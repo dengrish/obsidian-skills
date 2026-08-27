@@ -1,0 +1,2103 @@
+"""Batch-extract figures from every PDF under a source directory tree.
+
+Walks `--src` recursively, runs caption detection (auto_fig_bbox) and figure
+cropping (extract_figures) on each PDF, and writes the results to a flat
+`--out` directory using the naming convention:
+
+    [pdf_stem]_fig_<N>.png
+
+where pdf_stem is the source PDF's on-disk filename stem (exactly as it
+appears, any `_src` suffix included) and <N> can be:
+  - integer:          1, 23
+  - dash-separated:   1-2, 1-2-4   (source captions like "Figure 1.2" or "Figure 1-2")
+  - supplementary:    S1, S2-3     (source captions like "Figure S1",
+                                    "Supplementary Figure 1", "Extended Data Figure 1")
+  - appendix letter:  A-1, A1      (source captions like "Figure A.1", "Figure A1")
+
+That name is the interface `wiki-builder` globs for (`Sources/Images/
+[source_stem]_fig*`). Changing it here breaks that lookup silently — entries
+get no images and the unused-figure diagnostic stays quiet, because it walks
+the same pattern.
+
+pdf_stem is also why `pdf-organizer` runs before this script and not after:
+renaming a source PDF later leaves every PNG filed under the old stem, on
+disk but invisible to every consumer.  See shared/CONVENTIONS.md 1a and 8.
+
+Captions themselves are NOT included in the cropped PNGs — the bbox detector
+clips just above the caption text.
+
+Behavior:
+  - Idempotent: figures whose output PNG already exists are skipped. Re-running
+    after dropping new PDFs into Sources/PDFs/ just processes the new ones.
+  - Split books are extracted from the CHAPTERS, not from the whole book.
+    pdf-organizer leaves both on disk — the book in `Sources/PDFs/`, the
+    chapters in `Sources/PDFs/<Work>/` — and a recursive walk finds both, so every
+    figure would otherwise be written twice under two different stems.
+    Byte-identical, never colliding, and permanently half-unused, because
+    whichever stem an entry cites, the other copy is invisible to the
+    unused-figure diagnostic (it is per-source). See "Split books" below.
+  - Reports: at the end, prints a summary table with counts of figures
+    extracted per PDF, suspicious bboxes flagged for manual review, figures
+    that failed to write, PDFs where detection looks PARTIAL (the body text
+    cites figure numbers no caption was found for), byte-identical figures
+    written under two stems, and the three distinct "produced nothing" cases
+    — no captions found, no extractable text (a scan), and not a readable PDF
+    at all. Only the second of those is an OCR problem.
+  - Output is flat: the pdf_stem in each filename disambiguates across
+    subfolders. If two source PDFs happen to share the same stem, the later
+    one's figures overwrite the earlier ones — the script logs a warning when
+    this happens.
+
+Split books:
+    pdf-organizer splits `Kuhn_StructSciRev_2012.pdf` into
+    `Sources/PDFs/Kuhn_StructSciRev_2012/Kuhn_StructSciRev_2012_01_RoleHistory.pdf`
+    and friends, and keeps the book itself. This script detects that shape —
+    a PDF in the run whose stem is `<another PDF's stem>_NN_Name` — and skips
+    the book, because the chapter stem is what everything downstream keys to
+    (pdf-organizer's *Chapter filename format*, CONVENTIONS.md 1a). Pass
+    `--include-split-books` to extract from the book as well; you then get
+    both copies on purpose rather than by accident.
+
+Usage:
+    python batch_extract.py \\
+        --src /Users/dennisgrishin/Downloads/claude-main/Sources/PDFs \\
+        --out /Users/dennisgrishin/Downloads/claude-main/Sources/Images
+
+    # --src also accepts a single PDF:
+    python batch_extract.py --src /path/to/one_paper.pdf --out ...
+
+    # Dry run — list what would be extracted without writing anything:
+    python batch_extract.py --src ... --out ... --dry-run
+
+    # Force re-extract figures that already exist on disk:
+    python batch_extract.py --src ... --out ... --overwrite
+
+    # Record that a flagged bbox has been checked (and fixed, if it needed it),
+    # so later runs stop asking about it:
+    python batch_extract.py --src ... --out ... \\
+        --mark-reviewed Prince_UDL_2026_02_SupLearn:10-5
+
+    # The adversarial fixtures this module is held to.
+    python3 batch_extract.py --test
+"""
+import argparse
+import hashlib
+import os
+import re
+import shlex
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+# --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
+import os as _os, sys as _sys
+_here = _os.path.dirname(_os.path.abspath(__file__))
+_env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
+if _env:                                   # explicit override: authoritative, no fallback
+    _tried = [_os.path.abspath(_os.path.expanduser(_env))]
+else:                                      # plugin-relative walk-up, at most 5 levels
+    _tried, _d = [], _here
+    for _ in range(5):
+        _tried.append(_os.path.join(_d, "shared", "scripts"))
+        _d = _os.path.dirname(_d)
+_shared = next((_p for _p in _tried if _os.path.isdir(_p)), None)
+if _shared is None:
+    raise SystemExit("""obsidian: cannot find the plugin's shared/scripts/ folder, which holds
+the one canonical copy of the conventions this script depends on.
+Looked for:
+  %s
+Fix: install the whole plugin tree, or set OBSIDIAN_VAULT_SHARED to the
+shared/scripts/ directory (unset it to use the plugin-relative walk-up).
+Do NOT paste a second copy of the algorithm into this skill -- a divergent
+copy is the bug the shared layer exists to prevent.""" % "\n  ".join(_tried))
+_sys.path[:] = [_p for _p in _sys.path if _p not in (_shared, _here)]
+_sys.path.insert(0, _shared)               # shared/scripts/ FIRST
+_sys.path.append(_here)                    # own dir LAST: a local copy cannot shadow it
+# --- end bootstrap ---
+# The bootstrap also puts this script's own directory on the path, which is
+# what makes the sibling `auto_fig_bbox` / `extract_figures` imports below
+# work when the script is run as a file rather than via `python -m`.
+
+try:
+    # `import pymupdf` is the modern spelling. The legacy `import fitz`
+    # alias prints a deprecation notice **on stdout** in PyMuPDF >= 1.25,
+    # which corrupts `auto_fig_bbox.py --emit extract` (its output is meant
+    # to be a runnable shell command) — and the alias is slated for removal
+    # outright. Fall back to it only for PyMuPDF older than 1.24.3, which
+    # predates the `pymupdf` module name.
+    import pymupdf as fitz
+except ImportError:
+    try:
+        import fitz  # PyMuPDF < 1.24.3
+    except ImportError:
+        sys.exit(
+            "PyMuPDF required. Install with:\n"
+            "  python3 -m pip install pymupdf Pillow\n"
+            "adding --user, or --break-system-packages where pip refuses an\n"
+            "unflagged install as externally managed. Always go through\n"
+            "`python3 -m pip` -- macOS ships no bare `pip` command, and its\n"
+            "stock pip predates --break-system-packages."
+        )
+
+from auto_fig_bbox import (
+    CAPTION_IN_CROP_TAG,
+    caption_coverage,
+    configure_marker_prefix,
+    configure_strip_frame,
+    degenerate,
+    detect_figures,
+)
+from extract_figures import extract_one_figure, normalize_fig_num
+
+
+#: The chapter-stem rule is `pdf-organizer`'s, so it is imported rather than
+#: restated. This file used to carry its own `CHAPTER_STEM_RE`, whose chapter
+#: name admitted no `_` — so a chapter carrying the `_src` suffix that
+#: pdf-organizer's own recogniser puts at the *end*
+#: (`Prince_UDL_2026_02_SupLearn_src`) was not recognised as a chapter, the
+#: book was not skipped, and every figure was written twice under two stems
+#: that never collide and never deduplicate. CONVENTIONS.md §1a, §8b.
+from naming import chapter_book_stem, core_stem, looks_canonical  # noqa: E402
+
+#: Default filename for the review ledger, written inside `--out`. A dotfile:
+#: Obsidian hides it, and it can never be mistaken for a figure, because
+#: every consumer globs `[source_stem]_fig*` and this matches no stem.
+REVIEW_FILE = ".figure-review.txt"
+REVIEW_HEADER = (
+    "# pdf-figure-extractor review marks.\n"
+    "# One per line: <pdf_stem><TAB><figure label>[<TAB>note]\n"
+    "# A flagged bbox listed here is reported as reviewed, not as needing\n"
+    "# review, so a crop you have already checked (or fixed by hand) stops\n"
+    "# coming back every run. Delete a line to un-review it.\n"
+)
+
+#: Digests of the figures this extractor has written, beside the review ledger
+#: and hidden for the same reasons (Obsidian ignores dotfiles, and it matches
+#: no `[source_stem]_fig*` glob).
+#:
+#: `Sources/Images/` is SHARED. `clipping-processor` writes `<slug>_fig_<N>.
+#: <ext>` into the same folder under the same convention (CONVENTIONS.md 8b),
+#: so a clipping whose slug equals a paper's stem can already own
+#: `<stem>_fig_1.png` — and the idempotent "already exists" skip then reports
+#: `1 extracted, 1 skipped (already exist)`, which is exactly what an ordinary
+#: re-run reports. The paper's real Figure 1 is never written and every
+#: consumer embeds the clipping's picture as it. Knowing which files are this
+#: extractor's own output is the only way to tell the two apart, and the digest
+#: on the skip path is already being computed for the duplicate check, so
+#: keeping it costs nothing on the common re-run path.
+MANIFEST_FILE = ".figure-manifest.tsv"
+MANIFEST_HEADER = (
+    "# pdf-figure-extractor output manifest.\n"
+    "# One per line: <figure filename><TAB><sha256 of the bytes written>\n"
+    "# This is how a re-run tells its own output from another skill's file at\n"
+    "# the same name (Sources/Images/ is shared -- see CONVENTIONS.md 8b).\n"
+    "# Delete a line to make this extractor treat that file as unclaimed;\n"
+    "# delete the file to have it rebuilt from scratch on the next run.\n"
+)
+
+#: Files this extractor writes: the `[stem]_fig_<N>.png` convention of 8b.
+#: Used to seed the digest index and the manifest from what is already on disk.
+FIGURE_GLOB = "*_fig_*.png"
+
+
+def split_book_chapters(pdfs):
+    """{book path: [chapter paths]} for every book split into chapters.
+
+    Detection is purely by stem, which is what makes it safe: pdf-organizer
+    guarantees the chapter stem is the book stem plus `_NN_Name`
+    (*Chapter filename format*), and both files are in the same walk. No
+    vault layout is assumed, so this works for a Downloads folder too.
+
+    Both sides are compared on the *core* stem — `_src` and `_2` stripped —
+    because a book and its chapters carry those tails independently: a book
+    may be `Prince_UDL_2026_src.pdf` while its chapters are
+    `Prince_UDL_2026_01_Intro.pdf`, or the other way round. Comparing raw
+    stems misses the pairing, and a missed pairing writes every figure twice.
+    """
+    # Stems are matched case-insensitively: the documented vault sits on a
+    # case-insensitive volume, where `kuhn_x_2012_01_A.pdf` really is a chapter
+    # of `Kuhn_X_2012.pdf` — an exact-case match skips the book on Linux and
+    # extracts it twice there.
+    #
+    # EVERY path per core stem is collected, not one representative: with both
+    # spellings of a split book in the walk (`X.pdf` beside `X_src.pdf` — the
+    # plain copy lingering after a rename), keeping one path per key skipped
+    # that one and extracted the twin whole, writing every chapter figure a
+    # second time under the twin's stem.  paper_scan.classify skips every stem
+    # whose core is a book of some chapter; the two skills split the same
+    # folder, and disagreeing is worse than either answer.
+    by_stem = {}
+    for p in pdfs:
+        by_stem.setdefault(core_stem(p.stem).casefold(), []).append(p)
+    out = defaultdict(list)
+    for p in pdfs:
+        book = chapter_book_stem(p.stem)
+        if not book:
+            continue
+        for bp in by_stem.get(book.casefold(), []):
+            if bp != p:
+                out[bp].append(p)
+    return {book: sorted(chs) for book, chs in out.items()}
+
+
+def load_reviewed(path):
+    """{(pdf_stem, figure label)} marked reviewed in the ledger at `path`.
+
+    The ledger's own format is TAB-separated (`REVIEW_HEADER`), and a line that
+    has a tab is split on tabs ALONE. A `STEM:FIG` line is accepted too, for a
+    ledger a user typed by hand in the same spelling `--mark-reviewed` takes,
+    and it is split the way `mark_reviewed` splits it: on the LAST colon.
+
+    Both halves used to be one `re.split(r"[\\t:]+")`, which broke every stem
+    containing a colon. `mark_reviewed` writes `A:B<TAB>10-5` for
+    `--mark-reviewed A:B:10-5` -- correctly, via `rpartition` -- and this read
+    it back as the pair `("A", "B")`. The mark then matched no figure, so the
+    bbox the user had just checked came back flagged on the next run, and the
+    ledger looked like it had recorded something. The two ends of one file
+    disagreed about its format, and nothing compared them.
+    """
+    out = set()
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.split("#", 1)[0].strip()
+                if not line:
+                    continue
+                if "\t" in line:
+                    parts = [p.strip() for p in line.split("\t") if p.strip()]
+                else:
+                    stem, sep, fig = line.rpartition(":")
+                    parts = [stem.strip(), fig.strip()] if sep else [line]
+                if len(parts) >= 2 and parts[0] and parts[1]:
+                    out.add((parts[0], parts[1]))
+    except OSError:
+        pass
+    return out
+
+
+def mark_reviewed(path, entries, dry_run=False):
+    """Append `STEM:FIG` entries to the ledger; returns what was recorded.
+
+    `dry_run` parses and validates the entries but writes nothing — not the
+    ledger, and not the `--out` directory that `os.makedirs` below would
+    otherwise create. `--dry-run` is documented as writing nothing at all, and
+    it is the run a user makes against a path they have not committed to yet:
+    a mistyped `--out` would be left behind as an empty folder in the vault.
+    A malformed `STEM:FIG` still exits here, because reporting the syntax
+    error only on the real run is the same surprise the other way round.
+    """
+    recorded = []
+    for e in entries:
+        stem, sep, fig = e.rpartition(":")
+        if not sep or not stem.strip() or not fig.strip():
+            sys.exit(
+                f"--mark-reviewed {e!r}: expected STEM:FIG, e.g. "
+                f"--mark-reviewed Prince_UDL_2026_02_SupLearn:10-5"
+            )
+        recorded.append((stem.strip(), fig.strip()))
+    if dry_run:
+        return recorded
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "a", encoding="utf-8") as fh:
+        if fh.tell() == 0:                       # a fresh ledger: explain itself
+            fh.write(REVIEW_HEADER)
+        for stem, fig in recorded:
+            fh.write(f"{stem}\t{fig}\n")
+    return recorded
+
+
+def load_manifest(path):
+    """{figure filename: sha256} recorded by earlier runs, or {} when absent.
+
+    Returns `{}` for a missing file, which the caller must not confuse with
+    "the manifest says nothing is ours" — see `seed_output_index`, which treats
+    a manifest that has never existed as a migration rather than as a folder
+    full of foreign files.
+    """
+    out = {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.split("#", 1)[0].strip()
+                if not line or "\t" not in line:
+                    continue
+                name, _, digest = line.partition("\t")
+                name, digest = name.strip(), digest.strip()
+                if name and digest:
+                    out[name] = digest
+    except OSError:
+        pass
+    return out
+
+
+def save_manifest(path, manifest):
+    """Rewrite the manifest. Best-effort: a read-only vault must not fail a run."""
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        tmp = path + ".part-%d" % os.getpid()
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(MANIFEST_HEADER)
+            for name in sorted(manifest):
+                fh.write(f"{name}\t{manifest[name]}\n")
+        os.replace(tmp, path)
+        return True
+    except OSError as e:
+        print(f"note: could not write {path} ({e}) — the next run cannot tell "
+              f"its own figures from another skill's", file=sys.stderr)
+        return False
+
+
+def seed_output_index(out_dir, manifest, manifest_existed):
+    """Hash the figures already in `--out`; returns (seen_hashes, adopted).
+
+    Two fixes want the same walk, so they share one:
+
+      * **Cross-stem duplicate detection.** `_note_output`'s docstring has
+        always claimed "existing files are hashed too: the second copy is
+        usually written on a later run than the first" — and it was false.
+        `seen_hashes` started empty every run and was filled only from paths
+        that run touched, so a byte-identical twin already on disk under
+        another stem, from an earlier run, went unreported: precisely the
+        "later run" the docstring names. Seeding it from the folder is what
+        makes the sentence true.
+      * **Ownership.** A manifest that has never existed cannot be read as
+        "none of these files are mine" — every figure from every run before
+        this feature existed would be reported as a foreign occupant. So the
+        first run adopts what is there, says so once, and from then on a file
+        that turns up under a figure name this extractor did not write is
+        reported instead of skipped.
+
+    The cost is one sha256 pass over the existing figure PNGs; the skip path
+    was already hashing each of them individually for the duplicate check.
+    """
+    seen, adopted = {}, []
+    for path in sorted(Path(out_dir).glob(FIGURE_GLOB)) if os.path.isdir(out_dir) else []:
+        if not path.is_file():
+            continue
+        try:
+            digest = _sha256(str(path))
+        except OSError:
+            continue
+        seen.setdefault(digest, str(path))
+        if not manifest_existed:
+            manifest[path.name] = digest
+            adopted.append(path.name)
+    return seen, adopted
+
+
+def find_pdfs(src_dir):
+    """Return every PDF under `src_dir`, in stable order.
+
+    `src_dir` may also be a single PDF file — "extract the figures from
+    this one paper" is a normal request, and requiring the user to point at
+    a folder either drags in every sibling PDF or forces them down to the
+    lower-level scripts for no reason.
+
+    Matches both `.pdf` and `.PDF` (and any other case variant) — important
+    on case-sensitive filesystems where `*.pdf` would miss `paper.PDF`.
+    macOS APFS is usually case-insensitive so most users won't hit this,
+    but it's free safety for portability.
+
+    Sorted output makes runs reproducible — helpful when diffing the summary
+    report between runs to see what changed. macOS-specific cruft like
+    `.DS_Store` is skipped implicitly because we filter on the `.pdf`
+    extension.
+    """
+    src = Path(src_dir)
+    if src.is_file():
+        if src.suffix.lower() != ".pdf":
+            sys.exit(f"--src: {src} is a file but not a .pdf")
+        return [src]
+    if not src.is_dir():
+        sys.exit(f"--src: {src} is not a directory or a PDF file")
+    return sorted(
+        p for p in src.rglob("*")
+        if p.is_file() and p.suffix.lower() == ".pdf"
+    )
+
+
+def page_has_text(page):
+    """Return True if the page has any extractable text.
+
+    A common source of "this PDF produced zero figures" is a scanned PDF with
+    no OCR layer — every page is an image and `get_text()` returns ''. We use
+    this as a cheap upstream check so we can label such PDFs in the report
+    instead of silently skipping them. Note that `get_text()` returns '' for
+    blank pages too, so we accept a PDF as "has text" if *any* page has text.
+    """
+    return bool(page.get_text().strip())
+
+
+def _sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _foreign_occupant(manifest, out_path):
+    """(why this file is not our own output — '' if it is, its digest or None).
+
+    Cheap and local: one lookup, and a digest only when there is something to
+    compare it against — which the caller then reuses for the duplicate check,
+    so an ordinary re-run hashes each existing figure exactly once, as it
+    always did. The manifest is the only positive evidence available: a PNG
+    carries no provenance, and re-rendering the crop to compare would cost
+    exactly what the "already exists" skip exists to save.
+    """
+    name = os.path.basename(out_path)
+    recorded = manifest.get(name)
+    if recorded is None:
+        return ("no record of writing it — another skill writes "
+                "<slug>_fig_<N> into this same folder"), None
+    try:
+        digest = _sha256(out_path)
+    except OSError:
+        return "", None
+    if digest != recorded:
+        return "its bytes have changed since this extractor wrote it", digest
+    return "", digest
+
+
+def _note_output(result, seen_hashes, out_path, fig_num, stem, manifest=None,
+                 digest=None):
+    """Record a figure's bytes and report a byte-identical twin, if any.
+
+    Byte-identical output under a DIFFERENT stem is the same figure written
+    twice under two names that never collide and never deduplicate.
+    Whichever stem an entry cites, the other copy is unused forever AND
+    unreportable — the unused-figure diagnostic is per-source, so it never
+    looks at the other stem. Existing files are hashed too: the second copy
+    is usually written on a later run than the first, so `seen_hashes` is
+    seeded from the whole of `--out` before the run starts
+    (`seed_output_index`). It used to start empty and be filled only from
+    paths the current run touched, which made that sentence false for exactly
+    the case it describes.
+
+    Under the SAME stem it means something else — two captions whose crops
+    came out identical, i.e. the detector could not tell the two figures
+    apart (side-by-side panels with a caption each is the usual cause). Both
+    are worth saying; they are not the same problem, so they are recorded
+    with a flag and reported separately.
+    """
+    if digest is None:
+        try:
+            digest = _sha256(out_path)
+        except OSError:
+            return
+    if manifest is not None:
+        manifest[os.path.basename(out_path)] = digest
+    first = seen_hashes.setdefault(digest, out_path)
+    if os.path.basename(first) != os.path.basename(out_path):
+        same_stem = os.path.basename(first).startswith(stem + "_fig")
+        result["duplicates"].append((fig_num, first, same_stem))
+
+
+def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
+                reviewed=(), seen_hashes=None, manifest=None):
+    """Detect and extract every figure in one PDF.
+
+    Args:
+        reviewed: {(pdf_stem, figure label)} the user has marked as checked;
+            a flagged bbox in this set is reported as reviewed instead of
+            being re-flagged forever.
+        seen_hashes: {sha256: output path} shared across the whole run, so
+            two source PDFs producing a byte-identical PNG under different
+            stems is noticed instead of written silently. Pass the same dict
+            to every call, seeded from `--out` by `seed_output_index`.
+        manifest: {figure filename: sha256} this extractor wrote, from
+            `load_manifest`. Read before an "already exists" skip, so a file
+            another skill put at that name is reported rather than skipped;
+            updated in place with every figure written.
+
+    Returns a dict summarizing what happened — used by the caller to build
+    the run-end report. Keys:
+        extracted:  int   — figures newly written to disk
+        skipped:    int   — figures whose output already existed BEFORE this run
+        collisions: list  — (label, label) pairs where two captions in this
+                            same PDF normalized to the same filename. The
+                            first caption is the one that "won" (was written);
+                            the second is the one that got dropped. Common
+                            when a paper uses both `Figure S1` AND
+                            `Supplementary Figure 1` style — they collapse
+                            into the same S-prefixed slot by design, but the
+                            user should know it happened.
+        warnings:   list  — (fig_label, reason) for suspicious bboxes
+        reviewed:   list  — (fig_label, reason) for suspicious bboxes the
+                            user has already marked as checked in the review
+                            ledger. Counted, not nagged about.
+        duplicates: list  — (fig_label, other path, same_stem) where this
+                            PDF produced a PNG byte-identical to one already
+                            written. A different stem usually means the same
+                            document is in the source tree twice; the same
+                            stem means two captions got the same crop.
+        missing:    list  — figure labels the body text cites that no caption
+                            matched. Non-empty means detection was PARTIAL —
+                            the failure that otherwise looks exactly like a
+                            complete run, since nothing downstream counts
+                            figures independently.
+        referenced: int   — distinct figure labels the body text cites
+        failures:   list  — (fig_label, reason) for figures that were
+                            detected but could not be written (degenerate
+                            crop rect, render error). Without this the
+                            count in the summary silently disagrees with
+                            what is on disk.
+        blank:      list  — (fig_label, page) for crops that rendered nothing
+                            but white. Its own bucket because it is its own
+                            failure: the bbox was plausible, the render
+                            worked, and the result is a picture of empty
+                            page — the shape a caption whose figure sits on
+                            the NEXT page produces.
+        occupied:   list  — (fig_label, path, why) for output names already
+                            held by a file this extractor did not write.
+                            NOT a skip: `Sources/Images/` is shared, and a
+                            skip here means the paper's figure is never
+                            written while the report says the figure is
+                            already there.
+        caption_in: list  — (fig_label, reason) for crops that contain caption
+                            text. A subset of `warnings` by mechanism, its own
+                            bucket by meaning: it is the one thing this skill
+                            promises its output never contains.
+        had_text:   bool  — False if the PDF appears to be a pure scan
+        open_error: str   — non-empty when the file could not be opened as
+                            a PDF at all (truncated download, HTML saved
+                            with a .pdf extension). Distinct from had_text:
+                            this is not an OCR problem and `ocrmypdf` will
+                            not help.
+        no_pages:   bool  — True for a structurally valid PDF with zero
+                            pages. Also not an OCR problem.
+        figures:    list  — figure labels seen (for logging)
+    """
+    stem = pdf_path.stem
+    reviewed = set(reviewed)
+    if seen_hashes is None:
+        seen_hashes = {}
+    # `manifest is None` means "no ownership information was supplied", which
+    # is NOT the same as an empty manifest: an empty one says nothing on disk
+    # is ours, and every existing figure would be reported as another skill's.
+    # Callers that have no manifest get the old unconditional skip.
+    result = {
+        "extracted": 0,
+        "skipped": 0,
+        "collisions": [],
+        "warnings": [],
+        "reviewed": [],
+        "duplicates": [],
+        "missing": [],
+        "referenced": 0,
+        "failures": [],
+        "blank": [],
+        "occupied": [],
+        "caption_in": [],
+        "had_text": False,
+        "open_error": "",
+        "no_pages": False,
+        "figures": [],
+    }
+
+    try:
+        doc = fitz.open(str(pdf_path))
+    except Exception as e:
+        result["open_error"] = str(e)
+        print(f"  ERROR: could not open {pdf_path.name}: {e}", file=sys.stderr)
+        return result
+
+    # PyMuPDF opens HTML, XPS and EPUB natively, so a truncated download or a
+    # saved error page named `.pdf` opens without raising and reads as a
+    # perfectly good text-bearing document. Left unchecked it lands in the "no
+    # figure captions detected" bucket, which tells the operator to go hunting
+    # for an unusual caption style in a file that is not a PDF at all; the
+    # open_error bucket is the one that says re-download it.
+    if not doc.is_pdf:
+        fmt = (doc.metadata or {}).get("format") or "an unknown format"
+        result["open_error"] = (
+            f"not a PDF — opened as {fmt} (an HTML error page or a truncated "
+            f"download saved with a .pdf extension)"
+        )
+        doc.close()
+        return result
+
+    if len(doc) == 0:
+        result["no_pages"] = True
+        doc.close()
+        return result
+
+    # Cheap upstream check for OCR-less scans. If no page has any text, we
+    # can't find captions, so just bail out with a clear flag in the report.
+    # An encrypted PDF opens, reports `is_pdf` and a page count, and then
+    # raises on the first page access -- which aborted the WHOLE run with a
+    # traceback, no summary, and every remaining PDF unprocessed. It sorts
+    # first alphabetically often enough that one such file loses the lot.
+    if getattr(doc, "needs_pass", False) or getattr(doc, "is_encrypted", False):
+        doc.close()
+        result["open_error"] = ("encrypted and password-protected, so no page "
+                                "can be read. Decrypt it first (`qpdf "
+                                "--decrypt in.pdf out.pdf`), then re-run.")
+        return result
+    try:
+        result["had_text"] = any(page_has_text(page) for page in doc)
+    except Exception as exc:                  # a damaged page is not a crash
+        doc.close()
+        result["open_error"] = ("could not be read past the first page (%s). "
+                                "It is damaged; re-download it."
+                                % type(exc).__name__)
+        return result
+    if not result["had_text"]:
+        doc.close()
+        return result
+
+    # Track which output paths we've written in THIS run. Distinguishes
+    # within-PDF caption collisions (two distinct captions normalizing to
+    # the same filename) from idempotent re-run skips (file existed before
+    # we started). Maps out_path → the first caption label that claimed it.
+    written_this_run = {}
+
+    for page_idx, fig_num, raw_label, bbox, _cap_rect, reason in detect_figures(doc):
+        fig_suffix = normalize_fig_num(fig_num)
+        out_path = os.path.join(out_dir, f"{stem}_fig_{fig_suffix}.png")
+        result["figures"].append(fig_num)
+        if reason:
+            # A bbox the user has already checked stays counted but stops
+            # being asked about — without this, a hand-fixed crop is
+            # re-flagged on every run forever and the flag list becomes
+            # noise nobody reads.
+            if (stem, fig_num) in reviewed or (stem, fig_suffix) in reviewed:
+                result["reviewed"].append((fig_num, reason))
+            else:
+                result["warnings"].append((fig_num, reason))
+                if reason.startswith(CAPTION_IN_CROP_TAG):
+                    result["caption_in"].append((fig_num, reason))
+
+        # A degenerate rect cannot be rendered at all — writing it would
+        # either crash PyMuPDF's band writer or drop a 1x1 PNG into the
+        # vault for wiki-builder to flag as an unused figure forever.
+        if degenerate(bbox):
+            result["failures"].append(
+                (fig_num, f"degenerate bbox on page {page_idx + 1} — crop by hand")
+            )
+            continue
+
+        # Within-run collision: we already wrote this filename earlier in
+        # the same PDF. Record the raw caption forms so the report tells
+        # the user which captions actually collided (e.g., "Figure S1" vs
+        # "Extended Data Figure 1") rather than just two copies of "S1".
+        if out_path in written_this_run:
+            result["collisions"].append((written_this_run[out_path], raw_label))
+            continue
+
+        # Prior-run idempotent skip: file existed before this run started.
+        if not overwrite and os.path.exists(out_path):
+            written_this_run[out_path] = raw_label
+            why, digest = (_foreign_occupant(manifest, out_path)
+                           if manifest is not None else ("", None))
+            if why:
+                # NOT a skip. `Sources/Images/` is shared with
+                # clipping-processor, and a file at this name that this
+                # extractor did not write means the paper's own figure has
+                # never been extracted — while `1 skipped (already exist)`
+                # says the opposite, in the words of an ordinary re-run.
+                result["occupied"].append((fig_num, out_path, why))
+                continue
+            result["skipped"] += 1
+            _note_output(result, seen_hashes, out_path, fig_num, stem,
+                         manifest, digest=digest)
+            continue
+
+        if dry_run:
+            result["extracted"] += 1
+            written_this_run[out_path] = raw_label
+            continue
+
+        try:
+            _rendered, _final, blank = extract_one_figure(
+                doc, page_idx, bbox, out_path, dpi=dpi)
+            if blank:
+                # Nothing was written (extract_one_figure leaves the temp
+                # file behind rather than moving a picture of empty page into
+                # the vault), so this is not an extraction.
+                result["blank"].append((fig_num, page_idx + 1))
+                continue
+            result["extracted"] += 1
+            written_this_run[out_path] = raw_label
+            _note_output(result, seen_hashes, out_path, fig_num, stem,
+                         manifest)
+        except Exception as e:
+            result["failures"].append(
+                (fig_num, f"render failed on page {page_idx + 1}: {e}")
+            )
+            print(
+                f"  ERROR: failed to extract {stem} fig {fig_num} "
+                f"(page {page_idx+1}): {e}",
+                file=sys.stderr,
+            )
+
+    # Partial detection. Nothing else in the pipeline can see it: the summary
+    # counts PDFs with ZERO captions, and downstream the figure glob and the
+    # unused-figure diagnostic both walk whatever files exist — so 3 of 4
+    # figures looks exactly like 4 of 4 everywhere.
+    referenced, missing = caption_coverage(doc, result["figures"])
+    result["referenced"] = len(referenced)
+    result["missing"] = missing
+
+    doc.close()
+    return result
+
+
+def mark_reviewed_command(src_dir, out_dir, stem, fig):
+    """The full `--mark-reviewed` invocation, runnable as printed.
+
+    `python3` and an absolute script path, for the same reason
+    `auto_fig_bbox.py --emit extract` uses them: this text is pasted into a
+    shell sitting in the vault, where macOS has no `python` binary at all and
+    a bare script name resolves to nothing.
+    """
+    return (
+        f"python3 {shlex.quote(os.path.abspath(__file__))} "
+        f"--src {shlex.quote(str(src_dir))} --out {shlex.quote(str(out_dir))} "
+        f"--mark-reviewed {shlex.quote(f'{stem}:{fig}')}"
+    )
+
+
+def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
+                  dry_run=False, src_dir=""):
+    """Print a human-readable summary of the batch run.
+
+    Sections, in order: header, counts, figures that failed to write,
+    collisions (two captions in the same PDF mapping to the same filename),
+    warnings (suspicious bboxes needing manual review), PARTIAL detection
+    (figure numbers the text cites with no caption found), byte-identical
+    duplicates, split books whose figures came from the chapters, zero-yield
+    PDFs (likely scans or PDFs without "Figure" captions), and stem-collision
+    warnings (two different source PDFs producing the same filename stem).
+    """
+    total_extracted = sum(r["extracted"] for r in per_pdf.values())
+    total_skipped = sum(r["skipped"] for r in per_pdf.values())
+    total_warnings = sum(len(r["warnings"]) for r in per_pdf.values())
+    total_reviewed = sum(len(r["reviewed"]) for r in per_pdf.values())
+    total_collisions = sum(len(r["collisions"]) for r in per_pdf.values())
+    total_failures = sum(len(r["failures"]) for r in per_pdf.values())
+    total_dupes = sum(len(r["duplicates"]) for r in per_pdf.values())
+    total_blank = sum(len(r.get("blank", ())) for r in per_pdf.values())
+    total_occupied = sum(len(r.get("occupied", ())) for r in per_pdf.values())
+    total_caption_in = sum(len(r.get("caption_in", ())) for r in per_pdf.values())
+    n_partial = sum(1 for r in per_pdf.values() if r["missing"] and r["figures"])
+    skipped_books = skipped_books or {}
+    n_pdfs = len(per_pdf)
+    n_zero = sum(
+        1 for r in per_pdf.values()
+        if r["had_text"] and not r["figures"]
+    )
+    # The three "produced nothing" buckets are kept apart on purpose: only
+    # one of them is an OCR problem, and telling a user to run `ocrmypdf`
+    # on a truncated download or an empty PDF sends them down a dead end.
+    n_unreadable = sum(1 for r in per_pdf.values() if r["open_error"])
+    n_no_pages = sum(1 for r in per_pdf.values() if r["no_pages"])
+    n_no_text = sum(
+        1 for r in per_pdf.values()
+        if not r["had_text"] and not r["open_error"] and not r["no_pages"]
+    )
+
+    print()
+    print("=" * 72)
+    print(f"Summary: {n_pdfs} PDF(s) scanned, wrote to {out_dir}")
+    print("=" * 72)
+    print(f"  Figures extracted:    {total_extracted}")
+    print(f"  Already existed:      {total_skipped} (skipped — pass --overwrite to redo)")
+    print(f"  Caption collisions:   {total_collisions} (two captions → same filename)")
+    print(f"  Suspicious bboxes:    {total_warnings} (review these manually)")
+    if total_reviewed:
+        print(f"  ...already reviewed:  {total_reviewed} (flagged, but marked "
+              f"checked in {review_file or REVIEW_FILE})")
+    if dry_run:
+        # The duplicate check hashes PNGs on disk, and a dry run writes none.
+        # Printing a bare `0` there reads as "checked, none found" — the one
+        # thing it cannot mean — for the bucket whose whole purpose is to
+        # surface a loss nothing else in the pipeline can see.
+        print(f"  Duplicate figures:    {total_dupes} among the figures that "
+              f"already exist (a dry run writes no bytes, so the ones it "
+              f"would write are not compared)")
+    else:
+        print(f"  Duplicate figures:    {total_dupes} (byte-identical to a figure already written)")
+    print(f"  Failed to write:      {total_failures} (detected but not extracted)")
+    print(f"  Blank crops:          {total_blank} (rendered nothing but white — not written)")
+    print(f"  Caption text in crop: {total_caption_in} (the crop overlaps a caption)")
+    print(f"  Occupied filenames:   {total_occupied} (a file this extractor did not write is in the way)")
+    print(f"  PDFs with PARTIAL detection:      {n_partial} (text cites figures no caption matched)")
+    if skipped_books:
+        print(f"  Split books skipped:              {len(skipped_books)} "
+              f"(figures come from the chapter PDFs)")
+    print(f"  PDFs with no figures detected:    {n_zero}")
+    print(f"  PDFs with no extractable text:    {n_no_text} (likely scans — needs OCR)")
+    print(f"  PDFs that could not be opened:    {n_unreadable} (not a readable PDF)")
+    print(f"  PDFs with zero pages:             {n_no_pages}")
+    print()
+
+    if total_failures:
+        print("Figures detected but NOT written (these are missing from Sources/Images/):")
+        for pdf_path, r in per_pdf.items():
+            for fig_num, reason in r["failures"]:
+                print(f"  {pdf_path.name}  Fig {fig_num}  ({reason})")
+        print()
+
+    if total_blank:
+        print("Blank crops — the rect rendered nothing but white, so NOTHING was written:")
+        for pdf_path, r in per_pdf.items():
+            for fig_num, page_no in r.get("blank", ()):
+                print(f"  {pdf_path.name}  Fig {fig_num}  (page {page_no})")
+        print("  The crop is over empty page. The usual cause is a caption at the foot of")
+        print("  a page whose figure is overleaf: the search region above it holds no")
+        print("  content, and the fallback rect covers the gap. Render that page and the")
+        print("  next one (scripts/render_page.py) and set the crop by hand, on whichever")
+        print("  page the figure is actually on.")
+        # One PDF where EVERY figure came out blank is not N independent
+        # blank crops — it is one detection failure with N symptoms, and it
+        # reads as an empty run unless the report says so. This is the shape
+        # a layout the detector reads wrongly produces once the blank guard
+        # stops the white PNGs from being written.
+        for pdf_path, r in per_pdf.items():
+            blanks = r.get("blank", ())
+            if (blanks and not r["extracted"] and not r["skipped"]
+                    and len(blanks) == len(set(r["figures"]))):
+                print(f"  ALL {len(blanks)} figure(s) detected in {pdf_path.name} came out "
+                      f"blank, and none were written.")
+                print( "  That is one detection failure for the whole PDF, not "
+                       "N independent blank crops:")
+                print( "  the crops are landing off the figures entirely. Check its layout "
+                       "before")
+                print( "  cropping figure by figure — this PDF produced no images at all.")
+        print()
+
+    if total_caption_in:
+        print("Caption text inside the crop — the one thing this skill promises it excludes:")
+        for pdf_path, r in per_pdf.items():
+            for fig_num, reason in r.get("caption_in", ()):
+                print(f"  {pdf_path.name}  Fig {fig_num}  ({reason})")
+        print("  The crop was built from the wrong part of the page — the neighbouring")
+        print("  column of a two-column layout and a rotated page are the two shapes that")
+        print("  produce it. The PNG is on disk and carries somebody's caption; re-crop it")
+        print("  by hand (see the skill's *Setting a crop by hand*) before anything embeds it.")
+        print()
+
+    if total_occupied:
+        print("Output names already held by a file this extractor did not write:")
+        for pdf_path, r in per_pdf.items():
+            for fig_num, path, why in r.get("occupied", ()):
+                print(f"  {pdf_path.name}  Fig {fig_num}  → {path}  ({why})")
+        print("  These figures were NOT extracted and NOT skipped: Sources/Images/ is shared,")
+        print("  and clipping-processor writes <slug>_fig_<N> there too, so a clipping whose")
+        print("  slug equals this PDF's stem owns the name. Left as a skip, the paper's real")
+        print("  figure is never written and every consumer embeds the other file as it.")
+        print("  Look at each one: if it is the clipping's, rename that note (and its images)")
+        print("  or the PDF so the two stems differ; if it is this extractor's own from an")
+        print("  older run, re-run with --overwrite to rewrite and record it.")
+        print()
+
+    if total_collisions:
+        print("Caption collisions (later caption dropped — typically multiple supplementary styles in one paper):")
+        for pdf_path, r in per_pdf.items():
+            for kept, dropped in r["collisions"]:
+                print(f"  {pdf_path.name}  kept '{kept}', dropped '{dropped}' (both normalized to the same filename)")
+        print()
+
+    if total_warnings:
+        print("Suspicious bboxes (likely auto-detect failure — render and crop manually):")
+        for pdf_path, r in per_pdf.items():
+            for fig_num, reason in r["warnings"]:
+                print(f"  {pdf_path.name}  Fig {fig_num}  ({reason})")
+        # The example has to come from a PDF that actually carries a flag.
+        # Keying it to the first PDF *processed* printed the header with
+        # nothing under it whenever that PDF came back clean — the usual case
+        # in a batch — so the one line that tells the user how to stop the
+        # nagging was the line they never saw.
+        example = next(((p, r["warnings"][0][0])
+                        for p, r in per_pdf.items() if r["warnings"]), None)
+        if example:
+            print("  Once you have checked one (and fixed the crop if it needed it), record it:")
+            # The whole command, not just the flag. It used to print the
+            # `--mark-reviewed '<stem>':'<fig>'` fragment alone while the skill
+            # documented it as "the exact command" — leaving the reader to
+            # reconstruct the interpreter, the script's path and the two
+            # required arguments from somewhere else. `auto_fig_bbox.py --emit
+            # extract` has always emitted a runnable line; this is the same
+            # rule. `shlex.quote` because these are the user's paths.
+            print("    " + mark_reviewed_command(src_dir, out_dir,
+                                                 example[0].stem, example[1]))
+        print()
+
+
+
+    if n_partial:
+        print("PARTIAL detection — the body text cites figure numbers no caption matched.")
+        print("Nothing downstream can see this: the figure glob and the unused-figure")
+        print("diagnostic both walk the files that exist, so 3-of-4 looks like 4-of-4.")
+        for pdf_path, r in per_pdf.items():
+            if r["missing"] and r["figures"]:
+                got = len(set(r["figures"]))
+                print(f"  {pdf_path.name}  {got} caption(s) found, "
+                      f"{r['referenced']} cited; no caption for: "
+                      + ", ".join(f"Fig {m}" for m in r["missing"][:12]))
+        print("  Check those pages by hand (scripts/render_page.py). Three things produce")
+        print("  it: a caption clipped away by the page-margin bounds (a caption low in the")
+        print("  text area of a tall page, which is where an A4 journal style puts one), a")
+        print("  caption style the regex misses, or a figure that lives in another document.")
+        print()
+
+    cross = [(p, f, o) for p, r in per_pdf.items()
+             for f, o, same in r["duplicates"] if not same]
+    within = [(p, f, o) for p, r in per_pdf.items()
+              for f, o, same in r["duplicates"] if same]
+    if cross:
+        print("Byte-identical figures written under two different stems:")
+        for pdf_path, fig_num, other in cross:
+            print(f"  {pdf_path.name}  Fig {fig_num}  is identical to {other}")
+        print("  The same document is in the source tree twice. Whichever stem an entry")
+        print("  cites, the other copy is unused forever and no diagnostic can report it")
+        print("  (the unused-figure check is per-source). Delete one source or one stem's")
+        print("  figures.")
+        print()
+    if within:
+        print("Byte-identical figures under the SAME stem (two captions, one crop):")
+        for pdf_path, fig_num, other in within:
+            print(f"  {pdf_path.name}  Fig {fig_num}  is identical to {other}")
+        print("  The detector could not separate these figures — side-by-side panels with")
+        print("  a caption each is the usual cause. Crop them by hand (see the skill's")
+        print("  *Setting a crop by hand*), then --mark-reviewed them.")
+        print()
+
+    if skipped_books:
+        print("Split books — figures were extracted from the chapters, not the book:")
+        for book, chapters in sorted(skipped_books.items()):
+            print(f"  {book.name}  ({len(chapters)} chapter PDF(s))")
+            stale = sorted(
+                f for f in (os.listdir(out_dir) if os.path.isdir(out_dir) else [])
+                if f.startswith(book.stem + "_fig")
+            )
+            if stale:
+                print(f"    NOTE: {len(stale)} figure(s) under the BOOK's stem are still "
+                      f"in {out_dir}")
+                print(f"    from a run before this rule existed — duplicates of the "
+                      f"chapter figures.")
+                print(f"    They are unused and unreportable; delete "
+                      f"{book.stem}_fig* or keep the book instead")
+                print(f"    with --include-split-books.")
+        print()
+
+    if n_zero:
+        print("PDFs with extractable text but no figure captions detected:")
+        for pdf_path, r in per_pdf.items():
+            if r["had_text"] and not r["figures"]:
+                print(f"  {pdf_path.name}")
+        print()
+
+    if n_no_text:
+        print("PDFs with no extractable text (scanned — OCR with `ocrmypdf` first):")
+        for pdf_path, r in per_pdf.items():
+            if not r["had_text"] and not r["open_error"] and not r["no_pages"]:
+                print(f"  {pdf_path.name}")
+        print()
+
+    if n_unreadable:
+        print("PDFs that could not be opened (NOT an OCR problem — the file is not a readable PDF):")
+        for pdf_path, r in per_pdf.items():
+            if r["open_error"]:
+                print(f"  {pdf_path.name}  ({r['open_error']})")
+        print()
+
+    if n_no_pages:
+        print("PDFs with zero pages (nothing to scan):")
+        for pdf_path, r in per_pdf.items():
+            if r["no_pages"]:
+                print(f"  {pdf_path.name}")
+        print()
+
+    # Stem collisions: two source PDFs with the same base name will overwrite
+    # each other's figures. Compared case-insensitively — on the vault's own
+    # case-insensitive volume, `Paper.pdf` and `paper.pdf` in two subfolders
+    # write to ONE set of figure filenames (the second run's "already exists"
+    # skip silently attributes the first PDF's figures to the second).
+    stems = defaultdict(list)
+    for pdf_path in per_pdf:
+        stems[pdf_path.stem.casefold()].append(pdf_path)
+    stem_collisions = {paths[0].stem: paths for paths in stems.values()
+                       if len(paths) > 1}
+    if stem_collisions:
+        print("WARNING: filename stem collisions (figures will overwrite each other):")
+        for stem, paths in stem_collisions.items():
+            print(f"  stem '{stem}':")
+            for p in paths:
+                print(f"    {p}")
+        print()
+
+
+# ---------------------------------------------------------------------------
+# self-test
+# ---------------------------------------------------------------------------
+#
+# `python3 batch_extract.py --test`.
+#
+# Every fixture is built inside a function — `tests/test_conventions.py`'s
+# `check_scripts_run` imports this module and fails it for anything computed at
+# module scope. Nothing is written outside a `tempfile` directory, which is
+# removed again; no vault path is touched and nothing is fetched.
+#
+# The buckets are the point. This script's whole contract with the user is that
+# a PDF which produced no figures lands in the RIGHT bucket — an OCR-less scan,
+# an encrypted file, a download that is not a PDF, and a PDF with no captions
+# are four different instructions to the reader, and three of them are ruined
+# by being told to run `ocrmypdf`.
+
+
+def _st_fig_pdf(path, captions=("Figure 1. Synthetic.",), fill=(0.2, 0.3, 0.7)):
+    """One page per caption, each with a drawn figure above it."""
+    doc = fitz.open()
+    for cap in captions:
+        page = doc.new_page(width=612, height=792)
+        page.draw_rect(fitz.Rect(100, 200, 500, 400), fill=fill)
+        page.insert_text((100, 430), cap, fontsize=9)
+    doc.save(str(path))
+    doc.close()
+    return Path(path)
+
+
+
+
+def _st_scan_pdf(path):
+    """A page with marks and no extractable text: an un-OCRed scan."""
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.draw_rect(fitz.Rect(50, 50, 500, 700), fill=(0.55, 0.55, 0.55))
+    doc.save(str(path))
+    doc.close()
+    return Path(path)
+
+
+def _st_html_pdf(path):
+    """An HTML error page saved with a `.pdf` extension.
+
+    PyMuPDF opens it natively, so it reads as a perfectly good text-bearing
+    document — the failure mode the `is_pdf` bucket exists for.
+    """
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("<html><body><h1>404 Not Found</h1>"
+                 "<p>The document you requested is gone.</p></body></html>")
+    return Path(path)
+
+
+def _st_zero_page_pdf(path):
+    """A structurally valid PDF with no pages (PyMuPDF refuses to save one)."""
+    with open(path, "wb") as fh:
+        fh.write(b"%PDF-1.4\n"
+                 b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+                 b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n"
+                 b"trailer\n<< /Root 1 0 R /Size 3 >>\n%%EOF\n")
+    return Path(path)
+
+
+def _st_encrypted_pdf(path):
+    """A password-protected PDF: opens, reports pages, raises on page access."""
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((100, 200), "Figure 1. Locked away.", fontsize=9)
+    doc.save(str(path), encryption=fitz.PDF_ENCRYPT_AES_256,
+             owner_pw="ownerpw", user_pw="userpw")
+    doc.close()
+    return Path(path)
+
+
+def _st_tiny_fig_pdf(path):
+    """A figure small enough that the bbox is flagged as suspicious."""
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.draw_rect(fitz.Rect(100, 200, 130, 230), fill=(0, 0, 0))
+    page.insert_text((100, 260), "Figure 1. Tiny.", fontsize=9)
+    doc.save(str(path))
+    doc.close()
+    return Path(path)
+
+
+def _st_next_page_figure_pdf(path):
+    """A caption at the FOOT of a page whose figure is on the next one.
+
+    The normal shape for a figure that would not fit: prose fills the page,
+    the caption sits under it, and the figure itself is overleaf. The search
+    region above the caption holds no content at all, so `auto_fig_bbox`'s
+    raster-only fallback synthesises a rect over the empty gap — plausibly
+    sized, no region to compare it against, no running head in it, less prose
+    than the crop is wide — and every check passes. The result was a
+    pure-white PNG reported as `1 extracted, 0 suspicious, 0 failed`.
+    """
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    for k in range(9):
+        page.insert_text((72, 100 + 13 * k),
+                         "Body prose line %d of the running text here." % k,
+                         fontsize=10)
+    page.insert_text((72, 700),
+                     "Figure 4. A caption whose figure is overleaf.",
+                     fontsize=9)
+    page2 = doc.new_page(width=612, height=792)
+    page2.draw_rect(fitz.Rect(100, 100, 500, 400), fill=(0.3, 0.5, 0.2))
+    doc.save(str(path))
+    doc.close()
+    return Path(path)
+
+
+def _st_two_column_pdf(path):
+    """Two figures side by side, their captions a few points apart in height.
+
+    An ordinary two-column page. The left figure's crop runs the width of the
+    page down to its own caption, so it reaches over the bottom of the right
+    column's caption, which starts six points higher. The caption text is in
+    the PNG — the one thing this skill promises its output never contains —
+    and every bucket in the report read zero, because the only caption-overlap
+    check in the plugin was in `extract_figures.main()`, which this script
+    bypasses by calling `extract_one_figure()` directly.
+    """
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.draw_rect(fitz.Rect(70, 200, 290, 400), fill=(0.2, 0.4, 0.8))
+    page.draw_rect(fitz.Rect(320, 200, 550, 380), fill=(0.8, 0.3, 0.2))
+    page.insert_text((317, 424),
+                     "Figure 2. The right column caption, a line higher.",
+                     fontsize=8)
+    page.insert_text((60, 430), "Figure 1. The left column caption.",
+                     fontsize=8)
+    doc.save(str(path))
+    doc.close()
+    return Path(path)
+
+
+def _st_top_caption_pdf(path):
+    """A caption at the very top of a page: the search region collapses.
+
+    The figure it belongs to is on the previous page, so there is nothing
+    above the caption to crop and the rect comes out inverted — the
+    `degenerate bbox` failure, which must be reported rather than written.
+    """
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((100, 58), "Figure 3. Continued from the previous page.",
+                     fontsize=9)
+    page.insert_text((100, 400), "Body prose lower down the page.", fontsize=9)
+    doc.save(str(path))
+    doc.close()
+    return Path(path)
+
+
+def run_self_test():
+    """Run the built-in cases; print `N/M self-test cases pass`, return 0/1."""
+    import contextlib
+    import io
+    import shutil
+    import tempfile
+
+    state = {"n": 0, "bad": 0}
+
+    def check(label, got, want):
+        state["n"] += 1
+        if got != want:
+            state["bad"] += 1
+            print("FAIL %s -> %r, expected %r" % (label, got, want))
+
+    def ok(label, cond):
+        state["n"] += 1
+        if not cond:
+            state["bad"] += 1
+            print("FAIL %s" % label)
+
+    tmp = tempfile.mkdtemp(prefix="batch-extract-selftest-")
+    try:
+        # --- the review ledger, both directions ---------------------------
+        # `mark_reviewed` writes it and `load_reviewed` reads it. They are the
+        # two ends of one file and nothing else compares them.
+        ledger = os.path.join(tmp, "ledger", REVIEW_FILE)
+        check("mark_reviewed parses STEM:FIG",
+              mark_reviewed(ledger, ["Prince_UDL_2026_02_SupLearn:10-5"]),
+              [("Prince_UDL_2026_02_SupLearn", "10-5")])
+        check("load_reviewed reads it back",
+              load_reviewed(ledger), {("Prince_UDL_2026_02_SupLearn", "10-5")})
+        with open(ledger, encoding="utf-8") as fh:
+            body = fh.read()
+        ok("a fresh ledger explains itself", body.startswith(REVIEW_HEADER))
+        ok("the entry is TAB-separated, as the header says",
+           "Prince_UDL_2026_02_SupLearn\t10-5\n" in body)
+
+        # The label is split off at the LAST colon, so a stem containing one
+        # survives the round trip. `mark_reviewed` always got this right;
+        # `load_reviewed` split on every colon and handed back ("A", "B") --
+        # a mark that matches no figure, so the bbox the user just checked is
+        # flagged again on the next run and the ledger looks like it worked.
+        check("mark_reviewed on a stem containing a colon",
+              mark_reviewed(ledger, ["Notes:2025_Draft:S1"]),
+              [("Notes:2025_Draft", "S1")])
+        check("load_reviewed on a stem containing a colon",
+              ("Notes:2025_Draft", "S1") in load_reviewed(ledger), True)
+        check("the ledger still holds the first entry",
+              ("Prince_UDL_2026_02_SupLearn", "10-5") in load_reviewed(ledger),
+              True)
+
+        # A hand-written `STEM:FIG` line is read the same way as the flag.
+        hand = os.path.join(tmp, "hand-ledger.txt")
+        with open(hand, "w", encoding="utf-8") as fh:
+            fh.write("# a comment\n\n"
+                     "Doe_Figs_2025:1\n"
+                     "Notes:2025_Draft:S2\n"
+                     "Doe_Figs_2025\tS3\tchecked by hand\n")
+        check("a hand-written ledger", load_reviewed(hand),
+              {("Doe_Figs_2025", "1"), ("Notes:2025_Draft", "S2"),
+               ("Doe_Figs_2025", "S3")})
+        check("a ledger that does not exist is empty, not an error",
+              load_reviewed(os.path.join(tmp, "nope.txt")), set())
+
+        for bad_entry in ("no-colon-at-all", ":1", "stem:", "  :  "):
+            state["n"] += 1
+            try:
+                mark_reviewed(os.path.join(tmp, "unused.txt"), [bad_entry])
+                state["bad"] += 1
+                print("FAIL mark_reviewed accepted %r" % bad_entry)
+            except SystemExit:
+                pass
+        ok("a refused entry wrote no ledger",
+           not os.path.exists(os.path.join(tmp, "unused.txt")))
+
+        # `--dry-run` validates and writes nothing -- not the ledger, and not
+        # the `--out` directory `os.makedirs` would otherwise create.
+        dry_ledger = os.path.join(tmp, "dry", REVIEW_FILE)
+        check("mark_reviewed --dry-run still parses",
+              mark_reviewed(dry_ledger, ["Doe_Figs_2025:2"], dry_run=True),
+              [("Doe_Figs_2025", "2")])
+        ok("mark_reviewed --dry-run wrote no ledger",
+           not os.path.exists(dry_ledger))
+        ok("mark_reviewed --dry-run created no directory",
+           not os.path.isdir(os.path.join(tmp, "dry")))
+
+        # --- split books ---------------------------------------------------
+        def paths(*names):
+            return [Path(os.path.join(tmp, n)) for n in names]
+
+        book, ch1, ch2 = paths("Prince_UDL_2026.pdf",
+                               "Prince_UDL_2026_01_Intro.pdf",
+                               "Prince_UDL_2026_02_SupLearn.pdf")
+        check("a book with its chapters in the run",
+              split_book_chapters([book, ch1, ch2]), {book: [ch1, ch2]})
+        check("a book alone is not skipped",
+              split_book_chapters([book]), {})
+        check("chapters alone pair with nothing",
+              split_book_chapters([ch1, ch2]), {})
+        # `_src` sits on either side independently, which is why both are
+        # compared on the CORE stem.
+        srcbook, = paths("Prince_UDL_2026_src.pdf")
+        check("a `_src` book pairs with plain chapters",
+              split_book_chapters([srcbook, ch1]), {srcbook: [ch1]})
+        srcch, = paths("Prince_UDL_2026_01_Intro_src.pdf")
+        check("a plain book pairs with `_src` chapters",
+              split_book_chapters([book, srcch]), {book: [srcch]})
+        # The legacy mid-`_src` chapter spelling: recognised as a chapter even
+        # though `looks_canonical` rejects it, so the book is still skipped
+        # while a vault's names are being fixed.
+        legacy, = paths("Prince_UDL_2026_src_01_Intro.pdf")
+        check("the legacy `<book>_src_NN_Name` chapter still pairs",
+              split_book_chapters([book, legacy]), {book: [legacy]})
+        # BOTH spellings of one split book in the walk: each is a book of the
+        # same chapters, and each must be skipped — keeping one representative
+        # extracted the twin whole and wrote every figure a second time.
+        check("a plain book AND its `_src` twin are both skipped",
+              split_book_chapters([book, srcbook, ch1]),
+              {book: [ch1], srcbook: [ch1]})
+        # A `_2` disambiguator names a DIFFERENT document, so it pairs with
+        # nothing -- pdf-organizer refuses to split one at all.
+        dis, = paths("Prince_UDL_2026_2.pdf")
+        check("a `_2` book is not the book of these chapters",
+              split_book_chapters([dis, ch1]), {})
+        upper, lower = paths("Kuhn_X_2012.pdf", "kuhn_x_2012_01_A.pdf")
+        check("stems pair case-insensitively (the vault's own volume is)",
+              split_book_chapters([upper, lower]), {upper: [lower]})
+
+        # --- find_pdfs -----------------------------------------------------
+        src = os.path.join(tmp, "src")
+        os.makedirs(os.path.join(src, "Prince_UDL_2026"))
+        a = _st_fig_pdf(os.path.join(src, "Doe_Figs_2025.pdf"),
+                        ("Figure 1. First.", "Supplementary Figure 2. Second."))
+        b = _st_fig_pdf(os.path.join(src, "Prince_UDL_2026.pdf"))
+        c = _st_fig_pdf(os.path.join(src, "Prince_UDL_2026",
+                                     "Prince_UDL_2026_01_Intro.pdf"))
+        upper_ext = _st_fig_pdf(os.path.join(src, "Doe_Upper_2025.PDF"))
+        with open(os.path.join(src, "notes.txt"), "w") as fh:
+            fh.write("not a pdf")
+        found = find_pdfs(src)
+        check("find_pdfs walks subfolders and ignores non-PDFs",
+              found, sorted([a, b, c, upper_ext]))
+        ok("find_pdfs matches a .PDF extension too", upper_ext in found)
+        check("find_pdfs on a single PDF", find_pdfs(str(a)), [a])
+        state["n"] += 1
+        try:
+            find_pdfs(os.path.join(src, "notes.txt"))
+            state["bad"] += 1
+            print("FAIL find_pdfs accepted a file that is not a PDF")
+        except SystemExit:
+            pass
+        state["n"] += 1
+        try:
+            find_pdfs(os.path.join(tmp, "no-such-folder"))
+            state["bad"] += 1
+            print("FAIL find_pdfs accepted a folder that does not exist -- "
+                  "a mistyped --src must not read as an empty vault")
+        except SystemExit:
+            pass
+
+        # --- duplicate bytes ------------------------------------------------
+        d1 = os.path.join(tmp, "Doe_One_2025_fig_1.png")
+        d2 = os.path.join(tmp, "Doe_Two_2025_fig_1.png")
+        d3 = os.path.join(tmp, "Doe_One_2025_fig_2.png")
+        for p, payload in ((d1, b"same"), (d2, b"same"), (d3, b"different")):
+            with open(p, "wb") as fh:
+                fh.write(payload)
+        check("_sha256 agrees for identical bytes", _sha256(d1), _sha256(d2))
+        ok("_sha256 differs for different bytes", _sha256(d1) != _sha256(d3))
+        seen, res = {}, {"duplicates": []}
+        _note_output(res, seen, d1, "1", "Doe_One_2025")
+        check("the first figure is not a duplicate of itself",
+              res["duplicates"], [])
+        _note_output(res, seen, d2, "1", "Doe_Two_2025")
+        check("a byte-identical figure under another stem",
+              res["duplicates"], [("1", d1, False)])
+        res["duplicates"] = []
+        _note_output(res, seen, d3, "2", "Doe_One_2025")
+        check("different bytes are not a duplicate", res["duplicates"], [])
+        # Same stem, same bytes: two captions the detector could not separate.
+        d4 = os.path.join(tmp, "Doe_One_2025_fig_3.png")
+        with open(d4, "wb") as fh:
+            fh.write(b"same")
+        res["duplicates"] = []
+        _note_output(res, seen, d4, "3", "Doe_One_2025")
+        check("a byte-identical figure under the SAME stem is flagged apart",
+              res["duplicates"], [("3", d1, True)])
+        res["duplicates"] = []
+        _note_output(res, seen, os.path.join(tmp, "gone.png"), "9", "Doe_X_2025")
+        check("a figure that is not on disk is not a duplicate",
+              res["duplicates"], [])
+
+        # --- process_pdf: which bucket each PDF lands in -------------------
+        out = os.path.join(tmp, "Images")
+        os.makedirs(out)
+        r = process_pdf(a, out, dpi=72)
+        check("a normal PDF: figures found", r["figures"], ["1", "S2"])
+        check("a normal PDF: figures written", r["extracted"], 2)
+        check("a normal PDF: nothing failed", r["failures"], [])
+        check("a normal PDF: it has text", r["had_text"], True)
+        check("a normal PDF: it opened", r["open_error"], "")
+        ok("the PNGs are on disk under the PDF's stem",
+           os.path.exists(os.path.join(out, "Doe_Figs_2025_fig_1.png"))
+           and os.path.exists(os.path.join(out, "Doe_Figs_2025_fig_S2.png")))
+        # Idempotent: the second run skips what the first wrote.
+        r2 = process_pdf(a, out, dpi=72)
+        check("a re-run skips what exists", (r2["extracted"], r2["skipped"]),
+              (0, 2))
+        r3 = process_pdf(a, out, dpi=72, overwrite=True)
+        check("--overwrite re-extracts", (r3["extracted"], r3["skipped"]),
+              (2, 0))
+
+        scan = process_pdf(_st_scan_pdf(os.path.join(tmp, "Doe_Scan_2025.pdf")),
+                           out, dpi=72)
+        check("a scan has no text", scan["had_text"], False)
+        check("a scan is not an open error", scan["open_error"], "")
+        check("a scan has no zero-page flag", scan["no_pages"], False)
+
+        html = process_pdf(_st_html_pdf(os.path.join(tmp, "Doe_Html_2025.pdf")),
+                           out, dpi=72)
+        ok("an HTML page named .pdf is an open error, not a scan",
+           "not a PDF" in html["open_error"])
+        check("...and is not reported as textless (it has text)",
+              html["had_text"], False)
+
+        zero = process_pdf(
+            _st_zero_page_pdf(os.path.join(tmp, "Doe_Zero_2025.pdf")), out,
+            dpi=72)
+        check("a zero-page PDF", zero["no_pages"], True)
+        check("...and is not an open error", zero["open_error"], "")
+
+        enc = process_pdf(
+            _st_encrypted_pdf(os.path.join(tmp, "Doe_Enc_2025.pdf")), out,
+            dpi=72)
+        ok("an encrypted PDF is reported, not raised through the run",
+           "encrypted" in enc["open_error"])
+        ok("...and says how to fix it", "qpdf" in enc["open_error"])
+
+        junk = os.path.join(tmp, "Doe_Junk_2025.pdf")
+        with open(junk, "wb") as fh:
+            fh.write(b"\x00\x01 not a document at all")
+        # `process_pdf` prints the open failure to stderr as it happens; that
+        # is the behaviour under test, not something to let leak into the
+        # self-test's own output.
+        with contextlib.redirect_stderr(io.StringIO()):
+            bad_open = process_pdf(Path(junk), out, dpi=72)
+        ok("an unreadable file is an open error", bool(bad_open["open_error"]))
+
+        # A caption with no room above it: detected, degenerate, NOT written.
+        top = process_pdf(
+            _st_top_caption_pdf(os.path.join(tmp, "Doe_Top_2025.pdf")), out,
+            dpi=72)
+        check("a degenerate bbox is detected", top["figures"], ["3"])
+        check("...and counted as a failure, not an extraction",
+              (top["extracted"], len(top["failures"])), (0, 1))
+        # The REASON has to say degenerate, not just "failed": a collapsed
+        # search region is a crop to set by hand, while a render error is a
+        # different problem with a different fix. Letting the rect through to
+        # PyMuPDF turns the first into the second, in the report only.
+        ok("...saying the bbox was degenerate",
+           "degenerate bbox" in top["failures"][0][1])
+        ok("...naming the page", "page 1" in top["failures"][0][1])
+        ok("no PNG was written for it",
+           not os.path.exists(os.path.join(out, "Doe_Top_2025_fig_3.png")))
+
+        # A caption at the foot of a page whose figure is overleaf: the crop
+        # is over empty page and renders pure white. It used to be written and
+        # counted — `1 extracted, 0 suspicious, 0 failed` for a 314x468 PNG
+        # with one colour in it.
+        nxt = process_pdf(
+            _st_next_page_figure_pdf(os.path.join(tmp, "Doe_Next_2025.pdf")),
+            out, dpi=72)
+        check("a caption whose figure is overleaf is detected",
+              nxt["figures"], ["4"])
+        check("...and its all-white crop is NOT an extraction",
+              (nxt["extracted"], nxt["skipped"]), (0, 0))
+        check("...it is a blank crop, in its own bucket",
+              nxt["blank"], [("4", 1)])
+        check("...and is not miscounted as a render failure or a flag",
+              (nxt["failures"], nxt["warnings"]), ([], []))
+        ok("...and no white PNG reached the output folder",
+           not os.path.exists(os.path.join(out, "Doe_Next_2025_fig_4.png")))
+
+        # Two side-by-side figures whose captions are a few points apart in
+        # height: the left crop reaches over the right caption. The batch path
+        # had no caption check at all, so this was written with every bucket
+        # reading zero.
+        twocol = process_pdf(
+            _st_two_column_pdf(os.path.join(tmp, "Doe_TwoCol_2025.pdf")),
+            out, dpi=72)
+        check("both captions on a two-column page are found",
+              sorted(twocol["figures"]), ["1", "2"])
+        check("a crop holding another figure's caption is flagged",
+              [f for f, _ in twocol["caption_in"]], ["1"])
+        ok("...saying which caption is in it",
+           "'Figure 2'" in twocol["caption_in"][0][1])
+        ok("...and it is a warning as well, so the flag count still sees it",
+           ("1", twocol["caption_in"][0][1]) in twocol["warnings"])
+
+        # A suspicious bbox, and the ledger that stops it being re-flagged.
+        tiny_pdf = _st_tiny_fig_pdf(os.path.join(tmp, "Doe_Tiny_2025.pdf"))
+        tiny = process_pdf(tiny_pdf, out, dpi=72)
+        check("a tiny figure is flagged", [w[0] for w in tiny["warnings"]], ["1"])
+        ok("...with a reason", "width" in tiny["warnings"][0][1])
+        tiny2 = process_pdf(tiny_pdf, out, dpi=72, overwrite=True,
+                            reviewed={("Doe_Tiny_2025", "1")})
+        check("a reviewed bbox stops being nagged about",
+              (len(tiny2["warnings"]), len(tiny2["reviewed"])), (0, 1))
+
+        # PARTIAL detection: the body text cites a figure no caption matched.
+        partial_pdf = os.path.join(tmp, "Doe_Partial_2025.pdf")
+        pdoc = fitz.open()
+        page = pdoc.new_page(width=612, height=792)
+        page.draw_rect(fitz.Rect(100, 200, 500, 400), fill=(0.4, 0.4, 0.4))
+        page.insert_text((100, 430), "Figure 1. The only caption.", fontsize=9)
+        page.insert_text((100, 500), "Figure 2 shows the other condition.",
+                         fontsize=9)
+        pdoc.save(partial_pdf)
+        pdoc.close()
+        part = process_pdf(Path(partial_pdf), out, dpi=72)
+        check("a cited figure with no caption is reported missing",
+              part["missing"], ["2"])
+        ok("...and the citation count is kept", part["referenced"] >= 2)
+
+        # Two source PDFs, same pixels, different stems.
+        dup_dir = os.path.join(tmp, "dup")
+        os.makedirs(dup_dir)
+        one = _st_fig_pdf(os.path.join(tmp, "Doe_One_2025.pdf"))
+        two = _st_fig_pdf(os.path.join(tmp, "Doe_Two_2025.pdf"))
+        seen = {}
+        r_one = process_pdf(one, dup_dir, dpi=72, seen_hashes=seen)
+        r_two = process_pdf(two, dup_dir, dpi=72, seen_hashes=seen)
+        check("the first copy is not a duplicate", r_one["duplicates"], [])
+        check("the second copy is",
+              [(f, os.path.basename(o), same)
+               for f, o, same in r_two["duplicates"]],
+              [("1", "Doe_One_2025_fig_1.png", False)])
+        # ...and a dry run cannot see any of it, because it writes no bytes.
+        dry_dir = os.path.join(tmp, "dryrun")
+        os.makedirs(dry_dir)
+        seen = {}
+        d_one = process_pdf(one, dry_dir, dpi=72, dry_run=True, seen_hashes=seen)
+        d_two = process_pdf(two, dry_dir, dpi=72, dry_run=True, seen_hashes=seen)
+        check("a dry run counts what it would extract",
+              (d_one["extracted"], d_two["extracted"]), (1, 1))
+        check("a dry run writes nothing", os.listdir(dry_dir), [])
+        check("a dry run finds no duplicates -- it has no bytes to compare",
+              d_two["duplicates"], [])
+
+        check("page_has_text on a text page",
+              page_has_text(fitz.open(str(a))[0]), True)
+        check("page_has_text on a scan",
+              page_has_text(fitz.open(os.path.join(tmp,
+                                                   "Doe_Scan_2025.pdf"))[0]),
+              False)
+
+        # --- ownership of an output name that already exists ----------------
+        # `Sources/Images/` is shared: clipping-processor writes
+        # `<slug>_fig_<N>.<ext>` into it too, so a clipping whose slug equals a
+        # paper's stem can already own `<stem>_fig_1.png`. The skip reported
+        # `1 extracted, 1 skipped (already exist)` — an ordinary re-run, word
+        # for word — while the paper's real Figure 1 was never written and
+        # every consumer embedded the clipping as it.
+        own_dir = os.path.join(tmp, "Owned")
+        os.makedirs(own_dir)
+        own_pdf = _st_fig_pdf(os.path.join(tmp, "Doe_Owned_2025.pdf"))
+        own_manifest = {}
+        first = process_pdf(own_pdf, own_dir, dpi=72, manifest=own_manifest)
+        check("a first run writes the figure", first["extracted"], 1)
+        check("...and records it in the manifest",
+              sorted(own_manifest), ["Doe_Owned_2025_fig_1.png"])
+        again = process_pdf(own_pdf, own_dir, dpi=72, manifest=own_manifest)
+        check("a re-run of our own output is an ordinary skip",
+              (again["skipped"], again["occupied"]), (1, []))
+        # Now another skill takes the name.
+        occupied_path = os.path.join(own_dir, "Doe_Owned_2025_fig_1.png")
+        with open(occupied_path, "wb") as fh:
+            fh.write(b"\x89PNG\r\n\x1a\n not this extractor's bytes")
+        foreign = process_pdf(own_pdf, own_dir, dpi=72, manifest=own_manifest)
+        check("a file we did not write is NOT a skip",
+              (foreign["skipped"], foreign["extracted"]), (0, 0))
+        check("...it is an occupied name, in its own bucket",
+              [(f, os.path.basename(p)) for f, p, _ in foreign["occupied"]],
+              [("1", "Doe_Owned_2025_fig_1.png")])
+        ok("...saying the bytes are not the ones we wrote",
+           "changed" in foreign["occupied"][0][2])
+        # A name with no manifest entry at all — the clipping got there first.
+        never = process_pdf(own_pdf, own_dir, dpi=72, manifest={})
+        ok("a name we have no record of writing is occupied too",
+           [f for f, _p, _w in never["occupied"]] == ["1"]
+           and "no record" in never["occupied"][0][2])
+        # ...and a caller with no manifest at all keeps the old behaviour,
+        # rather than reading an empty one as "none of this is mine".
+        check("no manifest supplied means no ownership claim either way",
+              process_pdf(own_pdf, own_dir, dpi=72)["skipped"], 1)
+
+        check("load_manifest on a file that does not exist",
+              load_manifest(os.path.join(tmp, "nope.tsv")), {})
+        man_path = os.path.join(tmp, "man.tsv")
+        save_manifest(man_path, {"a_fig_1.png": "d1", "b_fig_2.png": "d2"})
+        check("a manifest round-trips", load_manifest(man_path),
+              {"a_fig_1.png": "d1", "b_fig_2.png": "d2"})
+        ok("...and explains itself at the top",
+           open(man_path, encoding="utf-8").read().startswith("#"))
+
+        # --- the digest index is seeded from what is already in --out -------
+        # `_note_output`'s docstring has always said "existing files are hashed
+        # too: the second copy is usually written on a later run than the
+        # first". It was false: `seen_hashes` started empty every run and was
+        # filled only from paths that run touched, so a byte-identical twin
+        # already on disk from a PRIOR run — the case the sentence describes —
+        # went unreported.
+        seed_dir = os.path.join(tmp, "Seed")
+        os.makedirs(seed_dir)
+        prior = os.path.join(seed_dir, "Doe_Prior_2025_fig_1.png")
+        shutil.copyfile(os.path.join(out, "Doe_Figs_2025_fig_1.png"), prior)
+        seeded, adopted = seed_output_index(seed_dir, {}, False)
+        check("seeding hashes the figures already in --out",
+              sorted(os.path.basename(p) for p in seeded.values()),
+              ["Doe_Prior_2025_fig_1.png"])
+        check("...and adopts them when no manifest has ever existed",
+              adopted, ["Doe_Prior_2025_fig_1.png"])
+        check("...but claims nothing when a manifest is already in use",
+              seed_output_index(seed_dir, {}, True)[1], [])
+        twin_seen, _ = seed_output_index(seed_dir, {}, False)
+        # `a` renders the same pixels the prior run left on disk, under its
+        # own stem: the same document reaching the source tree twice.
+        twin = process_pdf(a, seed_dir, dpi=72, seen_hashes=twin_seen)
+        check("a twin of a figure written by an EARLIER run is reported",
+              [(f, os.path.basename(o), same)
+               for f, o, same in twin["duplicates"]][0],
+              ("1", "Doe_Prior_2025_fig_1.png", False))
+        empty_seen, _ = seed_output_index(os.path.join(tmp, "no-such-dir"),
+                                          {}, True)
+        check("seeding a folder that does not exist", empty_seen, {})
+
+        # --- the --mark-reviewed line is a command, not a fragment ----------
+        cmd = mark_reviewed_command("/v/Sources/PDFs", "/v/Sources/Images",
+                                    "Doe_Tiny_2025", "1")
+        ok("the mark-reviewed line runs python3", cmd.startswith("python3 "))
+        ok("...names this script by absolute path",
+           os.path.abspath(__file__) in cmd)
+        ok("...carries both required arguments",
+           "--src /v/Sources/PDFs" in cmd and "--out /v/Sources/Images" in cmd)
+        ok("...and the mark itself", "--mark-reviewed Doe_Tiny_2025:1" in cmd)
+        ok("a path with a space is quoted for the shell",
+           "'/v/My Vault/Sources/Images'" in mark_reviewed_command(
+               "/v/s", "/v/My Vault/Sources/Images", "A", "1"))
+
+        # --- print_summary --------------------------------------------------
+        def summary(per_pdf, **kw):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                print_summary(per_pdf, out, **kw)
+            return buf.getvalue()
+
+        ok("the summary counts the figures extracted",
+           "Figures extracted:    2" in summary({a: r}))
+        text = summary({a: r, tiny_pdf: tiny, Path(partial_pdf): part,
+                        Path(junk): bad_open})
+        ok("the summary names the flagged bbox", "Doe_Tiny_2025.pdf" in text)
+        ok("the summary prints the --mark-reviewed line for a PDF that has "
+           "a flag", "--mark-reviewed Doe_Tiny_2025:1" in text)
+        ok("the summary prints a runnable --mark-reviewed command, not just "
+           "the flag", "python3 " in text and "--src " in text
+           and "--out " in text)
+        ok("the summary reports PARTIAL detection", "PARTIAL" in text)
+        ok("...naming page-margin clipping as a cause, since the caption "
+           "regex is only one of three", "page-margin" in text)
+        # The three new outcomes each get their own line and their own
+        # remediation: a blank crop, a caption inside a crop, and an output
+        # name held by another skill's file are three different instructions.
+        text = summary({Path(os.path.join(tmp, "Doe_Next_2025.pdf")): nxt})
+        ok("the summary counts blank crops", "Blank crops:          1" in text)
+        ok("...with their own section", "rendered nothing but white" in text)
+        ok("...and their own remediation", "is on another page" in text
+           or "figure is overleaf" in text or "overleaf" in text)
+        # Every figure blank is one detection failure, not N blank crops —
+        # and without a line saying so it reads as an empty run.
+        ok("...and says so when EVERY figure in a PDF came out blank",
+           "one detection failure for the whole PDF" in text)
+        ok("...naming the PDF and the count",
+           "ALL 1 figure(s) detected in Doe_Next_2025.pdf" in text)
+        mixed = dict(nxt)
+        mixed["extracted"] = 1
+        mixed["figures"] = ["4", "5"]
+        check("...and not when some figures did come out",
+              "one detection failure for the whole PDF"
+              in summary({Path(os.path.join(tmp, "Doe_Next_2025.pdf")): mixed}),
+              False)
+        text = summary({Path(os.path.join(tmp, "Doe_TwoCol_2025.pdf")): twocol})
+        ok("the summary counts caption text inside a crop",
+           "Caption text in crop: 1" in text)
+        ok("...with its own section",
+           "the one thing this skill promises it excludes" in text)
+        text = summary({own_pdf: foreign})
+        ok("the summary counts occupied output names",
+           "Occupied filenames:   1" in text)
+        ok("...and says they were neither extracted nor skipped",
+           "NOT extracted and NOT skipped" in text)
+        ok("...naming the other producer", "clipping-processor" in text)
+        text = summary({a: r, tiny_pdf: tiny, Path(partial_pdf): part,
+                        Path(junk): bad_open})
+        ok("the summary keeps the unreadable file out of the OCR bucket",
+           "not a readable PDF" in text)
+        text = summary({one: r_one, two: r_two})
+        ok("the summary reports cross-stem duplicates",
+           "two different stems" in text)
+        # Two PDFs whose stems differ only in case write to ONE set of figure
+        # names on the vault's own case-insensitive volume.
+        text = summary({Path(os.path.join(tmp, "A", "Doe_Figs_2025.pdf")): r,
+                        Path(os.path.join(tmp, "B", "doe_figs_2025.pdf")): r})
+        ok("the summary warns about a stem collision",
+           "stem collisions" in text and "doe_figs_2025.pdf" in text)
+        text = summary({a: r})
+        check("...and says nothing when the stems are distinct",
+              "stem collisions" in text, False)
+        text = summary({b: r}, skipped_books={b: [c]})
+        ok("the summary names a skipped book", "Split books" in text)
+        # A dry run's duplicate count is not a finding: it hashes written
+        # PNGs, and a dry run writes none.
+        text = summary({one: d_one}, dry_run=True)
+        ok("a dry run says the duplicate check did not run",
+           "a dry run writes no bytes" in text)
+        text = summary({one: r_one})
+        ok("a real run reports the duplicate count plainly",
+           "byte-identical to a figure already written" in text)
+
+        # --- main(), end to end --------------------------------------------
+        def run(argv):
+            """main() with `argv`, returning (exit code, stdout, stderr)."""
+            so, se = io.StringIO(), io.StringIO()
+            code = 0
+            with contextlib.redirect_stdout(so), contextlib.redirect_stderr(se):
+                try:
+                    code = main(argv)
+                except SystemExit as exc:
+                    code = exc.code
+                except Exception as exc:
+                    # An unhandled exception is a failure of this case, not of
+                    # the run: reported like any other wrong answer so the
+                    # cases after it still execute and still get counted.
+                    code = "unhandled %s: %s" % (type(exc).__name__, exc)
+            return code, so.getvalue(), se.getvalue()
+
+        run_out = os.path.join(tmp, "run-out")
+        code, so, se = run(["--src", src, "--out", run_out, "--dpi", "72"])
+        check("a clean run exits 0", code, 0)
+        ok("the book is skipped in favour of its chapters",
+           "Skipping Prince_UDL_2026.pdf" in so)
+        ok("the chapter's figures are written",
+           os.path.exists(os.path.join(run_out,
+                                       "Prince_UDL_2026_01_Intro_fig_1.png")))
+        ok("the book's figures are NOT written under the book's stem",
+           not os.path.exists(os.path.join(run_out,
+                                           "Prince_UDL_2026_fig_1.png")))
+        code, so, se = run(["--src", src, "--out", run_out, "--dpi", "72",
+                            "--include-split-books"])
+        ok("--include-split-books extracts the book too",
+           os.path.exists(os.path.join(run_out, "Prince_UDL_2026_fig_1.png")))
+
+        # An unorganized filename is refused, and the run says so in its exit
+        # code as well as its output: a batch that extracted nothing must not
+        # report success to whatever called it.
+        unorg = os.path.join(tmp, "unorganized")
+        os.makedirs(unorg)
+        _st_fig_pdf(os.path.join(unorg, "download (1).pdf"))
+        code, so, se = run(["--src", unorg, "--out", run_out, "--dpi", "72"])
+        ok("an unorganized PDF is refused", "REFUSED" in so)
+        check("a run that refused everything exits non-zero", code, 1)
+        ok("...and says nothing is left", "Nothing left to process." in so)
+        code, so, se = run(["--src", unorg, "--out", run_out, "--dpi", "72",
+                            "--allow-unorganized"])
+        check("--allow-unorganized runs it", code, 0)
+        ok("...and writes its figures",
+           os.path.exists(os.path.join(run_out, "download (1)_fig_1.png")))
+
+        # A PDF that could not be opened is a failed run, not a clean one.
+        badsrc = os.path.join(tmp, "badsrc")
+        os.makedirs(badsrc)
+        _st_html_pdf(os.path.join(badsrc, "Doe_Broken_2025.pdf"))
+        code, so, se = run(["--src", badsrc, "--out", run_out, "--dpi", "72"])
+        check("a run whose PDF could not be opened exits non-zero", code, 1)
+        ok("...and says it is not an OCR problem",
+           "not an OCR problem" in so)
+
+        # `--dry-run` writes nothing at all, `--out` directory included.
+        dry_out = os.path.join(tmp, "dry-out")
+        code, so, se = run(["--src", src, "--out", dry_out, "--dpi", "72",
+                            "--dry-run", "--mark-reviewed", "Doe_Figs_2025:1"])
+        check("a dry run exits 0", code, 0)
+        ok("a dry run creates no output directory", not os.path.exists(dry_out))
+        ok("a dry run says it would record the mark", "Would record" in so)
+        ok("a dry run says it is one", "Dry run" in so)
+
+        # `--mark-reviewed` on a real run lands in the ledger inside --out.
+        code, so, se = run(["--src", src, "--out", run_out, "--dpi", "72",
+                            "--mark-reviewed", "Doe_Figs_2025:1"])
+        ok("a real run records the mark", "Recorded as reviewed" in so)
+        check("...in the ledger inside --out",
+              ("Doe_Figs_2025", "1") in load_reviewed(
+                  os.path.join(run_out, REVIEW_FILE)), True)
+
+
+        code, so, se = run(["--out", run_out])
+        check("a missing --src exits 2", code, 2)
+        ok("...naming it", "--src" in se)
+        code, so, se = run(["--src", os.path.join(tmp, "empty-dir"),
+                            "--out", run_out])
+        ok("a --src that does not exist is refused",
+           code != 0 and "not a directory" in str(code))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    print("%d/%d self-test cases pass"
+          % (state["n"] - state["bad"], state["n"]))
+    return 1 if state["bad"] else 0
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=__doc__,
+    )
+    p.add_argument(
+        "--src",
+        help=(
+            "Source directory (walked recursively for *.pdf), or a single "
+            ".pdf file."
+        ),
+    )
+    p.add_argument(
+        "--out",
+        help="Output directory for cropped figure PNGs.",
+    )
+    p.add_argument(
+        "--overwrite", action="store_true",
+        help="Re-extract figures even if the target PNG already exists.",
+    )
+    p.add_argument(
+        "--dry-run", action="store_true",
+        help="Detect and report, but don't write any PNGs.",
+    )
+    p.add_argument(
+        "--dpi", type=int, default=250,
+        help="Render resolution (default 250).",
+    )
+    p.add_argument(
+        "--ed-prefix", default="S",
+        help=(
+            "Filename prefix for 'Extended Data Figure N' captions "
+            "(default 'S' — collapses into supplementary). Pass 'ED' to "
+            "keep Extended Data figures in a distinct namespace (e.g., "
+            "Nature papers that have both 'Supplementary Figure 1' AND "
+            "'Extended Data Figure 1' as different figures)."
+        ),
+    )
+    p.add_argument(
+        "--keep-frame", action="store_true",
+        help=(
+            "Keep the publisher's figure frame (the thin rectangle around "
+            "the figure in O'Reilly-style books). Default: strip the frame "
+            "so it doesn't appear in the output PNG."
+        ),
+    )
+    p.add_argument(
+        "--include-split-books", action="store_true",
+        help=(
+            "Also extract from a book PDF whose chapter PDFs are in the same "
+            "run. Default: skip the book, because its figures would be "
+            "written a second time under the book's stem — byte-identical, "
+            "never colliding, and permanently unused whichever stem an entry "
+            "cites."
+        ),
+    )
+    p.add_argument(
+        "--allow-unorganized", action="store_true",
+        help=(
+            "Extract from PDFs whose filename pdf-organizer has not produced. "
+            "Default: refuse them and name them, because every figure is keyed "
+            "to the PDF's stem and a later rename orphans the whole set under "
+            "a name nothing looks for — invisibly, since the figure glob and "
+            "the unused-figure diagnostic walk that same stem."
+        ),
+    )
+    p.add_argument(
+        "--review-file", default=None,
+        help=(
+            f"Ledger of bboxes you have already checked, so they stop being "
+            f"flagged every run. Default: {REVIEW_FILE} inside --out."
+        ),
+    )
+    p.add_argument(
+        "--mark-reviewed", action="append", default=[], metavar="STEM:FIG",
+        help=(
+            "Record that a flagged bbox has been checked (repeatable), e.g. "
+            "--mark-reviewed Prince_UDL_2026_02_SupLearn:10-5. Appends to the "
+            "review file and continues with the run."
+        ),
+    )
+    p.add_argument("--test", action="store_true", help="run the self-test")
+    args = p.parse_args(argv)
+
+    if args.test:
+        return run_self_test()
+    # Reported by name rather than left to argparse's `required=True`: with the
+    # flags marked required, argparse rejects `--test` (which needs neither)
+    # before `main()` can see it. Same shape and exit code as
+    # `paper_scan.py`'s missing-argument path.
+    missing = [f for f in ("src", "out") if not getattr(args, f)]
+    if missing:
+        print("missing required argument(s): %s"
+              % ", ".join("--" + m for m in missing), file=sys.stderr)
+        return 2
+
+    # Wire the CLI choice into the caption→prefix mapping used by
+    # find_caption_blocks. Calling this unconditionally is fine — if the
+    # user didn't pass --ed-prefix, the value is 'S' which matches the
+    # default and is a no-op.
+    configure_marker_prefix("Extended Data", args.ed_prefix)
+    configure_strip_frame(not args.keep_frame)
+
+    src_dir = os.path.expanduser(args.src)
+    out_dir = os.path.expanduser(args.out)
+    if not args.dry_run:
+        os.makedirs(out_dir, exist_ok=True)
+
+    review_file = os.path.expanduser(
+        args.review_file or os.path.join(out_dir, REVIEW_FILE))
+    marked = []
+    if args.mark_reviewed:
+        marked = mark_reviewed(review_file, args.mark_reviewed,
+                               dry_run=args.dry_run)
+        verb = "Would record" if args.dry_run else "Recorded"
+        for stem, fig in marked:
+            print(f"{verb} as reviewed: {stem} Fig {fig}  → {review_file}")
+        print()
+    reviewed = load_reviewed(review_file)
+    # A dry run wrote no ledger, but it still has to report what the real run
+    # would report — otherwise the marks the user just passed come back as
+    # fresh flags and the dry run disagrees with the run it is previewing.
+    reviewed |= set(marked)
+
+    pdfs = find_pdfs(src_dir)
+    if not pdfs:
+        print(f"No PDFs found under {src_dir}")
+        return 0
+
+    # Every figure this script writes is keyed to the PDF's on-disk stem, and
+    # nothing downstream survives that stem changing: a later rename orphans
+    # the whole set under a name no consumer looks for, and neither the
+    # figure glob nor the unused-figure diagnostic can report it, because both
+    # walk the same stem (CONVENTIONS.md §1a). So a PDF that has not been
+    # through pdf-organizer is refused rather than extracted — the ordering is
+    # a constraint, not a preference, and this is the only place in the
+    # pipeline positioned to enforce it.
+    # A split book and its chapters are both in the walk, and extracting
+    # both writes every figure twice under two stems. The chapter stem is
+    # what everything downstream keys to, so the book is what gets skipped.
+    #
+    # THIS RUNS BEFORE THE REFUSAL BELOW, and the order is load-bearing.
+    # `naming.py` deliberately recognises the legacy `<book>_src_NN_Name`
+    # spelling as a chapter while `looks_canonical` rejects it, precisely so a
+    # vault still holding those files gets its book skipped while the names are
+    # being fixed. Refusing first removes those chapters from `pdfs`, the
+    # pairing is never seen, and the book is extracted after all -- the doubled
+    # figures the carve-out exists to prevent, on the default path.
+    skipped_books = {} if args.include_split_books else split_book_chapters(pdfs)
+    if skipped_books:
+        pdfs = [p for p in pdfs if p not in skipped_books]
+
+    unorganized = []
+    if not args.allow_unorganized:
+        unorganized = [p for p in pdfs if not looks_canonical(p.stem)]
+        pdfs = [p for p in pdfs if p not in set(unorganized)]
+
+    if unorganized:
+        print("REFUSED: %d PDF(s) whose filename pdf-organizer has not "
+              "produced." % len(unorganized))
+        print("  Every figure is named after the PDF's stem, so extracting "
+              "now and renaming later")
+        print("  orphans the whole set silently. Run pdf-organizer on these "
+              "first:")
+        for p in sorted(unorganized):
+            print(f"    {p}")
+        print("  Then re-run. To extract anyway, pass --allow-unorganized "
+              "(the figures are then")
+        print("  keyed to a name that is expected to change).")
+        print()
+    # The book-skip is reported even when the refusal above emptied the run.
+    # It used to sit after an early `return`, so a vault holding legacy
+    # chapter names printed the refusal and nothing else -- leaving the
+    # operator to conclude the book had been processed, when in fact it was
+    # correctly skipped and its chapters were correctly refused. Both halves
+    # of that outcome have to be visible for it to be actionable.
+    for book, chapters in sorted(skipped_books.items()):
+        print(f"Skipping {book.name}: split into {len(chapters)} chapter PDF(s); "
+              f"figures come from those (--include-split-books to override)")
+    if unorganized and not pdfs:
+        if skipped_books:
+            print()
+        print("Nothing left to process.")
+        # Non-zero: every PDF the user pointed at was refused, so nothing was
+        # extracted. Exiting 0 there tells a caller — a shell `&&`, a wrapper
+        # script, the model reading `$?` — that the figures are in the vault.
+        return 1
+
+    print(f"Found {len(pdfs)} PDF(s) under {src_dir}")
+    if args.dry_run:
+        print("Dry run — no files will be written.")
+    print()
+
+    # One pass over the figures already in --out. It seeds the digest index
+    # (so a byte-identical twin written by an EARLIER run is reported, which
+    # is what `_note_output` has always claimed and never did) and, the first
+    # time this runs against a folder with no manifest, adopts what is there
+    # as this extractor's own.
+    manifest_file = os.path.join(out_dir, MANIFEST_FILE)
+    manifest_existed = os.path.exists(manifest_file)
+    manifest = load_manifest(manifest_file)
+    seen_hashes, adopted = seed_output_index(out_dir, manifest, manifest_existed)
+    if adopted:
+        # A dry run adopts in memory so it reports what the real run would,
+        # and writes no manifest — so it must not claim it recorded anything.
+        verb = "Would record" if args.dry_run else "Recorded"
+        print(f"{verb} {len(adopted)} figure(s) already in {out_dir} as this "
+              f"extractor's own output")
+        print(f"  in {manifest_file}. From now on a file appearing under a "
+              f"figure name this")
+        print(f"  extractor did not write is reported instead of being skipped "
+              f"as already done.")
+        print()
+
+    per_pdf = {}
+    for pdf_path in pdfs:
+        # `--src` may be a single PDF, in which case relative_to() returns
+        # "." (or raises, on an odd path) — neither is a useful label.
+        try:
+            rel = pdf_path.relative_to(src_dir)
+            if str(rel) in (".", ""):
+                rel = pdf_path.name
+        except ValueError:
+            rel = pdf_path.name
+        print(f"Processing: {rel}")
+        result = process_pdf(
+            pdf_path, out_dir,
+            overwrite=args.overwrite, dpi=args.dpi, dry_run=args.dry_run,
+            reviewed=reviewed, seen_hashes=seen_hashes, manifest=manifest,
+        )
+        per_pdf[pdf_path] = result
+        n = result["extracted"]
+        s = result["skipped"]
+        c = len(result["collisions"])
+        w = len(result["warnings"])
+        f = len(result["failures"])
+        if result["open_error"]:
+            print("  → could not be opened as a PDF (not an OCR problem)")
+        elif result["no_pages"]:
+            print("  → PDF has zero pages")
+        elif not result["had_text"]:
+            print("  → no extractable text (scanned PDF?)")
+        elif not result["figures"]:
+            print("  → no figure captions detected")
+        else:
+            parts = [f"{n} extracted"]
+            if s:
+                parts.append(f"{s} skipped (already exist)")
+            if c:
+                parts.append(f"{c} collision{'s' if c > 1 else ''}")
+            if w:
+                parts.append(f"{w} flagged")
+            if result["reviewed"]:
+                parts.append(f"{len(result['reviewed'])} flagged but reviewed")
+            if result["duplicates"]:
+                parts.append(f"{len(result['duplicates'])} duplicate")
+            if result["blank"]:
+                parts.append(f"{len(result['blank'])} blank crop")
+            if result["occupied"]:
+                parts.append(f"{len(result['occupied'])} name(s) occupied by "
+                             f"another skill's file")
+            if result["missing"]:
+                parts.append(
+                    "PARTIAL: no caption for "
+                    + ", ".join(f"Fig {m}" for m in result["missing"][:6]))
+            if f:
+                parts.append(f"{f} failed")
+            print(f"  → {', '.join(parts)}")
+
+    if not args.dry_run:
+        save_manifest(manifest_file, manifest)
+
+    print_summary(per_pdf, out_dir, skipped_books, review_file, args.dry_run,
+                  src_dir=src_dir)
+
+    # The exit code has to say whether the run did what it was asked. It was
+    # always 0 — a run that refused every PDF, could not open half of them, or
+    # detected figures it then failed to write reported success, and anything
+    # reading `$?` (a shell `&&`, a wrapper, the model) took the report's word
+    # for it without reading the report. Three outcomes are failures:
+    # refusals, files that could not be opened at all, and figures detected but
+    # not written. A suspicious bbox is NOT one of them — it is advisory, the
+    # PNG is on disk, and `--mark-reviewed` is the answer to it.
+    # A blank crop and an occupied output name join that list for the same
+    # reason: in both, a figure was detected and is NOT in `--out` afterwards.
+    # A caption inside a crop does not — the PNG is there, it is just wrong,
+    # and it is reported the way every other suspicious bbox is.
+    failed = any(r["failures"] or r["open_error"] or r["blank"] or r["occupied"]
+                 for r in per_pdf.values())
+    return 1 if (unorganized or failed) else 0
+
+
+if __name__ == "__main__":
+    # `sys.exit(main())`: `--test`, the missing-argument path and the
+    # refusal/failure exit codes all report through the return value.
+    sys.exit(main())
