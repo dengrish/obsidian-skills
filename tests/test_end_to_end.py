@@ -179,6 +179,69 @@ class WorkflowTests(unittest.TestCase):
         self.assertFalse(source.exists())
         self.assertEqual(digest(self.pdfs / source.name), original)
 
+    def test_escaped_source_identity_survives_scan_and_pdf_rename(self):
+        source = self.pdfs / "Doe_Study_2025.pdf"
+        self.make_pdf(source)
+        figure = self.images / "Doe_Study_2025_fig_1.png"
+        Image.new("RGB", (64, 48), (20, 100, 180)).save(figure)
+        note = self.notes / "Doe_Study_2025.md"
+        body = summary_note(source.stem).replace(
+            'sources:\n  - "[[Doe_Study_2025.pdf]]"',
+            'sources: # recorded origin\n- "[[\\x44oe_Study_2025.pdf]]" # verified')
+        note.write_text(body, encoding="utf-8")
+        self.assertEqual(self.scan_papers()["counts"]["done"], 1)
+        self.run_script("skills/paper-summarizer/scripts/note_lint.py", note,
+                        "--images", self.images)
+        original = digest(figure)
+        self.run_script("skills/pdf-organizer/scripts/organize.py", "rename",
+                        "--vault", self.vault, source,
+                        "--to", "Doe_Renamed_2025.pdf", "--apply")
+        renamed_note = self.notes / "Doe_Renamed_2025.md"
+        metadata = yaml.safe_load(renamed_note.read_text().split("---", 2)[1])
+        self.assertEqual(metadata["sources"], ["[[Doe_Renamed_2025.pdf]]"])
+        self.assertTrue(metadata["read"])
+        self.assertEqual(str(metadata["created"]), "2026-08-30")
+        self.assertEqual(digest(self.images / "Doe_Renamed_2025_fig_1.png"), original)
+        self.assertEqual(self.scan_papers()["counts"]["done"], 1)
+        self.run_script("skills/paper-summarizer/scripts/note_lint.py", renamed_note,
+                        "--images", self.images)
+
+    def test_pdf_rename_preserves_publisher_urls_and_foreign_clipping(self):
+        source = self.vault / "Inbox/download.pdf"
+        self.make_pdf(source)
+        clipping = self.notes / "download.md"
+        clipping.write_text(
+            "---\nsources: # capture\n- 'https://example.org/O''Reilly/download.pdf'\n"
+            "read: true\n---\n![[download_fig_1.png]]\n*Clipping image.*\n",
+            encoding="utf-8")
+        figure = self.images / "download_fig_1.png"
+        Image.new("RGB", (32, 24), (180, 40, 80)).save(figure)
+        reference = self.vault / "Wiki/reference.md"
+        publisher = "https://publisher.example/papers/download.pdf"
+        reference.write_text(
+            f'[[Inbox/download.pdf#page=1]]\n[Publisher]({publisher})\n',
+            encoding="utf-8")
+        before = {path: digest(path) for path in (source, clipping, figure, reference)}
+        self.run_script("skills/pdf-organizer/scripts/organize.py", "rename",
+                        "--vault", self.vault, source,
+                        "--to", "Doe_Study_2025.pdf", "--dest", self.pdfs, "--apply",
+                        expected=1)
+        self.assertEqual({path: digest(path) for path in before}, before)
+        # Resolve the fixture's ambiguous image ownership before retrying.
+        # The image keeps its basename and bytes, so the clipping still embeds it.
+        held = self.vault / "Held clipping images"
+        held.mkdir()
+        relocated = held / figure.name
+        figure.rename(relocated)
+        self.run_script("skills/pdf-organizer/scripts/organize.py", "rename",
+                        "--vault", self.vault, source,
+                        "--to", "Doe_Study_2025.pdf", "--dest", self.pdfs, "--apply")
+        self.assertTrue((self.pdfs / "Doe_Study_2025.pdf").is_file())
+        self.assertEqual(digest(clipping), before[clipping])
+        self.assertEqual(digest(relocated), before[figure])
+        self.assertEqual(reference.read_text(),
+                         f'[[Doe_Study_2025.pdf#page=1]]\n[Publisher]({publisher})\n')
+
     def test_clipping_image_reprocess_keeps_duplicate_detection_and_stems_aligned(self):
         fetch = "skills/clipping-processor/scripts/fetch_images.py"
         dedup = "skills/clipping-processor/scripts/dedup_index.py"

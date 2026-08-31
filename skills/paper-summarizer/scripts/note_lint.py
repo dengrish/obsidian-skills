@@ -12,9 +12,9 @@ drift is invisible from inside the note that has it.
 
 Exit 0 clean, 1 with one line per violation, 2 for a bad invocation.
 
-Stdlib only, no import-time effects.  The YAML is parsed by hand: the schema is
-ten known keys with known shapes, PyYAML is not on a stock macOS, and a real
-parser would accept plenty this format does not.
+Stdlib only. The nine-key schema and list shapes are checked here; scalar
+decoding is shared with the source-ownership readers so valid YAML escapes do
+not make citations point at a different document.
 """
 
 import argparse
@@ -22,6 +22,35 @@ import datetime
 import os
 import re
 import sys
+import unicodedata
+
+# --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
+import os as _os, sys as _sys
+_here = _os.path.dirname(_os.path.abspath(__file__))
+_env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
+if _env:                                   # explicit override: authoritative, no fallback
+    _tried = [_os.path.abspath(_os.path.expanduser(_env))]
+else:                                      # plugin-relative walk-up, at most 5 levels
+    _tried, _d = [], _here
+    for _ in range(5):
+        _tried.append(_os.path.join(_d, "shared", "scripts"))
+        _d = _os.path.dirname(_d)
+_shared = next((_p for _p in _tried if _os.path.isdir(_p)), None)
+if _shared is None:
+    raise SystemExit("""obsidian: cannot find the plugin's shared/scripts/ folder, which holds
+the one canonical copy of the conventions this script depends on.
+Looked for:
+  %s
+Fix: install the whole plugin tree, or set OBSIDIAN_VAULT_SHARED to the
+shared/scripts/ directory (unset it to use the plugin-relative walk-up).
+Do NOT paste a second copy of the algorithm into this skill -- a divergent
+copy is the bug the shared layer exists to prevent.""" % "\n  ".join(_tried))
+_sys.path[:] = [_p for _p in _sys.path if _p not in (_shared, _here)]
+_sys.path.insert(0, _shared)               # shared/scripts/ FIRST
+_sys.path.append(_here)                    # own dir LAST: a local copy cannot shadow it
+# --- end bootstrap ---
+
+from yaml_scalars import parse_scalar, strip_comment
 
 # --- the format, as data -----------------------------------------------------
 
@@ -132,6 +161,9 @@ CLEAN = object()
 # A horizontal rule in any spelling CommonMark accepts, other than our `___`.
 _OTHER_RULE = re.compile(r"\A(?:-\s*-\s*-[-\s]*|\*\s*\*\s*\*[\*\s]*|_\s*_\s*_[_\s]*)\Z")
 _DATE = re.compile(r"\A\d{4}-\d{2}-\d{2}\Z")
+_NUMBER = re.compile(r"[-+]?(?:[0-9][0-9_]*(?:\.[0-9_]*)?"
+                     r"(?:[eE][-+]?[0-9]+)?|\.[0-9]+(?:[eE][-+]?[0-9]+)?"
+                     r"|0[xob][0-9a-fA-F_]+|\.(?:inf|nan))", re.I)
 _EMBED = re.compile(r"\A!\[\[([^\]]+)\]\]\Z")
 # `[[Stem.pdf#page=5|5]]` -- group 1 the target, group 2 the display text if any.
 _PAGE_LINK = re.compile(r"\[\[([^\]|]*#page=[^\]|]*)(?:\|([^\]]*))?\]\]")
@@ -182,7 +214,7 @@ _TABLE_ROW = re.compile(r"\A\s*\|.*\|\s*\Z")
 _TABLE_SEP = re.compile(r"\A\s*\|(?:\s*:?-{2,}:?\s*\|)+\s*\Z")
 # A footnote marker or definition.  Matched, not substring-searched: `[^a-z]` in
 # an inline code span is a character class, not a footnote.
-_FOOTNOTE = re.compile(r"\[\^[0-9]+\]|\A\[\^[^\]]+\]:")
+_FOOTNOTE = re.compile(r"\[\^[^\]\s]+\]|\A\[\^[^\]]+\]:")
 
 
 def _fenced(lines):
@@ -231,6 +263,7 @@ class Note(object):
         self.text = text
         self.raw_lines = text.split("\n")
         self.findings = []
+        self.source = None
 
     def fail(self, line, msg):
         """`line` is 1-indexed, or 0 when the finding is about the whole file."""
@@ -259,13 +292,13 @@ def _split_front_matter(note):
     keys, kv, cur = [], {}, None
     for i in range(1, end):
         line = lines[i]
-        if not line.strip():
+        if not line.strip() or line.lstrip().startswith("#"):
             continue
         m = re.match(r"\A([A-Za-z_][A-Za-z0-9_-]*):(.*)\Z", line)
         if m and not line.startswith((" ", "\t", "-")):
             cur = m.group(1)
             keys.append(cur)
-            kv[cur] = [m.group(2).strip(), []]
+            kv[cur] = [strip_comment(m.group(2)).strip(), []]
         elif cur is not None:
             kv[cur][1].append(line)
             if cur not in ("author", "tags", "sources") and not line.startswith(("-", " ", "\t")):
@@ -299,25 +332,35 @@ def _check_front_matter(note, keys, kv):
     def scalar(key):
         return kv[key][0] if key in kv else None
 
+    def decoded(raw, label):
+        try:
+            return parse_scalar(raw)
+        except ValueError as exc:
+            note.fail(2, "invalid YAML in %s: %s" % (label, exc))
+            return None, "invalid"
+
+    def non_string(value):
+        return (value is None or value.casefold() in
+                ("null", "~", "true", "false", "yes", "no", "on", "off")
+                or _NUMBER.fullmatch(value) or _DATE.fullmatch(value))
+
     for key in ("title", "description"):
         value = scalar(key)
         if value is None:
             continue
         quoted = bool(value) and value[0] in "\"'"
-        if quoted and (len(value) < 2 or value[-1] != value[0]):
-            note.fail(2, "`%s` has an unterminated quoted YAML string" % key)
-        elif not (value[1:-1] if quoted else value).strip():
-            note.fail(2, "`%s` is empty" % key)
-        elif not quoted and (
-                re.search(r":(?:\s|$)", value)
-                or value[0] in "#[]{}&*!|>@`"
-                or value.casefold() in ("null", "~", "true", "false", "yes", "no", "on", "off")
-                or re.fullmatch(r"[-+]?(?:[0-9][0-9_]*(?:\.[0-9_]*)?"
-                                r"(?:[eE][-+]?[0-9]+)?|\.[0-9]+(?:[eE][-+]?[0-9]+)?"
-                                r"|0[xob][0-9a-fA-F_]+|\.(?:inf|nan))", value, re.I)
-                or _DATE.fullmatch(value)):
+        parsed, style = decoded(value, "`%s`" % key)
+        if style == "invalid":
+            if quoted and (len(value) < 2 or value[-1] != value[0]):
+                note.fail(2, "`%s` has an unterminated quoted YAML string" % key)
+            elif not quoted:
+                note.fail(2, "quote `%s` as a YAML string; its unquoted value "
+                             "contains YAML syntax" % key)
+        elif style == "bare" and non_string(parsed):
             note.fail(2, "quote `%s` as a YAML string; its unquoted value "
-                         "contains YAML syntax or a non-string value" % key)
+                         "is not a string" % key)
+        elif not parsed or not parsed.strip():
+            note.fail(2, "`%s` is empty" % key)
 
     fmt = scalar("format")
     if fmt is not None and fmt not in FORMATS:
@@ -335,10 +378,12 @@ def _check_front_matter(note, keys, kv):
         items = [i[1:].strip() if i.startswith("-") else i for i in raw_items]
         if not items:
             note.fail(2, "`sources` is empty -- item 1 is the PDF wikilink")
+        inner = []
         for n, it in enumerate(items, 1):
-            if not (len(it) >= 2 and it[0] == '"' and it[-1] == '"'):
+            value, style = decoded(it, "`sources` item %d" % n)
+            if style != "double":
                 note.fail(2, "`sources` item %d must be double-quoted" % n)
-        inner = [i.strip('"').strip() for i in items]
+            inner.append(value.strip() if isinstance(value, str) else "")
         if inner:
             first = inner[0]
             if not (first.startswith("[[") and first.endswith("]]")):
@@ -346,6 +391,11 @@ def _check_front_matter(note, keys, kv):
                              "e.g. \"[[Doe_X_2025.pdf]]\"")
             elif not first[2:-2].lower().endswith(".pdf"):
                 note.fail(2, "`sources` item 1 must name a .pdf")
+            elif re.search(r"[\[\]#|\r\n]", first[2:-2]):
+                note.fail(2, "`sources` item 1 must be one PDF wikilink without "
+                             "an alias or page anchor")
+            else:
+                note.source = first[2:-2].split("/")[-1]
         for n, it in enumerate(inner[1:], 2):
             if it.startswith("[["):
                 note.fail(2, "`sources` item %d is a wikilink; only item 1 "
@@ -376,10 +426,13 @@ def _check_front_matter(note, keys, kv):
 
     desc = scalar("description")
     if desc is not None:
-        bare = desc[1:-1] if len(desc) >= 2 and desc[0] == desc[-1] == '"' else desc
-        if not bare:
+        try:
+            bare = parse_scalar(desc)[0]
+        except ValueError:
+            bare = None     # the malformed scalar was reported above
+        if bare == "":
             note.fail(2, "`description` is empty")
-        elif len(bare) > MAX_DESCRIPTION:
+        elif isinstance(bare, str) and len(bare) > MAX_DESCRIPTION:
             note.fail(2, "`description` is %d characters, over the %d limit"
                          % (len(bare), MAX_DESCRIPTION))
 
@@ -394,6 +447,10 @@ def _check_front_matter(note, keys, kv):
                 note.fail(2, "`author` entry is not a block-list item: %r" % it)
             elif "[[" in it:
                 note.fail(2, "`author` entries carry no [[...]] wrapper: %r" % it)
+            else:
+                value, style = decoded(it[2:].strip(), "`author` entry")
+                if not value or (style == "bare" and non_string(value)):
+                    note.fail(2, "`author` entries must be non-empty YAML strings")
 
     if "tags" in kv:
         if kv["tags"][0]:
@@ -406,11 +463,11 @@ def _check_front_matter(note, keys, kv):
                 note.fail(2, "`tags` entry is not a block-list item: %r" % it)
                 continue
             val = it[2:].strip()
-            if not (len(val) >= 2 and val[0] == '"' and val[-1] == '"'):
+            inner, style = decoded(val, "`tags` entry")
+            if style != "double":
                 note.fail(2, "tag %s must be double-quoted -- an unquoted # "
                              "starts a YAML comment and the tag vanishes" % val)
                 continue
-            inner = val[1:-1]
             if not inner.startswith("#"):
                 note.fail(2, "tag %s must be #-prefixed" % val)
             elif inner[1:] not in TAG_ENUM:
@@ -805,8 +862,8 @@ def _check_figures(note, bounds, images, fenced, source=None):
             continue
         embeds += 1
         name = m.group(1).split("|")[0].strip()
-        if source and not name.casefold().startswith(
-                os.path.splitext(source)[0].casefold() + "_fig"):
+        if source and not _name_key(name).startswith(
+                _name_key(os.path.splitext(source)[0]) + "_fig"):
             note.fail(n + 1, "figure embed %r is not filed under this note's "
                              "`sources:` PDF %r; select from its figure inventory"
                       % (name, source))
@@ -928,7 +985,8 @@ def _check_citations(note, body_start, captions, fenced, source=None):
     for n, l in enumerate(lines):
         if n in fenced:
             continue
-        if _FOOTNOTE.search(l):
+        prose = re.sub(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)", " ", l)
+        if _FOOTNOTE.search(prose):
             note.fail(n + 1, "footnote syntax in the note; page references are "
                              "inline links now (SKILL.md step 9a)")
         wrapped = {c.start() for c in _CITATION.finditer(l)}
@@ -954,7 +1012,9 @@ def _check_citations(note, body_start, captions, fenced, source=None):
                                  "page %s does not exist" % page)
             where = ("the front matter" if n < body_start else
                      "the callout" if n in in_callout else
-                     "a caption" if n in captions else None)
+                     "a caption" if n in captions else
+                     "a heading" if l.lstrip().startswith("#") else
+                     "a table" if _TABLE_ROW.match(l) else None)
             if where:
                 note.fail(n + 1, "page citation in %s; citations are body-prose "
                                  "only" % where)
@@ -973,10 +1033,14 @@ def _check_citations(note, body_start, captions, fenced, source=None):
             if not base.lower().endswith(".pdf"):
                 note.fail(n + 1, "page citation target %r does not name a .pdf"
                                  % base)
-            elif source and base.casefold() != source.casefold():
+            elif source and _name_key(base) != _name_key(source):
                 note.fail(n + 1, "page citation points at %r, but this note's "
                                  "`sources:` item 1 is %r" % (base, source))
 
+
+
+def _name_key(name):
+    return unicodedata.normalize("NFC", name).casefold()
 
 
 def lint(text, path="<note>", images=None):
@@ -1001,10 +1065,7 @@ def lint(text, path="<note>", images=None):
     after = _check_callout(note, body_start, fenced)
     _check_rule(note, after)
     bounds = _check_structure(note, body_start, fenced)
-    _sitems = [l.strip() for l in kv.get("sources", ["", []])[1] if l.strip()]
-    src = (_sitems[0][1:].strip() if _sitems and _sitems[0].startswith("-")
-           else (_sitems[0] if _sitems else "")).strip('"').strip()
-    src = src[2:-2].split("/")[-1] if src.startswith("[[") and src.endswith("]]") else None
+    src = note.source
     captions = _check_figures(note, bounds, images, fenced, src)
     captions |= _check_tables(note, bounds, fenced)
     _check_exhibit_numbers(note, body_start, captions, fenced)
@@ -1120,6 +1181,42 @@ def _cases():
         ("a title string must close its quote",
          _mutate('title: "A Title: With a Colon"', 'title: "Unfinished'),
          "unterminated quoted YAML string"),
+        ("embedded unescaped title quotes are invalid YAML",
+         _mutate('title: "A Title: With a Colon"', 'title: "A "quoted" trial"'),
+         "invalid YAML in `title`"),
+        ("a description cannot carry an unknown YAML escape",
+         _mutate('description: Doe cut recurrence from 45% to 8% in a 219-patient trial.',
+                 'description: "A \\q trial"'), "invalid YAML in `description`"),
+        ("a commented null is still not a title string",
+         _mutate('title: "A Title: With a Colon"', 'title: null # not recorded'),
+         "quote `title` as a YAML string"),
+        ("escaped ASCII in sources resolves to the real paper",
+         _mutate('"[[Doe_X_2025.pdf]]"', '"[[\\x44oe_X_2025.pdf]]"'), CLEAN),
+        ("comments and indentless sources retain their block-list meaning",
+         _mutate('sources:\n  - "[[Doe_X_2025.pdf]]"',
+                 'sources: # recorded origin\n# verified locally\n'
+                 '- "[[\\x44oe_X_2025.pdf]]" # verified'), CLEAN),
+        ("comments on plain schema fields and escaped tags are valid YAML",
+         GOOD.replace('read: false', 'read: false # unread')
+             .replace('format: Paper', 'format: Paper # local document')
+             .replace('  - "#medicine"', '  - "#\\x6dedicine" # discipline'), CLEAN),
+        ("Unicode-equivalent source spelling is the same paper",
+         GOOD.replace("Doe_X_2025", "Müller_X_2025").replace(
+             '"[[Müller_X_2025.pdf]]"', '"[[Mu\u0308ller_X_2025.pdf]]"'), CLEAN),
+        ("quote escapes count as decoded description characters",
+         _mutate('description: Doe cut recurrence from 45% to 8% in a 219-patient trial.',
+                 'description: "' + '\\u00e9' * 110 + '"'), CLEAN),
+        ("null is not an author name",
+         _mutate('  - Priya N. Doe', '  - null'), "non-empty YAML strings"),
+        ("a mapping is not an author name",
+         _mutate('  - Priya N. Doe', '  - Team: Trial group'), "invalid YAML in `author`"),
+        ("heading citations are not body prose",
+         _mutate(I_H, I_H + '<sup>[[Doe_X_2025.pdf#page=6|6]]</sup>'),
+         "page citation in a heading"),
+        ("table citations are not body prose",
+         _mutate('| Transplant | 8.2% |',
+                 '| Transplant | 8.2%.<sup>[[Doe_X_2025.pdf#page=5|5]]</sup> |'),
+         "page citation in a table"),
         ("read true survives an authorized rewrite",
          _mutate("read: false", "read: true"), CLEAN),
         ("a soft-wrapped long sentence is counted as one",
@@ -1388,6 +1485,10 @@ def _cases():
          _mutate("More prose.<sup>[[Doe_X_2025.pdf#page=6|6]]</sup>",
                  "The class `[^a-z]` excludes letters.<sup>[[Doe_X_2025.pdf#page=6|6]]</sup>"),
          CLEAN),
+        ("a named footnote reference is still forbidden citation syntax",
+         _mutate("Prose.", "Prose.[^source]"), "footnote"),
+        ("numeric footnote examples inside code are literal text",
+         _mutate("Prose.", "The token ``[^1]`` is literal code."), CLEAN),
         ("supplementary table number",
          _mutate("More prose.<sup>[[Doe_X_2025.pdf#page=6|6]]</sup>",
                  "Supplementary Table 1 has the rest."), "points at something"),

@@ -10,6 +10,7 @@ PREPROCESSING (order is load-bearing; special-character substitutions run
 before NFKD because NFKD canonicalises distinct codepoints to the same
 character and would erase meaning):
 
+  0.  canonical NFD normalization (preserves microsign versus Greek mu)
   1.  microsign U+00B5 -> "u"            (distinct from Greek mu U+03BC)
   2.  Greek letters    -> "name-"        (alpha- beta- ... omega-)
   3.  dashes           -> "-"            (en, em, figure, horbar, minus)
@@ -66,7 +67,7 @@ Usable as a CLI and as a module:
     slugify("ROC curve")     -> "roc-curve.md"
     slug_stem("ROC curve")   -> "roc-curve"
     base_term("Feature (machine learning)") -> "Feature"
-    mu_variants("uM buffer") -> both the U+00B5 and U+03BC spellings, for
+    mu_variants("µM buffer") -> both the U+00B5 and U+03BC spellings, for
                                 probe (b) in find_collisions.py
 
 CLI (JSON to stdout unless --stem; --help everywhere):
@@ -192,7 +193,10 @@ _TRAILING_PAREN_RE = re.compile(r"^(?P<base>.*?)\s*\([^()]*\)\s*$")
 
 def preprocess(title: str) -> str:
     """Run the skill's preprocessing pass (plus FIX-A/B/C) over ``title``."""
-    s = title
+    # Canonically equivalent text must name the same entry. NFD exposes the
+    # Greek base letter in accented forms before the table runs; NFKD here
+    # would incorrectly merge microsign with Greek mu before their mapping.
+    s = unicodedata.normalize("NFD", title)
 
     # 1. microsign before anything that could NFKD it into Greek mu
     s = s.replace(MICRO_SIGN, "u")
@@ -381,6 +385,11 @@ TEST_CASES = [
     ("ΔG", "delta-g.md", "Greek CAPITAL delta"),
     ("Ω notation", "omega-notation.md", "Greek CAPITAL omega"),
     ("Σ-algebra", "sigma-algebra.md", "Greek CAPITAL sigma"),
+    ("Ά-helix", "alpha-helix.md", "composed accented Greek capital"),
+    ("Α\u0301-helix", "alpha-helix.md", "same capital in decomposed form"),
+    ("ΐ notation", "iota-notation.md", "composed Greek with two accents"),
+    ("ι\u0308\u0301 notation", "iota-notation.md", "same iota in decomposed form"),
+    ("Ω law", "omega-law.md", "ohm sign is canonically equivalent to omega"),
 
     # --- FIX-C: final sigma folds exactly like medial sigma ------------------
     ("σ", "sigma.md", "medial sigma U+03C3"),

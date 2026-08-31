@@ -96,6 +96,7 @@ _sys.path.append(_here)                    # own dir LAST: a local copy cannot s
 # --- end bootstrap ---
 
 from slugify import SlugError as _SlugError, slug_stem as _slug_stem  # noqa: E402
+from yaml_scalars import parse_scalar, strip_comment  # noqa: E402
 
 # ===========================================================================
 # NO SINGULARIZER LIVES HERE EITHER, and for the same reason.  The item-5
@@ -195,34 +196,38 @@ FM_KEY = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*:(.*)$")
 FM_ITEM = re.compile(r"^\s*-(?:\s+(.*)|\s*)$")
 
 def unquote(raw):
-    """Strip ONE matching pair of surrounding quotes and unescape the inner ones.
-
-    `.strip('"')` stripped *every* leading/trailing quote character, mangling
-    `title: "He said \\"hi\\""` into `He said \\"hi` — and then the slug check
-    compared the wrong string against the filename.
-    """
-    s = (raw or "").strip()
-    if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
-        return s[1:-1].replace('\\"', '"')
-    if len(s) >= 2 and s[0] == "'" and s[-1] == "'":
-        return s[1:-1].replace("''", "'")
-    return s
+    """Decode a validated YAML scalar; malformed input raises ValueError."""
+    return parse_scalar(raw)[0]
 
 def split_flow(inner):
-    """Split a `[a, b]` payload on top-level commas, honouring quotes."""
-    out, buf, quote, esc = [], [], None, False
-    for ch in inner:
-        if esc: buf.append(ch); esc = False; continue
-        if ch == "\\" and quote: buf.append(ch); esc = True; continue
+    """Split a flow-list payload, respecting YAML quote and escape boundaries."""
+    out, buf, quote = [], [], None
+    i = 0
+    while i < len(inner):
+        ch = inner[i]
         if quote:
             buf.append(ch)
-            if ch == quote: quote = None
-            continue
-        if ch in "\"'": quote = ch; buf.append(ch); continue
-        if ch == ",": out.append("".join(buf).strip()); buf = []; continue
-        buf.append(ch)
+            if quote == '"' and ch == "\\" and i + 1 < len(inner):
+                i += 1
+                buf.append(inner[i])
+            elif ch == quote:
+                if quote == "'" and i + 1 < len(inner) and inner[i + 1] == "'":
+                    i += 1
+                    buf.append(inner[i])
+                else:
+                    quote = None
+        elif ch in "\"'" and not "".join(buf).strip():
+            quote = ch
+            buf.append(ch)
+        elif ch == ",":
+            out.append("".join(buf).strip())
+            buf = []
+        else:
+            buf.append(ch)
+        i += 1
     out.append("".join(buf).strip())
     return [x for x in out if x != ""]
+
 
 def raw_scalar(fm_raw, key):
     """The literal text after `key:` in the frontmatter, or None if absent.
@@ -238,7 +243,7 @@ def raw_scalar(fm_raw, key):
     for line in fm_raw.split("\n"):
         m = FM_KEY.match(line)
         if m and m.group(1) == key:
-            return m.group(2).strip()
+            return strip_comment(m.group(2)).strip()
     return None
 
 
@@ -272,24 +277,40 @@ def parse_fm(fm, bad=None):
     """
     d, key = {}, None
     for line in fm.split("\n"):
-        if not line.strip(): continue
+        if not line.strip() or line.lstrip().startswith("#"): continue
         mi = FM_ITEM.match(line)
         if mi and key is not None and isinstance(d.get(key), list):
             val = (mi.group(1) or "").strip()
-            if val: d[key].append(unquote(val))
+            try:
+                d[key].append(unquote(val))
+            except ValueError:
+                if bad is not None: bad.append(line)
+                d[key].append(None)
             continue
         m = FM_KEY.match(line)
         if not m:
             if bad is not None: bad.append(line)
             continue
-        key, raw = m.group(1), m.group(2).strip()
+        key, raw = m.group(1), strip_comment(m.group(2)).strip()
         if raw == "":
             d[key] = []                                  # blank, or a block list to follow
         elif raw.startswith("[") and raw.endswith("]"):
-            d[key] = [unquote(x) for x in split_flow(raw[1:-1])]
+            values = []
+            for item in split_flow(raw[1:-1]):
+                try:
+                    values.append(unquote(item))
+                except ValueError:
+                    if bad is not None: bad.append(line)
+                    values.append(None)
+            d[key] = values
             key = None                                   # a flow list ends on its own line
         else:
-            d[key] = unquote(raw); key = None
+            try:
+                d[key] = unquote(raw)
+            except ValueError:
+                if bad is not None: bad.append(line)
+                d[key] = None
+            key = None
     return d
 
 def source_stem(item):
@@ -440,7 +461,7 @@ def tag_canonical(tag_slug):
 
 WORD = re.compile(r"[A-Za-z0-9]+")
 
-_FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
+_FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 
 
 def strip_fenced(text):
@@ -462,9 +483,14 @@ def strip_fenced(text):
         m = _FENCE_RE.match(ln)
         if m and fence is None:
             fence = m.group(1)
+            # Retain nested/list fences while rejecting a more-indented sample
+            # as the closer of a top-level fence. Tabs count as four columns.
+            fence_indent = max(3, len(ln[:m.start(1)].expandtabs(4)))
             out.append("")
             continue
-        if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
+        if (m and m.group(1)[0] == fence[0]
+                and len(m.group(1)) >= len(fence) and not m.group(2).strip()
+                and len(ln[:m.start(1)].expandtabs(4)) <= fence_indent):
             fence = None
             out.append("")
             continue
@@ -696,7 +722,7 @@ def build_backfill(entries, surf_map):
     return backfill
 
 
-def iter_entry_files(wiki):
+def iter_entry_files(wiki, on_error=None):
     """Every `.md` under `wiki`, RECURSIVELY and sorted (dot-dirs skipped).
 
     `os.listdir` was flat, so an entry filed in `Wiki/sub/` was invisible to the
@@ -705,7 +731,7 @@ def iter_entry_files(wiki):
     """
     out = []
     seen_dirs = set()
-    for dirpath, dirnames, filenames in os.walk(wiki, followlinks=True):
+    for dirpath, dirnames, filenames in os.walk(wiki, followlinks=True, onerror=on_error):
         # followlinks, because a synced or shared subfolder under Wiki/ is a
         # symlink in plenty of real vaults, and skipping it made every link
         # into it read as dangling -- whose documented fix writes a stub over
@@ -774,7 +800,12 @@ def scan(wiki, images=None):
     # -- and stubbing it would write over the file.
     on_disk = set()
     seen_paths = {}
-    for path in iter_entry_files(wiki):
+    ambiguous_files = set()
+    def walk_error(exc):
+        location = os.path.relpath(exc.filename, wiki) if exc.filename else "."
+        problems.append((location, "item0", "unreadable wiki directory: %s" % exc))
+
+    for path in iter_entry_files(wiki, on_error=walk_error):
         fn = os.path.basename(path)
         sl = fn[:-3]
         rel = os.path.relpath(path, wiki)
@@ -784,6 +815,7 @@ def scan(wiki, images=None):
         # to Obsidian and to the vault's own APFS volume — are one slug with
         # two bodies. Report, keep the first.
         if fold_name(sl) in seen_paths:
+            ambiguous_files.add(fold_name(sl))
             prev_sl, prev_rel = seen_paths[fold_name(sl)]
             problems.append((sl,"item5",f'slug "{sl}" occurs in two files ({prev_rel} and {rel}'
                                         f'{"" if prev_sl == sl else ", stems differing only in case/normalization"}) — '
@@ -821,13 +853,14 @@ def scan(wiki, images=None):
         def _scalar(k):                    # a key written as a list is not a scalar
             v = fm.get(k, "")
             return v if isinstance(v, str) else ""
-        sources = fm.get("sources", [])
+        sources = fm.get("sources") or []
         if isinstance(sources, str): sources = [sources]
         is_stub = (sources == ["stub"])
         title = _scalar("title")
-        aliases = fm.get("aliases", []) if isinstance(fm.get("aliases"), list) else []
+        aliases = ([a for a in fm["aliases"] if isinstance(a, str) and a]
+                   if isinstance(fm.get("aliases"), list) else [])
         tags_raw = fm.get("tags", []) if isinstance(fm.get("tags"), list) else ([fm["tags"]] if fm.get("tags") else [])
-        tags_raw = [t.strip() for t in tags_raw if t.strip()]          # raw items, e.g. "#machine-learning" (quotes already stripped by parse_fm)
+        tags_raw = [t.strip() for t in tags_raw if isinstance(t, str) and t.strip()]  # decoded, non-null tags
         tag_slugs = [t.lstrip("#").strip() for t in tags_raw]          # discipline slugs without the # prefix, for MOC/hierarchy use
         desc = _scalar("description")
         created = _scalar("created"); updated = _scalar("updated")
@@ -860,13 +893,16 @@ def scan(wiki, images=None):
     # alternative slug, and wiki-builder's find_collisions.build_targets probes
     # aliases for exactly that reason. A file always wins over an alias, so
     # this is consulted only after the slug and on-disk lookups, and it is not
-    # a fallback for them. A first-owner-wins map: an alias claimed by two
-    # entries is item 18's finding, and picking a side here would hide it.
+    # a fallback for them. Keep ambiguous owners separate: item 18 reports
+    # the collision, but item 10 must not choose a rewrite target for it.
     alias_of = {}
+    ambiguous_aliases = set()
     for _sl, _e in sorted(entries.items()):
         for _a in _e["aliases"]:
             _k = fold_name(_a)
             if _k:
+                if _k in alias_of and alias_of[_k][0] != _sl:
+                    ambiguous_aliases.add(_k)
                 alias_of.setdefault(_k, (_sl, _a))
 
     for sl,e in entries.items():
@@ -956,6 +992,10 @@ def scan(wiki, images=None):
         #                  only the spelling is wrong, and the value is preserved.
         #   out of order-> already caught by the schema-order check above.
         _read_raw = raw_scalar(fm_raw, "read") or ""
+        try:
+            _read_value, _read_style = parse_scalar(_read_raw)
+        except ValueError:
+            _read_value, _read_style = None, "invalid"
         if "read" not in e["key_order"]:
             problems.append((sl,"item2/read-missing",
                              "missing read: key — the user's review checkbox. Report it; "
@@ -971,12 +1011,12 @@ def scan(wiki, images=None):
                              'report-only class, as a missing read: key'
                              % ("bare `read:`" if not _read_raw.strip()
                                 else "`read: %s`" % _read_raw.strip())))
-        elif unquote(_read_raw).lower() not in {"true", "false", "yes", "no", "0", "1"}:
+        elif not isinstance(_read_value, str) or _read_value.lower() not in {"true", "false", "yes", "no", "0", "1"}:
             problems.append((sl,"item2/read-unknown",
                              'read: has no recognizable boolean answer (%r) -- REPORT ONLY, '
                              'DO NOT FIX. Neither true nor false can be inferred safely; '
                              'ask the user to supply their review state' % _read_raw))
-        elif _read_raw.lower() not in READ_BOOLEANS:
+        elif _read_style != "bare" or _read_value.lower() not in READ_BOOLEANS:
             problems.append((sl,"item2/read-type",
                              'read: must be a bare boolean (`true` / `false`), not %r — a '
                              'quoted "false" is a string, and Obsidian renders any non-empty '
@@ -1008,15 +1048,23 @@ def scan(wiki, images=None):
         for line in fm_raw.split("\n"):
             mt = FM_KEY.match(line)
             if mt:
-                k, val = mt.group(1), mt.group(2).strip(); cur = None
-                if k in ("title","description") and val and not (val.startswith('"') and val.endswith('"')):
+                k, val = mt.group(1), strip_comment(mt.group(2)).strip(); cur = None
+                try:
+                    _value, _style = parse_scalar(val)
+                except ValueError:
+                    _value, _style = None, "invalid"
+                if k in ("title","description") and val and _style != "double":
                     problems.append((sl,"item2",f'{k} must be double-quoted'))
                 if k in ("type","created","updated") and (val.startswith('"') or val.startswith("'")):
                     problems.append((sl,"item2",f'{k} must not be quoted'))
                 if k in ("aliases","sources","tags","parents"):
                     if val.startswith("[") and val.endswith("]"):    # flow list, complete on this line
                         for iv in split_flow(val[1:-1]):
-                            if not (iv.startswith('"') and iv.endswith('"')):
+                            try:
+                                _iv_style = parse_scalar(iv)[1]
+                            except ValueError:
+                                _iv_style = "invalid"
+                            if _iv_style != "double":
                                 problems.append((sl,"item2",f'{k} item not double-quoted: {iv[:30]}'))
                     else:
                         cur = k
@@ -1024,7 +1072,11 @@ def scan(wiki, images=None):
                 mi = re.match(r"^\s*-\s*(.*)$", line)
                 if mi and cur:
                     iv = mi.group(1).strip()
-                    if iv and not (iv.startswith('"') and iv.endswith('"')):
+                    try:
+                        _iv_style = parse_scalar(iv)[1]
+                    except ValueError:
+                        _iv_style = "invalid"
+                    if iv and _iv_style != "double":
                         problems.append((sl,"item2",f'{cur} item not double-quoted: {iv[:30]}'))
         # ---- item 3: dates ----
         for f in ("created","updated"):
@@ -1077,6 +1129,9 @@ def scan(wiki, images=None):
         elif not e["sources_is_list"]:
             problems.append((sl,"item4","sources: must be a list, not a scalar"))
         for i,src in enumerate(e["sources"]):
+            if src is None:
+                problems.append((sl,"item4","sources: contains a null or invalid item"))
+                continue
             if src == "stub":
                 if e["sources"] != ["stub"]:
                     problems.append((sl,"item4",'"stub" marker must be the sole source item'))
@@ -1091,11 +1146,10 @@ def scan(wiki, images=None):
         # No two sources: items may name the same DOCUMENT. paper-summarizer writes a note into
         # Articles/ for every PDF it summarises, so one document sits in the vault under two
         # names — Sources/PDFs/X.pdf and Articles/X.md — and both are legal sources:
-        # values. An entry carrying both records ONE source twice: it inflates the entry's apparent
-        # provenance, and the .md half carries no #page=N, so it also reads as a source with no
-        # locatable position. Only a stem collision ACROSS the two extensions counts — an entry may
-        # legitimately cite several distinct PDFs and several distinct clippings, and a web clipping
-        # has no PDF twin at all — and stems compare case- and NFC-insensitively (the documented
+        # values. A same-stem clipping may instead be an independent source, so the match
+        # needs the markdown note's provenance before any source may be removed.
+        # Only a stem collision ACROSS the two extensions counts — an entry may
+        # legitimately cite several distinct PDFs and several distinct clippings — and stems compare case- and NFC-insensitively (the documented
         # vault lives on a filesystem that is insensitive to both; see fold_name).
         pdf_by_stem, md_items = {}, []
         for src in e["sources"]:
@@ -1106,10 +1160,11 @@ def scan(wiki, images=None):
             elif ext == "md": md_items.append((stem, src))
         for stem, md_src in md_items:
             if stem not in pdf_by_stem: continue
-            problems.append((sl,"item4",f'{md_src} and {pdf_by_stem[stem]} name the same document — the PDF and '
-                                        f'the note written about it — so one source is recorded '
-                                        f'twice; delete the .md item and keep the .pdf one, which is the only one '
-                                        f'of the two that can carry a #page=N anchor'))
+            problems.append((sl,"item4/source-identity",
+                             f'{md_src} and {pdf_by_stem[stem]} share a filename stem; review the '
+                             f'markdown note\'s decoded sources: (or legacy source:) to establish '
+                             f'whether it summarizes that PDF. A URL-origin clipping can be '
+                             f'independent. Preserve both sources until their identity is confirmed'))
         # ---- item 6: type / API surface (non-Software entries) ----
         if e["type"] != "Software":
             if re.match(r"^[A-Za-z_][\w]*(\.[A-Za-z_][\w]*)+$", title) or "()" in title:
@@ -1364,6 +1419,10 @@ def scan(wiki, images=None):
                 problems.append((sl,"item19","## Flashcards not preceded by a '---' separator line on its own (Body Structure → Flashcards)"))
             # split the section (after the heading) into card blocks on blank-line boundaries
             after_head = e["fcsec"].split("\n",1)[1] if "\n" in e["fcsec"] else ""
+            # Line-4+ HTML comments belong to the review plugin. A blank line
+            # inside or between its comments is not another card whose removal
+            # may be proposed. Mask comments only in this read-only check.
+            after_head = re.sub(r"<!--.*?(?:-->|\Z)", "", after_head, flags=re.S)
             cards = [b for b in re.split(r"\n[ \t]*\n", after_head.strip("\n")) if b.strip()]
             if not cards:
                 problems.append((sl,"item19","## Flashcards section has no card"))
@@ -1460,7 +1519,7 @@ def scan(wiki, images=None):
         _p10, _r10 = strip_code(e["prose"]), strip_code(e["rel"])
         for m in WIKILINK.finditer(_p10 + "\n" + _r10):
             tgt = m.group(1).split("#")[0].split("^")[0].strip()
-            if not tgt or tgt in entries:
+            if not tgt:
                 continue
             # Three forms Obsidian resolves that a bare `tgt in entries` test
             # calls dangling -- and the documented fix for a dangler writes a
@@ -1468,20 +1527,26 @@ def scan(wiki, images=None):
             # (`sub/delta`), an explicit `.md` suffix, and a link to a
             # document rather than an entry (`Doe_Foo_2025.pdf`, the form
             # CONVENTIONS 6/7 blesses in a `sources:` list).
-            bare = tgt.split("/")[-1]
-            if bare in entries or bare[:-3] in entries and bare.endswith(".md"):
+            bare = tgt.replace("\\", "/").rsplit("/", 1)[-1]
+            lookup = bare[:-3] if bare.lower().endswith(".md") else bare
+            if fold_name(lookup) in ambiguous_files:
+                problems.append((sl, "item10/ambiguous",
+                                 f'wikilink target "{tgt}" shares a basename with multiple files; '
+                                 f'preserve the link, its path, anchor and display text until the '
+                                 f'destination is resolved. Report only; never choose a file by walk order'))
                 continue
-            if os.path.splitext(bare)[1].lower() in _DOC_EXTS:
+            actual = fold_of.get(fold_name(lookup))
+            if actual == lookup:
                 continue
-            actual = fold_of.get(fold_name(tgt))
             if actual:
                 problems.append((sl,"item10/case",
                                  f'wikilink target "{tgt}" matches the entry "{actual}" only case-/'
                                  f'normalization-insensitively — the link resolves in Obsidian, so this '
-                                 f'is a FIX IN PLACE (rewrite the link target to "{actual}", exactly), '
+                                 f'is a FIX IN PLACE (rewrite the link target to "{actual}", preserving '
+                                 f'any existing anchor and display label), '
                                  f'NEVER a stub: on the vault\'s case-insensitive volume a stub written '
                                  f'to "{tgt}.md" opens and overwrites "{actual}.md"'))
-            elif fold_name(tgt) in on_disk_fold:
+            elif fold_name(lookup) in on_disk_fold:
                 # The file EXISTS but did not parse (item0/item1), or lives in a
                 # symlinked subfolder the walk did not enter. Reporting it as a
                 # dangler is wrong twice over: the link resolves in Obsidian,
@@ -1492,7 +1557,9 @@ def scan(wiki, images=None):
                                  f'on disk but could not be parsed as an entry. '
                                  f'The link resolves; fix that file. NEVER stub '
                                  f'this target -- the stub would overwrite it'))
-            elif fold_name(tgt) in alias_of:
+            elif os.path.splitext(bare)[1].lower() in _DOC_EXTS:
+                continue
+            elif fold_name(lookup) in alias_of:
                 # An ALIAS of another entry. Obsidian resolves it, so it is not
                 # a dangler -- and the dangler remedy is the destructive one
                 # here: a stub at Wiki/<tgt>.md becomes a FILE with that name,
@@ -1501,12 +1568,22 @@ def scan(wiki, images=None):
                 # starts resolving to the one-line stub. Nothing downstream
                 # reports that as an item-18 clash, so the link is quietly
                 # re-pointed at an empty note for good.
-                _own_sl, _own_raw = alias_of[fold_name(tgt)]
+                if fold_name(lookup) in ambiguous_aliases:
+                    problems.append((sl, "item10/ambiguous",
+                                     f'wikilink target "{tgt}" is claimed as an alias by multiple '
+                                     f'entries; preserve the link, anchor and display text until its '
+                                     f'owner is resolved. Report only; never choose the first alias owner'))
+                    continue
+                _own_sl, _own_raw = alias_of[fold_name(lookup)]
+                _anchor_match = re.search(r"[#^].*", m.group(1))
+                _anchor = _anchor_match.group(0) if _anchor_match else ""
+                _label = m.group(2) if m.group(2) is not None else tgt
+                _replacement = f'[[{_own_sl}{_anchor}|{_label}]]'
                 problems.append((sl,"item10/alias",
                                  f'wikilink target "{tgt}" is an alias of the entry '
                                  f'"{_own_sl}" (aliases: "{_own_raw}"), not an entry of its '
                                  f'own — the link RESOLVES in Obsidian. Fix in place: '
-                                 f'rewrite to "[[{_own_sl}|{tgt}]]", never stub it. Stubbing '
+                                 f'rewrite to "{_replacement}", never stub it. Stubbing '
                                  f'creates a file that outranks the alias and steals every '
                                  f'"[[{tgt}]]" in the vault away from "{_own_sl}"'))
             else:
@@ -1733,7 +1810,8 @@ def scan(wiki, images=None):
         t = tally.setdefault(item, [0, set()])
         t[0] += 1; t[1].add(sl)
     nfull = len(fulls) or 1
-    tally_out = [dict(item=item, entries=len(ents), pct_of_full=100*len(ents)//nfull, issues=cnt)
+    full_set = set(fulls)
+    tally_out = [dict(item=item, entries=len(ents), pct_of_full=100*len(ents & full_set)//nfull, issues=cnt)
                  for item,(cnt,ents) in sorted(tally.items(),
                                                key=lambda kv: (-len(kv[1][1]), -kv[1][0], kv[0]))]
 
@@ -2259,7 +2337,7 @@ def run_self_test():
         check("a .md source naming the same document as a .pdf source is item4 "
               "(stems folded for case and folder, as CONVENTIONS 7 requires of "
               "both copies of source_stem)",
-              "name the same document" in _st_msg(res, "twice-cited", "item4"), True)
+              "Preserve both sources" in _st_msg(res, "twice-cited", "item4/source-identity"), True)
         check("a frontmatter key shown inside a FENCE is not a merge scar",
               "item13" in _st_keys(res, "sw"), False)
         check("a real stray frontmatter key in the body still is",
@@ -2806,6 +2884,111 @@ def run_self_test():
         check("backfill ignores listings and already-linked destinations, but a shown link cannot hide real prose",
               sorted(b["slug"] for b in res["backfill_candidates"] if b["target"] == "recall"),
               ["plain", "sample"])
+
+        v = os.path.join(tmp, "v15-preserved-content")
+        for name, tail in (
+                ('studied', '<!--SR:!2026-09-20,30,250!2026-09-21,31,250-->\n\n<!-- preserved state -->\n'),
+                ('multiline', '<!--SR:\n!2026-09-20,30,250\n\n!2026-09-21,31,250\n-->\n')):
+            text = _st_entry(name.title(), '**%s** is a worked example.' % name.title())
+            text = text.replace('read: false', 'read: true').replace('\n??\n', '\n!!\n') + tail
+            _st_write(v, name + '.md', text)
+        _st_write(v, 'extra.md', _st_entry('Extra', '**Extra** is a worked example.')
+                  + '<!--SR:!2026-09-20,30,250-->\n\n<!-- preserved state -->\n\n'
+                  + 'A different main claim.\n??\nAnother term\n')
+        for name, fence in (('backticks', '```'), ('tildes', '~~~')):
+            _st_write(v, name + '.md', _st_entry(
+                name.title(), '**%s** is a worked example.\n\n' % name.title()
+                + fence + 'text\n' + fence + 'not-a-close\n[[syntax-example]]\n'
+                + fence, type_='Software'))
+        _st_write(v, 'indented-closer.md', _st_entry('Indented closer',
+                  '**Indented closer** displays syntax.\n\n```text\n    ```\n[[literal-syntax]]\n```',
+                  type_='Software'))
+        _st_write(v, 'nested-fence.md', _st_entry('Nested fence',
+                  '**Nested fence** displays syntax.\n\n- An example:\n\n    ```text\n    [[literal-nested]]\n    ```',
+                  type_='Software'))
+        _st_write(v, 'sub/parsed.md', _st_entry('Parsed', '**Parsed** is a worked example.'))
+        _st_write(v, 'sub/unparsed.md', 'A user note without frontmatter.\n')
+        _st_write(v, 'linked.md', _st_entry('Linked', '**Linked** cites [[SUB/PARSED]], '
+                  '[[sub/UNPARSED]], [[sub/parsed.MD]] and [[sub/unparsed.md]].'))
+        before = {p: open(p, 'rb').read() for p in iter_entry_files(v)}
+        res = scan(v)
+        check("studied cards keep their multiline or separated review comments",
+              [k for name in ('studied', 'multiline') for k in _st_keys(res, name)
+               if k == 'item19'], [])
+        check("metadata is not counted, but a genuine second card still is",
+              '2 cards' in _st_msg(res, 'extra', 'item19'), True)
+        check("a fence with trailing text cannot end the listing or hide the real flashcard",
+              [k for name in ('backticks', 'tildes', 'indented-closer', 'nested-fence') for k in _st_keys(res, name)
+               if k in ('item10/dangling', 'item19')], [])
+        check("qualified case and explicit-extension links are never false danglers",
+              'item10/dangling' in _st_keys(res, 'linked'), False)
+        check("qualified unparsed destinations still route to the file's own repair",
+              _st_keys(res, 'linked').count('item10/unparsed'), 2)
+        check("the scanner leaves review histories and all input bytes untouched",
+              all(open(p, 'rb').read() == content for p, content in before.items()), True)
+
+        v = os.path.join(tmp, "v16-scalar-provenance")
+        _st_write(v, 'commented.md', _st_entry('Commented', '**Commented** is a worked example.')
+                  .replace('title: "Commented"', 'title: "Comm\\u0065nted" # user annotation')
+                  .replace('read: false', 'read: true # already read')
+                  .replace('sources:\n', 'sources: # origin\n# preserve this annotation\n'))
+        for name, raw in (('null-title', 'null'), ('malformed', '"Malformed "yaml""')):
+            _st_write(v, name + '.md', _st_entry(name.title(), '**Example** is a worked example.')
+                      .replace('title: "' + name.title() + '"', 'title: ' + raw))
+        _st_write(v, 'two-sources.md', _st_entry('Two sources', '**Two sources** is a worked example.',
+                  sources=('"[[Study.pdf#page=2]]"', '"[[Study.md]]"')))
+        res = scan(v)
+        check("comments and decoded YAML title preserve a clean studied entry",
+              _st_keys(res, 'commented'), [])
+        check("null or malformed titles never produce rename candidates",
+              [r for r in res['rename_candidates'] if r['slug'] in ('null-title', 'malformed')], [])
+        check("malformed quoted YAML is a validity finding",
+              'item1' in _st_keys(res, 'malformed'), True)
+        check("same-stem PDF/clipping provenance is a report-only candidate",
+              _st_keys(res, 'two-sources'), ['item4/source-identity'])
+        for raw, want in (("[O'Reilly, real-alias]", ["O'Reilly", "real-alias"]),
+                          ("['tail\\', 'real-alias']", ["tail\\", "real-alias"]),
+                          ("['O''Reilly, Inc.', 'real-alias']", ["O'Reilly, Inc.", "real-alias"])):
+            check("flow parsing retains every valid scalar in %s" % raw,
+                  parse_fm('---\naliases: ' + raw + '\n---\n')['aliases'], want)
+        from unittest.mock import patch
+        def unreadable_walk(root, followlinks=False, onerror=None):
+            if onerror:
+                onerror(PermissionError(13, "permission denied", os.path.join(root, "private")))
+            return iter(())
+        with patch.object(os, "walk", unreadable_walk):
+            inaccessible = scan(v)
+        check("an unreadable directory is reported even with no readable entries",
+              any(p['item'] == 'item0' and 'directory' in p['message']
+                  for p in inaccessible['problems']), True)
+
+        v = os.path.join(tmp, "v17-ambiguous-links")
+        for name in ('first', 'second'):
+            aliases = ('"shared-name"', '"single-name"') if name == 'first' else ('"shared-name"',)
+            _st_write(v, name + '.md', _st_entry(name.title(), '**%s** is a worked example.' % name.title(),
+                      aliases=aliases))
+        for rel in ('a/Shared.md', 'b/shared.md'):
+            _st_write(v, rel, _st_entry('Shared', '**Shared** is a worked example.'))
+        _st_write(v, 'reader.md', _st_entry('Reader', '**Reader** cites '
+                  '[[shared-name#Definition|the chosen term]], [[b/shared#Section]], '
+                  'and [[single-name#Definition|the precise term]].'))
+        res = scan(v)
+        check("ambiguous file and alias owners never produce an automatic rewrite or dangler",
+              _st_keys(res, 'reader').count('item10/ambiguous'), 2)
+        check("an unambiguous alias rewrite keeps the existing anchor and display label",
+              '[[first#Definition|the precise term]]' in _st_msg(res, 'reader', 'item10/alias'), True)
+        check("ambiguous resolving links are not classified as dangling",
+              'item10/dangling' in _st_keys(res, 'reader'), False)
+
+        v = os.path.join(tmp, "v18-tally")
+        _st_write(v, 'full.md', _st_entry('Full', '**Full** is a worked example.'))
+        for name in ('stub-one', 'stub-two'):
+            _st_write(v, name + '.md', _st_entry(name.title(), '**%s** is a placeholder.' % name.title(),
+                      sources=('"stub"',), tags=(), card=False))
+        res = scan(v)
+        check("stub findings cannot inflate the reported percentage of affected full entries",
+              [(p['entries'], p['pct_of_full']) for p in res['problem_tally'] if p['item'] == 'item8'],
+              [(2, 0)])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

@@ -20,7 +20,7 @@ Why this is a script and not a fenced block in SKILL.md: the four things a
 model re-derives wrongly — `keyed_files`' four-way stem fan-out, the
 case-insensitive symlink-safe vault walk, the boundary-anchored single-pass
 rewrite, and `_norm`-based +/-2 page verification — are now covered by
-`--self-test` and compiled/imported by the plugin's test harness on every run.
+`selftest` and compiled/imported by the plugin's test harness on every run.
 
 Usage:
     # The reference check.  Run it before every rename.
@@ -57,7 +57,9 @@ import argparse
 import json
 import os
 import re
+import stat
 import sys
+import tempfile
 import unicodedata
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
@@ -99,7 +101,10 @@ from naming import (                       # noqa: E402  (after the bootstrap)
     core_stem,
     looks_canonical,
 )
-from figure_state import MANIFEST_FILE, REVIEW_FILE, rewrite_sidecar  # noqa: E402
+from figure_state import (MANIFEST_FILE, REVIEW_FILE, rewrite_sidecar,
+                          read_manifest, manifest_key, file_digest,
+                          check_manifest_writable)  # noqa: E402
+from yaml_scalars import parse_scalar, strip_comment  # noqa: E402
 
 #: Folders never walked: VCS and editor state, and the trash, whose contents
 #: are deleted notes that must not resurrect a "still referenced" verdict.
@@ -278,12 +283,96 @@ NOTE_DIRS = (("Articles",),)
 #: All three anchored at the START of a frontmatter line -- not indented, so
 #: a nested key under some other key cannot win over the real one.
 _SOURCES_KEY = re.compile(r"\Asources\s*:\s*\Z", re.I)
-_SOURCES_ITEM = re.compile(r"\A\s+-\s*(.*)\Z")
+_SOURCES_ITEM = re.compile(r"\A[ \t]*-(?:[ \t]+(.*))?\Z")
 _SOURCE_LINE = re.compile(r"\Asource\s*:\s*(.*)\Z", re.I)
 
 #: The document a `source:` wikilink names.  Obsidian resolves by basename, so
 #: only the last path segment matters.
-_SRC_LINK = re.compile(r"\A!?\[\[([^\]|#]+)")
+_SRC_LINK = re.compile(r"\A!?\[\[([^\]|#\r\n]+)(?:[#|][^\]\r\n]*)?\]\]\Z")
+
+
+def _quoted_source_spans(text):
+    """Quoted source scalars as (start, end, decoded value, quote style).
+
+    Source ownership and reference repair must read the same YAML spelling:
+    `Garc\\u00eda.pdf` and `O''Reilly.pdf` are filenames after decoding, not
+    literal backslashes or doubled apostrophes. Other frontmatter and prose
+    retain their original spelling.
+    """
+    start = len(text) - len(text.lstrip("\ufeff \t\r\n"))
+    lines = text[start:].splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return
+    end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None)
+    if end is None:
+        return
+    position = start + len(lines[0])
+    in_sources = False
+    for line in lines[1:end]:
+        raw = line.rstrip("\r\n")
+        scalar = None
+        if raw.strip() and not raw.lstrip().startswith("#"):
+            if in_sources:
+                scalar = _SOURCES_ITEM.match(raw)
+                if scalar is None:
+                    in_sources = False
+            if scalar is None:
+                if _SOURCES_KEY.match(strip_comment(raw)):
+                    in_sources = True
+                else:
+                    scalar = _SOURCE_LINE.match(raw)
+            if scalar and scalar.group(1) is not None:
+                encoded = scalar.group(1)
+                try:
+                    value, style = parse_scalar(encoded)
+                except ValueError:
+                    pass
+                else:
+                    if style in ("single", "double"):
+                        clean = strip_comment(encoded)
+                        left = len(clean) - len(clean.lstrip())
+                        offset = position + scalar.start(1)
+                        yield offset + left, offset + len(clean), value, style
+        position += len(line)
+
+
+def _source_text_parts(text):
+    """Yield (original, decoded, style) chunks for one-pass link operations."""
+    position = 0
+    for start, end, value, style in _quoted_source_spans(text):
+        yield text[position:start], text[position:start], None
+        yield text[start:end], value, style
+        position = end
+    yield text[position:], text[position:], None
+
+
+def _map_source_text(text, transform):
+    out = []
+    for original, decoded, style in _source_text_parts(text):
+        changed = transform(decoded)
+        if changed == decoded:
+            out.append(original)
+        elif style == "single":
+            out.append("'" + changed.replace("'", "''") + "'")
+        elif style == "double":
+            out.append(json.dumps(changed, ensure_ascii=False))
+        else:
+            out.append(changed)
+    return "".join(out)
+
+
+# External source URLs are not vault references, even when their last path
+# segment is the PDF being renamed. Stop before brackets so an immediately
+# adjacent wikilink remains independently repairable.
+_EXTERNAL_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s<>\[\]\"]+")
+
+
+def _external_url_spans(text):
+    return [(m.start(), m.end()) for m in _EXTERNAL_URL.finditer(text)]
+
+
+def _inside_span(position, spans):
+    return any(start <= position < end for start, end in spans)
 
 
 def _note_is_about(path, stem):
@@ -302,80 +391,60 @@ def _note_is_about(path, stem):
     as a fallback for unmigrated notes — the same two-key logic as
     clipping-processor's `dedup_index.read_source`.
 
-    A note with no readable frontmatter is claimed, which is the safe default
-    here: those are this plugin's own older outputs, and leaving one behind
-    under the old stem is the failure `keyed_files` exists to prevent.
+    Unknown or malformed metadata establishes no ownership. A legacy note
+    without a source field is accepted only when its entire body is an embed
+    of this PDF; sharing a filename alone cannot make a user's note ours.
     """
-    def _named(raw_val):
-        val = raw_val.strip()
-        # A trailing YAML comment after the value is dropped the way
-        # `dedup_index._yaml_scalar` and `paper_scan._yaml_scalar` drop it
-        # (this docstring claims their two-key logic): for a quoted value the
-        # closing quote ends it; for a bare one, ` #` does.  Without this,
-        # `- "[[X.pdf]]" # note` still ended in `e`, the quote strip never
-        # fired, and OUR OWN summary note read as somebody else's clipping —
-        # left behind under the old stem by its document's rename.
-        if val[:1] in "\"'":
-            _close = val.find(val[0], 1)
-            if _close != -1:
-                val = val[:_close + 1]
-        else:
-            val = re.sub(r"\s+#.*\Z", "", val)
+    def _named(val):
+        if not isinstance(val, str):
+            return False
         val = val.strip()
-        if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
-            val = val[1:-1].strip()
         link = _SRC_LINK.match(val)
         if not link:
-            return False              # a URL: somebody else's clipping
+            return False
         base = link.group(1).strip().rstrip("/").split("/")[-1]
-        # NFC on both sides, like every other name comparison in the
-        # fan-out: an origin written NFC beside a note filed NFD is
-        # byte-different, reads as somebody else's clipping, and the
-        # note is left behind by its own document's rename.  The
-        # `casefold` is the one this comparison already had, kept
-        # rather than narrowed to `_nfc_low`'s `lower`: claiming a
-        # note is the safe direction here, and nothing that used to
-        # be claimed should stop being.
-        return _nfc_low(os.path.splitext(base)[0]).casefold() \
-            == _nfc_low(stem).casefold()
+        return (os.path.splitext(base)[1].lower() == ".pdf"
+                and _nfc_low(os.path.splitext(base)[0]) == _nfc_low(stem))
+
+    def _legacy(body):
+        body = body.strip()
+        return body.startswith("![[") and _named(body)
 
     try:
-        with open(path, "r", encoding="utf-8-sig", errors="replace") as fh:
-            for first in fh:
-                if first.strip():
-                    break
-            else:
-                return True
-            if first.strip() != "---":
-                return True
-            pending = False
-            for line in fh:
-                if line.strip() == "---":
-                    return True
-                raw = line.rstrip("\n")
-                if pending:
-                    # Blank and comment-only lines between `sources:` and its
-                    # first item are valid YAML (Obsidian still reads item 1);
-                    # consuming the flag on one made the real item on the next
-                    # line unread — and this reader's claimed-by-default then
-                    # swept a URL clipping into the PDF's rename.  The sibling
-                    # readers (dedup_index, paper_scan) skip them the same way.
-                    if not raw.strip() or raw.lstrip().startswith("#"):
-                        continue
-                    pending = False
-                    mi = _SOURCES_ITEM.match(raw)
-                    if mi:
-                        return _named(mi.group(1))
-                if _SOURCES_KEY.match(raw):
-                    pending = True    # the origin is the NEXT line
+        with open(path, encoding="utf-8-sig") as fh:
+            body = fh.read().lstrip()
+        lines = body.splitlines()
+        if not lines or lines[0].strip() != "---":
+            return _legacy(body)
+        end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None)
+        if end is None:
+            return False
+        source_values, sources_values = [], []
+        sources_count, pending = 0, False
+        for raw in lines[1:end]:
+            if not raw.strip() or raw.lstrip().startswith("#"):
+                continue
+            if pending:
+                pending = False
+                item = _SOURCES_ITEM.match(raw)
+                if item:
+                    sources_values.append(parse_scalar(item.group(1))[0])
                     continue
-                m = _SOURCE_LINE.match(raw)
-                if not m:
-                    continue
-                return _named(m.group(1))
-    except OSError:
-        return True
-    return True
+            if re.match(r"\Asources\s*:", raw, re.I):
+                sources_count += 1
+                pending = bool(_SOURCES_KEY.match(strip_comment(raw)))
+                continue
+            source = _SOURCE_LINE.match(raw)
+            if source:
+                source_values.append(parse_scalar(source.group(1))[0])
+        if sources_count:
+            return (sources_count == 1 and len(sources_values) == 1
+                    and _named(sources_values[0]))
+        if source_values:
+            return len(source_values) == 1 and _named(source_values[0])
+        return _legacy("\n".join(lines[end + 1:]))
+    except (OSError, UnicodeError, ValueError):
+        return False
 
 
 def keyed_files(vault, path, _seen=None):
@@ -751,23 +820,21 @@ def references(vault, names, dirs=None):
             continue
         note_dir = os.path.relpath(os.path.dirname(md), vault)
         found = set()
-        for m in pat.finditer(body):
-            stem = _stem_match(m)
-            if stem is not None:
-                name = _canonical_name(slut, stem)
-                if _qualifies(m, name, dirs, note_dir):
-                    found.add(name)
-            else:
-                name = _canonical_name(lut, m.group("name"))
-                # The basename branch used to skip `_qualifies` entirely, so a
-                # `[[Sources/PDFs/download.pdf]]` naming a DIFFERENT file of
-                # that basename was reported as a reference to the keyed one --
-                # and then repointed at it by the rewrite.  That is the exact
-                # failure `_qualifies` exists to prevent, and it was
-                # unimplemented for the only file type this skill renames.
-                if _qualifies_qual(_qual_before(body, m.start("name")),
-                                   name, dirs, note_dir):
-                    found.add(name)
+        for _original, part, _style in _source_text_parts(body):
+            urls = _external_url_spans(part)
+            for m in pat.finditer(part):
+                if _inside_span(m.start(), urls):
+                    continue
+                stem = _stem_match(m)
+                if stem is not None:
+                    name = _canonical_name(slut, stem)
+                    if _qualifies(m, name, dirs, note_dir):
+                        found.add(name)
+                else:
+                    name = _canonical_name(lut, m.group("name"))
+                    if _qualifies_qual(_qual_before(part, m.start("name")),
+                                       name, dirs, note_dir):
+                        found.add(name)
         found.discard(os.path.basename(md))           # a note naming itself
         if found:
             hits[md] = sorted(found)
@@ -826,12 +893,14 @@ def debase_links(text, names):
     cites it, so "the new folder" is a different string per note and getting
     one wrong is the same dangling link with more machinery behind it.
     """
-    for name in sorted(names, key=len, reverse=True):
-        if not name:
-            continue
-        for rx in _debase_res(name):
-            text = rx.sub(r"\1\3", text)
-    return text
+    def debase(part):
+        for name in sorted(names, key=len, reverse=True):
+            if name:
+                for rx in _debase_res(name):
+                    part = rx.sub(r"\1\3", part)
+        return part
+
+    return _map_source_text(text, debase)
 
 
 def rewrite_text(text, ren, stem_ren, dirs=None, note_dir=""):
@@ -880,33 +949,27 @@ def rewrite_text(text, ren, stem_ren, dirs=None, note_dir=""):
         for v in _name_variants(o):
             new_stem_of[v] = n
 
-    def repl(m):
-        stem = _stem_match(m)
-        if stem is not None:
-            name = _canonical_name(slut, stem)
-            if not _qualifies(m, name, dirs, note_dir):
-                return m.group(0)         # names a different file: not ours
-            return m.group("open") + _canonical_name(new_stem_of, stem)
-        name = m.group("name")
-        # The basename branch ran no `_qualifies` check at all, while
-        # `references()` -- the guard that decides whether this rewrite may
-        # happen -- runs one.  The two disagreed in the direction with no
-        # safety net: beside a keyed `Inbox/download.pdf`, a note citing
-        # `[[Sources/PDFs/download.pdf#page=3]]` (a DIFFERENT document) was
-        # correctly NOT reported as a reference, so the caller renamed -- and
-        # this line repointed the note at the renamed file anyway, after which
-        # `debase_links` stripped the folder that was the only evidence of
-        # what it used to mean.  Both the pre-check and the documented
-        # post-rename `assert not references(vault, old, dirs=dirs)` pass on
-        # the corrupted vault, because both ask about the OLD name and the
-        # link no longer carries it.  Same call `references()` makes, on the
-        # same canonical name, so the two cannot drift apart again.
-        if not _qualifies_qual(_qual_before(text, m.start("name")),
-                               _canonical_name(lut, name), dirs, note_dir):
-            return m.group(0)
-        return _canonical_name(new_of, name)
+    def rewrite(part):
+        urls = _external_url_spans(part)
 
-    return pat.sub(repl, text)
+        def repl(m):
+            if _inside_span(m.start(), urls):
+                return m.group(0)
+            stem = _stem_match(m)
+            if stem is not None:
+                name = _canonical_name(slut, stem)
+                if not _qualifies(m, name, dirs, note_dir):
+                    return m.group(0)
+                return m.group("open") + _canonical_name(new_stem_of, stem)
+            name = m.group("name")
+            if not _qualifies_qual(_qual_before(part, m.start("name")),
+                                   _canonical_name(lut, name), dirs, note_dir):
+                return m.group(0)
+            return _canonical_name(new_of, name)
+
+        return pat.sub(repl, part)
+
+    return _map_source_text(text, rewrite)
 
 
 # ---------------------------------------------------------------------------
@@ -946,6 +1009,55 @@ def _inside(vault, path):
     return p == v or p.startswith(v + os.sep)
 
 
+def obsolete_names(moves):
+    """Basenames that disappeared, excluding filing and case-only changes."""
+    return {os.path.basename(src) for src, dst in moves
+            if re.fullmatch(re.escape(unicodedata.normalize(
+                "NFC", os.path.basename(src))),
+                unicodedata.normalize("NFC", os.path.basename(dst)), re.I) is None}
+
+
+def _image_ownership_blockers(vault, source, keyed):
+    """Do not carry a same-stem clipping's images along with an unrelated PDF."""
+    images = os.path.join(vault, "Sources", "Images")
+    sources = {source} | {p for p, name in keyed.items()
+                          if name.lower().endswith(".pdf")}
+    ambiguous = []
+    for pdf in sources:
+        stem = os.path.splitext(os.path.basename(pdf))[0]
+        outsiders = []
+        for parts in NOTE_DIRS:
+            home = os.path.join(vault, *parts)
+            for name in _listdir(home):
+                note = os.path.join(home, name)
+                if (_nfc_low(name) == _nfc_low(stem + ".md")
+                        and not _note_is_about(note, stem)):
+                    outsiders.append(note)
+        if outsiders:
+            ambiguous.extend((p, outsiders) for p, name in keyed.items()
+                             if os.path.dirname(p) == images
+                             and _nfc_low(name).startswith(_nfc_low(stem) + "_fig"))
+    if not ambiguous:
+        return []
+    try:
+        manifest = read_manifest(os.path.join(images, MANIFEST_FILE))
+        blockers = []
+        for image_path, notes in ambiguous:
+            key = manifest_key(manifest, os.path.basename(image_path))
+            if key is not None and file_digest(image_path) == manifest[key]:
+                continue
+            blockers.append(
+                "%s has ambiguous ownership: %s shares this stem but is not "
+                "a note about this PDF, and the image is not verified in the "
+                "figure manifest. Resolve which source owns the image before "
+                "renaming; matching filenames alone are not ownership."
+                % (image_path, ", ".join(notes)))
+        return blockers
+    except (OSError, UnicodeError, ValueError) as exc:
+        return ["Cannot establish ownership of same-stem images (%s). "
+                "Repair the figure records before renaming." % exc]
+
+
 def _plan_figure_state(vault, ren):
     """Plan metadata updates for the images and PDF stems being renamed."""
     edits, blockers = {}, []
@@ -963,8 +1075,8 @@ def _plan_figure_state(vault, ren):
                 body = fh.read()
             new = rewrite_sidecar(body, mapping, kind)
             if new != body:
-                if not (os.access(path, os.W_OK)
-                        and os.access(os.path.dirname(path), os.W_OK)):
+                check_manifest_writable(path)
+                if not os.access(os.path.dirname(path), os.W_OK):
                     raise ValueError("sidecar is not writable")
                 edits[path] = new
         except (OSError, UnicodeError, ValueError) as exc:
@@ -1002,6 +1114,12 @@ def plan_rename(vault, path, new_basename, dest=None):
     old_stem, old_ext = os.path.splitext(src_basename)
     new_stem, new_ext = os.path.splitext(new_basename)
     have_vault = bool(vault) and os.path.isdir(vault)
+    if have_vault and not _inside(vault, path) and not os.path.islink(path):
+        return [], Edits(), [
+            "%s is outside the vault passed as --vault. Its stem cannot "
+            "establish ownership of files inside that vault. Omit --vault "
+            "and --dest to rename this independent download in place; "
+            "this command never imports it into the vault." % path]
 
     # Measured on the name that actually lands on disk, not the one the caller
     # typed: this skill keeps the source's own extension, so `--to '<stem>'` with
@@ -1083,7 +1201,7 @@ def plan_rename(vault, path, new_basename, dest=None):
     if not old_ext and new_ext:
         ren[src_basename] = new_stem + new_ext
 
-    blockers = []
+    blockers = _image_ownership_blockers(vault, path, keyed) if have_vault else []
 
     # Renaming an already-split book must not mint chapter names a later
     # extractor refuses or attributes to a different book. In particular a
@@ -1327,45 +1445,47 @@ def references_in_text(text, ren, stem_ren):
     if not names:
         return False
     pat, _lut, _slut, _stems = _reference_re({n for n in names if n})
-    return pat.search(text) is not None
+    for _original, part, _style in _source_text_parts(text):
+        urls = _external_url_spans(part)
+        if any(not _inside_span(m.start(), urls) for m in pat.finditer(part)):
+            return True
+    return False
 
 
 def _write(path, text):
-    """Replace `path`'s contents atomically.
+    """Replace `path` atomically without widening existing file permissions.
 
     Temp file plus `os.replace`, so a write that dies part-way leaves the
     original intact rather than a truncated note — "nothing from this rename
-    is on disk" has to be true of the notes as well as the files.
+    is on disk" has to be true of the notes as well as the files. A unique
+    temporary also leaves any occupant of an old staging pathname untouched.
     """
     # `_walk` follows symlinks so a synced or shared subfolder is covered.
     # Replacing a symlinked note would sever it: the vault gets a regular file
     # and the shared original keeps the old, now-dangling reference.  Write
     # through the link instead, to the file it actually names.
-    if os.path.islink(path):
-        real = os.path.realpath(path)
-        tmp = "%s.organize-%d.tmp" % (real, os.getpid())
-        try:
-            with open(tmp, "w", encoding="utf-8") as fh:
-                fh.write(text)
-            os.replace(tmp, real)
-            return
-        except BaseException:
+    target = os.path.realpath(path) if os.path.islink(path) else path
+    try:
+        previous = os.stat(target)
+        mode = stat.S_IMODE(previous.st_mode) if stat.S_ISREG(previous.st_mode) else None
+    except FileNotFoundError:
+        mode = None
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=os.path.dirname(target) or ".",
+                prefix=".organize-", suffix=".tmp", delete=False) as fh:
+            tmp = fh.name
+            fh.write(text)
+            if mode is not None:
+                os.fchmod(fh.fileno(), mode)
+        os.replace(tmp, target)
+    finally:
+        if tmp is not None:
             try:
                 os.remove(tmp)
             except OSError:
                 pass
-            raise
-    tmp = "%s.organize-%d.tmp" % (path, os.getpid())
-    try:
-        with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write(text)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        raise
 
 
 def rename_all(vault, path, new_basename, apply=False, dest=None):
@@ -1813,6 +1933,11 @@ def _cmd_check(args):
               "did NOT run; say so in the report rather than reporting the "
               "file as unreferenced." % (args.vault or "not given"))
         return 0
+    if not _inside(vault, path):
+        print("The source is outside --vault. Omit --vault for an independent "
+              "download; matching its basename cannot establish ownership of "
+              "the vault's notes or images.", file=sys.stderr)
+        return 1
     keyed = keyed_files(vault, path)
     print("Names keyed to %s (%d):" % (os.path.basename(path), len(keyed)))
     for p, b in sorted(keyed.items()):
@@ -1836,8 +1961,8 @@ def _cmd_rename(args):
               % (args.vault or "not given"))
     keyed = keyed_files(vault, path) if vault and os.path.isdir(vault) else {}
     old = set(keyed.values())
-    # Located BEFORE the rename and reused after it: a rename changes basenames
-    # and never directories, so this still says where each old name lived —
+    # Located BEFORE the rename and reused after it, so this still says where
+    # each old name lived, including when --dest files the source elsewhere —
     # which is what keeps the verification below from re-reading a link to a
     # different file of that basename as an unfinished repair.
     old_dirs = keyed_dirs(vault, keyed) if keyed else None
@@ -1851,6 +1976,10 @@ def _cmd_rename(args):
     _report_plan(moves, edits, blockers, args.apply)
     if blockers:
         return 1
+    # Filing an already canonical PDF and changing letter case leave a valid
+    # basename that the case-insensitive reference probe still recognizes.
+    # Only names that actually became obsolete belong in this final check.
+    old.intersection_update(obsolete_names(moves))
     if args.apply and old:
         left = references(vault, old, old_dirs)
         if left:
@@ -2145,7 +2274,7 @@ def _selftest():
 
     _inbox_pdf = _dw("Inbox/download (1).pdf", "%PDF")
     _dw("Sources/Images/download (1)_fig_1.png", "x")
-    _dw("Articles/download (1).md", "a note\n")
+    _dw("Articles/download (1).md", "![[download (1).pdf]]\n")
     _dmoves, _, _dblock = plan_rename(_dv, _inbox_pdf,
                                       "Smith_WealthNations_1776.pdf",
                                       dest=os.path.join(_dv, "Sources", "PDFs"))
@@ -2325,10 +2454,13 @@ def _selftest():
     check("a nested source: does not win over the real one",
           sorted(os.path.basename(p) for p in keyed_files(_nv, _npdf)),
           ["Doe_Foo_2025.md", "Doe_Foo_2025.pdf"])
-    # A note this plugin wrote before frontmatter existed is still claimed:
-    # leaving one behind under the old stem is what keyed_files prevents.
+    # A shared filename does not establish ownership of a legacy user note.
     _nw("Articles/Doe_Foo_2025.md", "just a body\n")
-    check("a note with no frontmatter is claimed",
+    check("a note with no source provenance remains unclaimed",
+          sorted(os.path.basename(p) for p in keyed_files(_nv, _npdf)),
+          ["Doe_Foo_2025.pdf"])
+    _nw("Articles/Doe_Foo_2025.md", "![[Doe_Foo_2025.pdf]]\n")
+    check("an exact legacy PDF embed establishes note ownership",
           sorted(os.path.basename(p) for p in keyed_files(_nv, _npdf)),
           ["Doe_Foo_2025.md", "Doe_Foo_2025.pdf"])
     # ...and the CURRENT schema (CONVENTIONS 2b): the origin is item 1 of a
@@ -2386,6 +2518,25 @@ def _selftest():
     check("a current-schema clipping is not in the rename plan",
           (sorted(os.path.basename(s) for s, _d in _cmoves), _cblock),
           (["Doe_Foo_2025.pdf"], []))
+
+    for _source_header in (
+            "sources: # origin\n- 'https://example.org/O''Reilly'\n",
+            "sources: null\n",
+            "sources:\n  -\n",
+            'sources:\n  - "[[Doe_Foo_2025.pdf]]\n',
+            'source: "[[Doe_Foo_2025.pdf]]"\nsources:\n'
+            '  - "https://example.org/clipping"\n'):
+        _note = _nw("Articles/Doe_Foo_2025.md", "---\n" + _source_header + "---\n")
+        check("foreign or malformed source metadata cannot claim a note: %r" % _source_header,
+              _note_is_about(_note, "Doe_Foo_2025"), False)
+    _note = _nw("Articles/Doe_Foo_2025.md",
+                '---\nsources: # origin\n- "[[Doe_Foo_2025.pdf]]"\n---\n')
+    check("commented keys and indentless source sequences preserve ownership",
+          _note_is_about(_note, "Doe_Foo_2025"), True)
+    with open(_note, "wb") as _fh:
+        _fh.write(b"---\ntitle: caf\xe9\n---\n")
+    check("unreadable source metadata cannot claim a foreign note",
+          _note_is_about(_note, "Doe_Foo_2025"), False)
 
     # NFC/NFD twin figure files derive to ONE new name (`_derive` writes NFC)
     # and must be a BLOCKER, exactly like the case-twin pair: grouped under
@@ -2545,10 +2696,17 @@ def _selftest():
     # A symlinked note is written THROUGH the link, not replaced.
     _v = _vault("Store", "Sources")
     _put(_v, "Store/n.md", "![[old.pdf]]\n")
+    os.chmod(os.path.join(_v, "Store/n.md"), 0o640)
     os.symlink("../Store/n.md", os.path.join(_v, "Sources/n.md"))
-    _write(os.path.join(_v, "Sources/n.md"), "![[new.pdf]]\n")
+    _previous_umask = os.umask(0o022)
+    try:
+        _write(os.path.join(_v, "Sources/n.md"), "![[new.pdf]]\n")
+    finally:
+        os.umask(_previous_umask)
     check("a symlinked note stays a symlink",
           os.path.islink(os.path.join(_v, "Sources/n.md")), True)
+    check("a symlinked note's target retains its private permissions",
+          stat.S_IMODE(os.stat(os.path.join(_v, "Store/n.md")).st_mode), 0o640)
     with open(os.path.join(_v, "Store/n.md")) as _fh:
         check("the shared original is what got rewritten", _fh.read(),
               "![[new.pdf]]\n")
@@ -2856,15 +3014,186 @@ def _selftest():
         check("malformed ownership blocks a rename before mutation",
               (bool(_blockers), os.path.exists(_new_pdf)), (True, True))
 
-    with _tf.TemporaryDirectory(prefix="org-inbox-test-") as _v:
-        _pdf = _put(_v, "Inbox/Doe_Canonical_2025.pdf")
-        _moves, _edits, _blockers = rename_all(
-            _v, _pdf, os.path.basename(_pdf), apply=True,
-            dest=os.path.join(_v, "Sources/PDFs"))
-        check("a canonical Inbox PDF still reaches its permanent folder",
-              (_blockers, os.path.exists(_pdf),
-               os.path.isfile(os.path.join(_v, "Sources/PDFs/Doe_Canonical_2025.pdf"))),
-              ([], False, True))
+    import contextlib
+    import io
+
+    def _run_cli(argv):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = main(argv)
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    # Atomic note/sidecar rewrites must preserve privacy, including when the
+    # transaction subsequently rolls back. A default 022 umask otherwise
+    # turns deliberately group-readable 0640 files into world-readable 0644.
+    for _rollback in (False, True):
+        with _tf.TemporaryDirectory(prefix="org-private-write-test-") as _v:
+            _pdf = _put(_v, "Sources/PDFs/Doe_Private_2025.pdf")
+            _image = _put(_v, "Sources/Images/Doe_Private_2025_fig_1.png", b"private figure")
+            _article = _put(_v, "Articles/Doe_Private_2025.md",
+                            '---\nsources:\n- "[[Doe_Private_2025.pdf]]"\n---\n'
+                            '![[Doe_Private_2025_fig_1.png]]\n')
+            _wiki = _put(_v, "Wiki/topic.md", "[[Doe_Private_2025]]\n")
+            _manifest = _put(_v, "Sources/Images/" + MANIFEST_FILE,
+                             "Doe_Private_2025_fig_1.png\t" + file_digest(_image) + "\n")
+            _review = _put(_v, "Sources/Images/" + REVIEW_FILE,
+                           "Doe_Private_2025\t1\n")
+            _protected = {_article: 0o640, _wiki: 0o640,
+                          _manifest: 0o640, _review: 0o600}
+            _before = {}
+            for _file, _mode in _protected.items():
+                os.chmod(_file, _mode)
+                with open(_file, "rb") as _fh:
+                    _before[_file] = _fh.read()
+            _previous_umask = os.umask(0o022)
+            try:
+                with (patch("os.rename", side_effect=OSError("injected move failure"))
+                      if _rollback else contextlib.nullcontext()):
+                    _code, _stdout, _stderr = _run_cli([
+                        "rename", _pdf, "--vault", _v,
+                        "--to", "Doe_Renamed_2025.pdf", "--apply"])
+            finally:
+                os.umask(_previous_umask)
+            check("private-file CLI rename/rollback returns the expected status",
+                  _code, 1 if _rollback else 0)
+            _after_modes, _after_bodies = {}, {}
+            for _file, _mode in _protected.items():
+                _target = (_file.replace("Doe_Private_2025.md", "Doe_Renamed_2025.md")
+                           if not _rollback and _file == _article else _file)
+                _after_modes[_file] = stat.S_IMODE(os.stat(_target).st_mode)
+                with open(_target, "rb") as _fh:
+                    _after_bodies[_file] = _fh.read()
+            check("note and sidecar permissions survive %s under umask 022"
+                  % ("rollback" if _rollback else "an applied rename"),
+                  _after_modes, _protected)
+            check("note and sidecar contents %s with their permissions"
+                  % ("roll back" if _rollback else "follow the rename"),
+                  _after_bodies,
+                  _before if _rollback else {
+                      p: body.replace(b"Doe_Private_2025", b"Doe_Renamed_2025")
+                      for p, body in _before.items()})
+
+    # An old deterministic staging pathname may already belong to someone
+    # else. Neither it nor a symlink target is permission to overwrite bytes.
+    with _tf.TemporaryDirectory(prefix="org-temp-occupant-test-") as _v:
+        _note = _put(_v, "note.md", "original note\n")
+        _foreign = _put(_v, "unrelated.txt", "unrelated private bytes\n")
+        os.chmod(_note, 0o640)
+        os.chmod(_foreign, 0o600)
+        _old_temp = "%s.organize-%d.tmp" % (_note, os.getpid())
+        os.symlink(_foreign, _old_temp)
+        _previous_umask = os.umask(0o022)
+        try:
+            _write(_note, "new note\n")
+        finally:
+            os.umask(_previous_umask)
+        with open(_foreign, encoding="utf-8") as _fh:
+            check("a foreign old-style temporary symlink and its bytes survive",
+                  (os.path.islink(_old_temp), _fh.read(),
+                   stat.S_IMODE(os.stat(_foreign).st_mode)),
+                  (True, "unrelated private bytes\n", 0o600))
+        with open(_note, encoding="utf-8") as _fh:
+            check("the note remains a regular private file after atomic replacement",
+                  (os.path.islink(_note), _fh.read(), stat.S_IMODE(os.stat(_note).st_mode)),
+                  (False, "new note\n", 0o640))
+        check("only the foreign temporary occupant remains after replacement",
+              sorted(os.listdir(_v)), sorted(["note.md", "unrelated.txt", os.path.basename(_old_temp)]))
+
+    for _old, _new in (("Doe_Canonical_2025.pdf", "Doe_Canonical_2025.pdf"),
+                       ("doe_canonical_2025.pdf", "Doe_Canonical_2025.pdf")):
+        with _tf.TemporaryDirectory(prefix="org-inbox-test-") as _v:
+            _pdf = _put(_v, "Inbox/" + _old)
+            _ref = _put(_v, "Wiki/topic.md", "[[Inbox/" + _old + "]]\n")
+            _code, _stdout, _stderr = _run_cli([
+                "rename", _pdf, "--vault", _v, "--to", _new, "--apply",
+                "--dest", os.path.join(_v, "Sources/PDFs")])
+            check("filing a canonical/case-only PDF reports success: " + _old,
+                  (_code, os.path.exists(_pdf),
+                   os.path.isfile(os.path.join(_v, "Sources/PDFs", _new))),
+                  (0, False, True))
+            with open(_ref, encoding="utf-8") as _fh:
+                check("its existing reference remains valid after filing",
+                      _fh.read(), "[[" + _new + "]]\n")
+
+    with _tf.TemporaryDirectory(prefix="org-url-test-") as _v:
+        _pdf = _put(_v, "Inbox/download.pdf")
+        _url_body = ('---\nsources:\n- "https://example.org/papers/download.pdf"\n---\n'
+                     '[Publisher](https://example.org/papers/download.pdf)\n'
+                     '<https://example.org/papers/download.pdf>\n')
+        _remote = _put(_v, "Articles/publisher.md", _url_body)
+        check("publisher URLs are not references to the local PDF",
+              references(_v, {"download.pdf"}), {})
+        _local = _put(_v, "Wiki/topic.md",
+                      '[Publisher](https://example.org/download.pdf)[[Inbox/download.pdf]]\n')
+        _code, _, _ = _run_cli(["rename", _pdf, "--vault", _v,
+                                "--to", "Doe_Method_2025.pdf", "--apply",
+                                "--dest", os.path.join(_v, "Sources/PDFs")])
+        with open(_remote, encoding="utf-8") as _fh:
+            check("publisher URLs survive an applied rename byte for byte",
+                  (_code, _fh.read()), (0, _url_body))
+        with open(_local, encoding="utf-8") as _fh:
+            check("a local link adjacent to a URL is still repaired", _fh.read(),
+                  '[Publisher](https://example.org/download.pdf)[[Doe_Method_2025.pdf]]\n')
+
+    for _stem, _quoted, _expected in (
+            ("García", r'"[[Inbox/Garc\u00eda.pdf#page=2]]"',
+             '"[[Doe_Method_2025.pdf#page=2]]"'),
+            ("O'Reilly", "'[[Inbox/O''Reilly.pdf#page=2]]'",
+             "'[[Doe_Method_2025.pdf#page=2]]'")):
+        with _tf.TemporaryDirectory(prefix="org-yaml-source-test-") as _v:
+            _pdf = _put(_v, "Inbox/" + _stem + ".pdf")
+            _body = '---\ntitle: Preserve me\nsources: # origin\n- ' + _quoted + ' # verified\n---\nSummary.\n'
+            _note = _put(_v, "Articles/" + _stem + ".md", _body)
+            check("escaped YAML source is a located reference: " + _stem,
+                  references(_v, {_stem + ".pdf"}), {_note: [_stem + ".pdf"]})
+            _code, _, _ = _run_cli(["rename", _pdf, "--vault", _v,
+                                    "--to", "Doe_Method_2025.pdf", "--apply",
+                                    "--dest", os.path.join(_v, "Sources/PDFs")])
+            _new_note = os.path.join(_v, "Articles/Doe_Method_2025.md")
+            check("escaped-source note follows its PDF: " + _stem,
+                  (_code, os.path.isfile(_new_note)), (0, True))
+            if os.path.isfile(_new_note):
+                with open(_new_note, encoding="utf-8") as _fh:
+                    check("decoded source is rewritten without losing surrounding metadata",
+                          _fh.read(), _body.replace(_quoted, _expected))
+
+    with _tf.TemporaryDirectory(prefix="org-clipping-image-test-") as _v:
+        _pdf = _put(_v, "Inbox/download.pdf")
+        _body = ("---\nsources: # capture\n- 'https://example.org/O''Reilly'\n---\n"
+                 "![[download_fig_1.jpg]]\n")
+        _note = _put(_v, "Articles/download.md", _body)
+        _image = _put(_v, "Sources/Images/download_fig_1.jpg", b"foreign clipping bytes")
+        _moves, _edits, _blockers = rename_all(_v, _pdf, "Doe_Method_2025.pdf", apply=True)
+        with open(_note, encoding="utf-8") as _fh, open(_image, "rb") as _im:
+            check("a same-stem clipping's images block the whole rename unchanged",
+                  (bool(_blockers), os.path.isfile(_pdf), _fh.read(), _im.read()),
+                  (True, True, _body, b"foreign clipping bytes"))
+        # A clipping may cite a PDF-owned image; a matching manifest digest
+        # is the positive evidence that allows that image to follow the PDF.
+        _put(_v, "Sources/Images/" + MANIFEST_FILE,
+             "download_fig_1.jpg\t" + file_digest(_image) + "\n")
+        _moves, _edits, _blockers = rename_all(_v, _pdf, "Doe_Method_2025.pdf", apply=True)
+        check("verified PDF image ownership is sufficient despite a same-stem clipping",
+              (_blockers, os.path.isfile(_note), os.path.isfile(os.path.join(
+                  _v, "Sources/Images/Doe_Method_2025_fig_1.jpg"))), ([], True, True))
+
+    with _tf.TemporaryDirectory(prefix="org-outside-source-test-") as _tmp:
+        _v = os.path.join(_tmp, "vault")
+        _inside_pdf = _put(_v, "Sources/PDFs/download.pdf", b"inside source")
+        _outside_pdf = _put(_tmp, "Downloads/download.pdf", b"external source")
+        _note = _put(_v, "Articles/download.md", "![[download.pdf]]\n")
+        _image = _put(_v, "Sources/Images/download_fig_1.png", b"inside image")
+        _snapshot = {p: open(p, "rb").read()
+                     for p in (_inside_pdf, _outside_pdf, _note, _image)}
+        _code, _, _ = _run_cli(["rename", _outside_pdf, "--vault", _v,
+                                "--to", "Doe_Outside_2025.pdf", "--apply"])
+        check("an independent download cannot take the vault's same-stem derivatives",
+              (_code, {p: open(p, "rb").read() for p in _snapshot}), (1, _snapshot))
+        _code, _, _ = _run_cli(["rename", _outside_pdf,
+                                "--to", "Doe_Outside_2025.pdf", "--apply"])
+        check("omitting --vault still supports an independent in-place rename",
+              (_code, os.path.isfile(os.path.join(_tmp, "Downloads/Doe_Outside_2025.pdf")),
+               os.path.isfile(_inside_pdf)), (0, True, True))
 
     with _tf.TemporaryDirectory(prefix="org-src-book-test-") as _v:
         _book = _put(_v, "Sources/PDFs/Doe_Book_2025_src.pdf")

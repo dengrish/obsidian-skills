@@ -79,6 +79,12 @@ Single quotes on every path: they are the user's, not this file's (`CONVENTIONS.
 
 **`--notes` is `Articles/`, which this skill shares with `clipping-processor`.** Its cleaned clippings sit in the same folder under the same `CONVENTIONS.md` §2b schema, and a clipping slug and a PDF stem can land on the same filename. That is what the `collision` status below exists for, and it is why the scan reads each existing note's `sources:` rather than just checking that a file is there.
 
+Two PDFs in different source subfolders can also share a basename and therefore
+claim one output note. The scan reports these as `collision` with
+`source_conflicts`, even when no note exists yet. Leave both untouched and
+resolve the source names through `pdf-organizer` before summarising either;
+directory order is not evidence that one PDF owns the note or figures.
+
 Seven statuses, and that is the whole set:
 
 - **`new`** — proceed to step 2.
@@ -239,7 +245,7 @@ Field by field:
 
 - **`title`** — the title the first page states, not the filename. Unquoted unless it contains a colon or another YAML metacharacter.
 - **`format`** — unquoted, exactly one of **`Paper`** (a standalone article or preprint — has an abstract and references), **`Book`** (a book or book chapter — the `_NN_ChapterName` pattern, or a first page saying "Chapter N"), **`Report`** (technical report, white paper, standards document, thesis). Unsure between `Paper` and `Report`: a formal abstract makes it `Paper`.
-- **`sources`** — block-form list, every item double-quoted; **item 1 is the quoted wikilink to the PDF**, bare basename. `pdf-organizer` guarantees the basename is unique vault-wide, which is what makes the bare form safe (`CONVENTIONS.md` §1a). For a PDF that did not come through it, confirm with `find '<vault>' -name 'Doe_GutMicrobiome_2025.pdf'` (single-quoted — the basename is arbitrary text, §1b) and path-qualify the link if more than one comes back.
+- **`sources`** — block-form list, every item double-quoted; **item 1 is the quoted wikilink to the PDF**, bare basename. `pdf-organizer` guarantees the basename is unique vault-wide, which is what makes the bare form safe (`CONVENTIONS.md` §1a). For a PDF that did not come through it, scan the full `Sources/PDFs/` root first. If multiple PDFs share that basename, resolve their names through `pdf-organizer` before summarising. Path-qualifying only the source link does not fix the collision: the summary filename and flat image namespace still use the shared basename.
 - **`sources` item 2** — the document's printed origin, and **normally absent**. Write it only when the document itself prints a DOI or an arXiv identifier, normalised to URL form (`arXiv:2401.01234` → `"https://arxiv.org/abs/2401.01234"`), double-quoted like every list item. **Never on `format: Book`** — a chapter has no per-chapter origin and an ISBN is not a URL. **Omit the item rather than writing it blank**, and never reconstruct a publisher page from the title. (The retired scalar `source` + `url` pair is this list's pre-rename shape.)
 - **`author`** — block-form list, one entry per author, unquoted, no `[[…]]` wrapper. For a paper with more than about eight authors, the first three then a final `- et al.` entry.
 - **`published`** — the publication date, **always `YYYY-MM-DD`, never a bare year**. Take every component the document actually prints, and **pad each one it does not with `01`**: a title page reading `3 Jan 2025` gives `2025-01-03`, one reading `March 2025` gives `2025-03-01`, one reading only `2025` gives `2025-01-01`. The padding is a placeholder and the note does not pretend otherwise — the full-date shape exists so the field sorts and filters as a date in Obsidian, which a bare year does not. **Do not go looking for the day elsewhere** (a publisher page, a DOI record); use what this PDF prints and pad the rest. Where the year itself is genuinely absent, that is `pdf-organizer`'s `nd` case and the filename already says so — there is no component to pad and none is invented, from the stem or from anywhere else. Stop for that note and surface the file in the run report: whether an undated document gets a summary is the user's call.
@@ -295,7 +301,7 @@ The examples below are one fictional paper — a twelve-year tillage trial — c
 | Limitations | `## Limitations` | `## One farm, one soil type, and no deep-core sampling` |
 | Availability | `## Availability` | `## Plot data are public, the yield model is not` |
 
-The rules a heading has to meet, all of them checked by `note_lint.py`:
+The rules a heading has to meet. `note_lint.py` checks the length, word count and formatting limits; judging whether the sentence states a supported, scoped finding remains part of the source review:
 
 - **A short sentence about *this* paper**, 20 to 90 characters, at least three words. Long enough to say something; short enough to read in an outline pane at a glance.
 - **Sentence case, and no full stop.** A heading is a sentence in shape, not in punctuation.
@@ -488,9 +494,11 @@ Write to `<vault>/Articles/<pdf stem>.md`. **The PDF is not moved, renamed, copi
 
 If the note already exists and the user asked for a rewrite, read `read:` off the existing file first and write it back unchanged (step 5) — the summary and the frontmatter are regenerated, that field deliberately is not.
 
+Publish only the complete, linted bytes. Stage them in a unique temporary directory beside `Articles/` so publication stays on one filesystem. For a new note, use an exclusive operation such as `os.link(staged_path, final_path)`: any occupied destination, including a dangling symlink, must fail without changing it. For an authorized rewrite, recheck that the destination is the same regular, non-symlink note inspected at the start, with unchanged contents and the expected source, then replace it atomically with `os.replace`. A failed publication must leave the original note intact. If these operations are unavailable, report the limitation rather than falling back to an ordinary overwrite.
+
 ### 11a. Lint the note before it lands
 
-**Draft to a scratch path outside the vault** — `/tmp/<stem>.md` is fine, and anywhere under `Articles/` is not, because a half-written note in that folder is one the next scan reads as this skill's own output. **Run the linter on the draft, every run, and fix what it reports before the file reaches `Articles/`:**
+**Draft inside a unique temporary directory outside the vault.** Do not reuse a predictable `/tmp/<stem>.md` path or put drafts under `Articles/`, where the next scan could read an unfinished note as this skill's own output. **Run the linter on the draft, every run, and fix what it reports before the file reaches `Articles/`:**
 
 ```bash
 python3 '<skill>/scripts/note_lint.py' '<path to the drafted note>'

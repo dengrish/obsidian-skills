@@ -863,13 +863,13 @@ count of the homes.
 ### 4a. Wiki-entry slugs — `shared/scripts/slugify.py`
 
 **The algorithm is the script, not a table.** `shared/scripts/slugify.py` is the
-single canonical implementation; it carries a 53-case self-test drawn from the
+single canonical implementation; it carries a self-test drawn from the
 skill's own worked examples:
 
 ```bash
 python3 shared/scripts/slugify.py "C++"          # -> {"slug": "c-plus-plus", ...}
 python3 shared/scripts/slugify.py "C++" --stem   # -> c-plus-plus
-python3 shared/scripts/slugify.py --test         # -> 53/53
+python3 shared/scripts/slugify.py --test         # reports the passing case tally
 ```
 
 As a module: `slugify(title)` → `"<slug>.md"`, `slug_stem(title)` → `"<slug>"`,
@@ -1039,26 +1039,20 @@ Diagnose an install with:
 python3 shared/scripts/plugin_paths.py --from skills/wiki-linter/scripts/scan_vault.py
 ```
 
-**Depended on by:** any skill script importing from `shared/` — today six.
-`wiki-builder/scripts/find_collisions.py`, `wiki-builder/scripts/lint_entry.py`
-and `wiki-linter/scripts/scan_vault.py` came first, for `slugify`;
-`pdf-organizer/scripts/organize.py` and
-`pdf-figure-extractor/scripts/batch_extract.py` joined them for `naming.py`, and
-`paper-summarizer/scripts/paper_scan.py` for the same module.
-All six carry the bootstrap verbatim; there is no vendored copy of any shared
-module left anywhere in the tree.
+**Depended on by:** every skill script importing a shared module. Each carries
+the bootstrap verbatim; shared algorithms are not copied into skill folders.
 
-`shared/scripts/` now holds four modules, and each is the single home of one
-fact: `slugify.py` (§4a), `plugin_paths.py` (this section), `naming.py` (§1a)
-and `plurals.py` — the one English singulariser, imported by
-`wiki-builder/scripts/find_collisions.py` and
-`wiki-linter/scripts/scan_vault.py`. `plurals.py` is the newest and its history
-is the standard one: the two skills each held a copy, and the copies disagreed
-on `hypotheses`, `analyses`, `matrices`, `indices`, `leaves`, `mice` and `axes`
-— so a near-duplicate pair fired for the skill probing one new candidate and
-not for the whole-vault sweep that is the only thing which ever looks at a pair
-already in the vault. Nothing raises; the vault just keeps two entries for one
-concept.
+The shared modules own these rules: `slugify.py` (§4a), `plugin_paths.py` (this
+section), `naming.py` (§1a), `plurals.py` (English singularisation for both Wiki
+collision probes), `figure_state.py` (§8b), and `yaml_scalars.py` (§2).
+
+`yaml_scalars.py` decodes the single-line scalar values used in frontmatter:
+YAML double-quote escapes, doubled apostrophes in single quotes, trailing
+comments and bare null values. It is not a document parser. Callers still
+validate fences, list structure, field types and schema-specific quoting;
+unsupported or malformed input must be reported rather than supplying a
+guessed title or source identity. Reading a valid alternative YAML spelling
+does not change the canonical output forms in §2.
 
 ---
 
@@ -1130,55 +1124,59 @@ book-chapter PDF whose chapter starts at printed page 87 has its first page at
 appears with *different* anchors in different entries — each entity is anchored
 where it is introduced.
 
-**No two items in one list may name the same document.** paper-summarizer
-writes a note into `Articles/` for every PDF it summarises (§2b), named after that
-PDF's stem, so one document sits in the vault under two names — `X.pdf` and
-`X.md` — and **both are legal `sources:` values**, which is what makes this
-reachable rather than theoretical: a run pointed at the note instead of the PDF
-leaves an entry carrying `"[[X.pdf#page=2]]"` beside `"[[X.md]]"`. That is one source recorded
-twice — it inflates the entry's apparent provenance, and the `.md` half carries
-no anchor, so it also reads as a source with no locatable position. **Keep the
-`.pdf`, drop the `.md`**: the PDF is the only one of the two that can carry
-`#page=N`. On a merge this is a *replacement*, not an append — the second of the
-only two cases where `sources:` is mutated by replacement (the other is the
-`"stub"` marker on promotion).
+**No two items in one list may name the same document.** A PDF summary in
+`Articles/` (§2b) takes its PDF's stem, so `X.pdf` and `X.md` can represent one
+document. An unrelated web clipping can also happen to have that stem.
+**A matching stem is a provenance-review candidate, not proof of identity.**
 
-The comparison is by **stem**, because the two strings differ by construction:
-strip the `[[ ]]`, a display pipe, the `#page=N` anchor and any folder
-qualification (Obsidian resolves a link by basename, so `Sources/PDFs/X.pdf`
-and `X.pdf` are one file), then fold case **and normalise to NFC** (the
-documented vault lives on a filesystem insensitive to both, so an NFD `.pdf`
-item read off disk and its NFC `.md` twin typed into an entry are one
-document — folding case alone leaves them byte-different and the duplicate
-escapes both implementations). Only a stem collision **across the two
-extensions** counts: an entry may legitimately cite several distinct PDFs and
-several distinct clippings, and a web clipping has no PDF twin at all, so a
-`.md` item is suspect only when a `.pdf` item of the same stem sits beside it.
+Before dropping a Markdown item, read that note's decoded `sources:` item 1
+(or its legacy `source:`). If it names this PDF, retain the PDF citation and
+remove the redundant summary-note citation. This is a replacement on a merge,
+not an append. If the note instead has a distinct URL origin, retain both
+sources. Missing, malformed or ambiguous provenance is report-only: never
+delete a source reference on the strength of its filename alone.
 
-**A `sources:` item is a name, not a link the plugin maintains.** wiki-linter
+Candidate comparison strips the wikilink wrapper, display label, page anchor
+and folder qualification, then folds case and normalises the basename stem to
+NFC. Only matches **across PDF and Markdown extensions** enter this review;
+several distinct PDFs or clippings remain separate sources. Filename matching
+does not replace the origin check.
+
+**A `sources:` item is a name, not a link wiki-linter maintains.** wiki-linter
 checks its *format* and never rewrites the filename inside it, and the orphan
 audits of §9 skip `sources:` entirely — so an item naming a file that has since
-been renamed or removed is never reported by anything here. §1a is the ordering
-rule that keeps that from happening.
+been renamed or removed is outside those audits. §1a's ordering and the
+approved pdf-organizer rename workflow keep the references aligned.
 
-**Depended on by:** wiki-builder (writes them; also greps them with
-`grep -rlF -e '[[<name>.pdf' -e '[[<name>.md' '<wiki-folder>'` (single-quoted, §1b) to decide
-whether a source was already processed — **both names in the one command**, because a
-document that sits in the vault as a PDF and as an `Articles/` note (§2b) is one source, and
-probing a single name makes a fully-covered document read as brand new and get re-extracted
-into entries that already cover it. The on-disk names must be exact and the `-F` literal),
+**Depended on by:** wiki-builder (writes them; checks decoded frontmatter
+sources through `scripts/vault_index.py` to decide whether a source was already
+processed). Query the PDF and a **verified summary-note representation**
+together; omit the Markdown argument if its origin has not been established:
+
+```bash
+python3 '<skill>/scripts/vault_index.py' '<wiki-folder>' \
+  --source '<name>.pdf' --source '<name>.md' -o /tmp/wiki-index.json
+```
+
+`source_matches` compares literal local basenames with NFC and case folding,
+ignoring folder qualification, anchors and display labels. A mention in body
+prose is not evidence that an entry used that source. Inspect index problems
+and ambiguous ownership before deciding to skip; an incomplete index cannot
+establish that a source was fully processed.
+
+Also depended on by
 wiki-linter (checks the format, never rewrites the file names),
 clipping-processor (its cleaned notes are markdown sources), paper-summarizer
 (its notes put the same wikilink form in `sources:` item 1, and are the `.md` half of
 the pair above), pdf-organizer (§1a).
 
-The same-document rule above is the one part of §7 that is mechanized on **both**
+The same-stem candidate check above is mechanized on **both**
 sides — `wiki-builder/scripts/lint_entry.py` as `4-duplicate-source` and
 `wiki-linter/scripts/scan_vault.py` as `item4`, each over its own copy of a
 `source_stem()` helper. Two implementations of one rule is the shape §10 exists
 to catch, so it is stated here once and the two are expected to agree exactly;
 the *form* half of item 4 (extension present, anchor shape) is the scanner's
-alone.
+alone. Neither report authorizes deletion without the provenance check above.
 
 ---
 

@@ -255,17 +255,51 @@ def load_index(path):
     with open(path, "r", encoding="utf-8") as fh:
         data = json.load(fh)
     if isinstance(data, list):
-        return {"wiki_folder": None, "entries": data}
-    if isinstance(data, dict) and "entries" in data:
-        return data
-    if isinstance(data, dict):
+        data = {"wiki_folder": None, "entries": data}
+    elif isinstance(data, dict) and "entries" in data:
+        pass
+    elif isinstance(data, dict):
         entries = []
         for slug, rec in data.items():
+            if rec is not None and not isinstance(rec, dict):
+                raise ValueError("index record %r must be an object" % slug)
             rec = dict(rec or {})
             rec.setdefault("slug", slug)
             entries.append(rec)
-        return {"wiki_folder": None, "entries": entries}
-    raise ValueError("unrecognised index shape in %s" % path)
+        data = {"wiki_folder": None, "entries": entries}
+    else:
+        raise ValueError("unrecognised index shape in %s" % path)
+    _validate_index(data)
+    return data
+
+
+def _validate_index(index):
+    """Reject malformed lookup data rather than treating it as an empty vault."""
+    if not isinstance(index, dict) or not isinstance(index.get("entries"), list):
+        raise ValueError("index must contain an entries list")
+    if not isinstance(index.get("problems", []), list):
+        raise ValueError("index problems must be a list")
+    for i, rec in enumerate(index["entries"], 1):
+        if not isinstance(rec, dict) or not isinstance(rec.get("slug"), str) or not rec["slug"].strip():
+            raise ValueError("index entry %d must be an object with a nonempty slug" % i)
+        aliases = rec.get("aliases", [])
+        if aliases is None:
+            aliases = []
+        if not isinstance(aliases, list) or any(not isinstance(a, str) for a in aliases):
+            raise ValueError("index entry %d aliases must be a list of strings" % i)
+        if not isinstance(rec.get("errors", []), list):
+            raise ValueError("index entry %d errors must be a list" % i)
+
+
+def _index_problems(index):
+    """Keep index omissions visible even when a caller supplied a bare list."""
+    problems = [str(p) for p in index.get("problems", [])]
+    for rec in index["entries"]:
+        for error in rec.get("errors", []):
+            message = "%s: %s" % (rec.get("relpath") or rec["slug"], error)
+            if message not in problems:
+                problems.append(message)
+    return problems
 
 
 def build_targets(index):
@@ -275,6 +309,7 @@ def build_targets(index):
     ``{slug, via, alias, entry_slug, path}`` -- one for each filename stem
     and one for each alias on each entry.
     """
+    _validate_index(index)
     targets = []
     for rec in index.get("entries", []):
         slug = (rec.get("slug") or "").strip()
@@ -313,6 +348,8 @@ def build_targets(index):
 
 def _candidate_slugs(title, use_stem=True, use_superset=True):
     """All probe keys for one candidate title.  Returns ``(slug, keys, err)``."""
+    if not isinstance(title, str) or not title.strip():
+        return None, None, "candidate title must be a nonempty string"
     try:
         slug = slug_stem(title)
     except SlugError as exc:
@@ -418,7 +455,7 @@ def _probe_pair(keys, other_slug, use_stem=True, use_superset=True):
 
 
 def check_candidate(title, index, use_stem=True, use_superset=True, peers=None,
-                    targets=None):
+                    targets=None, index_problems=None):
     """Probe one candidate title against the vault index (and optional peers).
 
     ``peers`` is a list of ``(title, slug)`` for the other candidates in the
@@ -471,12 +508,20 @@ def check_candidate(title, index, use_stem=True, use_superset=True, peers=None,
         if VERDICT_RANK[match["implies"]] > VERDICT_RANK[verdict]:
             verdict = match["implies"]
     result["verdict"] = verdict
+    problems = _index_problems(index) if index_problems is None else index_problems
+    if problems and verdict == "create":
+        result["verdict"] = "adjudicate"
+        result["error"] = ("the index reports %d problem(s); unreadable or malformed "
+                           "entries may hide aliases, so creation is not established"
+                           % len(problems))
     return result
 
 
 def check_candidates(titles, index, use_stem=True, use_superset=True,
                      include_peers=True):
     """Probe every candidate title; returns the full report dict."""
+    if not isinstance(titles, (list, tuple)) or any(not isinstance(t, str) or not t.strip() for t in titles):
+        raise ValueError("candidate titles must be a list of nonempty strings")
     prepared = []
     for title in titles:
         try:
@@ -487,9 +532,10 @@ def check_candidates(titles, index, use_stem=True, use_superset=True,
     peers = [(t, s) for t, s in prepared if s] if include_peers else []
 
     targets = build_targets(index)          # once, not once per candidate
+    index_problems = _index_problems(index)
     results = [check_candidate(t, index, use_stem=use_stem,
                                use_superset=use_superset, peers=peers,
-                               targets=targets)
+                               targets=targets, index_problems=index_problems)
                for t in titles]
 
     seen_pairs, pairwise = set(), []
@@ -511,6 +557,7 @@ def check_candidates(titles, index, use_stem=True, use_superset=True,
     return {
         "wiki_folder": index.get("wiki_folder"),
         "indexed_entries": len(index.get("entries", [])),
+        "index_problems": index_problems,
         "stem_probe_enabled": use_stem,
         "superset_probe_enabled": use_superset,
         "candidate_count": len(results),
@@ -619,6 +666,24 @@ def run_self_test():
               [t["alias"] for t in build_targets(index)
                if t["slug"] == "receiver-operating-characteristic"],
               ["receiver operating characteristic"])
+
+        for incomplete in (
+                {"entries": [], "problems": ["unreadable wiki directory: private"]},
+                {"entries": [{"slug": "existing", "aliases": [],
+                              "errors": ["unparseable YAML scalar"]}]}):
+            rep = check_candidates(["A new unmatched term"], incomplete)
+            check("incomplete index cannot authorize an unmatched create",
+                  (rep["results"][0]["verdict"], bool(rep["index_problems"])),
+                  ("adjudicate", True))
+        malformed_index = os.path.join(tmp, "malformed-index.json")
+        for payload in ({"entries": ["bad"]}, {"entries": [{"slug": "x", "aliases": 0}]}):
+            with open(malformed_index, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = main(["--index", malformed_index, "--title", "A new term"])
+            check("malformed index records are structured CLI errors, never tracebacks",
+                  (rc, json.loads(buf.getvalue())["ok"]), (2, False))
 
         # -- every probe, firing --------------------------------------------
         def probe(title, **kw):
@@ -757,6 +822,20 @@ def run_self_test():
                 json.dump(payload, fh)
             check("--titles accepts %s" % label, _load_titles(tf), want)
 
+        for payload in ({"titles": [{"title": 12}]}, {"titles": "not a list"}, [None]):
+            with open(tf, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = main(["--index", path, "--titles", tf])
+            check("malformed title JSON is a structured CLI error",
+                  (rc, json.loads(buf.getvalue())["ok"]), (2, False))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = main(["--index", path, "--title", "   "])
+        check("a blank --title is a structured CLI error too",
+              (rc, json.loads(buf.getvalue())["ok"]), (2, False))
+
         # -- the CLI still refuses a real run that is missing an argument ----
         for argv, needle in (([], "--index"), (["--wiki", wiki], "--title")):
             buf = io.StringIO()
@@ -783,15 +862,25 @@ def _load_titles(path):
     with open(path, "r", encoding="utf-8") as fh:
         data = json.load(fh)
     if isinstance(data, dict):
-        data = data.get("titles") or data.get("candidates") or []
+        if "titles" in data:
+            data = data["titles"]
+        elif "candidates" in data:
+            data = data["candidates"]
+        else:
+            raise ValueError("title object must contain titles or candidates")
+    if not isinstance(data, list):
+        raise ValueError("candidate titles must be a list")
     titles = []
     for item in data:
         if isinstance(item, str):
-            titles.append(item)
+            val = item
         elif isinstance(item, dict):
             val = item.get("title") or item.get("candidate") or item.get("name")
-            if val:
-                titles.append(val)
+        else:
+            raise ValueError("every candidate must be a title string or object")
+        if not isinstance(val, str) or not val.strip():
+            raise ValueError("every candidate title must be a nonempty string")
+        titles.append(val)
     return titles
 
 
@@ -875,9 +964,13 @@ def main(argv=None):
                          indent=2))
         return 2
 
-    report = check_candidates(titles, index, use_stem=not args.no_stem,
-                              use_superset=not args.no_superset,
-                              include_peers=not args.no_peers)
+    try:
+        report = check_candidates(titles, index, use_stem=not args.no_stem,
+                                  use_superset=not args.no_superset,
+                                  include_peers=not args.no_peers)
+    except ValueError as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}, indent=2))
+        return 2
     print(json.dumps(report, ensure_ascii=False,
                      **({} if args.compact else {"indent": 2})))
     return 0

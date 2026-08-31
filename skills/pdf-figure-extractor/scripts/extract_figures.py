@@ -666,6 +666,10 @@ def run_self_test():
         with open(png, "wb") as fh:
             fh.write(b"a hand-set crop, not this run's render")
         stamp = open(png, "rb").read()
+        # The scoped batch migration (or an earlier tracked run) established
+        # ownership before a manual replacement is allowed.
+        write_manifest(os.path.join(outdir, MANIFEST_FILE),
+                       {os.path.basename(png): file_digest(png)})
         code, so, se = run(base + ["--crop", "1:1:100,150,500,350", "--dpi",
                                    "72", "--no-trim"])
         check("a second run exits 0", code, 0)
@@ -675,6 +679,21 @@ def run_self_test():
                                    "72", "--no-trim", "--overwrite"])
         ok("--overwrite replaces it", open(png, "rb").read() != stamp)
         ok("--overwrite says it wrote", "Wrote" in so)
+
+        legacy = os.path.join(tmp, "Legacy")
+        os.makedirs(legacy)
+        foreign = os.path.join(legacy, "Doe_Figs_2025_fig_1.png")
+        _st_png(foreign, (24, 18), (180, 20, 40))
+        foreign_bytes = open(foreign, "rb").read()
+        for overwrite in ([], ["--overwrite"]):
+            code, so, se = run([pdf, "--out", legacy, "--stem", "Doe_Figs_2025",
+                               "--crop", "1:2:100,150,500,350",
+                               "--crop", "1:1:100,150,500,350"] + overwrite)
+            ok("an untracked legacy occupant is refused before any crop", code != 0)
+            check("a refused legacy crop preserves the other producer's image",
+                  open(foreign, "rb").read(), foreign_bytes)
+            check("legacy preflight leaves the entire image folder unchanged",
+                  sorted(os.listdir(legacy)), [os.path.basename(foreign)])
 
         # A caption inside the crop is the one thing this skill promises never
         # to do, so a crop reaching past the caption's top edge is warned about.
@@ -923,24 +942,29 @@ def main(argv=None):
             sys.exit(f"Refusing manual crops: cannot safely read {manifest_path}: {exc}")
         if os.path.islink(manifest_path) or not os.access(manifest_path, os.W_OK):
             sys.exit(f"Refusing manual crops: {manifest_path} is not a writable regular sidecar")
-        # Preflight every target before writing the first crop. Unknown or
-        # changed occupants must not become claimed merely through --overwrite.
-        for spec in args.crop:
-            _page_idx, suffix, _rect = parse_crop(spec)
-            target = os.path.join(out_dir, f"{args.stem}_fig_{suffix}.png")
-            if not os.path.lexists(target):
-                continue
-            if os.path.islink(target):
-                sys.exit(f"Refusing manual crop of {target}: it is a symlink, not a recorded output file")
-            try:
-                digest = file_digest(target)
-            except OSError as exc:
-                sys.exit(f"Refusing manual crop of {target}: {exc}")
-            key = manifest_key(manifest, os.path.basename(target))
-            if manifest.get(key) != digest:
-                sys.exit(f"Refusing manual crop of {target}: ownership is unknown or its bytes changed. "
-                         "Inspect the occupant and reconcile its ownership record first; "
-                         "--overwrite does not claim another file.")
+    # Preflight every target even in a legacy folder. An absent manifest is
+    # not proof that an occupied slot belongs to this PDF: clippings share
+    # these filenames. A manual crop must not bypass the batch ownership guard.
+    for spec in args.crop:
+        _page_idx, suffix, _rect = parse_crop(spec)
+        target = os.path.join(out_dir, f"{args.stem}_fig_{suffix}.png")
+        if not os.path.lexists(target):
+            continue
+        if os.path.islink(target):
+            sys.exit(f"Refusing manual crop of {target}: it is a symlink, not a recorded output file")
+        if manifest is None:
+            sys.exit(f"Refusing manual crop of {target}: no ownership manifest exists. "
+                     "Inspect this legacy image and run a scoped batch migration before "
+                     "replacing it; --overwrite does not claim another file.")
+        try:
+            digest = file_digest(target)
+        except OSError as exc:
+            sys.exit(f"Refusing manual crop of {target}: {exc}")
+        key = manifest_key(manifest, os.path.basename(target))
+        if manifest.get(key) != digest:
+            sys.exit(f"Refusing manual crop of {target}: ownership is unknown or its bytes changed. "
+                     "Inspect the occupant and reconcile its ownership record first; "
+                     "--overwrite does not claim another file.")
 
     # Caption rects, for the "is the caption inside this crop?" warning.
     # Imported lazily and defensively: the check is a convenience, and a

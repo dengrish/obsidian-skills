@@ -1,20 +1,20 @@
 # Review pass (step 13)
 
-**Read this on every run, after the polished file is on disk.** Step 13 is unconditional, so this file is too: its trigger is a step number, not a circumstance, and it is listed that way in SKILL.md rather than as an "if" it never fails. It stays a separate file for one reason — length. Folded into the spine it would be the part a truncated read loses, and it is the one file where losing the tail costs every check after it. Every item here applies to every note this skill writes: one input shape, one output shape, no branch to scope the checklist to.
+**Read this on every run, after the completed scratch draft is on disk and before publishing it.** Step 13 is unconditional, so this file is too: its trigger is a step number, not a circumstance, and it is listed that way in SKILL.md rather than as an "if" it never fails. It stays a separate file for one reason — length. Folded into the spine it would be the part a truncated read loses, and it is the one file where losing the tail costs every check after it. Every item here applies to every note this skill writes: one input shape, one output shape, no branch to scope the checklist to.
 
 - The mechanical sweep (run it first) and how to read its output
 - The source-anchored structural diff (the open-ended backstop)
 - The checklist: YAML frontmatter, structure, summary bullets, body, attachments on disk, completeness audit
 - The fix-or-flag decision rule
 
-After writing the polished file (and running the completeness audit), do a final conformance pass against the rules from steps 1–12. This is a structural/format review, not a content review — it catches things that slipped through during the main pass and either fixes them or flags them. **It's a quick scan, not a re-run of the workflow.** Read the file from disk.
+After completing the draft and its completeness audit, do a final conformance pass against the rules from steps 1–12. This is a structural/format review, not a content review — it catches things that slipped through during the main pass and either fixes them or flags them. **It's a quick scan, not a re-run of the workflow.** Read the draft from disk; on reprocess, keep the published original and its image names unchanged until finalization.
 
 **Run this mechanical sweep first — don't rely on reading the file to notice these.** Most of the checklist below is machine-detectable, and the recurring failure mode is that a prose-only "confirm no X survived" check gets skimmed and an issue slips (that's how a scrambled bold-italic label and unescaped currency both got through earlier runs). This battery makes the detectable classes impossible to skip; run it (substitute the path), then walk the checklist for the judgment items a grep can't see. **Empty output = clean for that line**, except the noisy detectors flagged below.
 
 **These greps do not parse Markdown.** Exclude YAML and fenced/inline code when judging body matches, and never edit literal code to satisfy them. An asterisk list marker, escaped `\*`, or emphasis continued across lines can give an odd asterisk count without damage. A stacked-marker match can also represent a real nested list; compare its structure with the source before collapsing it. Preserve the source when a detector flags legitimate Markdown.
 
 ```sh
-f='<path to the polished .md>'
+f='<path to the completed scratch .md>'
 echo "[1  H1 in body — expect NONE]";                          grep -nE '^# ' "$f"
 echo "[2  Summary callouts — expect exactly 1]";               grep -cE '^> \[!Summary\]' "$f"
 echo "[3  leftover raw image refs ![](…) — NONE]";             grep -nE '!\[[^]]*\]\(' "$f"
@@ -115,9 +115,9 @@ print("COUNTS:", counts)
 - Dangling equation/diagram references whose body wasn't clipped are removed-or-flagged, not left as bare `(5-38)` / "since ," litter.
 
 **Sources/Images on disk:**
-- Every `![[name]]` wikilink in the body resolves to a real file in `<vault>/Sources/Images/`. On a reprocess where the slug changed, the embeds and the on-disk files both use the **new** slug — no embed or file is left pointing at the old slug, and no `<!-- missing attachment -->` note is left unflagged.
+- Every `![[name]]` wikilink in the draft resolves to a real file in `<vault>/Sources/Images/`, or to an existing file through the reviewed `rename --dry-run` mapping. On a reprocess where the slug changed, verify the draft's **new** names against that mapping before finalization; do not rename live images just to pass this review. After publication, read the final note back and verify every embed resolves at its final name. No `<!-- missing attachment -->` note is left unflagged.
 - No leftover broken extension-mismatched twins (e.g., a `.png` whose actual MIME is webp, sitting next to a correctly-named `.webp` sibling). Use `file --mime-type -b '<path>'` to spot-check any file whose extension feels off.
-- Image filenames match the note filename casing (`Teslo_..._fig_1.png`, not `teslo_..._fig_1.png`).
+- Image filenames match the final note filename casing (`Teslo_..._fig_1.png`, not `teslo_..._fig_1.png`), allowing only the reviewed rename mapping before finalization.
 
 **Completeness audit (step 12):**
 - **The audit produced an explicit verdict in the report** (one of: `<N> recovered, <M> flagged, <K> decoratives skipped` / `no gaps found` / `SKIPPED — <reason>`). A polished file with no audit verdict in the report is incomplete — re-run the audit, or if it truly can't run, write the `SKIPPED — <reason>` line explicitly. **A silent no-op is the failure mode this gate exists to catch.**
@@ -126,11 +126,11 @@ print("COUNTS:", counts)
 - Any captions marked `(synthesized from context)` are paraphrases of content the immediately-preceding paragraph actually contains — not inventions, not extrapolations from elsewhere in the article. If a synthesized caption claims something the lead-in doesn't say, rewrite it from what the lead-in actually says or downgrade to a bare embed.
 - No duplicate placeholders for the same element and no duplicate image embeds (the reprocess failure mode — two `<!-- source has an inline SVG diagram here… -->` for one diagram, the same figure embedded twice, or a Lottie re-converted to a second `_fig_N.gif`). On reprocess the figure count and placeholder set should match the source, not grow each run.
 - No figure represented twice in two forms — e.g. a Lottie that was both converted to a `_fig_N.gif` *and* recovered as its static `_fig_M.svg` poster. A figure with a Lottie source should appear once, as the GIF.
-- Any converted-Lottie GIFs in `Sources/Images/` aren't silently blank or missing visible content. The bundled script already deletes a blank render and writes nothing, but spot-check at least the middle frame of each `_fig_N.gif` anyway — if the grayscale standard deviation is near zero (effectively empty canvas), the renderer dropped the animation's content, so **overwrite** that GIF with the fallback from sub-part 3b's chain (static poster, else source-URL placeholder) — replacing this run's own blank output in place. Never `rm` it: an attachment is an input (`CONVENTIONS.md` §1), and on a reprocess the `_fig_N.gif` at that slot may be a *previous* run's good render rather than this one's blank. This is the silent-failure mode of an engine that can't render text layers, like rlottie.
+- Any converted-Lottie GIFs in `Sources/Images/` aren't silently blank or missing visible content. The bundled script already deletes a blank scratch render and writes nothing, but spot-check at least the middle frame of each `_fig_N.gif` anyway — if the grayscale standard deviation is near zero (effectively empty canvas), the renderer dropped the animation's content. Replace the **draft embed** with a static poster at a fresh figure number and its correct extension, or with a source-URL placeholder if no poster is available. Preserve the existing GIF; do not overwrite it with another format or with placeholder text. An attachment is an input (`CONVENTIONS.md` §1), and on a reprocess the `_fig_N.gif` at that slot may be a previous run's good render rather than this one's blank. This is the silent-failure mode of an engine that can't render text layers, like rlottie.
 
 **Fix-or-flag decision rule:**
 
-- **Mechanical issues** that are clearly wrong on inspection (wrong heading level, heading-child not demoted, leftover horizontal rule, leftover MathJax delimiter, casing mismatch on an image file, an auto-generated backlink block, an orphaned image credit, a run-on nav fragment, a split-emphasis run-on, a mangled nested list, decorative-Unicode title) — **fix them inline** by rewriting the affected portion of the file (or renaming the image, etc.).
+- **Mechanical issues** that are clearly wrong on inspection (wrong heading level, heading-child not demoted, leftover horizontal rule, leftover MathJax delimiter, casing mismatch on an image file, an auto-generated backlink block, an orphaned image credit, a run-on nav fragment, a split-emphasis run-on, a mangled nested list, decorative-Unicode title) — **fix them in the draft**. Add any existing-image rename to the reviewed finalization plan instead of moving that image early.
 - **Judgment issues** that depend on what the user wants (first bullet isn't really a thesis, description hits 110 chars but trimming further would lose meaning, a paragraph that might be a hero-image lede or might be a caption, an equation body that's missing and can't be reconstructed) — **flag in the report** for the user to decide.
 
 Every fix and every flag from the review is logged in step 14's report so nothing happens silently.

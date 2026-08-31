@@ -257,29 +257,30 @@ def sections(pages):
             norm = normalize(line).strip()
             norm = re.sub(r"\A[\s#*]*(?:[0-9]+(?:\.[0-9]+)*|[IVXLC]+)[.)]?\s+",
                           "", norm)
-            norm = norm.strip(" .:\u2014\u2013-*#")
-            if not norm or len(norm) > 60 or len(norm.split()) > 8:
-                continue
-            if norm.endswith((".", ";", ":")) or norm[-1:].isdigit():
-                continue                      # a sentence, or a wrapped line
             # "Funding: supported by Acme Pharma." is a heading with its
             # content on the same line, which is how most journals set the
             # statements this looks for.  Take what precedes the first colon
-            # as a candidate as well as the whole line.
+            # before applying heading length limits: the statement itself
+            # can be much longer than a heading.
             cands = [norm.casefold()]
             if ":" in norm:
                 cands.append(norm.split(":", 1)[0].casefold())
             for cand in cands:
-              for part in re.split(r"[,/&]| and (?=\w)", cand):
-                  part = part.strip(" .:-")
-                  if not part or len(part.split()) > 4:
-                      continue
-                  for name, starts in _SECTIONS:
-                      if any(part == s or part.endswith(" " + s) for s in starts):
-                          out.setdefault(name, [])
-                          if i not in out[name]:
-                              out[name].append(i)
-                          break
+                cand = cand.strip(" :\u2014\u2013-*#")
+                if not cand or len(cand) > 60 or len(cand.split()) > 8:
+                    continue
+                if cand.endswith((".", ";")) or cand[-1:].isdigit():
+                    continue                  # a sentence, or a wrapped line
+                for part in re.split(r"[,/&]| and (?=\w)", cand):
+                    part = part.strip(" .:-")
+                    if not part or len(part.split()) > 4:
+                        continue
+                    for name, starts in _SECTIONS:
+                        if any(part == s or part.endswith(" " + s) for s in starts):
+                            out.setdefault(name, [])
+                            if i not in out[name]:
+                                out[name].append(i)
+                            break
     return out
 
 
@@ -408,6 +409,7 @@ def run_self_test():
     # rule fired on every one of these, and step 10 uses the results page range
     # to decide which numbers to look at hardest.
     for prose in ("Results were consistent across all three cohorts.",
+                  "We discuss the results.",
                   "Methods for the assay are described in the appendix.",
                   "Limitations of this approach are discussed below.",
                   "Background rates of infection were low.",
@@ -422,6 +424,10 @@ def run_self_test():
     case("roman-numbered heading", sections(["IV. Results"]).get("results"), [1])
     case("multi-word section name",
          sections(["Materials and Methods"]).get("methods"), [1])
+    case("inline statements do not hide their short heading",
+         sections(["Funding: This research was supported by the Example Research "
+                   "Council through its investigator grant programme."]),
+         {"funding": [1]})
     # A range after a plural is a range, not a hierarchical label.
     case("figure range counts the first, not a phantom label",
          cites(["See Figures 1-3 for the traces."]), {"1": 1})

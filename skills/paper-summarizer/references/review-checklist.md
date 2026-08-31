@@ -116,7 +116,7 @@ Exit 0 means every item below with a **(lint)** tag is already satisfied and nee
 - [ ] **(lint)** `format` is one of `Paper`, `Book`, `Report` — this note's enum. The `Article`/`Post`/`Video` set belongs to a web clipping and is wrong here.
 - [ ] **(lint)** `sources` item 1 is a **quoted** wikilink to a `.pdf`. That the PDF exists under that name is yours to confirm.
 - [ ] A second `sources` item is present **only** if the document prints a DOI or an arXiv id (URL-normalised, double-quoted), never on `format: Book`, and never blank — a one-item list is a complete note. *(The linter checks the shape and the position, not whether the document prints one.)*
-- [ ] **(lint)** `published` is a full `YYYY-MM-DD`, with any component the document does not print padded to `01` — never a bare year, and never a day invented from somewhere other than this PDF.
+- [ ] **(lint: date shape)** `published` is a full, valid `YYYY-MM-DD`. Confirm against the PDF that printed components were preserved and only unstated month/day components were padded to `01`; the linter cannot verify that provenance.
 - [ ] `created` is today. *(Not linted — the check would fail every time an existing note is re-linted later.)*
 - [ ] **(lint: length only)** `description` is 110 characters or fewer. That it is **one sentence**, and that it leads with the specifics, is yours.
 - [ ] **(lint)** `tags` values are from the 27-value enum (`CONVENTIONS.md` §3), block-form, `#`-prefixed and **double-quoted**. An unquoted `#` starts a YAML comment and the discipline disappears with no error.
@@ -125,8 +125,8 @@ Exit 0 means every item below with a **(lint)** tag is already satisfied and nee
 - [ ] **(lint)** The `> [!Summary]` callout opens on the line immediately after the closing `---`, with no blank line above it, and holds three to seven single-line `> - ` bullets.
 - [ ] **(lint)** One `___` rule, with a blank line either side, and no other horizontal rule in the note.
 - [ ] **(lint)** Six `##` sections, in the role order of SKILL.md step 7, none empty.
-- [ ] **(lint)** Every heading is 20 to 90 characters, three or more words, does not start lower-case, is not in capitals, has no full stop, and is not a bare role label like `Results` or `Background`.
-- [ ] Every heading is in **sentence case** and is about **this paper**. The linter catches capitals and a lower-case opening; Title Case and a heading that could sit on any paper are yours.
+- [ ] **(lint)** Every heading is 20 to 90 characters, three or more words, is not in capitals, has no full stop, and is not a bare role label like `Results` or `Background`.
+- [ ] Every heading is in **sentence case** and is about **this paper**. Preserve an opening technical name's correct casing (`p53`, `mRNA`); the linter deliberately permits those. Title Case and a heading that could sit on any paper are yours to catch.
 - [ ] Read the six headings on their own, in order. **Do they tell the paper's story?** If they read as a table of contents rather than an argument, they are labels wearing sentences. *(Nothing mechanical can check this; it is the whole point of the rule.)*
 - [ ] No heading overstates. The four claim rules bind in a heading exactly as in a sentence, and a heading is the most-read line in its section.
 - [ ] **(lint)** Every page reference is a superscript `<sup>[[<stem>.pdf#page=N|N]]</sup>` whose display text equals the page it opens and whose target is this note's own `sources:` PDF, attached to the preceding character with no space, in body prose only — not in the front matter, the callout or a caption.

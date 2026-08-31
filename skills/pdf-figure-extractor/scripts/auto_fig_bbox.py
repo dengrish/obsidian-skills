@@ -161,7 +161,7 @@ CAP_RE = re.compile(
     r'|[A-Z]' + LABEL_SEP + r'?\d+(?:' + LABEL_SEP + r'\d+)*'   # A.1, A1, B-2 (appendix)
     r'|\d+(?:' + LABEL_SEP + r'\d+)*)'                      # plain numeric — group 2
     r'(?!' + LABEL_SEP + r'\d)\b'                           # not a truncated number
-    r'(?=\.\s|\s+[^a-z]|\s*$|\s*:|\s*[–—])',                # caption-shape lookahead
+    r'(?=\.\s|\s+[^\sa-z]|\s*$|\s*:|\s*[–—])',              # caption-shape lookahead
     re.MULTILINE,
 )
 # The final lookahead distinguishes captions from prose references that
@@ -177,11 +177,13 @@ CAP_RE = re.compile(
 #   "Figure 1-23 shows an example of..."                (verb after space)
 #   "Figure 1-24 illustrates the gradient..."           (verb after space)
 # The verb in a prose reference always starts with a LOWERCASE letter, so
-# `\s+[^a-z]` (one-or-more whitespace then any non-lowercase character —
+# `\s+[^\sa-z]` (whitespace then a non-whitespace, non-lowercase character —
 # digits, capitals, parentheses, math symbols — all OK) rejects prose
 # references while accepting digit-led math captions. The `\s*:` and
 # `\s*[–—]` alternatives add support for Nature-style colon captions and
 # em-/en-dash captions; neither appears at the start of a prose reference.
+# Excluding whitespace in the final class prevents backtracking from reading
+# a second space in "Figure 1  shows..." as the start of a caption title.
 # `header_y()` / `footer_y()` are loose page-margin bounds used to (a) discard
 # the very top/bottom strip from text-block analysis and (b) seed the figure
 # search region. They are intentionally small/large enough that any real
@@ -2104,6 +2106,8 @@ def run_self_test():
     # belongs to a real figure elsewhere.
     for text in (
             "Figure 1 shows an example of overfitting",       # prose
+            "Figure 1  shows an example of overfitting",      # PDF spacing
+            "Figure 1\t shows an example of overfitting",
             "Figure 1-24 illustrates the gradient",           # prose
             "figure 1 shows the same thing in lower case",    # prose
             "Figure 1a. Panel pointer",                       # panel letter
@@ -2128,6 +2132,19 @@ def run_self_test():
             state["bad"] += 1
             print("FAIL CAP_RE accepted the non-caption %r (as %r)"
                   % (text, m.group(2)))
+
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 90), "Figure 1  shows the result discussed below.")
+    page.draw_rect(fitz.Rect(90, 200, 470, 400), fill=(0.2, 0.3, 0.7))
+    page.insert_text((90, 440), "Figure 1. The actual caption.")
+    found = list(detect_figures(doc))
+    check("PDF prose spacing cannot introduce a second caption",
+          [row[1] for row in found], ["1"])
+    ok("the detected caption belongs to the actual chart",
+       len(found) == 1 and found[0][4].y0 > 400
+       and found[0][3].y0 <= 200 and found[0][3].y1 >= 400)
+    doc.close()
 
     # --- label normalisation, through the function that names the file ----
     def label_of(caption):

@@ -43,6 +43,34 @@ import sys
 import unicodedata
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
+# --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
+import os as _os, sys as _sys
+_here = _os.path.dirname(_os.path.abspath(__file__))
+_env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
+if _env:                                   # explicit override: authoritative, no fallback
+    _tried = [_os.path.abspath(_os.path.expanduser(_env))]
+else:                                      # plugin-relative walk-up, at most 5 levels
+    _tried, _d = [], _here
+    for _ in range(5):
+        _tried.append(_os.path.join(_d, "shared", "scripts"))
+        _d = _os.path.dirname(_d)
+_shared = next((_p for _p in _tried if _os.path.isdir(_p)), None)
+if _shared is None:
+    raise SystemExit("""obsidian: cannot find the plugin's shared/scripts/ folder, which holds
+the one canonical copy of the conventions this script depends on.
+Looked for:
+  %s
+Fix: install the whole plugin tree, or set OBSIDIAN_VAULT_SHARED to the
+shared/scripts/ directory (unset it to use the plugin-relative walk-up).
+Do NOT paste a second copy of the algorithm into this skill -- a divergent
+copy is the bug the shared layer exists to prevent.""" % "\n  ".join(_tried))
+_sys.path[:] = [_p for _p in _sys.path if _p not in (_shared, _here)]
+_sys.path.insert(0, _shared)               # shared/scripts/ FIRST
+_sys.path.append(_here)                    # own dir LAST: a local copy cannot shadow it
+# --- end bootstrap ---
+
+from yaml_scalars import parse_scalar
+
 
 def _path_keys(path):
     """Comparable spellings of one file path, for the --exclude match.
@@ -93,7 +121,9 @@ def normalize_url(url):
     """Normalize an HTTP(S) URL for identity; invalid origins return no key."""
     if not isinstance(url, str):
         return ""
-    url = url.strip().strip('"').strip("'")
+    url = url.strip()
+    if len(url) >= 2 and url[0] == url[-1] and url[0] in "\"'":
+        url = url[1:-1].strip()
     if not url:
         return ""
     try:
@@ -134,32 +164,16 @@ def normalize_url(url):
 #: silently overwritten on the next run.  `sources:` (block-form list, schema
 #: 2b) is the current key; the scalar `source:` is the pre-rename legacy shape,
 #: still read so an unmigrated note stays visible to the duplicate check.
-SOURCES_RE = re.compile(r"\Asources\s*:\s*\Z", re.IGNORECASE)
+SOURCES_RE = re.compile(r"\Asources\s*:\s*(?:#.*)?\Z", re.IGNORECASE)
 # YAML allows an indentless block sequence at a mapping value; serializers such
 # as PyYAML emit it by default. Requiring indentation hides those saved notes
 # from dedup. A sequence marker still needs whitespace before its scalar.
 _ITEM_RE = re.compile(r"\A[ \t]*-[ \t]+(.*)\Z")
 SOURCE_RE = re.compile(r"\Asource\s*:\s*(.*)\Z", re.IGNORECASE)
 
-#: An unquoted YAML scalar ends at a ` #` comment. The whitespace is required by
-#: YAML and is what keeps a `#` INSIDE a URL — a fragment — out of it.
-_TRAILING_COMMENT = re.compile(r"\s+#.*\Z")
-
-
 def _yaml_scalar(raw):
-    """The value of a YAML scalar: quotes removed, a trailing comment removed.
-
-    `source: https://example.com/x # canonical` used to key the note under
-    `https://example.com/x ` — the comment became part of the URL, the trailing
-    space survived normalization, and the note was therefore indexed under a URL
-    no raw can ever produce. That is a dedup MISS, whose cost is the polished
-    note silently overwritten on the next run.
-    """
-    val = raw.strip()
-    if len(val) >= 2 and val[0] in "\"'":
-        end = val.find(val[0], 1)
-        return (val[1:end] if end != -1 else val[1:]).strip()
-    return _TRAILING_COMMENT.sub("", val).strip()
+    """Decode a scalar without changing escaped source identities."""
+    return parse_scalar(raw)[0]
 
 
 def read_source(path):
@@ -223,7 +237,7 @@ def read_source(path):
                     m = SOURCE_RE.match(raw)
                     if m:
                         found = _yaml_scalar(m.group(1))
-    except OSError:
+    except (OSError, ValueError):
         return None
     return None
 
@@ -368,6 +382,8 @@ def run_self_test():
              normalize_url(bad), "")
     case("surrounding quotes are stripped",
           normalize_url('"https://example.com/a"'), "https://example.com/a")
+    differ("a trailing apostrophe in a URL path is literal data",
+           "https://example.com/rockin'", "https://example.com/rockin")
     for param in ("utm_source", "utm_medium", "utm_campaign", "fbclid",
                   "gclid", "mc_cid", "mc_eid", "referrer", "share", "r",
                   "showWelcome"):
@@ -423,6 +439,18 @@ def run_self_test():
                  '---\nsources:\n- "%s"\n---\n' % URL, URL),
                 ("sources list, indentless unquoted item",
                  "---\nsources:\n- %s\n---\n" % URL, URL),
+                ("sources key with a YAML comment",
+                 '---\nsources: # capture URL\n- "%s"\n---\n' % URL, URL),
+                ("single quote escape in URL",
+                 "---\nsources:\n  - 'https://example.com/o''brien'\n---\n",
+                 "https://example.com/o'brien"),
+                ("double quote Unicode escape in URL",
+                 '---\nsources:\n  - "https://example.com/caf\\u00e9"\n---\n',
+                 "https://example.com/café"),
+                ("malformed quoted origin stays unindexable",
+                 '---\nsources:\n  - "https://example.com/a"broken"\n---\n', None),
+                ("unclosed quoted origin stays unindexable",
+                 '---\nsources:\n  - "https://example.com/a\n---\n', None),
                 ("a dash without following whitespace is not a list item",
                  "---\nsources:\n  -%s\n---\n" % URL, None),
                 ("sources list, wikilink first item (a summary note)",
@@ -557,6 +585,15 @@ def run_self_test():
              ["no-source", "no-source", "no-source", "new"])
         case("the live index did not leak into the caller's",
               sorted(index), sorted([normalize_url(URL)]))
+        quoted_note = article("Quoted.md",
+                              "---\nsources: # verified\n"
+                              "- 'https://example.com/o''brien'\n---\n")
+        quoted_index = build_index(vault)[0]
+        quoted_check = check([{"id": "raw-quoted", "source": "https://example.com/o'brien"}],
+                             quoted_index)
+        case("editor-saved quote escaping cannot hide an existing article",
+             (quoted_check[0]["status"], quoted_check[0]["matches"]),
+             ("duplicate", [quoted_note]))
 
         # --- the three guards this script backs must agree with each other ---
         # Guard 2 (step 3) is the one line an agent actually reads when the

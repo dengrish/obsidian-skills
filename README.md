@@ -64,7 +64,7 @@ python3 -m venv .venv
 .venv/bin/python tools/build_plugin.py --check
 ```
 
-The convention suite also runs all 20 bundled script self-tests. The
+The convention suite also runs every bundled script self-test. The
 end-to-end suite runs the public commands against temporary vaults, checking
 PDF filing, manual figure repairs, source renames, clipping reprocessing, and
 the source-to-wiki index, collision, lint, and scan workflow. It never edits a
@@ -229,7 +229,7 @@ home instead of five:
   section names the skills that depend on it, so an edit's blast radius is
   visible before you make it.
 - **`shared/scripts/slugify.py`** — the canonical title → filename slug
-  algorithm, with a 56-case self-test (`slugify.py --test`).
+  algorithm, with a built-in self-test (`slugify.py --test`).
 - **`shared/scripts/plugin_paths.py`** — how a skill script reaches
   `shared/scripts/` whether the plugin is installed whole or the skill was
   extracted alone (`CONVENTIONS.md` §5).
@@ -242,6 +242,9 @@ home instead of five:
   sidecars. Extraction and manual repairs share the same digest records;
   source renames carry those records with the files, and clipping writes
   refuse slots recorded as PDF output.
+- **`shared/scripts/yaml_scalars.py`** — reads quoted scalar values and YAML
+  comments consistently across source identity checks and Wiki frontmatter.
+  It decodes escapes without rewriting notes and reports malformed values.
 - **`shared/scripts/plurals.py`** — the one English singulariser, so the
   duplicate-entry probes agree about which two word forms are the same word.
   Its two former copies disagreed on every irregular (`hypotheses`, `matrices`,
@@ -301,6 +304,7 @@ python3 shared/scripts/slugify.py --test                       # and the shared 
 python3 shared/scripts/plurals.py --test
 python3 shared/scripts/naming.py --test
 python3 shared/scripts/figure_state.py --test
+python3 shared/scripts/yaml_scalars.py --test
 python3 tests/test_end_to_end.py                              # commands working together
 ```
 

@@ -83,26 +83,26 @@ SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 #: leaves `Prince_UDL`, which silently unpairs every book from its chapters.
 #: The tail is only ever peeled off a stem whose canonical core has already
 #: been matched, which is what `_FULL_RE` below does.
-TAIL = r"(?:_src)?(?:_\d+)?"
+TAIL = r"(?:_src)?(?:_[0-9]+)?"
 
 #: `<Author>_<AbbrevTitle>_<Year>`, no tail.
-STANDALONE_CORE = r"[A-Za-z0-9][A-Za-z0-9-]*_[A-Za-z0-9-]+_(?:\d{4}|nd)"
+STANDALONE_CORE = r"[A-Za-z0-9][A-Za-z0-9-]*_[A-Za-z0-9-]+_(?:[0-9]{4}|nd)"
 
 #: `<standalone core>_<NN>_<ChapterName>`, no tail.  The chapter name admits
 #: no underscore: that is what keeps `_NN_` unambiguous as the boundary
 #: between a book stem and its chapter segment.
-CHAPTER_CORE = STANDALONE_CORE + r"_\d{2}_[A-Za-z0-9-]+"
+CHAPTER_CORE = STANDALONE_CORE + r"_[0-9]{2}_[A-Za-z0-9-]+"
 
 #: A stem this plugin has already produced, either form, tail optional.
 #: Match against the STEM, not the filename — `looks_canonical()` does the
 #: extension stripping for you.
-CANONICAL = re.compile(r"(?:%s)(?:_\d{2}_[A-Za-z0-9-]+)?%s\Z"
+CANONICAL = re.compile(r"(?:%s)(?:_[0-9]{2}_[A-Za-z0-9-]+)?%s\Z"
                        % (STANDALONE_CORE, TAIL))
 
 #: The same shape, with the base, the `_src` marker and the disambiguator
 #: captured separately.  They are NOT one "tail": see `split_tail`.
-_FULL_RE = re.compile(r"\A(?P<base>%s(?:_\d{2}_[A-Za-z0-9-]+)?)"
-                      r"(?P<src>(?:_src)?)(?P<disam>(?:_\d+)?)\Z" % STANDALONE_CORE)
+_FULL_RE = re.compile(r"\A(?P<base>%s(?:_[0-9]{2}_[A-Za-z0-9-]+)?)"
+                      r"(?P<src>(?:_src)?)(?P<disam>(?:_[0-9]+)?)\Z" % STANDALONE_CORE)
 
 #: A chapter stem, tolerating a tail in *either* position.  `book` is always
 #: the tail-free standalone core, so a chapter pairs with its book whatever
@@ -114,7 +114,7 @@ _FULL_RE = re.compile(r"\A(?P<base>%s(?:_\d{2}_[A-Za-z0-9-]+)?)"
 #: it), but recognising it here means a vault that already holds those files
 #: still gets its book skipped instead of every figure written twice.
 _CHAPTER_RE = re.compile(r"\A(?P<book>%s)(?P<mid>(?:_src)?)"
-                         r"_(?P<number>\d{2})_(?P<name>[A-Za-z0-9-]+)"
+                         r"_(?P<number>[0-9]{2})_(?P<name>[A-Za-z0-9-]+)"
                          r"(?P<tail>%s)\Z"
                          % (STANDALONE_CORE, TAIL))
 
@@ -261,6 +261,10 @@ TEST_CASES = [
     ("Prince_UDL_20260_01_Intro",            False, None),
     ("Prince_UDL_2026_1_Intro",              False, None),   # NN not padded
     ("Prince_UDL_2026_01_Sup_Learn",         False, None),   # `_` in the name
+    # Unicode digits are not in SAFE_NAME and cannot be names the writer made.
+    ("Doe_Study_٢٠٢٥",                     False, None),
+    ("Doe_Study_2025_٠١_Intro",             False, None),
+    ("Doe_Study_2025_٢",                   False, None),
 ]
 
 #: Names `SAFE_NAME` must refuse.  Each is a real shape pdf-organizer has been

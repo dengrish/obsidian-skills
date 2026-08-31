@@ -8,9 +8,20 @@ from pathlib import Path
 import zipfile
 
 
+def reject_symlinks(root, path):
+    """Keep source reads and generated writes inside a self-contained tree."""
+    current = root
+    for part in path.relative_to(root).parts:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError("plugin path is a symlink: %s" % current.relative_to(root))
+
+
 def codex_manifest(root):
     """Keep common metadata authored once; add only Codex presentation fields."""
-    manifest = json.loads((root / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+    path = root / ".claude-plugin/plugin.json"
+    reject_symlinks(root, path)
+    manifest = json.loads(path.read_text(encoding="utf-8"))
     manifest["skills"] = "./skills/"
     manifest["interface"] = {
         "displayName": "Obsidian",
@@ -32,12 +43,16 @@ def package_files(root):
     """An allowlist keeps local environments, vault data and Git state out."""
     files = {}
     for name in ("AGENTS.md", "CLAUDE.md", "README.md", "requirements.txt", "requirements-dev.txt"):
+        reject_symlinks(root, root / name)
         files[name] = (root / name).read_bytes()
     for name in (".claude-plugin", "skills", "shared", "tests", "tools"):
+        reject_symlinks(root, root / name)
         for path in sorted((root / name).rglob("*")):
+            if "__pycache__" in path.parts:
+                continue
+            reject_symlinks(root, path)
             if path.is_file() and path.suffix in (".md", ".py", ".json", ".txt"):
-                if "__pycache__" not in path.parts:
-                    files[path.relative_to(root).as_posix()] = path.read_bytes()
+                files[path.relative_to(root).as_posix()] = path.read_bytes()
     files[".codex-plugin/plugin.json"] = codex_manifest(root)
     return files
 
@@ -60,10 +75,15 @@ def main():
     parser.add_argument("--check", action="store_true", help="fail if generated files are stale; write nothing")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    outputs = {
-        root / ".codex-plugin/plugin.json": codex_manifest(root),
-        root / "obsidian.plugin": archive_bytes(package_files(root)),
-    }
+    try:
+        for name in (".codex-plugin/plugin.json", "obsidian.plugin"):
+            reject_symlinks(root, root / name)
+        outputs = {
+            root / ".codex-plugin/plugin.json": codex_manifest(root),
+            root / "obsidian.plugin": archive_bytes(package_files(root)),
+        }
+    except (OSError, ValueError) as exc:
+        parser.exit(2, "Cannot build plugin: %s\n" % exc)
     stale = [path for path, content in outputs.items()
              if not path.is_file() or path.read_bytes() != content]
     if args.check:

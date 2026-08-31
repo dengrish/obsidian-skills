@@ -65,6 +65,100 @@ class CompatibilityTests(unittest.TestCase):
                 self.assertNotIn("..", Path(name).parts)
         self.assertEqual(content, build.archive_bytes(expected))
 
+    def test_packaging_does_not_read_through_source_symlinks(self):
+        build = load("build_plugin", ROOT / "tools/build_plugin.py")
+        with tempfile.TemporaryDirectory(prefix="obsidian-package-boundary-") as tmp:
+            root = Path(tmp) / "plugin"
+            root.mkdir()
+            for name in ("AGENTS.md", "CLAUDE.md", "README.md", "requirements.txt", "requirements-dev.txt"):
+                (root / name).write_bytes((ROOT / name).read_bytes())
+            (root / ".claude-plugin").mkdir()
+            (root / ".claude-plugin/plugin.json").write_bytes(
+                (ROOT / ".claude-plugin/plugin.json").read_bytes())
+            (root / "skills").mkdir()
+            foreign = Path(tmp) / "outside.txt"
+            foreign.write_text("not repository content", encoding="utf-8")
+            for name in ("skills/linked.md", "README.md", ".claude-plugin/plugin.json", "shared"):
+                with self.subTest(path=name):
+                    path = root / name
+                    original = path.read_bytes() if path.is_file() else None
+                    if path.exists():
+                        path.unlink()
+                    path.symlink_to(foreign)
+                    try:
+                        with self.assertRaisesRegex(ValueError, "symlink"):
+                            build.package_files(root)
+                    finally:
+                        path.unlink()
+                        if original is not None:
+                            path.write_bytes(original)
+                    self.assertEqual(foreign.read_text(), "not repository content")
+
+    def test_build_does_not_write_through_output_symlinks(self):
+        with tempfile.TemporaryDirectory(prefix="obsidian-build-boundary-") as tmp:
+            root = Path(tmp) / "plugin"
+            (root / "tools").mkdir(parents=True)
+            script = root / "tools/build_plugin.py"
+            script.write_bytes((ROOT / "tools/build_plugin.py").read_bytes())
+            foreign = Path(tmp) / "outside.txt"
+            foreign.write_text("preserve external bytes", encoding="utf-8")
+            (root / "obsidian.plugin").symlink_to(foreign)
+            result = subprocess.run([sys.executable, str(script)], cwd=tmp,
+                                    capture_output=True, text=True, timeout=30)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("symlink", result.stderr)
+            self.assertEqual(foreign.read_text(), "preserve external bytes")
+            self.assertTrue((root / "obsidian.plugin").is_symlink())
+
+    def test_convention_probe_separates_text_parsers_from_slug_writers(self):
+        conventions = load("convention_probe", ROOT / "tests/test_conventions.py")
+        with tempfile.TemporaryDirectory(prefix="obsidian-probe-") as tmp:
+            directory = Path(tmp)
+            sentinel = directory / "must-not-be-written"
+            sources = {
+                "text_parser.py": (
+                    "import re, unicodedata\n"
+                    "TABLE = re.compile(r'-{2,}')\n"
+                    "def lint(text):\n"
+                    f"    open({str(sentinel)!r}, 'w').write(text)\n"
+                    "    return unicodedata.normalize('NFC', text)\n"),
+                "unsafe_slug.py": (
+                    "def slug_stem(title):\n"
+                    f"    open({str(sentinel)!r}, 'w').write(title)\n"
+                    "    return title.lower().replace(' ', '-')\n"),
+                "renamed_slug.py": (
+                    "import re\n"
+                    "def to_name(title):\n"
+                    "    return re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')\n"),
+            }
+            results = {}
+            for name, source in sources.items():
+                path = directory / name
+                path.write_text(source, encoding="utf-8")
+                results[name] = conventions.probe_module(str(path))
+                self.assertIsNone(conventions.probe_failure(results[name], name))
+            self.assertEqual(results["text_parser.py"]["screened"], [])
+            self.assertEqual(results["text_parser.py"]["producers"], [])
+            self.assertIn("slug_stem", results["unsafe_slug.py"]["screened"])
+            self.assertTrue(results["unsafe_slug.py"]["defines"]["slug_stem"])
+            detected = results["renamed_slug.py"]["producers"]
+            self.assertEqual([item["name"] for item in detected], ["to_name"])
+            self.assertFalse(detected[0]["delegates"])
+            self.assertTrue(any(case[0] == "C++" for case in detected[0]["diffs"]))
+            self.assertFalse(sentinel.exists())
+
+    def test_heading_check_preserves_import_paths_and_reports_unreadable_rules(self):
+        conventions = load("convention_headings", ROOT / "tests/test_conventions.py")
+        before = list(sys.path)
+        module = conventions.mod_generic(str(ROOT / "skills/paper-summarizer/scripts/note_lint.py"))
+        self.assertIsNotNone(module)
+        self.assertEqual(sys.path, before)
+        report = conventions.Report()
+        with patch.object(conventions, "mod_generic", return_value=None):
+            conventions.check_note_headings(report, (ROOT / "shared/CONVENTIONS.md").read_text())
+        self.assertEqual(report.exit_code(), 1)
+        self.assertTrue(any("GENERIC_HEADINGS" in row[3] for row in report.by_status("FAIL")))
+
     def test_packaged_helpers_run_outside_plugin_directory(self):
         # Hosts execute helpers while their cwd is the user's vault, and
         # plugin cache paths commonly contain spaces. Exercise the real CLIs.

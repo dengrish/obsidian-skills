@@ -88,10 +88,11 @@ way for code to end up running at import is refused with a file and a line.
 Run this on a tree you would run the skills from; that is the same trust
 decision, and no smaller.
 
-Stdlib only, Python 3.8+.  ~10s on the shipped tree: the walk is done once and
+The harness uses stdlib, Python 3.9+; the script self-tests also need the runtime
+dependencies in requirements-dev.txt. The walk is done once and
 cached, the enum extractors skip any file that cannot possibly hold the list,
-and the out-of-process work -- 18 probed modules plus the 19 bundled self-test
-suites, each in a subprocess of its own -- is the bulk of the wall clock.
+and the out-of-process module probes and bundled self-test suites account for
+most of the runtime.
 """
 
 from __future__ import annotations
@@ -1557,7 +1558,7 @@ def _slug_producers(mod, fingerprinted):
     harness declines to execute has not agreed with the canonical module, it
     has gone unchecked, and silence there is the shape this whole file exists
     to prevent.  Only candidates that *claim* to be an implementation (a
-    §4a-published name, or a fingerprinted module) are listed -- a screened
+    §4a-published name) are listed -- a screened
     `normalize_fig_num` is not a slug function and reporting it would be
     noise.
     """
@@ -1574,7 +1575,12 @@ def _slug_producers(mod, fingerprinted):
         if id(obj) in seen or not _takes_one_title(obj):
             continue
         if not _looks_pure(obj, mod):
-            if name.lstrip("_") in CANONICAL_SLUG_API or fingerprinted:
+            # A weak module fingerprint widens discovery, but cannot make an
+            # unrelated CLI/linter claim to be a slug implementation. Unicode
+            # filename comparison plus a Markdown table separator already
+            # supplies two fingerprints. Strong module-level evidence remains
+            # checked separately against SLUG_FINGERPRINT_UNVERIFIABLE.
+            if name.lstrip("_") in CANONICAL_SLUG_API:
                 screened.append(name)
             continue
         if _produces_slugs(obj):
@@ -1675,7 +1681,7 @@ def _check_slug_claims(rep, check, canon):
 #: cheapest way to keep the suite green was to leave the gaps alone -- and
 #: CONVENTIONS.md §4a named three real ones (Greek capitals, final sigma, CJK)
 #: that stayed open for exactly that reason.  A shrink is still a failure.
-SLUG_SELFTEST_MIN = 56          # the 2026-08-24 tally; shrink = FAIL
+SLUG_SELFTEST_MIN = 61          # the 2026-08-31 tally; shrink = FAIL
 
 
 def _check_slug_exports(rep, check, canon):
@@ -2125,7 +2131,7 @@ FIG_EMBED_RE = re.compile(r"^!\[\[([^\]\n]+)\]\][ \t]*$", re.M)
 #: Floor, not a pin -- exactly like SLUG_SELFTEST_MIN.  Coverage may grow
 #: freely; only a shrink fails, which is what stops a case being quietly
 #: deleted to make a regression go away.
-NAMING_SELFTEST_MIN = 128       # the 2026-08-24 tally; shrink = FAIL
+NAMING_SELFTEST_MIN = 137       # the 2026-08-31 tally; shrink = FAIL
 
 #: The same idea applied to a *corpus* rather than a suite: how many stated
 #: figure filenames `figure-naming` (c) must still find.  295 today.  The
@@ -5483,31 +5489,30 @@ SELFTEST_TALLY = re.compile(
 #: fails.  Lowering a number here is a deliberate, reviewable statement that
 #: cases went away; a script with no line is checked for a clean tally only.
 SELFTEST_MIN_CASES = {
-    # Re-tuned to the exact tallies of 2026-08-30 (the v1.32 round grew the
-    # suites and left the floors behind -- auto_fig_bbox could silently lose
-    # 94 cases, a third of its suite, with the harness green).  Raising after
-    # growth is the mirror duty of the "lowering is a deliberate, reviewable
-    # statement" rule below.
-    "shared/scripts/figure_state.py": 5,
-    "shared/scripts/naming.py": 128,
+    # Re-tuned to the exact tallies of 2026-08-31. Raising after growth is the
+    # mirror duty of the "lowering is a deliberate, reviewable statement" rule
+    # below: new regression cases must not disappear with the harness green.
+    "shared/scripts/figure_state.py": 6,
+    "shared/scripts/naming.py": 137,
     "shared/scripts/plugin_paths.py": 95,
     "shared/scripts/plurals.py": 196,
-    "shared/scripts/slugify.py": 56,
-    "skills/clipping-processor/scripts/dedup_index.py": 93,
-    "skills/clipping-processor/scripts/fetch_images.py": 265,
+    "shared/scripts/slugify.py": 61,
+    "shared/scripts/yaml_scalars.py": 7,
+    "skills/clipping-processor/scripts/dedup_index.py": 100,
+    "skills/clipping-processor/scripts/fetch_images.py": 280,
     "skills/clipping-processor/scripts/slug.py": 117,
-    "skills/paper-summarizer/scripts/note_lint.py": 155,
-    "skills/paper-summarizer/scripts/paper_scan.py": 90,
-    "skills/paper-summarizer/scripts/paper_text.py": 37,
-    "skills/pdf-figure-extractor/scripts/auto_fig_bbox.py": 292,
-    "skills/pdf-figure-extractor/scripts/batch_extract.py": 156,
-    "skills/pdf-figure-extractor/scripts/extract_figures.py": 94,
+    "skills/paper-summarizer/scripts/note_lint.py": 169,
+    "skills/paper-summarizer/scripts/paper_scan.py": 104,
+    "skills/paper-summarizer/scripts/paper_text.py": 39,
+    "skills/pdf-figure-extractor/scripts/auto_fig_bbox.py": 296,
+    "skills/pdf-figure-extractor/scripts/batch_extract.py": 186,
+    "skills/pdf-figure-extractor/scripts/extract_figures.py": 100,
     "skills/pdf-figure-extractor/scripts/render_page.py": 38,
-    "skills/pdf-organizer/scripts/organize.py": 157,
-    "skills/wiki-builder/scripts/find_collisions.py": 50,
-    "skills/wiki-builder/scripts/lint_entry.py": 117,
-    "skills/wiki-builder/scripts/vault_index.py": 47,
-    "skills/wiki-linter/scripts/scan_vault.py": 129,
+    "skills/pdf-organizer/scripts/organize.py": 191,
+    "skills/wiki-builder/scripts/find_collisions.py": 58,
+    "skills/wiki-builder/scripts/lint_entry.py": 130,
+    "skills/wiki-builder/scripts/vault_index.py": 61,
+    "skills/wiki-linter/scripts/scan_vault.py": 147,
 }
 
 
@@ -6112,14 +6117,8 @@ def mod_generic(path):
     earlier, and an import-time hang in this in-process exec would have wedged
     the harness.  Returns None if it is refused or will not import.
     """
-    import importlib.util
     try:
-        if module_scope_effects(read(path)):
-            return None
-        spec = importlib.util.spec_from_file_location("_ns_probe", path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        return mod
+        return _load_module(path, "_ns_probe", screen=True)
     except Exception:
         return None
 
@@ -6209,13 +6208,17 @@ def check_note_headings(rep, conv):
                  % ", ".join(missing_row), rel(skill))
         return
     generic = getattr(mod_generic(lint), "GENERIC_HEADINGS", None)
-    if generic is not None:
-        loose = [r for r in stated if r.casefold() not in generic]
-        if loose:
-            rep.fail(check, "note_lint.py's GENERIC_HEADINGS does not contain %s, "
-                            "so a note headed with that role name would pass"
-                     % ", ".join(loose), rel(lint))
-            return
+    if not isinstance(generic, (set, frozenset, list, tuple)):
+        rep.fail(check, "note_lint.py's GENERIC_HEADINGS could not be read as "
+                        "a collection; its agreement with the section roles "
+                        "was not checked", rel(lint))
+        return
+    loose = [r for r in stated if r.casefold() not in generic]
+    if loose:
+        rep.fail(check, "note_lint.py's GENERIC_HEADINGS does not contain %s, "
+                        "so a note headed with that role name would pass"
+                 % ", ".join(loose), rel(lint))
+        return
     rep.saw(check, "section roles stated in both places", len(stated))
     rep.saw(check, "role-table rows cross-checked", len(table))
     rep.ok(check, "SKILL.md's canonical block, its step-7 table and "

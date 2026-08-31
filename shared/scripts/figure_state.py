@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import os
 import re
+import stat
 import tempfile
 import unicodedata
 
@@ -128,12 +129,24 @@ def rewrite_sidecar(text, replacements, kind):
     return result
 
 
-def write_manifest(path, manifest, header=""):
-    """Atomically write valid ownership records, never replacing a symlink."""
-    body = header + "".join("%s\t%s\n" % (key, manifest[key]) for key in sorted(manifest))
-    parse_manifest(body)
+def check_manifest_writable(path):
+    """Preflight a sidecar; atomic replacement must respect a read-only file."""
     if os.path.islink(path):
         raise ValueError("%s is a sidecar symlink; refusing to replace it" % path)
+    if os.path.exists(path):
+        mode = os.stat(path).st_mode
+        if not stat.S_ISREG(mode):
+            raise ValueError("%s is not a regular sidecar file" % path)
+        if not mode & 0o222 or not os.access(path, os.W_OK):
+            raise ValueError("%s is a read-only sidecar; refusing to replace it" % path)
+
+
+def write_manifest(path, manifest, header=""):
+    """Atomically write valid ownership records, preserving existing modes."""
+    body = header + "".join("%s\t%s\n" % (key, manifest[key]) for key in sorted(manifest))
+    parse_manifest(body)
+    check_manifest_writable(path)
+    mode = stat.S_IMODE(os.stat(path).st_mode) if os.path.exists(path) else None
     directory = os.path.dirname(path) or "."
     os.makedirs(directory, exist_ok=True)
     temporary = None
@@ -142,6 +155,8 @@ def write_manifest(path, manifest, header=""):
                                          prefix=".figure-manifest-", delete=False) as fh:
             temporary = fh.name
             fh.write(body)
+            if mode is not None:
+                os.fchmod(fh.fileno(), mode)
         os.replace(temporary, path)
     finally:
         if temporary and os.path.exists(temporary):
@@ -199,6 +214,29 @@ def self_test():
                 self.assertEqual(open(path, "rb").read(), before)
                 self.assertEqual(read_manifest(path), {"A_fig_1.png": "a" * 64})
                 self.assertEqual(read_manifest(os.path.join(directory, "absent")), {})
+
+        def test_read_only_and_linked_sidecars_remain_untouched(self):
+            with tempfile.TemporaryDirectory() as directory:
+                path = os.path.join(directory, MANIFEST_FILE)
+                write_manifest(path, {"A_fig_1.png": "a" * 64})
+                before = open(path, "rb").read()
+                os.chmod(path, 0o444)
+                try:
+                    with self.assertRaises(ValueError):
+                        write_manifest(path, {"B_fig_1.png": "b" * 64})
+                    self.assertEqual(open(path, "rb").read(), before)
+                    self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o444)
+                finally:
+                    os.chmod(path, 0o640)
+                write_manifest(path, {"B_fig_1.png": "b" * 64})
+                self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o640)
+                link = os.path.join(directory, "linked.tsv")
+                os.symlink(path, link)
+                before = open(path, "rb").read()
+                with self.assertRaises(ValueError):
+                    write_manifest(link, {"C_fig_1.png": "c" * 64})
+                self.assertTrue(os.path.islink(link))
+                self.assertEqual(open(path, "rb").read(), before)
 
     output = io.StringIO()
     result = unittest.TextTestRunner(stream=output).run(

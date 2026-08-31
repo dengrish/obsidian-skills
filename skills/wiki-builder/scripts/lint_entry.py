@@ -23,10 +23,10 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
   3   3-dates                 created/updated are YYYY-MM-DD; created <= updated
   4   4-sources               sources: is a list of PDF wikilinks with positive
                               page anchors or unanchored markdown wikilinks
-  4   4-duplicate-source      no two sources: items name the same document: a
-                              .md item whose stem equals a .pdf item's stem is
-                              the PDF and its paper-summarizer note, i.e. one
-                              source recorded twice (stems compared case- and
+  4   4-duplicate-source      review a same-stem PDF/Markdown source pair;
+                              provenance must establish whether the note is
+                              about the PDF or is an independent clipping
+                              (stems compared case- and
                               NFC-insensitively, anchor and folder stripped)
   5   5-slug                  re-run slugify on title:; must equal the filename
   7   7-description           <= 110 chars (count reported), plain text, no
@@ -331,7 +331,10 @@ def _valid_date(value):
 
 
 def _style_of(raw):
-    return unquote_scalar(raw)[1]
+    try:
+        return unquote_scalar(raw)[1]
+    except ValueError:
+        return "invalid"  # The parser already reports the malformed scalar.
 
 
 def source_stem(item):
@@ -368,9 +371,16 @@ def source_stem(item):
 
 
 def parse_flashcards(flashcard_lines):
-    """Group the Flashcards section into cards (blank-line separated)."""
+    """Group visible card content, excluding preserved HTML review metadata.
+
+    Blank lines inside or between line-4+ comments do not start another
+    card. Counting them as cards prescribed deleting the stored schedule.
+    The source text is never changed; only the linting view omits comments.
+    """
+    visible = re.sub(r"<!--.*?(?:-->|\Z)", "", "\n".join(flashcard_lines),
+                     flags=re.S)
     cards, buf = [], []
-    for line in flashcard_lines:
+    for line in visible.split("\n"):
         if line.strip() == "":
             if buf:
                 cards.append(buf)
@@ -499,10 +509,14 @@ def _check_read(fm, findings):
     if field is None:
         return  # The missing-key finding already routes to the user.
     raw = field.raw_value.strip()
-    value, style = unquote_scalar(raw)
+    try:
+        value, style = unquote_scalar(raw)
+    except ValueError:
+        value, style = None, "invalid"
     if field.kind == "scalar" and style == "bare" and raw.lower() in {"true", "false"}:
         return
-    if field.kind == "scalar" and value.lower() in {"true", "false", "yes", "no", "0", "1"}:
+    if (field.kind == "scalar" and isinstance(value, str)
+            and value.lower() in {"true", "false", "yes", "no", "0", "1"}):
         findings.append(_f(
             "2-quoting" if style in {"double", "single"} else "2-read-state", "error",
             "read: must be a bare true/false boolean; correct the spelling "
@@ -526,6 +540,10 @@ def _check_sources(fm, findings):
             "4-sources", "error", "sources: must be a list, not a scalar",
             {"line": field.line}))
     for value, line in zip(field.values, field.item_lines):
+        if value is None:
+            findings.append(_f("4-sources", "error", "sources: contains a null or invalid item",
+                               {"line": line}))
+            continue
         if value == "stub":
             continue  # _check_stub_sources enforces the legacy sole-marker rule.
         if re.fullmatch(r"\[\[[^\[\]\r\n|#]+\.(?i:pdf)#page=[1-9][0-9]*\]\]", value):
@@ -638,6 +656,15 @@ def _check_tags(fm, findings, is_stub):
     if field is None:
         return
     values = [v for v in field.values if v not in (None, "")]
+    # An unquoted # tag is a comment, not a parsed value. Its original text
+    # still tells the user which discipline was lost and how to repair it.
+    for raw, value, line in zip(field.raw_items, field.values, field.item_lines):
+        if raw.startswith("#"):
+            findings.append(_f(
+                "8-tags", "error",
+                "unquoted %s parses as a YAML comment -- the discipline is "
+                "silently lost; write - \"%s\"" % (raw, raw),
+                {"line": line, "raw": raw}))
     if not values:
         if is_stub:
             findings.append(_f("8-tags", "error",
@@ -645,15 +672,8 @@ def _check_tags(fm, findings, is_stub):
                                "is not allowed on a stub"))
         return
     for raw, value, line in zip(field.raw_items, field.values, field.item_lines):
-        style = _style_of(raw)
-        if style != "double":
-            # already reported by the quoting check; add the specific failure mode
-            if style == "bare" and raw.startswith("#"):
-                findings.append(_f(
-                    "8-tags", "error",
-                    "unquoted %s parses as a YAML comment -- the discipline is "
-                    "silently lost; write - \"%s\"" % (raw, raw),
-                    {"line": line, "raw": raw}))
+        if not isinstance(value, str) or not value:
+            continue
         if not value.startswith("#"):
             findings.append(_f("8-tags", "error",
                                "tag %r is not #-prefixed" % value,
@@ -943,7 +963,7 @@ def _check_sentence_length(sections, findings, is_stub):
 # Keep these in lockstep with scan_vault.py (the two tools must agree).
 # --------------------------------------------------------------------------
 
-_FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
+_FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 
 
 def strip_fenced(text):
@@ -965,9 +985,14 @@ def strip_fenced(text):
         m = _FENCE_RE.match(ln)
         if m and fence is None:
             fence = m.group(1)
+            # Retain nested/list fences while rejecting a more-indented sample
+            # as the closer of a top-level fence. Tabs count as four columns.
+            fence_indent = max(3, len(ln[:m.start(1)].expandtabs(4)))
             out.append("")
             continue
-        if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
+        if (m and m.group(1)[0] == fence[0]
+                and len(m.group(1)) >= len(fence) and not m.group(2).strip()
+                and len(ln[:m.start(1)].expandtabs(4)) <= fence_indent):
             fence = None
             out.append("")
             continue
@@ -1364,15 +1389,13 @@ def _check_source_duplicates(fm, findings):
     ``paper-summarizer`` writes a note into ``Articles/`` for every PDF it
     summarises, named after that PDF's stem, so one document sits in the vault
     under two names -- ``Sources/PDFs/X.pdf`` and ``Articles/X.md`` -- and
-    both are legal ``sources:`` values.  An entry carrying both records ONE document as
-    two sources: it inflates the entry's apparent provenance, and the ``.md``
-    half carries no ``#page=N``, so it also reads as a source with no
-    locatable position.  Keep the PDF -- it is the one that can carry the
-    anchor -- and drop the ``.md``.
+    both are legal ``sources:`` values. However, an independent web clipping
+    can have the same stem too. This check has no source-note provenance,
+    so it reports a review candidate, never a deletion instruction.
 
     Only a stem collision ACROSS the two extensions is a finding.  An entry
     may legitimately cite several distinct PDFs and several distinct markdown
-    clippings, and a web clipping has no PDF twin at all, so a ``.md`` source
+    clippings, so a ``.md`` source
     is only suspect when a ``.pdf`` source of the same stem sits beside it.
     """
     field = fm.get("sources")
@@ -1392,14 +1415,14 @@ def _check_source_duplicates(fm, findings):
             continue
         pdf_value, pdf_line = pdfs[stem]
         findings.append(_f(
-            "4-duplicate-source", "error",
-            "%s and %s name the same document -- the PDF and the "
-            "note written about it -- so one source is "
-            "recorded twice; delete the .md item and keep the .pdf one, which "
-            "is the only one of the two that can carry a #page=N anchor"
+            "4-duplicate-source", "warning",
+            "%s and %s share a filename stem; review the markdown note's "
+            "decoded sources: (or legacy source:) to establish whether it "
+            "summarizes that PDF. A URL-origin clipping can be independent. "
+            "Preserve both sources until their identity is confirmed"
             % (md_value, pdf_value),
-            {"stem": stem, "delete": md_value, "delete_line": md_line,
-             "keep": pdf_value, "keep_line": pdf_line}))
+            {"stem": stem, "markdown": md_value, "markdown_line": md_line,
+             "pdf": pdf_value, "pdf_line": pdf_line, "review_only": True}))
 
 
 # --------------------------------------------------------------------------
@@ -1531,7 +1554,9 @@ def lint_path(target, severity_floor=None):
               "summary": {}, "problems": []}
 
     if os.path.isdir(target):
-        paths = iter_markdown_files(target)
+        def walk_error(exc):
+            report["problems"].append("unreadable wiki directory: %s" % exc)
+        paths = iter_markdown_files(target, on_error=walk_error)
         folder_mode = True
     elif os.path.isfile(target):
         paths = [target]
@@ -1569,7 +1594,7 @@ def lint_path(target, severity_floor=None):
         "findings": total,
         "by_severity": dict(sorted(by_severity.items())),
         "by_item": dict(sorted(by_item.items())),
-        "clean": total == 0,
+        "clean": total == 0 and not report["problems"],
     }
     return report
 
@@ -1668,6 +1693,47 @@ def run_self_test():
           items(good), [])
     check("the clean STUB produces no finding either",
           items(stub, "precision.md"), [])
+    commented = good.replace('title: "ROC curve"', 'title: "ROC curve" # user annotation')
+    commented = commented.replace('"auroc"', '"aur\\u006fc" # an escaped alias')
+    commented = commented.replace('sources:\n', 'sources: # reference\n# provenance annotation\n')
+    commented = commented.replace('read: false', 'read: true # already read')
+    check("valid YAML escapes and comments do not cause metadata or body repairs",
+          items(commented), [])
+    for raw in ('"Malformed "yaml""', '"bad\\q"'):
+        bad = lint_text(mutate('title: "ROC curve"', 'title: ' + raw), 'roc-curve.md')
+        check("malformed YAML produces a validity finding rather than a fabricated title",
+              "1-valid-yaml" in _st_items(bad), True)
+    for raw in ('null', '~'):
+        bad = lint_text(mutate('title: "ROC curve"', 'title: ' + raw), 'roc-curve.md')
+        check("a null title never creates a rename target",
+              (bad['title'], any((f.get('evidence') or {}).get('expected_filename')
+                                for f in bad['findings'])), (None, False))
+    pair = lint_text(mutate('  - "[[Doe_X_2025.pdf#page=2]]"\n',
+                            '  - "[[Doe_X_2025.pdf#page=2]]"\n  - "[[Doe_X_2025.md]]"\n'),
+                     'roc-curve.md')
+    pair_findings = [f for f in pair['findings'] if f['item'] == '4-duplicate-source']
+    check("same-stem provenance has no deletion instruction or deletion payload",
+          [(f['severity'], f['evidence'].get('review_only'), 'delete' in f['evidence'])
+           for f in pair_findings], [('warning', True, False)])
+
+    for review_tail in (
+            '<!--SR:!2026-09-20,30,250!2026-09-21,31,250-->\n\n<!-- preserved state -->\n',
+            '<!--SR:\n!2026-09-20,30,250\n\n!2026-09-21,31,250\n-->\n'):
+        studied = good.replace('read: false', 'read: true').replace('\n??\n', '\n!!\n') + review_tail
+        check("blank lines in preserved review comments are not extra cards",
+              items(studied), [])
+        extra = studied + '\nA different main claim.\n??\nAnother term\n'
+        check("review comments do not hide a genuine extra card",
+              any(f.get('evidence', {}).get('cards') == 2
+                  for f in lint_text(extra, 'roc-curve.md')['findings']
+                  if isinstance(f.get('evidence'), dict)), True)
+    for fence in ('```', '~~~'):
+        example = good.replace('\n**Related:**',
+                               '\n' + fence + 'text\n' + fence + 'not-a-close\n'
+                               '[[precision]]\n' + fence + '\n\n[[precision]]\n\n**Related:**')
+        check("a closing code fence may not carry trailing text: %s" % fence,
+              [f for f in lint_text(example, 'roc-curve.md')['findings']
+               if f['item'] in ('10-duplicate-wikilink', '19-flashcards')], [])
 
     for alias, surface in (("attribute", "attributes"), ("hypothesis", "hypotheses")):
         alias_text = mutate('"auroc"', json.dumps(alias)).replace(
@@ -2138,6 +2204,15 @@ def run_self_test():
               "0-encoding" in _st_items(lint_file(binary)), True)
         check("a missing path is a problem, not a traceback",
               lint_path(os.path.join(tmp, "nope"))["problems"] != [], True)
+        from unittest.mock import patch
+        def unreadable_walk(root, followlinks=False, onerror=None):
+            if onerror:
+                onerror(PermissionError(13, "permission denied", os.path.join(root, "private")))
+            return iter(())
+        with patch.object(os, "walk", unreadable_walk):
+            inaccessible = lint_path(wiki)
+        check("unreadable directories cannot certify the folder's alias audit clean",
+              (inaccessible["summary"]["clean"], bool(inaccessible["problems"])), (False, True))
 
         floor = lint_path(wiki, severity_floor="error")
         check("--severity error drops warnings and info",

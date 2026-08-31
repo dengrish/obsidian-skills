@@ -55,7 +55,7 @@ python3 '<skill>/scripts/batch_extract.py' \
 - **Document folder:** `<vault>/Sources/PDFs/`, walked recursively — this is `--src`. It is the same tree `paper-summarizer` reads; the two produce different artifacts and don't conflict, and running this skill first is what puts figures on disk for that one to embed.
 - **Not `<vault>/Inbox/`.** New files land there unorganized, and a figure keyed to `download (1)` is keyed to a name that is about to change — which is exactly what `batch_extract.py` refuses (*Run `pdf-organizer` first*). Organize first; the documents move to `Sources/PDFs/` on their way.
 
-The script is idempotent — figures whose PNG already exists are skipped, so re-running after dropping new PDFs into Sources/PDFs/ just processes the new ones. Pass `--overwrite` to force re-extraction, or `--dry-run` to see what would be extracted without writing anything. `scripts/extract_figures.py` skips existing files the same way, for the same reason: both write into the same flat `Sources/Images/`, and the two must not silently undo each other's work.
+The script is idempotent: verified existing figures are skipped, so re-running after dropping new PDFs into Sources/PDFs/ just processes the new ones. Pass `--overwrite` to re-extract verified output, or `--dry-run` to preview without writing anything. An occupied name without proven ownership is refused, including with `--overwrite`. `scripts/extract_figures.py` applies the same protection in the shared flat image folder.
 
 **Read the summary before replying.** Two of its buckets describe failures that are invisible everywhere else in the pipeline — **PARTIAL detection** (the body text cites figure numbers no caption matched) and **byte-identical duplicates** (one figure written under two stems). Neither is an error; both are silent losses if you skip past them. See *Edge cases the summary surfaces*.
 
@@ -109,7 +109,7 @@ Letter-suffixed files from earlier runs (`Biswas_LowNProteinEng_2021_fig_1a.png`
 
 `--src PATH` — source directory (walked recursively) **or a single `.pdf` file**. Required.
 `--out DIR` — output directory for cropped PNGs. Required.
-`--overwrite` — re-extract figures even if the target PNG already exists. Default: skip existing.
+`--overwrite` — re-extract verified existing output. Unknown or conflicting occupants are still refused. Default: skip verified existing figures.
 `--dry-run` — detect and report, but write nothing at all: no PNGs, no review ledger, not even the `--out` directory. Combined with `--mark-reviewed` it validates the `STEM:FIG` syntax and counts those bboxes as reviewed *for the preview*, printing `Would record` rather than `Recorded` — the mark itself lands only on a real run.
 `--dpi N` — render resolution. Default: 250.
 `--ed-prefix PREFIX` — filename prefix for `Extended Data Figure N` captions. Default: `S` (collapses into supplementary). Pass `ED` to keep them distinct.
@@ -123,7 +123,7 @@ Letter-suffixed files from earlier runs (`Biswas_LowNProteinEng_2021_fig_1a.png`
 
 ## Subfolder behavior
 
-Source paths are walked recursively, but **output is flat** — every PNG lands directly in the output directory. The `pdf_stem` in each filename disambiguates across subfolders. If two source PDFs share the same filename stem (which would cause their figures to overwrite each other), the run-end summary surfaces a collision warning so the user can rename one.
+Source paths are walked recursively, but **output is flat** — every PNG lands directly in the output directory. PDFs must have distinct stems across that whole source scope, including case and Unicode normalization variants. Colliding sources are refused before either can write or claim images. Other PDFs continue, and the run exits nonzero so the conflict cannot be mistaken for a completed extraction.
 
 ## Split books
 
@@ -154,9 +154,9 @@ After processing, the script prints a summary that groups PDFs by outcome. Use t
 - **Failed to write** — figures that were *detected* but never reached disk: a crop rectangle that collapsed to zero area (the search region got squeezed to nothing), or a render error. These are called out separately because without them the "figures extracted" count silently disagrees with what is in `Sources/Images/`. Each needs a manual crop.
 - **PDFs with no figure captions detected** — text-bearing PDFs where the caption regex matched nothing. Common when a paper uses a non-standard caption style (e.g., bold "Fig 1" with no period or trailing text), or really has no figures.
 - **PDFs with no extractable text** — pure scans without an OCR layer. The script can't find captions in these. Recommend running `ocrmypdf '<input>.pdf' '<output>.pdf'` first (single-quoted: the paths are the user's, not ours — `CONVENTIONS.md` §1b), then re-running the skill. `ocrmypdf` is not preinstalled on macOS — if `command -v ocrmypdf` finds nothing, say so and name the install (`brew install ocrmypdf`, or `python3 -m pip install ocrmypdf` plus a Tesseract install) rather than reporting the file as unprocessable.
-- **PDFs that could not be opened** — the file is not a readable PDF at all: a truncated download, an HTML error page saved with a `.pdf` extension, a corrupt file. **This is not an OCR problem** and is reported in its own bucket precisely so it doesn't get an `ocrmypdf` recommendation that cannot help. Tell the user which file it is and that it needs re-downloading.
+- **PDFs that could not be opened or fully read** — a truncated download, an HTML error page saved with a `.pdf` extension, or a damaged page encountered during detection. **This is not an OCR problem.** Name the file and the reported error; inspect or re-download it. Completed crops retain their ownership records, other PDFs continue, and the run exits nonzero. An ordinary interruption also saves ownership of completed crops before stopping.
 - **PDFs with zero pages** — structurally valid but empty. Also not an OCR problem; also its own bucket.
-- **Stem collisions** — two source PDFs producing the same filename stem (rare but happens with `paper.pdf` in two subfolders). The user should rename one before re-running. Worth surfacing prominently: because the output folder is flat, both write to **one** set of filenames. Under the default (no `--overwrite`) the **first** PDF processed wins and the second's figures are silently skipped as already-existing — so `wiki-builder` embeds the first source's images in entries for the **second**. With `--overwrite` the last one processed wins instead. Either way one source's entries get another source's pictures, and nothing downstream can tell.
+- **Stem collisions** — two source PDFs share one output identity. Neither source is extracted or adopted as legacy output, including with `--overwrite`; other uniquely named PDFs may still run. Rename the colliding sources with `pdf-organizer` before retrying, because a flat image folder cannot distinguish their figures.
 
 ## Setting a crop by hand
 
@@ -198,16 +198,20 @@ python3 '<skill>/scripts/batch_extract.py' --src ... --out ... --mark-reviewed p
 - **`render_page.py` gives you pixels; `extract_figures.py`'s `--crop` takes points.** Multiply by `72 / DPI` — **0.72** at the default 100 DPI. A US Letter page is 612×792 pt and 850×1100 px at 100 DPI. Skip the conversion and the crop lands ~39% too far right and too far down: a wrong picture, not an error message. `render_page.py` prints the factor on every render, and `--dpi 72` makes the two the same number.
 - **`y1` must stay above the caption's `y0`,** or the caption text ends up in the PNG — the one thing this skill promises it never does. `auto_fig_bbox.py`'s table prints the caption rect next to every bbox for exactly this; use `y1 = cap_y0 - 0.5`. `extract_figures.py` warns by name when a crop reaches into a detected caption (`--no-caption-check` turns it off).
 
-**Overwrite behaviour is the same in both scripts: existing PNGs are skipped, `--overwrite` replaces them.** They write into the same flat `Sources/Images/`, so a manual crop and a batch run would otherwise silently undo each other depending only on which ran last. When you *are* redoing a crop by hand, pass `--overwrite` — it will tell you it skipped otherwise.
+**Overwrite behaviour is the same in both scripts: verified existing PNGs are skipped, and `--overwrite` replaces verified output.** When redoing a crop by hand, pass `--overwrite`; without it the verified crop is left intact.
 
 When an ownership manifest exists, a manual crop updates its own digest so the
 next batch recognizes the repair and leaves it intact. Both scripts refuse a
 conflicting or untracked occupied name even with `--overwrite`; inspect that
 file and reconcile its ownership first. A malformed manifest is a blocker,
-not permission to reset it or claim every image. Manual cropping leaves a
-legacy folder with no manifest in that state; the batch migration remains the
-operation that reports and records its adoption of historical output matching
-canonical PDFs in the requested source scope.
+not permission to reset it or claim every image. Manual cropping may add a new
+image in a legacy folder with no manifest, but cannot replace any occupied name
+there. Inspect legacy images and run the scoped batch migration before repairing
+an existing crop; that migration reports and records historical output matching
+canonical, uniquely named PDFs in the requested source scope. A protected or
+symlinked manifest blocks before extraction or review marks are written. A late
+manifest-save failure makes the run fail and must be resolved before retrying;
+do not delete the manifest to make untracked PNGs appear owned.
 
 `auto_fig_bbox.py --emit extract --stem '<pdf_stem>'` prints the whole `extract_figures.py` invocation with one `--crop` per detected figure, ready to paste — the fastest way to fix a batch of bad crops without re-running the batch. It emits the current Python interpreter and the script's absolute path, so it runs from the vault root as printed; the one thing you must edit is `--out`, deliberately emitted as the placeholder `/EDIT-THIS/path/to/vault/Sources/Images` because this script cannot know your vault and a bare relative `Sources/Images` would silently resolve against whatever directory you pasted into. Edit the coordinates in place too, and add `--overwrite` if the batch already wrote those files. Figures whose bbox collapsed to zero area are left out of it (they would abort the batch) and counted on stderr.
 

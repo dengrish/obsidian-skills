@@ -80,8 +80,10 @@ import json
 import os
 import re
 import sys
+import unicodedata
 
 from naming import chapter_book_stem, core_stem, looks_canonical, stem_of
+from yaml_scalars import parse_scalar
 
 #: Figure-label namespaces, ranked so a listing reads main → appendix →
 #: supplementary → Supporting Information → Extended Data.  Longest prefix
@@ -109,23 +111,13 @@ STATUSES = ("book", "chapter", "unorganized", "collision", "legacy",
 #: summarised.  Case-insensitive, and the same two-key logic as
 #: clipping-processor's `dedup_index.read_source`: the two skills read each
 #: other's notes out of one folder and must agree about what is parseable.
-_SOURCES_KEY_RE = re.compile(r"\Asources\s*:\s*\Z", re.I)
-_SOURCES_ITEM_RE = re.compile(r"\A\s+-\s*(.*)\Z")
+_SOURCES_KEY_RE = re.compile(r"\Asources\s*:\s*(?:#.*)?\Z", re.I)
+_SOURCES_ITEM_RE = re.compile(r"\A[ \t]*-[ \t]+(.*)\Z")
 _SOURCE_RE = re.compile(r"\Asource\s*:\s*(.*)\Z", re.I)
 
-#: An unquoted YAML scalar ends at a ` #` comment.  The whitespace is required
-#: by YAML and is what keeps a `#` INSIDE a value -- a `#page=N` anchor -- out
-#: of it.  Same rule as `dedup_index._yaml_scalar`, for the same reason.
-_TRAILING_COMMENT_RE = re.compile(r"\s+#.*\Z")
-
-
 def _yaml_scalar(raw):
-    """The value of a YAML scalar: quotes removed, a trailing comment removed."""
-    val = raw.strip()
-    if len(val) >= 2 and val[0] in "\"'":
-        end = val.find(val[0], 1)
-        return (val[1:end] if end != -1 else val[1:]).strip()
-    return _TRAILING_COMMENT_RE.sub("", val).strip()
+    """Decode source scalars using the same rules as clipping dedup."""
+    return parse_scalar(raw)[0]
 
 #: The document a `source:` wikilink names, if it is one at all.  Obsidian
 #: resolves a wikilink by basename, so only the last path segment matters, and
@@ -148,6 +140,10 @@ def panel_parent(label):
     return (match.group(1), match.group(2)) if match else (label, "")
 
 
+def _name_key(name):
+    return unicodedata.normalize("NFC", name).casefold()
+
+
 def label_sort_key(label):
     """Order figure labels the way a reader expects to meet them.
 
@@ -163,7 +159,7 @@ def label_sort_key(label):
         if base.startswith(prefix) and re.match(r"\A-?\d", tail):
             rank, rest = r, tail.lstrip("-")
             break
-    nums = tuple(int(p) if p.isdigit() else _BIG
+    nums = tuple(int(p) if p.isdecimal() else _BIG
                  for p in rest.split("-") if p)
     return (rank, nums or (_BIG,), panel, label)
 
@@ -179,8 +175,8 @@ def figures_for(attachments, stem):
     total loss on a vault holding figures written before the spellings
     converged (§8c).
     """
-    prefix = stem + "_fig"
-    fold = prefix.casefold()
+    stem_key = _name_key(stem)
+    fold = stem_key + "_fig"
     try:
         names = sorted(os.listdir(attachments))
     except OSError:
@@ -192,7 +188,7 @@ def figures_for(attachments, stem):
         # figure written `doe_foo_2025_fig_1.png` IS this stem's. Missing it
         # reports zero figures, which SKILL.md step 1 reads as "the extractor
         # never ran" -- a wrong diagnosis that ships a figureless note.
-        if not name.casefold().startswith(fold):
+        if not _name_key(name).startswith(fold):
             continue
         if not os.path.isfile(os.path.join(attachments, name)):
             continue
@@ -202,7 +198,9 @@ def figures_for(attachments, stem):
         # this stem's figure, and slicing by the prefix length alone labelled it
         # `ure_3`.  Take the label from after whatever `_fig`-ish separator the
         # file actually carries.
-        tail = base[len(stem):]
+        stem_end = next(i for i, char in enumerate(base)
+                        if char == "_" and _name_key(base[:i]) == stem_key)
+        tail = base[stem_end:]
         m = _FIG_SEP.match(tail)
         label = tail[m.end():] if m else tail.lstrip("_")
         parent, panel = panel_parent(label)
@@ -286,7 +284,7 @@ def note_source(path):
                     m = _SOURCE_RE.match(raw)
                     if m:
                         found = _yaml_scalar(m.group(1))
-    except OSError:
+    except (OSError, ValueError):
         return None
     return None
 
@@ -351,7 +349,7 @@ def source_names(source, stem):
         return False
     base = m.group(1).strip().rstrip("/").split("/")[-1]
     return (base.lower().endswith(".pdf")
-            and os.path.splitext(base)[0].casefold() == stem.casefold())
+            and _name_key(os.path.splitext(base)[0]) == _name_key(stem))
 
 
 def find_pdfs(src):
@@ -387,7 +385,7 @@ def books_in(stems):
     figures under two stems that never collide and never deduplicate (§8).
     Three other comparisons in this file already fold; this one did not.
     """
-    return {b.casefold() for b in (chapter_book_stem(s) for s in stems) if b}
+    return {_name_key(b) for b in (chapter_book_stem(s) for s in stems) if b}
 
 
 def classify(stem, books, note_state, allow_unorganized=False,
@@ -412,7 +410,7 @@ def classify(stem, books, note_state, allow_unorganized=False,
     """
     # Folded on BOTH sides: `books_in` folds what it produces, and a caller
     # passing a raw set (the self-test does) must get the same answer.
-    if core_stem(stem).casefold() in {b.casefold() for b in books} \
+    if _name_key(core_stem(stem)) in {_name_key(b) for b in books} \
             and not include_books:
         return "book"
     if chapter_book_stem(stem) and not include_chapters:
@@ -435,11 +433,18 @@ def scan(src, notes, images, allow_unorganized=False,
     pdfs = find_pdfs(src)
     stems = [stem_of(p) for p in pdfs]
     books = books_in(stems)
+    by_stem = {}
+    for path, stem in zip(pdfs, stems):
+        by_stem.setdefault(_name_key(stem), []).append(path)
     rows = []
     for path, stem in zip(pdfs, stems):
         note = os.path.join(notes, stem + ".md")
-        if not os.path.isfile(note):
+        if not os.path.lexists(note):
             state, existing = "absent", None
+        elif os.path.islink(note) or not os.path.isfile(note):
+            # A directory or dangling symlink still occupies the destination.
+            # Never follow a symlink to classify a path as safe to rewrite.
+            state, existing = "theirs", None
         else:
             existing = note_source(note)
             if not source_names(existing, stem):
@@ -448,13 +453,20 @@ def scan(src, notes, images, allow_unorganized=False,
                 state = "legacy"
             else:
                 state = "ours"
+        conflicts = [p for p in by_stem[_name_key(stem)] if p != path]
+        status = classify(stem, books, state, allow_unorganized,
+                          include_books, include_chapters)
+        if conflicts and status not in ("book", "chapter", "unorganized"):
+            # Basename-only sources cannot distinguish two different PDFs in
+            # nested folders, and both would otherwise write the same note.
+            status = "collision"
         rows.append({
             "pdf": path,
             "stem": stem,
             "note": note,
             "note_source": existing,
-            "status": classify(stem, books, state, allow_unorganized,
-                               include_books, include_chapters),
+            "status": status,
+            "source_conflicts": conflicts,
             "figures": figures_for(images, stem),
         })
     counts = {s: sum(1 for r in rows if r["status"] == s) for s in STATUSES}
@@ -511,7 +523,13 @@ def render(result):
             lines.append("      its chapters are in this scan and are the unit "
                          "to summarise; the book's own stem has no figures")
         if row["status"] == "collision":
-            lines.append("      %s already exists and its source: is %r -- a "
+            if row.get("source_conflicts"):
+                lines.append("      %s shares this PDF basename and the same "
+                             "output note: %s. Nothing may be written until "
+                             "pdf-organizer gives the sources distinct names."
+                             % (", ".join(row["source_conflicts"]), row["note"]))
+            else:
+                lines.append("      %s already exists and its source: is %r -- a "
                          "different note under the same name. Do NOT write "
                          "over it; report both and let the user rename one."
                          % (row["note"], row["note_source"]))
@@ -541,6 +559,7 @@ _SORT_CASES = [
     # A panel sits with its own figure, not after every figure (§8b).
     (["2", "1b", "1", "1a", "S1a", "S1"],
      ["1", "1a", "1b", "2", "S1", "S1a"]),
+    (["²", "2", "1"], ["1", "2", "²"]),
 ]
 
 #: (label, parent, panel letter). A whole figure's label never ends in a
@@ -624,6 +643,7 @@ def run_self_test():
             ("[[Sources/PDFs/Doe_Foo_2025.pdf]]",     "Doe_Foo_2025",  True),
             ("[[Doe_Foo_2025.pdf|the paper]]",        "Doe_Foo_2025",  True),
             ("[[doe_foo_2025.pdf]]",                  "Doe_Foo_2025",  True),
+            ("[[Mu\u0308ller_Foo_2025.pdf]]",          "Müller_Foo_2025", True),
             ("[[Doe_Foo_2025.PDF#page=3|3]]",         "Doe_Foo_2025",  True),
             ("[[Doe_Foo_2025.md]]",                   "Doe_Foo_2025",  False),
             ("[[Doe_Foo_2025]]",                      "Doe_Foo_2025",  False),
@@ -706,6 +726,15 @@ def run_self_test():
         # classified as a `collision` and no paper was ever `done`.
         ('---\nsources:\n  - "[[Doe_Foo_2025.pdf]]"\n---\n',
          "[[Doe_Foo_2025.pdf]]"),
+        ('---\nsources: # original PDF\n- "[[Doe_Foo_2025.pdf]]"\n---\n',
+         "[[Doe_Foo_2025.pdf]]"),
+        ('---\nsources:\n- "[[\\x44oe_Foo_2025.pdf]]"\n---\n',
+         "[[Doe_Foo_2025.pdf]]"),
+        ("---\nsource: 'https://example.com/o''brien'\n---\n",
+         "https://example.com/o'brien"),
+        ('---\nsources:\n  -"[[Doe_Foo_2025.pdf]]"\n---\n', None),
+        ('---\nsources:\n  - "[[Doe_Foo_2025.pdf]]\n---\n', None),
+        ('---\nsources:\n  - "[[Doe_Foo_2025.pdf]]"extra\n---\n', None),
         ('---\nsources:\n  - "[[Doe_Foo_2025.pdf#page=1]]"\n---\n',
          "[[Doe_Foo_2025.pdf#page=1]]"),
         # item 2 (the printed-origin URL) is not the origin; item 1 is.
@@ -794,6 +823,18 @@ def run_self_test():
     if any(f["duplicate_label"] for f in figures_for(_img, "Doe_Foo_2025")):
         bad += 1
         print("FAIL figures_for flagged a duplicate label among distinct labels")
+    unicode_name = "Mu\u0308ller_Trial_2025_fig_1.png"
+    open(os.path.join(_img, unicode_name), "w").close()
+    n += 1
+    unicode_figures = figures_for(_img, "Müller_Trial_2025")
+    if [(f["file"], f["label"]) for f in unicode_figures] != [(unicode_name, "1")]:
+        bad += 1
+        print("FAIL figures_for lost a canonically equivalent Unicode filename")
+    open(os.path.join(_img, "STRASSE_Trial_2025_fig_2.png"), "w").close()
+    n += 1
+    if [f["label"] for f in figures_for(_img, "Straße_Trial_2025")] != ["2"]:
+        bad += 1
+        print("FAIL casefold expansion shifted the figure label")
     # Two producers can legally occupy `<stem>_fig_2` at two extensions --
     # `Sources/Images/` is flat and shared, the files never collide on disk and
     # nothing deduplicates them -- so the skill picking a figure BY LABEL gets
@@ -877,6 +918,11 @@ def run_self_test():
     _mk("Sources/PDFs/Smith_Done_2024.pdf")
     _mk("Sources/PDFs/Graham_Clip_2012.pdf")
     _mk("Sources/PDFs/Legacy_Old_2019.pdf")
+    _mk("Sources/PDFs/Link_Occupied_2025.pdf")
+    _mk("Sources/PDFs/Dir_Occupied_2025.pdf")
+    os.symlink(os.path.join(_v, "missing.md"),
+               os.path.join(_v, "Articles", "Link_Occupied_2025.md"))
+    os.makedirs(os.path.join(_v, "Articles", "Dir_Occupied_2025.md"))
     _mk("Sources/PDFs/Prince_UDL_2026_src.pdf")
     _mk("Sources/PDFs/Prince_UDL_2026/Prince_UDL_2026_01_Intro.pdf")
     # The same pairing with the two halves spelled in different cases, which is
@@ -912,6 +958,8 @@ def run_self_test():
                        ("Smith_Done_2024", "done"),
                        ("Graham_Clip_2012", "collision"),
                        ("Legacy_Old_2019", "legacy"),
+                       ("Link_Occupied_2025", "collision"),
+                       ("Dir_Occupied_2025", "collision"),
                        ("Doe_New_2025", "done"),
                        ("Clip_Match_2024", "collision"),
                        ("Embed_Old_2019", "legacy"),
@@ -936,6 +984,24 @@ def run_self_test():
     except Exception as exc:
         bad += 1
         print("FAIL render(): %s: %s" % (type(exc).__name__, exc))
+
+    for sub in ("Sources/PDFs/first", "Sources/PDFs/second"):
+        os.makedirs(os.path.join(_v, *sub.split("/")))
+    _mk("Sources/PDFs/first/Dup_Study_2025.pdf", "first paper")
+    _mk("Sources/PDFs/second/dup_study_2025.pdf", "different paper")
+    conflicted = scan(os.path.join(_v, "Sources", "PDFs"),
+                      os.path.join(_v, "Articles"), os.path.join(_v, "Sources", "Images"))
+    duplicates = [row for row in conflicted["pdfs"]
+                  if _name_key(row["stem"]) == "dup_study_2025"]
+    n += 1
+    if len(duplicates) != 2 or any(row["status"] != "collision"
+                                    or len(row["source_conflicts"]) != 1 for row in duplicates):
+        bad += 1
+        print("FAIL two PDFs with one basename were allowed to share an output note")
+    n += 1
+    if "shares this PDF basename" not in render(conflicted):
+        bad += 1
+        print("FAIL source collisions did not explain the conflicting PDF paths")
 
     print("%d/%d self-test cases pass" % (n - bad, n))
     return 1 if bad else 0

@@ -44,9 +44,8 @@ Behavior:
     — no captions found, no extractable text (a scan), and not a readable PDF
     at all. Only the second of those is an OCR problem.
   - Output is flat: the pdf_stem in each filename disambiguates across
-    subfolders. If two source PDFs happen to share the same stem, the later
-    one's figures overwrite the earlier ones — the script logs a warning when
-    this happens.
+    subfolders. PDFs sharing a stem are refused before either can write;
+    the run continues with the sources whose stems are unique.
 
 Split books:
     pdf-organizer splits `Kuhn_StructSciRev_2012.pdf` into
@@ -156,7 +155,8 @@ from extract_figures import extract_one_figure, normalize_fig_num
 #: that never collide and never deduplicate. CONVENTIONS.md §1a, §8b.
 from naming import chapter_book_stem, core_stem, looks_canonical  # noqa: E402
 from figure_state import (MANIFEST_FILE, REVIEW_FILE, read_manifest,
-                          write_manifest, figure_identity, manifest_key)  # noqa: E402
+                          write_manifest, figure_identity, manifest_key,
+                          check_manifest_writable, parse_reviewed)  # noqa: E402
 
 #: Default filename for the review ledger, written inside `--out`. A dotfile:
 #: Obsidian hides it, and it can never be mistaken for a figure, because
@@ -205,7 +205,7 @@ def split_book_chapters(pdfs):
     (*Chapter filename format*), and both files are in the same walk. No
     vault layout is assumed, so this works for a Downloads folder too.
 
-    Both sides are compared on the *core* stem — `_src` and `_2` stripped —
+    Both sides are compared on the *core* stem — `_src` stripped, `_2` kept —
     because a book and its chapters carry those tails independently: a book
     may be `Prince_UDL_2026_src.pdf` while its chapters are
     `Prince_UDL_2026_01_Intro.pdf`, or the other way round. Comparing raw
@@ -253,23 +253,13 @@ def load_reviewed(path):
     ledger looked like it had recorded something. The two ends of one file
     disagreed about its format, and nothing compared them.
     """
-    out = set()
     try:
         with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.split("#", 1)[0].strip()
-                if not line:
-                    continue
-                if "\t" in line:
-                    parts = [p.strip() for p in line.split("\t") if p.strip()]
-                else:
-                    stem, sep, fig = line.rpartition(":")
-                    parts = [stem.strip(), fig.strip()] if sep else [line]
-                if len(parts) >= 2 and parts[0] and parts[1]:
-                    out.add((parts[0], parts[1]))
-    except OSError:
-        pass
-    return out
+            return parse_reviewed(fh.read())
+    except FileNotFoundError:
+        if os.path.lexists(path):
+            raise ValueError("%s is a dangling review sidecar symlink" % path)
+        return set()
 
 
 def mark_reviewed(path, entries, dry_run=False):
@@ -292,14 +282,26 @@ def mark_reviewed(path, entries, dry_run=False):
                 f"--mark-reviewed Prince_UDL_2026_02_SupLearn:10-5"
             )
         recorded.append((stem.strip(), fig.strip()))
+    rows = "".join(f"{stem}\t{fig}\n" for stem, fig in recorded)
+    try:
+        parse_reviewed(rows)
+        with open(path, encoding="utf-8", newline="") as fh:
+            previous = fh.read()
+        parse_reviewed(previous)
+    except FileNotFoundError:
+        if os.path.lexists(path):
+            raise ValueError("%s is a dangling review sidecar symlink" % path)
+        previous = ""
     if dry_run:
         return recorded
+    check_manifest_writable(path)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "a", encoding="utf-8") as fh:
+    with open(path, "a", encoding="utf-8", newline="") as fh:
         if fh.tell() == 0:                       # a fresh ledger: explain itself
             fh.write(REVIEW_HEADER)
-        for stem, fig in recorded:
-            fh.write(f"{stem}\t{fig}\n")
+        elif previous and not previous.endswith(("\n", "\r")):
+            fh.write("\n")
+        fh.write(rows)
     return recorded
 
 
@@ -315,7 +317,7 @@ def load_manifest(path):
 
 
 def save_manifest(path, manifest):
-    """Rewrite the manifest. Best-effort: a read-only vault must not fail a run."""
+    """Rewrite ownership records; False means the run must report failure."""
     try:
         write_manifest(path, manifest, MANIFEST_HEADER)
         return True
@@ -552,9 +554,9 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                             bucket by meaning: it is the one thing this skill
                             promises its output never contains.
         had_text:   bool  — False if the PDF appears to be a pure scan
-        open_error: str   — non-empty when the file could not be opened as
-                            a PDF at all (truncated download, HTML saved
-                            with a .pdf extension). Distinct from had_text:
+        open_error: str   — non-empty when the file could not be opened or
+                            fully analyzed (truncated download, HTML saved
+                            with a .pdf extension, damaged later page). Distinct from had_text:
                             this is not an OCR problem and `ocrmypdf` will
                             not help.
         no_pages:   bool  — True for a structurally valid PDF with zero
@@ -645,96 +647,105 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
     # we started). Maps out_path → the first caption label that claimed it.
     written_this_run = {}
 
-    for page_idx, fig_num, raw_label, bbox, _cap_rect, reason in detect_figures(doc):
-        fig_suffix = normalize_fig_num(fig_num)
-        out_path = os.path.join(out_dir, f"{stem}_fig_{fig_suffix}.png")
-        result["figures"].append(fig_num)
-        if reason:
-            # A bbox the user has already checked stays counted but stops
-            # being asked about — without this, a hand-fixed crop is
-            # re-flagged on every run forever and the flag list becomes
-            # noise nobody reads.
-            if (stem, fig_num) in reviewed or (stem, fig_suffix) in reviewed:
-                result["reviewed"].append((fig_num, reason))
-            else:
-                result["warnings"].append((fig_num, reason))
-                if reason.startswith(CAPTION_IN_CROP_TAG):
-                    result["caption_in"].append((fig_num, reason))
+    try:
+        for page_idx, fig_num, raw_label, bbox, _cap_rect, reason in detect_figures(doc):
+            fig_suffix = normalize_fig_num(fig_num)
+            out_path = os.path.join(out_dir, f"{stem}_fig_{fig_suffix}.png")
+            result["figures"].append(fig_num)
+            if reason:
+                # A bbox the user has already checked stays counted but stops
+                # being asked about — without this, a hand-fixed crop is
+                # re-flagged on every run forever and the flag list becomes
+                # noise nobody reads.
+                if (stem, fig_num) in reviewed or (stem, fig_suffix) in reviewed:
+                    result["reviewed"].append((fig_num, reason))
+                else:
+                    result["warnings"].append((fig_num, reason))
+                    if reason.startswith(CAPTION_IN_CROP_TAG):
+                        result["caption_in"].append((fig_num, reason))
 
-        # Within-run collision: we already wrote this filename earlier in
-        # the same PDF. Record the raw caption forms so the report tells
-        # the user which captions actually collided (e.g., "Figure S1" vs
-        # "Extended Data Figure 1") rather than just two copies of "S1".
-        if out_path in written_this_run:
-            result["collisions"].append((written_this_run[out_path], raw_label))
-            continue
+            # Within-run collision: we already wrote this filename earlier in
+            # the same PDF. Record the raw caption forms so the report tells
+            # the user which captions actually collided (e.g., "Figure S1" vs
+            # "Extended Data Figure 1") rather than just two copies of "S1".
+            if out_path in written_this_run:
+                result["collisions"].append((written_this_run[out_path], raw_label))
+                continue
 
-        # Prior-run idempotent skip: file existed before this run started.
-        if os.path.lexists(out_path):
-            why, digest = (_foreign_occupant(manifest, out_path)
-                           if manifest is not None else ("", None))
-            if why:
-                # NOT a skip. `Sources/Images/` is shared with
-                # clipping-processor, and a file at this name that this
-                # extractor did not write means the paper's own figure has
-                # never been extracted — while `1 skipped (already exist)`
-                # says the opposite, in the words of an ordinary re-run.
-                result["occupied"].append((fig_num, out_path, why))
+            # Prior-run idempotent skip: file existed before this run started.
+            if os.path.lexists(out_path):
+                why, digest = (_foreign_occupant(manifest, out_path)
+                               if manifest is not None else ("", None))
+                if why:
+                    # NOT a skip. `Sources/Images/` is shared with
+                    # clipping-processor, and a file at this name that this
+                    # extractor did not write means the paper's own figure has
+                    # never been extracted — while `1 skipped (already exist)`
+                    # says the opposite, in the words of an ordinary re-run.
+                    result["occupied"].append((fig_num, out_path, why))
+                    written_this_run[out_path] = raw_label
+                    continue
+                if not overwrite:
+                    written_this_run[out_path] = raw_label
+                    result["skipped"] += 1
+                    _note_output(result, seen_hashes, out_path, fig_num, stem,
+                                 manifest, digest=digest)
+                    continue
+
+            # An existing verified crop may be the manual repair of this very
+            # detection failure. Check that output first; rejecting the bbox first
+            # made the documented repair remain "missing" on every later run.
+            if degenerate(bbox):
+                result["failures"].append(
+                    (fig_num, f"degenerate bbox on page {page_idx + 1} — crop by hand")
+                )
+                continue
+
+            if dry_run:
+                result["extracted"] += 1
                 written_this_run[out_path] = raw_label
                 continue
-            if not overwrite:
+
+            try:
+                _rendered, _final, blank = extract_one_figure(
+                    doc, page_idx, bbox, out_path, dpi=dpi)
+                if blank:
+                    # Nothing was written (extract_one_figure leaves the temp
+                    # file behind rather than moving a picture of empty page into
+                    # the vault), so this is not an extraction.
+                    result["blank"].append((fig_num, page_idx + 1))
+                    continue
+                result["extracted"] += 1
                 written_this_run[out_path] = raw_label
-                result["skipped"] += 1
                 _note_output(result, seen_hashes, out_path, fig_num, stem,
-                             manifest, digest=digest)
-                continue
+                             manifest)
+            except Exception as e:
+                result["failures"].append(
+                    (fig_num, f"render failed on page {page_idx + 1}: {e}")
+                )
+                print(
+                    f"  ERROR: failed to extract {stem} fig {fig_num} "
+                    f"(page {page_idx+1}): {e}",
+                    file=sys.stderr,
+                )
 
-        # An existing verified crop may be the manual repair of this very
-        # detection failure. Check that output first; rejecting the bbox first
-        # made the documented repair remain "missing" on every later run.
-        if degenerate(bbox):
-            result["failures"].append(
-                (fig_num, f"degenerate bbox on page {page_idx + 1} — crop by hand")
-            )
-            continue
+        # Partial detection. Nothing else in the pipeline can see it: the summary
+        # counts PDFs with ZERO captions, and downstream the figure glob and the
+        # unused-figure diagnostic both walk whatever files exist — so 3 of 4
+        # figures looks exactly like 4 of 4 everywhere.
+        referenced, missing = caption_coverage(doc, result["figures"])
+        result["referenced"] = len(referenced)
+        result["missing"] = missing
 
-        if dry_run:
-            result["extracted"] += 1
-            written_this_run[out_path] = raw_label
-            continue
-
-        try:
-            _rendered, _final, blank = extract_one_figure(
-                doc, page_idx, bbox, out_path, dpi=dpi)
-            if blank:
-                # Nothing was written (extract_one_figure leaves the temp
-                # file behind rather than moving a picture of empty page into
-                # the vault), so this is not an extraction.
-                result["blank"].append((fig_num, page_idx + 1))
-                continue
-            result["extracted"] += 1
-            written_this_run[out_path] = raw_label
-            _note_output(result, seen_hashes, out_path, fig_num, stem,
-                         manifest)
-        except Exception as e:
-            result["failures"].append(
-                (fig_num, f"render failed on page {page_idx + 1}: {e}")
-            )
-            print(
-                f"  ERROR: failed to extract {stem} fig {fig_num} "
-                f"(page {page_idx+1}): {e}",
-                file=sys.stderr,
-            )
-
-    # Partial detection. Nothing else in the pipeline can see it: the summary
-    # counts PDFs with ZERO captions, and downstream the figure glob and the
-    # unused-figure diagnostic both walk whatever files exist — so 3 of 4
-    # figures looks exactly like 4 of 4 everywhere.
-    referenced, missing = caption_coverage(doc, result["figures"])
-    result["referenced"] = len(referenced)
-    result["missing"] = missing
-
-    doc.close()
+    except Exception as exc:
+        result["open_error"] = (
+            f"PDF analysis failed after {len(result['figures'])} detected figure(s) "
+            f"({type(exc).__name__}: {exc}). Inspect the damaged page or PDF "
+            f"before relying on this source's figure set."
+        )
+        print(f"  ERROR: {pdf_path.name}: {result['open_error']}", file=sys.stderr)
+    finally:
+        doc.close()
     return result
 
 
@@ -780,7 +791,7 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
     n_pdfs = len(per_pdf)
     n_zero = sum(
         1 for r in per_pdf.values()
-        if r["had_text"] and not r["figures"]
+        if r["had_text"] and not r["figures"] and not r["open_error"]
     )
     # The three "produced nothing" buckets are kept apart on purpose: only
     # one of them is an OCR problem, and telling a user to run `ocrmypdf`
@@ -825,7 +836,7 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
               f"(figures come from the chapter PDFs)")
     print(f"  PDFs with no figures detected:    {n_zero}")
     print(f"  PDFs with no extractable text:    {n_no_text} (likely scans — needs OCR)")
-    print(f"  PDFs that could not be opened:    {n_unreadable} (not a readable PDF)")
+    print(f"  PDFs that could not be fully read:{n_unreadable} (not a readable PDF)")
     print(f"  PDFs with zero pages:             {n_no_pages}")
     print()
 
@@ -983,7 +994,7 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
     if n_zero:
         print("PDFs with extractable text but no figure captions detected:")
         for pdf_path, r in per_pdf.items():
-            if r["had_text"] and not r["figures"]:
+            if r["had_text"] and not r["figures"] and not r["open_error"]:
                 print(f"  {pdf_path.name}")
         print()
 
@@ -995,7 +1006,7 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
         print()
 
     if n_unreadable:
-        print("PDFs that could not be opened (NOT an OCR problem — the file is not a readable PDF):")
+        print("PDFs that could not be opened or fully read (NOT an OCR problem — not a readable PDF):")
         for pdf_path, r in per_pdf.items():
             if r["open_error"]:
                 print(f"  {pdf_path.name}  ({r['open_error']})")
@@ -1246,6 +1257,11 @@ def run_self_test():
                ("Doe_Figs_2025", "S3")})
         check("a ledger that does not exist is empty, not an error",
               load_reviewed(os.path.join(tmp, "nope.txt")), set())
+        with open(hand, "w", encoding="utf-8") as fh:
+            fh.write("# retain this note\nDoe_Figs_2025\t1")
+        mark_reviewed(hand, ["Doe_Figs_2025:2"])
+        check("appending after an unterminated last line preserves both marks",
+              load_reviewed(hand), {("Doe_Figs_2025", "1"), ("Doe_Figs_2025", "2")})
 
         for bad_entry in ("no-colon-at-all", ":1", "stem:", "  :  "):
             state["n"] += 1
@@ -1840,6 +1856,136 @@ def run_self_test():
                             "--out", run_out])
         ok("a --src that does not exist is refused",
            code != 0 and "not a directory" in str(code))
+
+        collision_src = Path(tmp) / "colliding-sources"
+        for folder, name, fill in (("A", "Doe_Same_2025.pdf", (1, 0, 0)),
+                                   ("B", "doe_same_2025.PDF", (0, 0, 1))):
+            (collision_src / folder).mkdir(parents=True)
+            _st_fig_pdf(collision_src / folder / name, fill=fill)
+        collision_out = Path(tmp) / "colliding-output"
+        collision_args = ["--src", str(collision_src), "--out", str(collision_out),
+                          "--dpi", "72"]
+        code, so, se = run(collision_args)
+        check("all colliding source stems are refused with failure status", code, 1)
+        check("neither colliding source publishes an image",
+              sorted(collision_out.glob("*.png")), [])
+        _st_fig_pdf(collision_src / "Doe_Unique_2025.pdf", fill=(0, 1, 0))
+        for extra in ([], ["--overwrite"]):
+            code, so, se = run(collision_args + extra)
+            check("a mixed run reports the refused source stems", code, 1)
+            check("a mixed run still extracts only the unambiguous source",
+                  sorted(p.name for p in collision_out.glob("*.png")),
+                  ["Doe_Unique_2025_fig_1.png"])
+            check("migration does not claim a colliding source's figures",
+                  sorted(load_manifest(collision_out / MANIFEST_FILE)),
+                  ["Doe_Unique_2025_fig_1.png"])
+
+        for kind in ("read-only", "symlink"):
+            protected = Path(tmp) / ("protected-" + kind)
+            protected.mkdir()
+            sidecar = protected / MANIFEST_FILE
+            original = "# protected ownership records\n"
+            if kind == "symlink":
+                backing = Path(tmp) / "shared-ownership.tsv"
+                backing.write_text(original, encoding="utf-8")
+                sidecar.symlink_to(backing)
+            else:
+                sidecar.write_text(original, encoding="utf-8")
+                sidecar.chmod(0o444)
+            try:
+                code, so, se = run(["--src", str(one), "--out", str(protected),
+                                    "--dpi", "72", "--mark-reviewed", one.stem + ":1"])
+                check("a %s manifest blocks before extraction" % kind, code, 1)
+                check("blocked ownership cannot leave an untracked PNG",
+                      list(protected.glob("*.png")), [])
+                check("the protected sidecar remains untouched",
+                      sidecar.read_text(encoding="utf-8"), original)
+                check("ownership preflight also precedes writing review marks",
+                      (protected / REVIEW_FILE).exists(), False)
+            finally:
+                if kind == "read-only":
+                    sidecar.chmod(0o644)
+
+        late_failure_out = Path(tmp) / "late-manifest-failure"
+        from unittest.mock import patch
+
+        def fail_manifest_write(*args, **kwargs):
+            raise OSError("injected full filesystem")
+
+        with patch.dict(globals(), write_manifest=fail_manifest_write):
+            code, so, se = run(["--src", str(one), "--out", str(late_failure_out),
+                                "--dpi", "72"])
+        check("a late ownership-save failure cannot report success", code, 1)
+        ok("the ownership-save failure names the recovery problem", "could not write" in se)
+
+        damaged_src = Path(tmp) / "damaged-late-page"
+        damaged_src.mkdir()
+        damaged_pdf = damaged_src / "A_Damaged_2025.pdf"
+        healthy_pdf = damaged_src / "B_Healthy_2025.pdf"
+        _st_fig_pdf(damaged_pdf, fill=(1, 0, 0))
+        _st_fig_pdf(healthy_pdf, fill=(0, 0, 1))
+        damaged_out = Path(tmp) / "damaged-output"
+        damaged_out.mkdir()
+        (damaged_out / MANIFEST_FILE).write_text(MANIFEST_HEADER, encoding="utf-8")
+        original_detect = detect_figures
+
+        def fail_after_detection(doc):
+            yield from original_detect(doc)
+            if Path(doc.name) == damaged_pdf:
+                raise ValueError("injected damaged later page")
+
+        with patch.dict(globals(), detect_figures=fail_after_detection):
+            code, so, se = run(["--src", str(damaged_src), "--out", str(damaged_out),
+                                "--dpi", "72"])
+        check("a damaged later page is reported as a failed PDF", code, 1)
+        ok("the page failure names the source and preserves its partial result",
+           "A_Damaged_2025.pdf" in se and "after 1 detected figure" in se)
+        check("later PDFs are still processed after a page-analysis failure",
+              sorted(p.name for p in damaged_out.glob("*.png")),
+              ["A_Damaged_2025_fig_1.png", "B_Healthy_2025_fig_1.png"])
+        check("completed crops retain ownership after a page-analysis failure",
+              load_manifest(damaged_out / MANIFEST_FILE),
+              {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+               for p in damaged_out.glob("*.png")})
+        code, so, se = run(["--src", str(damaged_src), "--out", str(damaged_out),
+                            "--dpi", "72"])
+        check("a repaired PDF can be rerun without claiming its prior PNGs as foreign", code, 0)
+
+        interrupted_out = Path(tmp) / "interrupted-output"
+        interrupted_out.mkdir()
+        (interrupted_out / MANIFEST_FILE).write_text(MANIFEST_HEADER, encoding="utf-8")
+
+        def interrupt_after_detection(doc):
+            yield from original_detect(doc)
+            raise KeyboardInterrupt()
+
+        interrupted = False
+        with patch.dict(globals(), detect_figures=interrupt_after_detection):
+            try:
+                run(["--src", str(damaged_pdf), "--out", str(interrupted_out),
+                     "--dpi", "72"])
+            except KeyboardInterrupt:
+                interrupted = True
+        check("Ctrl-C still interrupts the batch", interrupted, True)
+        check("Ctrl-C saves ownership for the crop already published",
+              load_manifest(interrupted_out / MANIFEST_FILE),
+              {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+               for p in interrupted_out.glob("*.png")})
+        check("the interruption fixture really wrote a crop before stopping",
+              len(list(interrupted_out.glob("*.png"))), 1)
+
+        zero_cli = Path(tmp) / "Doe_Empty_2025.pdf"
+        _st_zero_page_pdf(zero_cli)
+        code, so, se = run(["--src", str(zero_cli), "--out", str(damaged_out)])
+        check("a zero-page PDF cannot report successful extraction", code, 1)
+
+        invalid_review_out = Path(tmp) / "invalid-review"
+        invalid_review_out.mkdir()
+        (invalid_review_out / REVIEW_FILE).write_text("malformed record\n", encoding="utf-8")
+        code, so, se = run(["--src", str(one), "--out", str(invalid_review_out)])
+        check("a malformed review ledger is an explicit failure", code, 1)
+        check("review preflight happens before writing figures",
+              list(invalid_review_out.glob("*.png")), [])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1953,20 +2099,39 @@ def main(argv=None):
 
     src_dir = os.path.expanduser(args.src)
     out_dir = os.path.expanduser(args.out)
+    # Validate ownership before writing a review mark, creating output, or
+    # rendering a PNG. A protected or malformed ledger is not a fresh run.
+    manifest_file = os.path.join(out_dir, MANIFEST_FILE)
+    manifest_existed = os.path.lexists(manifest_file)
+    try:
+        manifest = load_manifest(manifest_file)
+        if not args.dry_run:
+            check_manifest_writable(manifest_file)
+    except (OSError, UnicodeError, ValueError) as exc:
+        print(f"REFUSED: could not safely read {manifest_file}: {exc}. "
+              "Repair the ownership records before extracting; no figures were written.",
+              file=sys.stderr)
+        return 1
     if not args.dry_run:
         os.makedirs(out_dir, exist_ok=True)
 
     review_file = os.path.expanduser(
         args.review_file or os.path.join(out_dir, REVIEW_FILE))
     marked = []
-    if args.mark_reviewed:
-        marked = mark_reviewed(review_file, args.mark_reviewed,
-                               dry_run=args.dry_run)
-        verb = "Would record" if args.dry_run else "Recorded"
-        for stem, fig in marked:
-            print(f"{verb} as reviewed: {stem} Fig {fig}  → {review_file}")
-        print()
-    reviewed = load_reviewed(review_file)
+    try:
+        reviewed = load_reviewed(review_file)
+        if args.mark_reviewed:
+            marked = mark_reviewed(review_file, args.mark_reviewed,
+                                   dry_run=args.dry_run)
+            verb = "Would record" if args.dry_run else "Recorded"
+            for stem, fig in marked:
+                print(f"{verb} as reviewed: {stem} Fig {fig}  → {review_file}")
+            print()
+    except (OSError, UnicodeError, ValueError) as exc:
+        print(f"REFUSED: could not safely use {review_file}: {exc}. "
+              "Repair the review records before extracting; no figures were written.",
+              file=sys.stderr)
+        return 1
     # A dry run wrote no ledger, but it still has to report what the real run
     # would report — otherwise the marks the user just passed come back as
     # fresh flags and the dry run disagrees with the run it is previewing.
@@ -1980,7 +2145,11 @@ def main(argv=None):
     # Capture the source scope before skipping whole books or refusing
     # noncanonical filenames. An explicit --allow-unorganized does not grant
     # permission to adopt a clipping whose slug happens to match that name.
-    adopt_stems = {p.stem for p in pdfs if looks_canonical(p.stem)}
+    by_source_stem = defaultdict(list)
+    for source in pdfs:
+        by_source_stem[figure_identity(source.stem)].append(source)
+    adopt_stems = {p.stem for p in pdfs if looks_canonical(p.stem)
+                   and len(by_source_stem[figure_identity(p.stem)]) == 1}
 
     # Every figure this script writes is keyed to the PDF's on-disk stem, and
     # nothing downstream survives that stem changing: a later rename orphans
@@ -2010,6 +2179,24 @@ def main(argv=None):
         unorganized = [p for p in pdfs if not looks_canonical(p.stem)]
         pdfs = [p for p in pdfs if p not in set(unorganized)]
 
+    # A flat image folder cannot distinguish PDFs sharing a stem. Detect the
+    # conflict before either source can publish or claim that stem's images.
+    # Otherwise the second source silently reuses the first one's PNGs, even
+    # though the ownership manifest correctly records those exact bytes.
+    stem_collisions = {}
+    for source in pdfs:
+        group = by_source_stem[figure_identity(source.stem)]
+        if len(group) > 1:
+            stem_collisions[figure_identity(source.stem)] = group
+    if stem_collisions:
+        print("REFUSED: filename stem collisions; no figures will be written for these PDFs:")
+        for group in sorted(stem_collisions.values(), key=lambda paths: str(paths[0])):
+            for source in group:
+                print(f"  {source}")
+        print("  Give each source a unique PDF stem with pdf-organizer, then re-run.")
+        print()
+        pdfs = [p for p in pdfs if figure_identity(p.stem) not in stem_collisions]
+
     if unorganized:
         print("REFUSED: %d PDF(s) whose filename pdf-organizer has not "
               "produced." % len(unorganized))
@@ -2032,7 +2219,7 @@ def main(argv=None):
     for book, chapters in sorted(skipped_books.items()):
         print(f"Skipping {book.name}: split into {len(chapters)} chapter PDF(s); "
               f"figures come from those (--include-split-books to override)")
-    if unorganized and not pdfs:
+    if (unorganized or stem_collisions) and not pdfs:
         if skipped_books:
             print()
         print("Nothing left to process.")
@@ -2052,15 +2239,6 @@ def main(argv=None):
     # time this runs against a folder with no manifest, adopts only legacy
     # PNGs keyed to canonical PDFs in the source scope. Clipping images are
     # still indexed for duplicate detection, but are not claimed as ours.
-    manifest_file = os.path.join(out_dir, MANIFEST_FILE)
-    manifest_existed = os.path.lexists(manifest_file)
-    try:
-        manifest = load_manifest(manifest_file)
-    except (OSError, UnicodeError, ValueError) as exc:
-        print(f"REFUSED: could not safely read {manifest_file}: {exc}. "
-              "Repair the ownership records before extracting; no figures were written.",
-              file=sys.stderr)
-        return 1
     seen_hashes, adopted = seed_output_index(out_dir, manifest, manifest_existed,
                                              adopt_stems)
     if adopted:
@@ -2076,62 +2254,65 @@ def main(argv=None):
         print()
 
     per_pdf = {}
-    for pdf_path in pdfs:
-        # `--src` may be a single PDF, in which case relative_to() returns
-        # "." (or raises, on an odd path) — neither is a useful label.
-        try:
-            rel = pdf_path.relative_to(src_dir)
-            if str(rel) in (".", ""):
+    try:
+        for pdf_path in pdfs:
+            # `--src` may be a single PDF, in which case relative_to() returns
+            # "." (or raises, on an odd path) — neither is a useful label.
+            try:
+                rel = pdf_path.relative_to(src_dir)
+                if str(rel) in (".", ""):
+                    rel = pdf_path.name
+            except ValueError:
                 rel = pdf_path.name
-        except ValueError:
-            rel = pdf_path.name
-        print(f"Processing: {rel}")
-        result = process_pdf(
-            pdf_path, out_dir,
-            overwrite=args.overwrite, dpi=args.dpi, dry_run=args.dry_run,
-            reviewed=reviewed, seen_hashes=seen_hashes, manifest=manifest,
-        )
-        per_pdf[pdf_path] = result
-        n = result["extracted"]
-        s = result["skipped"]
-        c = len(result["collisions"])
-        w = len(result["warnings"])
-        f = len(result["failures"])
-        if result["open_error"]:
-            print("  → could not be opened as a PDF (not an OCR problem)")
-        elif result["no_pages"]:
-            print("  → PDF has zero pages")
-        elif not result["had_text"]:
-            print("  → no extractable text (scanned PDF?)")
-        elif not result["figures"]:
-            print("  → no figure captions detected")
-        else:
-            parts = [f"{n} extracted"]
-            if s:
-                parts.append(f"{s} skipped (already exist)")
-            if c:
-                parts.append(f"{c} collision{'s' if c > 1 else ''}")
-            if w:
-                parts.append(f"{w} flagged")
-            if result["reviewed"]:
-                parts.append(f"{len(result['reviewed'])} flagged but reviewed")
-            if result["duplicates"]:
-                parts.append(f"{len(result['duplicates'])} duplicate")
-            if result["blank"]:
-                parts.append(f"{len(result['blank'])} blank crop")
-            if result["occupied"]:
-                parts.append(f"{len(result['occupied'])} name(s) occupied by "
-                             f"another skill's file")
-            if result["missing"]:
-                parts.append(
-                    "PARTIAL: no caption for "
-                    + ", ".join(f"Fig {m}" for m in result["missing"][:6]))
-            if f:
-                parts.append(f"{f} failed")
-            print(f"  → {', '.join(parts)}")
+            print(f"Processing: {rel}")
+            result = process_pdf(
+                pdf_path, out_dir,
+                overwrite=args.overwrite, dpi=args.dpi, dry_run=args.dry_run,
+                reviewed=reviewed, seen_hashes=seen_hashes, manifest=manifest,
+            )
+            per_pdf[pdf_path] = result
+            n = result["extracted"]
+            s = result["skipped"]
+            c = len(result["collisions"])
+            w = len(result["warnings"])
+            f = len(result["failures"])
+            if result["open_error"]:
+                print("  → could not be opened or fully read as a PDF (not an OCR problem)")
+            elif result["no_pages"]:
+                print("  → PDF has zero pages")
+            elif not result["had_text"]:
+                print("  → no extractable text (scanned PDF?)")
+            elif not result["figures"]:
+                print("  → no figure captions detected")
+            else:
+                parts = [f"{n} extracted"]
+                if s:
+                    parts.append(f"{s} skipped (already exist)")
+                if c:
+                    parts.append(f"{c} collision{'s' if c > 1 else ''}")
+                if w:
+                    parts.append(f"{w} flagged")
+                if result["reviewed"]:
+                    parts.append(f"{len(result['reviewed'])} flagged but reviewed")
+                if result["duplicates"]:
+                    parts.append(f"{len(result['duplicates'])} duplicate")
+                if result["blank"]:
+                    parts.append(f"{len(result['blank'])} blank crop")
+                if result["occupied"]:
+                    parts.append(f"{len(result['occupied'])} name(s) occupied by "
+                                 f"another skill's file")
+                if result["missing"]:
+                    parts.append(
+                        "PARTIAL: no caption for "
+                        + ", ".join(f"Fig {m}" for m in result["missing"][:6]))
+                if f:
+                    parts.append(f"{f} failed")
+                print(f"  → {', '.join(parts)}")
 
-    if not args.dry_run:
-        save_manifest(manifest_file, manifest)
+    finally:
+        # Keep ownership of completed crops on a damaged-page exception or
+        # Ctrl-C too; otherwise the next run sees our own PNGs as foreign.
+        manifest_saved = args.dry_run or save_manifest(manifest_file, manifest)
 
     print_summary(per_pdf, out_dir, skipped_books, review_file, args.dry_run,
                   src_dir=src_dir)
@@ -2148,9 +2329,10 @@ def main(argv=None):
     # reason: in both, a figure was detected and is NOT in `--out` afterwards.
     # A caption inside a crop does not — the PNG is there, it is just wrong,
     # and it is reported the way every other suspicious bbox is.
-    failed = any(r["failures"] or r["open_error"] or r["blank"] or r["occupied"]
+    failed = any(r["failures"] or r["open_error"] or r["no_pages"]
+                 or r["blank"] or r["occupied"]
                  for r in per_pdf.values())
-    return 1 if (unorganized or failed) else 0
+    return 1 if (unorganized or stem_collisions or failed or not manifest_saved) else 0
 
 
 if __name__ == "__main__":

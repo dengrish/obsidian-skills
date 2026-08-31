@@ -48,9 +48,9 @@ Unless told otherwise:
 - **Vault root:** `<vault>` selected using `shared/RUNTIME.md`. The user can override it per-request; the override applies to that run only.
 - **Where documents live:** `<vault>/Sources/PDFs/`. **This is a destination, not just a location.** New files land in `<vault>/Inbox/` — everything the user drops in, clippings and documents together — and this skill is what takes the `.pdf` files out of that folder, gives each a name, and **moves them to `Sources/PDFs/`** in the same operation. That move is the whole reason the inbox drains. A file already inside `Sources/PDFs/` is renamed where it stands; there is nowhere for it to go.
 - **Book chapters:** one folder per work, directly under `Sources/PDFs/` — e.g. `Sources/PDFs/Prince_UDL_2026/`. The whole book **stays** at the top of `Sources/PDFs/`; the chapters go in the folder. Both are kept. `paper-summarizer` sweeps `Sources/PDFs/` recursively and relies on meeting both in one scan: seeing a chapter is how it recognises the book as a book and skips it, and seeing a chapter is also how it knows to skip *that* rather than write twenty-one summaries. Put the chapters anywhere else and it summarises the book instead, figureless.
-- **Figures:** `Sources/Images/`, flat. Every file in it whose name begins with a PDF's stem belongs to that PDF. This skill never *creates* one; the only time it writes there is carrying that set along with a rename the user asked for.
+- **Figures:** `Sources/Images/`, flat. Files matching `[pdf_stem]_fig*` are candidates to follow a PDF rename. This folder also holds clipping images: a same-stem clipping or unclaimed note makes ownership ambiguous, so the rename blocks unless the figure manifest and current image digest establish PDF ownership. This skill never creates figures.
 
-The user may also point the skill at a folder outside the vault — a Downloads inbox, say. Everything below still applies; the vault-wide checks just come back empty, which is the normal answer for a fresh download. If there is no vault to scan at all, say so in the report rather than skipping the checks silently.
+The user may also point the skill at a folder outside the vault — a Downloads inbox, say. Rename it in place with no `--vault` or `--dest` (`vault=None` in the API), and report that vault-wide checks did not run. Passing `--vault` for an external source is refused: matching its basename cannot establish ownership of the vault's notes or images. This skill does not import external files.
 
 ### What the naming scheme guarantees
 
@@ -77,11 +77,18 @@ too. Three names derive from one PDF: its own basename, the figures in
 split book, the chapter folder and every chapter, each a stem in its own
 right. A probe that only looks for `OldName.pdf` misses all but the first.
 
+An `Articles/` note follows the PDF only when its first `sources:` item (or
+legacy `source:` fallback) identifies that PDF. Quoted YAML escapes, comments,
+and indentless lists are read consistently by ownership checks and link repair.
+A foreign, missing, malformed, or unreadable origin does not establish
+ownership; the only metadata-free legacy exception is a body consisting solely
+of an embed of that PDF. Publisher URLs are external sources and remain unchanged.
+
 `scripts/organize.py` does it. Import it, or run its CLI:
 
 ```python
 import sys; sys.path.insert(0, "<skill>/scripts")
-from organize import keyed_dirs, keyed_files, references, rename_all, vault_names
+from organize import keyed_dirs, keyed_files, obsolete_names, references, rename_all, vault_names
 
 keyed = keyed_files(vault, path)                  # {path: basename}, every kind
 dirs  = keyed_dirs(vault, keyed)                  # {basename: {vault-relative dir}}
@@ -94,9 +101,8 @@ counted as a reference to a keyed `Articles/UDL_2026.md` — a *different*
 file that merely shares the basename. On the probe that reads as a spurious hit
 and the rename is refused; on the rewrite it renames a link pointing somewhere
 else. `keyed_dirs` answers it from where the keyed files actually are, and it
-survives the rename it authorises: a rename changes basenames and never
-directories, so the same mapping is still right for the post-rename re-probe
-below. The CLI already threads it.
+records the old locations needed by the post-rename re-probe below, including
+when `--dest` files the source in another folder. The CLI already threads it.
 
 ```bash
 python3 '<skill>/scripts/organize.py' check --vault '<vault>' '<path>'   # same, as a report
@@ -131,11 +137,14 @@ are tracked separately in `edits.sidecars`; they are shown in the plan and
 updated or rolled back with the files. Malformed, conflicting or unwritable
 sidecars block the rename. A custom review ledger supplied with `--review-file`
 is outside that default lookup and must be included explicitly in the run's
-review before claiming every review mark followed a rename. Then **verify by re-probing every old name, not just the old
-basename**:
+review before claiming every review mark followed a rename. Then **verify every
+obsolete name, including figures and notes, not just the PDF basename**. Use the
+returned `moves`; a name preserved during filing or changed only in case is
+still valid and must not be treated as an unfinished repair. The CLI performs
+this check automatically:
 
 ```python
-old = set(keyed.values())                     # captured BEFORE the rename
+old = obsolete_names(moves)                   # moves returned by rename_all
 assert not references(vault, old, dirs=dirs), "incomplete — nothing else will finish it"
 ```
 

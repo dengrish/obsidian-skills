@@ -96,6 +96,7 @@ failed (the JSON lists which). Stdlib only.
 
 import argparse
 import base64
+import fnmatch
 import glob
 import ipaddress
 import json
@@ -140,51 +141,27 @@ _sys.path.append(_here)                    # own dir LAST: a local copy cannot s
 from figure_state import MANIFEST_FILE, read_manifest
 
 
-def _slug_spellings(slug):
-    """The slug plus its other Unicode normalization form(s), deduplicated.
-
-    On macOS a filename read back from disk is often NFD (decomposed) while
-    the same slug passed on the command line is NFC — byte-different strings
-    for one on-screen name.  ``glob`` matches by bytes against ``os.scandir``
-    output, so a glob built from the NFC spelling silently matches nothing
-    against NFD files (and vice versa): ``rename`` reports zero attachments
-    for a note whose figures are right there, and ``_refuse_existing`` fails
-    to see an occupied slot.  Globbing every spelling closes both.  ASCII
-    slugs — the normal case — produce a single spelling and cost nothing.
-    """
-    out = [slug]
-    for form in ("NFC", "NFD"):
-        v = unicodedata.normalize(form, slug)
-        if v not in out:
-            out.append(v)
-    return out
+def _name_key(name):
+    return unicodedata.normalize("NFC", name).casefold()
 
 
 def _glob_slug(attachments, slug, tail):
-    """Glob ``<attachments>/<slug><tail>`` under every spelling of ``slug``."""
-    hits = []
-    for spelling in _slug_spellings(slug):
-        hits.extend(glob.glob(os.path.join(
-            attachments, glob.escape(spelling) + tail)))
-    return sorted(set(hits))
+    """Match the flat folder using the vault's case/Unicode name identity.
+
+    Python glob compares directory entries case-sensitively even on macOS.
+    Scanning the literal directory also keeps brackets in a vault path from
+    being interpreted as a glob expression.
+    """
+    pattern = glob.escape(_name_key(slug)) + _name_key(tail)
+    try:
+        with os.scandir(attachments) as entries:
+            return sorted(entry.path for entry in entries
+                          if fnmatch.fnmatchcase(_name_key(entry.name), pattern))
+    except FileNotFoundError:
+        return []
 
 UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
-
-MIME_EXT = {
-    "image/png": "png",
-    "image/jpeg": "jpg",
-    "image/jpg": "jpg",
-    "image/gif": "gif",
-    "image/webp": "webp",
-    "image/svg+xml": "svg",
-}
-KNOWN_EXT = {"png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "tiff"}
-
-# Content-Types that say "bytes" and nothing more: the URL's extension is then
-# the only hint left, so the extension fallback still applies to them.
-GENERIC_CT = {"", "application/octet-stream", "binary/octet-stream",
-              "application/binary", "unknown/unknown"}
 
 ALLOWED_SCHEMES = {"http", "https", "data"}
 DEFAULT_MAX_BYTES = 25 * 1024 * 1024
@@ -360,7 +337,7 @@ def describe_bytes(head):
 
 
 def sniff_extension(head, content_type=None, url=None):
-    """Detect the real image type: **the bytes decide**; the header is a hint.
+    """Detect a supported image signature; headers and URL names cannot supply it.
 
     Returns an extension, or None when the payload is not an image at all (an
     HTML error page, a JSON error body, a PDF, a failed redirect — all treated
@@ -378,10 +355,12 @@ def sniff_extension(head, content_type=None, url=None):
     2. **Bytes that are recognizably something else lose.** Text that is not an
        SVG root, and the binary signatures in `_NOT_IMAGE_MAGIC`, are a failure
        no header can rescue.
-    3. **Only genuinely unrecognized bytes fall through to the claims** —
-       step 6's "an `image/*` subtype with no mapping → the URL's extension,
-       else png" tail, plus the uninformative-Content-Type case
-       (absent, or `application/octet-stream`), where the URL is all there is.
+    3. **Unrecognized bytes fail too.** Otherwise arbitrary binary data with an
+       image header or a .png URL is published as a successful image. Add a
+       byte signature for a new format instead of guessing its extension.
+
+    This is format identification, not a complete image decode. Visual review
+    must still check that a recognized image is intact and readable.
 
     A failure here is what puts the documented `<!-- image download failed: … -->`
     placeholder in the body; `describe_bytes` names the shape for the message.
@@ -393,28 +372,7 @@ def sniff_extension(head, content_type=None, url=None):
     ext = _image_magic(head)
     if ext:
         return ext
-    if _binary_shape(head):
-        return None                      # a PDF/ZIP/ELF/media file, whatever the header says
-    ct = (content_type or "").split(";")[0].strip().lower()
-    if ct == "image/svg+xml":
-        # An SVG is text and these bytes are not, so the header is the only
-        # claim there is and the bytes contradict it.
-        return None
-    if ct in MIME_EXT:
-        return MIME_EXT[ct]
-    is_image_ct = ct.startswith("image/")
-    if not is_image_ct and ct not in GENERIC_CT:
-        return None                      # text/html, application/json, pdf, …
-    if url:
-        ext = os.path.splitext(urllib.parse.urlsplit(url).path)[1].lstrip(".").lower()
-        if ext == "svg":
-            return None                  # same reason: an SVG would have decoded as text
-        if ext in KNOWN_EXT:
-            return "jpg" if ext == "jpeg" else ext
-    # An image/* subtype we have no mapping for still gets step 6's png
-    # fallback; an uninformative Content-Type with no usable URL extension and
-    # no recognizable magic bytes does not — there is no evidence of an image.
-    return "png" if is_image_ct else None
+    return None
 
 
 def _temp_path():
@@ -531,7 +489,7 @@ def _reject_non_public(host, scheme="https"):
             ip = ipaddress.ip_address(addr)
         except ValueError:
             continue
-        if (ip.is_loopback or ip.is_link_local or ip.is_private
+        if (not ip.is_global or ip.is_loopback or ip.is_link_local or ip.is_private
                 or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
             raise ValueError(
                 f"host {host!r} resolves to the non-public address {ip} — "
@@ -646,7 +604,7 @@ def _fetch_data_uri(url, tmp, max_bytes=DEFAULT_MAX_BYTES):
     return mime or None
 
 
-def _refuse_existing(attachments, slug, index, overwrite):
+def _refuse_existing(attachments, slug, index, overwrite, extension=None):
     """Refuse a figure slot that is already occupied, unless asked to overwrite.
 
     `shutil.move` onto an existing path replaces it with no error and no way
@@ -670,9 +628,20 @@ def _refuse_existing(attachments, slug, index, overwrite):
         if unicodedata.normalize("NFC", name).casefold().startswith(prefix):
             raise ValueError(f"{name} is recorded in the PDF figure manifest — "
                              "clipping-processor cannot replace that producer's figure")
-    if overwrite:
-        return
     hit = _glob_slug(attachments, slug, f"_fig_{index}.*")
+    if overwrite:
+        # Replacing a PNG with a WebP at the same number would leave both on
+        # disk, and consumers could not choose which is current. Keep the old
+        # figure intact and require a fresh number when the format changes.
+        if extension is not None:
+            final = os.path.join(attachments, f"{slug}_fig_{index}.{extension}")
+            if any(not _same_file(path, final) for path in hit):
+                raise ValueError(
+                    "figure slot is occupied by a different filename or format: "
+                    + ", ".join(os.path.basename(path) for path in hit)
+                    + " — --overwrite replaces only the existing file; use "
+                    "the next free index for a new format and update the embed")
+        return
     if hit:
         raise ValueError(
             f"{os.path.basename(hit[0])} already exists in the attachments "
@@ -746,11 +715,11 @@ def download_one(url, attachments, slug, index, timeout=45,
         os.makedirs(attachments, exist_ok=True)
         final = os.path.join(attachments, f"{slug}_fig_{index}.{ext}")
         _ensure_within(attachments, final)
-        _refuse_existing(attachments, slug, index, overwrite)
+        _refuse_existing(attachments, slug, index, overwrite, ext)
         warning = _publish_file(
             tmp, final, overwrite,
             staging_parent=os.path.dirname(os.path.realpath(attachments)),
-            before_publish=lambda: _refuse_existing(attachments, slug, index, overwrite))
+            before_publish=lambda: _refuse_existing(attachments, slug, index, overwrite, ext))
         result.update(ok=True, path=final, filename=os.path.basename(final),
                       ext=ext, bytes=size, content_type=content_type)
         if warning:
@@ -860,11 +829,11 @@ def place_file(src, attachments, slug, index, overwrite=False):
         os.makedirs(attachments, exist_ok=True)
         final = os.path.join(attachments, f"{slug}_fig_{index}.{ext}")
         _ensure_within(attachments, final)
-        _refuse_existing(attachments, slug, index, overwrite)
+        _refuse_existing(attachments, slug, index, overwrite, ext)
         warning = _publish_file(
             src, final, overwrite,
             staging_parent=os.path.dirname(os.path.realpath(attachments)),
-            before_publish=lambda: _refuse_existing(attachments, slug, index, overwrite))
+            before_publish=lambda: _refuse_existing(attachments, slug, index, overwrite, ext))
         result.update(ok=True, path=final, filename=os.path.basename(final),
                       ext=ext, bytes=size)
         if warning:
@@ -978,6 +947,11 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, sources=None):
                           "figures belong to that document and are "
                           "pdf-organizer's to move, not this skill's"
                           % (old_slug, sources)}]
+    if sources and _pdf_named(sources, new_slug):
+        return [{"from": old_slug + "_fig_*", "to": new_slug + "_fig_*", "ok": False,
+                 "error": "refusing to rename: the destination stem %s belongs "
+                          "to a PDF in %s; choose an unused clipping slug"
+                          % (new_slug, sources)}]
     owned = {unicodedata.normalize("NFC", name).casefold()
              for name in read_manifest(os.path.join(attachments, MANIFEST_FILE))}
     # --- plan: every member is judged before any of them is touched ---------
@@ -988,28 +962,37 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, sources=None):
         base = os.path.basename(src)
         # the matched spelling's length, not the argument's — NFC and NFD
         # spellings of one slug differ in length.
-        matched = next(s for s in _slug_spellings(old_slug)
-                       if base.startswith(s))
+        stem_end = next(i for i, char in enumerate(base)
+                        if char == "_" and _name_key(base[:i]) == _name_key(old_slug))
         # Everything after the stem is carried across verbatim, separator
         # included, so a file written before the spellings converged keeps its
         # own label under the new stem and stays with its set, rather than
         # being re-spelled into the current convention by a rename.
-        dst = os.path.join(attachments, new_slug + base[len(matched):])
+        tail = base[stem_end:]
+        dst = os.path.join(attachments, new_slug + tail)
+        destination_prefix = _name_key(os.path.splitext(os.path.basename(dst))[0]) + "."
+        destination_slot = _glob_slug(
+            attachments, new_slug, glob.escape(os.path.splitext(tail)[0]) + ".*")
         entry = {"from": base, "to": os.path.basename(dst), "ok": False,
                  "error": None}
         if dry_run:
             entry["dry_run"] = True
         if unicodedata.normalize("NFC", base).casefold() in owned:
             entry["error"] = "recorded in the PDF figure manifest; not this skill's to rename"
-        elif _PDF_ONLY_LABEL.search(base):
+        elif any(name.startswith(destination_prefix) for name in owned):
+            entry["error"] = "destination is recorded in the PDF figure manifest"
+        elif _PDF_ONLY_LABEL.search(tail):
             entry["error"] = ("label spelling only pdf-figure-extractor "
                               "writes; this file is a PDF's figure, not this "
                               "note's")
         elif not os.path.lexists(src):
             entry["error"] = "source missing"
+        elif not os.path.isfile(src):
+            entry["error"] = "source is not an image file"
         # lexists, not exists: a broken symlink at dst is still something there.
-        elif os.path.lexists(dst) and not _same_file(src, dst):
-            entry["error"] = "destination exists"
+        elif any(not _same_file(src, path) for path in destination_slot) \
+                or (os.path.lexists(dst) and not _same_file(src, dst)):
+            entry["error"] = "destination exists (the figure slot includes every extension)"
         else:
             try:
                 _ensure_within(attachments, src)
@@ -1128,27 +1111,24 @@ def run_self_test():
             ("PNG bytes, .jpg URL", _PNG, None, "http://x/a.jpg", "png"),
             ("PNG bytes, text/html Content-Type", _PNG, "text/html",
              "http://x/a", "png"),
-            # no magic: the Content-Type decides
-            ("Content-Type png", b"\x00\x01\x02\x03", "image/png", None, "png"),
+            # No recognized image bytes: neither header nor URL can rescue it.
+            ("Content-Type png", b"\x00\x01\x02\x03", "image/png", None, None),
             ("Content-Type with a charset", b"\x00\x01", "image/png; charset=x",
-             None, "png"),
-            ("Content-Type jpeg normalises to jpg", b"\x00\x01", "image/jpeg",
-             None, "jpg"),
-            ("Content-Type uppercase", b"\x00\x01", "IMAGE/PNG", None, "png"),
-            # an image/* subtype with no mapping falls back to the URL, then png
+             None, None),
+            ("Content-Type jpeg without JPEG bytes", b"\x00\x01", "image/jpeg",
+             None, None),
+            ("Content-Type uppercase", b"\x00\x01", "IMAGE/PNG", None, None),
             ("unmapped image/*, URL extension", b"\x00\x01", "image/tiff",
-             "http://x/a.tiff", "tiff"),
-            ("unmapped image/*, no URL", b"\x00\x01", "image/heif", None, "png"),
-            # a Content-Type carrying no information at all: the URL is all
-            # that is left, and without it there is no evidence of an image
+             "http://x/a.tiff", None),
+            ("unmapped image/*, no URL", b"\x00\x01", "image/heif", None, None),
             ("octet-stream, .png URL", b"\x00\x01", "application/octet-stream",
-             "http://x/a.png", "png"),
-            ("octet-stream, .jpeg URL normalises", b"\x00\x01",
-             "application/octet-stream", "http://x/a.jpeg", "jpg"),
+             "http://x/a.png", None),
+            ("octet-stream, .jpeg URL", b"\x00\x01",
+             "application/octet-stream", "http://x/a.jpeg", None),
             ("octet-stream, uppercase URL extension", b"\x00\x01",
-             "application/octet-stream", "http://x/A.PNG", "png"),
+             "application/octet-stream", "http://x/A.PNG", None),
             ("octet-stream, URL extension behind a query", b"\x00\x01",
-             "application/octet-stream", "http://x/a.webp?w=800", "webp"),
+             "application/octet-stream", "http://x/a.webp?w=800", None),
             ("octet-stream, no usable URL extension", b"\x00\x01",
              "application/octet-stream", "http://x/a", None),
             ("no Content-Type, no extension", b"\x00\x01", None, "http://x/a",
@@ -1347,6 +1327,7 @@ def run_self_test():
                             ("169.254.169.254", "the link-local metadata address"),
                             ("10.0.0.5", "RFC1918 private space"),
                             ("192.168.1.1", "a home router"),
+                            ("100.64.0.1", "shared carrier/private-overlay space"),
                             ("0.0.0.0", "the unspecified address")):
             url = "http://%s/a.png" % host
             try:
@@ -1541,6 +1522,27 @@ def run_self_test():
         touch(os.path.join(att, "Teslo_Cancer_2026_fig_2.webp"))
         check("a different extension at the same index is the same slot",
               download_one(data_url, att, "Teslo_Cancer_2026", 2)["ok"], False)
+        old_webp = os.path.join(att, "Teslo_Cancer_2026_fig_2.webp")
+        render_png = touch(os.path.join(tmp, "changed-format.png"), _PNG)
+        replaced = download_one(data_url, att, "Teslo_Cancer_2026", 2, overwrite=True)
+        placed = place_file(render_png, att, "Teslo_Cancer_2026", 2, overwrite=True)
+        check("overwrite cannot create extension twins on either publication path",
+              (replaced["ok"], placed["ok"], open(old_webp, "rb").read(),
+               os.path.exists(render_png),
+               os.path.exists(os.path.join(att, "Teslo_Cancer_2026_fig_2.png"))),
+              (False, False, b"x", True, False))
+        misleading = "data:image/png;base64," + base64.b64encode(
+            b"\x00\xffnot an image\x01").decode("ascii")
+        nonimage = download_one(misleading, att, "Teslo_Cancer_2026", 70)
+        check("arbitrary binary data with an image MIME label never lands",
+              (nonimage["ok"], _glob_slug(att, "Teslo_Cancer_2026", "_fig_70.*")),
+              (False, []))
+        bracketed = os.path.join(tmp, "Vault [research]", "Images")
+        os.makedirs(bracketed)
+        lower_image = touch(os.path.join(bracketed, "teslo_cancer_2026_fig_1.webp"))
+        check("case variants in a bracketed vault path still occupy the slot",
+              download_one(data_url, bracketed, "Teslo_Cancer_2026", 1)["ok"], False)
+        check("the occupied file is retained", open(lower_image, "rb").read(), b"x")
         # a non-image is a failure, not a .png in the vault
         res = download_one("data:text/html;base64," + base64.b64encode(
             b"<!DOCTYPE html><html>nope</html>").decode("ascii"),
@@ -1712,6 +1714,30 @@ def run_self_test():
                 "New_Slug_2026_fig_3.png"]))
         check("renaming a stem with no figures is empty, not an error",
               rename_slug(folder, "Nobody_Home_2020", "X_2021"), [])
+        folder = figures("müLLER_Trial_2025", ("_fig_1.png",))
+        out = rename_slug(folder, unicodedata.normalize("NFD", "Müller_Trial_2025"),
+                          "Muller_New_2026")
+        check("a different case and Unicode spelling still renames the real figure",
+              ([entry["ok"] for entry in out], sorted(os.listdir(folder))),
+              ([True], ["Muller_New_2026_fig_1.png"]))
+        folder = figures("STRASSE_Trial_2025", ("_fig_1.png",))
+        out = rename_slug(folder, "Straße_Trial_2025", "New_Trial_2026")
+        check("casefold expansion does not cut the figure suffix at the wrong character",
+              ([entry["to"] for entry in out], [entry["ok"] for entry in out]),
+              (["New_Trial_2026_fig_1.png"], [True]))
+        folder = figures("Old_Slug_2025")
+        touch(os.path.join(folder, "new_slug_2026_fig_2.webp"), b"other owner")
+        before_set = sorted(os.listdir(folder))
+        for dry in (True, False):
+            out = rename_slug(folder, "Old_Slug_2025", "New_Slug_2026", dry_run=dry)
+            check("rename refuses another format in its destination slot (dry=%s)" % dry,
+                  ([entry["ok"] for entry in out], sorted(os.listdir(folder))),
+                  ([False, False, False], before_set))
+        folder = figures("Old_Slug_2025")
+        os.mkdir(os.path.join(folder, "Old_Slug_2025_fig_assets"))
+        check("a matching directory refuses the rename instead of moving user content",
+              all(not entry["ok"] for entry in rename_slug(
+                  folder, "Old_Slug_2025", "New_Slug_2026")), True)
 
         # §8a: a CONSUMER matches `<stem>_fig`, never `<stem>_fig_`. This side
         # globbed the strict form, so a vault holding pre-convergence names
@@ -1837,8 +1863,8 @@ def run_self_test():
             pass                              # no hard links here: skip, silently
         else:
             check("a destination that IS the source is not a collision",
-                  [e["ok"] for e in rename_slug(folder, "teslo_cancer_2026",
-                                                "Teslo_Cancer_2026")], [True])
+                  all(e["ok"] for e in rename_slug(folder, "teslo_cancer_2026",
+                                                   "Teslo_Cancer_2026")), True)
 
         # Sources/Images is FLAT and shared. Two guards say the stem is a PDF's.
         folder = figures("Doe_Foo_2025", ("_fig_1.png", "_fig_S1.png"))
@@ -1861,11 +1887,30 @@ def run_self_test():
         out = rename_slug(folder, "Doe_Baz_2025", "New_Note_2026")
         check("a plain integer label is this skill's", [e["ok"] for e in out],
               [True, True])
+        folder = figures("Doe_Fig_S1_2025", ("_fig_1.png",))
+        check("PDF-only label syntax inside a clipping title does not own its figures",
+              [e["ok"] for e in rename_slug(
+                  folder, "Doe_Fig_S1_2025", "Doe_Trial_2025")], [True])
 
         # ...and a `<stem>.pdf` on disk settles ownership outright
         sources = os.path.join(tmp, "Sources", "PDFs")
         os.makedirs(os.path.join(sources, "sub"))
         touch(os.path.join(sources, "sub", "Doe_Qux_2025.pdf"))
+        folder = figures("Clipping_Topic_2025", ("_fig_1.png",))
+        check("a PDF also reserves the destination stem before figures exist",
+              [entry["ok"] for entry in rename_slug(
+                  folder, "Clipping_Topic_2025", "Doe_Qux_2025", sources=sources)],
+              [False])
+        with open(os.path.join(folder, MANIFEST_FILE), "w") as fh:
+            fh.write("Reserved_Paper_2025_fig_1.png\t" + hashlib.sha256(_PNG).hexdigest() + "\n")
+        check("a missing figure's PDF manifest record still reserves the rename destination",
+              [entry["ok"] for entry in rename_slug(
+                  folder, "Clipping_Topic_2025", "Reserved_Paper_2025")], [False])
+        with open(os.path.join(folder, MANIFEST_FILE), "w") as fh:
+            fh.write("Reserved_Paper_2025_fig_1.webp\t" + hashlib.sha256(_PNG).hexdigest() + "\n")
+        check("manifest ownership reserves the destination index across extensions",
+              [entry["ok"] for entry in rename_slug(
+                  folder, "Clipping_Topic_2025", "Reserved_Paper_2025")], [False])
         folder = figures("Doe_Qux_2025", ("_fig_1.png",))
         out = rename_slug(folder, "Doe_Qux_2025", "New_Note_2026",
                           sources=sources)
@@ -2075,8 +2120,8 @@ def main(argv=None):
                    help="permit hosts resolving to loopback/link-local/private "
                         "addresses (off by default)")
     d.add_argument("--overwrite", action="store_true",
-                   help="replace an existing <slug>_fig_<N>.* instead of "
-                        "refusing it (the documented reprocess path; off by "
+                   help="replace an existing figure only at the same filename; "
+                        "a format change needs a fresh index (reprocess only; off by "
                         "default, because a wrong --start otherwise destroys "
                         "the figures already filed under that name)")
 
@@ -2108,8 +2153,8 @@ def main(argv=None):
                         "attachments folder; it is moved, not copied, and its "
                         "extension comes from its bytes, not from its name")
     p.add_argument("--overwrite", action="store_true",
-                   help="replace an existing <slug>_fig_<N>.* instead of "
-                        "refusing it (off by default)")
+                   help="replace an existing figure only at the same filename; "
+                        "a format change needs a fresh index (off by default)")
 
     r = sub.add_parser("rename", help="rename attachments after a slug change")
     r.add_argument("--attachments", required=True)

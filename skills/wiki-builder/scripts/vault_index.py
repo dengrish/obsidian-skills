@@ -35,11 +35,15 @@ Module use:
         print(e["slug"], e["title"], e["is_stub"])
 
 CLI:
-    vault_index.py <wiki-folder> [-o index.json] [--compact]
+    vault_index.py <wiki-folder> [-o index.json] [--compact] [--source NAME ...]
 
 Top-level index shape:
     {wiki_folder, generated, entry_count, stub_count, entries[],
      duplicate_slugs, problems[]}
+
+``--source`` additionally emits ``source_matches[]``, matching only decoded
+frontmatter provenance against literal source basenames. Nonempty problems
+mean lookup data is incomplete or malformed, never an automatic skip decision.
 
 Per-entry record:
     slug, path, relpath, title, type, aliases[], sources[], created, updated,
@@ -68,6 +72,34 @@ import re
 import sys
 import unicodedata as _ud
 
+# --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
+import os as _os, sys as _sys
+_here = _os.path.dirname(_os.path.abspath(__file__))
+_env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
+if _env:                                   # explicit override: authoritative, no fallback
+    _tried = [_os.path.abspath(_os.path.expanduser(_env))]
+else:                                      # plugin-relative walk-up, at most 5 levels
+    _tried, _d = [], _here
+    for _ in range(5):
+        _tried.append(_os.path.join(_d, "shared", "scripts"))
+        _d = _os.path.dirname(_d)
+_shared = next((_p for _p in _tried if _os.path.isdir(_p)), None)
+if _shared is None:
+    raise SystemExit("""obsidian: cannot find the plugin's shared/scripts/ folder, which holds
+the one canonical copy of the conventions this script depends on.
+Looked for:
+  %s
+Fix: install the whole plugin tree, or set OBSIDIAN_VAULT_SHARED to the
+shared/scripts/ directory (unset it to use the plugin-relative walk-up).
+Do NOT paste a second copy of the algorithm into this skill -- a divergent
+copy is the bug the shared layer exists to prevent.""" % "\n  ".join(_tried))
+_sys.path[:] = [_p for _p in _sys.path if _p not in (_shared, _here)]
+_sys.path.insert(0, _shared)               # shared/scripts/ FIRST
+_sys.path.append(_here)                    # own dir LAST: a local copy cannot shadow it
+# --- end bootstrap ---
+
+from yaml_scalars import parse_scalar, strip_comment  # noqa: E402
+
 
 def fold_name(s):
     """Case- and Unicode-normalization-folded form of a slug or link target.
@@ -90,6 +122,7 @@ __all__ = [
     "extract_wikilinks",
     "index_entry",
     "build_index",
+    "source_matches",
     "iter_markdown_files",
     "unquote_scalar",
 ]
@@ -118,6 +151,7 @@ _ITEM_RE = re.compile(r"^(?P<indent>\s*)-(?:\s+(?P<val>.*)|\s*)$")
 _WIKILINK_RE = re.compile(r"(?<!\!)\[\[([^\[\]]+?)\]\]")
 _EMBED_RE = re.compile(r"\!\[\[([^\[\]]+?)\]\]")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_SOURCE_REF_RE = re.compile(r"\[\[[^\[\]|#]+\.(?:pdf#page=0*[1-9][0-9]*|md)\]\]", re.I)
 
 
 # --------------------------------------------------------------------------
@@ -182,52 +216,37 @@ class Frontmatter(object):
 
 
 def unquote_scalar(raw):
-    """Return ``(value, style)`` where style is double | single | bare | empty."""
-    if raw is None:
-        return None, "empty"
-    s = raw.strip()
-    if s == "":
-        return "", "empty"
-    if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
-        return s[1:-1].replace('\\"', '"'), "double"
-    if len(s) >= 2 and s[0] == "'" and s[-1] == "'":
-        return s[1:-1].replace("''", "'"), "single"
-    return s, "bare"
+    """Return a validated scalar and its quoting style, or raise ValueError."""
+    return parse_scalar(raw)
 
 
 def _split_flow(inner):
-    """Split a ``[a, b]`` payload on top-level commas, honouring quotes."""
-    out, buf, quote, esc = [], [], None, False
-    for ch in inner:
-        if esc:
-            buf.append(ch)
-            esc = False
-            continue
-        if ch == "\\" and quote:
-            buf.append(ch)
-            esc = True
-            continue
+    """Split a flow-list payload, respecting YAML quote and escape boundaries."""
+    out, buf, quote = [], [], None
+    i = 0
+    while i < len(inner):
+        ch = inner[i]
         if quote:
             buf.append(ch)
-            if ch == quote:
-                quote = None
-            continue
-        if ch in "\"'":
+            if quote == '"' and ch == "\\" and i + 1 < len(inner):
+                i += 1
+                buf.append(inner[i])
+            elif ch == quote:
+                if quote == "'" and i + 1 < len(inner) and inner[i + 1] == "'":
+                    i += 1
+                    buf.append(inner[i])
+                else:
+                    quote = None
+        elif ch in "\"'" and not "".join(buf).strip():
             quote = ch
             buf.append(ch)
-            continue
-        if ch == ",":
+        elif ch == ",":
             out.append("".join(buf).strip())
             buf = []
-            continue
-        buf.append(ch)
-    tail = "".join(buf).strip()
-    if tail or out:
-        out.append(tail)
-    # Empties are ALWAYS dropped, exactly as scan_vault's split_flow drops
-    # them: the old `or (...)` tail returned the unfiltered list for a
-    # degenerate `[,]`, and the quoting check then reported two unquoted
-    # items that do not exist.
+        else:
+            buf.append(ch)
+        i += 1
+    out.append("".join(buf).strip())
     return [x for x in out if x != ""]
 
 
@@ -272,14 +291,18 @@ def parse_frontmatter(text):
     for offset in range(1, close):
         raw_line = lines[offset]
         lineno = offset + 1
-        if raw_line.strip() == "":
+        if raw_line.strip() == "" or raw_line.lstrip().startswith("#"):
             continue
 
         item_m = _ITEM_RE.match(raw_line)
         if item_m and current is not None and current.kind in ("blank", "block_list"):
             current.kind = "block_list"
             raw_item = (item_m.group("val") or "").strip()
-            val, _style = unquote_scalar(raw_item)
+            try:
+                val, _style = unquote_scalar(raw_item)
+            except ValueError as exc:
+                fm.errors.append("line %d: unparseable YAML scalar: %s" % (lineno, exc))
+                val = None
             current.raw_items.append(raw_item)
             current.values.append(val)
             current.item_lines.append(lineno)
@@ -308,19 +331,27 @@ def parse_frontmatter(text):
         key = key_m.group("key")
         rest = key_m.group("rest")
 
-        raw_value = rest.strip()
+        raw_value = strip_comment(rest).strip()
         if raw_value == "":
             field = Field(key, "blank", "", lineno)
         elif raw_value.startswith("[") and raw_value.endswith("]"):
             field = Field(key, "flow_list", raw_value, lineno)
             for raw_item in _split_flow(raw_value[1:-1]):
-                val, _style = unquote_scalar(raw_item)
+                try:
+                    val, _style = unquote_scalar(raw_item)
+                except ValueError as exc:
+                    fm.errors.append("line %d: unparseable YAML scalar: %s" % (lineno, exc))
+                    val = None
                 field.raw_items.append(raw_item)
                 field.values.append(val)
                 field.item_lines.append(lineno)
         else:
             field = Field(key, "scalar", raw_value, lineno)
-            val, _style = unquote_scalar(raw_value)
+            try:
+                val, _style = unquote_scalar(raw_value)
+            except ValueError as exc:
+                fm.errors.append("line %d: unparseable YAML scalar: %s" % (lineno, exc))
+                val = None
             field.raw_items.append(raw_value)
             field.values.append(val)
             field.item_lines.append(lineno)
@@ -338,7 +369,7 @@ def parse_frontmatter(text):
 # body sectioning + wikilinks
 # --------------------------------------------------------------------------
 
-_FENCE_LINE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
+_FENCE_LINE_RE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 #: A Flashcards heading as Obsidian renders one: ≤3 leading spaces, ``##`` or
 #: ``###``, whitespace, the word.  Tolerant on purpose — every one of those
 #: spellings SHOWS the reader a Flashcards section, so treating one as missing
@@ -371,8 +402,13 @@ def split_sections(body):
         m = _FENCE_LINE_RE.match(ln)
         if m and fence is None:
             fence = m.group(1)
+            # Retain nested/list fences while rejecting a more-indented sample
+            # as the closer of a top-level fence. Tabs count as four columns.
+            fence_indent = max(3, len(ln[:m.start(1)].expandtabs(4)))
             continue
-        if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
+        if (m and m.group(1)[0] == fence[0]
+                and len(m.group(1)) >= len(fence) and not m.group(2).strip()
+                and len(ln[:m.start(1)].expandtabs(4)) <= fence_indent):
             fence = None
             continue
         if fence is not None:
@@ -500,6 +536,14 @@ def index_entry(path, text=None, root=None):
     record["description"] = fm.scalar("description")
     for key in ("aliases", "sources", "tags", "parents"):
         record[key] = [v for v in fm.values(key) if v not in (None, "")]
+        field = fm.get(key)
+        if field and field.kind == "scalar":
+            record["errors"].append("%s: expected a list, not a scalar" % key)
+        if field and any(v is None for v in field.values):
+            record["errors"].append("%s: null or malformed list item" % key)
+    for source in record["sources"]:
+        if source != STUB_MARKER and not _SOURCE_REF_RE.fullmatch(source):
+            record["errors"].append("sources: malformed local source reference %r" % source)
     record["is_stub"] = _is_stub(fm)
 
     sections = split_sections(fm.body)
@@ -516,7 +560,7 @@ def index_entry(path, text=None, root=None):
     return record
 
 
-def iter_markdown_files(root):
+def iter_markdown_files(root, on_error=None):
     """Yield every ``.md`` path under ``root``, recursively, sorted.
 
     Dot-directories and ``.obsidian`` are skipped so vault plumbing never
@@ -529,7 +573,7 @@ def iter_markdown_files(root):
     root = os.path.abspath(root)
     found = []
     seen = set()
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=True, onerror=on_error):
         try:
             st = os.stat(dirpath)
             key = (st.st_ino, st.st_dev)
@@ -563,7 +607,10 @@ def build_index(root):
         return index
 
     by_slug = {}          # folded slug -> [(display slug, relpath)]
-    for path in iter_markdown_files(root):
+    def walk_error(exc):
+        index["problems"].append("unreadable wiki directory: %s" % exc)
+
+    for path in iter_markdown_files(root, on_error=walk_error):
         rec = index_entry(path, root=root)
         index["entries"].append(rec)
         by_slug.setdefault(fold_name(rec["slug"]), []).append(
@@ -586,6 +633,33 @@ def build_index(root):
             "insensitively, so subfolder and case/normalization variants all "
             "collide): %s" % (slug, len(paths), ", ".join(paths)))
     return index
+
+
+def source_matches(index, filenames):
+    """Entries citing the supplied literal PDF/Markdown basenames.
+
+    Read only decoded frontmatter sources, never example links in body prose.
+    Folder qualifications, anchors, case and Unicode normalization do not
+    change the basename. Disambiguators such as _2 remain part of its name.
+    The caller must inspect index problems before treating a match as grounds
+    for an automatic already-processed skip.
+    """
+    requested = {fold_name(str(name).replace("\\", "/").rsplit("/", 1)[-1])
+                 for name in filenames}
+    matches = []
+    for entry in index["entries"]:
+        cited = []
+        for source in entry["sources"]:
+            if not isinstance(source, str) or not _SOURCE_REF_RE.fullmatch(source):
+                continue
+            target = source[2:-2].split("|", 1)[0].split("#", 1)[0].strip()
+            basename = target.replace("\\", "/").rsplit("/", 1)[-1]
+            if fold_name(basename) in requested:
+                cited.append(source)
+        if cited:
+            matches.append({"slug": entry["slug"], "path": entry["path"],
+                            "relpath": entry["relpath"], "sources": cited})
+    return matches
 
 
 # --------------------------------------------------------------------------
@@ -715,6 +789,27 @@ def run_self_test():
         beta = [r for r in idx["entries"] if r["slug"] == "beta"][0]
         check("a FLOW-form aliases: list parses identically",
               beta["aliases"], ["beta-alias", "beta-second"])
+        decoded = parse_frontmatter(
+            '---\ntitle: "Garc\\u00eda" # annotation\n'
+            'aliases: ["garc\\u00eda", "other"] # annotation\n'
+            'sources: # origin follows the comment\n# preserved annotation\n'
+            '  - "[[Study.pdf#page=2]]" # physical page\n---\n')
+        check("comments and YAML escapes retain decoded title, aliases and sources",
+              (decoded.scalar("title"), decoded.values("aliases"),
+               decoded.values("sources"), decoded.errors),
+              ("García", ["garcía", "other"], ["[[Study.pdf#page=2]]"], []))
+        for raw, want in (("[O'Reilly, real-alias]", ["O'Reilly", "real-alias"]),
+                          ("['tail\\', 'real-alias']", ["tail\\", "real-alias"]),
+                          ("['O''Reilly, Inc.', 'real-alias']", ["O'Reilly, Inc.", "real-alias"])):
+            parsed = parse_frontmatter('---\naliases: ' + raw + '\n---\n')
+            check("flow parsing retains every alias in %s" % raw,
+                  (parsed.values("aliases"), parsed.errors), (want, []))
+        for raw in ('"Malformed "yaml""', '"bad\\q"', '"unterminated'):
+            parsed = parse_frontmatter('---\ntitle: ' + raw + '\n---\n')
+            check("malformed scalar is recorded, not used as a title: %s" % raw,
+                  (parsed.scalar("title"), bool(parsed.errors)), (None, True))
+        check("bare YAML null is not an entity title",
+              parse_frontmatter('---\ntitle: null\n---\n').scalar("title"), None)
         check("scalars are unquoted",
               (anchor["title"], anchor["type"], anchor["created"]),
               ("Anchor", "Concept", "2026-01-01"))
@@ -798,6 +893,14 @@ def run_self_test():
               sec["separator_index"] is not None, True)
         check("...and exposes the heading line as spelled",
               sec["flashcards_head"], "## Flashcards")
+        for fence in ('```', '~~~'):
+            sec = split_sections('Prose.\n\n' + fence + 'text\n' + fence + 'not-a-close\n'
+                                 '## Flashcards\n' + fence + '\n\nMore prose.\n\n---\n\n'
+                                 '## Flashcards\n\nDef.\n??\nTerm\n')
+            check("a fence with trailing text does not expose a sample heading: %s" % fence,
+                  ('More prose.' in '\n'.join(sec['prose_lines']),
+                   [l for l in sec['flashcard_lines'] if l.strip()]),
+                  (True, ['Def.', '??', 'Term']))
         # Fenced samples are SHOWN, not asserted: markers inside a listing do
         # not start a section, and the real ones after the fence still do.
         sec = split_sections("Prose.\n\n```\n**Related:** [[x|X]]\n"
@@ -843,6 +946,41 @@ def run_self_test():
         check("a missing wiki folder is reported and returns an empty index",
               (missing["entry_count"], bool(missing["problems"])), (0, True))
 
+        # The source query uses provenance, never a prose example, and names
+        # are compared literally (including numeric disambiguators).
+        put("cited.md", _st_entry_text("Cited").replace(
+            '"[[Doe_X_2025.pdf#page=2]]"',
+            '"[[Sources/PDFs/Garc\\u00eda_Study_2025.pdf#page=02]]" # origin'))
+        put("mentioned.md", _st_entry_text("Mentioned", body='An example uses [[García_Study_2025.pdf]].\n'))
+        put("different.md", _st_entry_text("Different").replace(
+            'Doe_X_2025.pdf', 'García_Study_2025_2.pdf'))
+        put("bad-source.md", _st_entry_text("Bad source").replace(
+            'Doe_X_2025.pdf#page=2', 'García_Study_2025.pdf#page=0'))
+        source_idx = build_index(wiki)
+        check("source matching folds Unicode/case but ignores body-only and _2 citations",
+              [r["slug"] for r in source_matches(source_idx, ["GARCI\u0301A_STUDY_2025.PDF"])],
+              ["cited"])
+        check("malformed provenance remains a problem rather than an automatic source match",
+              any("bad-source.md: sources:" in p for p in source_idx["problems"]), True)
+        out_path = os.path.join(tmp, "source-index.json")
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = main([wiki, "--source", "García_Study_2025.pdf", "--source", "DifferentNote.md", "-o", out_path])
+        with open(out_path, encoding="utf-8") as fh:
+            cli_idx = json.load(fh)
+        check("repeatable CLI --source adds the same provenance matches",
+              (rc, [r["slug"] for r in cli_idx["source_matches"]]), (0, ["cited"]))
+
+        from unittest.mock import patch
+        def unreadable_walk(root, followlinks=False, onerror=None):
+            if onerror:
+                onerror(PermissionError(13, "permission denied", os.path.join(root, "private")))
+            return iter(())
+        with patch.object(os, "walk", unreadable_walk):
+            inaccessible = build_index(wiki)
+        check("an unreadable directory cannot masquerade as a clean empty index",
+              (inaccessible["entry_count"], any("unreadable wiki directory" in p for p in inaccessible["problems"])),
+              (0, True))
+
         # -- the CLI still refuses a real run with no folder --------------------
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
@@ -882,6 +1020,9 @@ def _build_parser():
                                           "(a one-line status still goes to stdout)")
     p.add_argument("--compact", action="store_true",
                    help="emit compact JSON instead of indented")
+    p.add_argument("--source", action="append", default=[], metavar="FILENAME",
+                   help="also report source_matches for this literal source basename "
+                        "from decoded frontmatter only (repeat for a paired PDF/note)")
     return p
 
 
@@ -899,6 +1040,8 @@ def main(argv=None):
     if not os.path.isdir(args.wiki_folder):
         print(json.dumps(index, indent=2, ensure_ascii=False))
         return 2
+    if args.source:
+        index["source_matches"] = source_matches(index, args.source)
 
     dumped = json.dumps(index, ensure_ascii=False,
                         **({} if args.compact else {"indent": 2}))
