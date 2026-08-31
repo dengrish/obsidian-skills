@@ -16,6 +16,8 @@ The three guards below fire at steps 1, 3 and 11. They cost a URL lookup, a file
 
 **Then check for duplicates before doing any other work.** If a polished version of this article already exists in `Articles/`, the user has already processed it — reprocessing would either be wasted work or would silently overwrite their downstream edits. Scan every `.md` file in that folder, read each one's YAML `sources:` URL (item 1 — the script also reads a legacy scalar `source:`), and compare to this raw's `source:` URL. **When you're reprocessing a file that itself lives in `Articles/` (explicit single-file mode), exclude that one file from this scan** — otherwise it matches its own `sources:` URL and the dedup logic flags the file as a duplicate of itself.
 
+Apply step 1's origin precedence even when checking by hand: use `source:` only if `sources:` is absent, and never infer ownership from duplicate keys or a malformed current value. An unreadable directory is a failed inventory, not an empty one; the manual fallback must cover the same complete scope before processing can continue.
+
 **URL comparison normalization.** Compare *normalized* URLs on both sides — the raw's and each polished note's — so that two captures of the same article match even when the strings differ. Apply in order:
 
 - Lowercase the scheme and host.

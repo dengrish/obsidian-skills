@@ -2131,7 +2131,7 @@ FIG_EMBED_RE = re.compile(r"^!\[\[([^\]\n]+)\]\][ \t]*$", re.M)
 #: Floor, not a pin -- exactly like SLUG_SELFTEST_MIN.  Coverage may grow
 #: freely; only a shrink fails, which is what stops a case being quietly
 #: deleted to make a regression go away.
-NAMING_SELFTEST_MIN = 137       # the 2026-08-31 tally; shrink = FAIL
+NAMING_SELFTEST_MIN = 161       # the 2026-08-31 tally; shrink = FAIL
 
 #: The same idea applied to a *corpus* rather than a suite: how many stated
 #: figure filenames `figure-naming` (c) must still find.  295 today.  The
@@ -5493,26 +5493,26 @@ SELFTEST_MIN_CASES = {
     # mirror duty of the "lowering is a deliberate, reviewable statement" rule
     # below: new regression cases must not disappear with the harness green.
     "shared/scripts/figure_state.py": 6,
-    "shared/scripts/naming.py": 137,
+    "shared/scripts/naming.py": 161,
     "shared/scripts/plugin_paths.py": 95,
     "shared/scripts/plurals.py": 196,
     "shared/scripts/slugify.py": 61,
-    "shared/scripts/yaml_scalars.py": 7,
-    "skills/clipping-processor/scripts/dedup_index.py": 100,
-    "skills/clipping-processor/scripts/fetch_images.py": 280,
-    "skills/clipping-processor/scripts/slug.py": 117,
-    "skills/paper-summarizer/scripts/note_lint.py": 169,
-    "skills/paper-summarizer/scripts/paper_scan.py": 104,
+    "shared/scripts/yaml_scalars.py": 8,
+    "skills/clipping-processor/scripts/dedup_index.py": 108,
+    "skills/clipping-processor/scripts/fetch_images.py": 282,
+    "skills/clipping-processor/scripts/slug.py": 120,
+    "skills/paper-summarizer/scripts/note_lint.py": 177,
+    "skills/paper-summarizer/scripts/paper_scan.py": 118,
     "skills/paper-summarizer/scripts/paper_text.py": 39,
     "skills/pdf-figure-extractor/scripts/auto_fig_bbox.py": 296,
-    "skills/pdf-figure-extractor/scripts/batch_extract.py": 186,
+    "skills/pdf-figure-extractor/scripts/batch_extract.py": 205,
     "skills/pdf-figure-extractor/scripts/extract_figures.py": 100,
     "skills/pdf-figure-extractor/scripts/render_page.py": 38,
-    "skills/pdf-organizer/scripts/organize.py": 191,
-    "skills/wiki-builder/scripts/find_collisions.py": 58,
+    "skills/pdf-organizer/scripts/organize.py": 210,
+    "skills/wiki-builder/scripts/find_collisions.py": 62,
     "skills/wiki-builder/scripts/lint_entry.py": 130,
-    "skills/wiki-builder/scripts/vault_index.py": 61,
-    "skills/wiki-linter/scripts/scan_vault.py": 147,
+    "skills/wiki-builder/scripts/vault_index.py": 62,
+    "skills/wiki-linter/scripts/scan_vault.py": 150,
 }
 
 

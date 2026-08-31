@@ -10,6 +10,8 @@ Two directions: **backfill** the links that couldn't exist when an earlier entry
 
 ### Backfill (add missing links)
 
+Surfaces claimed by multiple entries are omitted from backfill candidates; resolve their ownership before linking them. A bare common-noun destination stays excluded when mentioned through a plural or alias too.
+
 Step 0's **backfill candidates** are the worklist: it has already scanned every full entry's prose for bare-text mentions of other entries' titles/aliases (and their plurals), excluding bare common nouns and targets already linked in that entry. Walk that list and, for each candidate that clears the closeness bar below, wrap the **first body-prose occurrence** in the piped form `[[slug|Display]]` (bare when display = slug), the display label preserving the entry's wording (alias mentions keep the source surface form — "Lambda Rank" → `[[lambdarank|Lambda Rank]]`). Add newly-linked targets to the `**Related:**` footer per the footer format. Only the first occurrence is wrapped; later mentions stay bare text.
 
 #### The closeness bar

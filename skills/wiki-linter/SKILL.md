@@ -76,7 +76,7 @@ A steady-state vault is mostly already-correct. **Only write an entry that actua
 
 ## Step 0 — Inventory the vault
 
-Before any task, build a complete model of the vault with **one scan**. Give the script its full path (`<skill>` is the directory this SKILL.md sits in — your working directory is normally the vault, where a bare `scripts/…` resolves to nothing):
+Before any task, build the initial model of the vault with **one scan**. Give the script its full path (`<skill>` is the directory this SKILL.md sits in — your working directory is normally the vault, where a bare `scripts/…` resolves to nothing):
 
 ```bash
 python3 '<skill>/scripts/scan_vault.py' '<vault>/Wiki' --images '<vault>/Sources/Images' --out '/tmp/wiki-scan-<run-id>.json'
@@ -150,6 +150,8 @@ Re-check every **full** entry against wiki-builder's Quality Checklist and fix v
 **Valid blanks are not violations.** Blank `tags:` on a full entry is an intended state; never "fill it in" as a QC fix. (Blank `tags:` on a *stub* **is** a violation — a stub needs ≥1 tag.)
 
 **`importance:` is retired, and a legacy one is left alone.** The field was removed from wiki-builder's schema, so new entries omit the key; the entries already in the vault still carry it, populated. **Never strip it, never rewrite it, never flag it** — at any severity. The scanner emits no finding for it, and there is no item 20 (see *In scope* in `references/qc-items.md`).
+
+**Refresh after QC edits.** If Task 1 changed entries, re-run the Step 0 command before Task 2 or Task 3 consumes its worklists. Use the refreshed inventory, aliases, `backfill_candidates`, and `discipline_tags`: a newly added alias or corrected tag is absent from the original scan. Keep the first scan's `run_timestamp` as this run's suggestion-log timestamp.
 
 ---
 

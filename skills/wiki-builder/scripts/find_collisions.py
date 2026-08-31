@@ -19,7 +19,8 @@ THE FIVE PROBES (SKILL.md (step 3, the five probes)):
 VERDICTS
   create      no probe fired
   merge       probe (a) or (b) fired -- same entity under a different
-              spelling of the same slug; the skill's merge path applies
+              spelling of the same slug, with one existing owner;
+              multiple existing owners require adjudication
   adjudicate  probe (c), (d), (e) or (f) fired -- these are near-duplicate
               *signals*, not identity.  SKILL.md (step 3, the five probes)-489 documents a case
               where probe (e) fires on two genuinely different techniques
@@ -503,6 +504,22 @@ def check_candidate(title, index, use_stem=True, use_superset=True, peers=None,
                 "implies": _implies(probe),
             })
 
+    # A decisive spelling match does not choose between several existing
+    # owners. Keep paths in the identity: two subfolders can contain distinct
+    # files with the very same slug. Multiple aliases of ONE entry are safe.
+    merge_owners = {(m["entry_slug"], m["entry_path"])
+                    for m in result["matches"]
+                    if m["matched_via"] != "candidate" and m["implies"] == "merge"}
+    if len(merge_owners) > 1:
+        result["verdict"] = "adjudicate"
+        result["error"] = ("exact spelling matches have %d existing owners; "
+                           "resolve the destination before merging; never "
+                           "choose an owner by index order" % len(merge_owners))
+        for match in result["matches"]:
+            if match["implies"] == "merge":
+                match["implies"] = "adjudicate"
+        return result
+
     verdict = "create"
     for match in result["matches"]:
         if VERDICT_RANK[match["implies"]] > VERDICT_RANK[verdict]:
@@ -808,6 +825,36 @@ def run_self_test():
         check("a candidate never collides with itself",
               [c for c in rep["candidate_collisions"]
                if c["candidates"][0] == c["candidates"][1]], [])
+
+        # Distinct physical destinations cannot be reduced to one decisive
+        # merge merely because they claim the same filename or alias.
+        for label, records in (
+                ("duplicate basenames", [("first/shared.md", "Shared", []),
+                                         ("second/shared.md", "Shared", [])]),
+                ("shared aliases", [("first.md", "First", ["shared"]),
+                                    ("second.md", "Second", ["shared"])]),
+                ("filename and alias", [("first.md", "First", ["shared"]),
+                                        ("shared.md", "Shared", [])])):
+            collision_wiki = os.path.join(tmp, label.replace(" ", "-"))
+            for rel, title, aliases in records:
+                dest = os.path.join(collision_wiki, rel)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with open(dest, "w", encoding="utf-8") as fh:
+                    fh.write(_st_entry_text(title, aliases=aliases))
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = main(["--wiki", collision_wiki, "--title", "Shared"])
+            rep = json.loads(buf.getvalue())
+            result = rep["results"][0]
+            check("%s require destination adjudication in the public CLI" % label,
+                  (rc, result["verdict"], rep["summary"]["merge"],
+                   all(m["implies"] == "adjudicate" for m in result["matches"]),
+                   "existing owners" in result.get("error", "")),
+                  (0, "adjudicate", 0, True, True))
+        unique = {"entries": [{"slug": "shared", "aliases": ["shared", "Shared"],
+                               "relpath": "shared.md"}]}
+        check("several exact spellings on one owner remain a merge",
+              check_candidate("Shared", unique)["verdict"], "merge")
 
         # -- --titles, in each shape a caller actually writes ---------------
         for label, payload, want in (

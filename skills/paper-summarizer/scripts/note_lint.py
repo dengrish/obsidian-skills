@@ -176,8 +176,10 @@ _CITATION = re.compile(r"<sup>\[\[[^\]|]*#page=[^\]|]*(?:\|[^\]]*)?\]\]</sup>")
 # separated" is still a numbered caption.
 _MARK = r"(?:supplementary\s+|suppl\.?\s*|supp\.?\s*|extended\s+data\s+)?"
 _NUM = r"\s*[A-Za-z]?[0-9]+(?:[.\-][0-9A-Za-z]+)*"
-_FIG_NUM_BODY = _MARK + r"fig(?:ure|\.)?s?" + _NUM
-_TAB_NUM_BODY = _MARK + r"tab(?:le|\.)?s?" + _NUM
+# Abbreviations need a separator: TAB1 and FIG4 are also scientific identifiers,
+# so a compact identifier alone is not evidence of an external exhibit pointer.
+_FIG_NUM_BODY = _MARK + r"(?:figures?|figs?(?:\.|\s))" + _NUM
+_TAB_NUM_BODY = _MARK + r"(?:tables?|tabs?(?:\.|\s))" + _NUM
 # `_EXHIBIT_NUM` matches one anywhere in a line; `_CAP_NUM` only at the head of
 # a caption, where it is the classic "Figure 2 -- " label.
 _CAP_NUM = re.compile(r"\A\*?\s*[(\[]?\s*(?:" + _FIG_NUM_BODY + r"|"
@@ -189,8 +191,8 @@ _CAP_NUM = re.compile(r"\A\*?\s*[(\[]?\s*(?:" + _FIG_NUM_BODY + r"|"
 # never in force.  `_FIG_NUM_BODY`/`_TAB_NUM_BODY` keep their `s?` because
 # `_CAP_NUM` needs it: a caption opening "Figures 2 and 3 --" is an exhibit
 # label whatever else is true of the plural.
-_FIG_NUM_ONE = _MARK + r"fig(?:ure|\.)?" + _NUM
-_TAB_NUM_ONE = _MARK + r"tab(?:le|\.)?" + _NUM
+_FIG_NUM_ONE = _MARK + r"(?:figure|fig(?:\.|\s))" + _NUM
+_TAB_NUM_ONE = _MARK + r"(?:table|tab(?:\.|\s))" + _NUM
 # The plural forms -- "figures 45% and 8%", "the revenue figures 2024" -- are
 # where this over-fires: "figures" is an ordinary English word for numbers.  A
 # reference to an exhibit is singular ("Figure 2") or an explicit range
@@ -201,7 +203,7 @@ _TAB_NUM_ONE = _MARK + r"tab(?:le|\.)?" + _NUM
 _EXHIBIT_NUM = re.compile(
     r"\b(?:(?:" + _FIG_NUM_ONE + r"|" + _TAB_NUM_ONE + r")"
     r"(?![0-9]*\s*%)"                       # "figure 45%" is prose
-    r"|\b(?:fig(?:ure)?s|tab(?:le)?s)\s*[A-Za-z]?[0-9]+"
+    r"|\b(?:figures|tables|figs(?:\.|\s)|tabs(?:\.|\s))\s*[A-Za-z]?[0-9]+"
     r"(?:\s*(?:-|–|to|and|,)\s*[A-Za-z]?[0-9]+)+)", re.I)
 # A bare URL, stripped before the exhibit sweep: `.../figures/fig2` is a path
 # segment, not a pointer out of the note.
@@ -1567,6 +1569,29 @@ def _cases():
          "points at something"),
         ("`Figure` with no number is fine",
          _mutate("More prose.<sup>[[Doe_X_2025.pdf#page=6|6]]</sup>", "Figure-ground separation held."), CLEAN),
+        ("scientific identifiers are not compact figure or table pointers",
+         _mutate("More prose.<sup>", "TAB1 binds TAK1, and FIG4 regulates lipids.<sup>"),
+         CLEAN),
+        ("a caption may open with a scientific identifier",
+         _mutate("*The arms separated", "*TAB1 and FIG4 differed"), CLEAN),
+        ("a dotted abbreviated figure pointer remains a finding",
+         _mutate("More prose.<sup>", "See Fig.2.<sup>"),
+         "'Fig.2' points at something"),
+        ("a spaced abbreviated figure pointer remains a finding",
+         _mutate("More prose.<sup>", "See Fig 2.<sup>"),
+         "'Fig 2' points at something"),
+        ("a dotted abbreviated table pointer remains a finding",
+         _mutate("More prose.<sup>", "See Tab.2.<sup>"),
+         "'Tab.2' points at something"),
+        ("a compact full figure label remains a finding",
+         _mutate("More prose.<sup>", "See Figure2.<sup>"),
+         "'Figure2' points at something"),
+        ("a compact full table label remains a finding",
+         _mutate("More prose.<sup>", "See Table2.<sup>"),
+         "'Table2' points at something"),
+        ("an abbreviated plural range remains a finding",
+         _mutate("More prose.<sup>", "See Figs.2 and 3.<sup>"),
+         "'Figs.2 and 3' points at something"),
         # The plural rule this pattern's own comment states, which was dead
         # code: the singular alternative carried `s?`, so it matched every
         # plural first and the range-required branch never ran.

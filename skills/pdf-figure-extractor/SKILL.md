@@ -208,7 +208,9 @@ not permission to reset it or claim every image. Manual cropping may add a new
 image in a legacy folder with no manifest, but cannot replace any occupied name
 there. Inspect legacy images and run the scoped batch migration before repairing
 an existing crop; that migration reports and records historical output matching
-canonical, uniquely named PDFs in the requested source scope. A protected or
+canonical, uniquely named PDFs in the requested source scope. Only complete PNGs
+are adopted; truncated images or other formats named `.png` stay unclaimed
+and unchanged and are reported for inspection. A protected or
 symlinked manifest blocks before extraction or review marks are written. A late
 manifest-save failure makes the run fail and must be resolved before retrying;
 do not delete the manifest to make untracked PNGs appear owned.

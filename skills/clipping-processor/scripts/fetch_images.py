@@ -880,15 +880,16 @@ _FIG_GLOB = "_fig*"
 
 def _pdf_named(sources, slug):
     """Is there a `<slug>.pdf` under `sources`?  Cheap, read-only."""
+    def failed(exc):
+        raise ValueError("cannot verify PDF ownership in %r: %s" %
+                         (exc.filename or sources, exc)) from exc
+
     key = unicodedata.normalize("NFC", slug).casefold()
-    try:
-        for root, _dirs, files in os.walk(sources):
-            for f in files:
-                if unicodedata.normalize("NFC", os.path.splitext(f)[0]).casefold() == key \
-                        and f.lower().endswith(".pdf"):
-                    return True
-    except OSError:
-        pass
+    for root, _dirs, files in os.walk(sources, onerror=failed):
+        for f in files:
+            if unicodedata.normalize("NFC", os.path.splitext(f)[0]).casefold() == key \
+                    and f.lower().endswith(".pdf"):
+                return True
     return False
 
 
@@ -1934,6 +1935,21 @@ def run_self_test():
         raises("a mistyped --sources path cannot silently disable ownership checks",
                rename_slug, folder, accented, "New_Note_2026",
                sources=os.path.join(sources, "missing-folder"))
+        scandir = os.scandir
+
+        def unreadable_sources(path):
+            if path == os.path.join(sources, "sub"):
+                raise PermissionError(13, "permission denied", path)
+            return scandir(path)
+
+        before = {name: open(os.path.join(folder, name), "rb").read()
+                  for name in os.listdir(folder)}
+        with patch.object(os, "scandir", side_effect=unreadable_sources):
+            raises("an incomplete PDF inventory cannot authorize an image rename",
+                   rename_slug, folder, accented, "New_Note_2026", sources=sources)
+        check("failed ownership enumeration preserves every image name and byte",
+              {name: open(os.path.join(folder, name), "rb").read()
+               for name in os.listdir(folder)}, before)
         raises("rename_slug validates both slugs", rename_slug, folder,
                "../old", "new")
         raises("...including the new one", rename_slug, folder, "old",

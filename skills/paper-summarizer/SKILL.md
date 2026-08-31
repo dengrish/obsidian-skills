@@ -79,6 +79,8 @@ Single quotes on every path: they are the user's, not this file's (`CONVENTIONS.
 
 **`--notes` is `Articles/`, which this skill shares with `clipping-processor`.** Its cleaned clippings sit in the same folder under the same `CONVENTIONS.md` §2b schema, and a clipping slug and a PDF stem can land on the same filename. That is what the `collision` status below exists for, and it is why the scan reads each existing note's `sources:` rather than just checking that a file is there.
 
+The current `sources:` first item takes precedence over a legacy `source:`, regardless of their order. The legacy scalar is used only when `sources:` is absent; duplicate origin keys or an empty, malformed, or unsupported current value cannot establish ownership and leave an occupied note as a collision. A non-zero exit for an unreadable source, note, or image directory is a failed scan: resolve it before proceeding, and never read it as `new` or zero figures.
+
 Two PDFs in different source subfolders can also share a basename and therefore
 claim one output note. The scan reports these as `collision` with
 `source_conflicts`, even when no note exists yet. Leave both untouched and

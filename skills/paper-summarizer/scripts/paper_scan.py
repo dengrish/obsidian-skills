@@ -83,7 +83,7 @@ import sys
 import unicodedata
 
 from naming import chapter_book_stem, core_stem, looks_canonical, stem_of
-from yaml_scalars import parse_scalar
+from yaml_scalars import parse_scalar, strip_comment
 
 #: Figure-label namespaces, ranked so a listing reads main → appendix →
 #: supplementary → Supporting Information → Extended Data.  Longest prefix
@@ -111,7 +111,7 @@ STATUSES = ("book", "chapter", "unorganized", "collision", "legacy",
 #: summarised.  Case-insensitive, and the same two-key logic as
 #: clipping-processor's `dedup_index.read_source`: the two skills read each
 #: other's notes out of one folder and must agree about what is parseable.
-_SOURCES_KEY_RE = re.compile(r"\Asources\s*:\s*(?:#.*)?\Z", re.I)
+_SOURCES_KEY_RE = re.compile(r"\Asources\s*:\s*(.*)\Z", re.I)
 _SOURCES_ITEM_RE = re.compile(r"\A[ \t]*-[ \t]+(.*)\Z")
 _SOURCE_RE = re.compile(r"\Asource\s*:\s*(.*)\Z", re.I)
 
@@ -179,8 +179,11 @@ def figures_for(attachments, stem):
     fold = stem_key + "_fig"
     try:
         names = sorted(os.listdir(attachments))
-    except OSError:
+    except FileNotFoundError:
         return []
+    except OSError as exc:
+        raise ValueError("cannot read figure inventory %r: %s" %
+                         (attachments, exc)) from exc
     out = []
     for name in names:
         # Case-folded on both sides, for the reason organize.py matches that
@@ -258,32 +261,34 @@ def note_source(path):
                 return None
             if first.strip() != "---":
                 return None
-            found = None
+            found = {}
             pending = False
             for line in fh:
                 if line.strip() == "---":
-                    return found or None   # the fence closed: it is ours
-                if found is None:
-                    raw = line.rstrip("\n")
-                    if pending:
-                        # Blank and comment-only lines between `sources:` and
-                        # its first item are valid YAML (Obsidian still reads
-                        # item 1); consuming the flag on one left the real item
-                        # unread and the note classified `collision`.  The
-                        # sibling readers (dedup_index, organize) skip the same way.
-                        if not raw.strip() or raw.lstrip().startswith("#"):
-                            continue
-                        pending = False
-                        mi = _SOURCES_ITEM_RE.match(raw)
-                        if mi:
-                            found = _yaml_scalar(mi.group(1))
-                            continue
-                    if _SOURCES_KEY_RE.match(raw):
-                        pending = True     # the origin is the NEXT line
+                    return found.get("sources", found.get("source")) or None
+                raw = line.rstrip("\n")
+                if not raw.strip() or raw.lstrip().startswith("#"):
+                    continue
+                if pending:
+                    pending = False
+                    mi = _SOURCES_ITEM_RE.match(raw)
+                    if mi:
+                        found["sources"] = _yaml_scalar(mi.group(1))
                         continue
-                    m = _SOURCE_RE.match(raw)
-                    if m:
-                        found = _yaml_scalar(m.group(1))
+                m = _SOURCES_KEY_RE.match(raw)
+                if m:
+                    if "sources" in found:
+                        return None            # duplicate origin keys are ambiguous
+                    found["sources"] = None
+                    # A current field, even when unreadable, takes precedence
+                    # over legacy metadata; it cannot authorize a fallback.
+                    pending = not strip_comment(m.group(1)).strip()
+                    continue
+                m = _SOURCE_RE.match(raw)
+                if m:
+                    if "source" in found:
+                        return None
+                    found["source"] = _yaml_scalar(m.group(1))
     except (OSError, ValueError):
         return None
     return None
@@ -364,8 +369,12 @@ def find_pdfs(src):
             raise ValueError("%s is a file but not a .pdf; --src takes a PDF or "
                              "a folder of them" % src)
         return [src]
+    def failed(exc):
+        raise ValueError("cannot complete PDF scan of %r: %s" %
+                         (exc.filename or src, exc)) from exc
+
     out = []
-    for root, dirs, files in os.walk(src):
+    for root, dirs, files in os.walk(src, onerror=failed):
         dirs[:] = sorted(d for d in dirs if not d.startswith("."))
         for name in sorted(files):
             if name.lower().endswith(".pdf") and not name.startswith("."):
@@ -385,7 +394,8 @@ def books_in(stems):
     figures under two stems that never collide and never deduplicate (§8).
     Three other comparisons in this file already fold; this one did not.
     """
-    return {_name_key(b) for b in (chapter_book_stem(s) for s in stems) if b}
+    return {_name_key(b) for b in
+            (chapter_book_stem(s, is_stem=True) for s in stems) if b}
 
 
 def classify(stem, books, note_state, allow_unorganized=False,
@@ -410,12 +420,12 @@ def classify(stem, books, note_state, allow_unorganized=False,
     """
     # Folded on BOTH sides: `books_in` folds what it produces, and a caller
     # passing a raw set (the self-test does) must get the same answer.
-    if _name_key(core_stem(stem)) in {_name_key(b) for b in books} \
+    if _name_key(core_stem(stem, is_stem=True)) in {_name_key(b) for b in books} \
             and not include_books:
         return "book"
-    if chapter_book_stem(stem) and not include_chapters:
+    if chapter_book_stem(stem, is_stem=True) and not include_chapters:
         return "chapter"
-    if not looks_canonical(stem) and not allow_unorganized:
+    if not looks_canonical(stem, is_stem=True) and not allow_unorganized:
         return "unorganized"
     if note_state == "theirs":
         return "collision"
@@ -426,6 +436,11 @@ def classify(stem, books, note_state, allow_unorganized=False,
 
 def scan(src, notes, images, allow_unorganized=False,
          include_books=False, include_chapters=None):
+    try:
+        os.listdir(notes)
+    except OSError as exc:
+        raise ValueError("cannot inspect existing notes in %r: %s" %
+                         (notes, exc)) from exc
     # Explicit naming overrides every folder filter, here as everywhere else
     # in this plugin: `--src` pointed at one PDF means process that PDF.
     if include_chapters is None:
@@ -768,6 +783,18 @@ def run_self_test():
         ('---\ncitation:\n  source: "[[Other_2020.pdf]]"\n'
          'source: "[[Doe_Foo_2025.pdf]]"\n---\n', "[[Doe_Foo_2025.pdf]]"),
         ('---\nsource: https://example.com/x\n---\n', "https://example.com/x"),
+        ('---\nsource: "[[Doe_Foo_2025.pdf]]"\nsources:\n'
+         '  - "https://example.com/clip"\n---\n', "https://example.com/clip"),
+        ('---\nsources:\n  - "https://example.com/clip"\n'
+         'source: "[[Doe_Foo_2025.pdf]]"\n---\n', "https://example.com/clip"),
+        ('---\nsource: "[[Doe_Foo_2025.pdf]]"\nsources:\n---\n', None),
+        ('---\nsource: "[[Doe_Foo_2025.pdf]]"\nsources: null\n---\n', None),
+        ('---\nsource: "[[Doe_Foo_2025.pdf]]"\nsources:\n'
+         '  - "unterminated\n---\n', None),
+        ('---\nsources:\n  - "[[Doe_Foo_2025.pdf]]"\n'
+         'sources:\n  - "https://example.com/clip"\n---\n', None),
+        ('---\nsource: "[[Doe_Foo_2025.pdf]]"\n'
+         'source: "https://example.com/clip"\n---\n', None),
         ('---\ntitle: no source here\n---\n', None),
         ('no frontmatter at all\n', None),
         ('\ufeff---\nsource: "[[Doe_Foo_2025.pdf]]"\n---\n',
@@ -1002,6 +1029,62 @@ def run_self_test():
     if "shares this PDF basename" not in render(conflicted):
         bad += 1
         print("FAIL source collisions did not explain the conflicting PDF paths")
+
+    import contextlib
+    import io
+    from unittest.mock import patch
+
+    # The public command must use the complete on-disk stem. Stripping a
+    # second extension falsely accepted these unorganized PDF filenames.
+    for stem in ("Edge_Source_2025", "Edge_Source_2025.revised", "Edge_Source_2025.pdf"):
+        _mk("Sources/PDFs/%s.pdf" % stem)
+    _mk("Sources/PDFs/Mixed_Origin_2025.pdf")
+    _mk("Articles/Mixed_Origin_2025.md",
+        '---\nsource: "[[Mixed_Origin_2025.pdf]]"\nsources:\n'
+        '  - "https://example.com/separate-clipping"\n---\nUser-edited article.\n')
+    argv = ["--src", os.path.join(_v, "Sources", "PDFs"),
+            "--notes", os.path.join(_v, "Articles"),
+            "--images", os.path.join(_v, "Sources", "Images"), "--json"]
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        code = main(argv)
+    actual = {row["stem"]: row["status"]
+              for row in json.loads(output.getvalue())["pdfs"]}
+    for stem, expected in (("Edge_Source_2025", "new"),
+                           ("Edge_Source_2025.revised", "unorganized"),
+                           ("Edge_Source_2025.pdf", "unorganized"),
+                           ("Mixed_Origin_2025", "collision")):
+        n += 1
+        if code != 0 or actual.get(stem) != expected:
+            bad += 1
+            print("FAIL public scan(): %s -> %r, expected %s"
+                  % (stem, actual.get(stem), expected))
+
+    # Real directory enumeration errors must not become clean inventories.
+    # The independent integration fixture also exercises these with chmod000.
+    scandir, listdir = os.scandir, os.listdir
+    for blocked in (os.path.join(_v, "Sources", "PDFs", "first"),
+                    os.path.join(_v, "Sources", "Images"),
+                    os.path.join(_v, "Articles")):
+        def denied_scan(path):
+            if path == blocked:
+                raise PermissionError(13, "permission denied", path)
+            return scandir(path)
+
+        def denied_list(path):
+            if path == blocked:
+                raise PermissionError(13, "permission denied", path)
+            return listdir(path)
+
+        output, errors = io.StringIO(), io.StringIO()
+        with patch.object(os, "scandir", side_effect=denied_scan), \
+                patch.object(os, "listdir", side_effect=denied_list), \
+                contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            code = main(argv)
+        n += 1
+        if code != 2 or output.getvalue() or blocked not in errors.getvalue():
+            bad += 1
+            print("FAIL unreadable directory was reported as a complete scan: %s" % blocked)
 
     print("%d/%d self-test cases pass" % (n - bad, n))
     return 1 if bad else 0

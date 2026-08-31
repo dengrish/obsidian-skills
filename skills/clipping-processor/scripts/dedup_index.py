@@ -69,7 +69,7 @@ _sys.path.insert(0, _shared)               # shared/scripts/ FIRST
 _sys.path.append(_here)                    # own dir LAST: a local copy cannot shadow it
 # --- end bootstrap ---
 
-from yaml_scalars import parse_scalar
+from yaml_scalars import parse_scalar, strip_comment
 
 
 def _path_keys(path):
@@ -164,7 +164,7 @@ def normalize_url(url):
 #: silently overwritten on the next run.  `sources:` (block-form list, schema
 #: 2b) is the current key; the scalar `source:` is the pre-rename legacy shape,
 #: still read so an unmigrated note stays visible to the duplicate check.
-SOURCES_RE = re.compile(r"\Asources\s*:\s*(?:#.*)?\Z", re.IGNORECASE)
+SOURCES_RE = re.compile(r"\Asources\s*:\s*(.*)\Z", re.IGNORECASE)
 # YAML allows an indentless block sequence at a mapping value; serializers such
 # as PyYAML emit it by default. Requiring indentation hides those saved notes
 # from dedup. A sequence marker still needs whitespace before its scalar.
@@ -211,40 +211,46 @@ def read_source(path):
                 return None
             if first.strip() != "---":
                 return None
-            found = None
+            found = {}
             pending = False
             for line in fh:
                 if line.strip() == "---":
-                    return found or None       # the fence closed: it is ours
-                if found is None:
-                    raw = line.rstrip("\n")
-                    if pending:
-                        # Blank and comment-only lines between `sources:` and
-                        # its first item are valid YAML (Obsidian still reads
-                        # item 1); consuming the flag on one left the real item
-                        # unread and the note indexed as unindexable.  The
-                        # sibling readers (paper_scan, organize) skip the same way.
-                        if not raw.strip() or raw.lstrip().startswith("#"):
-                            continue
-                        pending = False
-                        mi = _ITEM_RE.match(raw)
-                        if mi:
-                            found = _yaml_scalar(mi.group(1))
-                            continue
-                    if SOURCES_RE.match(raw):
-                        pending = True         # the origin is the NEXT line
+                    return found.get("sources", found.get("source")) or None
+                raw = line.rstrip("\n")
+                if not raw.strip() or raw.lstrip().startswith("#"):
+                    continue
+                if pending:
+                    pending = False
+                    mi = _ITEM_RE.match(raw)
+                    if mi:
+                        found["sources"] = _yaml_scalar(mi.group(1))
                         continue
-                    m = SOURCE_RE.match(raw)
-                    if m:
-                        found = _yaml_scalar(m.group(1))
+                m = SOURCES_RE.match(raw)
+                if m:
+                    if "sources" in found:
+                        return None            # duplicate origin keys are ambiguous
+                    found["sources"] = None
+                    # A present but unsupported/empty current field must not
+                    # manufacture ownership from a stale legacy value.
+                    pending = not strip_comment(m.group(1)).strip()
+                    continue
+                m = SOURCE_RE.match(raw)
+                if m:
+                    if "source" in found:
+                        return None
+                    found["source"] = _yaml_scalar(m.group(1))
     except (OSError, ValueError):
         return None
     return None
 
 
 def _md_files(folder):
+    def failed(exc):
+        raise ValueError("cannot complete Markdown scan of %r: %s" %
+                         (exc.filename or folder, exc)) from exc
+
     out = []
-    for root, _dirs, files in os.walk(folder):
+    for root, _dirs, files in os.walk(folder, onerror=failed):
         for f in sorted(files):
             if f.endswith(".md"):
                 out.append(os.path.join(root, f))
@@ -464,9 +470,25 @@ def run_self_test():
                 ("leading blank lines", "\n\n---\nsource: %s\n---\n" % URL, URL),
                 ("an indented source: is nested under another key, not ours",
                  "---\ncitation:\n  source: %s\n---\n" % URL, None),
-                ("the first source: wins",
+                ("duplicate source: keys cannot establish an origin",
                  "---\nsource: %s\nsource: https://other.example/b\n---\n" % URL,
-                 URL),
+                 None),
+                ("current sources wins over an earlier legacy source",
+                 '---\nsource: "[[Old_Paper_2025.pdf]]"\nsources:\n'
+                 '  - "%s"\n---\n' % URL, URL),
+                ("current sources wins over a later legacy source",
+                 '---\nsources:\n  - "%s"\nsource: "[[Old_Paper_2025.pdf]]"\n---\n'
+                 % URL, URL),
+                ("duplicate sources keys are ambiguous",
+                 '---\nsources:\n  - "%s"\nsources:\n'
+                 '  - "https://other.example/b"\n---\n' % URL, None),
+                ("empty current sources does not fall back to a legacy source",
+                 '---\nsource: "%s"\nsources:\n---\n' % URL, None),
+                ("unsupported current sources does not use a stale origin",
+                 '---\nsource: "%s"\nsources: null\n---\n' % URL, None),
+                ("malformed current origin does not use a stale origin",
+                 '---\nsource: "%s"\nsources:\n  - "unterminated\n---\n' % URL,
+                 None),
                 ("no frontmatter at all", "just prose\n", None),
                 ("frontmatter with no source:", "---\ntitle: x\n---\n", None),
                 ("an empty source:", "---\nsource:\n---\n", None),
@@ -595,6 +617,37 @@ def run_self_test():
              (quoted_check[0]["status"], quoted_check[0]["matches"]),
              ("duplicate", [quoted_note]))
 
+        # A failed walk must not publish an empty index or an empty input list.
+        # Inject scandir's OS error so the real os.walk error path runs on
+        # platforms where chmod does not restrict the test user's access.
+        import contextlib
+        import io
+        from unittest.mock import patch
+        hidden = os.path.join(vault, "restricted")
+        os.makedirs(hidden)
+        with open(os.path.join(hidden, "Reviewed.md"), "w") as fh:
+            fh.write('---\nsource: "%s"\n---\nUser-edited text.\n' % URL)
+        scandir = os.scandir
+
+        def denied(path):
+            if path == hidden:
+                raise PermissionError(13, "permission denied", path)
+            return scandir(path)
+
+        for label, argv in (
+                ("an incomplete Articles scan cannot say a URL is new",
+                 [vault, "--url", URL]),
+                ("an incomplete raw scan cannot say there is nothing to process",
+                 [os.path.join(tmp, "empty-articles"), "--raw", hidden])):
+            os.makedirs(os.path.join(tmp, "empty-articles"), exist_ok=True)
+            output = io.StringIO()
+            with patch.object(os, "scandir", side_effect=denied), \
+                    contextlib.redirect_stdout(output):
+                code = main(argv)
+            result = json.loads(output.getvalue())
+            case(label, (code, bool(result.get("error")), "checked" in result),
+                 (1, True, False))
+
         # --- the three guards this script backs must agree with each other ---
         # Guard 2 (step 3) is the one line an agent actually reads when the
         # filename check fires, and on a different-source collision it said
@@ -669,7 +722,11 @@ def main(argv=None):
         print(json.dumps({"error": f"not a directory: {args.cleaned_dir}"}))
         return 1
 
-    index, unindexable, non_url = build_index(args.cleaned_dir, args.exclude)
+    try:
+        index, unindexable, non_url = build_index(args.cleaned_dir, args.exclude)
+    except ValueError as exc:
+        print(json.dumps({"error": str(exc)}))
+        return 1
 
     # A --raw path that doesn't exist is a typo, not a clean skip: left to fall
     # through it reads a missing file, gets None, and reports `no-source`, which
@@ -682,7 +739,11 @@ def main(argv=None):
 
     entries = []
     for raw in args.raw:
-        paths = _md_files(raw) if os.path.isdir(raw) else [raw]
+        try:
+            paths = _md_files(raw) if os.path.isdir(raw) else [raw]
+        except ValueError as exc:
+            print(json.dumps({"error": str(exc)}))
+            return 1
         for p in paths:
             entries.append({"id": p, "source": read_source(p)})
     for u in args.url:

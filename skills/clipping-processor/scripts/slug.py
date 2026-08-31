@@ -358,10 +358,11 @@ def author_kind(name):
     # is why "Ludwig van Beethoven", "van der Waals" and "Gerard 't Hooft" stay
     # people — and one capitalised token is required before the test runs at all,
     # since clipped metadata is often all-lowercase and "ruxandra teslo" is a
-    # person, not a masthead.
+    # person, not a masthead. A lowercase prefix before an internal capital,
+    # as in d'Ormesson or d’Hondt, is still part of a personal name.
     if len(toks) > 1 and any(t[:1].isupper() for t in toks):
         stray = [t for t in toks
-                 if t[:1].islower() and _strip_punct(t).lower() not in NAME_PARTICLES]
+                 if t.islower() and _strip_punct(t).lower() not in NAME_PARTICLES]
         if stray:
             return "publication", ("reads as a phrase, not a personal name (%s)"
                                    % ", ".join(repr(t) for t in stray))
@@ -788,6 +789,14 @@ def run_self_test():
     check("...and the slug is then topic_year",
           slug_of(author="Editorial Team", topic="Deep Dive", year=2025),
           "Deep_Dive_2025")
+    for given, want in (("Jean d'Ormesson", "dOrmesson"),
+                        ("Victor d’Hondt", "dHondt")):
+        check("an attached lowercase name particle keeps its surname (%r)" % given,
+              slug_of(author=given, topic="Voting Systems", year=2025),
+              want + "_Voting_Systems_2025")
+    check("a lowercase phrase word still identifies a publication",
+          slug_of(author="Works in Progress", topic="Voting Systems", year=2025),
+          "Voting_Systems_2025")
 
     # --- topic segment: every case the reference ships ----------------------
     for title_words, want in (

@@ -618,7 +618,9 @@ def _index_surfaces(surf_map):
     """
     by_tokens, maxwords = {}, 0
     for s in surf_map:
-        if s in COMMON_NOUNS: continue
+        # Plurals and aliases cannot make a forbidden bare destination safe:
+        # excluding only "entropy" still proposed [[entropy|entropies]].
+        if s in COMMON_NOUNS or fold_name(surf_map[s]) in COMMON_NOUNS: continue
         m = list(WORD.finditer(s))
         if not m: continue
         key = " ".join(t.group(0) for t in m)
@@ -1761,7 +1763,7 @@ def scan(wiki, images=None):
         seen_c.add(key); collisions2.append((a,b,p,d))
 
     # ---- Surface map + backfill candidates (Task 2 worklist; model judges closeness) ----
-    surf_map = {}                         # lowercased surface form -> slug
+    surface_owners = {}                   # lowercased surface form -> all owners
     _title_surf, _alias_surf = set(), set()
     for sl,e in entries.items():
         forms = [("title", e["title"])] + [("alias", a.replace("-"," ")) for a in e["aliases"]]
@@ -1770,8 +1772,15 @@ def scan(wiki, images=None):
             # `plural_surface`, not `pluralize`: the latter takes ONE token, and
             # a whole title matches no irregular in its table (see plural_surface).
             for variant in (f, plural_surface(f)):
-                surf_map.setdefault(variant.lower(), sl)
+                surface_owners.setdefault(variant.lower(), set()).add(sl)
                 (_title_surf if kind == "title" else _alias_surf).add(variant.lower())
+    # A shared title/alias (or plural) supplies no unique link destination.
+    # Choosing the first owner can link an entry's own opener to another
+    # entity; duplicate basenames are ambiguous even with one parsed record.
+    surf_map = {surface: next(iter(owners))
+                for surface, owners in surface_owners.items()
+                if len(owners) == 1
+                and fold_name(next(iter(owners))) not in ambiguous_files}
     # Alias-mediated bare-noun surfaces: a single all-lowercase word reached
     # only through an alias ("attribute", "target", "predictor").  These match
     # everywhere, nearly always fail the closeness bar, and — candidates
@@ -2046,6 +2055,9 @@ def _st_msg(res, slug, item):
 
 
 def run_self_test():
+    import contextlib
+    import io
+    from pathlib import Path
     import shutil
     import tempfile
     cases = []
@@ -2989,6 +3001,37 @@ def run_self_test():
         check("stub findings cannot inflate the reported percentage of affected full entries",
               [(p['entries'], p['pct_of_full']) for p in res['problem_tally'] if p['item'] == 'item8'],
               [(2, 0)])
+
+        v = os.path.join(tmp, "v19-backfill-ownership")
+        _st_write(v, 'aaa-technique.md', _st_entry('AAA technique',
+                  '**AAA technique** is a worked example.', aliases=('"calibration"', '"shared-method"')))
+        _st_write(v, 'calibration.md', _st_entry('Calibration',
+                  '**Calibration** is a worked example.'))
+        _st_write(v, 'second-technique.md', _st_entry('Second technique',
+                  '**Second technique** is a worked example.', aliases=('"shared-method"', '"unique-method"')))
+        for rel in ('first/duplicate.md', 'second/duplicate.md'):
+            _st_write(v, rel, _st_entry('Duplicate', '**Duplicate** is a worked example.'))
+        _st_write(v, 'reader.md', _st_entry('Reader',
+                  '**Reader** uses calibration, shared methods, duplicates and a unique method.'))
+        before = {p: Path(p).read_bytes() for p in iter_entry_files(v)}
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = main([v])
+        res = json.loads(buf.getvalue())
+        check("ambiguous backfill surfaces never choose a first owner, but unique aliases remain",
+              (rc, [(b['slug'], b['target'], b['surface']) for b in res['backfill_candidates']]),
+              (0, [('reader', 'second-technique', 'unique method')]))
+        check("the ownership scan leaves every entry byte-for-byte unchanged",
+              {p: Path(p).read_bytes() for p in iter_entry_files(v)}, before)
+
+        v = os.path.join(tmp, "v20-bare-target-plurals")
+        for name, title in (('entropy', 'Entropy'), ('information-entropy', 'Information entropy')):
+            _st_write(v, name + '.md', _st_entry(title, '**%s** is a worked example.' % title))
+        _st_write(v, 'reader.md', _st_entry('Reader',
+                  '**Reader** compares entropies and information entropies.'))
+        check("a plural cannot bypass the bare-common-noun destination gate",
+              [(b['target'], b['surface']) for b in scan(v)['backfill_candidates']
+               if b['slug'] == 'reader'], [('information-entropy', 'information entropies')])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

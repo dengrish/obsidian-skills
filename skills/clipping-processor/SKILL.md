@@ -95,6 +95,8 @@ python3 '<skill>/scripts/dedup_index.py' '<vault>/Articles' --raw '<vault>/Inbox
 
 It scans `Articles/` once, applies the URL normalization to both sides, and returns a status per raw plus the counts the report needs.
 
+The current `sources:` first item takes precedence over a legacy `source:`, regardless of their order; use the legacy scalar only when `sources:` is absent. Duplicate origin keys or an empty, malformed, or unsupported current value leave the note unindexable, never owned through a stale fallback. A non-zero exit naming an unreadable directory means the inventory is incomplete: resolve that scan failure before processing, rather than treating omitted notes as absent.
+
 **Four per-raw statuses** — `new`, `duplicate`, `duplicate-of-earlier-input`, `no-source`, one on each entry in `checked[]`, and that is the whole set the script emits. (`duplicate` gets two bullets below because the response differs by mode, not because it is two statuses.)
 
 - **`new`** — proceed to step 2.

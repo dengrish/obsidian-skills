@@ -61,6 +61,7 @@ import stat
 import sys
 import tempfile
 import unicodedata
+from urllib.parse import quote, unquote
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
@@ -336,14 +337,51 @@ def _quoted_source_spans(text):
         position += len(line)
 
 
+_MARKDOWN_DESTINATION = re.compile(
+    r"\]\([ \t]*(?:<(?P<angle>[^<>\r\n]+)>|(?P<bare>[^\s()<>]+))")
+
+
+def _markdown_text_parts(text):
+    """Decode local inline-link paths once, preserving their original spelling.
+
+    Obsidian's Markdown links encode spaces and punctuation in PDF filenames.
+    Match those decoded names with the same boundaries as wikilinks, without
+    treating a literal `%20` inside a wikilink as a space or changing a URL.
+    Query strings and page anchors stay outside the decoded path.
+    """
+    position = 0
+    for match in _MARKDOWN_DESTINATION.finditer(text):
+        group = "angle" if match.group("angle") is not None else "bare"
+        target = match.group(group)
+        if target.startswith("//") or re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", target):
+            continue
+        path = re.split(r"[?#]", target, maxsplit=1)[0]
+        try:
+            decoded = unquote(path, errors="strict")
+        except UnicodeError:
+            continue
+        if decoded == path and group == "bare":
+            continue
+        start, end = match.start(), match.start(group) + len(path)
+        yield text[position:start], text[position:start], None
+        # Complete wikilink boundaries let the existing qualification and
+        # folder-removal checks see decoded spaces without treating them as
+        # Markdown separators. Retain the original Markdown opening outside
+        # this logical representation when encoding a changed path back.
+        prefix = text[start:match.start(group)]
+        yield text[start:end], "[[" + decoded + "]]", ("markdown", prefix)
+        position = end
+    yield text[position:], text[position:], None
+
+
 def _source_text_parts(text):
     """Yield (original, decoded, style) chunks for one-pass link operations."""
     position = 0
     for start, end, value, style in _quoted_source_spans(text):
-        yield text[position:start], text[position:start], None
+        yield from _markdown_text_parts(text[position:start])
         yield text[start:end], value, style
         position = end
-    yield text[position:], text[position:], None
+    yield from _markdown_text_parts(text[position:])
 
 
 def _map_source_text(text, transform):
@@ -356,6 +394,10 @@ def _map_source_text(text, transform):
             out.append("'" + changed.replace("'", "''") + "'")
         elif style == "double":
             out.append(json.dumps(changed, ensure_ascii=False))
+        elif isinstance(style, tuple) and style[0] == "markdown":
+            # '%' is deliberately not safe: one URL decode must resolve a
+            # literal percent in the filename, rather than decode it twice.
+            out.append(style[1] + quote(changed[2:-2], safe="/:@!$&'*,;=+-._~"))
         else:
             out.append(changed)
     return "".join(out)
@@ -485,10 +527,10 @@ def keyed_files(vault, path, _seen=None):
                 out[os.path.join(notedir, f)] = f
 
     src = os.path.join(vault, "Sources/PDFs")
-    identity = _nfc_low(core_stem(stem))
+    identity = _nfc_low(core_stem(stem, is_stem=True))
     for d in sorted(_listdir(src)):
         folder = os.path.join(src, d)
-        if _nfc_low(core_stem(d)) != identity or not os.path.isdir(folder):
+        if _nfc_low(core_stem(d, is_stem=True)) != identity or not os.path.isdir(folder):
             continue
         out[folder] = d
         for f in sorted(_listdir(folder)):
@@ -996,9 +1038,9 @@ def _derive(old_stem, basename, new_stem):
     # Book and chapter `_src` markers are independent. The book may carry
     # one while its chapter filenames do not, so those derived names begin
     # with its core identity. Keep each chapter's own suffix unchanged.
-    identity = unicodedata.normalize("NFC", core_stem(old_stem))
+    identity = unicodedata.normalize("NFC", core_stem(old_stem, is_stem=True))
     if identity != head and _nfc_low(nfc[:len(identity)]) == _nfc_low(identity):
-        return core_stem(new_stem) + nfc[len(identity):]
+        return core_stem(new_stem, is_stem=True) + nfc[len(identity):]
     return basename                                   # not ours; leave it
 
 
@@ -1208,10 +1250,10 @@ def plan_rename(vault, path, new_basename, dest=None):
     # `_2` disambiguator cannot be inserted before the chapter segment.
     for old, new in ren.items():
         book = chapter_book_stem(old) if old.lower().endswith(".pdf") else None
-        if book and _nfc_low(book) == _nfc_low(core_stem(old_stem)):
+        if book and _nfc_low(book) == _nfc_low(core_stem(old_stem, is_stem=True)):
             new_book = chapter_book_stem(new)
             if not looks_canonical(new) or new_book is None \
-                    or _nfc_low(new_book) != _nfc_low(core_stem(new_stem)):
+                    or _nfc_low(new_book) != _nfc_low(core_stem(new_stem, is_stem=True)):
                 blockers.append("%s would become %s, which is not a canonical chapter "
                                 "of the renamed book. Re-abbreviate the book title "
                                 "before the year rather than adding a disambiguator."
@@ -1643,20 +1685,20 @@ def _resolve(chapters, text, n_pages, out_dir, taken, book_stem=None):
         # `looks_canonical` and `chapter_book_stem` were imported and never
         # applied to the names this function writes.
         chap_stem = os.path.splitext(name)[0]
-        if not looks_canonical(chap_stem):
+        if not looks_canonical(chap_stem, is_stem=True):
             problems.append("%r: not a name pdf-organizer produces, so "
                             "pdf-figure-extractor and paper-summarizer will "
                             "refuse it as unorganized. Use "
                             "Author_Work_Year_NN_ChapterName.pdf with a "
                             "two-digit NN (CONVENTIONS.md 1a)." % name)
             continue
-        of_book = chapter_book_stem(chap_stem)
+        of_book = chapter_book_stem(chap_stem, is_stem=True)
         if of_book is None:
             problems.append("%r: has no `_NN_ChapterName` segment, so nothing "
                             "downstream can tell it is a chapter of this book."
                             % name)
             continue
-        if book_stem is not None and core_stem(of_book) != core_stem(book_stem):
+        if book_stem is not None and core_stem(of_book, is_stem=True) != core_stem(book_stem, is_stem=True):
             problems.append("%r: names chapter of %r, but the book being split "
                             "is %r. Chapters carry their own book's stem, or "
                             "their figures are filed under the other book's."
@@ -1799,8 +1841,8 @@ def split_book(pdf_path, chapters, out_dir, taken=None, verbose=True):
     # canonical standalone book: a junk name is this skill's INPUT and not a
     # refusal, and a chapter is not a book.
     identity = core_stem(pdf_path)                    # `_src` off, `_N` kept
-    if looks_canonical(identity) and chapter_parts(identity) is None \
-            and not looks_canonical(identity + "_01_Chapter"):
+    if looks_canonical(identity, is_stem=True) and chapter_parts(identity, is_stem=True) is None \
+            and not looks_canonical(identity + "_01_Chapter", is_stem=True):
         raise SplitRefused(
             "%s: refusing to split a disambiguated book. Its document identity "
             "%r carries a `_N` disambiguator, so it is a DIFFERENT document "
@@ -3022,6 +3064,60 @@ def _selftest():
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             code = main(argv)
         return code, stdout.getvalue(), stderr.getvalue()
+
+    # Obsidian encodes local Markdown destinations. Repair those alongside
+    # wikilinks, but decode only once and leave other documents/URLs alone.
+    for _old in ("download (1).pdf", "download%20(1).pdf"):
+        for _filing in (False, True):
+            with _tf.TemporaryDirectory(prefix="org-url-link-test-") as _v:
+                _home = "Inbox/Research Drafts" if _filing else "Sources/PDFs/Research Drafts"
+                _pdf = _put(_v, _home + "/" + _old, b"original PDF bytes")
+                _other = _put(_v, "Archive/" + _old, b"a different PDF")
+                _url = "../" + quote(_home + "/" + _old)
+                _foreign_url = "../Archive/" + quote(_old)
+                _distinct = "download%20(1).pdf" if " " in _old else "download (1).pdf"
+                _distinct_url = "../Archive/" + quote(_distinct)
+                _body = ("[paper](" + _url + "#page=2)\n"
+                         "[angle](<" + _url + "#page=3>)\n"
+                         "[query](" + _url + "?download=1#page=4)\n"
+                         "[other](" + _foreign_url + ")\n"
+                         "[distinct](" + _distinct_url + ")\n"
+                         "[publisher](https://example.org/" + quote(_old) + ")\n"
+                         "[[" + _distinct + "]]\n")
+                _note = _put(_v, "Wiki/topic.md", _body)
+                _code, _, _ = _run_cli(["check", _pdf, "--vault", _v])
+                check("the CLI sees URL-encoded local PDF references", _code, 1)
+                _args = ["rename", _pdf, "--vault", _v,
+                         "--to", "Doe_Method_2025.pdf", "--apply"]
+                if _filing:
+                    _args.extend(["--dest", os.path.join(_v, "Sources/PDFs")])
+                _code, _, _ = _run_cli(_args)
+                _new_url = ("Doe_Method_2025.pdf" if _filing else
+                            "../" + quote(_home + "/Doe_Method_2025.pdf"))
+                with open(_note, encoding="utf-8") as _fh:
+                    check("encoded links follow rename/filing without changing foreign identities",
+                          (_code, _fh.read()), (0, _body.replace(_url, _new_url)))
+                _new_home = "Sources/PDFs" if _filing else _home
+                with open(os.path.join(_v, _new_home, "Doe_Method_2025.pdf"), "rb") as _fh:
+                    check("encoded-link repair preserves the source PDF", _fh.read(), b"original PDF bytes")
+                with open(_other, "rb") as _fh:
+                    check("encoded-link repair leaves same-basename foreign PDFs intact",
+                          _fh.read(), b"a different PDF")
+
+    for _legacy_first in (False, True):
+        with _tf.TemporaryDirectory(prefix="org-source-precedence-test-") as _v:
+            _legacy = 'source: "https://example.org/legacy"\n'
+            _current = 'sources:\n- "[[Doe_Study_2025.pdf]]"\n'
+            _fields = _legacy + _current if _legacy_first else _current + _legacy
+            _note = _put(_v, "Articles/Doe_Study_2025.md", "---\n" + _fields + "---\n")
+            check("current PDF provenance wins over a legacy URL in either key order",
+                  _note_is_about(_note, "Doe_Study_2025"), True)
+
+    with _tf.TemporaryDirectory(prefix="org-dotted-book-test-") as _v:
+        _pdf = _put(_v, "Sources/PDFs/Doe_Book_2025.pdf")
+        _put(_v, "Sources/PDFs/Doe_Book_2025.revised/Doe_Book_2025_01_Intro.pdf")
+        check("a dotted foreign folder is not keyed to the undotted book",
+              keyed_files(_v, _pdf), {_pdf: "Doe_Book_2025.pdf"})
 
     # Atomic note/sidecar rewrites must preserve privacy, including when the
     # transaction subsequently rolls back. A default 022 umask otherwise

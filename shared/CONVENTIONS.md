@@ -188,6 +188,13 @@ implementation; `looks_canonical()`, `chapter_parts()`, `core_stem()` and
 `split_tail()` are its surface, and both consumers import them rather than
 restating them:
 
+These helpers accept a full filename by default. When a caller has already
+removed the extension (for example, `Path.stem`), pass `is_stem=True` to
+`looks_canonical`, `chapter_parts`, `chapter_book_stem` and `core_stem`.
+Removing a second extension from `Doe_Study_2025.revised` would incorrectly
+accept the unorganized PDF or merge its identity with another source.
+`split_tail` always takes a stem and needs no flag.
+
 <!-- canonical:source-filename -->
 ```
 <Author>_<AbbrevTitle>_<Year>

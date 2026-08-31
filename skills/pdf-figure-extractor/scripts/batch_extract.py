@@ -225,10 +225,10 @@ def split_book_chapters(pdfs):
     # folder, and disagreeing is worse than either answer.
     by_stem = {}
     for p in pdfs:
-        by_stem.setdefault(core_stem(p.stem).casefold(), []).append(p)
+        by_stem.setdefault(core_stem(p.stem, is_stem=True).casefold(), []).append(p)
     out = defaultdict(list)
     for p in pdfs:
-        book = chapter_book_stem(p.stem)
+        book = chapter_book_stem(p.stem, is_stem=True)
         if not book:
             continue
         for bp in by_stem.get(book.casefold(), []):
@@ -327,6 +327,26 @@ def save_manifest(path, manifest):
         return False
 
 
+def _legacy_png_error(path):
+    """A readable filename is not evidence of a complete historical PNG."""
+    try:
+        from PIL import Image
+    except ImportError:
+        sys.exit("Pillow is required to verify legacy PNGs before recording "
+                 "ownership. Use the Python environment from shared/RUNTIME.md.")
+    try:
+        with Image.open(path) as image:
+            if image.format != "PNG":
+                return "the bytes are %s, not PNG" % image.format
+            image.verify()
+        # Chunk validation alone does not decompress the pixel stream.
+        with Image.open(path) as image:
+            image.load()
+    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as exc:
+        return "the PNG cannot be fully decoded (%s)" % exc
+    return ""
+
+
 def seed_output_index(out_dir, manifest, manifest_existed, adopt_stems=()):
     """Hash the figures already in `--out`; returns (seen_hashes, adopted).
 
@@ -354,7 +374,8 @@ def seed_output_index(out_dir, manifest, manifest_existed, adopt_stems=()):
     was already hashing each of them individually for the duplicate check.
     """
     seen, adopted = {}, []
-    source_stems = {figure_identity(stem) for stem in adopt_stems if looks_canonical(stem)}
+    source_stems = {figure_identity(stem) for stem in adopt_stems
+                    if looks_canonical(stem, is_stem=True)}
     for path in sorted(Path(out_dir).glob(FIGURE_GLOB)) if os.path.isdir(out_dir) else []:
         if not path.is_file():
             continue
@@ -367,6 +388,11 @@ def seed_output_index(out_dir, manifest, manifest_existed, adopt_stems=()):
         # of the much narrower permission to adopt historical PDF output.
         if (not manifest_existed and not path.is_symlink()
                 and figure_identity(path.name).rsplit("_fig_", 1)[0] in source_stems):
+            problem = _legacy_png_error(path)
+            if problem:
+                print(f"Not adopting {path}: {problem}. The file is unchanged; "
+                      "inspect it before reconciling ownership.", file=sys.stderr)
+                continue
             manifest[path.name] = digest
             adopted.append(path.name)
     return seen, adopted
@@ -1326,6 +1352,13 @@ def run_self_test():
         upper, lower = paths("Kuhn_X_2012.pdf", "kuhn_x_2012_01_A.pdf")
         check("stems pair case-insensitively (the vault's own volume is)",
               split_book_chapters([upper, lower]), {upper: [lower]})
+        for suffix in (".revised", ".pdf"):
+            dotted_book, = paths("Prince_UDL_2026" + suffix + ".pdf")
+            dotted_chapter, = paths("Prince_UDL_2026_01_Intro" + suffix + ".pdf")
+            check("a dotted standalone stem cannot masquerade as a split book: " + suffix,
+                  split_book_chapters([dotted_book, ch1]), {})
+            check("a dotted chapter stem cannot suppress its undotted book: " + suffix,
+                  split_book_chapters([book, dotted_chapter]), {})
 
         # --- find_pdfs -----------------------------------------------------
         src = os.path.join(tmp, "src")
@@ -1791,6 +1824,41 @@ def run_self_test():
             return code, so.getvalue(), se.getvalue()
 
         run_out = os.path.join(tmp, "run-out")
+        for suffix in (".revised", ".pdf"):
+            dotted = _st_fig_pdf(Path(tmp) / ("Doe_Dotted_2025" + suffix + ".pdf"))
+            dotted_out = Path(tmp) / ("dotted-out-" + suffix[1:])
+            code, so, se = run(["--src", str(dotted), "--out", str(dotted_out), "--dpi", "72"])
+            check("the CLI refuses an exact dotted stem: " + dotted.name, code, 1)
+            check("a refused dotted stem publishes and claims no figures",
+                  (list(dotted_out.glob("*.png")), (dotted_out / MANIFEST_FILE).exists()), ([], False))
+
+        # A legacy render can have a .png name and still be interrupted or
+        # hold another format. Hashing it must not turn broken output into a
+        # permanent, successful idempotent skip.
+        from PIL import Image
+        legacy_pdf = _st_fig_pdf(Path(tmp) / "Doe_Legacy_2025.pdf")
+        for kind in ("truncated", "wrong-format", "valid"):
+            legacy_out = Path(tmp) / ("legacy-png-" + kind)
+            legacy_out.mkdir()
+            legacy_png = legacy_out / "Doe_Legacy_2025_fig_1.png"
+            if kind == "truncated":
+                legacy_png.write_bytes(b"\x89PNG\r\n\x1a\n")
+            else:
+                Image.new("RGB", (30, 20), (40, 90, 150)).save(
+                    legacy_png, format="JPEG" if kind == "wrong-format" else "PNG")
+            original = legacy_png.read_bytes()
+            code, so, se = run(["--src", str(legacy_pdf), "--out", str(legacy_out), "--dpi", "72"])
+            check("legacy PNG validation controls the CLI result: " + kind,
+                  code, 0 if kind == "valid" else 1)
+            check("legacy PNG validation never replaces the occupant: " + kind,
+                  legacy_png.read_bytes(), original)
+            check("only complete legacy PNGs receive ownership: " + kind,
+                  load_manifest(legacy_out / MANIFEST_FILE),
+                  {legacy_png.name: _sha256(legacy_png)} if kind == "valid" else {})
+            if kind != "valid":
+                ok("invalid legacy PNGs are reported, not silently skipped",
+                   "Not adopting" in se and "0 extracted, 1 skipped" not in so)
+
         code, so, se = run(["--src", src, "--out", run_out, "--dpi", "72"])
         check("a clean run exits 0", code, 0)
         ok("the book is skipped in favour of its chapters",
@@ -2148,7 +2216,7 @@ def main(argv=None):
     by_source_stem = defaultdict(list)
     for source in pdfs:
         by_source_stem[figure_identity(source.stem)].append(source)
-    adopt_stems = {p.stem for p in pdfs if looks_canonical(p.stem)
+    adopt_stems = {p.stem for p in pdfs if looks_canonical(p.stem, is_stem=True)
                    and len(by_source_stem[figure_identity(p.stem)]) == 1}
 
     # Every figure this script writes is keyed to the PDF's on-disk stem, and
@@ -2176,7 +2244,7 @@ def main(argv=None):
 
     unorganized = []
     if not args.allow_unorganized:
-        unorganized = [p for p in pdfs if not looks_canonical(p.stem)]
+        unorganized = [p for p in pdfs if not looks_canonical(p.stem, is_stem=True)]
         pdfs = [p for p in pdfs if p not in set(unorganized)]
 
     # A flat image folder cannot distinguish PDFs sharing a stem. Detect the

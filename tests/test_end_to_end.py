@@ -179,6 +179,35 @@ class WorkflowTests(unittest.TestCase):
         self.assertFalse(source.exists())
         self.assertEqual(digest(self.pdfs / source.name), original)
 
+    def test_dotted_pdf_names_require_organization_before_downstream_work(self):
+        sources = [self.pdfs / name for name in
+                   ("Doe_Study_2025.revised.pdf", "Doe_Study_2025.pdf.pdf")]
+        for source in sources:
+            self.make_pdf(source)
+        original = {path: digest(path) for path in sources}
+        scan = self.scan_papers()
+        self.assertEqual(scan["counts"]["unorganized"], 2)
+        self.assertEqual(scan["counts"]["new"], 0)
+        batch = "skills/pdf-figure-extractor/scripts/batch_extract.py"
+        self.run_script(batch, "--src", self.pdfs, "--out", self.images,
+                        "--dpi", 72, expected=1)
+        self.assertEqual(list(self.images.iterdir()), [])
+        self.assertEqual({path: digest(path) for path in sources}, original)
+
+        self.run_script("skills/pdf-organizer/scripts/organize.py", "rename",
+                        "--vault", self.vault, sources[0],
+                        "--to", "Doe_Study_2025.pdf", "--apply")
+        organized = self.pdfs / "Doe_Study_2025.pdf"
+        self.assertEqual(digest(organized), original[sources[0]])
+        self.assertEqual(digest(sources[1]), original[sources[1]])
+        scan = self.scan_papers()
+        self.assertEqual(scan["counts"]["unorganized"], 1)
+        self.assertEqual(scan["counts"]["new"], 1)
+        self.run_script(batch, "--src", organized, "--out", self.images, "--dpi", 72)
+        self.assertTrue((self.images / "Doe_Study_2025_fig_1.png").is_file())
+        self.assertFalse(any("revised" in path.name or ".pdf_fig" in path.name
+                             for path in self.images.iterdir()))
+
     def test_escaped_source_identity_survives_scan_and_pdf_rename(self):
         source = self.pdfs / "Doe_Study_2025.pdf"
         self.make_pdf(source)

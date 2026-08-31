@@ -84,6 +84,10 @@ A foreign, missing, malformed, or unreadable origin does not establish
 ownership; the only metadata-free legacy exception is a body consisting solely
 of an embed of that PDF. Publisher URLs are external sources and remain unchanged.
 
+Local inline Markdown links are read with URL escapes decoded once, so a link
+to `download%20%281%29.pdf` follows `download (1).pdf` while a literal `%20` in
+a wikilink remains part of that filename.
+
 `scripts/organize.py` does it. Import it, or run its CLI:
 
 ```python

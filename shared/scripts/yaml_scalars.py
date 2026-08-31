@@ -28,8 +28,8 @@ def strip_comment(raw):
                 quote = None
             i += 1
             continue
-        if ch == "#" and (i == 0 or raw[i - 1].isspace()):
-            return raw[:i].rstrip()
+        if ch == "#" and (i == 0 or raw[i - 1] in " \t"):
+            return raw[:i].rstrip(" \t")
         if token_start and ch in "\"'":
             quote, token_start = ch, False
         elif token_start and ch in "[{":
@@ -39,10 +39,10 @@ def strip_comment(raw):
         elif depth and ch in "]}":
             depth -= 1
             token_start = False
-        elif not ch.isspace():
+        elif ch not in " \t":
             token_start = False
         i += 1
-    return raw.rstrip()
+    return raw.rstrip(" \t")
 
 
 _ESCAPES = {
@@ -69,14 +69,16 @@ def parse_scalar(raw):
         raise ValueError("multiline YAML scalars are not supported")
     if any(ord(ch) < 32 and ch != "\t" for ch in raw):
         raise ValueError("invalid control character in YAML scalar")
-    s = strip_comment(raw).strip()
+    # YAML token separators are ASCII space and tab. Unicode spaces can be
+    # part of a plain title or source identity, including just before '#'.
+    s = strip_comment(raw).strip(" \t")
     if not s:
         return "", "empty"
     if s[0] not in "\"'":
         if s in ("null", "Null", "NULL", "~"):
             return None, "bare"
-        if s[0] in "[]{}!&*|>%@`" or re.search(r":(?:\s|$)", s) \
-                or re.match(r"[-?](?:\s|$)", s):
+        if s[0] in "[]{}!&*|>%@`" or re.search(r":(?:[ \t]|$)", s) \
+                or re.match(r"[-?](?:[ \t]|$)", s):
             raise ValueError("expected a single-line YAML scalar")
         return s, "bare"
     quote = s[0]
@@ -89,7 +91,7 @@ def parse_scalar(raw):
                 out.append("'")
                 i += 2
                 continue
-            if s[i + 1:].strip():
+            if s[i + 1:].strip(" \t"):
                 raise ValueError("unexpected text after a quoted YAML scalar")
             return "".join(out), "double" if quote == '"' else "single"
         if quote == '"' and ch == "\\":
@@ -158,6 +160,19 @@ def self_test():
         def test_schema_keeps_plain_values(self):
             for raw in ("true", "false", "2026-08-30", "42", "O'Reilly", "a#b"):
                 self.assertEqual(parse_scalar(raw), (raw, "bare"))
+
+        def test_unicode_spaces_are_scalar_content(self):
+            for space in ("\u00a0", "\u202f", "\u2003"):
+                for raw in ("Plan" + space + "#2", "path:" + space + "value",
+                            "-" + space + "label", space + "title" + space):
+                    with self.subTest(raw=raw):
+                        self.assertEqual(parse_scalar(raw), (raw, "bare"))
+                        self.assertEqual(parse_scalar(raw + " # comment"),
+                                         (raw, "bare"))
+                for raw in ('"title"' + space, "'title'" + space + "#comment"):
+                    with self.subTest(raw=raw), self.assertRaises(ValueError):
+                        parse_scalar(raw)
+            self.assertEqual(parse_scalar("Plan\t# comment"), ("Plan", "bare"))
 
         def test_malformed_does_not_supply_an_identity(self):
             for raw in ('"Malformed "yaml""', "'unclosed", r'"bad\q"',

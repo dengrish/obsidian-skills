@@ -125,12 +125,16 @@ ChapterName = collections.namedtuple("ChapterName",
 
 
 def stem_of(name):
-    """The filename stem: basename without its extension.
+    """The filename stem: basename without its final extension.
 
-    Accepts a path, a basename or a bare stem, so a caller never has to
-    remember which it is holding.
+    Already extracted stems must use ``is_stem=True`` on the helpers below.
+    Otherwise an interior period is mistaken for another file extension.
     """
     return os.path.splitext(os.path.basename(name))[0]
+
+
+def _stem(name, is_stem):
+    return os.fspath(name) if is_stem else stem_of(name)
 
 
 def split_tail(stem):
@@ -171,7 +175,7 @@ def split_tail(stem):
     return (m.group("base") + m.group("disam"), m.group("src"))
 
 
-def core_stem(name):
+def core_stem(name, *, is_stem=False):
     """The stem's document identity: `_src` removed, `_N` kept.
 
     This is the string to compare a book against its chapters. A book and its
@@ -179,38 +183,43 @@ def core_stem(name):
     disambiguator names a different document, so it must not. A
     `_N`-disambiguated book therefore matches no chapter, which is correct:
     `split_book` refuses to split one (§1a).
+    Pass ``is_stem=True`` when ``name`` is already a stem; its periods are
+    part of its identity, not another extension to remove.
     """
-    return split_tail(stem_of(name))[0]
+    return split_tail(_stem(name, is_stem))[0]
 
 
-def looks_canonical(name):
+def looks_canonical(name, *, is_stem=False):
     """True when `name`'s stem is already in this plugin's output form.
 
     Answering this by eye gives different answers on different runs and both
     answers are expensive: a false positive leaves a junk name in place
     forever (the file is never re-examined), a false negative renames a
     canonical file and orphans every figure filed under its old stem.
+    Pass ``is_stem=True`` for an already extracted stem. In particular,
+    ``Doe_Study_2025.revised`` is not a canonical stem.
     """
-    return bool(CANONICAL.match(stem_of(name)))
+    return bool(CANONICAL.match(_stem(name, is_stem)))
 
 
-def chapter_parts(name):
+def chapter_parts(name, *, is_stem=False):
     """`ChapterName` when `name` is a book chapter, else None.
 
     `book` is the tail-free core, so a chapter carrying `_src` or a
     disambiguator reports the same book as one without — which is what lets a
     book pair with its chapters whatever tails either of them grew.
+    Pass ``is_stem=True`` for an already extracted stem.
     """
-    m = _CHAPTER_RE.match(stem_of(name))
+    m = _CHAPTER_RE.match(_stem(name, is_stem))
     if not m:
         return None
     return ChapterName(book=m.group("book"), number=m.group("number"),
                        name=m.group("name"), tail=m.group("tail"))
 
 
-def chapter_book_stem(name):
+def chapter_book_stem(name, *, is_stem=False):
     """The core book stem `name` is a chapter of, or None."""
-    parts = chapter_parts(name)
+    parts = chapter_parts(name, is_stem=is_stem)
     return parts.book if parts else None
 
 
@@ -286,11 +295,11 @@ def run_self_test():
 
     for stem, canonical, book in TEST_CASES:
         total += 2
-        got_canonical = looks_canonical(stem)
+        got_canonical = looks_canonical(stem, is_stem=True)
         if got_canonical != canonical:
             failures.append("looks_canonical(%r) -> %r, expected %r"
                             % (stem, got_canonical, canonical))
-        got_book = chapter_book_stem(stem)
+        got_book = chapter_book_stem(stem, is_stem=True)
         if got_book != book:
             failures.append("chapter_book_stem(%r) -> %r, expected %r"
                             % (stem, got_book, book))
@@ -302,6 +311,21 @@ def run_self_test():
         if looks_canonical(stem + ".pdf") != canonical:
             failures.append("looks_canonical(%r) disagrees with the bare stem"
                             % (stem + ".pdf"))
+
+    # A real PDF can carry an extra dot segment, including a second .pdf.
+    # Never strip that segment again when a consumer passes Path.stem.
+    for stem in ("Doe_Study_2025.revised", "Doe_Study_2025.pdf",
+                 "Doe_Book_2025_01_Intro.revised", "Doe_Book_2025_01_Intro.pdf",
+                 "Doe_Book_2025_src.revised", "Doe_Book_2025_src.pdf"):
+        total += 4
+        if looks_canonical(stem, is_stem=True):
+            failures.append("dotted stem %r was treated as canonical" % stem)
+        if core_stem(stem, is_stem=True) != stem:
+            failures.append("dotted stem %r lost part of its identity" % stem)
+        if chapter_parts(stem, is_stem=True) is not None:
+            failures.append("dotted stem %r was mistaken for a chapter" % stem)
+        if looks_canonical(stem + ".pdf") or core_stem(stem + ".pdf") != stem:
+            failures.append("dotted PDF %r disagrees with its exact stem" % (stem + ".pdf"))
 
     # A chapter pairs with its book whatever `_src` either carries: that is the
     # comparison `split_book_chapters` makes.

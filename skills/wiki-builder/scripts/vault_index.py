@@ -981,6 +981,21 @@ def run_self_test():
               (inaccessible["entry_count"], any("unreadable wiki directory" in p for p in inaccessible["problems"])),
               (0, True))
 
+        unicode_wiki = os.path.join(tmp, "unicode-space")
+        os.makedirs(unicode_wiki)
+        unicode_titles = {"plan-2": "Plan\u00a0#2", "path-value": "path:\u00a0value"}
+        for name, title in unicode_titles.items():
+            text = _st_entry_text("Unicode").replace('title: "Unicode"', 'title: ' + title)
+            with open(os.path.join(unicode_wiki, name + '.md'), 'w', encoding='utf-8') as fh:
+                fh.write(text)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = main([unicode_wiki])
+        unicode_idx = json.loads(buf.getvalue())
+        check("public index preserves Unicode spaces that are YAML scalar content",
+              (rc, {r['slug']: r['title'] for r in unicode_idx['entries']}, unicode_idx['problems']),
+              (0, unicode_titles, []))
+
         # -- the CLI still refuses a real run with no folder --------------------
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
