@@ -458,8 +458,9 @@ def _check_front_matter(note, keys, kv):
         if kv["tags"][0]:
             note.fail(2, "`tags` must be a block-form list, not inline")
         items = [l.strip() for l in kv["tags"][1] if l.strip()]
-        if not items:
-            note.fail(2, "`tags` has no entries")
+        # A present-but-blank `tags:` is the documented no-discipline case.
+        # The schema check still requires the key; populated values must keep
+        # their block-list shape, quoting and enum membership below.
         for it in items:
             if not it.startswith("- "):
                 note.fail(2, "`tags` entry is not a block-list item: %r" % it)
@@ -1260,6 +1261,19 @@ def _cases():
         ("quoted read", _mutate("read: false", 'read: "false"'), "bare boolean"),
         ("bare year", _mutate("published: 2025-01-03", "published: 2025"),
          "full YYYY-MM-DD"),
+        ("blank tags when no discipline applies",
+         _mutate('tags:\n  - "#medicine"', 'tags:'), CLEAN),
+        ("commented blank tags retain the no-discipline meaning",
+         _mutate('tags:\n  - "#medicine"',
+                 'tags: # no discipline applies\n# intentionally unclassified'), CLEAN),
+        ("the tags key is still required",
+         _mutate('tags:\n  - "#medicine"\n', ''), "missing: tags"),
+        ("an inline empty list is not the documented blank tags form",
+         _mutate('tags:\n  - "#medicine"', 'tags: []'), "block-form list, not inline"),
+        ("a populated tag still requires a list marker",
+         _mutate('  - "#medicine"', '  "#medicine"'), "not a block-list item"),
+        ("an empty string is not a discipline tag",
+         _mutate('  - "#medicine"', '  - ""'), "must be #-prefixed"),
         ("unquoted tag", _mutate('  - "#medicine"', "  - #medicine"), "double-quoted"),
         ("tag off enum", _mutate('  - "#medicine"', '  - "#astrology"'), "enum"),
         ("keys reordered",

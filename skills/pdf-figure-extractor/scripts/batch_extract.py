@@ -775,23 +775,46 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
     return result
 
 
-def mark_reviewed_command(src_dir, out_dir, stem, fig):
-    """The full `--mark-reviewed` invocation, runnable as printed.
+def mark_reviewed_command(src_dir, out_dir, stem, fig, *, ed_prefix="S",
+                          keep_frame=False, include_split_books=False,
+                          allow_unorganized=False, review_file=None, dpi=250):
+    """Record a review with the original source and extraction context.
 
     The current Python interpreter and an absolute script path, for the same reason
     `auto_fig_bbox.py --emit extract` uses them: this text is pasted into a
     shell sitting in the vault, where macOS has no `python` binary at all and
     a bare script name resolves to nothing.
+
+    This is a normal extraction run after recording the mark, so preserve the
+    label namespace, ledger, geometry and source-eligibility choices. Never
+    carry --overwrite: the crop may just have been repaired by hand.
     """
-    return (
-        f"{shlex.quote(sys.executable)} {shlex.quote(os.path.abspath(__file__))} "
-        f"--src {shlex.quote(str(src_dir))} --out {shlex.quote(str(out_dir))} "
-        f"--mark-reviewed {shlex.quote(f'{stem}:{fig}')}"
-    )
+    def bound_path(path):
+        # Bind relative paths before this command is pasted into another cwd.
+        # Do not resolve symlinks: a selected PDF's basename is its figure key.
+        path = os.path.expanduser(str(path))
+        return path if os.path.isabs(path) else os.path.join(os.getcwd(), path)
+
+    argv = [sys.executable, os.path.abspath(__file__),
+            "--src", bound_path(src_dir), "--out", bound_path(out_dir)]
+    if ed_prefix != "S":
+        argv += ["--ed-prefix", ed_prefix]
+    if dpi != 250:
+        argv += ["--dpi", str(dpi)]
+    if review_file is not None:
+        argv += ["--review-file", bound_path(review_file)]
+    for flag, enabled in (("--keep-frame", keep_frame),
+                          ("--include-split-books", include_split_books),
+                          ("--allow-unorganized", allow_unorganized)):
+        if enabled:
+            argv.append(flag)
+    argv += ["--mark-reviewed", f"{stem}:{fig}"]
+    return " ".join(shlex.quote(arg) for arg in argv)
 
 
 def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
-                  dry_run=False, src_dir=""):
+                  dry_run=False, src_dir="", *, ed_prefix="S", keep_frame=False,
+                  include_split_books=False, allow_unorganized=False, dpi=250):
     """Print a human-readable summary of the batch run.
 
     Sections, in order: header, counts, figures that failed to write,
@@ -956,7 +979,11 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
             # extract` has always emitted a runnable line; this is the same
             # rule. `shlex.quote` because these are the user's paths.
             print("    " + mark_reviewed_command(src_dir, out_dir,
-                                                 example[0].stem, example[1]))
+                                                 example[0].stem, example[1],
+                                                 ed_prefix=ed_prefix, keep_frame=keep_frame,
+                                                 include_split_books=include_split_books,
+                                                 allow_unorganized=allow_unorganized,
+                                                 review_file=review_file, dpi=dpi))
         print()
 
 
@@ -1139,12 +1166,12 @@ def _st_encrypted_pdf(path):
     return Path(path)
 
 
-def _st_tiny_fig_pdf(path):
+def _st_tiny_fig_pdf(path, caption="Figure 1. Tiny."):
     """A figure small enough that the bbox is flagged as suspicious."""
     doc = fitz.open()
     page = doc.new_page(width=612, height=792)
     page.draw_rect(fitz.Rect(100, 200, 130, 230), fill=(0, 0, 0))
-    page.insert_text((100, 260), "Figure 1. Tiny.", fontsize=9)
+    page.insert_text((100, 260), caption, fontsize=9)
     doc.save(str(path))
     doc.close()
     return Path(path)
@@ -1224,6 +1251,7 @@ def run_self_test():
     import contextlib
     import io
     import shutil
+    import subprocess
     import tempfile
 
     state = {"n": 0, "bad": 0}
@@ -1916,6 +1944,111 @@ def run_self_test():
               ("Doe_Figs_2025", "1") in load_reviewed(
                   os.path.join(run_out, REVIEW_FILE)), True)
 
+        # Execute the command the summary actually advertises. Losing ED or
+        # a custom ledger used to create an extra S1 PNG and leave the original
+        # warning unresolved. The same command must retain eligibility for an
+        # explicitly included whole book and an unorganized source, while not
+        # replaying --overwrite over a crop just repaired by hand.
+        review_root = Path(tmp) / "review command"
+        review_src = review_root / "sources"
+        review_src.mkdir(parents=True)
+        review_pdf = _st_tiny_fig_pdf(review_src / "Doe_Review_2025.pdf",
+                                      "Extended Data Figure 1. Tiny.")
+        _st_fig_pdf(review_src / "Doe_Review_2025_01_Chapter.pdf")
+        _st_fig_pdf(review_src / "download (2).pdf")
+        review_out = review_root / "images"
+        custom_ledger = review_root / "custom ledger.txt"
+        review_args = ["--src", str(review_src), "--out", str(review_out),
+                       "--ed-prefix", "ED", "--review-file", str(custom_ledger),
+                       "--dpi", "72", "--keep-frame", "--include-split-books",
+                       "--allow-unorganized"]
+        code, so, se = run(review_args + ["--overwrite"])
+        check("the review-command fixture extracts all selected sources", code, 0)
+        commands = [line.strip() for line in so.splitlines()
+                    if line.strip().startswith(shlex.quote(sys.executable) + " ")
+                    and "--mark-reviewed" in line]
+        check("a flagged run advertises one complete review command", len(commands), 1)
+        repaired_png = review_out / "Doe_Review_2025_fig_ED1.png"
+        before_repair = repaired_png.read_bytes()
+        manual = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve().with_name("extract_figures.py")),
+             str(review_pdf), "--out", str(review_out), "--stem", review_pdf.stem,
+             "--crop", "1:ED1:90,185,140,245", "--dpi", "96", "--no-trim", "--overwrite"],
+            capture_output=True, text=True, cwd=tmp)
+        check("the advertised command is tested after a real manual repair",
+              manual.returncode, 0)
+        repaired_bytes = repaired_png.read_bytes()
+        ok("the manual repair differs from the automatic crop",
+           repaired_bytes != before_repair)
+        if commands:
+            argv = shlex.split(commands[0])
+            replay = subprocess.run(argv, capture_output=True, text=True, cwd=tmp)
+            check("the printed command accepts the same selected source set",
+                  replay.returncode, 0)
+            ok("the review rerun includes the explicitly selected whole book",
+               "Skipping Doe_Review_2025.pdf" not in replay.stdout
+               and "already reviewed:" in replay.stdout)
+            check("the printed command records the ED mark in the selected ledger",
+                  load_reviewed(custom_ledger), {(review_pdf.stem, "ED1")})
+            check("the review command creates no unintended default ledger",
+                  (review_out / REVIEW_FILE).exists(), False)
+            check("the review command creates no unintended supplementary figure",
+                  (review_out / "Doe_Review_2025_fig_S1.png").exists(), False)
+            check("recording a review preserves the repaired crop's bytes",
+                  repaired_png.read_bytes(), repaired_bytes)
+            ok("review commands retain geometry options but omit overwrite",
+               "--keep-frame" in argv and "--dpi" in argv
+               and argv[argv.index("--dpi") + 1] == "72"
+               and "--overwrite" not in argv)
+            code, so, se = run(review_args)
+            check("the original context can be rerun successfully", code, 0)
+            ok("the original context sees the recorded review",
+               "already reviewed:" in so and "Suspicious bboxes:    0" in so)
+
+        # Relative CLI paths must stay bound to the initial working directory.
+        # A second directory deliberately has a different PDF at the same
+        # relative name: replaying unbound paths used to succeed there, write
+        # an unrelated image and ledger, and leave the original unreviewed.
+        relative_home = Path(tmp) / "relative review command"
+        alternate_home = relative_home / "elsewhere"
+        relative_src = "source files"
+        relative_out = "figure images"
+        relative_ledger = "reviews/custom ledger.txt"
+        (relative_home / relative_src).mkdir(parents=True)
+        (alternate_home / relative_src).mkdir(parents=True)
+        relative_pdf = _st_tiny_fig_pdf(
+            relative_home / relative_src / "Doe_Relative_2025.pdf",
+            "Extended Data Figure 1. Tiny.")
+        _st_fig_pdf(alternate_home / relative_src / relative_pdf.name,
+                    captions=("Extended Data Figure 1. Different source.",), fill=(1, 0, 0))
+        relative_args = [sys.executable, os.path.abspath(__file__),
+                         "--src", relative_src, "--out", relative_out,
+                         "--review-file", relative_ledger, "--ed-prefix", "ED", "--dpi", "72"]
+        initial = subprocess.run(relative_args, capture_output=True, text=True, cwd=relative_home)
+        check("relative input, output and ledger paths work on the original run",
+              initial.returncode, 0)
+        commands = [line.strip() for line in initial.stdout.splitlines()
+                    if line.strip().startswith(shlex.quote(sys.executable) + " ")
+                    and "--mark-reviewed" in line]
+        check("a relative-path run advertises one review command", len(commands), 1)
+        if commands:
+            replay = subprocess.run(shlex.split(commands[0]), capture_output=True,
+                                    text=True, cwd=alternate_home)
+            check("the relative-path review command succeeds from another cwd",
+                  replay.returncode, 0)
+            check("the relative-path review command updates the original ledger",
+                  load_reviewed(relative_home / relative_ledger), {(relative_pdf.stem, "ED1")})
+            check("the review command leaves the unrelated working directory untouched",
+                  ((alternate_home / relative_out).exists(),
+                   (alternate_home / "reviews").exists()), (False, False))
+            check("bound paths retain ED and custom-ledger selection",
+                  ((relative_home / relative_out / "Doe_Relative_2025_fig_S1.png").exists(),
+                   (relative_home / relative_out / REVIEW_FILE).exists()), (False, False))
+            repeated = subprocess.run(relative_args, capture_output=True, text=True, cwd=relative_home)
+            check("the original relative-path invocation still succeeds", repeated.returncode, 0)
+            ok("the original relative-path invocation sees its review mark",
+               "already reviewed:" in repeated.stdout and "Suspicious bboxes:    0" in repeated.stdout)
+
 
         code, so, se = run(["--out", run_out])
         check("a missing --src exits 2", code, 2)
@@ -2384,7 +2517,9 @@ def main(argv=None):
         manifest_saved = args.dry_run or save_manifest(manifest_file, manifest)
 
     print_summary(per_pdf, out_dir, skipped_books, review_file, args.dry_run,
-                  src_dir=src_dir)
+                  src_dir=src_dir, ed_prefix=args.ed_prefix, keep_frame=args.keep_frame,
+                  include_split_books=args.include_split_books,
+                  allow_unorganized=args.allow_unorganized, dpi=args.dpi)
 
     # The exit code has to say whether the run did what it was asked. It was
     # always 0 — a run that refused every PDF, could not open half of them, or

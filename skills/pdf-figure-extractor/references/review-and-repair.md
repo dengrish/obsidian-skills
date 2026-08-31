@@ -155,9 +155,12 @@ figure. This workflow creates whole figures only.
 
    This records the mark and continues a normal run; it is not a mark-only
    command. Include the same namespace/frame options and custom
-   `--review-file`, if used. The summary prints a complete mark command for
-   each flagged figure. With `--dry-run`, marks apply only to the preview
-   and nothing is persisted.
+   `--review-file`, if used. The summary prints a complete command for one
+   flagged figure, preserving the run's namespace, ledger, rendering and
+   source-selection options. Its absolute paths stay tied to the original
+   source, output and ledger when run from another working directory. It
+   omits `--overwrite` so recording a review preserves a manual crop repair.
+   With `--dry-run`, marks apply only to the preview and nothing is persisted.
 
 For several bad crops, `auto_fig_bbox.py --emit extract --stem '<pdf_stem>'`
 can print one manual-extraction command with multiple `--crop` arguments.
