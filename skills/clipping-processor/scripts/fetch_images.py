@@ -37,8 +37,9 @@ final write is left to the rendering step, because a script that does its own
 `rename`'s `--sources` is the vault's `Sources/PDFs`: given it, a `<old_slug>.pdf`
 found anywhere beneath (the folder is recursive — book chapters live in
 `Sources/PDFs/<Work>/`) proves the figures under that stem are that document's,
-and the whole rename is refused. Without it the script cannot tell whose figures
-it is holding except by label spelling, so pass it on every `rename`.
+and the whole rename is refused. PDF manifest ownership is checked regardless
+of this flag. Without either a manifest record or `--sources`, only label
+spelling distinguishes PDF figures, so pass `--sources` on every `rename`.
 
 URLs are processed in the order given, which must be the body's source order:
 the figure counter is shared and sequential. `--start` continues the counter
@@ -109,6 +110,34 @@ import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
+
+# --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
+import os as _os, sys as _sys
+_here = _os.path.dirname(_os.path.abspath(__file__))
+_env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
+if _env:                                   # explicit override: authoritative, no fallback
+    _tried = [_os.path.abspath(_os.path.expanduser(_env))]
+else:                                      # plugin-relative walk-up, at most 5 levels
+    _tried, _d = [], _here
+    for _ in range(5):
+        _tried.append(_os.path.join(_d, "shared", "scripts"))
+        _d = _os.path.dirname(_d)
+_shared = next((_p for _p in _tried if _os.path.isdir(_p)), None)
+if _shared is None:
+    raise SystemExit("""obsidian: cannot find the plugin's shared/scripts/ folder, which holds
+the one canonical copy of the conventions this script depends on.
+Looked for:
+  %s
+Fix: install the whole plugin tree, or set OBSIDIAN_VAULT_SHARED to the
+shared/scripts/ directory (unset it to use the plugin-relative walk-up).
+Do NOT paste a second copy of the algorithm into this skill -- a divergent
+copy is the bug the shared layer exists to prevent.""" % "\n  ".join(_tried))
+_sys.path[:] = [_p for _p in _sys.path if _p not in (_shared, _here)]
+_sys.path.insert(0, _shared)               # shared/scripts/ FIRST
+_sys.path.append(_here)                    # own dir LAST: a local copy cannot shadow it
+# --- end bootstrap ---
+
+from figure_state import MANIFEST_FILE, read_manifest
 
 
 def _slug_spellings(slug):
@@ -396,6 +425,35 @@ def _temp_path():
     return path
 
 
+def _publish_file(src, final, overwrite=False, staging_parent=None, mode=0o644,
+                  before_publish=None):
+    """Publish complete bytes without risking the previous destination.
+
+    A cross-filesystem shutil.move copies onto the final name before unlinking
+    its source. An interrupted copy exposes a partial image and, on overwrite,
+    destroys the old one. Stage beside the destination folder instead, then
+    publish on that filesystem. New files use an exclusive hard link so a
+    competing writer cannot be overwritten between the check and publication.
+    """
+    final = os.path.abspath(final)
+    parent = staging_parent or os.path.dirname(final)
+    with tempfile.TemporaryDirectory(prefix=".clipping-stage.", dir=parent) as stage:
+        staged = os.path.join(stage, "complete")
+        shutil.copyfile(src, staged)
+        os.chmod(staged, mode)
+        if before_publish is not None:
+            before_publish()
+        if overwrite:
+            os.replace(staged, final)
+        else:
+            os.link(staged, final)
+    try:
+        os.remove(src)
+    except OSError as exc:
+        return "published successfully, but could not remove scratch source %r: %s" % (src, exc)
+    return None
+
+
 def validate_slug(slug, what="--slug"):
     """Reject a slug that could steer a write out of the Sources/Images folder.
 
@@ -606,6 +664,12 @@ def _refuse_existing(attachments, slug, index, overwrite):
     replace a figure in place, so the capability is kept -- behind an explicit
     `--overwrite`, which is a thing someone has to type.
     """
+    owned = read_manifest(os.path.join(attachments, MANIFEST_FILE))
+    prefix = unicodedata.normalize("NFC", f"{slug}_fig_{index}.").casefold()
+    for name in owned:
+        if unicodedata.normalize("NFC", name).casefold().startswith(prefix):
+            raise ValueError(f"{name} is recorded in the PDF figure manifest — "
+                             "clipping-processor cannot replace that producer's figure")
     if overwrite:
         return
     hit = _glob_slug(attachments, slug, f"_fig_{index}.*")
@@ -683,24 +747,14 @@ def download_one(url, attachments, slug, index, timeout=45,
         final = os.path.join(attachments, f"{slug}_fig_{index}.{ext}")
         _ensure_within(attachments, final)
         _refuse_existing(attachments, slug, index, overwrite)
-        # `shutil.move` degrades to copy+unlink across filesystems -- which is
-        # every vault on an external drive, a network share or a mounted
-        # connected folder. A copy that dies mid-way leaves a truncated file at
-        # the FINAL path while this function reports failure, so the `finally`
-        # below cleans the temp and the vault keeps the corpse. Clean up the
-        # destination too, on the way out.
-        try:
-            shutil.move(tmp, final)      # move, not copy: no temp twin left behind
-        except BaseException:
-            if os.path.exists(final):
-                try:
-                    os.remove(final)
-                except OSError:
-                    pass
-            raise
-        os.chmod(final, 0o644)           # mkstemp defaults to 0600; vault files are readable
+        warning = _publish_file(
+            tmp, final, overwrite,
+            staging_parent=os.path.dirname(os.path.realpath(attachments)),
+            before_publish=lambda: _refuse_existing(attachments, slug, index, overwrite))
         result.update(ok=True, path=final, filename=os.path.basename(final),
                       ext=ext, bytes=size, content_type=content_type)
+        if warning:
+            result["warning"] = warning
     except Exception as exc:             # 404, timeout, unsupported scheme, non-image
         result["error"] = f"{type(exc).__name__}: {exc}"
     finally:
@@ -731,27 +785,29 @@ def fetch_source(url, out=None, timeout=45, max_bytes=DEFAULT_MAX_BYTES,
     result = {"url": url[:200] + ("…" if len(url) > 200 else ""),
               "final_url": None, "ok": False, "path": None, "bytes": 0,
               "content_type": None, "error": None}
-    if out is None:
-        fd, out = tempfile.mkstemp(prefix="clipping_src.", suffix="")
-        os.close(fd)
-        made_temp = True
-    else:
-        made_temp = False
+    tmp = _temp_path()
     try:
-        if not made_temp and os.path.lexists(out) and not overwrite:
+        if out is not None and os.path.lexists(out) and not overwrite:
             raise ValueError(f"{out!r} already exists — refusing to overwrite "
                              "it (pass --overwrite if that is intended)")
         content_type, size = _fetch_to_path(
-            url, out, timeout, max_bytes, max_seconds, allow_private, result)
+            url, tmp, timeout, max_bytes, max_seconds, allow_private, result)
         if size == 0:
             raise ValueError("empty response")
+        if out is None:
+            out, tmp = tmp, None
+        else:
+            warning = _publish_file(tmp, out, overwrite, mode=0o600)
+            if warning:
+                result["warning"] = warning
         result.update(ok=True, path=os.path.abspath(out), bytes=size,
                       content_type=content_type)
     except Exception as exc:             # 404, timeout, unsupported scheme, cap
         result["error"] = f"{type(exc).__name__}: {exc}"
-        if os.path.exists(out) and (made_temp or overwrite):
+    finally:
+        if tmp is not None and os.path.exists(tmp):
             try:
-                os.remove(out)
+                os.remove(tmp)
             except OSError:
                 pass
     return result
@@ -805,20 +861,14 @@ def place_file(src, attachments, slug, index, overwrite=False):
         final = os.path.join(attachments, f"{slug}_fig_{index}.{ext}")
         _ensure_within(attachments, final)
         _refuse_existing(attachments, slug, index, overwrite)
-        try:
-            shutil.move(src, final)
-        except BaseException:
-            if os.path.exists(final) and not os.path.exists(src):
-                pass                     # the move landed; let the caller see it
-            elif os.path.exists(final):
-                try:
-                    os.remove(final)
-                except OSError:
-                    pass
-            raise
-        os.chmod(final, 0o644)
+        warning = _publish_file(
+            src, final, overwrite,
+            staging_parent=os.path.dirname(os.path.realpath(attachments)),
+            before_publish=lambda: _refuse_existing(attachments, slug, index, overwrite))
         result.update(ok=True, path=final, filename=os.path.basename(final),
                       ext=ext, bytes=size)
+        if warning:
+            result["warning"] = warning
     except Exception as exc:
         result["error"] = f"{type(exc).__name__}: {exc}"
     return result
@@ -861,10 +911,11 @@ _FIG_GLOB = "_fig*"
 
 def _pdf_named(sources, slug):
     """Is there a `<slug>.pdf` under `sources`?  Cheap, read-only."""
+    key = unicodedata.normalize("NFC", slug).casefold()
     try:
         for root, _dirs, files in os.walk(sources):
             for f in files:
-                if os.path.splitext(f)[0].casefold() == slug.casefold() \
+                if unicodedata.normalize("NFC", os.path.splitext(f)[0]).casefold() == key \
                         and f.lower().endswith(".pdf"):
                     return True
     except OSError:
@@ -919,12 +970,16 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, sources=None):
     """
     validate_slug(old_slug, "--old-slug")
     validate_slug(new_slug, "--new-slug")
+    if sources is not None and not os.path.isdir(sources):
+        raise ValueError("--sources is not a directory: %r — cannot verify PDF ownership" % sources)
     if sources and _pdf_named(sources, old_slug):
         return [{"from": old_slug + "_fig_*", "to": None, "ok": False,
                  "error": "refusing to rename: %s.pdf exists in %s, so these "
                           "figures belong to that document and are "
                           "pdf-organizer's to move, not this skill's"
                           % (old_slug, sources)}]
+    owned = {unicodedata.normalize("NFC", name).casefold()
+             for name in read_manifest(os.path.join(attachments, MANIFEST_FILE))}
     # --- plan: every member is judged before any of them is touched ---------
     # every Unicode spelling of the old slug: on macOS the on-disk files are
     # often NFD while the argument is NFC, and glob compares bytes.
@@ -944,7 +999,9 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, sources=None):
                  "error": None}
         if dry_run:
             entry["dry_run"] = True
-        if _PDF_ONLY_LABEL.search(base):
+        if unicodedata.normalize("NFC", base).casefold() in owned:
+            entry["error"] = "recorded in the PDF figure manifest; not this skill's to rename"
+        elif _PDF_ONLY_LABEL.search(base):
             entry["error"] = ("label spelling only pdf-figure-extractor "
                               "writes; this file is a PDF's figure, not this "
                               "note's")
@@ -1225,7 +1282,11 @@ def run_self_test():
 
     import shutil
     tmp = tempfile.mkdtemp(prefix="fetch_images_selftest.")
+    previous_tempdir = tempfile.tempdir
     try:
+        # The leak check must observe this run's scratch files, not another
+        # self-test or real download using the same system temporary folder.
+        tempfile.tempdir = tmp
         att = os.path.join(tmp, "Sources", "Images")
         os.makedirs(att)
 
@@ -1401,8 +1462,7 @@ def run_self_test():
 
         def strays():
             """`_temp_path`'s files, which every path through download_one must
-            clean up. Measured as a difference: this is the shared system temp
-            directory and something else may well be using it."""
+            clean up, in this run's isolated temporary directory."""
             return {f for f in os.listdir(tempfile.gettempdir())
                     if f.startswith("clipping_img.")}
 
@@ -1429,6 +1489,53 @@ def run_self_test():
         check("--overwrite is what replaces it",
               download_one(data_url, att, "Teslo_Cancer_2026", 1,
                            overwrite=True)["ok"], True)
+        # A failed cross-device move used to remove the previous good image.
+        # Simulate an interrupted copy after it wrote bytes, not a successful
+        # transfer whose return value merely says it failed.
+        import errno
+        def interrupted_copy(src, dst, *args, **kwargs):
+            with open(dst, "wb") as fh:
+                fh.write(b"incomplete")
+            raise OSError(errno.ENOSPC, "injected disk-full copy")
+        keep_image = os.path.join(att, "Teslo_Cancer_2026_fig_1.png")
+        with patch.object(os, "rename", side_effect=OSError(errno.EXDEV, "different filesystem")), \
+                patch.object(shutil, "copyfile", side_effect=interrupted_copy):
+            failed_replace = download_one(data_url, att, "Teslo_Cancer_2026", 1,
+                                          overwrite=True)
+            failed_new = download_one(data_url, att, "Teslo_Cancer_2026", 99)
+        check("a failed overwrite preserves the previous complete download",
+              (failed_replace["ok"], os.path.exists(keep_image)
+               and open(keep_image, "rb").read()), (False, _PNG))
+        check("an interrupted new download exposes no final figure",
+              (failed_new["ok"], _glob_slug(att, "Teslo_Cancer_2026", "_fig_99.*")),
+              (False, []))
+        check("failed publications leave no staging directories",
+              glob.glob(os.path.join(os.path.dirname(att), ".clipping-stage.*")), [])
+        # An explicit overwrite grants replacement of this clipping's figure,
+        # never a file another producer has recorded as its own.
+        import hashlib
+        pdf_owned = os.path.join(tmp, "pdf-owned")
+        os.makedirs(pdf_owned)
+        owned_name = "Doe_Paper_2026_fig_1.png"
+        owned_file = touch(os.path.join(pdf_owned, owned_name), _PNG)
+        with open(os.path.join(pdf_owned, MANIFEST_FILE), "w") as fh:
+            fh.write(owned_name + "\t" + hashlib.sha256(_PNG).hexdigest() + "\n")
+        blocked_download = download_one(data_url, pdf_owned, "Doe_Paper_2026", 1,
+                                        overwrite=True)
+        owned_render = touch(os.path.join(tmp, "owned-render.png"), _PNG)
+        blocked_place = place_file(owned_render, pdf_owned, "Doe_Paper_2026", 1,
+                                   overwrite=True)
+        check("overwrite never replaces a PDF-manifest-owned figure",
+              (blocked_download["ok"], blocked_place["ok"],
+               open(owned_file, "rb").read(), os.path.exists(owned_render)),
+              (False, False, _PNG, True))
+        check("recorded PDF figures cannot be renamed by a clipping either",
+              [row["ok"] for row in rename_slug(pdf_owned, "Doe_Paper_2026", "New_Note_2026")],
+              [False])
+        with open(os.path.join(pdf_owned, MANIFEST_FILE), "w") as fh:
+            fh.write("not a valid ownership record\n")
+        check("a malformed ownership manifest does not authorize a write",
+              download_one(data_url, pdf_owned, "New_Clipping_2026", 1)["ok"], False)
         # the slot is `<slug>_fig_<N>.*`, not one filename: a .webp at the same
         # index is the same slot, or the extension-twin comes back
         touch(os.path.join(att, "Teslo_Cancer_2026_fig_2.webp"))
@@ -1493,6 +1600,26 @@ def run_self_test():
         check("fetch refuses an --out that already exists",
               fetch_source("data:application/json,x", out_path)["ok"], False)
         check("...and leaves it untouched", open(out_path, "rb").read(), b"mine")
+        bad = fetch_source("file:///not-a-permitted-source", out_path,
+                           overwrite=True)
+        check("fetch validation failure never deletes an overwrite destination",
+              (bad["ok"], os.path.exists(out_path) and open(out_path, "rb").read()),
+              (False, b"mine"))
+        def interrupted_fetch(url, destination, *args, **kwargs):
+            touch(destination, b"partial response")
+            raise TimeoutError("injected transfer interruption")
+        new_out = os.path.join(tmp, "new-animation.json")
+        with patch.dict(globals(), {"_fetch_to_path": interrupted_fetch}):
+            new_failed = fetch_source("https://example.com/anim.json", new_out)
+            old_failed = fetch_source("https://example.com/anim.json", out_path,
+                                      overwrite=True)
+        check("an interrupted explicit fetch leaves no retry-blocking partial file",
+              (new_failed["ok"], os.path.exists(new_out)), (False, False))
+        check("an interrupted fetch leaves the previous source byte-identical",
+              (old_failed["ok"], os.path.exists(out_path)
+               and open(out_path, "rb").read()), (False, b"mine"))
+        check("retrying an interrupted fetch works without overwrite",
+              fetch_source("data:application/json,retry", new_out)["ok"], True)
 
         # `place` is the write half, and it is the SAME guards as `download`.
         gif = b"GIF89a\x01\x00\x01\x00\x00\xff\x00,"
@@ -1518,6 +1645,18 @@ def run_self_test():
         check("...while --overwrite is what replaces it",
               place_file(render, att, "Teslo_Cancer_2026", 20,
                          overwrite=True)["ok"], True)
+        replacement = touch(os.path.join(tmp, "replacement.gif"), gif)
+        keep_gif = os.path.join(att, "Teslo_Cancer_2026_fig_20.gif")
+        prior_gif = open(keep_gif, "rb").read()
+        with patch.object(os, "rename", side_effect=OSError(errno.EXDEV, "different filesystem")), \
+                patch.object(shutil, "copyfile", side_effect=interrupted_copy):
+            failed_place = place_file(replacement, att, "Teslo_Cancer_2026", 20,
+                                      overwrite=True)
+        check("a failed rendered-image replacement preserves the previous GIF",
+              (failed_place["ok"], os.path.exists(keep_gif)
+               and open(keep_gif, "rb").read()), (False, prior_gif))
+        check("...and leaves the render available for retry",
+              open(replacement, "rb").read(), gif)
         # the extension comes from the BYTES, not from the name the renderer
         # chose: a blank or failed render named `.gif` is not a GIF
         html = touch(os.path.join(tmp, "failed.gif"), b"<!DOCTYPE html><html>")
@@ -1739,6 +1878,17 @@ def run_self_test():
         check("...while a stem with no PDF renames normally",
               [e["ok"] for e in rename_slug(folder, "Doe_Qux_2025",
                                             "New_Note_2026")], [True])
+        accented = "Müller_Topic_2026"
+        touch(os.path.join(sources, "sub", unicodedata.normalize("NFD", accented) + ".pdf"))
+        folder = figures(accented, ("_fig_1.png",))
+        out = rename_slug(folder, accented, "New_Note_2026", sources=sources)
+        check("an NFD PDF filename still owns an NFC figure stem",
+              [e["ok"] for e in out], [False])
+        check("...and its figures stay under their original stem",
+              os.listdir(folder), [accented + "_fig_1.png"])
+        raises("a mistyped --sources path cannot silently disable ownership checks",
+               rename_slug, folder, accented, "New_Note_2026",
+               sources=os.path.join(sources, "missing-folder"))
         raises("rename_slug validates both slugs", rename_slug, folder,
                "../old", "new")
         raises("...including the new one", rename_slug, folder, "old",
@@ -1854,7 +2004,45 @@ def run_self_test():
                   (1, False))
             check("...and the escaped JSON still decodes to the same animation",
                   json.loads(emb), hostile)
+            validate_anim = ns.get("validate_anim")
+            check("the renderer validates untrusted animation data before launch",
+                  callable(validate_anim), True)
+            if callable(validate_anim):
+                base_anim = {"w": 100, "h": 100, "fr": 30, "ip": 0, "op": 60,
+                             "layers": []}
+                check("a self-contained animation passes renderer preflight",
+                      validate_anim(base_anim), None)
+                for label, extra in (
+                        ("an external image", {"assets": [{"p": "figure.png", "u": "https://example.com/"}]}),
+                        ("a private image URL", {"assets": [{"p": "http://127.0.0.1/image"}]}),
+                        ("an external font", {"fonts": {"list": [{"fPath": "https://example.com/font.woff"}]}}),
+                        ("an expression", {"layers": [{"ks": {"o": {"x": "fetch('https://example.com/')"}}}]}),
+                        ("zero frame rate", {"fr": 0}),
+                        ("an infinite dimension", {"w": float("inf")}),
+                        ("no frames", {"op": 0})):
+                    raises("renderer refuses %s before browser work" % label,
+                           validate_anim, {**base_anim, **extra})
+                check("embedded image bytes need no network permission",
+                      validate_anim({**base_anim,
+                                     "assets": [{"p": data_url, "e": 1}]}), None)
+            allowed = ns.get("render_request_allowed")
+            check("the renderer exposes its network allowlist", callable(allowed), True)
+            if callable(allowed):
+                check("only the fixed renderer library may be fetched",
+                      [allowed(url) for url in (ns["LOTTIE_CDN"],
+                       "http://127.0.0.1/image", "https://example.com/asset",
+                       ns["LOTTIE_CDN"] + "?redirect=elsewhere")],
+                      [True, False, False, False])
+            if callable(ns.get("load_anim")):
+                import zipfile
+                packed = os.path.join(tmp, "oversized.lottie")
+                with zipfile.ZipFile(packed, "w", zipfile.ZIP_DEFLATED) as archive:
+                    archive.writestr("animations/a.json", b" " * 1024)
+                ns["MAX_JSON_BYTES"] = 64
+                raises("a small ZIP cannot expand past the animation JSON cap",
+                       ns["load_anim"], packed)
     finally:
+        tempfile.tempdir = previous_tempdir
         shutil.rmtree(tmp, ignore_errors=True)
 
     failed = [c for c in cases if not c[1]]

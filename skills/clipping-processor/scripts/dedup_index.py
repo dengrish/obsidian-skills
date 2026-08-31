@@ -90,13 +90,22 @@ ROUTING_FRAGMENT = ("/", "!")
 
 
 def normalize_url(url):
-    """Normalize a URL for identity comparison (step 1's rules, in order)."""
-    if url is None:
+    """Normalize an HTTP(S) URL for identity; invalid origins return no key."""
+    if not isinstance(url, str):
         return ""
     url = url.strip().strip('"').strip("'")
     if not url:
         return ""
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+        if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+            return ""
+        if any(ch.isspace() for ch in parts.hostname):
+            return ""
+        # Accessing port validates it; urlsplit alone accepts `:not-a-port`.
+        parts.port
+    except ValueError:
+        return ""
     scheme = parts.scheme.lower()
     host = parts.netloc.lower()
     if host.startswith("www."):
@@ -126,7 +135,10 @@ def normalize_url(url):
 #: 2b) is the current key; the scalar `source:` is the pre-rename legacy shape,
 #: still read so an unmigrated note stays visible to the duplicate check.
 SOURCES_RE = re.compile(r"\Asources\s*:\s*\Z", re.IGNORECASE)
-_ITEM_RE = re.compile(r"\A\s+-\s*(.*)\Z")
+# YAML allows an indentless block sequence at a mapping value; serializers such
+# as PyYAML emit it by default. Requiring indentation hides those saved notes
+# from dedup. A sequence marker still needs whitespace before its scalar.
+_ITEM_RE = re.compile(r"\A[ \t]*-[ \t]+(.*)\Z")
 SOURCE_RE = re.compile(r"\Asource\s*:\s*(.*)\Z", re.IGNORECASE)
 
 #: An unquoted YAML scalar ends at a ` #` comment. The whitespace is required by
@@ -255,7 +267,11 @@ def build_index(cleaned_dir, exclude=()):
         if not src.lower().startswith(("http://", "https://")):
             non_url.append({"path": path, "source": src})
             continue
-        index.setdefault(normalize_url(src), []).append(path)
+        norm = normalize_url(src)
+        if not norm:
+            unindexable.append(path)
+            continue
+        index.setdefault(norm, []).append(path)
     return index, unindexable, non_url
 
 
@@ -272,11 +288,11 @@ def check(entries, index):
     results = []
     for ent in entries:
         src = ent.get("source")
-        if not src:
+        norm = normalize_url(src)
+        if not norm:
             results.append({**ent, "normalized": None, "status": "no-source",
                             "matches": []})
             continue
-        norm = normalize_url(src)
         matches = live.get(norm, [])
         if matches:
             status = ("duplicate-of-earlier-input" if norm in seen_this_run
@@ -345,6 +361,11 @@ def run_self_test():
           "https://example.com/a?a=1&b=2")
     case("None is the empty key", normalize_url(None), "")
     case("blank is the empty key", normalize_url("   "), "")
+    for bad in ("https://[broken/article", "https://", "http:///article",
+                "https://example.com:not-a-port/article", "https://bad host/x",
+                "file:///article.md", "not a URL"):
+        case("an unusable origin cannot become a dedup key: %r" % bad,
+             normalize_url(bad), "")
     case("surrounding quotes are stripped",
           normalize_url('"https://example.com/a"'), "https://example.com/a")
     for param in ("utm_source", "utm_medium", "utm_campaign", "fbclid",
@@ -398,6 +419,12 @@ def run_self_test():
                  '---\nsources:\n  - "%s"\n---\nbody\n' % URL, URL),
                 ("sources list, unquoted item",
                  "---\nsources:\n  - %s\n---\n" % URL, URL),
+                ("sources list, indentless quoted item",
+                 '---\nsources:\n- "%s"\n---\n' % URL, URL),
+                ("sources list, indentless unquoted item",
+                 "---\nsources:\n- %s\n---\n" % URL, URL),
+                ("a dash without following whitespace is not a list item",
+                 "---\nsources:\n  -%s\n---\n" % URL, None),
                 ("sources list, wikilink first item (a summary note)",
                  '---\nsources:\n  - "[[Doe_X_2025.pdf]]"\n---\n', "[[Doe_X_2025.pdf]]"),
                 ("an indented sources: belongs to another key",
@@ -501,6 +528,12 @@ def run_self_test():
               any(d in v for v in index.values()), False)
         case("--exclude keeps a note from matching itself",
               build_index(vault, exclude=[a])[0].get(normalize_url(URL)), [b])
+        malformed = article("Malformed.md",
+                            '---\nsources:\n  - "https://[broken/article"\n---\n')
+        after_bad, unreadable, _ = build_index(vault)
+        case("a malformed URL note is reported without aborting the batch",
+             (after_bad, sorted(unreadable)),
+             (index, sorted([c, malformed])))
 
         # --- case(): verdicts, including within one batch ------------------
         res = check([{"id": "raw1", "source": URL},
@@ -514,6 +547,14 @@ def run_self_test():
               res[2]["status"], "duplicate-of-earlier-input")
         case("a raw with no source: is not silently `new`",
               res[3]["status"], "no-source")
+        invalid_raws = check([
+            {"id": "malformed", "source": "https://[broken/article"},
+            {"id": "local", "source": "file:///article.md"},
+            {"id": "hostless", "source": "https://"},
+            {"id": "valid", "source": "https://example.com/valid"}], {})
+        case("bad raw origins are no-source and do not stop later valid inputs",
+             [r["status"] for r in invalid_raws],
+             ["no-source", "no-source", "no-source", "new"])
         case("the live index did not leak into the caller's",
               sorted(index), sorted([normalize_url(URL)]))
 

@@ -58,12 +58,18 @@ Use Python 3.9+ and an isolated environment. From the repository root:
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python tests/test_conventions.py
+.venv/bin/python tests/test_end_to_end.py
 .venv/bin/python tools/build_plugin.py
 .venv/bin/python tests/test_compatibility.py
 .venv/bin/python tools/build_plugin.py --check
 ```
 
-The convention suite also runs all 19 bundled script self-tests. The
+The convention suite also runs all 20 bundled script self-tests. The
+end-to-end suite runs the public commands against temporary vaults, checking
+PDF filing, manual figure repairs, source renames, clipping reprocessing, and
+the source-to-wiki index, collision, lint, and scan workflow. It never edits a
+real vault or fetches network content; note drafting and visual quality still
+need review. The
 compatibility suite checks both manifests, archive contents, execution from
 a different working directory with spaces in its path, and platform-sensitive
 URL and interpreter handling. When Claude Code is available, also run:
@@ -149,11 +155,12 @@ which is a restatement of the paper rather than the paper.
 downstream keys to a source's on-disk filename — `wiki-builder` writes
 `sources: "[[Name.pdf#page=N]]"`, `pdf-figure-extractor` names every figure
 after the PDF's stem, `paper-summarizer` names its note after it and links it
-as `sources:` item 1, `"[[name.pdf]]"` — so renaming
-a source *after* those have run breaks references that **nothing in this plugin
-detects**: the orphan audits deliberately skip `sources:`, and Obsidian renders
-an unresolved link as ordinary text. Organize first. `CONVENTIONS.md` §1a states
-the contract and what it costs to ignore.
+as `sources:` item 1, `"[[name.pdf]]"`. Renaming only the PDF after those have
+run leaves references and images under the old name. The orphan audits skip
+`sources:`, so they do not provide a complete safety net. Organize first; when
+an existing name must change, use pdf-organizer's reference check and approved
+rename plan to carry the related files, links, and sidecars together.
+`CONVENTIONS.md` §1a states the contract and authorization requirements.
 
 **Every stage but the last is per-document. `wiki-linter` is the only
 whole-vault pass** — that split is deliberate, and it is what stops two skills
@@ -222,7 +229,7 @@ home instead of five:
   section names the skills that depend on it, so an edit's blast radius is
   visible before you make it.
 - **`shared/scripts/slugify.py`** — the canonical title → filename slug
-  algorithm, with a 53-case self-test (`slugify.py --test`).
+  algorithm, with a 56-case self-test (`slugify.py --test`).
 - **`shared/scripts/plugin_paths.py`** — how a skill script reaches
   `shared/scripts/` whether the plugin is installed whole or the skill was
   extracted alone (`CONVENTIONS.md` §5).
@@ -231,6 +238,10 @@ home instead of five:
   the end of a stem comes off before the two are compared (`CONVENTIONS.md` §1a).
   Imported by pdf-organizer, pdf-figure-extractor and paper-summarizer; the
   first two used to hold copies that disagreed in both directions at once.
+- **`shared/scripts/figure_state.py`** — the PDF figure ownership and review
+  sidecars. Extraction and manual repairs share the same digest records;
+  source renames carry those records with the files, and clipping writes
+  refuse slots recorded as PDF output.
 - **`shared/scripts/plurals.py`** — the one English singulariser, so the
   duplicate-entry probes agree about which two word forms are the same word.
   Its two former copies disagreed on every irregular (`hypotheses`, `matrices`,
@@ -289,6 +300,8 @@ python3 skills/paper-summarizer/scripts/note_lint.py --test    # the summary-not
 python3 shared/scripts/slugify.py --test                       # and the shared layer
 python3 shared/scripts/plurals.py --test
 python3 shared/scripts/naming.py --test
+python3 shared/scripts/figure_state.py --test
+python3 tests/test_end_to_end.py                              # commands working together
 ```
 
 Every one of them reports how many cases ran and passed — the skill scripts as

@@ -14,7 +14,7 @@
 
 For each downloadable image (markdown/HTML/linked `url`), in source order:
 
-1. Increment a counter starting at 1. (When mixing renamed embeds and new downloads, keep one shared counter in source order so figure numbers stay sequential and unique.)
+1. On a fresh note, increment a counter starting at 1 in source order. On a reprocess, preserve existing figure numbers and allocate new downloads after the highest occupied number; inserting a new image before an existing embed must not reuse that embed's slot.
 2. **Hand the URLs to `scripts/fetch_images.py`, in source order, on one shared counter** — SKILL.md step 6 has the invocation. Items 3 and 4 below describe what it does; they are here so you can read its output, **not so you can do it by hand**.
 
    ```bash
@@ -50,7 +50,7 @@ For each downloadable image (markdown/HTML/linked `url`), in source order:
      - an `image/*` subtype with no mapping → the URL's extension; if none, `png`
      - a `Content-Type` carrying no information at all (absent, `application/octet-stream`) → the URL's extension, and if there is none, **a failure** — nothing here is evidence of an image
    - A failure names what the bytes actually looked like ("the bytes look like a JSON body"), so the report says whether the CDN answered with an error document, a login wall, or the wrong file.
-4. It **moves** (not copies) the temp file — which lives outside `Sources/Images/` and carries no image extension until this point — to `<vault>/Sources/Images/<image_slug>_fig_<N>.<ext>`. Nothing half-written or wrongly-named ever appears in the vault, and no extension twin is left behind. **An occupied `<image_slug>_fig_<N>.*` slot is refused, not overwritten**: a wrong `--start` would otherwise destroy the figures already filed under that name, with no way back. On the reprocess path, where replacing a figure in place is the intent, pass `--overwrite`.
+4. It publishes the complete file as `<vault>/Sources/Images/<image_slug>_fig_<N>.<ext>` and removes the scratch source. Publication stages bytes in a unique temporary directory beside `Sources/Images/`, outside the image folder, then uses a same-filesystem operation so an interrupted transfer cannot expose a partial figure or destroy the previous good one. New files use an exclusive hard link; explicit replacements use an atomic rename. If the filesystem cannot support safe publication, the command fails and leaves existing files alone. **An occupied `<image_slug>_fig_<N>.*` slot is refused, not overwritten**: a wrong `--start` would otherwise destroy an existing figure. On the deliberate reprocess path, `--overwrite` permits replacement.
 5. **Look for a caption** in the line(s) immediately following the `![](<url>)` reference. A caption is short (typically one or two sentences, under ~200 characters), describes the image, and often takes a recognizable shape:
    - Italic line like `*Figure 1: gene expression heatmap.*`
    - Bold prefix like `**Figure 1.** Mechanism of daraxonrasib binding to KRAS.`

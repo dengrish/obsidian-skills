@@ -130,7 +130,7 @@ def _yaml_scalar(raw):
 #: The document a `source:` wikilink names, if it is one at all.  Obsidian
 #: resolves a wikilink by basename, so only the last path segment matters, and
 #: a display pipe or a heading anchor is not part of the name.
-_WIKILINK_RE = re.compile(r"\A!?\[\[([^\]|#]+)")
+_WIKILINK_RE = re.compile(r"\A!?\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]\Z")
 
 
 #: A panel's label is its figure's label with a lowercase letter on the end
@@ -313,6 +313,8 @@ def body_is_embed_only(path):
     # makes a legacy embed-note read as a real summary -- the exact outcome
     # this function exists to prevent.
     lines = text.splitlines()
+    while lines and not lines[0].strip():
+        lines.pop(0)
     body_lines = lines
     if lines and lines[0].strip() == "---":
         for i in range(1, len(lines)):
@@ -348,7 +350,8 @@ def source_names(source, stem):
     if not m:
         return False
     base = m.group(1).strip().rstrip("/").split("/")[-1]
-    return os.path.splitext(base)[0].casefold() == stem.casefold()
+    return (base.lower().endswith(".pdf")
+            and os.path.splitext(base)[0].casefold() == stem.casefold())
 
 
 def find_pdfs(src):
@@ -621,6 +624,10 @@ def run_self_test():
             ("[[Sources/PDFs/Doe_Foo_2025.pdf]]",     "Doe_Foo_2025",  True),
             ("[[Doe_Foo_2025.pdf|the paper]]",        "Doe_Foo_2025",  True),
             ("[[doe_foo_2025.pdf]]",                  "Doe_Foo_2025",  True),
+            ("[[Doe_Foo_2025.PDF#page=3|3]]",         "Doe_Foo_2025",  True),
+            ("[[Doe_Foo_2025.md]]",                   "Doe_Foo_2025",  False),
+            ("[[Doe_Foo_2025]]",                      "Doe_Foo_2025",  False),
+            ("[[Doe_Foo_2025.pdf",                     "Doe_Foo_2025",  False),
             ("[[Doe_Bar_2025.pdf]]",                  "Doe_Foo_2025",  False),
             ("https://example.com/doe-foo",           "Doe_Foo_2025",  False),
             ("", "Doe_Foo_2025", False),
@@ -647,6 +654,8 @@ def run_self_test():
     _fm = '---\ntitle: x\nsource: "[[Doe_Foo_2025.pdf]]"\nread: false\n---\n'
     for label, body, want in (
             ("bare embed", _fm + "![[Doe_Foo_2025.pdf]]\n", True),
+            ("legacy note with leading blank lines",
+             "\n\n" + _fm + "![[Doe_Foo_2025.pdf]]\n", True),
             ("embed under a callout and a rule",
              _fm + "> [!Summary]\n> - a bullet\n\n___\n\n"
                    "![[Doe_Foo_2025.pdf]]\n", True),

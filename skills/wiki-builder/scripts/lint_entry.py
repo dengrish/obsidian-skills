@@ -18,10 +18,14 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               aliases/sources/tags/parents item double-quoted;
                               type/created/updated/read never quoted;
                               double quotes, never single
+  2   2-read-state            read: holds a boolean answer; a null or unknown
+                              value is report-only, never inferred as false
   3   3-dates                 created/updated are YYYY-MM-DD; created <= updated
+  4   4-sources               sources: is a list of PDF wikilinks with positive
+                              page anchors or unanchored markdown wikilinks
   4   4-duplicate-source      no two sources: items name the same document: a
                               .md item whose stem equals a .pdf item's stem is
-                              the PDF and its clipping-processor note, i.e. one
+                              the PDF and its paper-summarizer note, i.e. one
                               source recorded twice (stems compared case- and
                               NFC-insensitively, anchor and folder stripped)
   5   5-slug                  re-run slugify on title:; must equal the filename
@@ -67,9 +71,8 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
   18  18-alias-duplicate      the same alias listed twice within one entry
   18  18-alias-form           every alias is itself in slug form (warning)
 
-NOT implemented (out of scope by design): item 4's FORM rules (extension
-present, ``#page=N`` anchor shape -- wiki-linter's scanner owns those; only
-item 4's same-document rule is checked here), items 6, 9 beyond the opener and
+NOT implemented (out of scope by design): item 4's file existence and page
+correctness, items 6, 9 beyond the opener and
 the sentence-length flag, 11-15, 17 beyond the introduced-alias scan, and the
 interpretive halves of 8/18/19.
 
@@ -97,12 +100,14 @@ state.  Its quoting is covered by ``2-quoting`` and its presence by
 ``2-field-order``.
 
 ``read: true`` is likewise NOT flagged: the value is the user's, and this
-script checks only that the key is present (``2-field-order``), sits last in
-the schema (``2-field-order``) and is unquoted (``2-quoting``) -- a quoted
+script checks that the key is present (``2-field-order``), sits last in
+the schema (``2-field-order``), carries a boolean answer (``2-read-state``),
+and is unquoted (``2-quoting``) -- a quoted
 ``"false"`` is a string, which Obsidian's checkbox renders as permanently
 checked.  Whether a merge should have RESET the field is not mechanisable --
-no script can see whether a body gained substance -- and a missing ``read:``
-is reported for a human to resolve, never repaired: writing ``read: false``
+no script can see whether a body gained substance -- and a missing, null, or
+unrecognizable ``read:`` is reported for a human to resolve, never repaired:
+writing ``read: false``
 into an entry the user had already marked read destroys the state the field
 exists to hold.
 
@@ -156,6 +161,7 @@ _sys.path.append(_here)                    # own dir LAST: a local copy cannot s
 # --- end bootstrap ---
 
 from slugify import SlugError, base_term, has_parenthetical, slug_stem  # noqa: E402
+from plurals import singular_keys  # noqa: E402
 from vault_index import (  # noqa: E402
     SCHEMA_ORDER,
     extract_wikilinks,
@@ -460,6 +466,8 @@ def _check_quoting(fm, findings):
                 {"line": field.line, "raw": field.raw_value, "style": style}))
 
     for key in NEVER_QUOTED:
+        if key == "read":
+            continue  # _check_read distinguishes known answers from unknown state.
         field = fm.get(key)
         if field is None or field.kind == "blank":
             continue
@@ -483,6 +491,53 @@ def _check_quoting(fm, findings):
                     "every item under %s: must be double-quoted "
                     "(single quotes and bare values are both wrong)" % key,
                     {"line": line, "raw": raw, "style": style}))
+
+
+def _check_read(fm, findings):
+    """Validate the checkbox without inventing an answer for missing state."""
+    field = fm.get("read")
+    if field is None:
+        return  # The missing-key finding already routes to the user.
+    raw = field.raw_value.strip()
+    value, style = unquote_scalar(raw)
+    if field.kind == "scalar" and style == "bare" and raw.lower() in {"true", "false"}:
+        return
+    if field.kind == "scalar" and value.lower() in {"true", "false", "yes", "no", "0", "1"}:
+        findings.append(_f(
+            "2-quoting" if style in {"double", "single"} else "2-read-state", "error",
+            "read: must be a bare true/false boolean; correct the spelling "
+            "while preserving the existing answer",
+            {"line": field.line, "raw": raw, "report_only": False}))
+        return
+    findings.append(_f(
+        "2-read-state", "error",
+        "read: has no recognizable boolean answer -- report it to the user; "
+        "do not replace it with false or infer a review state",
+        {"line": field.line, "raw": raw, "report_only": True}))
+
+
+def _check_sources(fm, findings):
+    """Item 4: a list of complete local-source wikilinks with physical pages."""
+    field = fm.get("sources")
+    if field is None or not field.values:
+        return  # Missing/empty sources are already reported by the structure check.
+    if not field.is_list:
+        findings.append(_f(
+            "4-sources", "error", "sources: must be a list, not a scalar",
+            {"line": field.line}))
+    for value, line in zip(field.values, field.item_lines):
+        if value == "stub":
+            continue  # _check_stub_sources enforces the legacy sole-marker rule.
+        if re.fullmatch(r"\[\[[^\[\]\r\n|#]+\.(?i:pdf)#page=[1-9][0-9]*\]\]", value):
+            continue
+        if re.fullmatch(r"\[\[[^\[\]\r\n|#]+\.(?i:md)\]\]", value):
+            continue
+        findings.append(_f(
+            "4-sources", "error",
+            "source must be [[Name.pdf#page=N]] with a positive physical "
+            "page number, or [[Name.md]] without an anchor; URLs, display "
+            "labels and incomplete wikilinks are not source references",
+            {"line": line, "source": value}))
 
 
 def _check_dates(fm, findings):
@@ -762,24 +817,25 @@ def _check_alias_completeness(fm, sections, findings, filename):
     produced attributes, not the encoding") and the cross-domain bare-term
     carve-out are judgment, so the finding hands the model a candidate, not a
     verdict.  The two mechanical exclusions ARE applied: a form that slugs
-    identically to the filename, and one already in ``aliases:``.
+    identically to the filename, and a singular/plural form already covered by the filename or ``aliases:``.
     """
     stem = os.path.splitext(os.path.basename(filename))[0]
-    have = {stem}
+    have = {fold_name(stem)}
     for alias in fm.values("aliases"):
         if not alias:
             continue
-        have.add(alias)
+        have.add(fold_name(alias))
         try:
-            have.add(slug_stem(alias))
+            have.add(fold_name(slug_stem(alias)))
         except SlugError:
             pass
+    inflections = set().union(*(singular_keys(form) for form in have))
     for cand, where in _alias_candidates(sections):
         try:
             cslug = slug_stem(cand)
         except SlugError:
             continue
-        if cslug in have:
+        if singular_keys(fold_name(cslug)) & inflections:
             continue
         findings.append(_f(
             "17-alias-completeness", "warning",
@@ -1373,7 +1429,9 @@ def lint_text(text, filename):
     _check_field_order(fm, findings)
     _check_type(fm, findings)
     _check_quoting(fm, findings)
+    _check_read(fm, findings)
     _check_dates(fm, findings)
+    _check_sources(fm, findings)
     _check_source_duplicates(fm, findings)
     _check_slug(fm, findings, filename)
     _check_description(fm, findings, title=result["title"])
@@ -1610,6 +1668,38 @@ def run_self_test():
           items(good), [])
     check("the clean STUB produces no finding either",
           items(stub, "precision.md"), [])
+
+    for alias, surface in (("attribute", "attributes"), ("hypothesis", "hypotheses")):
+        alias_text = mutate('"auroc"', json.dumps(alias)).replace(
+            "\n**Related:**", "\nIt is also called *%s*.\n\n**Related:**" % surface)
+        check("a plural of an existing alias is not a missing alias: %s" % surface,
+              items(alias_text), [])
+    check("a genuinely different introduced name is still flagged",
+          items(good.replace("\n**Related:**", "\nIt is also called *sensitivity*.\n\n**Related:**")),
+          ["17-alias-completeness"])
+
+    # Invalid provenance and review state used to pass the creation gate.
+    for source in ("[[Doe_X_2025.pdf]]", "[[Doe_X_2025.pdf#page=0]]",
+                   "[[Doe_X_2025.pdf#page=1garbage]]",
+                   "https://example.test/Doe_X_2025.pdf#page=1",
+                   "Doe_X_2025.pdf#page=1", "[[Note.md#Heading]]"):
+        check("reject malformed source %s" % source,
+              items(mutate("[[Doe_X_2025.pdf#page=2]]", source)), ["4-sources"])
+    check("a valid markdown source has no page anchor",
+          items(mutate("[[Doe_X_2025.pdf#page=2]]", "[[Note.md]]")), [])
+    check("a source scalar is not a sources list",
+          items(mutate('sources:\n  - "[[Doe_X_2025.pdf#page=2]]"',
+                       'sources: "[[Doe_X_2025.pdf#page=2]]"')), ["4-sources"])
+    for raw in ("null", "~", "", "banana", "[]", "[true, false]", '"banana"'):
+        result = lint_text(mutate("read: false", "read: " + raw), "roc-curve.md")
+        check("unknown read state is report-only: %r" % raw,
+              [(f["item"], f["evidence"].get("report_only")) for f in result["findings"]],
+              [("2-read-state", True)])
+    for raw in ("yes", "no", "0", "1"):
+        result = lint_text(mutate("read: false", "read: " + raw), "roc-curve.md")
+        check("known read answer may be re-spelled: %s" % raw,
+              [(f["item"], f["evidence"].get("report_only")) for f in result["findings"]],
+              [("2-read-state", False)])
 
     # -- item 1: valid YAML ------------------------------------------------
     check("no frontmatter at all", items("just prose\n"), ["1-valid-yaml"])

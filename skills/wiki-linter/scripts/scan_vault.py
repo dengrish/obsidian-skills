@@ -653,9 +653,27 @@ def build_backfill(entries, surf_map):
     backfill = []
     if not by_tokens:
         return backfill
+    files = {fold_name(sl): sl for sl in entries}
+    alias_owners = {}
+    for sl, e in entries.items():
+        for alias in e.get("aliases", []):
+            alias_owners.setdefault(fold_name(alias), set()).add(sl)
     for sl, e in entries.items():
         if e["is_stub"]: continue  # Task 2 backfill operates on full entries only
-        masked = ANYLINK.sub(lambda m: " "*len(m.group(0)), e["prose"])  # blank out existing links/embeds
+        prose = strip_code(e["prose"])
+        linked = set()
+        for link in WIKILINK.finditer(prose):
+            target = link.group(1).split("#", 1)[0].split("^", 1)[0].strip()
+            target = target.replace("\\", "/").rsplit("/", 1)[-1]
+            if target.lower().endswith(".md"):
+                target = target[:-3]
+            key = fold_name(target)
+            owner = files.get(key)
+            if owner is None and len(alias_owners.get(key, ())) == 1:
+                owner = next(iter(alias_owners[key]))
+            if owner is not None:
+                linked.add(owner)
+        masked = ANYLINK.sub(lambda m: " "*len(m.group(0)), prose)
         # Blank every line a link may not be written on, for the same reason in
         # each case: the backfill worklist proposes linking the FIRST occurrence,
         # so a first occurrence sitting somewhere unlinkable is an un-actionable
@@ -664,7 +682,6 @@ def build_backfill(entries, surf_map):
         #   * markdown TABLE ROWS — item 10 forbids wikilinks in table cells;
         #   * fenced code blocks — a listing is shown, not asserted, and a link
         #     written inside one renders as literal `[[...]]` text.
-        masked = strip_fenced(masked)
         masked = "\n".join(
             ("" if (re.match(r"^\s*\*(?!\*).*\*\s*$", ln) or re.match(r"^\s*\|", ln))
              else ln)
@@ -673,7 +690,7 @@ def build_backfill(entries, surf_map):
         for surface, matched in _scan_surfaces(masked, by_tokens, maxwords):
             tgt = surf_map.get(surface)
             if not tgt or tgt == sl or tgt in proposed: continue
-            if ("[[%s|" % tgt) in e["prose"] or ("[[%s]]" % tgt) in e["prose"]: continue  # already linked here
+            if tgt in linked: continue
             proposed.add(tgt)
             backfill.append((sl, tgt, matched, surface))
     return backfill
@@ -818,7 +835,8 @@ def scan(wiki, images=None):
         prose, rel, fcsec, flash_off, flash_head = regions(body)
         entries[sl] = dict(slug=sl, title=title, aliases=aliases, type=_scalar("type"),
                            tags_raw=tags_raw, tag_slugs=tag_slugs, is_stub=is_stub,
-                           sources=sources, body=body, prose=prose, rel=rel, fcsec=fcsec, desc=desc,
+                           sources=sources, sources_is_list=isinstance(fm.get("sources"), list),
+                           body=body, prose=prose, rel=rel, fcsec=fcsec, desc=desc,
                            created=created, updated=updated, blank_after=blank_after,
                            parents=fm.get("parents", []) if isinstance(fm.get("parents"), list) else [],
                            key_order=key_order, fm_raw=fm_raw,
@@ -943,7 +961,7 @@ def scan(wiki, images=None):
                              "missing read: key — the user's review checkbox. Report it; "
                              "never write a value, since `false` would mark an entry they "
                              "have already read as unread"))
-        elif _read_raw.strip().lower() in READ_NULLS:
+        elif _read_raw.strip().lower() in READ_NULLS and not has_block_items(fm_raw, "read"):
             problems.append((sl,"item2/read-null",
                              'read: is present but carries no value (%s) — YAML null, not a '
                              'boolean, so Obsidian shows the checkbox unticked while the entry '
@@ -953,6 +971,11 @@ def scan(wiki, images=None):
                              'report-only class, as a missing read: key'
                              % ("bare `read:`" if not _read_raw.strip()
                                 else "`read: %s`" % _read_raw.strip())))
+        elif unquote(_read_raw).lower() not in {"true", "false", "yes", "no", "0", "1"}:
+            problems.append((sl,"item2/read-unknown",
+                             'read: has no recognizable boolean answer (%r) -- REPORT ONLY, '
+                             'DO NOT FIX. Neither true nor false can be inferred safely; '
+                             'ask the user to supply their review state' % _read_raw))
         elif _read_raw.lower() not in READ_BOOLEANS:
             problems.append((sl,"item2/read-type",
                              'read: must be a bare boolean (`true` / `false`), not %r — a '
@@ -1049,25 +1072,22 @@ def scan(wiki, images=None):
         if _created_d is not None and _updated_d is not None and _created_d > _updated_d:
             problems.append((sl,"item3/user-action",f'created {e["created"]} > updated {e["updated"]} — impossible ordering (updated is the last merge date, so it cannot precede creation); DO NOT FIX, report for the user to correct by hand'))
         # ---- item 4: sources format ----
+        if not e["sources"]:
+            problems.append((sl,"item4","sources: is empty; every full entry needs a local source"))
+        elif not e["sources_is_list"]:
+            problems.append((sl,"item4","sources: must be a list, not a scalar"))
         for i,src in enumerate(e["sources"]):
             if src == "stub":
                 if e["sources"] != ["stub"]:
                     problems.append((sl,"item4",'"stub" marker must be the sole source item'))
                 continue
-            inner = src.strip("[]")
-            low = inner.lower()
-            if "." not in inner:
-                problems.append((sl,"item4",f'source has no file extension: {src}'))
-            elif ".pdf" in low:
-                if not re.search(r"\.pdf#page=\d+", low):
-                    problems.append((sl,"item4",f'PDF source needs #page=N anchor: {src}'))
-            elif ".md" in low:
-                if "#" in inner:
-                    problems.append((sl,"item4",f'markdown source must not have an anchor: {src}'))
-                elif not low.endswith(".md"):
-                    problems.append((sl,"item4",f'unexpected source form: {src}'))
-            else:
-                problems.append((sl,"item4",f'unexpected source type (expect .pdf/.md): {src}'))
+            if re.fullmatch(r"\[\[[^\[\]\r\n|#]+\.(?i:pdf)#page=[1-9][0-9]*\]\]", src):
+                continue
+            if re.fullmatch(r"\[\[[^\[\]\r\n|#]+\.(?i:md)\]\]", src):
+                continue
+            problems.append((sl,"item4",f'source must be [[Name.pdf#page=N]] with a positive '
+                             f'physical page number, or [[Name.md]] without an anchor; '
+                             f'URLs, display labels and incomplete wikilinks are invalid: {src}'))
         # No two sources: items may name the same DOCUMENT. paper-summarizer writes a note into
         # Articles/ for every PDF it summarises, so one document sits in the vault under two
         # names — Sources/PDFs/X.pdf and Articles/X.md — and both are legal sources:
@@ -1768,10 +1788,17 @@ def scan(wiki, images=None):
         out = []
         for p in e.get("parents", []):
             m = re.match(r"\s*\[\[([^\]|#]+)", str(p))
-            if m and m.group(1).strip(): out.append(m.group(1).strip())
+            if not m:
+                continue
+            target = m.group(1).split("^", 1)[0].strip()
+            target = target.replace("\\", "/").rsplit("/", 1)[-1]
+            if target.lower().endswith(".md"):
+                target = target[:-3]
+            if target:
+                out.append(target)
         return out
     def _self_parent(e):
-        return e["slug"] in _parent_targets(e)
+        return fold_name(e["slug"]) in {fold_name(t) for t in _parent_targets(e)}
     selfp = sorted(sl for sl,e in entries.items() if not e["is_stub"] and _self_parent(e))
     # ---- parent CYCLES of length >= 2 (Task 3) ----
     # A self-parent is the 1-cycle and is reported above.  The 2-cycle — A
@@ -2715,6 +2742,70 @@ def run_self_test():
               (("feature-machine-learning", True) in _bf,
                ("gradient-descent", False) in _bf),
               (True, True))
+
+        v = os.path.join(tmp, "v13-validation")
+        for i, source in enumerate(("[[Doe_X_2025.pdf]]", "[[Doe_X_2025.pdf#page=0]]",
+                                  "[[Doe_X_2025.pdf#page=1garbage]]",
+                                  "https://example.test/Doe_X_2025.pdf#page=1",
+                                  "Doe_X_2025.pdf#page=1", "[[Note.md#Heading]]")):
+            name = "Source %s" % i
+            _st_write(v, slug(name) + ".md", _st_entry(
+                name, "**%s** is a worked example." % name,
+                sources=(json.dumps(source),)))
+        for i, raw in enumerate(("banana", "[]", "[true, false]", '"banana"')):
+            name = "Unknown %s" % i
+            _st_write(v, slug(name) + ".md", _st_entry(
+                name, "**%s** is a worked example." % name).replace("read: false", "read: " + raw))
+        for i, raw in enumerate(("yes", "no", "0", "1")):
+            name = "Known %s" % i
+            _st_write(v, slug(name) + ".md", _st_entry(
+                name, "**%s** is a worked example." % name).replace("read: false", "read: " + raw))
+        _st_write(v, "no-source.md", _st_entry("No source", "**No source** is a worked example.", sources=()))
+        _st_write(v, "self-case.md", _st_entry("Self case", "**Self case** is a worked example.",
+                  parents=('"[[SELF-CASE]]"',)))
+        for kind, target in (("md", "self-md.md"), ("path", "Wiki/self-path"),
+                             ("block", "self-block^definition"), ("heading", "self-heading#Definition")):
+            name = "Self " + kind
+            _st_write(v, slug(name) + ".md", _st_entry(name, "**%s** is a worked example." % name,
+                      parents=(json.dumps("[[%s]]" % target),)))
+        _st_write(v, "cycle-left.md", _st_entry("Cycle left", "**Cycle left** is a worked example.",
+                  parents=('"[[Wiki/CYCLE-RIGHT.md#Definition]]"',)))
+        _st_write(v, "cycle-right.md", _st_entry("Cycle right", "**Cycle right** is a worked example.",
+                  parents=('"[[cycle-left.md]]"',)))
+        res = scan(v)
+        check("every malformed source is an item4 finding",
+              ["item4" in _st_keys(res, "source-%d" % i) for i in range(6)], [True] * 6)
+        check("empty provenance is not a clean full entry", "item4" in _st_keys(res, "no-source"), True)
+        check("unknown review states route report-only, never read-type",
+              [sorted(k for k in _st_keys(res, "unknown-%d" % i) if k.startswith("item2/read"))
+               for i in range(4)], [["item2/read-unknown"]] * 4)
+        check("known review answers retain the spelling-only fix",
+              ["item2/read-type" in _st_keys(res, "known-%d" % i) for i in range(4)], [True] * 4)
+        check("resolving self-parent spellings are still self-parents",
+              res["hierarchy_diagnostic"]["self_parented"],
+              ["self-block", "self-case", "self-heading", "self-md", "self-path"])
+        check("a cycle survives parent path, extension, case and anchor variants",
+              res["hierarchy_diagnostic"]["parent_cycles"], [["cycle-left", "cycle-right"]])
+
+        v = os.path.join(tmp, "v14-backfill")
+        _st_write(v, "recall.md", _st_entry("Recall", "**Recall** measures sensitivity.",
+                  aliases=('"true-positive-rate"',)))
+        texts = {
+            "inline": "**Inline** documents `Recall` as an identifier.",
+            "indented": "**Indented** documents a listing.\n\n    Recall",
+            "sample": "**Sample** displays `[[recall]]` literally.\n\nRecall measures sensitivity.",
+            "anchor": "**Anchor** links [[recall#Definition|Recall]]. Recall measures sensitivity.",
+            "qualified": "**Qualified** links [[sub/recall.md|Recall]]. Recall measures sensitivity.",
+            "case": "**Case** links [[RECALL|Recall]]. Recall measures sensitivity.",
+            "alias": "**Alias** links [[true-positive-rate|Sensitivity]]. Recall measures sensitivity.",
+            "plain": "**Plain** explains why Recall measures sensitivity.",
+        }
+        for name, prose in texts.items():
+            _st_write(v, name + ".md", _st_entry(name.title(), prose, type_="Software"))
+        res = scan(v)
+        check("backfill ignores listings and already-linked destinations, but a shown link cannot hide real prose",
+              sorted(b["slug"] for b in res["backfill_candidates"] if b["target"] == "recall"),
+              ["plain", "sample"])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

@@ -66,6 +66,34 @@ import argparse
 import os
 import sys
 
+# --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
+import os as _os, sys as _sys
+_here = _os.path.dirname(_os.path.abspath(__file__))
+_env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
+if _env:                                   # explicit override: authoritative, no fallback
+    _tried = [_os.path.abspath(_os.path.expanduser(_env))]
+else:                                      # plugin-relative walk-up, at most 5 levels
+    _tried, _d = [], _here
+    for _ in range(5):
+        _tried.append(_os.path.join(_d, "shared", "scripts"))
+        _d = _os.path.dirname(_d)
+_shared = next((_p for _p in _tried if _os.path.isdir(_p)), None)
+if _shared is None:
+    raise SystemExit("""obsidian: cannot find the plugin's shared/scripts/ folder, which holds
+the one canonical copy of the conventions this script depends on.
+Looked for:
+  %s
+Fix: install the whole plugin tree, or set OBSIDIAN_VAULT_SHARED to the
+shared/scripts/ directory (unset it to use the plugin-relative walk-up).
+Do NOT paste a second copy of the algorithm into this skill -- a divergent
+copy is the bug the shared layer exists to prevent.""" % "\n  ".join(_tried))
+_sys.path[:] = [_p for _p in _sys.path if _p not in (_shared, _here)]
+_sys.path.insert(0, _shared)               # shared/scripts/ FIRST
+_sys.path.append(_here)                    # own dir LAST: a local copy cannot shadow it
+# --- end bootstrap ---
+
+from figure_state import MANIFEST_FILE, file_digest, read_manifest, write_manifest, manifest_key
+
 try:
     # `import pymupdf` is the modern spelling. The legacy `import fitz`
     # alias prints a deprecation notice **on stdout** in PyMuPDF >= 1.25,
@@ -719,6 +747,42 @@ def run_self_test():
         ok("...and nothing was written for it",
            not os.path.exists(os.path.join(outdir,
                                            "Doe_NotAPdf_2025_fig_1.png")))
+
+        # Follow the documented recovery path: batch -> manual crop -> batch.
+        # The second batch must keep the repair rather than declaring its
+        # changed digest foreign and recommending automatic re-extraction.
+        from pathlib import Path
+        from batch_extract import process_pdf, save_manifest, load_manifest
+        owned = os.path.join(tmp, "Owned")
+        os.makedirs(owned)
+        tracked = {}
+        process_pdf(Path(pdf), owned, dpi=72, manifest=tracked)
+        tracked["DOE_FIGS_2025_FIG_1.PNG"] = tracked.pop("Doe_Figs_2025_fig_1.png")
+        tracked["Unrelated_fig_8.png"] = "a" * 64
+        tracked_path = os.path.join(owned, MANIFEST_FILE)
+        save_manifest(tracked_path, tracked)
+        owned_png = os.path.join(owned, "Doe_Figs_2025_fig_1.png")
+        before = open(owned_png, "rb").read()
+        code, so, se = run([pdf, "--out", owned, "--stem", "Doe_Figs_2025",
+                           "--crop", "1:1:120,170,400,300", "--dpi", "72", "--overwrite"])
+        check("manual repair of tracked output succeeds", code, 0)
+        repaired = open(owned_png, "rb").read()
+        ok("manual repair changes the actual crop bytes", repaired != before)
+        recorded = load_manifest(tracked_path)
+        check("manual repair preserves unrelated ownership",
+              recorded["Unrelated_fig_8.png"], "a" * 64)
+        check("manual repair preserves an equivalent record's original casing",
+              sorted(recorded), ["DOE_FIGS_2025_FIG_1.PNG", "Unrelated_fig_8.png"])
+        rerun = process_pdf(Path(pdf), owned, dpi=72, manifest=recorded)
+        check("the next batch accepts and preserves the manual repair",
+              (rerun["skipped"], rerun["occupied"], open(owned_png, "rb").read()),
+              (1, [], repaired))
+        with open(tracked_path, "w") as fh:
+            fh.write("malformed ownership\n")
+        code, so, se = run([pdf, "--out", owned, "--stem", "Doe_Figs_2025",
+                           "--crop", "1:1:100,150,500,350", "--overwrite"])
+        ok("corrupt ownership is refused before altering a manual crop", code != 0)
+        check("a refused crop leaves image bytes intact", open(owned_png, "rb").read(), repaired)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -845,6 +909,39 @@ def main(argv=None):
     if len(doc) == 0:
         sys.exit(f"{pdf_path}: PDF has zero pages — nothing to extract")
 
+    # A manual repair is this extractor's own output too. Without updating
+    # its digest, the next batch called a repaired crop another skill's file
+    # and recommended overwriting it with the original, wrong automatic crop.
+    # Preserve legacy no-manifest folders as such; the batch migration handles
+    # them explicitly, rather than claiming unrelated historic images here.
+    manifest_path = os.path.join(out_dir, MANIFEST_FILE)
+    manifest = None
+    if os.path.lexists(manifest_path):
+        try:
+            manifest = read_manifest(manifest_path)
+        except (OSError, UnicodeError, ValueError) as exc:
+            sys.exit(f"Refusing manual crops: cannot safely read {manifest_path}: {exc}")
+        if os.path.islink(manifest_path) or not os.access(manifest_path, os.W_OK):
+            sys.exit(f"Refusing manual crops: {manifest_path} is not a writable regular sidecar")
+        # Preflight every target before writing the first crop. Unknown or
+        # changed occupants must not become claimed merely through --overwrite.
+        for spec in args.crop:
+            _page_idx, suffix, _rect = parse_crop(spec)
+            target = os.path.join(out_dir, f"{args.stem}_fig_{suffix}.png")
+            if not os.path.lexists(target):
+                continue
+            if os.path.islink(target):
+                sys.exit(f"Refusing manual crop of {target}: it is a symlink, not a recorded output file")
+            try:
+                digest = file_digest(target)
+            except OSError as exc:
+                sys.exit(f"Refusing manual crop of {target}: {exc}")
+            key = manifest_key(manifest, os.path.basename(target))
+            if manifest.get(key) != digest:
+                sys.exit(f"Refusing manual crop of {target}: ownership is unknown or its bytes changed. "
+                         "Inspect the occupant and reconcile its ownership record first; "
+                         "--overwrite does not claim another file.")
+
     # Caption rects, for the "is the caption inside this crop?" warning.
     # Imported lazily and defensively: the check is a convenience, and a
     # sibling-module import problem must not stop a manual crop from being
@@ -916,6 +1013,16 @@ def main(argv=None):
                 file=sys.stderr,
             )
             continue
+        if manifest is not None:
+            try:
+                name = os.path.basename(out_path)
+                manifest[manifest_key(manifest, name) or name] = file_digest(out_path)
+                write_manifest(manifest_path, manifest,
+                               "# pdf-figure-extractor output manifest.\n"
+                               "# One per line: <figure filename><TAB><sha256 of the bytes written>\n")
+            except (OSError, UnicodeError, ValueError) as exc:
+                sys.exit(f"Crop written to {out_path}, but its ownership record could not be updated: {exc}. "
+                         "Do not run automatic overwrite; preserve this manual crop while repairing the sidecar.")
         msg = f"Wrote {out_path}: {rw}x{rh}"
         if args.trim:
             if (fw, fh) != (rw, rh):

@@ -14,6 +14,8 @@ Step 0's **backfill candidates** are the worklist: it has already scanned every 
 
 #### The closeness bar
 
+When a selected surface is italicized or bolded, remove those surrounding emphasis markers as part of linking it: `*mean squared error*` becomes `[[mean-squared-error|mean squared error]]`, never `*[[mean-squared-error|mean squared error]]*`. Leave code spans and listings untouched, and count an existing link with a heading, block anchor, path, or `.md` suffix as already linking its target. After the edits, re-scan to catch any formatting or duplicate-link defect introduced by the backfill itself.
+
 **The bar is strict and conceptual.** "Should A link to B?" is judged on how closely related the two entities are, not on whether some source discussed both, and not on whether the mention unambiguously *refers* to the entity. Stated in full, a mention earns a link when **all** of these hold:
 
 1. **The reader would genuinely benefit from jumping there** — the entity is a *node worth visiting from this passage*, not merely a name that happens to have a file.

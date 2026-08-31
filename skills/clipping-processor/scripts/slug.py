@@ -305,7 +305,8 @@ def first_author(names):
     if not names:
         return "", ["no author given"]
     if len(names) > 1:
-        return names[0], ["author list: took the first entry"]
+        notes.append("author list: took the first entry")
+        names = names[:1]
 
     s = names[0]
     is_list = bool(MULTI_SEP.search(s)) or s.count(",") > 1
@@ -314,7 +315,7 @@ def first_author(names):
         # first separator and ignore the rest
         head = MULTI_SEP.split(s)[0]
         head = head.split(",")[0]
-        return head.strip(), ["multi-author string: took the portion before the first separator"]
+        return head.strip(), notes + ["multi-author string: took the portion before the first separator"]
 
     if s.count(",") == 1:
         before, after = [p.strip() for p in s.split(",")]
@@ -699,6 +700,14 @@ def run_self_test():
     # authors normally arrive as a YAML list: the first entry is the first author
     check("author list: the first entry wins",
           surname(first_author(["Ruxandra Teslo", "John Smith"])[0]), "Teslo")
+    check("a structured author list still resolves a surname-first first name",
+          slug_of(author=["Smith, John", "Jones, Mary"],
+                  topic="Cell Signals", year=2026),
+          "Smith_Cell_Signals_2026")
+    check("a structured author list still drops the first author's comma suffix",
+          slug_of(author=["Martin Luther King, Jr.", "Jane Doe"],
+                  topic="Civil Rights", year=2026),
+          "King_Civil_Rights_2026")
     # the two suffix guards are separate, and each covers what the other does
     # not: the comma one keeps `King, Jr.` from flipping to `Jr. Martin Luther
     # King`, and `surname`'s keeps `Martin Luther King Jr.` — no comma at all —

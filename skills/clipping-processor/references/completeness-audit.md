@@ -77,6 +77,7 @@ For each skipped decorative, log it briefly in the report (`Decorative skipped: 
 - **Idempotency on reprocess (check first).** On a reprocess the body may already contain the GIF this step produced last run — an `![[slug_fig_N.gif]]` embed whose caption carries the "animation converted to GIF" marker, anchored where this Lottie sits. If so, **don't re-convert** — that would duplicate the figure. Treat the existing GIF embed as already covering this Lottie (rename it like any other embed if the slug changed, per step 6's reprocess branch) and move on. Convert only when no such embed exists yet.
 - **Toolchain — render with headless Chromium driving lottie-web** (the canonical Lottie reference renderer). This isn't a preference; it's the only engine that renders Lottie *text layers*. These animations bake their axis labels, numbers, and annotations in as text (Quanta's carry an embedded glyph table plus a "Pangram" font), and every browser-free renderer drops them: `rlottie-python` runs but silently omits all text, and `python-lottie`/`cairosvg` renders the labels blank because its cairo path doesn't use the embedded glyphs. (Note: `python-lottie` ≥ 0.7.2 no longer *crashes* on text layers — an older version raised `'TextDocument' has no attribute 'color'` — but blank labels are just as useless, so the conclusion is unchanged.) A topology number line with no numbers is worse than no figure, so lottie-web it is. The full recipe is **embedded inline below** (written to a temp file at runtime) rather than shipped as a sidecar file, to keep the optional rendering recipe alongside its usage. Whole-plugin installs carry the scripts and references on both hosts.
   - **Get a working browser — detect first, install only what is missing.** Follow `shared/RUNTIME.md` and the host's browser/tool rules. Check whether the chosen Python already imports Playwright and Pillow, then try a short Chromium launch and close. If it works, reuse it.
+    A permitted existing Chrome/Chromium installation can be selected for this run with `OBSIDIAN_CHROMIUM_EXECUTABLE` set to its absolute executable path. The renderer uses a fresh temporary browser profile, never the user's signed-in profile.
     1. If the bindings are missing and installation is permitted, install them in the selected virtual environment:
        ```bash
        '<venv>/bin/python' -m pip install playwright Pillow
@@ -97,18 +98,50 @@ For each skipped decorative, log it briefly in the report (`Decorative skipped: 
          --slug '<image_slug>' --index <N> --from-file '<scratch>/lottie_render.gif'
      ```
      The rendered file is **moved**, not copied. Use the shared figure counter for `<N>` (the next free `_fig_N` in the note). If `place` reports `ok: false`, the slot belongs to something else — settle that the way step 3 settles a stem collision; do not pass `--overwrite` to get past it unless this is a reprocess of your own figure.
-- **The renderer is embedded here on purpose, not shipped as a sidecar file.** Earlier versions kept the Python in `scripts/lottie_to_gif.py` next to this SKILL.md; that failed in practice because the install of this skill does **not** reliably carry the `scripts/` folder along with `SKILL.md`, and a bare relative path like `scripts/lottie_to_gif.py` wouldn't resolve from the working directory anyway — so the skill reported the script "absent" and every Lottie fell through to a placeholder. To make this self-sufficient, **write the converter to a temp file at runtime from the source below, then run it.** No installed sidecar, no path assumptions. It needs `lottie-web` (bodymovin); rather than vendoring 300 KB of JS inline, the script fetches it from cdnjs at convert time — that is the browser's own fetch of a fixed CDN URL this file chose, not a fetch of anything the clipped page supplied. Write it once per run with the command block below. **The `cat` command and its heredoc are intentionally flush-left (column 0), not indented into this list** — a `<<'PYEOF'` terminator must start at column 0 or the shell never matches it and silently swallows the rest of the file, and the Python body must be unindented to parse. Run it exactly as written. (Authoring note for anyone editing this skill: **every code block here that is meant to be extracted and run — this heredoc, the sibling-indent detector and the structural-skeleton extractor in step 13 — must be fenced at column 0, never nested inside a list item.** A block indented for visual nesting comes out with leading whitespace on every line and dies on `IndentationError`/an unmatched heredoc terminator the moment it's run. This bit three separate scripts during development; keep runnable blocks flush-left.)
+- **The renderer is embedded here on purpose, not shipped as a sidecar file.** `scripts/lottie_to_gif.py` is not shipped: write this optional recipe to a unique scratch directory and run its absolute path. Whole-plugin installs do carry the actual scripts and references. It uses a fixed lottie-web CDN URL, or an already-available `lottie.min.js` beside the scratch script. Animation-supplied network requests and JavaScript expressions are refused; an animation with external image/font assets takes the poster/link fallback rather than bypassing `fetch_images.py`'s transport guards. The renderer's only permitted network request is its fixed library URL. **Keep the `cat` command, Python body, and `PYEOF` terminator flush-left**, exactly as below; indenting an executable heredoc or Python block for a Markdown list makes it fail when copied.
 
 ```bash
 cat > '<scratch>/lottie_to_gif.py' <<'PYEOF'
-import json, io, sys, os, shutil, zipfile, tempfile
+import json, io, sys, os, shutil, zipfile, tempfile, math
+LOTTIE_CDN = "https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.12.2/lottie.min.js"
+MAX_JSON_BYTES = 25 * 1024 * 1024
 def load_anim(src):
     if zipfile.is_zipfile(src):
         with zipfile.ZipFile(src) as z:
             inner = next(n for n in z.namelist()
                          if n.endswith(".json") and n != "manifest.json")
+            if z.getinfo(inner).file_size > MAX_JSON_BYTES:
+                raise ValueError("expanded animation JSON exceeds the size cap")
             return json.loads(z.read(inner).decode("utf-8"))
+    if os.path.getsize(src) > MAX_JSON_BYTES:
+        raise ValueError("animation JSON exceeds the size cap")
     return json.load(open(src, encoding="utf-8"))
+def validate_anim(anim):
+    if not isinstance(anim, dict):
+        raise ValueError("animation must be a JSON object")
+    for field in ("w", "h", "fr"):
+        value = anim.get(field)
+        if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+            raise ValueError("animation %s must be positive and finite" % field)
+    if int(anim.get("op", 0)) <= int(anim.get("ip", 0)):
+        raise ValueError("animation has no frames")
+    for asset in anim.get("assets", []):
+        if asset.get("p") and (not asset["p"].startswith("data:image/") or asset.get("u")):
+            raise ValueError("external image assets require the poster/link fallback")
+    for font in anim.get("fonts", {}).get("list", []):
+        if font.get("fPath") and not font["fPath"].startswith("data:"):
+            raise ValueError("external fonts require the poster/link fallback")
+    stack = [anim]
+    while stack:
+        value = stack.pop()
+        if isinstance(value, dict):
+            if isinstance(value.get("x"), str):
+                raise ValueError("animation expressions are not executed")
+            stack.extend(value.values())
+        elif isinstance(value, list):
+            stack.extend(value)
+def render_request_allowed(url):
+    return url == LOTTIE_CDN
 def json_for_script(obj):
     # Embedding JSON inside a <script> is not the same as writing JSON. Every
     # string field of this animation is text an author on the open web chose,
@@ -122,18 +155,19 @@ def lottie_js():
     local = os.path.join(os.path.dirname(__file__), "lottie.min.js")
     if os.path.exists(local):
         return "<script>" + open(local).read() + "</script>"
-    return ('<script src="https://cdnjs.cloudflare.com/ajax/libs/'
-            'bodymovin/5.12.2/lottie.min.js"></script>')
+    return '<script src="' + LOTTIE_CDN + '"></script>'
 def main(src, out):
     from playwright.sync_api import sync_playwright
     from PIL import Image, ImageStat
     anim = load_anim(src)
+    validate_anim(anim)
     w, h = anim["w"], anim["h"]; fps = anim["fr"]
     ip, op = int(anim.get("ip", 0)), int(anim["op"]); n_total = op - ip
     scale = min(1.0, 960 / max(w, h))
     W, H = max(1, int(w * scale)), max(1, int(h * scale))
     step = max(1, -(-n_total // 150))
     html = f"""<!doctype html><html><head><meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'">
     <style>html,body{{margin:0;padding:0;background:#fff}}#c{{width:{W}px;height:{H}px}}</style>
     {lottie_js()}</head><body><div id="c"></div><script>
     window.anim = lottie.loadAnimation({{container:document.getElementById("c"),
@@ -143,12 +177,18 @@ def main(src, out):
     </script></body></html>"""
     frames = []
     with sync_playwright() as p:
-        b = p.chromium.launch()
-        pg = b.new_context(viewport={"width": W, "height": H}).new_page()
+        executable = os.environ.get("OBSIDIAN_CHROMIUM_EXECUTABLE")
+        b = p.chromium.launch(**({"executable_path": executable} if executable else {}))
+        context = b.new_context(viewport={"width": W, "height": H}, service_workers="block")
+        context.route("**/*", lambda route: route.continue_()
+                      if render_request_allowed(route.request.url) else route.abort())
+        pg = context.new_page()
         pg.set_content(html); pg.wait_for_function("window.ready === true", timeout=30000)
         c = pg.locator("#c")
         for i in range(0, n_total, step):
-            pg.evaluate(f"window.anim.goToAndStop({i + ip}, true)")
+            # goToAndStop takes a frame relative to the composition's in-point.
+            # lottie-web adds ip itself; adding it here makes nonzero-ip clips blank.
+            pg.evaluate(f"window.anim.goToAndStop({i}, true)")
             frames.append(Image.open(io.BytesIO(c.screenshot(omit_background=False))).convert("RGBA"))
         b.close()
     pal = []
@@ -186,7 +226,7 @@ PYEOF
   ```
 
   **Single quotes on the source.** It is a path derived from a URL lifted out of the page being clipped, so it is text an author on the open web chose; inside `"…"` a `$(…)` in it is a command the shell runs before Python starts (`CONVENTIONS.md` §1b).
-  It content-detects raw `.json` vs. dotLottie zip, renders on white via lottie-web, caps the longest side at 960px and frames at ~150 (output ~120–230 KB), writes to a scratch file in the system temp directory, and only moves the GIF to the destination after verifying it's a valid, non-blank GIF (middle-frame grayscale stddev ≥ 2 — the check that catches a text-dropping engine) of sane size. On any failure or blank render it exits non-zero and writes nothing. **It does not fetch, and it does not write into `Sources/Images/`** — stage 1 and stage 3 above own those, and they are the only two steps in this sub-part that are allowed to touch the network or the vault. If the script exits non-zero, treat the Lottie as unconverted and fall through to the fallback chain.
+  It content-detects raw `.json` vs. dotLottie zip, bounds expanded JSON, renders self-contained animations on white, caps the longest side at 960px and frames at ~150, and only publishes the GIF after its middle frame passes the blank-image check and the file is under 8 MB. It never writes into `Sources/Images/` or fetches animation-supplied URLs; the fixed renderer-library download is its sole network exception. On failure, treat the Lottie as unconverted and use the fallback chain. The blank-image check cannot prove that every label rendered correctly, so visually inspect the output.
 - **Embed and caption** a converted GIF like a recovered image (sub-part 3's placement rules), noting in the caption that it's a converted animation, e.g. `*Figure N. <description> (animation converted to GIF; view the live version at the source).*` Record the conversion in the report.
 - **Fallback chain when conversion can't run** (no reachable source, Chromium unavailable, or the script failed) — degrade in order rather than jumping straight to a bare placeholder:
   1. **Static fallback poster, if the figure has one.** Sub-part 1 may have associated a `fallback_img` with this Lottie (a sibling `<img>` / `.svg` / `.webp` the page ships for no-JS). Recover *that* through sub-part 3's image pipeline and caption it honestly as a still: `*Figure N. <description> (static frame; the source shows this as an animation).*`. The publisher's own static diagram beats a comment. The one firm rule: the caption must say it's a still — never present the poster as if it were the animation. (Many pages — including the Quanta condensed-mathematics piece — ship *no* poster for their Lotties; then there's nothing to recover here and you go straight to step 2.)

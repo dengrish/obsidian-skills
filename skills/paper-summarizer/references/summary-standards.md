@@ -91,11 +91,15 @@ A reader outside the field cannot tell whether a hazard ratio of 0.62, a fold ch
 
 | Fails | Holds |
 |---|---|
-| a hazard ratio of 0.62 | roughly a third fewer events (hazard ratio 0.62) |
-| Pearson r = 0.51 | about a quarter of the variation accounted for (r = 0.51) |
-| a 3.1× improvement | three times as many, from 4 to 12 |
+| a hazard ratio of 0.62 | a 38% lower estimated event hazard, the instantaneous event rate among people still at risk (hazard ratio 0.62) |
+| Pearson r = 0.51 | a positive linear association between the two measured variables (r = 0.51); this does not establish causation |
+| a 3.1× improvement | 3.1 times as many, from 10 to 31, when those are the counts the paper reports |
 
 This is not a substitute for the absolute numbers of rule 2 — it sits beside them. And it is done **once per quantity**: a note that re-explains the same statistic at every mention is as tiring as one that never explains it.
+
+**Keep the measures distinct.** A hazard ratio is not a cumulative risk ratio or a ratio of event counts, and an odds ratio is not a risk ratio. Absolute risk also needs a population and a time horizon. Use the paper's reported absolute figures; if they are absent, name the gap rather than converting the ratio by intuition. See [Cochrane Handbook, effect measures](https://www.cochrane.org/authors/handbooks-and-manuals/handbook/current/chapter-06) and [time-to-event outcomes](https://www.cochrane.org/authors/handbooks-and-manuals/handbook/current/chapter-14#section-14-1-5-2).
+
+Squaring a correlation is not a general-purpose estimate of explained variation. That interpretation requires the corresponding regression setup, such as simple least-squares regression with an intercept, and does not imply a causal explanation. Preserve the statistic and explain the association when the paper does not establish that setup.
 
 ## The hedge ladder, and what sets its ceiling
 

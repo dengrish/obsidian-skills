@@ -5463,7 +5463,7 @@ SELFTEST_TIMEOUT = 240
 #: The self-test function itself: `run_self_test`, `_selftest`, `run_selftest`.
 SELFTEST_FUNC = re.compile(r"^def\s+(_?(?:run_)?self_?tests?\w*)\s*\(", re.M)
 
-#: The two entry points in use: a `--test` flag (seventeen scripts) and a
+#: The two entry points in use: a `--test` flag (eighteen scripts) and a
 #: `selftest` subcommand (`organize.py`, `fetch_images.py`, whose CLIs are
 #: subcommand-shaped already).  Both are accepted; having none is the failure.
 SELFTEST_FLAG = re.compile(r"""add_argument\(\s*["']--test["']""")
@@ -5483,30 +5483,31 @@ SELFTEST_TALLY = re.compile(
 #: fails.  Lowering a number here is a deliberate, reviewable statement that
 #: cases went away; a script with no line is checked for a clean tally only.
 SELFTEST_MIN_CASES = {
-    # Re-tuned to the exact tallies of 2026-08-24 (the v1.32 round grew the
+    # Re-tuned to the exact tallies of 2026-08-30 (the v1.32 round grew the
     # suites and left the floors behind -- auto_fig_bbox could silently lose
     # 94 cases, a third of its suite, with the harness green).  Raising after
     # growth is the mirror duty of the "lowering is a deliberate, reviewable
     # statement" rule below.
+    "shared/scripts/figure_state.py": 5,
     "shared/scripts/naming.py": 128,
-    "shared/scripts/plugin_paths.py": 93,
+    "shared/scripts/plugin_paths.py": 95,
     "shared/scripts/plurals.py": 196,
     "shared/scripts/slugify.py": 56,
-    "skills/clipping-processor/scripts/dedup_index.py": 81,
-    "skills/clipping-processor/scripts/fetch_images.py": 233,
-    "skills/clipping-processor/scripts/slug.py": 115,
-    "skills/paper-summarizer/scripts/note_lint.py": 137,
-    "skills/paper-summarizer/scripts/paper_scan.py": 85,
+    "skills/clipping-processor/scripts/dedup_index.py": 93,
+    "skills/clipping-processor/scripts/fetch_images.py": 265,
+    "skills/clipping-processor/scripts/slug.py": 117,
+    "skills/paper-summarizer/scripts/note_lint.py": 155,
+    "skills/paper-summarizer/scripts/paper_scan.py": 90,
     "skills/paper-summarizer/scripts/paper_text.py": 37,
     "skills/pdf-figure-extractor/scripts/auto_fig_bbox.py": 292,
-    "skills/pdf-figure-extractor/scripts/batch_extract.py": 148,
-    "skills/pdf-figure-extractor/scripts/extract_figures.py": 87,
+    "skills/pdf-figure-extractor/scripts/batch_extract.py": 156,
+    "skills/pdf-figure-extractor/scripts/extract_figures.py": 94,
     "skills/pdf-figure-extractor/scripts/render_page.py": 38,
-    "skills/pdf-organizer/scripts/organize.py": 144,
+    "skills/pdf-organizer/scripts/organize.py": 157,
     "skills/wiki-builder/scripts/find_collisions.py": 50,
-    "skills/wiki-builder/scripts/lint_entry.py": 95,
+    "skills/wiki-builder/scripts/lint_entry.py": 117,
     "skills/wiki-builder/scripts/vault_index.py": 47,
-    "skills/wiki-linter/scripts/scan_vault.py": 122,
+    "skills/wiki-linter/scripts/scan_vault.py": 129,
 }
 
 

@@ -271,9 +271,9 @@ confirm the basename resolves to exactly one file — `find '<vault>' -name
 'Prince_UDL_2026_01_Intro.pdf'` returning one path (single-quoted, per §1b) — and path-qualify the embed
 when it does not. The check is cheap; the failure it prevents is invisible.
 
-**(2) Renaming a source invalidates every downstream reference to it, and
-almost nothing in this plugin detects that.** Three skills key their output to a
-source's on-disk name:
+**(2) Renaming a source without carrying its references breaks downstream
+output, and the later audits cannot detect every break.** Three skills key
+their output to a source's on-disk name:
 
 - wiki-builder writes `sources: "[[Name.pdf#page=N]]"` into every entry, and
   **excludes `sources:` from its orphan audit** (§7, §9) — a `sources:` item
@@ -296,14 +296,15 @@ there — which is exactly the figure-embed half of the hazard above, after the
 fact. It is report-only, and it is narrow on purpose: it sees a `Wiki/` entry
 embedding a figure that is gone, and nothing else. It does **not** see a
 `sources:` wikilink pointing at a renamed PDF (that field is outside the orphan
-audit by design — §7, §9), a summary note's `sources:` item 1 in `Articles/` (nothing
-lints that folder at all), or a figure orphaned under the old stem that no entry
+audit by design — §7, §9), a summary note's `sources:` item 1 in `Articles/`
+(the summary linter checks its form, not whether the PDF exists), or a figure
+orphaned under the old stem that no entry
 happens to embed. Without `--images` the check does not run, and the scanner
 says so rather than reporting the vault clean.
 
 **So the ordering is a constraint, not a preference: organize → extract figures
-→ make notes → build wiki → lint.** Run pdf-organizer *after* any of the other
-three and the rename breaks links that mostly nothing here raises: entries cite
+→ make notes → build wiki → lint.** A bare PDF rename after those stages
+breaks links that mostly nothing here raises: entries cite
 a filename that no longer exists, figure embeds resolve to nothing, and a PDF
 embed-note points at a missing file. None of it fails loudly — Obsidian renders
 an unresolved link as plain text, and the audits that would otherwise catch it
@@ -312,9 +313,12 @@ figure embeds among them; it finds none of the rest, and it runs after the
 damage rather than instead of it. Renaming inside an already-processed
 vault is therefore a vault-wide edit rather than a file operation: either the
 references move with the name, or the rename does not happen. Detecting that a
-file is already referenced is pdf-organizer's own job — it is the skill holding
-the `mv` — and stopping to ask is the right answer there, because no skill in
-this plugin can see the whole blast radius.
+file is already referenced is pdf-organizer's own job. Preserve its rule to
+report the reference check and obtain authorization before renaming an already
+referenced source. Its approved `rename_all` workflow carries related files,
+Markdown references, and default figure sidecars together, with preflight and
+rollback. Inspect that plan and re-probe the old names afterward; a successful
+file move alone does not establish that all references moved.
 
 **Depended on by:** paper-summarizer (the bare `[[name.pdf]]` source link and
 its note-naming rule both assume (1); `scripts/paper_scan.py` imports
@@ -730,6 +734,11 @@ because the distinction is not whether the key is present but whether there is
 a sense to preserve — there is none, and writing `false` would clear a tick the
 user had set rather than correct how it was spelled.
 
+**An unrecognizable `read:` value is report-only too** (`item2/read-unknown`):
+an arbitrary string or a list provides no known boolean answer. Only recognizable
+`true`/`false`, `yes`/`no`, or `0`/`1` spellings may be converted; never infer an
+unknown review state.
+
 **The reset rule — body prose only.** wiki-builder sets `read: false` on an
 existing entry when, and only when, **the merge adds content to the body** — new
 prose, a new paragraph, a new image or table, a rewritten explanation, or a stub
@@ -771,7 +780,7 @@ hold. Same class as `item3/user-action`.
 rewrite — regenerating a summary is not new reading for the user to do),
 wiki-linter (validates presence, type and position; creates no entries, so it
 never supplies the value — it only re-spells a wrongly-typed one in place, never
-an existing entry's answer, and never a null one).
+an existing entry's answer, and never a null or unrecognizable one).
 
 ---
 
@@ -1264,40 +1273,48 @@ Shared sub-rules:
   extension its own bytes justify. Three skills write here and one renames in
   place, so a half-written file in the folder is not a private mess: it is a
   file the next consumer's glob picks up, embeds, and reports as a figure. A
-  move is also what makes the write atomic — there is no window in which the
-  name exists holding half a file.
+  same-filesystem rename or atomic link publishes the finished file without a
+  window in which the name holds partial bytes. A cross-filesystem move may
+  copy directly into its destination; stage on the destination filesystem,
+  outside `Sources/Images/`, before publishing. A failed replacement must leave
+  the previous good file intact.
 
-**Who owns a `_fig_` name is decided per producer, and heuristically.** Both
-producers compute names from a stem, the folder is flat and shared, and two
-different sources can therefore compute the same name — so each has to decide
-whether a name it is about to write is already someone else's. There is **no
-shared record** of that today, and this section does not invent one:
+**Figure ownership uses PDF records and conservative clipping checks.** Both
+producers compute names from a stem in a flat, shared folder, so different
+sources can compute the same name. `shared/scripts/figure_state.py` is the
+common parser for the PDF ownership manifest and review ledger; it refuses
+malformed or ambiguous records rather than treating them as permission to write.
 
 - **The rule both follow, and the only part that is a contract:** a producer
   never overwrites a name it did not write, and a name it cannot attribute is
   **reported, never taken**. Refusing is the safe failure — a figure that is
   not written is visible in the run report, where one that is silently replaced
   is not.
-- **pdf-figure-extractor keeps its own ledger.** A `.figure-manifest.tsv`
+- **pdf-figure-extractor records its output.** A `.figure-manifest.tsv`
   sidecar sits beside its review ledger, written from digests the run already
-  computes; the first run against a folder with no manifest adopts what is
-  there as its own and says so. A name held by a file it did not write is its
-  own bucket in the report — **neither extracted nor skipped**, because a skip
-  would read as an ordinary idempotent re-run while the paper's real figure was
-  never written.
-- **clipping-processor has no ledger and guesses from the name.** Its write
-  path refuses an occupied `<image_slug>_fig_<N>.*` slot by glob rather than
-  overwriting it (`--overwrite` is the deliberate reprocess path), and its
-  rename path reads the *label shape*: `_fig_S1`, `_fig_ED2`, `_fig_SI3` and
-  `_fig_1-2` are label forms only the PDF extractor produces, so a set holding
-  one of them is refused as not all its own.
-
-That asymmetry is the honest description, not a defect to paper over in this
-file: one producer has a record, the other has a heuristic that is right about
-the labels it knows and silent about the rest, and both fail by refusing. If it
-is ever made one rule, the manifest is the shape to standardise on — both
-producers writing it and reading it — and that is a change to two skills, not a
-line added here.
+  computes. With no manifest, migration adopts legacy PNGs only for PDF stems
+  in the requested source scope and reports the adoption; unrelated clipping
+  stems remain unclaimed. Stem matching is a migration heuristic, not proof
+  of provenance, so inspect a same-stem conflict before adopting it. A name
+  held by a file it did not write has its own report bucket — **neither
+  extracted nor skipped**. `--overwrite` does not override this ownership guard.
+- **Manual repairs preserve the ledger.** When a manifest exists, a manual
+  crop updates the corresponding digest and preserves other records. An
+  unknown or changed occupant is refused before cropping. A later batch run
+  then recognizes the repaired image instead of replacing it with the original
+  automatic crop. A legacy folder without a manifest stays unclaimed until the
+  scoped batch migration.
+- **pdf-organizer moves the records with their files.** A source rename updates
+  `.figure-manifest.tsv` filenames and `.figure-review.txt` source stems along
+  with the PDF, figures, and note links. Sidecars participate in preflight and
+  rollback; an unreadable or ambiguous ledger blocks the rename.
+- **clipping-processor reads the PDF manifest but keeps no clipping ledger.**
+  Download, placement, and rename refuse recorded PDF slots, including under
+  `--overwrite`. Other occupied `<image_slug>_fig_<N>.*` slots are refused
+  unless deliberately reprocessing with `--overwrite`. Rename also checks for
+  a matching PDF under `--sources` and the PDF-only label forms `_fig_S1`,
+  `_fig_ED2`, `_fig_SI3`, and `_fig_1-2`. Use `--sources` on every rename;
+  missing records alone do not prove that an image belongs to a clipping.
 
 ### 8c. Why 8a stays loose even though 8b is uniform
 
@@ -1628,7 +1645,7 @@ skills/clipping-processor/references/completeness-audit.md :: scripts/lottie_to_
 <!-- /canonical -->
 
 The one entry: clipping-processor's Lottie→GIF converter is written to a temp
-file at runtime and run from there, because an install of that skill does not
-reliably carry its `scripts/` folder, and a bare relative path would not
-resolve from the working directory anyway. The reference file says so at
-length; this line is what the harness reads.
+file at runtime and run from there. It is a documented optional rendering
+recipe, not a bundled script. A complete plugin install carries `scripts/`;
+the exception only covers this generated helper. The reference explains how
+to create and invoke it by its actual temporary path.

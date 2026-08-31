@@ -91,8 +91,8 @@ MAX_LIMITATION_CHARS = 420
 MAX_SENTENCE_WORDS = 25
 MAX_STEP_WORDS = 20
 
-#: One topic per paragraph, six sentences at most.  A markdown paragraph here
-#: is one line, so this is a per-line count.
+#: One topic per paragraph, six sentences at most. Soft line breaks do not
+#: start a new Markdown paragraph.
 MAX_PARAGRAPH_SENTENCES = 6
 
 #: Methods carries the experiment as numbered steps.  Fewer than three is not a
@@ -134,10 +134,10 @@ _OTHER_RULE = re.compile(r"\A(?:-\s*-\s*-[-\s]*|\*\s*\*\s*\*[\*\s]*|_\s*_\s*_[_\
 _DATE = re.compile(r"\A\d{4}-\d{2}-\d{2}\Z")
 _EMBED = re.compile(r"\A!\[\[([^\]]+)\]\]\Z")
 # `[[Stem.pdf#page=5|5]]` -- group 1 the target, group 2 the display text if any.
-_PAGE_LINK = re.compile(r"\[\[([^\]|]*#page=\d+)(?:\|([^\]]*))?\]\]")
+_PAGE_LINK = re.compile(r"\[\[([^\]|]*#page=[^\]|]*)(?:\|([^\]]*))?\]\]")
 # The whole citation: the link wrapped in <sup>, which is how Obsidian renders a
 # superscript.  Nothing between the tags and the brackets.
-_CITATION = re.compile(r"<sup>\[\[[^\]|]*#page=\d+(?:\|[^\]]*)?\]\]</sup>")
+_CITATION = re.compile(r"<sup>\[\[[^\]|]*#page=[^\]|]*(?:\|[^\]]*)?\]\]</sup>")
 # An exhibit number in any spelling: "Figure 2", "Fig. 1.2", "FIGURE S1",
 # "Figures 2 and 3", "Supplementary Figure 1", "Extended Data Figure 1", and the
 # same for tables.  No trailing delimiter is required: "Figure 2 The arms
@@ -299,6 +299,26 @@ def _check_front_matter(note, keys, kv):
     def scalar(key):
         return kv[key][0] if key in kv else None
 
+    for key in ("title", "description"):
+        value = scalar(key)
+        if value is None:
+            continue
+        quoted = bool(value) and value[0] in "\"'"
+        if quoted and (len(value) < 2 or value[-1] != value[0]):
+            note.fail(2, "`%s` has an unterminated quoted YAML string" % key)
+        elif not (value[1:-1] if quoted else value).strip():
+            note.fail(2, "`%s` is empty" % key)
+        elif not quoted and (
+                re.search(r":(?:\s|$)", value)
+                or value[0] in "#[]{}&*!|>@`"
+                or value.casefold() in ("null", "~", "true", "false", "yes", "no", "on", "off")
+                or re.fullmatch(r"[-+]?(?:[0-9][0-9_]*(?:\.[0-9_]*)?"
+                                r"(?:[eE][-+]?[0-9]+)?|\.[0-9]+(?:[eE][-+]?[0-9]+)?"
+                                r"|0[xob][0-9a-fA-F_]+|\.(?:inf|nan))", value, re.I)
+                or _DATE.fullmatch(value)):
+            note.fail(2, "quote `%s` as a YAML string; its unquoted value "
+                         "contains YAML syntax or a non-string value" % key)
+
     fmt = scalar("format")
     if fmt is not None and fmt not in FORMATS:
         note.fail(2, "`format: %s` is not one of %s -- Article/Post/Video is a "
@@ -309,6 +329,9 @@ def _check_front_matter(note, keys, kv):
         if kv["sources"][0]:
             note.fail(2, "`sources` is a block-form list; found a scalar value")
         raw_items = [l.strip() for l in kv["sources"][1] if l.strip()]
+        for item in raw_items:
+            if not item.startswith("- "):
+                note.fail(2, "`sources` entry is not a block-list item: %r" % item)
         items = [i[1:].strip() if i.startswith("-") else i for i in raw_items]
         if not items:
             note.fail(2, "`sources` is empty -- item 1 is the PDF wikilink")
@@ -395,8 +418,9 @@ def _check_front_matter(note, keys, kv):
 
     read = scalar("read")
     if read is not None and read not in ("false", "true"):
-        note.fail(2, "`read: %s` must be the bare boolean false (a quoted "
-                     "\"false\" is a string and renders permanently ticked)" % read)
+        note.fail(2, "`read: %s` must be a bare boolean (false on creation; "
+                     "preserve true on rewrites). A quoted \"false\" is a "
+                     "string and renders permanently ticked" % read)
 
 
 def _check_callout(note, body_start, fenced):
@@ -671,21 +695,7 @@ def _check_prose(note, bounds, captions, fenced, body_start):
     unreadable whatever the writing: the sentence that carries three claims,
     and the Results section that carries the whole paper.
     """
-    for n in range(body_start, len(note.raw_lines)):
-        if n in fenced:
-            continue
-        s = note.raw_lines[n].strip()
-        if not s or s == "___" or s.startswith("## "):
-            continue
-        if _TABLE_ROW.match(s) or _TABLE_SEP.match(s) or _EMBED.match(s):
-            continue
-        # Callout bullets, list bullets and numbered steps are sentences in
-        # their own right.  A step takes STE's tighter procedural limit.
-        s = re.sub(r"\A>\s*-\s+", "", s)
-        s = re.sub(r"\A-\s+", "", s)
-        step = _STEP.match(s)
-        if step:
-            s = step.group(2)
+    for n, s, step in _prose_blocks(note, body_start, captions, fenced):
         cap = MAX_STEP_WORDS if step else MAX_SENTENCE_WORDS
         counted = sentences(s)
         for sent in counted:
@@ -738,7 +748,44 @@ def _check_prose(note, bounds, captions, fenced, body_start):
                   % (chars, MAX_RESULTS_CHARS))
 
 
-def _check_figures(note, bounds, images, fenced):
+def _prose_blocks(note, body_start, captions, fenced):
+    """Yield readable paragraphs/list items with their first source line.
+
+    A soft-wrapped sentence is still one sentence, and seven adjacent lines
+    are still one paragraph. Blank lines, exhibits, headings, fences and new
+    list items separate blocks; wrapped numbered steps retain their 20-word cap.
+    """
+    pending = []
+    first, is_step = 0, False
+    for n in range(body_start, len(note.raw_lines)):
+        s = note.raw_lines[n].strip()
+        boundary = (n in fenced or not s or s == "___"
+                    or s.startswith("## ") or s == "> [!Summary]"
+                    or _TABLE_ROW.match(s) or _EMBED.match(s))
+        if boundary:
+            if pending:
+                yield first, " ".join(pending), is_step
+                pending = []
+            continue
+        # A callout marker is presentation, not part of the sentence.
+        s = re.sub(r"\A>\s*", "", s)
+        step = _STEP.match(s)
+        bullet = s.startswith("- ")
+        if step or bullet or n in captions:
+            if pending:
+                yield first, " ".join(pending), is_step
+                pending = []
+        if not pending:
+            first, is_step = n, bool(step)
+        pending.append(step.group(2) if step else s[2:] if bullet else s)
+        if n in captions:
+            yield first, " ".join(pending), is_step
+            pending = []
+    if pending:
+        yield first, " ".join(pending), is_step
+
+
+def _check_figures(note, bounds, images, fenced, source=None):
     """Returns the set of line numbers that are captions, for later checks.
 
     A caption is *the line under an embed*, and nothing else.  Sniffing for one
@@ -758,6 +805,11 @@ def _check_figures(note, bounds, images, fenced):
             continue
         embeds += 1
         name = m.group(1).split("|")[0].strip()
+        if source and not name.casefold().startswith(
+                os.path.splitext(source)[0].casefold() + "_fig"):
+            note.fail(n + 1, "figure embed %r is not filed under this note's "
+                             "`sources:` PDF %r; select from its figure inventory"
+                      % (name, source))
         if found_span and not (found_span[0] < n < found_span[1]):
             note.fail(n + 1, "figure embed outside the Results section: %s" % name)
         if n + 1 >= len(lines):
@@ -882,12 +934,14 @@ def _check_citations(note, body_start, captions, fenced, source=None):
         wrapped = {c.start() for c in _CITATION.finditer(l)}
         for m in _PAGE_LINK.finditer(l):
             target, alias = m.group(1), m.group(2)
+            page = target.rsplit("#page=", 1)[1]
+            valid_page = bool(re.fullmatch(r"[0-9]+", page)) and int(page) >= 1
             open_at = m.start() - len("<sup>")
             if open_at not in wrapped:
                 note.fail(n + 1, "page citation is not wrapped in `<sup>...</sup>`, "
                                  "so it renders full size: write "
                                  "`<sup>[[%s|%s]]</sup>`"
-                          % (target, re.search(r"#page=(\d+)", target).group(1)))
+                          % (target, page))
             elif open_at > 0 and l[open_at - 1].isspace():
                 note.fail(n + 1, "space before the citation; a superscript "
                                  "attaches to the character it follows, with no "
@@ -895,7 +949,9 @@ def _check_citations(note, body_start, captions, fenced, source=None):
             elif open_at == 0:
                 note.fail(n + 1, "citation opens the line; it attaches to the end "
                                  "of the text it supports")
-            page = re.search(r"#page=(\d+)", target).group(1)
+            if not valid_page:
+                note.fail(n + 1, "page citations use physical pages starting at 1; "
+                                 "page %s does not exist" % page)
             where = ("the front matter" if n < body_start else
                      "the callout" if n in in_callout else
                      "a caption" if n in captions else None)
@@ -906,8 +962,8 @@ def _check_citations(note, body_start, captions, fenced, source=None):
                 note.fail(n + 1, "page citation shows its whole target; give it the "
                                  "page number as display text -- `[[%s|%s]]`"
                                  % (target, page))
-            elif (not re.fullmatch(r"[0-9]+", alias.strip())
-                  or int(alias) != int(page)):
+            elif valid_page and (not re.fullmatch(r"[0-9]+", alias.strip())
+                                 or int(alias) != int(page)):
                 note.fail(n + 1, "page citation display text is %r but the link "
                                  "opens page %s; they must match" % (alias, page))
             # The citation must point at *this* note's PDF. A link left over
@@ -945,14 +1001,14 @@ def lint(text, path="<note>", images=None):
     after = _check_callout(note, body_start, fenced)
     _check_rule(note, after)
     bounds = _check_structure(note, body_start, fenced)
-    captions = _check_figures(note, bounds, images, fenced)
-    captions |= _check_tables(note, bounds, fenced)
-    _check_exhibit_numbers(note, body_start, captions, fenced)
-    _check_prose(note, bounds, captions, fenced, body_start)
     _sitems = [l.strip() for l in kv.get("sources", ["", []])[1] if l.strip()]
     src = (_sitems[0][1:].strip() if _sitems and _sitems[0].startswith("-")
            else (_sitems[0] if _sitems else "")).strip('"').strip()
     src = src[2:-2].split("/")[-1] if src.startswith("[[") and src.endswith("]]") else None
+    captions = _check_figures(note, bounds, images, fenced, src)
+    captions |= _check_tables(note, bounds, fenced)
+    _check_exhibit_numbers(note, body_start, captions, fenced)
+    _check_prose(note, bounds, captions, fenced, body_start)
     _check_citations(note, body_start, captions, fenced, src)
     return sorted(note.findings)
 
@@ -1032,6 +1088,59 @@ def _cases():
     LIM_H = "## Eight weeks of follow-up and one dominant donor"
     return [
         ("clean", GOOD, CLEAN),
+        ("foreign figure despite a plausible filename",
+         _mutate("Doe_X_2025_fig_2.png", "Other_Study_2025_fig_2.png"),
+         "not filed under this note's"),
+        ("legacy figure separator remains valid",
+         _mutate("Doe_X_2025_fig_2.png", "doe_x_2025_figure_2.webp"), CLEAN),
+        ("zero is not a physical page",
+         _mutate("#page=5|5", "#page=0|0"), "physical pages starting at 1"),
+        ("negative page cannot evade citation validation",
+         _mutate("#page=5|5", "#page=-1|-1"), "physical pages starting at 1"),
+        ("a word is not a physical page",
+         _mutate("#page=5|5", "#page=five|5"), "physical pages starting at 1"),
+        ("sources require the actual YAML list marker",
+         _mutate('  - "[[Doe_X_2025.pdf]]"', '  "[[Doe_X_2025.pdf]]"'),
+         "not a block-list item"),
+        ("an unquoted title colon makes invalid YAML",
+         _mutate('title: "A Title: With a Colon"', 'title: A Title: With a Colon'),
+         "quote `title` as a YAML string"),
+        ("null title is not a string",
+         _mutate('title: "A Title: With a Colon"', 'title: null'),
+         "quote `title` as a YAML string"),
+        ("empty quoted title has no text",
+         _mutate('title: "A Title: With a Colon"', 'title: ""'), "`title` is empty"),
+        ("whitespace-only quoted title has no text",
+         _mutate('title: "A Title: With a Colon"', "title: '  '"), "`title` is empty"),
+        ("numeric title must be a string",
+         _mutate('title: "A Title: With a Colon"', 'title: 12345'),
+         "quote `title` as a YAML string"),
+        ("quoted numeric title is text",
+         _mutate('title: "A Title: With a Colon"', 'title: "12345"'), CLEAN),
+        ("a title string must close its quote",
+         _mutate('title: "A Title: With a Colon"', 'title: "Unfinished'),
+         "unterminated quoted YAML string"),
+        ("read true survives an authorized rewrite",
+         _mutate("read: false", "read: true"), CLEAN),
+        ("a soft-wrapped long sentence is counted as one",
+         _mutate("Prose.",
+                 "The investigators compared the outcomes for each of the treated participants\n"
+                 "with the corresponding measurements from the matched untreated participants\n"
+                 "in every ward during the scheduled follow-up visit."),
+         "one idea per sentence"),
+        ("a soft-wrapped paragraph retains its sentence count",
+         _mutate("Prose.", "One is stated.\nTwo follows.\nThree lands.\n"
+                 "Four holds.\nFive stands.\nSix ends.\nSeven overflows."),
+         "one topic per paragraph"),
+        ("blank lines separate short paragraphs",
+         _mutate("Prose.", "One is stated.\n\nTwo follows.\n\nThree lands.\n\n"
+                 "Four holds.\n\nFive stands.\n\nSix ends.\n\nSeven follows."), CLEAN),
+        ("a wrapped numbered step keeps its tighter cap",
+         _mutate(M_H + "\n\nProse.", M_H + "\n\nProse.\n\n"
+                 "1. The investigators collected the original measurements from every participant\n"
+                 "   and compared those measurements with the same measurements from matched controls across all participating hospitals.\n"
+                 "2. They fitted the model.\n3. They evaluated the predictions."),
+         "a step runs 24 words"),
         # A single-letter initial is not a sentence boundary: "B. F. Skinner"
         # split into three "sentences", pushing a conforming 5-sentence
         # paragraph over the 6-sentence cap (lint_entry guards this shape;

@@ -13,7 +13,7 @@ Several of these are quick pointers: where a rule is fully spelled out in a work
 
 **Metadata**
 
-- **Raw YAML missing fields.** If `author`, `published`, or `created` are absent in the raw, recover what you can from step 2's source fetch. `created` falls back to today's date if neither raw nor fetch yields one. Don't invent values that can't be sourced.
+- **Raw YAML missing fields.** Recover missing `author` or `published` from step 2's source fetch. Preserve an existing `created`; if it is absent, use today's processing date and report that fallback. A website's creation date is not the user's clipping date, so never take `created` from the fetched page.
 - **Fetched author is a fuller form of the raw's** (raw "John Smith", JSON-LD "John A. Smith"). Prefer the fetched form — it's the article's own canonical byline — and note the change in the report.
 - **JSON-LD date carries a time/timezone** (`2026-05-12T14:30:00Z`). Drop the time, keep the date. If the timezone would shift the day, prefer the date as it appears in the URL or visible page text; failing that, use the UTC date.
 - **Multiple authors.** Block-form list, one `- Name` per line, in the source page's byline order (raw order as fallback) — the page's ordering is authoritative.
@@ -34,7 +34,7 @@ Several of these are quick pointers: where a rule is fully spelled out in a work
 - **Same `source:` URL but very different bodies** (the article was rewritten after the first clip). Step 1's dedup still fires and the raw is skipped — the user keeps the version they curated. To take the update, they reprocess via explicit-single-file mode and choose "reprocess and overwrite."
 - **Reprocessing a file already in `Articles/`.** The full behavior lives in steps 1, 6, 10 and 11: it's excluded from its own dedup scan; the old Summary callout and `___` separator are stripped; summary/`description`/`tags` are regenerated (so manual edits to those are lost) while `read:` is carried across as found and a legacy `roots:`/`wiki:` is stripped; embeds are renamed rather than re-downloaded; and, if the recomputed slug changed, the note is `mv`d to the new slug path before the polished content is written. Batch mode never picks it up — it scans `Inbox/` only.
 - **The same raw processed on two consecutive runs.** Shouldn't happen — that's the whole point of the dedup index — but if it does, the guards at steps 3 and 11 stop the write before the existing note is overwritten. A duplicate that reaches step 11 is reported, not resolved silently.
-- **Slug collision with a different existing cleaned file.** Append `_2`, `_3`, … per step 11, and flag it in the report.
+- **Slug collision with a different existing cleaned file.** Append `_2`, `_3`, … at step 3, before any image is written, and flag it in the report. A collision discovered at step 11 returns to step 3.
 
 **Completeness audit (step 12)**
 

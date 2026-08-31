@@ -25,6 +25,9 @@ in `README.md`, including `python3 tests/test_conventions.py` and any relevant
 script self-tests. Install `requirements-dev.txt` in an isolated Python environment
 first; use that same interpreter for validation. Run
 `python3 tests/test_compatibility.py` for packaging and portability checks.
+Run `python3 tests/test_end_to_end.py` for the workflows that cross skill
+boundaries. These tests use temporary vaults; do not substitute a user's live
+vault for their fixtures.
 
 Before distributing runtime changes, bump the version in the authored manifest
 and run `python3 tools/build_plugin.py`, then

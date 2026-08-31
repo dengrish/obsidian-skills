@@ -53,6 +53,7 @@ No command can see these. Walk the callout and each body section once.
 **Numbers**
 
 - [ ] Every relative figure has an absolute one beside it — or an explicit note that the paper does not report one.
+- [ ] Hazard ratios, odds ratios and risk ratios keep their own meanings; none is rewritten as a count or absolute risk without the required data. A missing uncertainty estimate is reported as missing, not as a single run or zero variance.
 - [ ] Denominators are given for anything small.
 - [ ] Intervals are carried on the results the note leans on, and on **every** null.
 - [ ] No p-value is doing the work of an effect size.
@@ -119,7 +120,7 @@ Exit 0 means every item below with a **(lint)** tag is already satisfied and nee
 - [ ] `created` is today. *(Not linted — the check would fail every time an existing note is re-linted later.)*
 - [ ] **(lint: length only)** `description` is 110 characters or fewer. That it is **one sentence**, and that it leads with the specifics, is yours.
 - [ ] **(lint)** `tags` values are from the 27-value enum (`CONVENTIONS.md` §3), block-form, `#`-prefixed and **double-quoted**. An unquoted `#` starts a YAML comment and the discipline disappears with no error.
-- [ ] **(lint)** `read` is the bare boolean `false`, last in the schema, unquoted. A quoted `"false"` is a string, which renders in a checkbox property as permanently ticked — the note ships marked read.
+- [ ] **(lint)** `read` is a bare boolean, last in the schema, unquoted; write `false` on creation and preserve its existing value on a rewrite. A quoted `"false"` is a string, which renders in a checkbox property as permanently ticked.
 - [ ] On a rewrite, `read` carries the existing note's value rather than resetting to `false`. *(The linter cannot know what the old note said.)*
 - [ ] **(lint)** The `> [!Summary]` callout opens on the line immediately after the closing `---`, with no blank line above it, and holds three to seven single-line `> - ` bullets.
 - [ ] **(lint)** One `___` rule, with a blank line either side, and no other horizontal rule in the note.
@@ -136,6 +137,7 @@ Exit 0 means every item below with a **(lint)** tag is already satisfied and nee
 ## 4. Figures and rebuilt tables
 
 - [ ] **(lint, with `--images`)** Every embed names a file that exists in `Sources/Images/`.
+- [ ] **(lint)** Every figure is filed under this note's PDF stem. Open it to confirm it is the intended exhibit; filenames and existence do not verify contents.
 - [ ] **(lint)** Every embed has an italic caption on the line **immediately** below it, no blank line between.
 - [ ] **(lint)** No figure or table number **anywhere in the note** — not `Figure 2 —` at the head of a caption, not "as Figure 2 shows", not "Table 5 reports", in any spelling.
 - [ ] **(lint)** Four embeds and four rebuilt tables at most, all of them inside *Results*.

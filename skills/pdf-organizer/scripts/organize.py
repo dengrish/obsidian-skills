@@ -99,6 +99,7 @@ from naming import (                       # noqa: E402  (after the bootstrap)
     core_stem,
     looks_canonical,
 )
+from figure_state import MANIFEST_FILE, REVIEW_FILE, rewrite_sidecar  # noqa: E402
 
 #: Folders never walked: VCS and editor state, and the trash, whose contents
 #: are deleted notes that must not resurrect a "still referenced" verdict.
@@ -144,6 +145,12 @@ class Edits(dict):
 
     #: Set by `plan_rename`; a tuple of "<path> (<error class>)" strings.
     unreadable = ()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Keep the public dict note-only. These plugin-owned records are
+        # displayed separately and join the same preflight/write/rollback.
+        self.sidecars = {}
 
 
 class RenameFailed(OSError):
@@ -409,13 +416,16 @@ def keyed_files(vault, path, _seen=None):
                 out[os.path.join(notedir, f)] = f
 
     src = os.path.join(vault, "Sources/PDFs")
+    identity = _nfc_low(core_stem(stem))
     for d in sorted(_listdir(src)):
         folder = os.path.join(src, d)
-        if _nfc_low(d) != low or not os.path.isdir(folder):
+        if _nfc_low(core_stem(d)) != identity or not os.path.isdir(folder):
             continue
         out[folder] = d
         for f in sorted(_listdir(folder)):
-            if _nfc_low(f).startswith(low + "_"):
+            book = chapter_book_stem(f)
+            if (_nfc_low(f).startswith(low + "_")
+                    or (book is not None and _nfc_low(book) == identity)):
                 out.update(keyed_files(vault, os.path.join(folder, f), seen))
     return out
 
@@ -920,6 +930,12 @@ def _derive(old_stem, basename, new_stem):
     head = unicodedata.normalize("NFC", old_stem)
     if _nfc_low(nfc[:len(head)]) == _nfc_low(head):
         return new_stem + nfc[len(head):]
+    # Book and chapter `_src` markers are independent. The book may carry
+    # one while its chapter filenames do not, so those derived names begin
+    # with its core identity. Keep each chapter's own suffix unchanged.
+    identity = unicodedata.normalize("NFC", core_stem(old_stem))
+    if identity != head and _nfc_low(nfc[:len(identity)]) == _nfc_low(identity):
+        return core_stem(new_stem) + nfc[len(identity):]
     return basename                                   # not ours; leave it
 
 
@@ -928,6 +944,34 @@ def _inside(vault, path):
     v = os.path.realpath(vault)
     p = os.path.realpath(path)
     return p == v or p.startswith(v + os.sep)
+
+
+def _plan_figure_state(vault, ren):
+    """Plan metadata updates for the images and PDF stems being renamed."""
+    edits, blockers = {}, []
+    stems = {os.path.splitext(old)[0]: os.path.splitext(new)[0]
+             for old, new in ren.items() if old.lower().endswith(".pdf")}
+    for filename, kind, mapping in ((MANIFEST_FILE, "manifest", ren),
+                                     (REVIEW_FILE, "review", stems)):
+        path = os.path.join(vault, "Sources", "Images", filename)
+        if not os.path.lexists(path):
+            continue
+        try:
+            if os.path.islink(path):
+                raise ValueError("sidecar is a symlink; reconcile its real location first")
+            with open(path, encoding="utf-8", newline="") as fh:
+                body = fh.read()
+            new = rewrite_sidecar(body, mapping, kind)
+            if new != body:
+                if not (os.access(path, os.W_OK)
+                        and os.access(os.path.dirname(path), os.W_OK)):
+                    raise ValueError("sidecar is not writable")
+                edits[path] = new
+        except (OSError, UnicodeError, ValueError) as exc:
+            blockers.append("%s cannot safely follow the source rename (%s). "
+                            "Repair its records first; do not delete/reset ownership metadata."
+                            % (path, exc))
+    return edits, blockers
 
 
 def plan_rename(vault, path, new_basename, dest=None):
@@ -1040,6 +1084,20 @@ def plan_rename(vault, path, new_basename, dest=None):
         ren[src_basename] = new_stem + new_ext
 
     blockers = []
+
+    # Renaming an already-split book must not mint chapter names a later
+    # extractor refuses or attributes to a different book. In particular a
+    # `_2` disambiguator cannot be inserted before the chapter segment.
+    for old, new in ren.items():
+        book = chapter_book_stem(old) if old.lower().endswith(".pdf") else None
+        if book and _nfc_low(book) == _nfc_low(core_stem(old_stem)):
+            new_book = chapter_book_stem(new)
+            if not looks_canonical(new) or new_book is None \
+                    or _nfc_low(new_book) != _nfc_low(core_stem(new_stem)):
+                blockers.append("%s would become %s, which is not a canonical chapter "
+                                "of the renamed book. Re-abbreviate the book title "
+                                "before the year rather than adding a disambiguator."
+                                % (old, new))
 
     # A relative `dest` resolves against whatever directory the shell happens
     # to be in, which is not the vault and is not this skill's to guess.  Left
@@ -1257,6 +1315,9 @@ def plan_rename(vault, path, new_basename, dest=None):
     # with a `FileNotFoundError` naming a file that does not exist, and
     # `_report_plan` listed the sentinel as a note it was about to rewrite.
     edits.unreadable = tuple(unreadable)
+    if have_vault:
+        edits.sidecars, sidecar_blockers = _plan_figure_state(vault, ren)
+        blockers.extend(sidecar_blockers)
     return moves, edits, blockers
 
 
@@ -1349,8 +1410,8 @@ def rename_all(vault, path, new_basename, apply=False, dest=None):
             if missing:
                 os.makedirs(d)
                 made_dirs.extend(reversed(missing))
-        for md, new in edits.items():
-            with open(md, encoding="utf-8") as fh:
+        for md, new in list(edits.items()) + list(edits.sidecars.items()):
+            with open(md, encoding="utf-8", newline="") as fh:
                 done_edits[md] = fh.read()
             _write(md, new)
         for src, dst in moves:
@@ -1721,6 +1782,10 @@ def _report_plan(moves, edits, blockers, apply_done):
     print("Note rewrites (%d):" % len(edits))
     for md in sorted(edits):
         print("  %s" % md)
+    if edits.sidecars:
+        print("Figure sidecar updates (%d):" % len(edits.sidecars))
+        for path in sorted(edits.sidecars):
+            print("  %s" % path)
     # Its own heading, not a line under "Note rewrites": these are notes this
     # run could not read and will not touch, and printing one where a rewrite
     # goes says the opposite of what happened.
@@ -2745,6 +2810,82 @@ def _selftest():
     _txt = [_norm(_p) for _p in ("Chapter 1 Intro " + "body " * 60, "more body")]
     _plan, _probs, _notes = _resolve(_ch, _txt, 2, "/tmp/x", {}, "Kuhn_S_2012")
     check("a start that needed no correction reports nothing", _notes, [])
+
+    # The extracted PNG follows a rename, so its ownership and review records
+    # must follow too. Otherwise the next batch refuses this plugin's own file.
+    from figure_state import parse_manifest, parse_reviewed
+    with _tf.TemporaryDirectory(prefix="org-sidecar-test-") as _v:
+        _pdf = _put(_v, "Sources/PDFs/Doe_Old_2025.pdf")
+        _img = _put(_v, "Sources/Images/Doe_Old_2025_fig_1.png", b"figure bytes")
+        _manifest_body = ("# keep metadata comments\nDoe_Old_2025_fig_1.png\t" + "a" * 64
+                          + "\nOther_fig_2.png\t" + "b" * 64 + "\n")
+        _review_body = "# checked manually\nDoe_Old_2025\t1\tkeep my note\nOther:2\n"
+        _manifest = _put(_v, "Sources/Images/" + MANIFEST_FILE, _manifest_body)
+        _review = _put(_v, "Sources/Images/" + REVIEW_FILE, _review_body)
+        _moves, _edits, _blockers = plan_rename(_v, _pdf, "Doe_New_2025.pdf")
+        check("sidecar changes appear separately in a rename plan",
+              (len(_edits), len(_edits.sidecars), _blockers), (0, 2, []))
+        with open(_manifest) as _fh:
+            check("a sidecar dry run writes nothing", _fh.read(), _manifest_body)
+        # Force a move failure after the state updates to exercise rollback.
+        with patch("os.rename", side_effect=OSError("injected move failure")):
+            try:
+                rename_all(_v, _pdf, "Doe_New_2025.pdf", apply=True)
+                _rolled_back = False
+            except RenameFailed as _exc:
+                _rolled_back = _exc.rolled_back
+        check("a failed rename rolls sidecars back too", _rolled_back, True)
+        with open(_manifest) as _fh:
+            check("manifest restored after failed move", _fh.read(), _manifest_body)
+        with open(_review) as _fh:
+            check("review ledger restored after failed move", _fh.read(), _review_body)
+        rename_all(_v, _pdf, "Doe_New_2025.pdf", apply=True)
+        with open(_manifest) as _fh:
+            check("successful rename carries ownership and unrelated records",
+                  parse_manifest(_fh.read()),
+                  {"Doe_New_2025_fig_1.png": "a" * 64, "Other_fig_2.png": "b" * 64})
+        with open(_review) as _fh:
+            _body = _fh.read()
+            check("successful rename carries reviewed figure labels",
+                  parse_reviewed(_body), {("Doe_New_2025", "1"), ("Other", "2")})
+            check("sidecar rename preserves comments and annotation columns",
+                  _body, _review_body.replace("Doe_Old_2025", "Doe_New_2025"))
+        _put(_v, "Sources/Images/" + MANIFEST_FILE, "malformed ownership\n")
+        _new_pdf = os.path.join(_v, "Sources/PDFs/Doe_New_2025.pdf")
+        _moves, _edits, _blockers = rename_all(_v, _new_pdf, "Doe_Next_2025.pdf", apply=True)
+        check("malformed ownership blocks a rename before mutation",
+              (bool(_blockers), os.path.exists(_new_pdf)), (True, True))
+
+    with _tf.TemporaryDirectory(prefix="org-inbox-test-") as _v:
+        _pdf = _put(_v, "Inbox/Doe_Canonical_2025.pdf")
+        _moves, _edits, _blockers = rename_all(
+            _v, _pdf, os.path.basename(_pdf), apply=True,
+            dest=os.path.join(_v, "Sources/PDFs"))
+        check("a canonical Inbox PDF still reaches its permanent folder",
+              (_blockers, os.path.exists(_pdf),
+               os.path.isfile(os.path.join(_v, "Sources/PDFs/Doe_Canonical_2025.pdf"))),
+              ([], False, True))
+
+    with _tf.TemporaryDirectory(prefix="org-src-book-test-") as _v:
+        _book = _put(_v, "Sources/PDFs/Doe_Book_2025_src.pdf")
+        _chapter = _put(_v, "Sources/PDFs/Doe_Book_2025_src/Doe_Book_2025_01_Intro.pdf")
+        _put(_v, "Sources/Images/Doe_Book_2025_01_Intro_fig_1.png")
+        _put(_v, "Wiki/topic.md", "[[Doe_Book_2025_01_Intro.pdf#page=1]]\n"
+             "![[Doe_Book_2025_01_Intro_fig_1.png]]\n")
+        _moves, _edits, _blockers = rename_all(_v, _book, "Doe_Renamed_2025_src.pdf", apply=True)
+        check("a `_src` book rename carries independently named chapters",
+              (_blockers, os.path.isfile(os.path.join(_v,
+               "Sources/PDFs/Doe_Renamed_2025_src/Doe_Renamed_2025_01_Intro.pdf")),
+               os.path.isfile(os.path.join(_v, "Sources/Images/Doe_Renamed_2025_01_Intro_fig_1.png"))),
+              ([], True, True))
+        with open(os.path.join(_v, "Wiki/topic.md")) as _fh:
+            check("chapter references follow a `_src` book rename too", _fh.read(),
+                  "[[Doe_Renamed_2025_01_Intro.pdf#page=1]]\n"
+                  "![[Doe_Renamed_2025_01_Intro_fig_1.png]]\n")
+        _new_book = os.path.join(_v, "Sources/PDFs/Doe_Renamed_2025_src.pdf")
+        _moves, _edits, _blockers = rename_all(_v, _new_book, "Doe_Renamed_2025_src_2.pdf", apply=True)
+        check("renaming a split book cannot write invalid disambiguated chapters",
+              (bool(_blockers), os.path.exists(_new_book)), (True, True))
 
     failed = [c for c in cases if not c[1]]
     for label, ok, got, want in cases:

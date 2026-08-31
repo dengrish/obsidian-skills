@@ -285,8 +285,10 @@ def ensure_shared_on_path(start=None, module=PROBE_MODULE):
     explicitly to put a directory on the path without vetting it.
     """
     path = find_shared_scripts(start=start, module=module)
-    if path not in sys.path:
-        sys.path.insert(0, path)
+    # An existing entry later in sys.path can still be shadowed by a local
+    # module. Restore the same precedence the canonical bootstrap guarantees.
+    sys.path[:] = [entry for entry in sys.path if entry != path]
+    sys.path.insert(0, path)
     return path
 
 
@@ -485,6 +487,10 @@ def run_self_test():
         eq("ensure_shared_on_path puts shared/scripts/ first", sys.path[0], shared)
         ensure_shared_on_path(start=script, module="slugify")
         eq("ensure_shared_on_path is idempotent", sys.path.count(shared), 1)
+        sys.path[:] = [here, shared, shared] + list(saved_path)
+        ensure_shared_on_path(start=script, module="slugify")
+        eq("an existing shared path cannot stay shadowed", sys.path[0], shared)
+        eq("preexisting shared duplicates are removed", sys.path.count(shared), 1)
         sys.path[:] = list(saved_path)
 
         # -- the plugin nested inside another folder --------------------
