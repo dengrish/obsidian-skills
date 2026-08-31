@@ -1,6 +1,6 @@
 # Writing an entry — flashcards, bold and italic
 
-> **When to read this:** whenever `references/writing.md` applies — every run that writes a full entry. This is the second half of that file, split off so neither half is lost to read truncation. Flashcards are written for every entry (a legacy stub gains its section on promotion); the bold/italic rules bind during the review pass.
+> **When to read this:** before writing a full entry or promoting a legacy stub. This guide owns [flashcard format](#4-flashcards) and [bold/italic rules](#5-bold-and-italic); [writing.md](writing.md) owns fields, prose, and link form. Maintenance of an existing card additionally follows [wiki-linter's review-history rules](../../wiki-linter/references/flashcards.md).
 
 ---
 

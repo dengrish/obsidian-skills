@@ -1,12 +1,12 @@
 # Link hygiene — the full rules (Task 2)
 
-**Read this when Task 2 runs — before applying or rejecting a single backfill candidate, before pruning any link, and before resolving any dangling target.** It holds the closeness bar in full, the two removal triggers, and the dangling-link protocol. Task 2 is the only destructive operation in the skill, so do not work from the summary in `SKILL.md` alone.
+**Read this when Task 2 runs — before applying or rejecting a backfill candidate, pruning a link, or resolving a dangling target.** It owns the closeness bar, removal triggers, and dangling-link protocol. Do not perform those operations from the [entrypoint summary](../SKILL.md#task-2--link-hygiene) alone.
 
-**wiki-linter is the only skill that links across entries.** wiki-builder wikilinks *inside* the entries it writes — and within a merged entry, only inside the prose it wrote on that run — builds their `**Related:**` footers, and links only targets that exist (it creates no stubs; neither skill does any more); it stops there, it has no back-fill audit, and its orphan sweep covers only the entries it created or merged on that run. Everything retroactive, cross-entry or vault-wide is Task 2's: the bare mention in an entry nobody has revisited — including one left standing inside an entry a later source merged — the weak link that should come out, and the dangling target left behind by a run that never reached it.
+**wiki-linter owns retrospective and vault-wide link editing.** Builder links only within entries it writes, and on merge only within newly written prose. Task 2 covers eligible bare mentions, weak links, and genuine dangling targets across the requested maintenance scope, including entries untouched by a recent source run. Neither skill creates stubs.
 
 ## Task 2 — Link hygiene
 
-Two directions: **backfill** the links that couldn't exist when an earlier entry was written, and **prune** duplicate or weak links. This is the only place wiki-linter modifies body-prose wikilinks and the Related footer, and the only **destructive** operation in the skill.
+Two directions: **backfill** links that could not exist when an earlier entry was written, and **prune** duplicate or weak links. Task 2 judges whether a link is added, kept, or removed. Task 1 may separately correct the spelling of an existing, unambiguous link or footer without changing its destination or meaning.
 
 ### Backfill (add missing links)
 
@@ -27,7 +27,7 @@ When a selected surface is italicized or bolded, remove those surrounding emphas
 
 **When in doubt, do not link — over-linking is the failure mode.**
 
-**This bar is wiki-linter's own, and it is the only one operating across entries.** It used to be stated as a bar *shared* with wiki-builder, because both skills linked vault-wide and a marginal mention was otherwise added by one and pruned by the other on alternating runs — churning `updated:` with nothing to show for it. That conflict can no longer arise: wiki-builder links only inside the entries it writes, so nothing else is judging the cross-entry mentions Task 2 judges. **Calibrate the bar on what the vault needs, not on matching another skill's threshold.** (The bar itself is unchanged — the criteria above are exactly as strict as they were; what went away is the obligation to keep them in lockstep with someone else's.)
+**This bar is wiki-linter's own.** Apply it consistently to additions and removals. Builder's separate source-run scope does not authorize rewrapping a carried-over mention this pass deliberately pruned.
 
 **Cross-domain bare-term rule (do not violate).** Never auto-link a bare common noun to a bare slug. A body's bare "entropy" is linked only with the qualified target and the source's wording — `[[information-entropy|entropy]]` in an ML context, `[[thermodynamic-entropy|entropy]]` in thermodynamics — never `[[entropy]]`. If the intended sense is ambiguous, leave it as plain text and flag it in the report. The corpus of bare terms this covers is wiki-builder's — *Cross-domain term disambiguation* in `wiki-builder/references/writing.md` (§3), which also carries the never-an-alias rule ("the bare term is not added as an alias to any entry"; the `aliases` field definition in §1 restates it under its redundant-alias rules). The scanner keeps its own working subset in the `COMMON_NOUNS` constant in `scripts/scan_vault.py` (it uses it to suppress bare-common-noun backfill candidates); that list is a floor for the scan, not the authority — wiki-builder's corpus is. Alias-mediated bare-noun surfaces (`attribute`, `target`, `predictor` — a single all-lowercase word reached only through an alias) are **not** suppressed, but arrive tagged `bare_noun_alias: true`: judge them as one batch, since they nearly always fail the closeness bar and re-surfaced for identical re-judgment every run, while a qualified-target link to a bare term stays legal in principle.
 

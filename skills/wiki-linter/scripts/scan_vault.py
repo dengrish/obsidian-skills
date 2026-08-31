@@ -1734,8 +1734,8 @@ def scan(wiki, images=None):
     group_probe(lambda s: s.replace("-",""), "hyphenation")
     group_probe(lambda s: "-".join(sorted(s.split("-"))), "word-order")
     # The sort above is a PURE token sort, so it cannot see `weight-tying` ~ `tying-weights`:
-    # `weights` does not sort to `weight`. wiki-builder/SKILL.md:125 calls the singularization
-    # step load-bearing for exactly that pair, and wiki-builder's find_collisions.py runs probe
+    # `weights` does not sort to `weight`. wiki-builder/references/merge.md describes the
+    # singularized comparison, and wiki-builder's find_collisions.py runs probe
     # (e) twice for it (`wordorder_key` AND `wordorder_key_singular`). CONVENTIONS §9 gives
     # whole-vault duplicate detection to wiki-linter alone — wiki-builder only probes the
     # candidates of the source in front of it — so a pair already sitting in the vault is seen
@@ -1813,7 +1813,7 @@ def scan(wiki, images=None):
 
     # ---- problem tally by checklist item ----
     # The share of entries affected is the recurrence signal for wiki-builder-improvement
-    # proposals — see SKILL.md, 'Closing the loop'.
+    # proposals — see references/backlogs.md.
     tally = {}                                   # item -> [issue_count, set_of_entries]
     for sl,item,_ in problems:
         t = tally.setdefault(item, [0, set()])

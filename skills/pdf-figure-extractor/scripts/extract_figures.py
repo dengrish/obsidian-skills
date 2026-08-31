@@ -21,10 +21,11 @@ next to every bbox for exactly this, and a y1 below the caption's y0 puts
 the caption text in the PNG, which is the one thing this skill promises it
 never does. Crops that overlap a detected caption are warned about by name.
 
-Existing files are **skipped**, matching `batch_extract.py`'s default; pass
---overwrite to replace them. Both scripts write into the same flat
-`Sources/Images/` folder, so a manual fix would otherwise be silently undone by
-the next batch run, or vice versa.
+Existing files are skipped only after their ownership record and current
+bytes are verified, matching `batch_extract.py`. Pass --overwrite to replace
+verified output; unknown or changed occupants are refused. Both scripts use
+the same flat `Sources/Images/` folder and preserve each other's manual fixes
+unless replacement is requested.
 
 After cropping, each PNG is auto-trimmed to remove near-white margins on all
 four sides (with `--trim-pad` pixels of breathing room). The PyMuPDF crop tends
@@ -831,11 +832,9 @@ def main(argv=None):
         "--overwrite",
         action="store_true",
         help=(
-            "Replace an output PNG that already exists. Default: skip it and "
-            "say so, which is what batch_extract.py does — the two write into "
-            "the same flat Sources/Images/ folder, and silently overwriting a "
-            "hand-set crop (or having one silently overwritten) is the same "
-            "bug in either direction."
+            "Replace existing PNGs only when their recorded ownership and "
+            "current bytes match. Default: skip verified output. Unknown or "
+            "changed files are refused with or without this flag."
         ),
     )
     p.add_argument(

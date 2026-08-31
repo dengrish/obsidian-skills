@@ -1,31 +1,25 @@
-# How to state a finding, and its limits
+# How to state a finding and its limits
 
-**Read this on every run, before drafting** (SKILL.md step 3). Its trigger is a step number, not a circumstance, and it is listed that way in SKILL.md rather than as an "if" that never fails. It stays a separate file for length: it is the longest thing in this package, and folded into the spine it would be the part a truncated read loses.
+- [The four claim rules, in full](#the-four-claim-rules-in-full)
+- [Where the qualification goes](#where-the-qualification-goes)
+- [Naming the size of a number](#naming-the-size-of-a-number)
+- [The hedge ladder, and what sets its ceiling](#the-hedge-ladder-and-what-sets-its-ceiling)
+- [Statistical statements](#statistical-statements)
+- [The limitations taxonomy, by design](#the-limitations-taxonomy-by-design)
+- [What the paper should have disclosed](#what-the-paper-should-have-disclosed)
+- [A phrasing bank](#a-phrasing-bank)
+- [Sources](#sources)
 
-It holds three things the spine states only in summary: the claim rules in full, with the phrasings that fail; the design-by-design limitations taxonomy step 8 points at; and the reporting checklists that make a *missing* disclosure visible.
-
----
-
-## Why this is structure and not advice
-
-The failure this file exists to prevent is not laziness. It is measured, it is specific, and it survives being told not to do it.
-
-- **Peters & Chin-Yee (2025)** compared model-written summaries of research papers against the papers themselves and against human-written summaries of the same papers. Models broadened the scope of the findings in **26–73% of summaries** depending on the model, at roughly **five times the odds** of the human summaries — and **the rate did not fall when the prompt explicitly demanded accuracy.** In several comparisons it rose. Newer, more capable models overgeneralised *more* than older ones, not less.
-- **Ovelman et al. (2024)** had model-drafted plain-language summaries reviewed by the authors of the underlying reviews: **3 of 10 contained errors in the results** serious enough to mislead.
-- **Greenland et al. (2016)** catalogue the misinterpretations that survive every level of expertise, of which the load-bearing one here is reading a non-significant result as evidence of no effect.
-- **Haber et al. (2022)** found that swapping a causal verb for an associational one does **not** stop readers drawing a causal conclusion. The design constraint has to be stated as its own sentence, not carried by a verb choice.
-- **Adams et al. (2019)** found that adding explicit caveats to a health-research summary lowered readers' certainty **without** lowering their interest or their trust. Hedging honestly costs nothing a summary is for.
-- **Lundh et al. (2017)** found industry-sponsored trials more likely to report results favourable to the sponsor (risk ratio ≈ 1.27). This note does **not** report funding (SKILL.md step 7), so the finding does not become a line in the output; it is here because it is the reason a *result* can lean without any single number being wrong, which is what the claim rules below are defending against.
-
-The intervention that does not work is being careful. The interventions that do are the ones below: a fixed vocabulary, a required clause, a mandatory second number, and a verification pass whose result is an exit code rather than a feeling.
-
----
+Read before recording claims or drafting a paper summary. This reference owns
+claim scope, confidence and methodological limitations. [Note format](note-format.md)
+owns the section shape and length limits; [verification](review-checklist.md)
+checks the resulting claims against the PDF.
 
 ## The four claim rules, in full
 
 ### 1. Scope clause, always
 
-Every finding names the population, system or setting it holds for. This is the single most common failure measured above, and it is invisible after the fact, because the widened sentence is the better-sounding one.
+Every finding names the population, system or setting it holds for. Check that the wording is no broader than the population actually studied.
 
 | Fails | Holds |
 |---|---|
@@ -68,22 +62,21 @@ Absence of evidence is what the study reported. Absence of effect is a different
 
 **"Not statistically significant" is not a synonym for "small".** And a difference between a significant result and a non-significant one is not itself a finding unless the paper tested it directly.
 
----
 
 ## Where the qualification goes
 
-The four rules above say **what** a claim must carry. They do not say where in the sentence to put it, and the answer the first version of this skill reached by default — all of it, in the main clause — is what made the notes unreadable. A 60-word sentence carrying a design, a population, a comparator and two numbers satisfies every rule above and communicates none of them.
+Keep each claim and its qualification together without packing design, population, comparator and numbers into one long sentence.
 
-**One plain sentence, then one qualifying sentence.** The claim goes first, in words a scientist from another field can take at speed. The scope, the comparator and the figures follow behind it. The **pair** is what has to satisfy the four rules; neither sentence has to on its own. The qualifier is also where the rung's limit sentence goes — the sentence that says what the study does not show (SKILL.md step 3).
+**One plain sentence, then one qualifying sentence.** The claim goes first, in words a scientist from another field can take at speed. The scope, the comparator and the figures follow behind it. The **pair** is what has to satisfy the four rules; neither sentence has to on its own. The qualifier is also where the rung's limit sentence goes — the sentence that says what the study does not show (see the confidence ladder below).
 
 | One sentence, every rule satisfied, nobody can read it | The same claim as a pair |
 |---|---|
 | Faecal transplant likely reduced recurrence of *C. difficile* infection from 45% to 8% within eight weeks in previously-treated adults with at least two prior recurrences, against placebo, in a 219-patient double-blind trial. | The trial shows that the transplant cuts recurrence by about four fifths. Recurrence fell from 45% to 8% within eight weeks, against placebo. The 219 adults had all had at least two prior recurrences. |
 | eUniRep likely raises the rate of better-than-wild-type designs well above a one-hot sequence encoding given as few as 24 assayed mutants, in avGFP and TEM-1 β-lactamase. | Twenty-four measured mutants were enough to design a better protein. About one design in ten beat the natural protein. The same pipeline without pre-training gave almost none. The test covered two proteins. |
 
-**The limit sentence sits immediately behind the result sentence, never further away.** Callout bullets are read out of order and section headings are read alone, so the pair has to survive being read as a unit of two. A modal verb is not a fallback for it: Haber et al. (2022), above, found that *may* and *is associated with* do not stop a causal reading, so the second sentence is the only thing carrying the constraint. Separate the two and the sentence that gets read is the unqualified one.
+**The limit sentence sits immediately behind the result sentence, never further away.** Callout bullets are read out of order and section headings are read alone, so the pair has to survive being read as a unit of two. A modal verb alone does not explain the design constraint; state what the study does not show. Separate the two and the sentence that gets read is the unqualified one.
 
-**A plain sentence with no qualifier behind it is the new failure mode.** The old shape could not lose a scope clause without losing the sentence; this one can, and it reads perfectly well when it does. That is why step 10's verification puts every scope clause through the finder as its own needle, and why the checklist asks for the pair rather than for the clause.
+Verify scope clauses as claims in their own right. A fluent finding followed by no qualification is still an overstatement.
 
 ## Naming the size of a number
 
@@ -103,7 +96,26 @@ Squaring a correlation is not a general-purpose estimate of explained variation.
 
 ## The hedge ladder, and what sets its ceiling
 
-SKILL.md's table is the ladder. This is how to place a paper on it.
+| Rung | When | The second sentence |
+|---|---|---|
+| 1 | a randomised, controlled, adequately-powered experiment, or a preregistered replication | none needed beyond the scope: *"The trial shows that the transplant reduces recurrence."* |
+| 2 | strong quasi-experimental design, or consistent evidence across designs, with the confounders addressed | *"The design is not randomised. Other causes are possible, and the authors tested for the known ones."* |
+| 3 | a single observational study, a correlational finding, an underpowered or unregistered experiment | *"It does not show that exercise causes the difference."* |
+| 4 | mechanistic, in-vitro, animal-only, simulation, a pilot, or a case series | *"The test was in cells only. The paper does not show an effect in people."* |
+
+The rung governs a claim and its adjacent qualification, not a hedge word.
+These statements sit off the effect ladder:
+
+- A **null result** uses the null/interval rule above; do not force an effect rung
+  onto an undetected effect.
+- A **non-evidential statement** is attributed to whoever made it, not graded.
+- A **descriptive qualitative finding** characterises the participants studied;
+  attribute it and make no frequency estimate. A claim extending beyond those
+  participants needs the conservative design limit, at rung 4.
+
+The report names the applicable off-ladder case instead of leaving confidence
+unexplained. For effect claims, apply the design ceiling below.
+
 
 | Design | Ceiling | Why |
 |---|---|---|
@@ -122,9 +134,8 @@ SKILL.md's table is the ladder. This is how to place a paper on it.
 
 **Take the lower of two rungs — the design's, and the authors' own.** Authors overstate their own observational findings routinely; that does not license the note to. The reverse also holds: a rung-1 design whose authors hedge is written at their hedge, with a line noting that the design would have supported more.
 
-**Peer-review status does not move a rung**, and this note does not report it (SKILL.md step 7). A preprint's design is its design; describe the design and let the rung follow from it. "Preprint" is not a design and can never stand in for one.
+**Peer-review status does not move a rung**, and this note does not report it ([scope](note-format.md#body-content)). A preprint's design is its design; describe the design and let the rung follow from it. "Preprint" is not a design and can never stand in for one.
 
----
 
 ## Statistical statements
 
@@ -134,11 +145,27 @@ SKILL.md's table is the ladder. This is how to place a paper on it.
 - **A subgroup finding is a hypothesis**, not a result, unless it was pre-specified and the interaction was tested. Say which.
 - **Multiplicity:** a paper reporting twenty outcomes and highlighting the one that reached significance is reporting a different kind of result from one that pre-registered a single primary outcome. Name that in *Limitations*.
 
----
 
 ## The limitations taxonomy, by design
 
-Step 8's six categories are the sweep to run on every paper — *considered* on every paper, and written only where they bite, since the section holds two to four bullets. These are the additional ones each design is prone to — the ones a reader who does not know the design would never think to ask about.
+Consider all six categories; write only 2–4 limitations that would change how a
+reader acts on or cites the finding:
+
+1. What the design cannot show.
+2. Who or what was studied, and the population/setting it does not cover.
+3. A proxy outcome substituted for the outcome of interest.
+4. Precision: wide intervals, small samples/effects, subgroups or post-hoc work.
+5. Material caveats the authors name.
+6. Missing **methodological** disclosures: registration, blinding, attrition,
+   sample-size justification, seeds or contamination checks. Funding, conflicts
+   and ethics remain outside the note's scope.
+
+Merge related limitations, fold repeated author caveats into the relevant
+bullet, and omit categories that do not apply. Put a caveat about one number
+beside that number, not again in Limitations. State the paper-level constraint
+once; avoid generic “more research is needed” filler.
+
+Use these design-specific prompts to find candidates:
 
 - **Randomised trial** — attrition and how it was handled; whether patients, clinicians and assessors were blinded; whether the primary outcome matches the registered one; whether the comparator was a fair one (placebo where standard care exists is a real limitation); whether the trial was stopped early; whether the population was healthier than the people the treatment is for.
 - **Cohort / observational** — confounding by indication, and which confounders were and were not measured; loss to follow-up; how exposure was ascertained (self-report is a limitation); reverse causation; whether the analysis was pre-specified.
@@ -152,7 +179,6 @@ Step 8's six categories are the sweep to run on every paper — *considered* on 
 
 **A proxy outcome is a limitation on every design.** A biomarker standing in for survival, a benchmark score standing in for capability, an intention standing in for a behaviour, a surrogate endpoint standing in for the thing the reader cares about — name the substitution, in the note, in the *Limitations* section, whether or not the paper does.
 
----
 
 ## What the paper should have disclosed
 
@@ -169,7 +195,6 @@ A missing disclosure is a limitation, and it is the one a reader could never not
 
 **Write the absence, not a hedge about it.** "The paper does not report how many patients withdrew" is a fact the reader can act on; "the methods are somewhat unclear" is not.
 
----
 
 ## A phrasing bank
 
@@ -184,12 +209,10 @@ A missing disclosure is a limitation, and it is the one a reader could never not
 | the authors conclude | *(only where they actually do — and then say it plainly)* |
 | experts say | *(cut: a summary of one paper has no experts in it)* |
 
----
 
 ## Sources
 
-Cochrane's plain-language summary standard (the only widely-used summary format that *mandates* a limitations section, which is why step 8 is a step rather than a habit); the eLife digest and PNAS Significance Statement formats; the PLOS author-summary guidance; the EU's Good Lay Summary Practice; ISO 24495-1:2023 on plain language; CONSORT, STROBE, PRISMA, ARRIVE, STARD and GRADE for what a complete report contains; the ASA statement on p-values and SAMPL for statistical reporting; and the IPCC AR6 visual style guide for the one-message-per-figure caption rule (`references/figures.md`).
+Background standards: Cochrane's plain-language summary standard; the eLife digest and PNAS Significance Statement formats; the PLOS author-summary guidance; the EU's Good Lay Summary Practice; ISO 24495-1:2023 on plain language; CONSORT, STROBE, PRISMA, ARRIVE, STARD and GRADE for what a complete report contains; the ASA statement on p-values and SAMPL for statistical reporting; and the IPCC AR6 visual style guide for the one-message-per-figure caption rule ([figures](figures.md)).
 
-The empirical claims at the top of this file are Peters & Chin-Yee (2025), Ovelman et al. (2024), Greenland et al. (2016), Haber et al. (2022), Adams et al. (2019) and Lundh et al. (2017).
 
-**No authoritative guidance exists on which figure of a paper carries its argument** — that judgment is genuinely unstandardised, which is why `references/figures.md` falls back on a mechanical tiebreak (how often the body text refers to each figure) rather than pretending to a rule.
+Figure selection remains judgment guided by the claim; [figures](figures.md#which-ones-to-carry) uses citation frequency only as a tiebreak.

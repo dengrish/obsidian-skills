@@ -1,17 +1,21 @@
-# Review pass (step 13)
+# Review the complete draft
 
-**Read this on every run, after the completed scratch draft is on disk and before publishing it.** Step 13 is unconditional, so this file is too: its trigger is a step number, not a circumstance, and it is listed that way in SKILL.md rather than as an "if" it never fails. It stays a separate file for one reason — length. Folded into the spine it would be the part a truncated read loses, and it is the one file where losing the tail costs every check after it. Every item here applies to every note this skill writes: one input shape, one output shape, no branch to scope the checklist to.
+- [Run the mechanical sweep](#run-the-mechanical-sweep)
+- [Compare structure with the source](#compare-structure-with-the-source)
+- [Check metadata and shape](#check-metadata-and-shape)
+- [Check the summary and cleaned body](#check-the-summary-and-cleaned-body)
+- [Check attachments and audit results](#check-attachments-and-audit-results)
+- [Fix or flag, then publish](#fix-or-flag-then-publish)
 
-- The mechanical sweep (run it first) and how to read its output
-- The source-anchored structural diff (the open-ended backstop)
-- The checklist: YAML frontmatter, structure, summary bullets, body, attachments on disk, completeness audit
-- The fix-or-flag decision rule
+Read for every clipping after its completeness audit and before publication.
+Review the saved scratch draft. Keep the published original and its image names
+unchanged until [safe replacement](duplicates-and-reprocessing.md#publish-an-approved-replacement).
 
-After completing the draft and its completeness audit, do a final conformance pass against the rules from steps 1–12. This is a structural/format review, not a content review — it catches things that slipped through during the main pass and either fixes them or flags them. **It's a quick scan, not a re-run of the workflow.** Read the draft from disk; on reprocess, keep the published original and its image names unchanged until finalization.
+## Run the mechanical sweep
 
-**Run this mechanical sweep first — don't rely on reading the file to notice these.** Most of the checklist below is machine-detectable, and the recurring failure mode is that a prose-only "confirm no X survived" check gets skimmed and an issue slips (that's how a scrambled bold-italic label and unescaped currency both got through earlier runs). This battery makes the detectable classes impossible to skip; run it (substitute the path), then walk the checklist for the judgment items a grep can't see. **Empty output = clean for that line**, except the noisy detectors flagged below.
-
-**These greps do not parse Markdown.** Exclude YAML and fenced/inline code when judging body matches, and never edit literal code to satisfy them. An asterisk list marker, escaped `\*`, or emphasis continued across lines can give an odd asterisk count without damage. A stacked-marker match can also represent a real nested list; compare its structure with the source before collapsing it. Preserve the source when a detector flags legitimate Markdown.
+Run the following, then inspect every match in context. These commands do not
+parse Markdown: ignore YAML and literal fenced/inline code when judging body
+matches. Never edit source code to satisfy a prose detector.
 
 ```sh
 f='<path to the completed scratch .md>'
@@ -27,7 +31,7 @@ echo "[9  currency \$-then-digit: each must be \\\$ or math]";  grep -nE '\$[0-9
 echo "[10 unescaped \$ parity: must be EVEN after escaping]";   grep -oE '(^|[^\\])\$' "$f" | wc -l
 echo "[11 dropped-\$ candidates: source-compare, NOISY]";       grep -nE '/[ =]|/1[KMB]([^A-Za-z0-9]|$)|/(GPU|hour|min|token)|per (hour|GPU|min)|[0-9]+/[0-9]|\([^)]*in (1[89]|20)[0-9]{2}\)' "$f"
 echo "[12 nested-list deep indent: candidate, NOISY]";         grep -nE $'^(>[ \t]?)*\t\t' "$f"
-echo "[12b sibling indent split: candidate, NOISY — run step-5 sibling-consistency script on \$f]"
+echo "[12b sibling indent split: candidate, NOISY — run body-cleaning sibling-consistency script on \$f]"
 echo "[13 footnote refs vs defs: the two lists must be identical]"
   printf '  refs: '; sed 's/^\[\^[0-9]*\]://' "$f" | grep -oE '\[\^[0-9]+\]' | tr -d '[]^' | sort -n | uniq | tr '\n' ' '; echo
   printf '  defs: '; grep -oE '^\[\^[0-9]+\]:' "$f" | tr -d '[]^:' | sort -n | uniq | tr '\n' ' '; echo
@@ -35,15 +39,35 @@ echo "[14 leftover HTML <table> — NONE unless complex]";       grep -nE '<tabl
 echo "[15 decorative HR BELOW the ___ separator — NONE]";      awk 'flag && /^([-*_]{3,}|<hr>)[[:space:]]*$/ {print FNR": "$0} /^___[[:space:]]*$/ {flag=1}' "$f"
 ```
 
-If the runner rejects the output as invalid UTF-8 (a grep can slice a multibyte char mid-sequence), append ` 2>&1 | iconv -f utf-8 -t utf-8 -c` to a line or the whole block.
+If a runner rejects sliced output as invalid UTF-8, a permitted
+`2>&1 | iconv -f utf-8 -t utf-8 -c` output filter can make the diagnostic readable.
+It does not repair the note itself.
 
-**Reading the sweep — what's a verdict vs. what's a candidate:**
-- **Required results in rendered prose:** [1] no H1, [3] no leftover remote images, [8] no confirmed clipping damage. [2] must identify one actual Summary callout; a quoted code example is not a second callout. [7] is a candidate detector, not an automatic repair instruction: dismiss legitimate Markdown and code before fixing an unmatched delimiter.
-- **Noisy by design** (a hit means *inspect*, not fix-blindly): [11] dropped-`$` matches plain fractions (`1/3`), dates, and any rate shape — only a price/rate missing its symbol *relative to the source* is real. [12] deep-indent is fine when the 2-tab line sits under a real 1-tab parent; it's damage only when orphaned. [12b] the sibling-indent script (from step 5) flags a list whose first item is flush but a later sibling is one tab deeper — but it **cannot** tell the bug from real nesting (both look like a shallow item followed by deeper ones), so judge each block by meaning: peers that should align (a dialogue's speaker turns) are the bug; a bullet followed by its own sub-points is correct. This is the single-tab split that [8] and [12] structurally miss. [6] is anchored to line-start now precisely because the un-anchored form matched prose like "…mentioned in pg187…".
-- **Deliberately not in the battery:** a raw `\(`/`\[` grep for leftover MathJax is *all* false positives in practice — the matches are escaped parens in Wikipedia URLs (`Entropy_\(information_theory\)`) and escaped literal brackets in prose (`\[OA5\]`), both correct. A genuine leftover `\(…\)` wraps a *math* expression; that stays an eyeball under the Body checklist's equation item.
+Read the results as follows:
 
-**Then — the open-ended backstop: a source-anchored structural diff.** The sweep above and the checklist below can only catch the failure modes someone already thought to encode; clips will keep producing *new* ones. This step exists to catch the kind we didn't anticipate, and it works **only because it's anchored to the source as ground truth** — an unanchored "read it over and fix anything that looks off" is exactly the skim-and-miss that let earlier bugs through, so don't do that. Instead, fetch is already done (steps 2 and 12 pulled the page), so compare the *structure* of the note against the *structure* of the source and treat every mismatch as a thing to inspect:
-- **Build both skeletons and diff them.** From the polished note's body (drop the YAML) and from the fetched source, extract and compare: (a) the **heading outline** — the ordered sequence of heading texts and their relative depths; (b) **coarse element counts** — list items, blockquote lines, links, image embeds, tables, code blocks. A representative extractor for the note side:
+- Required in rendered prose: no H1, exactly one actual Summary callout, no
+  remote-image reference left without a failure placeholder, and no confirmed
+  clipping damage. A code example is not a second callout.
+- Odd asterisk runs, stacked markers and deep indentation are **candidates**.
+  List bullets, escapes, multiline emphasis and genuine nested lists can match.
+  Use the [body-cleaning rules](body-cleaning.md#repair-structure-and-markup)
+  and sibling-consistency scan before repairing. A parent with children stays
+  nested; peer dialogue turns should align.
+- Currency-rate and inflation matches require comparison with the source.
+  Fractions/dates are expected false positives. After literal currency dollars
+  are escaped, check math-delimiter pairing; an even count alone is not proof.
+- Stray-HTML matches may be intentional complex tables or non-math sup/sub.
+  Preserve those cases according to body cleaning.
+- Do not use a bare MathJax-delimiter grep as a verdict: escaped Wikipedia URL
+  parentheses and literal brackets are legitimate. Inspect actual formulas.
+
+## Compare structure with the source
+
+Compare the ordered heading outline and coarse counts of lists, quotes, links,
+images, tables and code blocks. Use the fetched source when available; when its
+fetch failed, compare against the original capture and report the live-source
+limit. A representative note-side outline/count scan is:
+
 ```python
 import re, sys
 body = open(sys.argv[1]).read()
@@ -60,77 +84,101 @@ counts = dict(
 print("HEADINGS:", *(f"{'#'*l} {t}" for l,t in heads), sep="\n  ")
 print("COUNTS:", counts)
 ```
-  Pull the source's heading sequence from its `<h1>`–`<h6>` and eyeball-count its figures/lists for the comparison.
-- **What a mismatch means (all candidates, none auto-fix):** a source heading **missing from the note**, or note headings in a **different order/relative depth** than the source → either a clip that dropped a section (flag per missing-text, sub-part 5) or a heading-level normalization error (fix per step 5). The note has **far fewer image embeds than the source has figures** → a recovery gap (re-run the step-12 audit). A **count off by a large factor** in lists/quotes/links → inspect that region for structural damage of a kind the specific detectors didn't name. The point isn't the exact numbers — it's that a **novel** breakage (a definition list flattened to prose, a pull-quote merged into body text, a footnote cluster mis-grouped) shows up as an outline or count divergence even when no rule exists for it.
-- **Subtract the expected differences first**, or this drowns in false positives: the note legitimately lacks the source's nav/header/footer/share/related-posts chrome; the note may have *more* footnote-definition lines than the source has visible ones (the clip inlines them); link counts differ because the clip strips share/subscribe links; and any section the user deliberately dropped on a prior run stays dropped (don't re-flag a settled omission). Compare what's *meant* to carry over — article headings, figures, body lists, real block structure — not chrome.
-- **Report recurring defects for source maintenance.** Include a minimal example and a proposed detector in the run report. Do not edit the installed plugin while processing a clipping; implementing the improvement belongs in an authorized editing task against the source repository.
-- **Honest limits of this pass:** you are not rendering the markdown — you're reasoning about structure from the text, so a purely *visual* glitch that leaves the skeleton intact can still slip; the source's HTML nesting doesn't map one-to-one onto markdown depth, so small outline differences are often benign; and the counts are tripwires, not assertions. Use it to decide *where to look*, then judge against the source.
 
+Counts are tripwires, not assertions. Exclude the note's generated callout and
+source chrome from interpretation. Account for normalized heading levels,
+converted footnotes, removed share links and known intentional omissions.
+Inspect large divergences: a missing/misordered heading, an unexpectedly small
+figure inventory, or a list/quote/link count differing by a large factor.
 
-**Then walk this checklist** — the items below marked with a grep are the sweep's detail (how to *fix* each hit); the rest are **judgment the sweep can't make** (first-bullet-is-a-thesis, no anaphora/meta-framing, caption-vs-lede, description meaning vs. the 110-char cap, faithful heading depth, synthesized-caption accuracy), so read for those:
+Use [body cleaning](body-cleaning.md) for confirmed structural damage and the
+[completeness audit](completeness-audit.md) for source gaps. Do not auto-insert
+missing prose. This text comparison cannot prove visual rendering; report that
+limit where material. For a recurring new defect, report a minimal example and
+suggested detector; do not edit an installed plugin during clipping processing.
 
-**YAML frontmatter:**
-- The keys appear in this order: `title`, `format`, `sources`, `author`, `published`, `created`, `description`, `tags`, `read` — and **no others**. `roots:` and `wiki:`, the two keys an older producer may have left, are stripped rather than preserved (step 10); if either survived the rewrite, drop it here — and for a populated `roots:`, confirm its discipline reached `tags:` or the report first, because the strip is what makes it unrecoverable. A retired `topics:` (`CONVENTIONS.md` §2c) is the one legacy key that stays: leave it where it is.
-- **`sources` holds exactly one item on a clipping — its capture URL, double-quoted.** The retired `url:` key never appears: the printed-origin URL slot is `sources` item 2 on a *paper* note, a different skill's output (`CONVENTIONS.md` §2b). A note *with* a `url:` key at all — blank or filled — is the violation; delete the line, quoting a filled value in the report.
-- `title` is plain text — no decorative-Unicode letterforms (mathematical italic/bold/sans, fullwidth, small-caps) and no appended annotation the source didn't have (`(Author Name)`, series tags, etc.).
-- `description` is ≤ 110 characters.
-- `published` and `created` are valid `YYYY-MM-DD` dates.
-- `format` is exactly one of `Article`, `Post`, `Video` (step 4) — and a transcript/podcast-bodied page (timestamps, "Watch/Listen on…", speaker turns) is `Video` even when hosted on a blog. **The shared schema has a second enum — `Paper`, `Book`, `Report` — for notes about a local document (`CONVENTIONS.md` §2b), and a note carrying one of those is not this skill's to fix.** Check `source:` before touching the field: a URL means the note is this skill's and the three values above are the whole list; a `[[…pdf]]` wikilink means it is not, and `format: Paper` there is **correct, not an enum violation**. "Fixing" it inline to `Article` rewrites a right answer to a wrong one on every run.
-- `tags` is a block-form list of one or more `#`-prefixed, double-quoted enum slugs, or blank — no wikilink form, no unquoted `#`, no off-enum or abbreviated slug.
-- `read` is a **bare, unquoted** boolean. `read: "false"` is a string, and Obsidian renders a string in a checkbox property as permanently checked, so a quoted value marks the note read; `yes`/`no`/`0`/`1` are wrong the same way. Unquote a quoted value, but **never rewrite the value itself** — a `read: true` on a note you just reprocessed is the user's, carried across per step 10, not drift to be fixed back to `false`.
+## Check metadata and shape
 
-**Structure:**
-- No blank line between the closing `---` and `> [!Summary]`.
-- Summary callout uses `> [!Summary]` exactly (not lowercase, not uppercase).
-- One blank line between the summary block and `___`, and another between `___` and the body.
-- **Exactly one** `> [!Summary]` callout in the file, at the very top — no second/stale Summary callout left in the body (the failure mode when reprocessing an `Articles/` file whose previous summary wasn't stripped).
-- Body's top-level section headings are `##`; subsections are `###`. No `#` (H1) anywhere in the body.
-- Enumerated parts or named entries of a section sit one level *below* their parent (`## Mistakes` → `### Mistake 1`…; `## Appendix` → `### …`), not at the same `##` level. No bold-only line is doing a heading's job where a real heading belongs.
+- [ ] Generated frontmatter follows the shared
+  [source-note schema](../../../shared/CONVENTIONS.md#2b-source-note--a-note-about-a-document)
+  and [clipping metadata rules](metadata-verification.md#frontmatter-for-the-polished-note).
+  Legacy migrations preserved their information in tags/report. Unrelated user
+  fields, including `topics:`, were not stripped to enforce a generated schema.
+- [ ] First current `sources:` item establishes web ownership; legacy `source:`
+  is used only when current `sources:` is absent. This is not a PDF summary.
+  The output has its one preserved capture URL, no substituted canonical URL.
+- [ ] Corrected title, byline and publication date match their evidence;
+  unverified values and padded dates are reported. Meaningful Unicode remains.
+- [ ] Description is factual and at most 110 characters; format follows content
+  (`Article`, `Post`, or `Video` for a substantive transcript), and tags follow
+  the shared enum rather than invented synonyms.
+- [ ] A new note uses bare `read: false`. A rewrite preserves the review state,
+  including absent/unknown values, and reports those states rather than forcing
+  a boolean. If a required schema check rejects that state, the draft stays
+  unpublished. The capture URL and existing clipping date are unchanged.
+- [ ] The Summary starts immediately after YAML, appears once, and has the
+  prescribed blank-line/`___` boundary before the body. No stale old callout
+  remains inside the article.
+- [ ] Headings preserve source structure after normalization: H2 top-level,
+  H3 children, genuine containers above their entries, no invented headings
+  or body H1. A confirmed heading is not stranded as a bold-only line.
 
-**Summary bullets:**
-- First bullet is a stand-alone thesis statement that would make sense in isolation.
-- No bullet starts with anaphora ("It", "This", "They", "The team") referring to context the reader doesn't have — replace with explicit subjects.
-- No meta-framing ("the article argues that…", "the author claims…", "this piece explores…").
-- Wiki-worthy nouns are bolded; ordinary technical words are not over-bolded.
-- Bullet count is reasonable for the article length (5–8 short, 10–15 longform, up to 20 very long).
+## Check the summary and cleaned body
 
-**Body:**
-- No leftover `![](url)` image references — all rewritten as `![[file]]` embeds. No surviving HTML `<img>`/`<figure>` images and no leftover `[…](linkurl)` wrapper from a click-to-enlarge image — those were converted to embeds in step 6.
-- Each image with a caption has a single italic `*caption.*` line directly under it, no nested formatting inside.
-- No decorative horizontal rules left **in the body prose** (`---`, `***`, `___`, `<hr>` standalone). The structural `___` separator between the Summary callout and the body (inserted in step 11) is expected and stays — and the two YAML `---` fences aren't rules either, so don't count any of those. The check is only for rules *below* the separator, inside the article text; step 5 strips them on the way in, and this just confirms none survived.
-- Equations use `$...$` or `$$...$$` — no leftover `\(...\)` or `\[...\]` MathJax delimiters, and no genuine formula left as typographic plain text (an expression with `<sup>`/`<sub>` exponents or `×`/`⋅`/`=` structure that should have become LaTeX — e.g. `2.57 × (3.64 × 10 <sup>3</sup>) <sup>−0.048</sup>`). Non-math sup/sub (currency-inflation like `$5 <sup>$…</sup> <sub>year</sub>`, ordinals, date ranges, `CO <sub>2</sub>`) is cleaned to plain text/Unicode, not forced into math mode.
-- **Dollar signs — escape literals, balance math, and don't drop either.** Three related failure modes, all common in essays (Gwern especially) that mix scientific notation with dollar amounts in one sentence. **Run checks 1–2 in this order — the second is only trustworthy after the first.**
-  1. *Escape every literal currency `$` as `\$`* — `\$5`, `\$10k`, `\$6,289`. This is critical whenever the note **also contains `$…$` LaTeX, *or* carries two or more currency `$`** — in either case an unescaped `$` pairs with another `$` and renders the text between them as garbled math. Two ways that happens: *with LaTeX present*, a currency `$` collides with a neighboring math `$` (`$5k`/`$10k` next to `$8 \times 10^{9}$`); *with no LaTeX at all*, two prices simply pair with **each other** (the first two of three `$1.5 billion` turn the whole span between them into math). Aid: `grep -nE '\$[0-9]' file` lists every `$`-then-digit; each hit must be *either* escaped as `\$` (currency) *or* the opening of a balanced `$…$` math span. A bare `$` in front of a price is the bug. (The *only* truly-harmless case is a **single, lone `$`** in the entire note with no `$…$`/`$$…$$` math anywhere — then there's no second `$` for it to pair with. As few as two bare currency `$` are enough to corrupt a span, with or without LaTeX: the Leopold Aschenbrenner bio is a real case — three bare `$1.5 billion`, no math, all three still need escaping. When in doubt, escape — `\$` is never wrong.)
-  2. *Then every `$`/`$$` math delimiter is paired.* An unclosed `$` (e.g. writing `$8 \times 10^{9}` and forgetting the closing `$`) silently renders everything after it as math until the next `$`. **Only meaningful once step 1 is done** — with all currency escaped, the remaining unescaped `$` are math delimiters, so their count must be **even**: `grep -oE '(^|[^\\])\$' file | wc -l` (counts `$` not preceded by a backslash). An odd result is an unclosed delimiter — find it and close it. (Note: an *even* count alone does **not** prove correctness if currency is still unescaped — two stray currency `$` keep the count even while corrupting two spans — which is exactly why escaping comes first.)
-  3. *The inverse — a `$` dropped entirely.* The opposite slip also happens: the cleanup deletes a price's `$` outright, leaving a bare number that the grep aids above **can't** catch (there's no `$` left to match). The two real shapes this takes, from actual clips: a **rate/price with a slash** lost its symbol or denominator — Aschenbrenner's `$0.03/1K tokens` became `0.03/1K tokens`, and `33K tokens/$` became a dangling `33K tokens/`; or a **bare inflation-adjusted amount** lost its `$` — Gwern's `>$6,288.91` became `> 6,289`, recognizable because an inflation parenthetical (`($5k in 2020)`) sits right after it. This needs a **source comparison**, not a self-contained grep. Surface candidates with both tells in one pass — `grep -nE '/[ =]|/1[KMB]([^A-Za-z0-9]|$)|/(GPU|hour|min|token)|per (hour|GPU|min)|[0-9]+/[0-9]|\([^)]*in (1[89]|20)[0-9]{2}\)' file` (the first half flags dangling-denominator slashes and rate shapes, the last alternative flags inflation parentheticals) — then check each hit against step 2's fetched source text. Expect benign false positives (a plain fraction like `1/3` will match); the grep only narrows where to look. A number that reads like a price or rate but carries no currency symbol, a `/` with nothing after it, or an inflation parenthetical whose lead-in number lost its `$`, means the *clip* dropped something relative to the source — restore it (escaped, per point 1). **Restore only what the clip lost — leave the author's own quirks alone** (Aschenbrenner really did write `~$1 hour per GPU` and `tokens/ hour` with a stray space; those are faithful, not damage).
-- **Code blocks**: any HTML `<pre><code>` was converted to ` ``` ` fences; no inline `<code>` survived (became backticks); language hints preserved where Web Clipper provided them.
-- **Footnotes**: if the article had footnote bodies, all inline markers use `[^N]` syntax and definitions appear at the bottom as `[^N]: …` without an enclosing heading. No orphan "Notes" / "References" / "Footnotes" heading sits at the bottom without anything under it.
-- **Tables**: simple HTML `<table>` blocks were converted to pipe syntax; complex ones (merged cells, multi-paragraph cells) may remain as HTML. Existing pipe tables weren't damaged.
-- No stray HTML tags (`<br>`, `<span>`, `<div>`) — except inside fenced code blocks and inside `<table>` blocks that were kept intentionally.
-- No clipping chrome leftover (subscribe boxes, share widgets, "thanks for reading" sign-offs, related-article rails).
-- No auto-generated link panel left behind ("Backlinks (N)", "What links here", lists of `[backlink context]`/`[full context]` placeholder links). A curated "See Also"/"External Links" list with real anchor text is fine to keep.
-- No stray image-credit or caption line orphaned from a figure that wasn't clipped (`Source:`/`Credit:`/`Photographer / Publication`, or a "Figure N" caption with no nearby `![[…]]`).
-- No run-on section-navigation fragment under a heading (several Title-Cased phrases jammed together with no spaces).
-- No emphasis run-on from a split marker (`**Label⏎**following text…`) and no malformed/tripled emphasis (`***…** … *`); no mangled nested lists. **Verify the malformed-emphasis case mechanically, don't eyeball it** (eyeballing is how a scrambled bold-italic label slips through). An odd number of asterisk runs can indicate a scrambled delimiter, but list markers, escapes, code, and emphasis continued across lines also produce it. Surface them with `awk 'gsub(/\*+/,"&")%2==1 {print FNR": "$0}' '<file>'` — it flags the scrambled label `*Inherent limits…**:*`, the raw source-merge `***…****:*`, and the `***Correction:** … *` note, while leaving clean `***Limited compute***:` / `**bold**` / `*italic*` lines untouched. Expect a benign false positive on a *literal* lone asterisk (e.g. `5 * 3`); dismiss those on inspection. For each real hit, normalize to one clean balanced pair (see step 5) — and if it's one item in a list whose siblings share a lead-in style, match theirs (Aschenbrenner's bottleneck labels are all bold-italic `***label***`, so the scrambled one becomes `***Inherent limits to algorithmic progress***:`). **Verify the nested-list case mechanically too, three tiers** (the damage is often inside a blockquote, so the greps allow an optional `>` prefix): the stacked-marker grep `grep -nE '^(>[[:space:]]?)*[[:space:]]*([-*]|[0-9]+\.)([[:space:]]+([-*]|[0-9]+\.))+[[:space:]]'` is a candidate list too: preserve real nested lists and literal code. The deep-indent grep `grep -nE $'^(>[ \t]?)*\t\t'` (the `$'…'` makes the tabs literal in bash and zsh; macOS grep has no `-P`) is a candidate list, not an absolute gate: any remaining matches must be **verified legitimate nesting** (a sub-item correctly sitting under a real shallower parent item), not leftover Web-Clipper over-indentation (an orphaned item/paragraph dangling with no parent at the intervening level). The sibling-consistency script (step 5) is the third tier and catches what the first two miss — the **single-tab split**, where a list's first item is flush but a sibling is one tab deeper, so peers render as a nested sub-list (the real Gwern `> - **Q:**` / `> ⟶- **A:**` and the Biewald/Zaremba dialogue). It too only flags candidates: pull the indented items back to the first item's depth **only if they're peers** (dialogue turns, list entries); if the first item is genuinely their parent, leave the nesting. If a match is orphaned over-indentation or a mis-split sibling group, repair per step 5; if it's genuine nesting, leave it. De-bulleted continuation paragraphs sit at their item's text column.
-- Dangling equation/diagram references whose body wasn't clipped are removed-or-flagged, not left as bare `(5-38)` / "since ," litter.
+- [ ] The first bullet is a standalone thesis. Every bullet names its own
+  subject, states a complete claim and retains scope, confidence, terms and
+  numbers. No contextless “It/This/They”, meta-framing or links.
+- [ ] Bold emphasizes wiki-worthy entities without spreading to ordinary
+  technical words; bullet count is appropriate to the article's length.
+- [ ] The captured prose is preserved without paraphrase or truncation. Chrome,
+  auto-generated backlink panels and run-on navigation are gone; curated
+  further-reading links and intentional source content remain.
+- [ ] Images are local embeds or reported failure placeholders. A confirmed
+  caption is one italic line below the embed; ambiguous ledes remain prose.
+  Caption/credit orphans are removed only with evidence, not when they could
+  be a quotation, aside or retained failed-image caption.
+- [ ] Decorative rules are removed only from body prose, not YAML, code or the
+  Summary/body separator. Code and simple/complex tables follow body-cleaning
+  fidelity rules. Footnote references and definitions correspond.
+- [ ] Equations use Obsidian delimiters. Genuine formulas flattened to
+  typographic text were restored only with source evidence; ordinals, prices,
+  dates, chemical names and prose notation were not forced into math mode.
+- [ ] Literal currency dollars are escaped and math delimiters balanced.
+  Source comparison also catches **dropped** symbols or denominators, such as
+  `0.03/1K tokens`, `33K tokens/` or a bare amount before an inflation note.
+  Restore only what the clipping lost, not an author's original odd wording.
+- [ ] Missing equation/diagram bodies are flagged, never reconstructed from a
+  dangling label or a sentence with a missing symbol. Confirmed split/scrambled
+  emphasis and list damage are repaired without flattening legitimate nesting.
 
-**Sources/Images on disk:**
-- Every `![[name]]` wikilink in the draft resolves to a real file in `<vault>/Sources/Images/`, or to an existing file through the reviewed `rename --dry-run` mapping. On a reprocess where the slug changed, verify the draft's **new** names against that mapping before finalization; do not rename live images just to pass this review. After publication, read the final note back and verify every embed resolves at its final name. No `<!-- missing attachment -->` note is left unflagged.
-- No leftover broken extension-mismatched twins (e.g., a `.png` whose actual MIME is webp, sitting next to a correctly-named `.webp` sibling). Use `file --mime-type -b '<path>'` to spot-check any file whose extension feels off.
-- Image filenames match the final note filename casing (`Teslo_..._fig_1.png`, not `teslo_..._fig_1.png`), allowing only the reviewed rename mapping before finalization.
+## Check attachments and audit results
 
-**Completeness audit (step 12):**
-- **The audit produced an explicit verdict in the report** (one of: `<N> recovered, <M> flagged, <K> decoratives skipped` / `no gaps found` / `SKIPPED — <reason>`). A polished file with no audit verdict in the report is incomplete — re-run the audit, or if it truly can't run, write the `SKIPPED — <reason>` line explicitly. **A silent no-op is the failure mode this gate exists to catch.**
-- Any images recovered from the source resolve to real files in `Sources/Images/` and have captions per sub-part 3's fallback chain, same as step-6 images.
-- Uncapturable-media and missing-text placeholders are well-formed `<!-- … -->` comments with a `view at <source>` pointer, and each is listed in the report — no silent gaps.
-- Any captions marked `(synthesized from context)` are paraphrases of content the immediately-preceding paragraph actually contains — not inventions, not extrapolations from elsewhere in the article. If a synthesized caption claims something the lead-in doesn't say, rewrite it from what the lead-in actually says or downgrade to a bare embed.
-- No duplicate placeholders for the same element and no duplicate image embeds (the reprocess failure mode — two `<!-- source has an inline SVG diagram here… -->` for one diagram, the same figure embedded twice, or a Lottie re-converted to a second `_fig_N.gif`). On reprocess the figure count and placeholder set should match the source, not grow each run.
-- No figure represented twice in two forms — e.g. a Lottie that was both converted to a `_fig_N.gif` *and* recovered as its static `_fig_M.svg` poster. A figure with a Lottie source should appear once, as the GIF.
-- Any converted-Lottie GIFs in `Sources/Images/` aren't silently blank or missing visible content. The bundled script already deletes a blank scratch render and writes nothing, but spot-check at least the middle frame of each `_fig_N.gif` anyway — if the grayscale standard deviation is near zero (effectively empty canvas), the renderer dropped the animation's content. Replace the **draft embed** with a static poster at a fresh figure number and its correct extension, or with a source-URL placeholder if no poster is available. Preserve the existing GIF; do not overwrite it with another format or with placeholder text. An attachment is an input (`CONVENTIONS.md` §1), and on a reprocess the `_fig_N.gif` at that slot may be a previous run's good render rather than this one's blank. This is the silent-failure mode of an engine that can't render text layers, like rlottie.
+- [ ] Each draft embed resolves to a real file or through the reviewed rename
+  mapping to an existing file. Planned names match the final note stem/casing.
+  Do not rename live images just to make the draft pass this check.
+- [ ] Completed images were opened for readability; their returned extensions
+  match the format. No newly created extension twins or unexplained missing
+  attachments remain. Preserve old/foreign files and report conflicts.
+- [ ] Every capture has an explicit completeness verdict with the actual access
+  limits. Each recovery, gap, placeholder and approximate placement is reported.
+- [ ] Recovered captions follow the [fallback chain](completeness-audit.md#recover-missing-images).
+  A synthesized caption draws only from its immediately preceding lead-in and
+  carries its marker; an unsupported description becomes a bare embed.
+- [ ] Reprocessing did not duplicate embeds or placeholders. One Lottie is
+  represented by one verified GIF, or a labeled poster, or an actionable
+  placeholder. A static poster is not presented as an animation.
+- [ ] Converted GIFs were visually inspected, including the middle frame and
+  labels. A bad render gets a draft poster embed at a fresh number or a source
+  placeholder. Preserve any existing GIF; never replace its bytes with another
+  format or placeholder text.
 
-**Fix-or-flag decision rule:**
+## Fix or flag, then publish
 
-- **Mechanical issues** that are clearly wrong on inspection (wrong heading level, heading-child not demoted, leftover horizontal rule, leftover MathJax delimiter, casing mismatch on an image file, an auto-generated backlink block, an orphaned image credit, a run-on nav fragment, a split-emphasis run-on, a mangled nested list, decorative-Unicode title) — **fix them in the draft**. Add any existing-image rename to the reviewed finalization plan instead of moving that image early.
-- **Judgment issues** that depend on what the user wants (first bullet isn't really a thesis, description hits 110 chars but trimming further would lose meaning, a paragraph that might be a hero-image lede or might be a caption, an equation body that's missing and can't be reconstructed) — **flag in the report** for the user to decide.
+Fix confirmed mechanical damage **in the draft**. Existing-image renames stay
+in the reviewed publication plan. Flag unresolved judgment calls and missing
+source content for the user; do not silently invent an answer.
 
-Every fix and every flag from the review is logged in step 14's report so nothing happens silently.
+Log every fix/flag and any inability to complete a required check. Once the
+review is complete, return to [publication](../SKILL.md#6-publish-safely),
+then read back the published note and verify its final embeds before reporting
+completion.

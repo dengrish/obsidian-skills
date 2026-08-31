@@ -5,6 +5,12 @@ and Python helpers are shared by Codex and Claude Code; they do not require
 one host's internal tool names. Installing the plugin does not grant access
 to a vault, install Python packages, or enable browser tools.
 
+`SKILL.md` gives the active workflow and its decision gates. Follow its links
+when a step requires a reference; do not load every reference preemptively.
+[`CONVENTIONS.md`](CONVENTIONS.md) owns shared layout, naming, metadata and
+ownership rules. Start with §1 and §§1b–1c, then read the sections needed by
+the selected task. Its §§5 and 10 concern development and troubleshooting.
+
 ## Resolve the paths before acting
 
 - `<skill>` is the absolute directory containing the loaded `SKILL.md`.

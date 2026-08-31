@@ -1,6 +1,8 @@
 # Writing an entry — fields, body, wikilinks
 
-> **When to read this:** the run will write at least one entry. Read it once, before drafting the first — together with `references/flashcards-and-emphasis.md`, which carries the remaining two sections. The two are split only because one file of this length gets truncated by a single read; both are mandatory whenever an entry is written.
+> **When to read this:** before drafting the first entry. This is the canonical guide to fields, body prose, and link form. Read the separate [flashcard and emphasis guide](flashcards-and-emphasis.md) for card and markup rules; conditional merge, equation, and media procedures are linked at their action points in the [workflow](../SKILL.md#workflow).
+
+Contents: [Fields](#1-frontmatter-fields) · [Body](#2-the-body) · [Links and naming](#3-wikilinks-and-naming) · [Complete example](#complete-entry-example).
 
 ---
 
@@ -20,7 +22,7 @@ The canonical entity name in natural casing, double-quoted (`"LambdaRank"`, `"MN
 
 ### type
 
-One of the fifteen enum values listed in `SKILL.md` — no other values. The five that carry most of the classification difficulty are defined here; the remaining ten (`Device`, `Event`, `Standard`, `Gene/Protein`, `Organism`, `Chemical`, `Reaction`, `Place`, `Work`, `Quote`) are defined in `references/rare-types.md`.
+One of the fifteen enum values listed in [The entry](../SKILL.md#the-entry) — no other values. The five that carry most of the classification difficulty are defined here; the remaining ten (`Device`, `Event`, `Standard`, `Gene/Protein`, `Organism`, `Chemical`, `Reaction`, `Place`, `Work`, `Quote`) are defined in `references/rare-types.md`.
 
 - `Concept` — methods, algorithms, ideas, techniques, phenomena, **and named model architectures or specific pretrained models / research systems**. Examples: `LambdaRank`, `Photosynthesis`, `Backpropagation`, `Stochastic gradient descent`, `Random forests`, `BERT`, `ResNet`, `AlphaGo`, `AlphaFold`, `Stable Diffusion`, `CLIP`.
 - `Person` — individual researchers, authors, historical figures (`Yann LeCun`, `Marie Curie`, `Rosalind Franklin`).
@@ -94,7 +96,7 @@ The new source merely "phrasing it differently" is **not** sufficient grounds fo
 
 ### tags
 
-*(Mandatory; always present in YAML — at least one value when the entity has a disciplinary home, blank only when none applies.)* **One or more** Obsidian tags classifying the entity by academic discipline: each value is a discipline slug from the fixed enum of `CONVENTIONS.md` §3, restated in `SKILL.md`, **`#`-prefixed and double-quoted**, in a block-form list. This is the entity's disciplinary classification, and it is **multi-valued**: an entity genuinely foundational to several disciplines carries a tag for each.
+*(Mandatory; always present in YAML — at least one value when the entity has a disciplinary home, blank only when none applies.)* **One or more** Obsidian tags classifying the entity by academic discipline: each value is a discipline slug from the fixed enum in [CONVENTIONS §3](../../../shared/CONVENTIONS.md#3-the-discipline-tag-enum), **`#`-prefixed and double-quoted**, in a block-form list. This is the entity's disciplinary classification, and it is **multi-valued**: an entity genuinely foundational to several disciplines carries a tag for each.
 
 ```yaml
 tags:
@@ -286,3 +288,49 @@ Many terms have well-known, substantively different meanings across disciplines:
 **Wikilink between connected senses where the connection is substantive.** Information entropy and thermodynamic entropy share mathematical roots in Boltzmann's statistical mechanics; an entry on `Information entropy` discussing that lineage should wikilink to `Thermodynamic entropy`. A math vector and a virology vector share only a word — entries don't cross-link.
 
 ---
+
+## Complete entry example
+
+File: `lambdarank.md`. This is an illustrative entry; actual sources and image names come from the selected vault.
+
+
+```markdown
+---
+title: "LambdaRank"
+type: Concept
+aliases:
+  - "lambda-rank"
+sources:
+  - "[[Burges_LearningToRank_2010.pdf#page=4]]"
+  - "[[Liu_What_is_LambdaRank_Blog_2021.md]]"
+created: 2026-05-13
+updated: 2026-05-14
+description: "LambdaRank optimizes ranking metrics by scaling pairwise gradients by the change in NDCG from item swaps."
+tags:
+  - "#machine-learning"
+parents: []
+read: false
+---
+**LambdaRank** is a [[learning-to-rank|learning to rank]] method that sidesteps the non-differentiability of ranking metrics by defining gradients directly, scaled by the change in the target metric from swapping a pair of items.
+
+It starts from [[ranknet|RankNet]]'s pairwise cross-entropy loss and modifies its gradient $\lambda_{ij}$ for each item pair with a multiplicative $|\Delta\text{NDCG}_{ij}|$ term. That term is the change in [[ndcg|NDCG]] from swapping the two items in the current ranking:
+
+$$
+\lambda_{ij} = \lambda_{ij}^{\text{RankNet}} \cdot |\Delta\text{NDCG}_{ij}|
+$$
+
+![[Burges_LearningToRank_2010_fig_3.png]]
+*The gradient is scaled by the NDCG change from swapping a pair of items.*
+
+The loss itself is never written down explicitly; only its gradient. This makes the optimizer push harder on pairs whose swap would change the top of the ranking, where NDCG is most sensitive, and ignore pairs deep in the list where the metric is flat. Empirically, models trained this way reach higher NDCG than RankNet despite the lack of a closed-form loss. [[lambdaloss|LambdaLoss]] later formalized this result, proving that LambdaRank's gradients correspond to a specific (if peculiar) loss function.
+
+**Related:** [[ranknet|RankNet]] · [[lambdaloss|LambdaLoss]] · [[ndcg|NDCG]] · [[pairwise-ranking|Pairwise ranking]] · [[learning-to-rank|Learning to rank]]
+
+---
+
+## Flashcards
+
+A learning-to-rank method that sidesteps the non-differentiability of ranking metrics by defining gradients directly, scaling them by $|\Delta\text{NDCG}|$ — the change in NDCG from swapping a pair of items.
+??
+LambdaRank
+```

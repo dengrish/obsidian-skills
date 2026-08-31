@@ -20,12 +20,10 @@ paper yielded 3). The caption's own rect is then the lines from the caption
 line down, so the merged text above it stays inside the crop where it
 belongs.
 
-Suspicious bboxes are flagged with a "# WARN: ..." line on stderr so they
-catch your eye before the slow figure-extraction step. Two shapes are
-caught: a bbox that is simply too small (width/height/area), and a bbox that
-covers only a fraction of the figure region between the previous caption and
-this one — the signature of a crop whose top edge was raised by text sitting
-*inside* the figure (bar value labels, schematic box labels, axis ticks).
+Suspicious bboxes are flagged with a "# WARN: ..." line on stderr before
+extraction. Examples include an implausibly small crop or one covering only
+a fraction of the expected figure region. Review the reported reason and
+compare the crop with the PDF; absence of a warning does not prove completeness.
 
 `--coverage` compares the captions found against the figure numbers the body
 text refers to, so a partial detection (3 captions found, 4 figures cited)
@@ -1851,7 +1849,7 @@ def open_pdf(path):
 # files written are inside a `tempfile` directory that is removed again.
 #
 # What this covers, and why each part is here rather than trusted:
-#   * `CAP_RE` — every accepted caption style in SKILL.md's table AND every
+#   * `CAP_RE` — every accepted caption style in references/review-and-repair.md's label table AND every
 #     rejection class (prose references, panel pointers, plurals). The regex is
 #     the whole detector: a style it misses is a figure that is missing from
 #     `Sources/Images/` with nothing anywhere reporting a shortfall.
@@ -2049,7 +2047,7 @@ def run_self_test():
             state["bad"] += 1
             print("FAIL %s" % label)
 
-    # --- CAP_RE: every accepted style in SKILL.md's table ------------------
+    # --- CAP_RE: every accepted style in references/review-and-repair.md's label table ------------------
     # (caption text, expected marker group, expected label group)
     for text, marker, label in (
             ("Figure 7. Title", None, "7"),

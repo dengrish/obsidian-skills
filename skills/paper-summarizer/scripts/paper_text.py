@@ -20,7 +20,7 @@ Four modes, all over one page-indexed extraction:
                   the abstract, methods, results, limitations and
                   data-availability statements, and also the funding,
                   conflict-of-interest and registration ones -- which
-                  paper-summarizer never reports (its SKILL.md step 7) and
+                  paper-summarizer never reports (references/note-format.md) and
                   reads only to see what a reporting guideline asks for and
                   the paper does not say.  A heading is a short line that is
                   *only* a heading; prose that merely opens with a section

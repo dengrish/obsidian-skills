@@ -1,39 +1,89 @@
-# Edge cases
+# Special paper types and reading exceptions
 
-**Read this when** any one of the following holds. Each is a fact you have before you act on it — a design the paper names on its own first page, a status from `paper_scan.py`, a section `paper_text.py --sections` could not find, an exit code — not a sense that the run has gone sideways:
+Use the relevant section when the design or input needs it. These cases keep
+[the same note roles](note-format.md#section-roles-and-headings). The
+[confidence ladder and design ceilings](summary-standards.md#the-hedge-ladder-and-what-sets-its-ceiling)
+remain the single owner of confidence; this reference adds reading and Methods
+requirements, not a second ladder.
 
-- **Design** — the paper is a preprint; a systematic review or meta-analysis; a modelling or simulation study; a machine-learning benchmark paper; a case report or case series; qualitative work.
-- **A missing part** — it has no abstract, no methods section, or no figures at all.
-- **Not a study, or not readable** — it is a retraction, a correction or a comment on another paper; it is not in English; the PDF is a scan with no text layer.
-- **Assembly** — the figure the argument needs was not extracted; the paper has more than about eight authors; two PDFs in the batch are the same paper.
+## Methods for less common designs
 
-Scan the bolded case names for the match rather than reading it end to end.
+| Design | What Methods must make visible |
+|---|---|
+| Preprint | Name the actual design and analysis stage, such as a planned interim analysis. Venue is not a design or a confidence adjustment. Use the date printed on this version, without adding venue/review status to the note. |
+| Systematic review / meta-analysis | Give the number and designs of studies, total participants, search cut-off and pooling model. Do not let pooled *n* look like one primary study. Keep evidence limitations separate from review-process limitations using the [design taxonomy](summary-standards.md#the-limitations-taxonomy-by-design). |
+| Model / simulation | Name the model class, calibration/fitting data, assumptions and scenarios, including the counterfactual comparator. Carry sensitivity ranges with estimates. Scope findings to the model, not the real population it represents; fit is not external validation. |
+| Machine-learning benchmark | Name systems, benchmark version/split, number of runs, fixed data/compute/prompt budgets and dated baselines. Separate the measured score from the capability it is a proxy for. |
+| Case report / series | State the count, lack of control group, and whether cases were consecutive or selected. Describe what happened in those cases, not its frequency in a population or a causal effect. |
+| Qualitative work | Name the interview/focus-group/observation method, participants, recruitment and analysis method. Attribute descriptions/typologies to those studied; neither a vivid quotation nor a purposive sample establishes population frequency. |
 
-Nothing here suspends the spine: the four claim rules, the four-rung ladder and the six section *roles* are the same on every paper below. The heading **text** is not — it is a short sentence about the paper in hand (SKILL.md step 7), so the entries here name sections by role. What a design changes is the rung it can reach and what *Methods* must say for a reader to see the design without being told the rung. Where a rule is already spelled out in a workflow step, the entry names the case and points there, so the rule lives in one place and cannot drift.
+## Missing sections or figures
 
-**Design**
+- **No abstract heading:** read the first page before deciding the abstract is
+  absent. `--sections` searches headings, not all abstract content. Do not
+  change `format` because the search missed it; write description from results.
+- **No Methods heading:** inspect the last pages and variants such as
+  “Experimental procedures”; methods may follow references or live in an
+  unavailable supplement. If the design remains unstated, say what is known and
+  what is missing. Do not invent a design to support a stronger claim; use the
+  conservative confidence the text supports and name the methodological gap.
+- **No figure files:** follow [intake](../SKILL.md#1-select-and-inventory-the-work).
+  A `--cites` miss does not prove a figureless paper: inspect unnumbered,
+  non-English and image-only exhibits. Re-scan after permitted extraction.
+- **Needed figure still absent:** follow [missing exhibits](figures.md#when-the-figure-you-need-is-not-there).
+  A source-supported prose claim or rebuilt result table can remain; an invented
+  file, another paper's image or a pointer to the missing exhibit cannot.
 
-- **Preprint.** The ladder reads the design, not the venue: a preprint of a randomised trial is still rung-1 material, and demoting every preprint one rung invents a fifth rung that does not exist. What a preprint does bind is the *other* half of step 3's "lower of two rungs" — an unreviewed manuscript that calls its own result preliminary is rung 4 on the authors' own say-so. **The venue does not reach the note at all** (SKILL.md step 7): this note does not say a paper is a preprint, does not name its journal, and does not comment on refereeing. The one place the version shows through is `published:`, which takes the posting date off the title page like any other date (step 5), so a note written from v1 carries v1's date. In *Methods*, name the design and the analysis stage together ("a preregistered randomised trial, reported at its planned interim analysis"), because "preprint" is not a design and cannot stand in for one — and a design described precisely enough is what a reader needed the venue for anyway.
-- **Systematic review or meta-analysis.** Ceilings at the rung of what it pooled and never above it (`references/summary-standards.md` holds the table): a synthesis of agreeing randomised trials reaches rung 2, one pooling observational cohorts stays at rung 3 however many hundreds of thousands of participants it sums to, because pooling confounded estimates averages the confounding rather than removing it. The summed *n* is the trap — 400,000 people across 30 cohorts reads stronger than one 800-person trial and is weaker evidence about cause. **Its limitations come in two sets, and they are different failures.** The evidence pooled: heterogeneity between studies, risk of bias inside them, small-study and publication effects, a follow-up none of them exceeded. The review process itself: which databases, the search cut-off date, language restrictions, whether a protocol was registered, whether screening and extraction were duplicated, whether a subgroup analysis was prespecified or post-hoc. Write both, labelled, under step 8 — "the trials were small and disagreed" reads as an all-clear on the review, "the review searched one database to 2023" reads as an all-clear on the trials, and merging them hides whichever one you left out. PRISMA is the checklist for the second set (step 8 item 6). In *Methods*, give the shape and the counting: how many studies, of what design, totalling how many participants, searched to what date, pooled under what model — shown only the pooled *n*, a reader takes a synthesis for one enormous primary study.
-- **Modelling or simulation study.** Rung 4, flatly — the ladder says so, and the reason is that every output is a consequence of an assumption, so every number is a claim about the model. The characteristic limitation is that fit is not validation: a model calibrated on past data reproducing that data is arithmetic, and its projections move with parameters the modellers chose. Carry the central estimate with its sensitivity range beside it, name the counterfactual scenario as the comparator (claim rule 3), and make the scope clause the model's own — "in a compartmental model parameterised on 2020 England data", not "in England". In *Methods*, name the model class, what it was fitted or calibrated to, and the scenarios compared: "an agent-based simulation of X calibrated to Y, run against a no-intervention counterfactual". Written as "the study estimated 40,000 deaths averted", a simulation reads as a measurement, and it was not one.
-- **Machine-learning benchmark paper.** Two claims, two ceilings, both set in `references/summary-standards.md`'s table. The measured one — this system scored *x* on this benchmark version and split — reaches rung 2 where the comparison was genuinely controlled: same data, same budget, more than one seed, variance reported; a single run against numbers copied out of another paper's table is rung 3. Rung 1 is out of reach either way, because nothing in a benchmark run is randomised. Any claim about the *capability* the benchmark stands for ceilings at rung 3, because a benchmark score is a proxy measure (step 8 item 3): "state of the art on X" is a claim about X, not about the ability X was built to stand for, and the gap between the two is the whole reason the sentence is tempting. Characteristic limitations: contamination (the test set may sit inside the training data, and the paper usually cannot rule it out), single-seed results, unmatched compute or prompt budgets across arms, and saturation of a benchmark that has been optimised against for years. In *Methods*, name it as a benchmark evaluation — which systems, which benchmark version and split, how many runs, what was held fixed across arms, and which baseline as of when, since a leaderboard claim is relative to a snapshot (claim rule 3).
-- **Case report or case series.** Rung 4, for a reason the other rung-4 designs do not share: there is no comparison group at all, so claim rule 3 has nothing to name. What a series can establish is that something *can* happen; it can never say how often, because the denominator is unknown and the case was published for being remarkable — selection on the outcome is the design, not a flaw in it. Write the finding as existence rather than effect: "three patients with X developed Y within 10 days of Z", never "Z caused Y". Keep the count inside every key message, because here the count *is* the scope clause (claim rule 1). In *Methods*, say how many patients, that it is uncontrolled, and whether the cases were consecutive or selected — eight consecutive admissions and eight interesting ones are different objects wearing the same *n*.
-- **Qualitative work.** The ladder grades effects, and interviews, focus groups and ethnography do not measure one, so any sentence phrased as an effect or a frequency ceilings at rung 4 — and the repair is usually not to hedge that sentence but to write the finding as what it is: a description, a typology, a mechanism participants themselves named, attributed to them. The characteristic limitation is that the sample is purposive rather than random, so counting it re-imports the statistics the design deliberately refused — "8 of 20 said" is a proportion with no population behind it, and a vivid quote is evidence that one person said it. In *Methods*, name the method exactly (semi-structured interviews, focus groups, participant observation), with how many participants, how they were recruited, and how the material was analysed — thematic analysis, grounded theory, framework analysis are different methods and the note says which. `references/summary-standards.md` holds the checklist to hold it against.
+## Notices and non-English sources
 
-**A missing part**
+A retraction, correction or comment is itself the note's subject. State what
+changed, by whom, on what grounds and when, identifying the affected article by
+its printed title/DOI where supplied. The first `sources:` item remains **this
+notice's PDF**, not the affected paper. Do not retell withdrawn findings as if
+the notice established them. Attribute the notice's statements rather than
+forcing them onto an effect rung. If an affected paper has its own note, report
+it; do not rewrite that other note as part of this summary.
 
-- **No abstract.** Costs the note nothing — step 2 already sends you to the results rather than the abstract — but two things follow. First, `--sections` reporting the abstract as not found is a statement about *headings*, not about content: most journals set the abstract on page 1 with no heading at all, so read page 1 before believing it, and never re-decide `format:` on the script's silence (`CONVENTIONS.md` §2b). Second, `description:` (step 5) is then built from the results section rather than lifted from a summary that does not exist — which is the better source anyway, and the same source step 2 prefers.
-- **No methods section.** Run `python3 '<skill>/scripts/paper_text.py' '<pdf path>' --sections` and read the answer as a heading search rather than a verdict: Nature-format papers print Methods *after* the references, others head it "Experimental procedures", and others again put it in a supplement this PDF does not contain. Read the last pages before concluding. If the design genuinely is not stated, you cannot set a rung from a design you had to guess — write what the paper does state in *Methods*, name what it does not, and take the rung supported by the weakest design consistent with the text. The absent methods are themselves a limitation and get named as one (step 8 item 6); they are not something to work around quietly.
-- **No figures in the inventory.** Step 1 runs `python3 '<skill>/scripts/paper_text.py' '<pdf path>' --cites`. Numbered references trigger `pdf-figure-extractor` and a re-scan. No matches mean only that the text names no numbered figures: inspect the pages for unnumbered exhibits, non-English captions and image-only pages before calling the paper figureless. Extraction belongs at step 1, before exhibit selection. If a figure still cannot be recovered, carry its supported claim in prose and report the gap. Never substitute a different paper's figure or invent an embed filename.
+Write summaries of non-English papers in English while preserving the printed
+`title`. Verification needles remain in the source's language and typography,
+including a decimal comma (`--find '13,2 meses'`). A translated needle's failure
+says nothing about the original claim. Check numbers, units and names on the
+page; report low-confidence translations of scope instead of treating a
+familiar-looking word as proof.
 
-**Not a study, or not readable**
+## Unreadable text and helper failures
 
-- **Retraction, correction or comment on another paper.** The note's subject is the notice, not the paper it is about: what was retracted or corrected, by whom, on what grounds, when, and which article it lands on — named by that article's own title and DOI. `source:` still points at this PDF (`CONVENTIONS.md` §2b); the target is a fact in the body, not the note's source. Do not restate the target's findings from the notice — a notice reports a publication event, not the science, and a summary that re-tells the original result hands the reader exactly the claim that was withdrawn. The ladder grades evidence about the world, so the notice's own statements are attributed rather than graded ("the journal retracted it in March 2024, citing duplicated images"), and the ladder binds again the moment the note says anything about whether the original finding still holds. If the affected paper has its own note in `Articles/`, say so in the report: this skill writes exactly one note per run and it is not that one.
-- **Not in English.** Write the note in English and keep `title:` as the first page prints it (step 5). The step that actually breaks is 10: the needles come off the paper, so they stay in the paper's language *and its typography* — `python3 '<skill>/scripts/paper_text.py' '<pdf path>' --find '13,2 meses'`, decimal comma included. A translated needle is guaranteed to come back missing, and that miss says nothing about the claim, which makes it worse than not checking. Numbers, units and proper nouns verify exactly as they do in English; what does not verify is your reading of the prose, so a scope clause inferred from a cognate is a low-confidence call and gets reported as one (step 12).
-- **Scan with no text layer.** `paper_text.py` exits **4**, names the page count, and stops; step 2 holds the fix — OCR it (`ocrmypdf '<in>.pdf' '<out>.pdf'`) or read it with the `pdf` skill. The other non-zero exits are different failures and none of them means "this is a scan": **2** is a bad path or an empty needle (fix the command), **3** is that neither PyMuPDF nor pypdf is installed (install one and re-run — on exit 3 the PDF has not been looked at), and **5** is a file that is not a readable PDF at all, or is structurally valid with zero pages (it needs replacing; OCR cannot help). Write the OCR'd copy to a scratch path, never into `Sources/PDFs/` beside the original: a second PDF there is a second stem, and the stem is the whole identity every consumer keys on (`CONVENTIONS.md` §1a), so the next scan reports it as another paper — one with no figures of its own and a name `pdf-organizer` never produced. Expect step 10 to argue with the OCR too: a misread digit is as likely as a claim that was never there, so a missing needle on an OCR'd file is corrected against the page image, exactly as step 10 requires — corrected or cut, never softened into something vaguer.
+`paper_text.py` exits distinguish different problems:
 
-**Assembly**
+| Exit | Meaning / action |
+|---|---|
+| 1 | At least one finder needle is missing; apply [claim verification](review-checklist.md#locate-the-claims). |
+| 2 | Bad path or empty needle; fix the command. |
+| 3 | Neither PDF backend is available; repair the permitted environment or read pages directly. It has not inspected the PDF. |
+| 4 | No extractable text; inspect page images or OCR to unique scratch outside the vault. |
+| 5 | Unreadable/corrupt or zero-page PDF; stop this note and report the need for a readable source. |
 
-- **The figure the argument needs was not extracted.** Write the note without it. The claim carries in prose under its own page citation, which is what the gap actually costs: a picture, not the argument. If the missing figure's content is a table, rebuild the table instead (SKILL.md step 4) — and either way the note never says which figure it is missing, because a number the reader cannot resolve is worse than silence. Do not substitute the nearest figure that *was* extracted — a caption states one message and it would not be that claim — do not re-extract from here, and never write an embed for a file step 1 did not list. Name it in step 12's report beside the figure counts ("the main-result figure was not among them"), because closing the gap is a `pdf-figure-extractor` run and that decision is the user's. `references/figures.md` has the panel and supplementary cases.
-- **More than about eight authors.** The frontmatter rule is step 5's and is not restated here; what it does not license is compensating elsewhere. Byline order carries meaning — the last author is usually the senior one — and the trim drops them on purpose, so do not promote them back into the list, into *Availability*, or into a "led by" clause the paper never prints. Two things genuinely do change with a long byline. Where the paper's own byline is a collective (a consortium, a study group), write the collective as the paper prints it rather than mining three individual names out of a footnote. And a many-site collaboration usually widens the population it can speak for, which belongs in the scope clause (claim rule 1) rather than going unremarked.
-- **Two PDFs in the batch are the same paper.** `paper_scan.py` cannot see this, and is not built to: identity is the filename stem alone, so two differing stems are two papers and there is no content comparison anywhere in the scan. Say that plainly in the report, because the consequence is quiet rather than destructive — **nothing is overwritten**. The stems differ, so you get two notes, two summaries of one paper, and (figures keying on the stem as well) two full sets of figures, which means neither note looks wrong from the inside. You notice it in step 2, when the title and the numbers repeat. Summarise one, skip the other, and report the pair by filename: the fix is a rename, and renames belong to `pdf-organizer`, upstream of here (`CONVENTIONS.md` §1a) — its collision rule appends `_2` for a genuinely *different* document, which is precisely why a true duplicate wearing that tail looks like two documents to everything downstream. Delete neither PDF; this skill deletes nothing.
+Do not place an OCR copy beside the original in `Sources/PDFs/`: that creates a
+second source identity with no matching figures. Keep the original PDF
+unchanged. Verify OCR digits against page images; a failed needle may be OCR
+damage, not proof that the source lacks the claim. Correct from the page or cut
+an unsupported claim, never soften it into vague prose.
+
+If source-page reading is impossible, leave the summary unpublished. If only the
+finder is unavailable but the pages are readable, record manual page
+verification explicitly. Lint remains a separate required gate; its absence is
+not waived by a readable PDF or an available checklist.
+
+## Byline and duplicate-document cases
+
+For a long or collective byline use [frontmatter](note-format.md#frontmatter).
+Do not compensate for a shortened author list by promoting an omitted author
+elsewhere or adding an unsupported “led by” claim. A many-site population belongs
+in the finding's scope, not an invented byline.
+
+Two different stems can contain the same paper: the scan checks stem identity,
+not content. If reading reveals matching title/results, summarize one, skip the
+other and report both filenames. Do not create two summaries merely because
+both scans said `new`, and do not delete either PDF. Organization of source
+files belongs to `pdf-organizer`; a suffix used for distinct papers must not be
+treated as proof these contents are distinct.

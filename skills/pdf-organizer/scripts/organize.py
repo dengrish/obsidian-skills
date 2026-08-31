@@ -24,12 +24,12 @@ rewrite, and `_norm`-based +/-2 page verification — are now covered by
 
 Usage:
     # The reference check.  Run it before every rename.
-    python3 organize.py check --vault ~/Obsidian/claude-main \\
-        ~/Obsidian/claude-main/Sources/PDFs/download.pdf
+    python3 organize.py check --vault '<vault>' \\
+        '<vault>/Sources/PDFs/download.pdf'
 
-    # Plan a rename (writes nothing) — this is also the reference report.
-    python3 organize.py rename --vault ~/Obsidian/claude-main \\
-        ~/Obsidian/claude-main/Sources/PDFs/download.pdf \\
+    # Plan a rename (writes nothing), after inspecting the reference check.
+    python3 organize.py rename --vault '<vault>' \\
+        '<vault>/Sources/PDFs/download.pdf' \\
         --to Prince_UDL_2026.pdf
 
     # Apply it: the file, its figures, its notes, its chapter folder and
@@ -38,17 +38,17 @@ Usage:
 
     # Outside a vault (a Downloads inbox): omit --vault.  The vault-wide
     # checks are reported as not-run rather than silently skipped.
-    python3 organize.py rename ~/Downloads/download\\(1\\).pdf --to Smith_X_1776.pdf
+    python3 organize.py rename '<input-dir>/download(1).pdf' --to Smith_X_1776.pdf
 
     # Already in canonical form?  (Exit 0 = yes, 1 = no.)
     python3 organize.py canonical Prince_UDL_2026_02_SupLearn_src.pdf
 
     # Split a book.  chapters.json is a list of the chapter dicts described
-    # in `references/book-splitting.md`.
-    python3 organize.py split --vault ~/Obsidian/claude-main \\
-        ~/Obsidian/claude-main/Sources/PDFs/Kuhn_StructSciRev_2012.pdf \\
-        --chapters /tmp/chapters.json \\
-        --out ~/Obsidian/claude-main/Sources/PDFs/Kuhn_StructSciRev_2012
+    # in `references/book-splitting.md`; <run-temp> is unique to this run.
+    python3 organize.py split --vault '<vault>' \\
+        '<vault>/Sources/PDFs/Kuhn_StructSciRev_2012.pdf' \\
+        --chapters '<run-temp>/chapters.json' \\
+        --out '<vault>/Sources/PDFs/Kuhn_StructSciRev_2012'
 
     # The adversarial fixtures this module is held to.
     python3 organize.py selftest
@@ -132,7 +132,7 @@ class SplitRefused(Exception):
     """Refusing to split, with a reason the user needs in words.
 
     A plain Exception, not SystemExit: a batch is a loop, and SystemExit would
-    end the whole run at the first unreadable book (SKILL.md, *Batch Mode*
+    end the whole run at the first unreadable book (SKILL.md's batch workflow
     step 4).
     """
 
@@ -716,7 +716,7 @@ def _reference_re(names):
         # invisible to this pattern.  That is not a cosmetic miss: it made
         # `references()` return {} for a file the vault does cite, so the
         # pre-rename check said "rename immediately", the rewrite left the
-        # link alone, and SKILL.md's post-rename `assert not references(...)`
+        # link alone, and references/rename-repair.md's post-rename verification
         # passed on a vault the rename had just broken.  The one guard with no
         # downstream safety net certified the damage as repaired.
         #
@@ -813,7 +813,7 @@ def _qualifies(m, name, dirs, note_dir):
     was reported as citing the keyed note and rewritten to
     `[[Wiki/Sub/Prince_UDL_2026]]` — a link to nothing, because `Wiki/Sub/` is
     not what the rename touched.  Worse than the dangling link: the same
-    permissive test then stopped seeing that link, so SKILL.md's post-rename
+    permissive test then stopped seeing that link, so references/rename-repair.md's post-rename
     `assert not references(vault, old)` passed.  The one guard with no
     downstream safety net certified the break as repaired.
 
@@ -1198,8 +1198,7 @@ def plan_rename(vault, path, new_basename, dest=None):
             "it is, and name it in the report rather than dropping it "
             "silently." % (src_basename, old_ext)]
 
-    # THIS SKILL RENAMES THE STEM AND NEVER THE EXTENSION (SKILL.md, *Naming
-    # Convention*: "always preserves the original extension; only the base
+    # THIS SKILL RENAMES THE STEM AND NEVER THE EXTENSION (SKILL.md's filename rules: "always preserves the original extension; only the base
     # name changes").  A caller passing a different one believes it is
     # renaming some other file, so that is a blocker rather than a silent
     # preference — this used to be resolved by quietly discarding whatever the
@@ -1860,7 +1859,7 @@ def split_book(pdf_path, chapters, out_dir, taken=None, verbose=True):
     # `_reader` first, and the writer import after it: both come from pypdf,
     # and `_reader` is the one that turns a missing pypdf into a `SplitRefused`
     # with an install line in it. Importing PdfWriter above that call meant the
-    # bare `ImportError` escaped instead — which SKILL.md's *Batch Mode* step 4
+    # bare `ImportError` escaped instead — which SKILL.md's batch workflow
     # does not catch (it names `SplitRefused` and `OSError`), so the first book
     # in a 40-file batch ended the whole run with a traceback, and `_reader`'s
     # polished message was unreachable through this function.
@@ -1986,9 +1985,9 @@ def _cmd_check(args):
         print("  %-44s %s" % (b, p))
     refs = references(vault, set(keyed.values()), keyed_dirs(vault, keyed))
     if not refs:
-        print("\nNo references. Rename immediately — this is the normal case.")
+        print("\nNo references. Review the rename plan; no extra authorization is needed.")
         return 0
-    print("\nREFERENCED — do not rename without asking the user:")
+    print("\nREFERENCED — apply only with authorization to repair these references:")
     for md in sorted(refs):
         print("  %s\n    cites: %s" % (md, ", ".join(refs[md])))
     return 1
@@ -2177,7 +2176,7 @@ def _selftest():
                        {"UDL_2026": "Prince_UDL_2026"}),
           "see [[Articles/Prince_UDL_2026|the note]]")
 
-    # 14. The extension is never changed (SKILL.md, *Naming Convention*).
+    # 14. The extension is never changed (SKILL.md's filename rules).
     #     A caller passing a different one has the wrong file in hand, so it
     #     is refused; a source with no extension at all is the one case where
     #     the caller's is new information rather than a contradiction.  This

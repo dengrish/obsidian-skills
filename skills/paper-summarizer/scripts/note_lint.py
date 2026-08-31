@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check a paper-summarizer note against the fixed format of SKILL.md step 11.
+"""Check a paper-summarizer note against the fixed format in references/note-format.md.
 
 Prose cannot hold a format steady across notes written weeks apart.  Every rule
 below is one the shape has already drifted on -- an extra heading, a blank line
@@ -60,7 +60,7 @@ SCHEMA = ("title", "format", "sources", "author", "published",
           "created", "description", "tags", "read")
 OPTIONAL_KEYS = frozenset()
 
-# SKILL.md step 7.  Six sections, always these roles, always this order -- but
+# references/note-format.md.  Six sections, always these roles, always this order -- but
 # the *heading text* is written per paper, a short sentence about what that
 # section says.  Position is what carries the role, so these names never appear
 # in a note; they are what the note's sections are, not what they are called.
@@ -89,7 +89,7 @@ GENERIC_HEADINGS = frozenset({
     "the study", "the findings", "data", "code", "references",
 })
 
-# SKILL.md step 5: this note's enum, not a clipping's Article/Post/Video.
+# references/note-format.md: this note's enum, not a clipping's Article/Post/Video.
 FORMATS = ("Paper", "Book", "Report")
 
 # CONVENTIONS.md 3.  Stated here as data because this script is the thing that
@@ -103,7 +103,7 @@ TAG_ENUM = (
     "machine-learning",
 )
 
-# SKILL.md step 8: Limitations is the one section with a cap, because a list
+# references/note-format.md: Limitations is the one section with a cap, because a list
 # nobody reads to the end of buries the item that mattered.
 MIN_LIMITATIONS, MAX_LIMITATIONS = 2, 4
 # Step 9: data, code, and materials only.
@@ -111,7 +111,7 @@ MIN_AVAILABILITY, MAX_AVAILABILITY = 1, 3
 MAX_LIMITATION_CHARS = 420
 
 #: The house sentence limits: 25 words of prose, 20 inside a numbered step
-#: (SKILL.md step 7a).  The cap used to be 45, chosen as a generous edge around
+#: (references/note-format.md).  The cap used to be 45, chosen as a generous edge around
 #: a 30-word target; a third of the sentences in a finished note still sat
 #: above 25, and those were the ones that had to be read twice.  These two
 #: numbers came in with a controlled-language standard that this skill no
@@ -137,7 +137,7 @@ _STEP = re.compile(r"\A(\d+)\.\s+(.*)\Z")
 #: finding.  The section used to have no cap at all, on the reasoning that a
 #: paper with four experiments gets four; the cost was a section nobody read to
 #: the end of.  The rule now is one finding developed properly, with the
-#: secondary ones at a sentence each (SKILL.md step 7), and this is what makes
+#: secondary ones at a sentence each (references/note-format.md), and this is what makes
 #: that a fact rather than an intention.  Exhibits are excluded because a
 #: figure and its caption are how a result gets shorter, not longer.
 MAX_RESULTS_CHARS = 2400
@@ -643,7 +643,7 @@ def _check_structure(note, body_start, fenced):
                 if not MIN_LIMITATIONS <= len(bullets) <= MAX_LIMITATIONS:
                     note.fail(start + 1, "Limitations has %d bullets; it holds %d to "
                                          "%d -- only what would change how a reader "
-                                         "acts on the finding (SKILL.md step 8)"
+                                         "acts on the finding (references/note-format.md)"
                               % (len(bullets), MIN_LIMITATIONS, MAX_LIMITATIONS))
                 for b in bullets:
                     if len(b) > MAX_LIMITATION_CHARS:
@@ -762,7 +762,7 @@ def _check_prose(note, bounds, captions, fenced, body_start):
             if words > cap:
                 note.fail(n + 1, "a %s runs %d words, over %d -- one idea per "
                                  "sentence: a sentence is capped at %d words "
-                                 "and a numbered step at %d (SKILL.md step 7a). "
+                                 "and a numbered step at %d (references/note-format.md). "
                                  "Starts: %r"
                           % ("step" if step else "sentence", words, cap,
                              MAX_SENTENCE_WORDS, MAX_STEP_WORDS,
@@ -771,7 +771,7 @@ def _check_prose(note, bounds, captions, fenced, body_start):
         if not step and len(counted) > MAX_PARAGRAPH_SENTENCES:
             note.fail(n + 1, "a paragraph holds %d sentences, over %d -- one "
                              "topic per paragraph, six sentences at most "
-                             "(SKILL.md step 7a)"
+                             "(references/note-format.md)"
                       % (len(counted), MAX_PARAGRAPH_SENTENCES))
 
     # Methods carries the experiment as numbered steps.  The list is not
@@ -784,8 +784,7 @@ def _check_prose(note, bounds, captions, fenced, body_start):
                  if n not in fenced and _STEP.match(note.raw_lines[n].strip())]
         if steps and not MIN_STEPS <= len(steps) <= MAX_STEPS:
             note.fail(span[0] + 1, "Methods lists %d numbered steps; a walked-"
-                                   "through experiment has %d to %d (SKILL.md "
-                                   "step 7)"
+                                   "through experiment has %d to %d (references/note-format.md)"
                       % (len(steps), MIN_STEPS, MAX_STEPS))
         numbers = [int(_STEP.match(s).group(1)) for s in steps]
         if numbers and numbers != list(range(1, len(numbers) + 1)):
@@ -802,7 +801,7 @@ def _check_prose(note, bounds, captions, fenced, body_start):
         note.fail(span[0] + 1, "Results holds %d characters of prose, over %d -- "
                                "it carries the paper's main result developed "
                                "properly, with any secondary finding at a "
-                               "sentence each (SKILL.md step 7). Exhibits and "
+                               "sentence each (references/note-format.md). Exhibits and "
                                "their captions are not counted."
                   % (chars, MAX_RESULTS_CHARS))
 
@@ -948,7 +947,7 @@ def _check_tables(note, bounds, fenced):
 
 
 def _check_exhibit_numbers(note, body_start, captions, fenced):
-    """SKILL.md step 4: the note points at nothing the reader does not have.
+    """references/figures.md: the note points at nothing the reader does not have.
 
     A figure or table number is a pointer out of the note, so it is banned in
     prose and in captions alike -- and a figure number is also a second name for
@@ -965,7 +964,7 @@ def _check_exhibit_numbers(note, body_start, captions, fenced):
         if m:
             note.fail(n + 1, "%r points at something outside the note; if it "
                              "matters, embed the figure or rebuild the table, and "
-                             "never carry the number (SKILL.md step 4)"
+                             "never carry the number (references/figures.md)"
                              % m.group(0).strip())
 
 
@@ -990,7 +989,7 @@ def _check_citations(note, body_start, captions, fenced, source=None):
         prose = re.sub(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)", " ", l)
         if _FOOTNOTE.search(prose):
             note.fail(n + 1, "footnote syntax in the note; page references are "
-                             "inline links now (SKILL.md step 9a)")
+                             "inline links now (references/note-format.md)")
         wrapped = {c.start() for c in _CITATION.finditer(l)}
         for m in _PAGE_LINK.finditer(l):
             target, alias = m.group(1), m.group(2)

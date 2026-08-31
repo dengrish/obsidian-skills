@@ -1,73 +1,132 @@
 # Duplicates and reprocessing
 
-**Read this when** the input is a file that already lives in `Articles/` (a reprocess), when a duplicate guard finds an existing file and you have to decide what to do about it, or when `scripts/dedup_index.py` can't run and you need the URL-normalization rules to apply by hand.
+- [Reprocessing an existing note](#reprocessing-an-existing-note)
+- [Manual dedup index](#manual-dedup-index)
+- [Settle a slug before writing images](#settle-a-slug-before-writing-images)
+- [Publish an approved replacement](#publish-an-approved-replacement)
 
-The three guards below fire at steps 1, 3 and 11. They cost a URL lookup, a filename lookup and a pre-write check respectively, and they exist because the failure they prevent — silently overwriting a note the user has already polished and edited — leaves no trace and can't be undone.
+Use this reference for an approved rewrite, a filename collision, or the manual
+fallback when the dedup helper cannot run. The normal scan and its verdicts are
+in [Select the captures](../SKILL.md#1-select-the-captures-and-check-ownership).
 
-## Reading an `Articles/` file as input (reprocessing)
+## Reprocessing an existing note
 
-**If the input is already a polished `Articles/` file (reprocessing), its "body" is not raw article text — it opens with the previous run's `> [!Summary]` callout, then a `___` separator, then the article.** Before treating anything as the body, strip that leading Summary callout block and the `___` separator that follows it, so the body you carry forward is just the article prose (with its `![[…]]` embeds). The summary, `description`, and `tags` are all regenerated from scratch later in the pipeline — so the old ones, **and any manual edits the user made to those fields or to the summary bullets, are discarded by a reprocess.** That's expected, but mention it in the report so the user isn't surprised. (The polished file also carries `format`/`description`/`tags` keys in its YAML; ignore them on read — `format`, `tags`, and `description` are recomputed in steps 4, 8, and 9.)
+Only a note whose first current `sources:` item is a web URL belongs to this
+skill. Read legacy `source:` only when `sources:` is absent; malformed or
+ambiguous current metadata cannot establish ownership through a stale value.
+A PDF wikilink belongs to `paper-summarizer` and is not a clipping rewrite.
 
-**`read:` is the one field a reprocess reads off the old note and writes back unchanged.** It is the user's review checkbox, and a reprocess is this skill rewriting its own output over an article they have already read — not new reading for them to do. So it is deliberately outside the regenerated set: read the value before the overwrite, write it back as found, and never reset it to `false` (SKILL.md step 10). An older note that predates the field has no value to carry, and gets `read: false` like any new note.
+Naming a file already in `Articles/` for reprocessing authorizes that owned
+rewrite. Naming a raw capture that matches another note requires an explicit
+overwrite-or-skip decision; honor one already given in the conversation. Batch
+mode never overwrites a duplicate or selects polished notes on its own.
 
-**Two keys from an older producer are stripped rather than carried forward:** `roots:` (a discipline written as a wikilink, whose target note no longer exists) and `wiki:` (blank, or a wikilink into an index that is likewise gone). Drop both, and migrate a **populated** `roots:` into `tags:` first — its inner slug maps to a §3 enum value where that is unambiguous, and goes in the report for the user to place where it does not. The rule and the mapping are in SKILL.md step 10; it is a deliberate exception to leaving legacy files alone, and it covers those two keys only. Anything else outside the step-10 schema is left as found — a retired `topics:` in particular stays (`CONVENTIONS.md` §2c).
+Record the original bytes, file identity, permissions and metadata before
+preparing the replacement. Exclude this one note from its own dedup scan.
+Remove only its leading Summary callout and following `___` separator to get
+the article body. Keep existing body prose, embeds and still-valid audit
+placeholders. Do not summarize the old summary as if it were source prose.
 
-## Guard 1 (step 1) — the source-URL dedup index
+Regenerate the summary, `format`, `description` and `tags`; report that manual
+edits to those generated fields were replaced. Preserve `read:` as found, including an absent/unknown state, plus the capture URL,
+clipping date and unrelated user metadata. Report an absent/unknown review state;
+do not fill it with `false` to satisfy the generated schema. Apply only the targeted legacy migrations in
+[frontmatter](metadata-verification.md#frontmatter-for-the-polished-note).
 
-**Then check for duplicates before doing any other work.** If a polished version of this article already exists in `Articles/`, the user has already processed it — reprocessing would either be wasted work or would silently overwrite their downstream edits. Scan every `.md` file in that folder, read each one's YAML `sources:` URL (item 1 — the script also reads a legacy scalar `source:`), and compare to this raw's `source:` URL. **When you're reprocessing a file that itself lives in `Articles/` (explicit single-file mode), exclude that one file from this scan** — otherwise it matches its own `sources:` URL and the dedup logic flags the file as a duplicate of itself.
+Retain existing figure numbers. An unchanged slug leaves existing attachments
+alone; new remote images use the next free number. A changed slug needs a
+reviewed dry-run rename plan, not early changes to files the original note uses.
 
-Apply step 1's origin precedence even when checking by hand: use `source:` only if `sources:` is absent, and never infer ownership from duplicate keys or a malformed current value. An unreadable directory is a failed inventory, not an empty one; the manual fallback must cover the same complete scope before processing can continue.
+## Manual dedup index
 
-**URL comparison normalization.** Compare *normalized* URLs on both sides — the raw's and each polished note's — so that two captures of the same article match even when the strings differ. Apply in order:
+Use this only if `dedup_index.py` is unavailable and the complete `Articles/`
+scope can still be read. An unreadable directory is a failed inventory, not an
+empty one. Stop before notes or images are created if a complete scan cannot be
+established.
 
-- Lowercase the scheme and host.
-- Drop a leading `www.` from the host (`www.example.com` → `example.com`). Never disambiguates anything; frequently differs between two clips of one page.
-- Strip trailing slashes from the path.
-- Strip URL fragments (`#anchor-id`) — but **keep a routing fragment** (`#/posts/1`, `#!/posts/1`). On a fragment-routed single-page app the fragment *is* the page, so dropping it collapses every article on the site onto one key: clip one and every other one reports as a duplicate of it.
-- **Strip known tracking parameters, and only those** — the `utm_*` family, `fbclid`, `gclid`, `mc_cid`, `mc_eid`, `referrer`, `share`, and Substack's `r` and `showWelcome`. Not `ref`: it carries page identity as often as provenance (a git ref, a docs section), and `?ref=alpha` vs `?ref=beta` are two pages. These carry no page identity: the same article shared by email, by tweet, and from the archive yields three URLs that differ only here. **Leave every other query parameter alone** — `?id=`, `?p=`, `?page=`, `?v=` and friends often *are* the page identity, and dropping them would collapse genuinely different articles into one. Strip what you recognize as tracking; keep what you don't.
-- If stripping empties the query string, drop the trailing `?` too.
+Read each Markdown note's closed YAML frontmatter and first current `sources:`
+item. Only if that key is absent may legacy scalar `source:` supply the origin.
+Keep quoted scalars and lists intact; do not extract a later URL or infer
+ownership from duplicate keys, an empty current list or malformed YAML. Report
+unindexable notes and existing URL collisions. A valid first PDF wikilink is a
+paper summary, not an unindexable clipping.
 
-The asymmetry is deliberate: a false *negative* here (missing a duplicate) costs the user a clobbered note, while a false *positive* (wrongly matching two articles) costs a skip they can override by naming the file explicitly. So normalize away what is provably noise, and no further.
+Normalize URLs for comparison only; retain the original URL in the note:
 
-**Decision based on duplicate-check result:**
+- Lowercase scheme and host, drop a leading `www.`, and strip trailing path
+  slashes. Do not rewrite other host/path variants such as `m.` or `/amp`.
+- Drop ordinary fragments, but keep routing fragments (`#/posts/1`, `#!/posts/1`).
+- Strip only known tracking parameters: `utm_*`, `fbclid`, `gclid`, `mc_cid`,
+  `mc_eid`, `referrer`, `share`, and Substack's `r` and `showWelcome`.
+  Preserve `ref` and unknown parameters, which can identify different pages.
+- Drop an empty trailing `?`. Preserve literal URL characters, including an
+  unpaired apostrophe; quote decoding is a YAML operation, not URL trimming.
 
-- **Duplicate found, batch mode** — skip this raw and move on to the next. **Leave the raw file exactly where it is**; it is the user's archive copy, and the polished version existing in `Articles/` is precisely why there's nothing left to do. Record the skip for the batch report with the path to the existing polished file, so the user can verify the match was right.
-- **Duplicate found, explicit-single-file mode** (the user named this specific file) — don't auto-skip; they may have a reason for explicitly asking. Surface the situation: tell them which polished file already exists at which path, and ask whether to reprocess-and-overwrite it, or skip. Wait for their answer before proceeding.
-- **No duplicate** — proceed to step 2.
+Build `{normalized URL → note path(s)}` once per batch and update it after each
+publication. Compare raw captures against both the existing index and earlier
+inputs. Different bodies at the same origin are still duplicates: retain the
+user's processed version unless they authorize a rewrite. Mobile/AMP variants
+can evade URL matching; the filename check below is a second guard, not license
+to silently merge them.
 
-**Build the index once per batch run.** Scan `Articles/` a single time at the start, building `{normalized_source_url → filepath}` with the normalization above applied to each note's `sources:` URL as it goes in — then look up each raw's normalized URL against it. Don't rescan per file; on a vault with hundreds of notes and hundreds of raws that's the difference between one pass and a quadratic one.
+## Settle a slug before writing images
 
-Two things make this index worth writing carefully rather than treating as a lookup detail. **A note whose `sources:` URL is missing or unparseable can't go in the index**, and it's therefore invisible to every subsequent duplicate check — so count those while scanning and say so in the report ("3 notes in `Articles/` have no readable `sources:`; duplicates of those can't be detected"), rather than letting them fall out silently. And **build the index before processing any raw, then keep it updated in-memory as the batch writes new notes** — two different raws in `Inbox/` can be captures of the same article, and if the index only reflects what was on disk at start, the second one won't see the note the first one just wrote.
+Check lexical occupancy of `Articles/<slug>.md`, PDF stems throughout recursive
+`Sources/PDFs/`, and loose `Sources/Images/<slug>_fig*` files. A dangling symlink
+occupies a path too. If an inventory cannot be read, resolve that failure before
+choosing a supposedly free name.
 
-## Guard 2 (step 3) — the filename-slug check
+| Existing owner | Action |
+|---|---|
+| Note with the same normalized web origin | Batch: skip, keep raw, report the existing path and both URLs if the initial check missed them. Named capture: use the explicit overwrite decision, not filename similarity as authorization. |
+| Different article, PDF summary, PDF or loose figure set | Choose `<slug>_2`, then `_3`, … until the note and image stem are free. Use the suffix for both. Report the collision. |
+| Current note being explicitly reprocessed | Keep its stem if still correct, or plan its own note/image rename below. |
 
-**Second duplicate check, now that the real slug is known.** Step 1 compared source URLs; this compares filenames, and the two miss different things. A re-clip whose URL picked up an unrecognized query parameter slips past step 1 — but it still resolves to the same author, topic, and year, so it lands on the same slug. Checking here costs one directory lookup and comes *before* the expensive work (image downloads, the completeness audit), so an escape caught now is an escape caught cheaply.
+Do not rename another owner's figures to free a stem. If a new collision appears
+at final publication, return to this check and prepare/review the new draft and
+image plan; appending a suffix only to the note leaves its images under the
+wrong owner.
 
-If `Articles/<filename_slug>.md` already exists, compare that file's normalized `sources:` URL against this raw's:
+## Publish an approved replacement
 
-- **Same normalized source** — step 1 should have caught this and didn't, which means the normalization missed something. In **batch mode, skip the raw** (leave it in place) and report it as a dedup escape, quoting both URLs so the user can see what differed — that quoted pair is the bug report that lets the normalization rule be fixed. In **explicit-single-file mode**, the user asked for this file by name, so fall through to step 11's overwrite path as they intended.
-- **Different source** — a genuine slug collision between two different articles. **Settle it here, now, before step 6 writes a single image file** — not at step 11. Disambiguate to `<slug>_2` (then `_3`, …) and use that for the note *and* the image prefix, then carry on and report it. Carrying on with the un-suffixed slug is what step 11 cannot repair: step 6 downloads this clipping's figures as `<slug>_fig_N.*` under the *other* article's stem, so the note ships as `<slug>_2.md` while its images sit under `<slug>`, its embeds resolve to nothing, and the next consumer to walk `<slug>_fig*` (`CONVENTIONS.md` §8a) merges them into the other owner's figure set. Step 11's Guard 3 says the same thing from the other end — a collision reaching it means this check was skipped, and its instruction is to come back here. The full form of this check, which also looks for a PDF or a loose figure set owning the stem, is SKILL.md step 3.
-- **Neither file exists** — the normal path. Continue to step 4.
+This sequence applies to same-name rewrites and changed-slug reprocesses. The
+original note remains intact until successful publication. `Inbox/` raws are
+never moved, deleted or rewritten, including after a successful reprocess.
 
-## Guard 3 (step 11) — collision at the destination, and the reprocess rename
+1. Complete the replacement at a unique scratch path outside the vault, using
+   planned new image names. Finish the completeness audit and review against
+   that draft. Review any image rename with `fetch_images.py rename --dry-run`
+   and `--sources '<vault>/Sources/PDFs'`; that recursive PDF ownership guard
+   must not be omitted.
+2. Preflight both paths under the selected `Articles/`. The original must still
+   be this clipping's regular, non-symlink file, with the identity and contents
+   read at the start. Check destination occupancy with `os.path.lexists`, not
+   `exists` or shell `-e`. Refuse any other occupant. A case/Unicode spelling of
+   the same note is allowed only when `os.path.samefile` confirms it and the
+   directory has **one** entry with that normalized name. Two distinct hard-link
+   entries are not a spelling alias.
+3. Stage the finished bytes in a unique temporary directory beside `Articles/`,
+   outside the note folder and on its filesystem. Preserve the original note's
+   permissions. Recheck the destination before any attachment mutation. If the
+   slug changed, execute the exact reviewed image rename with `--sources`.
+   A failed rename publishes no note: inspect per-file errors and verify its
+   rollback restored the old figure names. Report any rollback failure and the
+   actual paths left on disk.
+4. Publish the complete staged note atomically. At a free destination use
+   exclusive creation such as `os.link(staged_note, new_path)`. For an authorized
+   rewrite of the same existing note, use `os.replace` only after rechecking
+   ownership, identity and unchanged contents. Never substitute a preflight
+   followed by overwriting `mv`. If publication fails after image renames,
+   reverse them with the same helper before stopping; report any failed
+   restoration rather than claiming the original still resolves.
+5. Only after publication succeeds, remove the old pathname if it is a distinct
+   path to this owned original and its identity and contents still match
+   preflight. Do not remove it for the same-file spelling case or if it changed.
+   If cleanup is refused, retain both notes and report the old path/dedup
+   collision. Do not roll images back after publication: the new note uses
+   their new names.
 
-Collision handling at the destination:
-
-- **`Articles/<filename_slug>.md` does not exist** — write the polished file there. Most common case.
-- **`Articles/<filename_slug>.md` exists and its normalized `sources:` URL matches this raw's** — this is a duplicate that got past both earlier guards. **In batch mode, do not write.** Steps 1 and 3 both concluded this article was new and both were wrong; overwriting here would replace a note the user already has (and has possibly edited, or built wiki entries from) with a freshly-derived one, and they'd have no way to know it happened. Skip the write, leave the raw alone, and report it as a dedup escape with both URLs and the existing file's path. The only way to reach a write here is **explicit-single-file mode** where the user chose "reprocess and overwrite" at the step-1 prompt — that's an instruction, so honor it and overwrite.
-- **`Articles/<filename_slug>.md` exists and its normalized `sources:` URL differs** — a genuine collision. This should already have been settled at step 3, which checks the note, `Sources/PDFs/` and `Sources/Images/` for an owner of the stem and picks `_2` *before* step 6 writes any image. Reaching it here means step 3 was skipped or the folder changed under the run: **go back to step 3 and re-derive the slug**, rather than renaming files at this end. Append `_2`, `_3`, … until free, write there, and flag it. **Do not rename the figures under the un-suffixed stem to get out of the way** unless this is a reprocess of your own note — on a collision they belong to whoever owns the stem, and on a summary note's PDF they are `pdf-figure-extractor`'s output; moving them breaks that note's embeds silently. A differing `sources:` first item now also covers **a `paper-summarizer` summary note**, since `Articles/` holds both kinds; say which in the report, because that one is worth the user's attention.
-
-When the user explicitly names a file in `Articles/` for reprocessing, run the full pipeline as usual. The recomputed slug (from the corrected metadata in step 2 and the slug rule in step 3) may **not** match the input filename — for instance, an old file named `Pancreatic_cancer_just_met_its_match.md`, or one written under an earlier all-lowercase topic convention like `Teslo_pancreatic_cancer_2026.md`, reprocessed under the current `Author_Topic_year` (Title-Cased topic) convention becomes `Teslo_Pancreatic_Cancer_2026.md`. Two sub-cases:
-
-- **Recomputed slug matches the input filename** — overwrite the file in place; no rename needed.
-- **Recomputed slug differs** — finalize the note and its existing attachments together, only after the complete draft has passed the audit and review. Step 6 prepares a dry-run image plan; it does not rename the live files while the original note still needs them.
-
-  1. Keep the original note intact. Draft the complete replacement outside the vault, preserving its `read:` value and using the planned new image names. Complete steps 12 and 13 against that draft before changing existing attachments.
-  2. Preflight both note paths under the selected `Articles/` folder. The original must be a regular file belonging to this clipping, not a symlink, and it must still have the content read at the start. Use **lexical existence** (`os.path.lexists`), not `exists` or a shell `-e` test: a dangling symlink occupies a destination too. Refuse any other occupant. The only occupied-destination exception is a case/Unicode spelling of the same note, confirmed with `os.path.samefile` and equivalent normalized filenames. Confirm the folder has just one directory entry with that normalized name; two distinct hard-linked entries are not a spelling alias.
-  3. Stage the finished bytes on the destination filesystem in a unique temporary directory beside `Articles/`, outside the note folder. Preserve the original note's permissions. Recheck the destination and run `fetch_images.py rename` with `--sources`, using the exact plan reviewed in step 6. If that command fails, publish no note; inspect its per-file errors and confirm its rollback restored the original figure set. Report any rollback failure and the actual names left on disk.
-  4. Publish the complete staged note atomically. At a free destination use **exclusive creation**, such as `os.link(staged_note, new_path)`, which cannot overwrite a file that appeared after preflight. For an authorized rewrite of the same existing note, use `os.replace` only after rechecking ownership and the unchanged original. Never substitute a check followed by an overwriting `mv`. If publication fails, reverse the successful image rename with the same helper and restore the old image names before stopping. Report any rollback failure with the actual file paths; do not claim the original note still resolves if restoration failed.
-  5. Only after publication succeeds, remove the old pathname when it is a distinct path to this skill's own previous note and its file identity and contents still match preflight. Do not remove it for the same-file spelling case, or if it changed meanwhile. If cleanup is refused or the old note changed, retain both notes, report the remaining old path and dedup collision, and do not roll images back: the published note already uses the new names. A filesystem that cannot provide safe publication is a reported refusal, never a reason to overwrite an unknown file.
-
-  Read back the published note and verify its embeds. Flag the rename (note and attachments) so the user can update inbound wikilinks. The original note is retained until publication succeeds; failures must never be presented as a completed rename.
-
-Either way there is no raw to consider — reprocessing an `Articles/` file has no `Inbox/` counterpart, and raws are never touched regardless.
+If the filesystem cannot provide safe publication, stop and report the refusal.
+Read back the published note and verify its embeds. Report note and attachment
+renames so the user can update inbound wikilinks; do not modify unrelated notes
+or claim a failed rename completed.

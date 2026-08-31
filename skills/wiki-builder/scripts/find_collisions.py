@@ -2,70 +2,35 @@
 # -*- coding: utf-8 -*-
 """find_collisions.py -- run wiki-builder's collision probes over candidates.
 
-SKILL.md step 3 ("Resolve against existing entries") specifies five probes
-and says each one must be compared "against every existing entry's filename
-stem AND every existing entry's ``aliases:`` list".  The workflow as written
-offers only ``ls '<wiki-folder>'``, so the alias half is not actually possible
-and near-duplicates slip through.  This runs all five, both halves, and adds
-the candidate-vs-candidate pass the skill never specifies.
+Runs the collision workflow described in references/merge.md. Every probe
+compares candidates with existing slugs and aliases, and with other candidates
+in the same source run. A match is evidence for a decision, not blanket
+permission to merge notes.
 
-THE FIVE PROBES (SKILL.md (step 3, the five probes)):
+PROBES:
   a  slug-equality        candidate slug compared as-is
   b  mu-variant           both U+00B5 / U+03BC spellings probed
   c  singular-plural      plural and singular forms probed
   d  hyphenation-collapse hyphens stripped from both sides
   e  word-order           slug tokenised on "-", tokens sorted, compared
+  f  stem-morphology      light per-token suffix normalization
+  g  token-superset       one stemmed token set extends the other by at most two
 
 VERDICTS
   create      no probe fired
   merge       probe (a) or (b) fired -- same entity under a different
               spelling of the same slug, with one existing owner;
               multiple existing owners require adjudication
-  adjudicate  probe (c), (d), (e) or (f) fired -- these are near-duplicate
-              *signals*, not identity.  SKILL.md (step 3, the five probes)-489 documents a case
-              where probe (e) fires on two genuinely different techniques
-              ("Weight tying" the LM embedding-sharing trick vs. "Tying
-              weights" the autoencoder symmetry trick), whose correct
-              handling is two qualified titles, NOT a merge.  Auto-merging
-              on (c)/(d)/(e) would silently fuse them, so this tool refuses
-              to and hands the decision back.
+  adjudicate  near-duplicate signals, multiple owners or peer collisions
+              require a source-based identity decision. Probes (c)–(g)
+              never establish identity by themselves; related techniques
+              and process/tool/unit terms may need separate qualified titles.
 
-DEVIATIONS FROM THE SKILL (reconcile with prose):
-
-  * CANDIDATE-VS-CANDIDATE.  The skill only probes candidate-vs-vault, so a
-    single source yielding both "masked language model" and "masked
-    language modeling" writes two entries.  Every probe is therefore also
-    run across the candidate set itself; those matches carry
-    ``matched_via: "candidate"`` and are additionally collected under the
-    top-level ``candidate_collisions`` key.
-
-  * PROBE (f), stem-morphology -- AN EXTENSION, NOT ONE OF THE FIVE.
-    SKILL.md (step 3, the five probes) calls stemming/morphology pairs a "known blind spot" and
-    it is exactly the blind spot that lets the masked-language-model /
-    masked-language-modeling pair through: neither (c), (d) nor (e) fires
-    on it (the token sets differ).  Probe (f) applies a light per-token
-    suffix stripper and can only ever produce ``adjudicate``, never
-    ``merge``.  It is ON by default; ``--no-stem`` restores strict
-    five-probe behaviour.  Note it deliberately fires on the process /
-    tool / unit triples the skill wants kept SEPARATE (tokenization /
-    tokenizer / token) -- that is the intended outcome, since adjudicate
-    means "make this call consciously", which is precisely what SKILL.md
-    the same-surface-form rule in references/edge-cases.md asks for there.
-
-  * PROBE (g), token-superset -- ALSO AN EXTENSION.  Every key above is a
-    whole-token-multiset invariant, so a candidate that merely EXTENDS an
-    existing slug by a token or two ("K-means clustering" against
-    ``k-means.md``, "Gradient descent" against
-    ``stochastic-gradient-descent.md``) fires nothing and step 4 writes a
-    duplicate.  Probe (g) stems each side's tokens with probe (f)'s
-    stemmer and fires when one token SET is a proper subset of the other
-    and the size difference is at most 2.  Adjudicate only, never merge --
-    a qualified title beside its base term is often two entities on
-    purpose.  ON by default; ``--no-superset`` disables it.  Deliberately
-    NOT mirrored in wiki-linter's scan_vault sweep: pairs already in the
-    vault were adjudicated at creation, and qualified-vs-base slugs
-    (feature-machine-learning / machine-learning) would flood a
-    vault-wide pass.
+Candidate-to-candidate matches carry ``matched_via: "candidate"`` and also
+appear in ``candidate_collisions``. Review them before writing either entry.
+Probes (f) and (g) are enabled by default and can be disabled independently.
+The token-superset probe is deliberately absent from wiki-linter's whole-vault
+sweep, where qualified terms alongside broader concepts are often intentional.
 
 Module use:
     from find_collisions import check_candidates, load_index
@@ -76,8 +41,8 @@ CLI:
     find_collisions.py --index index.json --title "Foo" [--title ...]
     find_collisions.py --index index.json --titles titles.json
         titles.json is either ["Foo", "Bar"] or [{"title": "Foo"}, ...]
-    find_collisions.py --wiki ~/Vault/Wiki --title "Foo"   (indexes on the fly)
-      [--no-stem]      strict five probes, probe (f) off
+    find_collisions.py --wiki '<vault>/Wiki' --title "Foo"   (indexes on the fly)
+      [--no-stem]      probe (f) off
       [--no-superset]  probe (g), the token-superset extension, off
       [--no-peers]     skip the candidate-vs-candidate pass
       [--compact]      compact JSON

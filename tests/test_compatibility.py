@@ -159,6 +159,57 @@ class CompatibilityTests(unittest.TestCase):
         self.assertEqual(report.exit_code(), 1)
         self.assertTrue(any("GENERIC_HEADINGS" in row[3] for row in report.by_status("FAIL")))
 
+    def test_heading_contract_requires_its_reference_and_ordered_examples(self):
+        conventions = load("convention_heading_contract", ROOT / "tests/test_conventions.py")
+        format_path = ROOT / "skills/paper-summarizer/references/note-format.md"
+        conv = (ROOT / "shared/CONVENTIONS.md").read_text()
+        isfile = conventions.os.path.isfile
+        report = conventions.Report()
+        with patch.object(conventions.os.path, "isfile", side_effect=lambda path:
+                          False if Path(path) == format_path else isfile(path)):
+            conventions.check_note_headings(report, conv)
+        self.assertEqual(report.exit_code(), 1)
+        self.assertTrue(any("contract is missing" in row[3]
+                            for row in report.by_status("FAIL")))
+
+        lines = format_path.read_text(encoding="utf-8").splitlines()
+        question = next(i for i, line in enumerate(lines) if line.startswith("| Question |"))
+        methods = next(i for i, line in enumerate(lines) if line.startswith("| Methods |"))
+        reordered = list(lines)
+        reordered[question], reordered[methods] = reordered[methods], reordered[question]
+        duplicated = list(lines)
+        duplicated.insert(question, duplicated[question])
+        read = conventions.read
+        for label, changed in (("reordered", reordered), ("duplicate", duplicated)):
+            with self.subTest(examples=label):
+                report = conventions.Report()
+                with patch.object(conventions, "read", side_effect=lambda path:
+                                  "\n".join(changed) if Path(path) == format_path else read(path)):
+                    conventions.check_note_headings(report, conv)
+                self.assertEqual(report.exit_code(), 1)
+                self.assertTrue(any("role table" in row[3]
+                                    for row in report.by_status("FAIL")))
+
+    def test_figure_caption_checks_follow_the_writers_scope(self):
+        conventions = load("convention_caption_scope", ROOT / "tests/test_conventions.py")
+        conv = (ROOT / "shared/CONVENTIONS.md").read_text()
+        for skill, caption, expected in (
+            ("clipping-processor", "", 0),
+            ("paper-summarizer", "", 1),
+            ("wiki-builder", "*The study design.*", 0),
+        ):
+            with self.subTest(skill=skill, caption=bool(caption)):
+                text = "`[source_stem]_fig*`\n\n![[Doe_Study_2025_fig_1.png]]\n" + caption + "\n"
+                path = str(ROOT / "skills" / skill / "references" / "example.md")
+                report = conventions.Report()
+                with patch.object(conventions, "walk_skill_files", return_value=[(skill, path, text)]), \
+                        patch.object(conventions, "FIG_NAME_MIN", 1):
+                    conventions.check_figure_naming(report, conv)
+                self.assertEqual(report.exit_code(), expected)
+                if expected:
+                    self.assertTrue(any("no italic caption" in row[3]
+                                        for row in report.by_status("FAIL")))
+
     def test_packaged_helpers_run_outside_plugin_directory(self):
         # Hosts execute helpers while their cwd is the user's vault, and
         # plugin cache paths commonly contain spaces. Exercise the real CLIs.

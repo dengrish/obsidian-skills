@@ -2,7 +2,9 @@
 
 **Read this when** you want to see the whole thing assembled before writing your first note of a session, or when a piece of the output shape is unclear — where the blank lines go, how a caption sits under an embed, what the report's correction lines look like. It is illustration, not rules: the rules are in the workflow steps and the other reference files.
 
-Raw input (`Inbox/Pancreatic_cancer_just_met_its_match.md`):
+## Raw input
+
+`Inbox/Pancreatic_cancer_just_met_its_match.md`:
 
 ```
 ---
@@ -17,7 +19,9 @@ For most of the last half-century, a diagnosis of metastatic pancreatic cancer w
 [body with embedded ![](https://...) image references and trailing caption paragraphs]
 ```
 
-Polished output, written to `Articles/Teslo_Pancreatic_Cancer_2026.md` (the raw stays in `Inbox/` untouched):
+## Polished output
+
+Written to `Articles/Teslo_Pancreatic_Cancer_2026.md` (the raw stays in `Inbox/` untouched):
 
 ```
 ---
@@ -53,11 +57,11 @@ For most of the last half-century, a diagnosis of metastatic pancreatic cancer w
 [body continues with `![[Teslo_Pancreatic_Cancer_2026_fig_2.png]]` followed by `*caption.*` lines, etc., in place of the original URLs and caption paragraphs]
 ```
 
-Things to notice in this example:
+## Reading the example
 
 - **Filename slug:** `Teslo_Pancreatic_Cancer_2026.md` — first author's lastname, two Title-Cased content words from the title (dropping "just met its match"), corrected published year.
 - **No blank line between the YAML closing `---` and the `> [!Summary]` callout** — the summary opens flush on the next line.
-- **First summary bullet is the central finding** (the trial result), not the lead anecdote — leading with the article's main claim, per step 7's "main claim first." The Ben Sasse case the piece opens with is demoted to the second bullet, demonstrating "one bullet covers the lead anecdote."
+- **First summary bullet is the central finding** (the trial result), not the lead anecdote — leading with the article's main claim, as [draft assembly](../SKILL.md#4-assemble-the-complete-draft) requires. The Ben Sasse case the piece opens with is demoted to the second bullet, demonstrating "one bullet covers the lead anecdote."
 - **Headings normalized to `##` / `###`** — the body's top-level section is `##`, the sub-section is `###`, regardless of what level Web Clipper used.
 - **Description is 86 characters** — well under the 110-char cap, leading with the drug name and main finding.
 - **`read: false`, bare and last** — the user's review checkbox, written once here and never again: they tick it to `true` when they've read the note, and a later reprocess of this file leaves whatever value it finds. The quotes are absent on purpose (`read: "false"` is a string, which Obsidian's checkbox renders as permanently checked).

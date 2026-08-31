@@ -505,7 +505,7 @@ def render(result):
         # four exhibits, and a bare `figures: 27` followed by a list starting
         # `1, 1a, 1b, 1c` reads as twenty-seven of them -- which then flows
         # into a note that treats each panel as a candidate and into a report
-        # that calls twenty-three of them unused (SKILL.md steps 4 and 12).
+        # that calls twenty-three of them unused (references/figures.md).
         # The JSON has carried `panel_of` since panels existed; this is the
         # human-readable half saying the same thing.
         whole = [f for f in figs if not f.get("panel_of")]
@@ -897,7 +897,7 @@ def run_self_test():
     # render() counts whole figures and panels apart, and lists the whole
     # ones.  A bare `figures: 27` beginning `1, 1a, 1b` reads as 27 exhibits,
     # which is what makes a note treat every panel as a candidate and a report
-    # call 23 of them unused (SKILL.md steps 4 and 12).
+    # call 23 of them unused (references/figures.md).
     _panelfigs = [{"label": "1", "panel": None, "panel_of": None,
                    "file": "Doe_Foo_2025_fig_1.png", "ext": ".png"},
                   {"label": "1a", "panel": "a", "panel_of": "1",

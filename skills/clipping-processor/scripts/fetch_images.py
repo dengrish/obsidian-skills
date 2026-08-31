@@ -1976,33 +1976,35 @@ def run_self_test():
 
         skill_md = doc("SKILL.md")
         images_md = doc("references", "images.md")
-        audit_md = doc("references", "completeness-audit.md")
+        reprocess_md = doc("references", "duplicates-and-reprocessing.md")
+        lottie_md = doc("references", "lottie-recovery.md")
 
         # `rename`'s ownership guard is real, and `--sources` is what arms it.
         # It appeared in NO markdown file, so both documented invocations ran
         # without it and the refusal never fired in practice.
+        commands = re.sub(r"\\\r?\n[ \t]*", " ",
+                          skill_md + "\n" + images_md + "\n" + reprocess_md)
         rename_calls = re.findall(
-            r"fetch_images\.py rename[^\n`]*--attachments[^\n`]*",
-            skill_md + images_md)
+            r"fetch_images\.py['\"]? rename[^\n`]*--attachments[^\n`]*",
+            commands)
         check("every documented `rename` invocation passes --sources",
-              (len(rename_calls) >= 3,
+              (len(rename_calls) >= 1,
                [c for c in rename_calls if "--sources" not in c]),
               (True, []))
-        check("...and SKILL.md no longer says the script simply cannot tell "
-              "whose figures it holds",
-              bool(re.search(r"unless you give it `--sources`|"
-                             r"cannot tell whose figures it is holding — with "
-                             r"that flag", skill_md)), True)
+        check("the image procedure requires the recursive PDF ownership guard",
+              bool(re.search(r"recursive PDF ownership.{0,100}both stems",
+                             images_md, re.S)) and
+              "Never use bare `mv` or omit the PDF guard" in images_md, True)
 
         # `Sources/PDFs/` is recursive by contract (a split book lives in
         # `Sources/PDFs/<Work>/`), so the step-3 stem-owner probe has to
         # recurse. `ls -d '<vault>/Sources/PDFs/<slug>.'*` could not see a
         # chapter stem, and the collision it exists to catch went unreported.
-        check("the step-3 stem-owner probe searches Sources/PDFs recursively",
-              bool(re.search(r"find '<vault>/Sources/PDFs' -name '<slug>\.\*'",
-                             skill_md)), True)
+        check("the naming procedure checks PDF stems recursively",
+              bool(re.search(r"PDF stems throughout recursive\s+`Sources/PDFs/`",
+                             reprocess_md)), True)
         check("...and no longer globs that folder one level deep",
-              "ls -d '<vault>/Sources/PDFs/" in skill_md, False)
+              "ls -d '<vault>/Sources/PDFs/" in skill_md + reprocess_md, False)
 
         # The caps are defaults behind flags, and `--allow-private-hosts` turns
         # off a guard the same bullet list sells as unconditional. None of the
@@ -2011,17 +2013,17 @@ def run_self_test():
                      "--allow-private-hosts"):
             check("references/images.md names %s" % flag, flag in images_md,
                   True)
-        check("...and says --allow-private-hosts turns the host guard off",
-              bool(re.search(r"--allow-private-hosts.{0,400}?\boff\b",
-                             images_md, re.S)), True)
+        check("...and explains that --allow-private-hosts enables private destinations",
+              bool(re.search(r"--allow-private-hosts[^\n]*enables[^\n]*private",
+                             images_md)), True)
 
         # The Lottie converter: the download and the final placement must go
         # through this script, and the heredoc must keep to rendering.
         check("the documented Lottie flow fetches through this script",
-              "fetch_images.py' fetch" in audit_md, True)
+              "fetch_images.py' fetch" in lottie_md, True)
         check("...and places through this script",
-              "fetch_images.py' place" in audit_md, True)
-        heredoc = re.search(r"<<'PYEOF'\n(.*?)\nPYEOF", audit_md, re.S)
+              "fetch_images.py' place" in lottie_md, True)
+        heredoc = re.search(r"<<'PYEOF'\n(.*?)\nPYEOF", lottie_md, re.S)
         check("the converter heredoc is still extractable", bool(heredoc), True)
         if heredoc:
             body = heredoc.group(1)

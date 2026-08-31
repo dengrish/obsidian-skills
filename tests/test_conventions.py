@@ -2123,8 +2123,8 @@ def _fig_name_excused(text, start):
 FIG_CONCRETE_STEM_RE = re.compile(
     r"(?<![\w./<>\[-])([A-Za-z0-9][A-Za-z0-9._-]*)_fig_[A-Za-z0-9-]+\.[a-z]{2,4}\b")
 
-#: An image embed on a line of its own; §8b requires an italic caption on the
-#: line immediately below, with no blank line between.
+#: An image embed on a line of its own. Wiki and summary writers supply an
+#: italic caption immediately below; clipping captions depend on the source.
 FIG_EMBED_RE = re.compile(r"^!\[\[([^\]\n]+)\]\][ \t]*$", re.M)
 
 
@@ -2133,12 +2133,13 @@ FIG_EMBED_RE = re.compile(r"^!\[\[([^\]\n]+)\]\][ \t]*$", re.M)
 #: deleted to make a regression go away.
 NAMING_SELFTEST_MIN = 161       # the 2026-08-31 tally; shrink = FAIL
 
-#: The same idea applied to a *corpus* rather than a suite: how many stated
-#: figure filenames `figure-naming` (c) must still find.  295 today.  The
-#: vacuity guard fires only at zero, and this population is plugin-wide -- two
-#: reference files renaming `_fig_` to `_figure_` removed 16 checks from the
-#: run and nothing said so.
-FIG_NAME_MIN = 295
+#: Corpus floor for figure-naming (c), separately from behavioral case counts.
+#: Rebased after the 2026-08-31 documentation consolidation: 352 occurrences
+#: became 292 by removing repeated instructions/examples. All label families
+#: remain covered; the only removed unique token, _fig_SI1, has SI3 examples
+#: and extractor tests. Rebase only after auditing intended content moves;
+#: near-miss tokens and every remaining filename are still checked below.
+FIG_NAME_MIN = 292
 
 #: The three consumers of the source-filename rule (§1a names them all), and
 #: the surface each one must be getting from the shared module rather than
@@ -2782,7 +2783,7 @@ HTML_ELEMENTS_AMBIGUOUS = frozenset((
 
 #: What makes a `<name>` markup rather than a placeholder: a closing tag, a
 #: tag carrying an attribute, a doctype, or an unambiguous element tag beside
-#: it on the same line.  `<style>html,body{…}</style>` in completeness-audit's
+#: it on the same line.  `<style>html,body{…}</style>` in lottie-recovery's
 #: heredoc has all three shapes; `grep -oiE '(…)' <source>` has none.
 _MARKUP_CONTEXT = re.compile(
     r"</[A-Za-z][A-Za-z0-9]*\s*>"                     # </style>
@@ -3312,12 +3313,13 @@ def check_figure_naming(rep, conv):
                          at(path, m.start(), text))
     rep.saw(check, "concrete figure filenames with a literal stem", n_stems)
 
-    # (c2) §8b: every embed carries an italic caption on the line immediately
-    #      below it, with no blank line between.  PDF embeds are exempt --
-    #      §6 makes `![[file.pdf]]` the whole body of a PDF-path note.
+    # (c2) §8b: authored wiki/summary image captions sit immediately below.
+    #      Clippings preserve source captions only; a missing caption is valid
+    #      and prose alone cannot distinguish the next paragraph from one.
+    #      PDF embeds are exempt (§6's legacy PDF-path notes).
     n_embeds = 0
     for skill, path, text in walk_skill_files():
-        if not path.endswith(".md"):
+        if not path.endswith(".md") or skill == "clipping-processor":
             continue
         lines = text.splitlines()
         for m in FIG_EMBED_RE.finditer(text):
@@ -3330,7 +3332,7 @@ def check_figure_naming(rep, conv):
                 rep.fail(check,
                          "%s embeds `%s` with no italic caption on the line "
                          "immediately below (found %r). CONVENTIONS.md §8b: "
-                         "every embed carries a caption there, italic, with no "
+                         "wiki/summary embeds carry a caption there, italic, with no "
                          "blank line between."
                          % (rel(path), m.group(1), nxt.strip()[:40]),
                          at(path, m.start(), text))
@@ -5081,7 +5083,7 @@ def _absent_paths(conv):
     """``{(file, token)}`` registered in `canonical:absent-paths` (§10c).
 
     A pointer at a file that does not ship is sometimes right --
-    `completeness-audit.md` explains at length why its Lottie converter is
+    `lottie-recovery.md` explains why its Lottie converter is
     written to a temp file at runtime instead of shipping as `scripts/…`, and
     reporting that as a broken pointer would report the fix as the bug.
 
@@ -6124,20 +6126,16 @@ def mod_generic(path):
 
 
 def check_note_headings(rep, conv):
-    """The summary note's six section roles, stated twice, held to agree.
+    """Keep the summary format's ordered roles and examples aligned with lint.
 
-    The note's headings are written per paper, so what is fixed is the six
-    *roles* and their order.  `paper-summarizer/SKILL.md` step 7 states them as
-    prose a model reads; `scripts/note_lint.py` states them as a tuple a script
-    enforces, and every section check keys on position through it.  Nothing
-    bound the two, and the pair has already been edited in bulk once -- a rename
-    that touched the prose and missed the constant would leave the linter
-    rejecting every note the skill was told to write, or worse, accepting a
-    heading set the skill no longer documents.  The `canonical:` marker in
-    SKILL.md advertised this check before the check existed.
+    The prose contract lives in references/note-format.md, linked from the
+    drafting step. Its canonical block and example table must both agree
+    with note_lint.py's ROLES and generic-heading rejection set.
     """
     check = "note-headings"
     skill = os.path.join(SKILLS_DIR, "paper-summarizer", "SKILL.md")
+    format_doc = os.path.join(SKILLS_DIR, "paper-summarizer", "references",
+                              "note-format.md")
     lint = os.path.join(SKILLS_DIR, "paper-summarizer", "scripts", "note_lint.py")
     if not os.path.isfile(skill):
         rep.ok(check, "paper-summarizer is not installed; nothing to check")
@@ -6148,20 +6146,25 @@ def check_note_headings(rep, conv):
                         "scripts/note_lint.py is not, so the six section roles "
                         "are stated once and enforced by nothing", rel(skill))
         return
-    stated = canonical_block(read(skill), "summary-note:roles", required=False)
+    if not os.path.isfile(format_doc):
+        rep.fail(check, "paper-summarizer is installed but its note-format.md "
+                        "contract is missing; the section roles are unchecked",
+                 rel(format_doc))
+        return
+    stated = canonical_block(read(format_doc), "summary-note:roles", required=False)
     stated = [l.strip() for l in stated if l.strip()]
     if not stated:
-        rep.fail(check, "paper-summarizer/SKILL.md has no "
+        rep.fail(check, "paper-summarizer/references/note-format.md has no "
                         "`canonical:summary-note:roles` block, so the section roles "
                         "note_lint.py enforces are stated in only one place",
-                 rel(skill))
+                 rel(format_doc))
         return
     got = None
     try:
         tree = ast.parse(read(lint))
     except SyntaxError as exc:
-        rep.fail(check, "note_lint.py does not parse (%s), so its HEADINGS "
-                        "constant could not be compared with SKILL.md's block"
+        rep.fail(check, "note_lint.py does not parse (%s), so its ROLES "
+                        "constant could not be compared with note-format.md's block"
                  % exc.msg, rel(lint))
         return
     for node in tree.body:
@@ -6183,29 +6186,25 @@ def check_note_headings(rep, conv):
     if got is None:
         rep.fail(check, "note_lint.py has no module-level ROLES literal, so the "
                         "section roles it enforces cannot be compared with the "
-                        "ones SKILL.md documents", rel(lint))
+                        "ones note-format.md documents", rel(lint))
         return
     if got != stated:
-        rep.fail(check, "note_lint.py ROLES is %s but SKILL.md's canonical block "
+        rep.fail(check, "note_lint.py ROLES is %s but note-format.md's canonical block "
                         "says %s -- the linter and the instructions disagree "
                         "about what sections a note has"
                  % (" | ".join(got) or "(empty)", " | ".join(stated)), rel(lint))
         return
-    # Three copies, not two.  The canonical block and ROLES are what the
-    # linter runs on; step 7's table is what the model reads, and a rename that
-    # touches only the table leaves the harness green while the instructions
-    # and the enforcement disagree.  `GENERIC_HEADINGS` is a fourth: it is what
-    # rejects a heading that fell back to a role name, so a role missing from
-    # it is a role the linter will happily accept as a heading.
-    skill_text = read(skill)
+    # The examples are instructions too: check their order and uniqueness,
+    # not merely membership in the canonical list.
+    format_text = read(format_doc)
     table = [m.group(1).strip() for m in
              re.finditer(r"(?m)^\|\s*([A-Za-z][A-Za-z ]*?)\s*\|\s*`## ",
-                         skill_text)]
-    missing_row = [r for r in stated if r not in table]
-    if missing_row:
-        rep.fail(check, "SKILL.md step 7's role table does not have a row for "
-                        "%s, so the table and the canonical block disagree"
-                 % ", ".join(missing_row), rel(skill))
+                         format_text)]
+    if table != stated:
+        rep.fail(check, "note-format.md's role table is %s but its canonical "
+                        "block says %s; the example roles must match in order"
+                 % (" | ".join(table) or "(empty)", " | ".join(stated)),
+                 rel(format_doc))
         return
     generic = getattr(mod_generic(lint), "GENERIC_HEADINGS", None)
     if not isinstance(generic, (set, frozenset, list, tuple)):
@@ -6221,9 +6220,9 @@ def check_note_headings(rep, conv):
         return
     rep.saw(check, "section roles stated in both places", len(stated))
     rep.saw(check, "role-table rows cross-checked", len(table))
-    rep.ok(check, "SKILL.md's canonical block, its step-7 table and "
+    rep.ok(check, "note-format.md's canonical block, its example table and "
                   "note_lint.py's ROLES and GENERIC_HEADINGS all agree",
-           rel(skill))
+           rel(format_doc))
 
 
 # ===========================================================================

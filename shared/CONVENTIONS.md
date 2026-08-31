@@ -5,43 +5,16 @@ plugin depends on is stated here, once. A skill that needs one of these facts
 **points at this file** rather than restating it; where a skill's own text and
 this file disagree, this file is what a future edit should reconcile against.
 
-**The pipeline, in order.** `pdf-organizer` → `pdf-figure-extractor` → a
-note-writing stage → `wiki-builder` → `wiki-linter`. The note-writing stage is
-two skills side by side rather than one, chosen by what the source is:
-`paper-summarizer` for a research PDF already in `Sources/PDFs/`, `clipping-processor`
-for a Web Clipper capture in `Inbox/`. Each stage is usable on
-its own, but the **first** position is a constraint rather than a habit: once
-figures, notes or entries have been keyed to a source's on-disk name, renaming
-that source breaks references nothing here detects. See §1a.
+**Reading this file.** Start with the layout and scope in §1 and the input
+safety rules in §§1b–1c. Read the other sections when the active skill's
+workflow needs them; the contents below links directly to each subject.
+§5 (shared-module setup) and §10 (validation registries) are for development
+or troubleshooting, not required background for every vault run.
 
-**Why it exists.** These six skills all write into one Obsidian vault. Every
-serious bug found across several review rounds came from a shared convention
-being restated per-skill and then drifting:
-
-- `slugify.py` existed in two skills and the copies disagreed — `C++` slugged to
-  `c-plus-plus` in one and `c` in the other. The linter then proposed renaming
-  correctly-named entries, and an approved rename rewrites links vault-wide.
-- The discipline-tag enum (then 25 values) was restated in five places; one copy had 24
-  values with a different member.
-- Figure naming diverged three ways, so two skills run over the same PDF lost
-  every figure, silently.
-- One skill documented a contract the skill supposedly implementing it had
-  never heard of.
-- The roster changed and the text did not: skills kept routing work to a name
-  with no directory behind it. A contract with a skill that is not installed is
-  never enforced and never fails — the work just quietly does not happen (§10b).
-
-None of those are typos. They are what happens when a fact has more than one
-home. So: **one home per fact, here.**
-
-**Guard.** `tests/test_conventions.py` mechanically checks the skills against
-this file. Run it after editing any skill:
-
-```bash
-python3 tests/test_conventions.py
-```
-
-Each section below ends with **Depended on by** — the blast radius of changing it.
+**Contributor validation.** Run `python3 tests/test_conventions.py` after
+editing a skill. Each section's **Depended on by** identifies its consumers;
+the [development guide](../README.md#developing-and-packaging) covers the
+remaining checks and packaging.
 
 ---
 
@@ -83,28 +56,25 @@ override paths per-request, for that run only.
 | `Articles/` | **flat**; notes *about* a document — cleaned clippings and paper summaries, one schema (§2b), told apart by `sources:` item 1 | clipping-processor, paper-summarizer | wiki-builder, clipping-processor (dedup index), paper-summarizer (dedup and collision check) |
 | `Sources/PDFs/` | organized source documents, recursive. Everything pdf-organizer produces lands here — but the user may also drop a file in directly, which is why both consumers still check the stem and refuse a name pdf-organizer did not produce | pdf-organizer (renames an `Inbox/` file **and moves it here**), the user | pdf-figure-extractor, paper-summarizer, wiki-builder |
 | `Sources/PDFs/<Work>/` | book-chapter PDFs, e.g. `Sources/PDFs/Prince_UDL_2026/`. The folder is what pdf-organizer creates when it splits a book. paper-summarizer's batch **scans** it — a book is only recognisable as one when a chapter turns up beside it — and then **skips** every chapter it finds, so a sweep never becomes a book's worth of summaries | pdf-organizer, the user | pdf-figure-extractor, paper-summarizer (scans, skips), wiki-builder |
-| `Sources/Images/` | **flat**; every figure and downloaded image, all extensions, whatever it came from | pdf-figure-extractor, clipping-processor; **pdf-organizer** renames in place, but only as step 3 of an approved source rename (§1a) | wiki-builder, paper-summarizer, clipping-processor (its `rename` path re-reads the folder — §8a), wiki-linter (validates the embeds pointing here **when run with `--images`**; it lists the folder's names and compares, and never opens a file) |
+| `Sources/Images/` | **flat**; every figure and downloaded image, all extensions, whatever it came from | pdf-figure-extractor, clipping-processor; **pdf-organizer** renames in place only within an approved source rename (§1a) | wiki-builder, paper-summarizer, clipping-processor (its `rename` path re-reads the folder — §8a), wiki-linter (validates the embeds pointing here **when run with `--images`**; it lists the folder's names and compares, and never opens a file) |
 | `Wiki/` | wiki entries, one `.md` per entity (walked **recursively**) | wiki-builder, wiki-linter | wiki-builder, wiki-linter |
 | *vault root* | `<discipline>-moc.md`, `wiki-builder-suggestions.md`, `wiki-linter-suggestions.md`, `wiki-notes-suggestions.md` | wiki-linter | — |
 
-**`Inbox/` drains for PDFs and accumulates for clippings, and the asymmetry is
-deliberate.** pdf-organizer **moves** a PDF out of `Inbox/` into
-`Sources/PDFs/` as part of renaming it, because that file is the document —
-there is one copy, and it needs a permanent home the rest of the vault can
-point at. clipping-processor **never moves the raw**: a Web Clipper capture is
-an archive of exactly what the clipper grabbed, the polished note in
-`Articles/` is a second copy of that content, and the raw is the only place the
-parts the cleaning pass dropped still exist. So an `Inbox/` full of already-
-processed `.md` files is the healthy steady state, and "is this one done?" is
-answered by the dedup index (§2b `sources:` item 1), never by where the file sits.
+**Source routes.** Choose the skill by the requested result; these are not
+six mandatory stages. For PDFs, organize the filename before creating derived
+files (§1a). Figure extraction supplies images to either paper-summarizer or
+wiki-builder. Those two skills independently read the PDF: the summary is a
+finished reading note, never an intermediate source for wiki-builder. A web
+capture follows clipping-processor into `Articles/`, and that cleaned note
+can become a wiki-builder source. wiki-linter maintains existing entries
+without needing a new source or an earlier stage in the same run.
 
-**A third case leaves nothing to do: a document that is neither.** An `.epub`,
-a `.docx`, a spreadsheet — no skill here files one, and none pretends to.
-pdf-organizer refuses a non-PDF at the script level rather than renaming it
-into `Sources/PDFs/`, where `*.pdf` is what every consumer globs and a stray
-file would be invisible to all of them. The rule is that both inbox skills
-**name what they left and why**, so a folder that is still not empty after a
-run says so rather than reading as a failure.
+**`Inbox/` drains for PDFs and accumulates for clippings.** pdf-organizer moves
+PDFs into `Sources/PDFs/`; clipping-processor preserves the raw capture in
+`Inbox/` because cleaning may remove material. Its dedup index, not the raw
+file's location, records whether it was processed (§2b). On an inbox-wide run,
+route `.pdf` and captured `.md` files separately. Both skills **name unsupported
+files and leave them in place**; neither files an `.epub`, `.docx`, or spreadsheet.
 
 **Two kinds of note share `Articles/`, and `sources:` item 1 is what tells them apart.**
 Both are §2b notes-about-a-document with the same field order, and both are
@@ -137,46 +107,24 @@ else's note and is **never** overwritten).
   suggestion log as an entry. Passing the vault root where `Wiki/` is expected
   breaks all three exclusions at once.
 
-**A vault holds folders and files no skill here writes.** A plugin's data
-folder, a project the user keeps beside their notes, full-text chapter notes
-left at the root by tooling no longer part of this plugin. Five of the six
-skills cannot reach them: every input above is scoped to a named folder, so
-anything outside those folders is out of scope by construction.
-
-**pdf-organizer is the exception, and it carries an enumeration rule instead
-of a boundary.** It is the one skill a user points at an arbitrary directory —
-a Downloads folder, the vault root — so its scope is whatever it was given.
-Inside a vault the rule is an **allowlist**: enumerate `Inbox/` and
-`Sources/PDFs/`, and nothing else. That way a folder nobody anticipated is out
-of scope by default rather than a rename candidate by default, which is the
-failure a blocklist has every time the vault gains a directory. It also drops
-every `.md` when reading `Inbox/`, because those are clipping-processor's.
-
-Either way the first invariant applies: read one of these files if a user
-names it, never rewrite or remove one on your own initiative, and never widen
-a batch scan to find it.
+**Batch scope is limited to the selected skill's input folders.** Unrelated
+projects, plugin data and legacy root notes remain outside that scope. Read
+one if the user names it, but do not widen a batch scan or rewrite it on your
+own initiative. pdf-organizer also accepts an arbitrary external directory;
+inside a vault its enumeration is an **allowlist** of `Inbox/` and
+`Sources/PDFs/`, with only PDFs eligible. It does not scan every folder merely
+because the user selected the vault root.
 
 **Depended on by:** all six skills. `Sources/Images/` is the only folder all six
 reach — five in the normal course, and pdf-organizer only on the rename path
 above, where it is the one skill that moves a file another skill wrote.
-`Articles/` is the hand-off from clipping-processor to wiki-builder, and the
-*end* of the line for paper-summarizer: a summary note is a reading surface for
-the user, and the hand-off for a PDF is the file in `Sources/PDFs/` that was
-there all along. Nothing lints an `Articles/` note either — wiki-linter walks
-only `Wiki/` — so its schema is enforced by its producer's own review pass and
-nowhere else.
-
-**One contradiction, since settled in the skill:** `pdf-organizer/SKILL.md` used
-to say of `Sources/Images/` "This skill never writes there", and then, six steps
-into its own rename procedure, "Rename every figure in `Sources/Images/` whose name
-begins with the old stem". A rename is a write. The procedure was right — §1a
-requires it — so the blanket line was the one that went. It now reads "This skill
-never *creates* one; the only time it writes there is carrying that set along
-with a rename the user asked for", which is what the table above records.
+`Articles/` is outside wiki-linter's scope. Its producers enforce their own
+notes' schema and quality; paper-summarizer also runs `note_lint.py` before
+publication.
 
 ### 1a. Source-file names, and why pdf-organizer runs first
 
-pdf-organizer is the **first** stage of the pipeline: it renames source files to
+Organize PDFs before deriving filenames and links from them. pdf-organizer renames source files to
 `LastName_AbbreviatedTitle_Year.pdf` and splits a book into
 `LastName_AbbreviatedTitle_Year_NN_ChapterName.pdf` inside a `Sources/PDFs/<Work>/`
 folder. Two facts follow from that, and both are contracts other skills already
@@ -206,17 +154,7 @@ accept the unorganized PDF or merge its identity with another source.
 chapter number. Either form may end with an optional `_src` marker and an
 optional `_2`, `_3`, … disambiguator, in that order — and **that tail always
 comes last, after the chapter segment**: `Prince_UDL_2026_02_SupLearn_src`,
-never `Prince_UDL_2026_src_02_SupLearn`. That is a claim about *position* only.
-The two markers mean opposite things, and which of them a comparison may strip
-is the paragraph after next.
-
-That ordering is the fact this section exists to pin down. It had two homes —
-`CANONICAL` in pdf-organizer and a hand-written `CHAPTER_STEM_RE` in
-pdf-figure-extractor — and they disagreed in *both* directions at once, so no
-chapter name satisfied both: the form one accepted, the other rejected. One
-choice made a batch run re-rename every chapter and orphan its figures; the
-other stopped the book being recognised as split, so every figure was written
-twice under two stems that never collide and never deduplicate. Neither raises.
+never `Prince_UDL_2026_src_02_SupLearn`. Position and identity are separate:
 
 **`_src` and `_N` are not one thing.** They occupy the same end of the stem and
 carry opposite meanings, and only one of them ever comes off:
@@ -234,12 +172,6 @@ So the string to compare on is the **identity**, not a "tail-stripped stem":
 `core_stem()` returns the stem with `_src` removed and any disambiguator kept,
 and `split_tail()` returns that identity paired with the `_src` marker it
 removed.
-
-Stripping the disambiguator as well is not a rounding error; it is the bug this
-distinction closes. `Prince_UDL_2026_2` compared equal to `Prince_UDL_2026`, so
-book #2's chapter was filed under book #1 and book #2 was never recognised as
-split at all — never skipped, so every one of its figures was written twice,
-under two stems that never collide and never deduplicate. Neither half raises.
 
 **A `_N`-disambiguated book therefore matches no chapter, and `split_book`
 refuses to split one** — before it opens the file, not when the names collide.
@@ -282,12 +214,10 @@ when it does not. The check is cheap; the failure it prevents is invisible.
 output, and the later audits cannot detect every break.** Three skills key
 their output to a source's on-disk name:
 
-- wiki-builder writes `sources: "[[Name.pdf#page=N]]"` into every entry, and
-  **excludes `sources:` from its orphan audit** (§7, §9) — a `sources:` item
-  pointing at a file that no longer exists is never reported. It also decides
-  whether a source was already processed by grepping for that literal filename
-  (§7), so a renamed PDF reads as brand new and gets extracted a second time,
-  into entries that already cover it;
+- wiki-builder records `"[[Name.pdf#page=N]]"` in `sources:` and
+  **excludes `sources:` from its orphan audit** (§7, §9). Its processed-source
+  check uses decoded frontmatter through `vault_index.py` (§7), so stale
+  source names can also hide prior coverage;
 - pdf-figure-extractor names every figure `[pdf_stem]_fig_<N>.png` (§8), and
   wiki-builder finds figures by globbing that stem — rename the PDF and the
   figures are still on disk under the old stem, invisible to every consumer;
@@ -309,21 +239,13 @@ orphaned under the old stem that no entry
 happens to embed. Without `--images` the check does not run, and the scanner
 says so rather than reporting the vault clean.
 
-**So the ordering is a constraint, not a preference: organize → extract figures
-→ make notes → build wiki → lint.** A bare PDF rename after those stages
-breaks links that mostly nothing here raises: entries cite
-a filename that no longer exists, figure embeds resolve to nothing, and a PDF
-embed-note points at a missing file. None of it fails loudly — Obsidian renders
-an unresolved link as plain text, and the audits that would otherwise catch it
-are scoped away from exactly these fields. A later `--images` lint finds the
-figure embeds among them; it finds none of the rest, and it runs after the
-damage rather than instead of it. Renaming inside an already-processed
-vault is therefore a vault-wide edit rather than a file operation: either the
-references move with the name, or the rename does not happen. Detecting that a
-file is already referenced is pdf-organizer's own job. Preserve its rule to
-report the reference check and obtain authorization before renaming an already
+**Establish a stable PDF name before extraction, summary writing or wiki
+building.** These consumers do not have to run in that order; a summary is
+not a prerequisite for wiki entries. A later rename must carry every affected
+reference and derived file. pdf-organizer checks references and reports the
+read-only rename plan before obtaining any still-needed authorization for a
 referenced source. Its approved `rename_all` workflow carries related files,
-Markdown references, and default figure sidecars together, with preflight and
+Markdown references and default figure sidecars together, with preflight and
 rollback. Inspect that plan and re-probe the old names afterward; a successful
 file move alone does not establish that all references moved.
 
@@ -712,39 +634,25 @@ pins it as `checkbox`, so the value is a bare YAML boolean.
 | clipping-processor | `false`, on creation only | a new cleaned clipping note |
 | paper-summarizer | `false`, on creation only | a new summary note in `Articles/` |
 | wiki-builder | `false`, on creation; `false` again on a **body-content revision** | see the reset rule below |
-| wiki-linter | **never an existing entry's value** | a lint pass is not a revision (same argument as `created:`/`updated:`, §9); it also creates no entries — stub creation is retired — so there is no new-entry case |
-| wiki-linter | a **wrongly-spelled** value, re-spelled in place | `"false"`, `yes`/`no`, `0`/`1` → the bare boolean it already means (`item2/read-type`) |
+| wiki-linter | only a meaning-preserving spelling repair | a recognized boolean spelling becomes the bare boolean it already means (`item2/read-type`); never invent, clear or set the user's review state |
 | the user | `true`, whenever they have read it | this is the point of the field |
 
-**wiki-linter's two rows are one rule.** The bar is whether the write would
-*supply* the user's review state or merely *re-spell* an answer already sitting
-in the file. §2a points here for the whole of who may write this field, so both
-cases live here rather than one here and the rest in §9:
+**The linter preserves the meaning of `read:`.** It may normalize recognizable
+`true`/`false`, `yes`/`no`, or `0`/`1` spellings to a bare YAML boolean, including
+quoted values such as `"false"`. This corrects the checkbox's representation
+without deciding whether the user has read the note. The linter creates no
+entries, so it has no new-entry case.
 
-- **On an entry that already exists, the value is never written** — not to
-  `false`, not to `true`, not on any lint pass. A lint pass is not a revision.
-  And the linter creates no entries — stub creation is retired plugin-wide
-  (danglers are dropped to bare text; §9) — so the *never* has no new-entry
-  carve-out left.
-- **A wrongly-spelled value is repaired in place** — `"false"`, `yes`/`no`,
-  `0`/`1` rewritten to the bare boolean it already means, keeping *which* one
-  that is (`item2/read-type`). This is an ordinary fix in place, not a write of
-  the user's state: the answer is already in the file and only its spelling is
-  wrong. The spelling is not cosmetic — a quoted `"false"` is a non-empty
-  string, which the `checkbox` type renders as permanently ticked, so leaving it
-  shows the user the opposite of what the file says.
+These cases are **report-only**, with the note and the value found named under
+*Notes for the user*:
 
-**A null or empty `read:` is not repairable, and is report-only**
-(`item2/read-null`): a bare `read:`, `read: null` or `read: ~` is YAML null.
-It looks like the case above and routes with the missing-key case below,
-because the distinction is not whether the key is present but whether there is
-a sense to preserve — there is none, and writing `false` would clear a tick the
-user had set rather than correct how it was spelled.
+- `item2/read-missing`: the key is absent.
+- `item2/read-null`: the value is empty, `null`, or `~`.
+- `item2/read-unknown`: the value is unrecognizable, such as an arbitrary
+  string or a list.
 
-**An unrecognizable `read:` value is report-only too** (`item2/read-unknown`):
-an arbitrary string or a list provides no known boolean answer. Only recognizable
-`true`/`false`, `yes`/`no`, or `0`/`1` spellings may be converted; never infer an
-unknown review state.
+None contains a known boolean answer to preserve. Do not substitute `false`
+or `true`, even during otherwise mechanical frontmatter repairs.
 
 **The reset rule — body prose only.** wiki-builder sets `read: false` on an
 existing entry when, and only when, **the merge adds content to the body** — new
@@ -774,13 +682,9 @@ checkbox stays the user's to clear. wiki-builder's own merges are the
 contrast: a merge that adds an equation resets `read: false` like any other
 body content.
 
-**Nothing mechanical enforces the reset rule** — no script can see whether a
-body gained substance. What *is* mechanised is the field's presence, its type,
-and its position (`vault_index.py`'s `SCHEMA_ORDER`, `scan_vault.py`'s `CANON`,
-`lint_entry.py`'s field-order list). A missing `read:` is **reported, never
-fixed** (`item2/read-missing`): writing `read: false` into a note the user had
-already marked read would silently destroy exactly the state the field exists to
-hold. Same class as `item3/user-action`.
+The reset rule requires judgment about body substance. Scripts check the
+field's presence, type and position, but cannot decide whether new reading
+has been added.
 
 **Depended on by:** wiki-builder (creates and resets), clipping-processor
 (creates), paper-summarizer (creates, and carries the existing value across on a
@@ -1131,13 +1035,19 @@ book-chapter PDF whose chapter starts at printed page 87 has its first page at
 appears with *different* anchors in different entries — each entity is anchored
 where it is introduced.
 
-**No two items in one list may name the same document.** A PDF summary in
+**On a merge, compare full citations, including page anchors.** Do not append
+an exact wikilink already present. Different physical pages of one PDF are
+distinct citations, not different documents; preserve existing anchors. If a
+rerun chooses another introducing page and adds that citation, report the
+anchor drift under *Notes for the user* rather than appending it silently.
+
+**Do not cite both representations of a verified PDF/summary pair.** A PDF summary in
 `Articles/` (§2b) takes its PDF's stem, so `X.pdf` and `X.md` can represent one
 document. An unrelated web clipping can also happen to have that stem.
 **A matching stem is a provenance-review candidate, not proof of identity.**
 
 Before dropping a Markdown item, read that note's decoded `sources:` item 1
-(or its legacy `source:`). If it names this PDF, retain the PDF citation and
+(legacy `source:` is a fallback only when `sources:` is absent). If it names this PDF, retain the PDF citation and
 remove the redundant summary-note citation. This is a replacement on a merge,
 not an append. If the note instead has a distinct URL origin, retain both
 sources. Missing, malformed or ambiguous provenance is report-only: never
@@ -1161,8 +1071,8 @@ processed). Query the PDF and a **verified summary-note representation**
 together; omit the Markdown argument if its origin has not been established:
 
 ```bash
-python3 '<skill>/scripts/vault_index.py' '<wiki-folder>' \
-  --source '<name>.pdf' --source '<name>.md' -o /tmp/wiki-index.json
+python3 '<plugin>/skills/wiki-builder/scripts/vault_index.py' '<wiki-folder>' \
+  --source '<name>.pdf' --source '<name>.md' -o '<run-temp>/wiki-index.json'
 ```
 
 `source_matches` compares literal local basenames with NFC and case folding,
@@ -1202,12 +1112,10 @@ so figures from any source are findable by prefix.
 <!-- /canonical -->
 
 **Match on `[source_stem]_fig`, never on `[source_stem]_fig_`, and accept any
-extension.** Not every figure in a real `Sources/Images/` folder was written by a
-producer below (see 8c); matching only the stricter pattern means a PDF whose
-figures are *already sitting in `Sources/Images/`* yields entries with no images at
-all — and the unused-figure diagnostic stays silent about it, because it walks
-the same wrong pattern. A total, invisible loss. Extensions vary too: PDFs give
-`.png`, clippings give `.jpg`, `.webp`, `.gif`, `.svg`.
+extension.** This includes older separator forms (§8c) as well as current
+output. Use the same broad inventory for selection and unused-figure reporting.
+PDF output is `.png`; clipping images can also be `.jpg`, `.webp`, `.gif` or
+`.svg`.
 
 ### 8b. The producer conventions
 
@@ -1220,10 +1128,8 @@ only in where the number comes from:
 | `clipping-processor` | `<note_stem>_fig_<N>.<ext>` | sequential counter from 1, in body order | `Teslo_Pancreatic_Cancer_2026_fig_3.webp` |
 
 **pdf-figure-extractor's `auto_fig_bbox.py`, `extract_figures.py` and
-`render_page.py` are the single implementation of PDF figure cropping in this
-plugin.** They were once duplicated, and the copies drifted — see 8c for what
-that cost. There is no second copy in the tree now, and adding one is how the
-divergence re-opens.
+`render_page.py` own PDF figure cropping.** Call those helpers instead of
+copying their algorithms into another skill.
 
 **`pdf_stem` is the source PDF's on-disk stem, `_src` suffix included** — not
 the markdown note's stem. wiki-builder globs `Sources/Images/[source_stem]_fig*`
@@ -1236,18 +1142,11 @@ Shared sub-rules:
   `Supp. Figure 1` and `Extended Data Figure 1` all become `_fig_S1` by default;
   `--ed-prefix ED` gives Extended Data its own namespace. `SI` (Supporting
   Information) keeps its own namespace.
-- **A panel is a lowercase letter on the end of `<N>`, and nothing else —
-  a reading convention only, since panel *production* was retired on
-  2026-08-16.** No producer writes per-panel files any more, but earlier runs
-  did (`Doe_Method_2025_fig_1a.png` through `_fig_1e.png` beside the
-  composite `_fig_1.png`, same folder, same separator), those files remain
-  valid vault content, and the grammar stays reserved so they parse. The
-  letter is lowercase, because the vault's volume is case-insensitive and
-  `_fig_1A` and `_fig_1a` are one name on it, and it sits inside the `<N>`
-  token rather than behind a `_panel` separator of its own — a second
-  producer convention is what 8c cost last time. Panels were always
-  **additions** — the composite was always written beside them, so every
-  panel on disk has its whole figure next to it.
+- **Legacy panels end in a lowercase letter inside `<N>`**, for example
+  `Doe_Method_2025_fig_1a.png` beside the composite `_fig_1.png`. These remain
+  valid inputs, but no producer creates new per-panel files. Preserve the
+  lowercase letter and existing separator; case variants can collide on the
+  vault's filesystem.
 
   **A whole figure's label never ends in a lowercase letter**, which is what
   makes the two tellable apart on sight and by machine: the caption forms in
@@ -1264,20 +1163,22 @@ Shared sub-rules:
   that one panel's, and never count an unplaced panel as an unused figure.**
   Placing a panel discharges its parent, and placing the parent discharges
   every panel under it.
-- **Captions and publisher frames are excluded** from the cropped image; the
-  caption becomes markdown text next to the embed, never pixels.
+- **PDF crops exclude captions and publisher frames by default.** Caption
+  text is written next to the embed. The extractor documents deliberate frame
+  overrides; clipping downloads preserve the source image's bytes.
 - **The clipping note's stem *is* the source stem.** `Teslo_Pancreatic_Cancer_2026.md`
   → `Teslo_Pancreatic_Cancer_2026_fig_1.webp`. Same string, same casing. This is
   what lets wiki-builder find a clipping's images when it later processes that
   note as a source. Don't diverge from it.
-- **Every embed carries a caption** on the line immediately below it, italic,
-  no blank line between — see the consuming skill for the caption's content rules.
+- **Captions sit immediately below the image embed**, italic, with no blank
+  line between. Wiki and summary writers add explanatory captions under their
+  own content rules; clippings preserve source captions and do not invent one
+  when the capture has none.
 - **Nothing unfinished is ever written into the folder.** A download, a render
   or a format conversion happens at a temp path *outside* `Sources/Images/`,
   and only the finished file is moved in, under its final name and with the
-  extension its own bytes justify. Three skills write here and one renames in
-  place, so a half-written file in the folder is not a private mess: it is a
-  file the next consumer's glob picks up, embeds, and reports as a figure. A
+  extension its own bytes justify. The two producers and pdf-organizer's
+  rename workflow share this folder; consumers can encounter any visible file. A
   same-filesystem rename or atomic link publishes the finished file without a
   window in which the name holds partial bytes. A cross-filesystem move may
   copy directly into its destination; stage on the destination filesystem,
@@ -1323,36 +1224,16 @@ malformed or ambiguous records rather than treating them as permission to write.
 
 ### 8c. Why 8a stays loose even though 8b is uniform
 
-PDF figure extraction was once implemented twice, and the two implementations
-spelled the separator differently: one wrote the number straight onto `_fig`
-where the other wrote `_fig_1-2.png`. A single PDF run through both populated
-`Sources/Images/` twice, under names that never collide and never deduplicate, and
-every consumer matching the strict `_fig_` prefix saw exactly half of them.
-8b is uniform now, and there is only one implementation left.
-
-**The loose glob stays anyway**, for two reasons:
-
-- **Those files are still on disk.** Every figure extracted into this vault
-  before the spellings converged is still sitting in `Sources/Images/` under the
-  older name, and the user has not deleted anything. A consumer that tightens
-  its glob does not clean those up — it stops seeing them, and stops reporting
-  that it cannot see them.
-- **Looseness is what made the original divergence survivable.** It degraded to
-  half the figures rather than none, and to a diagnostic that still fired. A
-  strict glob turns the next naming disagreement into a silent total loss.
-
-Nothing anywhere describes the old spelling as current, and nothing should —
-that is what §10a's `canonical:pending-figure-text` block parks, one file at a
-time, when it happens anyway. The loose glob is a concession to files that
-exist, not a live second convention.
+Older output sometimes placed the number directly after `_fig`. Existing
+images keep those names; reading them does not authorize renaming or deletion.
+The broad glob preserves their visibility and keeps naming anomalies visible
+to the unused-figure diagnostic. All new output follows §8b. The legacy form
+is a reading compatibility rule, not another permitted producer convention.
 
 **Depended on by:** pdf-figure-extractor (produces), clipping-processor
 (**produces and consumes** — its `rename` path re-reads `Sources/Images/`
 through 8a's loose glob to carry a note's whole figure set across a slug
-change, which is a consumer's read of a folder it also writes; the producer
-exemption in the naming checks is written against the *producing* half only,
-and a strict `_fig_*` glob on this path went unflagged for eleven review passes
-because the two halves were not told apart), wiki-builder (consumes — the
+change), wiki-builder (consumes — the
 use-by-default figure rule and the unused-figure diagnostic both walk 8a),
 paper-summarizer (consumes —
 `scripts/paper_scan.py` walks 8a to inventory a stem's figures, and the skill
@@ -1415,50 +1296,23 @@ vault-wide, so the whole retroactive and cross-entry surface is its alone:
 
 It **proposes renames and duplicate merges; it never applies them unasked** — an
 approved rename then rewrites every reference everywhere, including the MOCs.
-And it **never writes `created:`, `updated:` or `read:` on an entry that already
-exists**: the first two are source-provenance fields, the third is the user's
-review state (§2d), a lint pass is none of those things, and the run report is
-the audit trail. There is no new-entry exception left — stub creation is
-retired plugin-wide, so the linter creates no entries: a dangling target is
-dropped to bare text and, when it looks like a real gap, surfaced as a
-missing-entry candidate for the user to feed through wiki-builder.
+Routine lint preserves `created:` and `updated:` and never changes the meaning
+of `read:`. The only permitted review-field edit is §2d's spelling normalization;
+unknown or absent review state is reported, not supplied. The run report is
+the audit trail. The linter creates no entries: an unresolved target becomes
+plain text and, when it looks like a real gap, a missing-entry candidate for
+a later wiki-builder run.
 
-Re-spelling a `read:` that already carries an answer — `"false"`, `yes`/`no`,
-`0`/`1` → the bare boolean it means — is not a second exception, because it
-writes no value: the answer was already in the file and only its spelling was
-wrong. A `read:` that is *null* holds no answer, so it is report-only. §2d is
-the whole rule for this field, all four cases; nothing about `read:` is decided
-here.
+Within the linter, Task 1 canonicalizes existing link spelling and formatting;
+Task 2 judges whether body-prose and Related links should be added or pruned.
+Formatting repair does not authorize a new relationship or an identity guess.
 
 ### Why the split is drawn here
 
-Both skills used to link vault-wide under separately-stated bars, and the bars
-drifted: a marginal link got added by one and pruned by the other on alternating
-runs, churning `updated:` forever with nothing to show for it. Confining
-wiki-builder to the entries it writes removes **almost all** of that overlap,
-rather than trying to hold two bars identical. **The linking bar therefore has
-exactly one home: wiki-linter's.** If wiki-builder's files still say anything
-about vault-wide or retroactive linking, that text is stale.
-
-**One case is in both scopes, and this is the rule for it.** A **merged** entry
-is at the same time an entry wiki-builder writes and an entry wiki-linter
-maintains vault-wide, so "scoped to the entries it writes" does not separate the
-two there — and the old wording, that the split "removes the overlap at the
-root", claimed more than it delivered. Half the churn loop still reproduces
-mechanically: wiki-linter prunes a weak link down to bare text; its next scan
-has no memory of prunes, so the same mention comes back as a backfill candidate
-and is rejected again by the same bar — that half is stable, and
-`link-hygiene.md` says so. The other half is not. A later source merges that
-entry, wiki-builder's interlink sweep meets the bare text, wraps its first
-occurrence, and adds the Related-footer entry back, with `updated:` bumped and
-nothing anywhere reporting that a deliberate prune was reversed.
-
-**So, on a merge, wiki-builder links only the prose it wrote in that run.** A
-bare-text mention that was already in the entry is left exactly as it is: it is
-not a candidate for the interlink sweep, however substantive it looks. The run
-cannot tell a mention nobody has judged from one wiki-linter judged and
-unwrapped on purpose, and guessing wrong in that direction is the expensive
-one — it undoes a decision silently. Concretely, on the merge path:
+**The retrospective linking bar has one home: wiki-linter.** This prevents a
+later source integration from restoring weak links that maintenance deliberately
+removed. A merged entry is in both skills' scopes, so **wiki-builder links only
+the prose it wrote or rewrote in that run**:
 
 - **Body prose:** wrap first occurrences **inside the sentences this run wrote
   or rewrote**. Prose carried over from before the merge is not re-linked, not
@@ -1472,14 +1326,10 @@ one — it undoes a decision silently. Concretely, on the merge path:
   the same answer §9 gives everywhere else, and it is now the answer inside a
   merged entry too.
 
-This narrows wiki-builder's interlink step on the merge path, deliberately. The
-alternative is an add-then-prune cycle that no run report shows, because each
-half of it looks exactly like ordinary work.
-
-For everything *other* than linking — the schema and field definitions, naming
-and slugs, body and prose conventions, the Related-footer and Flashcards
-formats, the legacy-stub format — **wiki-builder is the source of truth** and
-wiki-linter does not redefine it.
+Shared schemas, naming and link forms are defined in this file. wiki-builder's
+references own entry prose, the Related-footer and Flashcards formats, and
+legacy-stub structure. wiki-linter applies those rules with its documented
+maintenance permissions; it does not create a competing writing standard.
 
 **Depended on by:** wiki-builder, wiki-linter. Getting this wrong does not
 produce a wrong entry; it produces perpetual churn across the whole vault.
@@ -1645,7 +1495,7 @@ many had been.
 
 <!-- canonical:absent-paths -->
 ```
-skills/clipping-processor/references/completeness-audit.md :: scripts/lottie_to_gif.py
+skills/clipping-processor/references/lottie-recovery.md :: scripts/lottie_to_gif.py
 ```
 <!-- /canonical -->
 

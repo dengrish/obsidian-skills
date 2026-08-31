@@ -648,17 +648,9 @@ def run_self_test():
             case(label, (code, bool(result.get("error")), "checked" in result),
                  (1, True, False))
 
-        # --- the three guards this script backs must agree with each other ---
-        # Guard 2 (step 3) is the one line an agent actually reads when the
-        # filename check fires, and on a different-source collision it said
-        # "carry on; step 11 appends `_2`". SKILL.md step 3, SKILL.md step 11
-        # and Guard 3 all say the opposite: settle the slug HERE. Following
-        # Guard 2 routes execution past step 6, which downloads the images
-        # under the UN-SUFFIXED slug — so the note ships as `<slug>_2.md` while
-        # its figures sit at `<slug>_fig_N.*`, its embeds resolve to nothing,
-        # and the next consumer to walk `<slug>_fig*` merges them into the
-        # other owner's set. A contradiction between four places is a bug in
-        # whichever one is read at the moment of the decision.
+        # Naming must precede image writes, and a late collision must return
+        # to that decision. Check the linked action gates without requiring
+        # historical step numbers or several copies of the repair procedure.
         def _doc(*parts):
             path = os.path.normpath(os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), "..", *parts))
@@ -672,22 +664,30 @@ def run_self_test():
                 return ""
 
         dup_md = _doc("references", "duplicates-and-reprocessing.md")
-        guard2 = dup_md.split("## Guard 2")[-1].split("## Guard 3")[0]
-        case("Guard 2 does not defer a different-source collision to step 11",
-             bool(re.search(r"Carry on; step 11 appends", guard2)), False)
-        case("Guard 2 settles the slug before step 6 writes an image",
-             bool(re.search(r"before step 6 writes", guard2)), True)
-        case("...and says to disambiguate to `_2` there and then",
-             bool(re.search(r"`<slug>_2`|`_2`", guard2)), True)
-        # the other three statements of the same rule are still there, so this
-        # is agreement rather than a contradiction moved somewhere else
         skill_md = _doc("SKILL.md")
-        case("SKILL.md step 3 still settles the collision at step 3",
-             "settled *here*, not at step 11" in skill_md, True)
-        case("SKILL.md step 11 still sends a collision back to step 3",
-             "go back to step 3" in skill_md, True)
-        case("Guard 3 still sends a collision back to step 3",
-             "go back to step 3 and re-derive the slug" in dup_md, True)
+        collision = re.search(
+            r"(?ms)^## Settle a slug before writing images\n(.*?)(?=^## |\Z)",
+            dup_md)
+        guard = collision.group(1) if collision else ""
+        case("the workflow links to the required pre-image collision procedure",
+             bool(collision) and
+             "references/duplicates-and-reprocessing.md#settle-a-slug-before-writing-images"
+             in skill_md, True)
+        naming = skill_md.find("Settle the slug before downloading any image")
+        download = skill_md.find("fetch_images.py' download")
+        case("the naming decision precedes the image download command",
+             0 <= naming < download, True)
+        case("a collision uses the same disambiguator for note and image stem",
+             "`<slug>_2`" in guard and "Use the suffix for both" in guard, True)
+        case("the collision procedure returns a late conflict to naming",
+             bool(re.search(r"final publication.{0,100}return to this check",
+                            guard, re.S)), True)
+        case("the publication gate also returns a late conflict to naming",
+             bool(re.search(r"collision discovered.{0,100}returns to the naming decision",
+                            skill_md, re.S)), True)
+        case("a naming collision never authorizes moving another owner's figures",
+             bool(re.search(r"(?:Never|Do not) rename another owner's figures",
+                            guard)), True)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

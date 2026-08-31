@@ -27,8 +27,8 @@ Captions themselves are NOT included in the cropped PNGs — the bbox detector
 clips just above the caption text.
 
 Behavior:
-  - Idempotent: figures whose output PNG already exists are skipped. Re-running
-    after dropping new PDFs into Sources/PDFs/ just processes the new ones.
+  - Idempotent: existing PNGs with verified ownership are skipped. Unknown or
+    changed occupants are refused, even with --overwrite.
   - Split books are extracted from the CHAPTERS, not from the whole book.
     pdf-organizer leaves both on disk — the book in `Sources/PDFs/`, the
     chapters in `Sources/PDFs/<Work>/` — and a recursive walk finds both, so every
@@ -68,7 +68,7 @@ Usage:
     # Dry run — list what would be extracted without writing anything:
     python3 batch_extract.py --src ... --out ... --dry-run
 
-    # Force re-extract figures that already exist on disk:
+    # Re-extract existing figures whose ownership and bytes are verified:
     python3 batch_extract.py --src ... --out ... --overwrite
 
     # Record that a flagged bbox has been checked (and fixed, if it needed it),
@@ -1056,7 +1056,7 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
     stem_collisions = {paths[0].stem: paths for paths in stems.values()
                        if len(paths) > 1}
     if stem_collisions:
-        print("WARNING: filename stem collisions (figures will overwrite each other):")
+        print("WARNING: filename stem collisions (these PDFs are refused):")
         for stem, paths in stem_collisions.items():
             print(f"  stem '{stem}':")
             for p in paths:
@@ -2080,11 +2080,12 @@ def main(argv=None):
     )
     p.add_argument(
         "--overwrite", action="store_true",
-        help="Re-extract figures even if the target PNG already exists.",
+        help=("Re-extract existing PNGs only when their recorded ownership and "
+              "current bytes match. Never claim an unknown or changed file."),
     )
     p.add_argument(
         "--dry-run", action="store_true",
-        help="Detect and report, but don't write any PNGs.",
+        help="Detect and report without writing PNGs, sidecars or output directories.",
     )
     p.add_argument(
         "--dpi", type=int, default=250,
