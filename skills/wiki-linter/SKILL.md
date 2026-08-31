@@ -5,6 +5,9 @@ description: "Maintain an existing Obsidian wiki built by wiki-builder — no ne
 
 # Wiki Linter
 
+**Runtime setup:** Read [shared/RUNTIME.md](../../shared/RUNTIME.md) once per
+task for vault selection, script paths, Python dependencies, and host tools.
+
 A **no-source, whole-vault maintenance pass** over a wiki produced by `wiki-builder`. The two skills are separated by **reach**: wiki-builder's edits stop at the entries it is writing from the source in front of it, and wiki-linter is the only pass that reaches across entries and back over the vault it has already built.
 
 **wiki-builder links only inside the entries it writes, and only at targets that exist.** Processing a source, it wikilinks within the entry bodies it creates or merges and builds each one's `**Related:**` footer; it creates **no stubs** — an entity too thin for a full entry gets no note and no link, its mention staying plain text (neither skill creates stubs any more). Its reach stops there: it **does not touch entries it did not write this run**. It has no back-fill audit (an entry mentioning another entry as bare text is not wiki-builder's to wrap), and its orphan-link audit covers only the entries this run created or merged — a dangling link inside one of its own new entries is repaired there and then (the missed full entry created, or the link dropped to bare text), and the rest of the vault is left alone. Refactoring stays out of its scope too: it never renames a slug and rewrites the inbound links, never splits a sprawled entry, never merges two entries, and never populates `parents:`.
@@ -28,17 +31,17 @@ It does three things:
 
 **The wiki-builder schema is the source of truth; wiki-linter does not redefine it.** wiki-builder's SKILL.md carries the *Quality Checklist* and a one-line-per-field cheat-sheet; the full rules live in its `references/` files, and that is where to go for the real text: **field definitions and *Quoting policy*** → `wiki-builder/references/writing.md` (§1); **the wikilink form and *Cross-domain term disambiguation*** → `wiki-builder/references/writing.md` (§3); **the slug algorithm** → the plugin's `shared/scripts/slugify.py`, the single implementation both skills import — no prose copy of the pipeline survives anywhere; **the Related-footer format** → `wiki-builder/references/writing.md` (*The Related footer*, §2); **the equation policy — coverage (a calculation the source states in words is typeset), the display-block form, the vault notation standard, normalization** → `wiki-builder/references/equations.md`; **the Flashcards format and the bold/italic rules** → `wiki-builder/references/flashcards-and-emphasis.md` (§4 *Flashcards*, §5 *Bold and italic*) — that file is the second half of `writing.md`, which stops at §3 and carries neither rule; **the legacy stub format** → wiki-builder's SKILL.md (*Stubs (legacy)*) — recognition and promotion only; **neither skill creates stubs any more**, and the structural rules below apply to stubs already in the vault. This file restates the *assertions* it enforces compactly and points at wiki-builder by file + section name / checklist-item number for the full rule. If a rule here ever drifts from wiki-builder's, **wiki-builder wins** — so when adjudicating a drift, open the reference file named above rather than settling it from the cheat-sheet or from memory. **The one carve-out is linking.** Because wiki-builder now links only inside the entries it writes, *when* a mention across entries earns a wikilink, which links get pruned, and how a dangling target is resolved are **wiki-linter's to decide** — if wiki-builder's files still say something about vault-wide or retroactive linking, it is stale and this skill governs. The precedence rule is unchanged for everything else: the schema and field definitions, naming and slugs, body and prose conventions (including the sentence-length and example-discipline rules), the Related-footer and Flashcards formats, and the legacy stub format all remain wiki-builder's.
 
-## Defaults for this user
+## Vault layout
 
 Unless told otherwise (same vault layout as wiki-builder):
 
-- **Vault root:** `/Users/dennisgrishin/Downloads/claude-main`
-- **Wiki folder:** `/Users/dennisgrishin/Downloads/claude-main/Wiki`
-- **Sources/Images folder:** `/Users/dennisgrishin/Downloads/claude-main/Sources/Images`
+- **Vault root:** `<vault>` selected using `shared/RUNTIME.md`
+- **Wiki folder:** `<vault>/Wiki`
+- **Sources/Images folder:** `<vault>/Sources/Images`
 - **MOC files:** written to the **vault root** (not `Wiki/`), one per discipline tag in use, named `<discipline-slug>-moc.md` where the slug is the tag value with the `#` stripped (e.g. the `#machine-learning` tag → `machine-learning-moc.md`). Because MOCs live in the vault root and the linter only ever walks `Wiki/`, a MOC is never linted as an entry and never listed inside another MOC — both exclusions are automatic.
 - **Suggestion logs:** three files in the **vault root** — `wiki-builder-suggestions.md` and `wiki-linter-suggestions.md` (improvements to the two *skills* — see *Proposing improvements*) and `wiki-notes-suggestions.md` (improvements to the *notes themselves* — content, clarity, organization — see *Proposing note improvements*) — where each run records its proposals. Each is a **set of open items, not a run transcript**: a new proposal is appended, a proposal already open is counted in place, and nothing is ever removed except by the user. All vault-root, so the linter (which only walks `Wiki/`) never lints them; all named `*-suggestions.md`, distinct from `*-moc.md`, so the MOC step never touches them.
 
-The user may override any path per-request; the override applies to that run only. If the skill is reused on a different vault, edit the three paths above directly.
+The user may override any path per-request; the override applies to that run only. Resolve the vault using `shared/RUNTIME.md` rather than editing these files.
 
 ## Relationship to wiki-builder — two deliberate overrides
 
@@ -76,7 +79,7 @@ A steady-state vault is mostly already-correct. **Only write an entry that actua
 Before any task, build a complete model of the vault with **one scan**. Give the script its full path (`<skill>` is the directory this SKILL.md sits in — your working directory is normally the vault, where a bare `scripts/…` resolves to nothing):
 
 ```bash
-python3 '<skill>/scripts/scan_vault.py' '/Users/dennisgrishin/Downloads/claude-main/Wiki' --images '/Users/dennisgrishin/Downloads/claude-main/Sources/Images' --out '/tmp/wiki-scan-<run-id>.json'
+python3 '<skill>/scripts/scan_vault.py' '<vault>/Wiki' --images '<vault>/Sources/Images' --out '/tmp/wiki-scan-<run-id>.json'
 ```
 
 **Pass `--images` on every real run.** `CONVENTIONS.md` §1 makes this skill the validator of the embeds pointing at `Sources/Images/`, and it is the only thing that checks them: nothing else walks `Wiki/`, and `paper-summarizer`'s `note_lint.py --images` only ever sees an `Articles/` note. Without the argument that one check silently does not run, and an entry embedding a figure that is not on disk — the state §1a's rename hazard leaves behind — comes back clean. It adds `item12/missing-image` findings and changes nothing else. A path that is not a directory is a **usage error, not an empty folder**: the script exits 2 rather than reporting every embed in the vault as broken.

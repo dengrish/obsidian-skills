@@ -48,11 +48,11 @@ both then yielded two different images competing for one filename — whichever
 ran last won, silently. Do not vendor a second copy — call this one.
 
 Usage:
-    python auto_fig_bbox.py input.pdf
-    python auto_fig_bbox.py input.pdf --pages 3,4,5
-    python auto_fig_bbox.py input.pdf --emit extract --stem MyBook_Ch12
-    python auto_fig_bbox.py input.pdf --keep-frame --ed-prefix ED
-    python auto_fig_bbox.py input.pdf --coverage
+    python3 auto_fig_bbox.py input.pdf
+    python3 auto_fig_bbox.py input.pdf --pages 3,4,5
+    python3 auto_fig_bbox.py input.pdf --emit extract --stem MyBook_Ch12
+    python3 auto_fig_bbox.py input.pdf --keep-frame --ed-prefix ED
+    python3 auto_fig_bbox.py input.pdf --coverage
 
     # The adversarial fixtures this module is held to.
     python3 auto_fig_bbox.py --test
@@ -76,12 +76,9 @@ except ImportError:
         import fitz  # PyMuPDF < 1.24.3
     except ImportError:
         sys.exit(
-            "PyMuPDF required. Install with:\n"
-            "  python3 -m pip install pymupdf Pillow\n"
-            "adding --user, or --break-system-packages where pip refuses an\n"
-            "unflagged install as externally managed. Always go through\n"
-            "`python3 -m pip` -- macOS ships no bare `pip` command, and its\n"
-            "stock pip predates --break-system-packages."
+            "PyMuPDF required. Use a Python environment with the plugin\n"
+            "dependencies installed; see shared/RUNTIME.md. Install into a\n"
+            "virtual environment, not the system Python."
         )
 
 # Captures the figure label in any of these forms:
@@ -3338,7 +3335,7 @@ def main():
                 file=sys.stderr,
             )
         else:
-            # `python3` and a full path, because this text is pasted into a
+            # The current interpreter and a full path, because this text is pasted into a
             # shell whose working directory is normally the vault: macOS ships
             # no `python` binary at all, and a bare `extract_figures.py`
             # resolves to nothing there (SKILL.md's own invocation rule). The
@@ -3348,7 +3345,7 @@ def main():
                 os.path.dirname(os.path.abspath(__file__)),
                 "extract_figures.py")
             lines = [
-                f"python3 {shlex.quote(extract_py)} {shlex.quote(pdf_path)}",
+                f"{shlex.quote(sys.executable)} {shlex.quote(extract_py)} {shlex.quote(pdf_path)}",
                 f"    --out {shlex.quote(OUT_PLACEHOLDER)} "
                 f"--stem {shlex.quote(args.stem)}",
             ] + crop_lines

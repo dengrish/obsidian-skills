@@ -8,6 +8,85 @@ They are separate skills because they fire at different moments, but they write
 into **one vault under one set of conventions** — stated once in
 [`shared/CONVENTIONS.md`](shared/CONVENTIONS.md).
 
+## Codex and Claude
+
+The same six skills run in **Codex and Claude Code**, including their desktop
+surfaces when local files and shell execution are available. This is a skill
+package, not an Obsidian community plugin or an MCP server. Ordinary chats
+without filesystem access cannot run the vault workflow.
+
+| Purpose | Codex | Claude Code |
+|---|---|---|
+| Contributor instructions | `AGENTS.md` | `CLAUDE.md` imports `AGENTS.md` |
+| Plugin manifest | generated `.codex-plugin/plugin.json` | authored `.claude-plugin/plugin.json` |
+| Marketplace | `.claude-plugin/marketplace.json` (compatibility format) | same catalog |
+| Runtime instructions and helpers | `skills/` and `shared/` | the same files |
+
+`CLAUDE.md` contains only `@AGENTS.md`, the
+[documented Claude import](https://code.claude.com/docs/en/memory#agentsmd).
+This avoids duplicated instructions and symlink requirements. These files apply
+when contributing to this repository; they are not automatically loaded when
+someone uses an installed plugin in a vault. Each skill explicitly links to
+[`shared/RUNTIME.md`](shared/RUNTIME.md) for its runtime setup.
+
+Install the **whole repository** through its marketplace; copying only a
+`SKILL.md` loses its references, sibling skills, and shared Python helpers.
+The current Codex CLI also accepts the Claude marketplace format (verified
+with Codex CLI 0.147.0); keep this single catalog instead of maintaining two.
+
+```bash
+# Codex
+codex plugin marketplace add https://github.com/dengrish/obsidian-skills.git
+codex plugin add obsidian@obsidian-skills
+
+# Claude Code
+claude plugin marketplace add dengrish/obsidian-skills
+claude plugin install obsidian@obsidian-skills
+```
+
+For a local Claude development session, `claude --plugin-dir .` loads this
+checkout. Start a fresh task/session after installing or updating to pick up
+the new skills. Installing a plugin does not install its Python dependencies
+or grant vault access; follow the runtime guide. Shell examples use POSIX
+syntax (macOS, Linux, or WSL); native PowerShell commands need translation.
+
+## Developing and packaging
+
+Use Python 3.9+ and an isolated environment. From the repository root:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python tests/test_conventions.py
+.venv/bin/python tools/build_plugin.py
+.venv/bin/python tests/test_compatibility.py
+.venv/bin/python tools/build_plugin.py --check
+```
+
+The convention suite also runs all 19 bundled script self-tests. The
+compatibility suite checks both manifests, archive contents, execution from
+a different working directory with spaces in its path, and platform-sensitive
+URL and interpreter handling. When Claude Code is available, also run:
+
+```bash
+claude plugin validate .claude-plugin/plugin.json
+claude plugin validate .claude-plugin/marketplace.json
+claude plugin validate skills
+```
+
+Author common metadata in `.claude-plugin/plugin.json`; the build command
+generates the native Codex manifest and `obsidian.plugin` from current sources.
+It includes all references and shared helpers, and excludes local environments
+and Git state. `--check` detects stale generated files without rewriting them.
+
+For a release, bump the authored manifest's version, validate, rebuild, and
+commit the source and generated files together before pushing. An explicit
+version is a cache key: **pushing changed code with the same version does not
+deliver a Claude plugin update**. See
+[Claude version management](https://code.claude.com/docs/en/plugins-reference#version-management).
+Refresh the marketplace and update/reinstall the plugin in each host afterward;
+a repository push does not refresh an already-running session.
+
 ## The pipeline
 
 Everything new lands in `Inbox/`, and **the file extension is the fork**:
@@ -101,8 +180,8 @@ existing vault → wiki-linter.
 
 ## Vault layout
 
-The default root is `/Users/dennisgrishin/Downloads/claude-main`; any skill
-takes a per-request override.
+`<vault>` is the user-selected vault or an unambiguous workspace vault. See
+[`shared/RUNTIME.md`](shared/RUNTIME.md) for path selection and per-run overrides.
 
 ```
 <vault>/

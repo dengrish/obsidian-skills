@@ -59,22 +59,22 @@ Split books:
     both copies on purpose rather than by accident.
 
 Usage:
-    python batch_extract.py \\
-        --src /Users/dennisgrishin/Downloads/claude-main/Sources/PDFs \\
-        --out /Users/dennisgrishin/Downloads/claude-main/Sources/Images
+    python3 batch_extract.py \\
+        --src '<vault>/Sources/PDFs' \\
+        --out '<vault>/Sources/Images'
 
     # --src also accepts a single PDF:
-    python batch_extract.py --src /path/to/one_paper.pdf --out ...
+    python3 batch_extract.py --src /path/to/one_paper.pdf --out ...
 
     # Dry run — list what would be extracted without writing anything:
-    python batch_extract.py --src ... --out ... --dry-run
+    python3 batch_extract.py --src ... --out ... --dry-run
 
     # Force re-extract figures that already exist on disk:
-    python batch_extract.py --src ... --out ... --overwrite
+    python3 batch_extract.py --src ... --out ... --overwrite
 
     # Record that a flagged bbox has been checked (and fixed, if it needed it),
     # so later runs stop asking about it:
-    python batch_extract.py --src ... --out ... \\
+    python3 batch_extract.py --src ... --out ... \\
         --mark-reviewed Prince_UDL_2026_02_SupLearn:10-5
 
     # The adversarial fixtures this module is held to.
@@ -131,12 +131,9 @@ except ImportError:
         import fitz  # PyMuPDF < 1.24.3
     except ImportError:
         sys.exit(
-            "PyMuPDF required. Install with:\n"
-            "  python3 -m pip install pymupdf Pillow\n"
-            "adding --user, or --break-system-packages where pip refuses an\n"
-            "unflagged install as externally managed. Always go through\n"
-            "`python3 -m pip` -- macOS ships no bare `pip` command, and its\n"
-            "stock pip predates --break-system-packages."
+            "PyMuPDF required. Use a Python environment with the plugin\n"
+            "dependencies installed; see shared/RUNTIME.md. Install into a\n"
+            "virtual environment, not the system Python."
         )
 
 from auto_fig_bbox import (
@@ -747,13 +744,13 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
 def mark_reviewed_command(src_dir, out_dir, stem, fig):
     """The full `--mark-reviewed` invocation, runnable as printed.
 
-    `python3` and an absolute script path, for the same reason
+    The current Python interpreter and an absolute script path, for the same reason
     `auto_fig_bbox.py --emit extract` uses them: this text is pasted into a
     shell sitting in the vault, where macOS has no `python` binary at all and
     a bare script name resolves to nothing.
     """
     return (
-        f"python3 {shlex.quote(os.path.abspath(__file__))} "
+        f"{shlex.quote(sys.executable)} {shlex.quote(os.path.abspath(__file__))} "
         f"--src {shlex.quote(str(src_dir))} --out {shlex.quote(str(out_dir))} "
         f"--mark-reviewed {shlex.quote(f'{stem}:{fig}')}"
     )
@@ -1625,7 +1622,8 @@ def run_self_test():
         # --- the --mark-reviewed line is a command, not a fragment ----------
         cmd = mark_reviewed_command("/v/Sources/PDFs", "/v/Sources/Images",
                                     "Doe_Tiny_2025", "1")
-        ok("the mark-reviewed line runs python3", cmd.startswith("python3 "))
+        ok("the mark-reviewed line preserves the Python environment",
+           shlex.split(cmd)[0] == sys.executable)
         ok("...names this script by absolute path",
            os.path.abspath(__file__) in cmd)
         ok("...carries both required arguments",
@@ -1650,7 +1648,7 @@ def run_self_test():
         ok("the summary prints the --mark-reviewed line for a PDF that has "
            "a flag", "--mark-reviewed Doe_Tiny_2025:1" in text)
         ok("the summary prints a runnable --mark-reviewed command, not just "
-           "the flag", "python3 " in text and "--src " in text
+           "the flag", shlex.quote(sys.executable) in text and "--src " in text
            and "--out " in text)
         ok("the summary reports PARTIAL detection", "PARTIAL" in text)
         ok("...naming page-margin clipping as a cause, since the caption "

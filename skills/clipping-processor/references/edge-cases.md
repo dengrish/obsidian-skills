@@ -39,7 +39,7 @@ Several of these are quick pointers: where a rule is fully spelled out in a work
 **Completeness audit (step 12)**
 
 - **Audit can't reach the page** (fetch failed / 404 / paywalled). Skip it with the explicit `SKIPPED — <reason>` verdict — there's nothing trustworthy to compare against — and say so. The note is still produced from the clip.
-- **JS-rendered page** (a `curl` returns a near-empty skeleton). Sub-part 1's static-first / Playwright-on-sparse logic handles it; only when *even* Playwright returns nothing does the audit emit `SKIPPED — JS-rendered page returned no usable content`.
+- **JS-rendered page** (a `curl` returns a near-empty skeleton). Sub-part 1's static-first / browser-on-sparse logic handles it; only when *even* the available browser returns nothing does the audit emit `SKIPPED — JS-rendered page returned no usable content`.
 - **A missed figure that can't be placed** (no caption/alt anchor, no clear text match). Don't guess a precise spot — append after the most-related paragraph and flag the placement as approximate (sub-part 3).
 - **A Lottie whose conversion fails** (Chromium unavailable, timeout, blank output). The script writes nothing on failure; fall back per sub-part 3b's chain — the static poster if the figure has one (captioned as a still), otherwise a placeholder that records the lottie source URL. Never silently pass the poster off as the animation; an honestly-captioned still is fine.
 - **A Lottie with a static image fallback** (a `<lottie-player>` + sibling `.svg`/`.webp`). One figure: convert the Lottie and suppress the poster when conversion succeeds; if conversion can't run, emit the poster (captioned as a still) and suppress the absent GIF. Never both (sub-parts 1 and 3b).

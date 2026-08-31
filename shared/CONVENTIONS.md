@@ -72,8 +72,9 @@ Each section below ends with **Depended on by** — the blast radius of changing
 
 ## 1. Vault folder layout
 
-One vault, shared by all six skills. The default root is
-`/Users/dennisgrishin/Downloads/claude-main`; every skill lets the user
+One vault, shared by all six skills. Resolve `<vault>` using
+[the runtime guide](RUNTIME.md): use the user-selected or unambiguous workspace
+vault, never a hard-coded home-directory path. Every skill lets the user
 override paths per-request, for that run only.
 
 | Path | Holds | Written by | Read by |

@@ -5,6 +5,9 @@ description: 'Clean Web Clipper captures into polished vault notes in Articles/.
 
 # Clipping Processor
 
+**Runtime setup:** Read [shared/RUNTIME.md](../../shared/RUNTIME.md) once per
+task for vault selection, script paths, Python dependencies, and host tools.
+
 **One raw clipping in, one polished `.md` + N image files out.** A raw `.md` in `Inbox/` yields one polished `.md` in `Articles/` plus N image files in `Sources/Images/` — YAML enriched, summary callout prepended, body cleaned, image references rewritten as wikilinks — with the raw itself left in place. That is the whole of what this skill does; steps 1–14 below are the pipeline.
 
 **Its input is markdown, never a PDF.** A `.pdf` handed to this skill goes to a different skill entirely, chosen by what the user wants out of it: a summary note explaining a research paper's findings → `paper-summarizer`; figure images → `pdf-figure-extractor`; a rename or a book split into chapters → `pdf-organizer`. This skill has no PDF path — it fetches a live URL, cleans clipped HTML-derived prose and downloads remote images, and none of those three has a meaning for a local document.
@@ -15,11 +18,11 @@ Because raws persist, "has this one been processed already?" can no longer be an
 
 That source-URL check (step 1) carries real weight, because it is the *only* thing standing between a re-run and a damaged vault. Every raw is re-examined on every batch run, forever; a raw the check fails to recognize gets re-derived into a note that already exists, silently overwriting the user's polished copy and whatever they had edited into it. Steps 1, 3, and 11 each carry a guard against that, at three different costs — a URL lookup, a filename lookup, a pre-write check — because the failure they prevent leaves no trace and can't be undone.
 
-## Defaults for this user
+## Vault layout
 
 Unless told otherwise:
 
-- **Vault root:** `/Users/dennisgrishin/Downloads/claude-main`
+- **Vault root:** `<vault>` selected using `shared/RUNTIME.md`
 - **Input:** `<vault>/Inbox/` — where everything new lands, clippings and documents together. **This skill's share of it is the `.md` files and nothing else.** Treat the folder as **read-only**: raws stay here after processing and accumulate indefinitely. Clearing it out is the user's call, not the skill's — and the ones that pile up are yours, because `pdf-organizer` moves *its* inputs out and this skill never does.
 - **Output:** `<vault>/Articles/`. Notes stay there permanently: `wiki-builder` reads a note from `Articles/` as a source and writes its entries into `Wiki/`, but never moves or removes the note, so the folder remains the complete record of what this skill has produced.
 - **Images:** `<vault>/Sources/Images/` (flat — shared with every figure in the vault, whatever produced it)
@@ -41,7 +44,7 @@ A few rules recur across every step that fetches from the web — stated once he
   ```bash
   curl -sL -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" '<url>' -o '<outfile>'
   ```
-  **The URL is single-quoted and the User-Agent is not, and that asymmetry is the point:** the UA is a constant this file chose, while the URL came out of a fetched page. Inside `"…"` the shell still expands `$(…)`, backticks and `${…}`, so a double-quoted URL off a hostile page is a command (`CONVENTIONS.md` §1b). This covers the source fetch in step 12. **It does not cover image downloads in step 6 or the Lottie source fetch in step 12 sub-part 3b** — both go through `scripts/fetch_images.py` (step 6's `download`, 3b's `fetch`), which additionally enforces a scheme allowlist, refuses private hosts (re-checked at every redirect hop), caps size and wall-clock, and never writes a non-image into the vault. `curl` does none of that; see `references/images.md`. (`web_fetch` — used for metadata in step 2 and prose extraction in step 12 — sets its own headers, so the UA rule is only about `curl`.)
+  **The URL is single-quoted and the User-Agent is not, and that asymmetry is the point:** the UA is a constant this file chose, while the URL came out of a fetched page. Inside `"…"` the shell still expands `$(…)`, backticks and `${…}`, so a double-quoted URL off a hostile page is a command (`CONVENTIONS.md` §1b). This covers the source fetch in step 12. **It does not cover image downloads in step 6 or the Lottie source fetch in step 12 sub-part 3b** — both go through `scripts/fetch_images.py` (step 6's `download`, 3b's `fetch`), which additionally enforces a scheme allowlist, refuses private hosts (re-checked at every redirect hop), caps size and wall-clock, and never writes a non-image into the vault. `curl` does none of that; see `references/images.md`. (the host's web-fetch tool — used for metadata in step 2 and prose extraction in step 12 — sets its own headers, so the UA rule is only about `curl`.)
 - **The cleaned note's body always comes from the raw clip, never from a fetched page.** Steps 2 and 12 both fetch the source, but only to *verify* metadata and *audit* for gaps — never to replace the body. The user curated the clip by clipping it, and many sites (especially paywalled or JS-heavy ones) return less than Web Clipper captured. So a fetch can correct a date or surface a missed figure, but the article prose that stays is the clip's.
 
 ---
@@ -115,7 +118,7 @@ It scans `Articles/` once, applies the URL normalization to both sides, and retu
 
 **Decides:** the article's true `title`, `author`, `published`. **Produces:** corrected metadata, and a list of corrections for the report.
 
-Web Clipper metadata is often wrong — the title carries the site suffix, the author is the publication account rather than the writer, the date is off by months or years. Treat raw YAML as a hint, not as truth. Fetch the source with `web_fetch` and extract **title** (`og:title` → JSON-LD `headline` → `<title>` stripped of its site suffix), **author** (JSON-LD `author.name` → `<meta name="author">` → `article:author` → visible byline; all of them, in source order), and **published** (JSON-LD `datePublished` → `article:published_time` → a visible `<time datetime>`), normalized to `YYYY-MM-DD`.
+Web Clipper metadata is often wrong — the title carries the site suffix, the author is the publication account rather than the writer, the date is off by months or years. Treat raw YAML as a hint, not as truth. Fetch the source with the host's web-fetch tool and extract **title** (`og:title` → JSON-LD `headline` → `<title>` stripped of its site suffix), **author** (JSON-LD `author.name` → `<meta name="author">` → `article:author` → visible byline; all of them, in source order), and **published** (JSON-LD `datePublished` → `article:published_time` → a visible `<time datetime>`), normalized to `YYYY-MM-DD`.
 
 Then resolve the disagreements: **`published`** — fetched wins whenever it is valid and they differ. **`title` / `author`** — fetched wins when it is materially cleaner or more specific. **the `sources` URL and `created`** — never overwritten, whatever the fetch says. On a paywall stub or a failed fetch, fall back to the raw for every field and record those fields as unverified. Every correction goes in the report as old → new, so the user can spot-check.
 
@@ -373,7 +376,7 @@ Compare the polished note against the live page: recover what can be cleanly rec
 
 - `Completeness audit: <N> recovered, <M> flagged, <K> decoratives skipped` (ran successfully — list each below the verdict line).
 - `Completeness audit: no gaps found` (ran, page and clip matched).
-- `Completeness audit: SKIPPED — <reason>` (couldn't run; valid reasons are fetch failed, paywall stub, 404, source URL unreachable, or the page is so JS-dependent that **even a rendered (Playwright) fetch** came back with nothing usable — say which). **A sparse *static* fetch is not one of the reasons.** It is the trigger to *upgrade* to a rendered fetch, not to skip: the audit's own sub-part 1 is static-first, Playwright-on-sparse, and only "even Playwright returns nothing" ends the chain. Skipping on a thin `curl` would silently drop the audit on every SPA-hosted article — exactly the case where the clip is most likely to be missing figures — behind a verdict line that reads as legitimate. A run that produces a polished note **without** any audit verdict in the report is incomplete and should be flagged in the step-13 review.
+- `Completeness audit: SKIPPED — <reason>` (couldn't run; valid reasons are required browser/network access unavailable, fetch failed, paywall stub, 404, source URL unreachable, or the page is so JS-dependent that **even a rendered browser fetch** came back with nothing usable — say which). **A sparse *static* fetch is not one of the reasons.** It is the trigger to *upgrade* to a rendered fetch, not to skip: the audit's own sub-part 1 is static-first, Playwright-on-sparse, and only "even Playwright returns nothing" ends the chain. Skipping on a thin `curl` would silently drop the audit on every SPA-hosted article — exactly the case where the clip is most likely to be missing figures — behind a verdict line that reads as legitimate. A run that produces a polished note **without** any audit verdict in the report is incomplete and should be flagged in the step-13 review.
 
 Skip only when there is no reliable basis for comparison: the step-2 fetch failed, the page is paywalled, or the page is so JS-dependent that even a rendered fetch returns nothing usable. The audit adds a second fetch per clipping and is the heaviest step in the pipeline — that's expected, not a reason to skip it silently.
 

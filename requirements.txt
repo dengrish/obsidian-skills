@@ -1,0 +1,3 @@
+# Full plugin runtime and convention-test dependencies.
+-r skills/pdf-figure-extractor/scripts/requirements.txt
+pypdf>=4.0

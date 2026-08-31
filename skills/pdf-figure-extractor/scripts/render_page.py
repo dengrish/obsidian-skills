@@ -19,10 +19,10 @@ crop lands about 39% too far right and too far down, which is a wrong crop,
 not an error. `--dpi 72` makes pixels and points the same number.
 
 Usage:
-    python render_page.py input.pdf 16
-    python render_page.py input.pdf 16,17,18
-    python render_page.py input.pdf 16 --out ~/Desktop --dpi 150
-    python render_page.py input.pdf 16 --dpi 72     # 1 px == 1 pt
+    python3 render_page.py input.pdf 16
+    python3 render_page.py input.pdf 16,17,18
+    python3 render_page.py input.pdf 16 --out ~/Desktop --dpi 150
+    python3 render_page.py input.pdf 16 --dpi 72     # 1 px == 1 pt
 
     # The adversarial fixtures this module is held to.
     python3 render_page.py --test
@@ -44,12 +44,9 @@ except ImportError:
         import fitz  # PyMuPDF < 1.24.3
     except ImportError:
         sys.exit(
-            "PyMuPDF required. Install with:\n"
-            "  python3 -m pip install pymupdf Pillow\n"
-            "adding --user, or --break-system-packages where pip refuses an\n"
-            "unflagged install as externally managed. Always go through\n"
-            "`python3 -m pip` -- macOS ships no bare `pip` command, and its\n"
-            "stock pip predates --break-system-packages."
+            "PyMuPDF required. Use a Python environment with the plugin\n"
+            "dependencies installed; see shared/RUNTIME.md. Install into a\n"
+            "virtual environment, not the system Python."
         )
 
 

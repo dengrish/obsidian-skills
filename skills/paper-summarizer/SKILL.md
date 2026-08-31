@@ -5,6 +5,9 @@ description: 'Turn a scientific research PDF into a summary note in Articles/ th
 
 # Paper Summarizer
 
+**Runtime setup:** Read [shared/RUNTIME.md](../../shared/RUNTIME.md) once per
+task for vault selection, script paths, Python dependencies, and host tools.
+
 **One research PDF in, one note in `Articles/` out.** The note's job is narrow and worth stating plainly: a reader who has not opened the paper should finish the note knowing what was asked, what was done, what was found, how much confidence the finding carries, and what would change their mind.
 
 **That reader is a scientist from another field, and the note carries one result.** Both halves are constraints on the writing rather than notes about the audience: the vocabulary of this paper's subfield gets explained the first time it appears, the finding is stated plainly and qualified in the sentence after, and *Results* develops the paper's main result rather than touring all four. Step 7a is the whole of it, and two of its rules are checked mechanically. The PDF stays exactly where it is — this skill only reads it.
@@ -13,11 +16,11 @@ description: 'Turn a scientific research PDF into a summary note in Articles/ th
 
 **The hard part is not writing the summary; it is not overstating it.** A summary of a paper is the one artifact in this vault whose failure mode is invisible: a claim widened by one word — a hedge dropped, a population generalised, a null read as an absence — is fluent, plausible, and wrong, and nothing downstream can detect it. This is measured, not feared. Peters & Chin-Yee (2025) found large language models broadened the scope of scientific findings in 26–73% of summaries **even when the prompt explicitly asked for accuracy**, at roughly five times the rate of the human-written summaries of the same papers, and newer models did it *more* than older ones. Ovelman (2024) found major result errors in 3 of 10 model-drafted plain-language summaries. So the guards in this skill are structural — a fixed hedge ladder, a mandatory scope clause, an absolute-numbers rule, and a verification pass run against the PDF *after* drafting, with a command whose exit code is the answer. Instructions to be careful are not among them, because that is the intervention already shown not to work.
 
-## Defaults for this user
+## Vault layout
 
 Unless told otherwise:
 
-- **Vault root:** `/Users/dennisgrishin/Downloads/claude-main`
+- **Vault root:** `<vault>` selected using `shared/RUNTIME.md`
 - **Input:** `<vault>/Sources/PDFs/` walked recursively. Standalone papers under `Sources/PDFs/` are the work; the wider scan is deliberate, because a book is only recognisable as one when a chapter of it turns up in the same run (step 1). Book chapters under `Sources/PDFs/<Work>/` are found and then skipped, so scanning wide does not become a whole book's worth of summaries. A PDF named explicitly is processed wherever it lives, chapters included.
 - **Output:** `<vault>/Articles/` — **flat, one `.md` per PDF, named after the PDF's stem.** `Sources/PDFs/Doe_GutMicrobiome_2025.pdf` → `Articles/Doe_GutMicrobiome_2025.md`. That shared stem is the whole of the pairing: it is the dedup key, the figure key, and what makes the embed resolve. Create the folder if it does not exist.
 - **Figures:** `<vault>/Sources/Images/` (flat, shared). This skill **embeds** figures and never extracts, crops or renames one itself — that is `pdf-figure-extractor`'s job and there is exactly one implementation of it (`CONVENTIONS.md` §8b). The one time this folder gains a file during a run is step 1 invoking that skill, unmodified, to fill an empty inventory; everything after step 1 treats the folder as read-only.

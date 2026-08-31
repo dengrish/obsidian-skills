@@ -1412,11 +1412,9 @@ def _reader(pdf_path):
         from pypdf import PdfReader
     except ImportError as exc:                        # pragma: no cover
         raise SplitRefused(
-            "pypdf is not installed, so no PDF can be split. Install it with "
-            "`python3 -m pip install pypdf` (add --user, or "
-            "--break-system-packages where pip refuses an unflagged install; "
-            "macOS has no bare `pip` command). The rename half of this script "
-            "needs nothing beyond the standard library.") from exc
+            "pypdf is not installed, so no PDF can be split. Use a virtual "
+            "environment with the plugin dependencies; see shared/RUNTIME.md. "
+            "The rename half needs only the standard library.") from exc
     try:
         reader = PdfReader(pdf_path)
         if reader.is_encrypted:
@@ -2334,11 +2332,21 @@ def _selftest():
     with open(_updf, "w", encoding="utf-8") as fh:
         fh.write("%PDF")
     os.makedirs(os.path.join(_uv, "Sources", "Images"))
-    for _twin in ("Müller_Uber_2001_fig_1.png",      # NFC
-                  "Müller_Uber_2001_fig_1.png"):    # NFD
+    _twins = ("Müller_Uber_2001_fig_1.png",         # NFC
+              "Müller_Uber_2001_fig_1.png")         # NFD
+    for _twin in _twins:
         with open(os.path.join(_uv, "Sources", "Images", _twin), "w") as fh:
             fh.write(_twin)
-    _tm, _tren, _tblock = plan_rename(_uv, _updf, "Muller_New_2001.pdf")
+    # APFS cannot store both normalization spellings in one directory. Model
+    # the listing a normalization-sensitive filesystem supplies, so the same
+    # collision guard is exercised on macOS and Linux without skipping it.
+    from unittest.mock import patch
+    _real_listdir = _listdir
+    _images_dir = os.path.join(_uv, "Sources", "Images")
+    def _twin_listing(directory):
+        return list(_twins) if directory == _images_dir else _real_listdir(directory)
+    with patch.dict(globals(), _listdir=_twin_listing):
+        _tm, _tren, _tblock = plan_rename(_uv, _updf, "Muller_New_2001.pdf")
     check("NFC/NFD twin figures deriving onto one name are a blocker, "
           "never a silent overwrite",
           any("case/normalization" in b and "one name" in b for b in _tblock),

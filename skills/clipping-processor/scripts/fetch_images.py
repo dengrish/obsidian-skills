@@ -447,6 +447,17 @@ def _reject_non_public(host, scheme="https"):
     every straightforward `file:`/loopback/RFC1918 URL and every redirect to
     one, which is the attack a clipped page actually carries.
     """
+    # inet_aton accepts legacy numeric forms that getaddrinfo interprets
+    # differently across operating systems (0177.0.0.1 is 127.0.0.1 on Linux,
+    # but can resolve as 177.0.0.1 on macOS). A proxy may use either reading.
+    # Refuse ambiguous forms before DNS; do not trust one platform's answer.
+    try:
+        numeric = socket.inet_ntoa(socket.inet_aton(host))
+    except OSError:
+        numeric = None
+    if numeric is not None and numeric != host:
+        raise ValueError(f"ambiguous numeric IPv4 host {host!r} — use {numeric!r} "
+                         "instead (pass --allow-private-hosts if intended)")
     try:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror as exc:
@@ -1289,6 +1300,15 @@ def run_self_test():
                   check_url(url, True), None)
         # the redirect handler re-runs the same guard, so a redirect is not a
         # way around it
+        from unittest.mock import patch
+        _public = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("177.0.0.1", 0))]
+        with patch.object(socket, "getaddrinfo", return_value=_public) as _dns:
+            for _host in ("0177.0.0.1", "0x7f000001", "2130706433", "127.1"):
+                raises("ambiguous numeric host is refused before a public DNS answer: "
+                       + _host, check_url, "http://" + _host + "/a.png")
+            check("numeric alias refusal does not consult the host resolver",
+                  _dns.call_count, 0)
+        # Redirects apply the same host guard as the initial request.
         raises("a redirect to file: is refused at the hop",
                _GuardedRedirectHandler(False).redirect_request,
                None, None, 302, "Found", {}, "file:///etc/passwd")

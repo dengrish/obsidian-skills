@@ -45,15 +45,15 @@ deduplicate. Every consumer matching the strict prefix saw half the figures
 and reported nothing wrong. Do not vendor a second copy — call this one.
 
 Usage:
-    python extract_figures.py input.pdf \\
-        --out /Users/dennisgrishin/Downloads/claude-main/Sources/Images \\
+    python3 extract_figures.py input.pdf \\
+        --out '<vault>/Sources/Images' \\
         --stem Prince_UDL_2023_02_SupLearn_src \\
         --crop "3:2.1:70,130,300,330" \\
         --crop "4:2.2:95,130,540,510" \\
         --crop "5:S1:95,130,540,350"
 
     # Replace figures a batch run already wrote:
-    python extract_figures.py input.pdf --overwrite --out ... --stem ... --crop ...
+    python3 extract_figures.py input.pdf --overwrite --out ... --stem ... --crop ...
 
     # The adversarial fixtures this module is held to.
     python3 extract_figures.py --test
@@ -79,12 +79,9 @@ except ImportError:
         import fitz  # PyMuPDF < 1.24.3
     except ImportError:
         sys.exit(
-            "PyMuPDF required. Install with:\n"
-            "  python3 -m pip install pymupdf Pillow\n"
-            "adding --user, or --break-system-packages where pip refuses an\n"
-            "unflagged install as externally managed. Always go through\n"
-            "`python3 -m pip` -- macOS ships no bare `pip` command, and its\n"
-            "stock pip predates --break-system-packages."
+            "PyMuPDF required. Use a Python environment with the plugin\n"
+            "dependencies installed; see shared/RUNTIME.md. Install into a\n"
+            "virtual environment, not the system Python."
         )
 
 
@@ -158,10 +155,8 @@ def trim_white_margins(img_path, pad=4, tolerance=10):
     except ImportError:
         sys.exit(
             "Pillow required for --trim (default on). "
-            "Install with: python3 -m pip install Pillow (adding --user, or "
-            "--break-system-packages where pip refuses an unflagged install; "
-            "macOS has no bare `pip` command), or pass --no-trim to skip the "
-            "cleanup step."
+            "Use a virtual environment with the plugin dependencies "
+            "(shared/RUNTIME.md), or pass --no-trim to skip cleanup."
         )
 
     img = Image.open(img_path)

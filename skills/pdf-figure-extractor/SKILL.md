@@ -1,9 +1,12 @@
 ---
 name: pdf-figure-extractor
-description: Extract figures from PDFs into a flat output folder of cropped PNGs — a whole source folder and its subfolders, or a single named PDF — using the filename convention `[pdf_stem]_fig_N.png` (where N is the figure label from the caption). Handles every common caption style: numbered, dotted, dashed, supplementary, Extended Data, SI. Use whenever the user wants figures pulled out of PDFs, to rip figures out of a folder of papers, or to populate an Obsidian Sources/Images folder from a Sources/PDFs folder. Captions are clipped. Trigger on "extract figures from my PDFs", "rip the figures out of this paper", or any request whose deliverable is figure images. If the user wants the paper explained instead, use `paper-summarizer`; if they want it renamed or split into chapters, use `pdf-organizer`.
+description: "Extract figures from PDFs into a flat output folder of cropped PNGs — a whole source folder and its subfolders, or a single named PDF — using the filename convention `[pdf_stem]_fig_N.png` (where N is the figure label from the caption). Handles every common caption style: numbered, dotted, dashed, supplementary, Extended Data, SI. Use whenever the user wants figures pulled out of PDFs, to rip figures out of a folder of papers, or to populate an Obsidian Sources/Images folder from a Sources/PDFs folder. Captions are clipped. Trigger on \"extract figures from my PDFs\", \"rip the figures out of this paper\", or any request whose deliverable is figure images. If the user wants the paper explained instead, use `paper-summarizer`; if they want it renamed or split into chapters, use `pdf-organizer`."
 ---
 
 # PDF Figure Extractor
+
+**Runtime setup:** Read [shared/RUNTIME.md](../../shared/RUNTIME.md) once per
+task for vault selection, script paths, Python dependencies, and host tools.
 
 Walks a source directory tree (or takes one named PDF), detects every figure caption, crops the figure (excluding the caption), trims white margins, and writes the result to a flat output directory.
 
@@ -33,25 +36,21 @@ Four skills in this plugin fire on a PDF; the cue in the request decides:
 
 ## Quick start
 
-The whole workflow is one command, plus a one-time dependency install. Below, `<skill>` is the directory this SKILL.md sits in — always give the scripts that full path (your working directory is normally the vault, where a bare `scripts/…` resolves to nothing), and always `python3`, never `python` (macOS ships no `python` binary). **PyMuPDF and Pillow are not preinstalled on macOS**, and environments differ in what pip allows, so install through this chain — macOS has no bare `pip` command and its stock pip predates `--break-system-packages`, while Debian and Homebrew Pythons refuse an unflagged install as externally managed:
-
-```bash
-python3 -m pip install -r '<skill>/scripts/requirements.txt' \
-    || python3 -m pip install --user pymupdf Pillow \
-    || python3 -m pip install --break-system-packages pymupdf Pillow
-```
-
-Then confirm the source and output paths with the user (substitute their actual PDF and image directories if they differ from the defaults), and run:
+Resolve `<skill>` and `<vault>` and check Python dependencies using
+`shared/RUNTIME.md`. Reuse an available interpreter with PyMuPDF and Pillow,
+or install `requirements.txt` in an isolated virtual environment. Use that
+interpreter for the command below. Confirm paths only if the task has not
+already established them.
 
 ```bash
 python3 '<skill>/scripts/batch_extract.py' \
-    --src /Users/dennisgrishin/Downloads/claude-main/Sources/PDFs \
-    --out /Users/dennisgrishin/Downloads/claude-main/Sources/Images
+    --src '<vault>/Sources/PDFs' \
+    --out '<vault>/Sources/Images'
 ```
 
-**Defaults for this user** (the same vault layout `wiki-builder`, `wiki-linter` and `clipping-processor` hardcode):
+**Vault layout** (shared with `wiki-builder`, `wiki-linter` and `clipping-processor`):
 
-- **Vault root:** `/Users/dennisgrishin/Downloads/claude-main`
+- **Vault root:** `<vault>` selected using `shared/RUNTIME.md`
 - **Image folder:** `<vault>/Sources/Images/` — **flat**, shared with every other skill, and the home of every figure in the vault whatever produced it. This is `--out`.
 - **Document folder:** `<vault>/Sources/PDFs/`, walked recursively — this is `--src`. It is the same tree `paper-summarizer` reads; the two produce different artifacts and don't conflict, and running this skill first is what puts figures on disk for that one to embed.
 - **Not `<vault>/Inbox/`.** New files land there unorganized, and a figure keyed to `download (1)` is keyed to a name that is about to change — which is exactly what `batch_extract.py` refuses (*Run `pdf-organizer` first*). Organize first; the documents move to `Sources/PDFs/` on their way.
@@ -143,7 +142,7 @@ Source paths are walked recursively, but **output is flat** — every PNG lands 
 After processing, the script prints a summary that groups PDFs by outcome. Use this as the basis for your reply to the user — don't just say "done", call out anything that needs their attention:
 
 - **Caption collisions** — two captions in the same PDF normalizing to the same filename. The most common cause is a paper that uses both `Figure S1` style AND `Supplementary Figure 1` style for the same figure (usually correct to collapse them), or that has both Supplementary and Extended Data figures numbered 1 (where the collapse is undesired). The first caption wins; later ones are dropped. The report shows the raw caption forms (e.g., "kept 'Figure S1', dropped 'Extended Data Figure 1'") so the user can decide whether to rerun with `--ed-prefix ED` (gives Extended Data its own namespace), manually rename one source figure, or accept the collapse.
-- **Suspicious bboxes** — figures whose crop rectangle looks wrong. Four shapes are caught: one that is simply too small (a caption-only rect, a degenerate match), one that **covers only a fraction of the figure region between the previous caption and this one** — the signature of a crop whose top edge was raised by text sitting *inside* the figure — one that has reached up into the running head or a paragraph of body prose, and one that overlaps a caption (below). The PNG is still written; render the page and verify, or set a manual crop. Once you have checked one, record it with `--mark-reviewed '<stem>:<fig>'` — the summary prints the whole command, `python3` and script path included, ready to paste — and it stops being flagged on later runs. Without that, a hand-fixed crop is re-flagged forever and the list becomes noise nobody reads.
+- **Suspicious bboxes** — figures whose crop rectangle looks wrong. Four shapes are caught: one that is simply too small (a caption-only rect, a degenerate match), one that **covers only a fraction of the figure region between the previous caption and this one** — the signature of a crop whose top edge was raised by text sitting *inside* the figure — one that has reached up into the running head or a paragraph of body prose, and one that overlaps a caption (below). The PNG is still written; render the page and verify, or set a manual crop. Once you have checked one, record it with `--mark-reviewed '<stem>:<fig>'` — the summary prints the whole command, the selected interpreter and script path included, ready to paste — and it stops being flagged on later runs. Without that, a hand-fixed crop is re-flagged forever and the list becomes noise nobody reads.
 - **Caption text in crop** — the crop overlaps a caption on that page: its own, or (more often) the neighbouring column's, whose caption block starts a few points higher than this one's. It is a subset of the suspicious bboxes by mechanism and its own bucket by meaning, because it is the one thing this skill promises its output never contains. Re-crop those by hand before anything embeds them.
 - **Caption position ambiguous** — a flag, not a bucket, and the one to know about *before* you meet it. "Is this caption *beside* its figure or *below* it?" is not decidable from geometry alone: a caption alongside a tall figure and one crossed by the next column's chart are the same shape. The detector scores both readings and takes the better; when the other reading has a real claim too (*contested*) or when it took the *side* reading with little behind it (*thin*), it says so and prints both scores. The two wordings are different on purpose — they are different situations.
 
@@ -186,7 +185,7 @@ python3 '<skill>/scripts/render_page.py' /path/to/paper.pdf 5
 #    --stem MUST be the PDF's on-disk filename stem, or the figure lands
 #    under a name nothing else in the vault looks for.
 python3 '<skill>/scripts/extract_figures.py' /path/to/paper.pdf \
-    --out /Users/dennisgrishin/Downloads/claude-main/Sources/Images \
+    --out '<vault>/Sources/Images' \
     --stem paper \
     --crop "5:2:80,140,520,360"
 

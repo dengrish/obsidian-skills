@@ -172,10 +172,8 @@ def read_pages(path):
     except ImportError:
         raise _NoBackend(
             "neither PyMuPDF nor pypdf is installed, so this script cannot "
-            "read a PDF at all. Install one:\n"
-            "  python3 -m pip install pymupdf\n"
-            "  || python3 -m pip install --user pymupdf\n"
-            "  || python3 -m pip install --break-system-packages pymupdf\n"
+            "read a PDF at all. Use a virtual environment with the plugin "
+            "dependencies; see shared/RUNTIME.md.\n"
             "Do not fall back to reading the paper by eye and reporting the "
             "verification as done.")
     reader = pypdf.PdfReader(path)

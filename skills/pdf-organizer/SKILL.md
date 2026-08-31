@@ -17,6 +17,9 @@ description: >
 
 # PDF Organizer
 
+**Runtime setup:** Read [shared/RUNTIME.md](../../shared/RUNTIME.md) once per
+task for vault selection, script paths, Python dependencies, and host tools.
+
 This skill does two things, to PDFs and to nothing else:
 1. **Rename** a PDF to a standardized name derived from its content, and move it to `Sources/PDFs/`
 2. **Split** a book PDF into individual chapter files
@@ -38,11 +41,11 @@ in.
 
 This skill is the only thing in this plugin that **changes a source file's name**, and four other skills identify a PDF by exactly that name. Read this section before the first rename of any run.
 
-### Defaults for this user
+### Vault layout
 
 Unless told otherwise:
 
-- **Vault root:** `/Users/dennisgrishin/Downloads/claude-main`. The user can override it per-request; the override applies to that run only.
+- **Vault root:** `<vault>` selected using `shared/RUNTIME.md`. The user can override it per-request; the override applies to that run only.
 - **Where documents live:** `<vault>/Sources/PDFs/`. **This is a destination, not just a location.** New files land in `<vault>/Inbox/` — everything the user drops in, clippings and documents together — and this skill is what takes the `.pdf` files out of that folder, gives each a name, and **moves them to `Sources/PDFs/`** in the same operation. That move is the whole reason the inbox drains. A file already inside `Sources/PDFs/` is renamed where it stands; there is nowhere for it to go.
 - **Book chapters:** one folder per work, directly under `Sources/PDFs/` — e.g. `Sources/PDFs/Prince_UDL_2026/`. The whole book **stays** at the top of `Sources/PDFs/`; the chapters go in the folder. Both are kept. `paper-summarizer` sweeps `Sources/PDFs/` recursively and relies on meeting both in one scan: seeing a chapter is how it recognises the book as a book and skips it, and seeing a chapter is also how it knows to skip *that* rather than write twenty-one summaries. Put the chapters anywhere else and it summarises the book instead, figureless.
 - **Figures:** `Sources/Images/`, flat. Every file in it whose name begins with a PDF's stem belongs to that PDF. This skill never *creates* one; the only time it writes there is carrying that set along with a rename the user asked for.
@@ -342,5 +345,5 @@ destructive.
 - **Don't hand-roll the move.** Plain `mv a b` destroys `b` without a word, and a rename is the one place this skill can lose a file the user cannot get back — `mv -n` is no answer either, since BSD `mv` (macOS) exits 0 when it silently declines, so the exit code tells you nothing. Nor is a shell probe: a filename is untrusted text, and the apostrophe in `O'Reilly Media.pdf` alone is enough to turn a quoted `grep` pattern into a syntax error or a command.
 - **Output filenames are ASCII**, and `[A-Za-z0-9_.-]` at that — the `SAFE_NAME` both functions enforce. Transliterate diacritics in the author token (`Muller`, not `Müller`): downstream matching is literal-substring, and a filename stored in one Unicode normalization form and cited in a note in another will not match, invisibly. Dropping quotes and shell metacharacters is the same argument one layer down — a name is passed to tools this skill does not control. The input filename can be anything; the name you write cannot.
 - **A rename relocates only inside a vault, and only when it has somewhere to go.** A file already under `Sources/PDFs/` is renamed in place. A file elsewhere **in the vault** — `Inbox/`, overwhelmingly — is renamed **and moved** to `Sources/PDFs/`, which is `rename_all`'s `dest` argument (`--dest` on the CLI); the destination must be absolute and inside the vault, and `rename_all` refuses anything else rather than moving the document somewhere the vault cannot see. **A file outside the vault is never imported.** Pointed at `~/Downloads`, this skill renames in place and leaves the file there — deciding that a download belongs in the vault is the user's call, not a side effect of asking for a better filename. Pass no `dest` there, and say in the report that the file was renamed where it sits. **Only the source file relocates.** Its figures stay in `Sources/Images/`, its note stays in `Articles/`, its chapter folder stays under `Sources/PDFs/` — each is renamed in its own home, because that home is where its consumer globs. A figure moved next to the document is invisible to every `Sources/Images/` lookup, and a note moved out of `Articles/` is invisible to `wiki-builder`; neither raises. Split book chapters go into their own folder under `Sources/PDFs/`.
-- **Use `pypdf` for PDF operations.** It is a third-party library and is **not preinstalled on macOS** (stock `python3` there ships only the standard library) — check with `python3 -c 'import pypdf'` before the first PDF of a run, and install it *then* rather than after a mid-run traceback: `python3 -m pip install pypdf`, falling back to `--user`, then `--break-system-packages` where pip refuses an unflagged install (always through `python3 -m pip`; macOS has no bare `pip` command). The rename half of `scripts/organize.py` needs nothing beyond the standard library, and `split_book` stops with a clean message rather than a traceback when `pypdf` is missing.
+- **Use `pypdf` for PDF operations.** Check it in the chosen interpreter before reading the first PDF, and follow `shared/RUNTIME.md` if dependencies are missing. The rename half of `scripts/organize.py` needs only the standard library; splitting needs `pypdf`.
 - **Be transparent about uncertainty.** If you're not confident in extracted metadata or chapter boundaries, say so.
