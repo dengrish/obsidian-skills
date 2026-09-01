@@ -791,13 +791,15 @@ _SYN_CUE_RE = re.compile(
     r"(?:often|commonly|usually)\s+called|"
     r"(?:many\s+)?people\s+call|some\s+call)\b", re.IGNORECASE)
 
-#: An *italic* span -- single asterisks, not a ``**bold**`` pair.
-_ITALIC_SPAN_RE = re.compile(r"(?<!\*)\*([^*\n]{2,60})\*(?!\*)")
-
 #: The opener's acronym/expansion binding: ``**Bolded title** (counterpart)``
+#: or the explicitly documented ``**title** algorithm (counterpart)`` form
 #: (prose principle 5(e)/(f)).  Scanned in the opening block only, so a
-#: definition bullet's ``- **True positives** (TP)`` never reaches it.
-_BOLD_PAREN_RE = re.compile(r"\*\*[^*\n]+\*\*\s*\(([A-Za-z][^()\n]{0,59})\)")
+#: definition bullet's ``- **True positives** (TP)`` never reaches it.  Only
+#: the literal noun ``algorithm`` may intervene; a general word window would
+#: attach unrelated later parentheticals to the title.
+_BOLD_PAREN_RE = re.compile(
+    r"\*\*[^*\n]+\*\*(?:\s+algorithm)?\s*\(([A-Za-z*][^()\n]{0,59})\)",
+    re.IGNORECASE)
 
 #: Parenthetical content that is annotation-but-not-a-name: dates, floruit
 #: markers, cross-references.  Any of these disqualifies the candidate.
@@ -810,8 +812,25 @@ _NON_NAME_PAREN_RE = re.compile(
 #: left in place, the candidate came out polluted ("singular, *archaeon*",
 #: expected alias "singular-archaeon").
 _PAREN_LEADIN_RE = re.compile(
-    r"^(?:singular|plural|abbreviated|formerly|n[ée]e|or)[\s,:]+",
-    re.IGNORECASE)
+    r"^(?:(?:short\s+for|originally\s+called|also\s+called|"
+    r"also\s+known\s+as|known\s+as)|singular|plural|abbreviated|"
+    r"formerly|n[ée]e|or)[\s,:]+", re.IGNORECASE)
+
+_SHORT_FOR_PAREN_RE = re.compile(r"^short\s+for[\s,:]+", re.IGNORECASE)
+
+#: A direct italic scientific abbreviation can be the title's own established
+#: counterpart: ``**Saccharomyces cerevisiae** (*S. cerevisiae*)``.  This is
+#: deliberately narrower than "any italic parenthetical" so an annotated
+#: synonym does not become a flashcard counterpart merely because it is also
+#: listed in aliases.
+_SCI_ABBREV_RE = re.compile(r"^[A-Z]\.\s*[a-z][A-Za-z.-]*(?:\s+[a-z][A-Za-z.-]*)*$")
+
+#: Exactly the first italic span after a synonym cue.  The old 160-character
+#: tail loop collected every later italic phrase in the paragraph: a cue for
+#: ``type I errors`` also nominated ``false negatives`` and ``type II errors``.
+#: Optional ``the`` is part of the grammar, not the name.
+_DIRECT_SYNONYM_RE = re.compile(
+    r"^\s*(?:the\s+)?\*([^*\n]{2,60})\*", re.IGNORECASE)
 
 
 def _clean_paren_name(raw):
@@ -836,7 +855,103 @@ def _opening_block(sections):
     return " ".join(block)
 
 
-def _alias_candidates(sections):
+def _sentence_prefix(text, end):
+    """The current sentence's text before ``end``, preserving markup.
+
+    This mirrors ``count_sentences``' exclusions closely enough for ownership
+    gating: an initial in ``S. cerevisiae`` and a known abbreviation do not
+    detach the cue from the bolded subject that precedes them.
+    """
+    start = 0
+    for match in re.finditer(r"[.!?]+", text[:end]):
+        following = text[match.end():match.end() + 1]
+        if following and not following.isspace():
+            continue
+        if match.group(0) == ".":
+            head = text[max(0, match.end() - 16):match.end()]
+            if _INITIAL_RE.search(head) or _ABBREV_RE.search(head):
+                continue
+        start = match.end()
+    return text[start:end].lstrip()
+
+
+def _surface_keys(value):
+    """Singular/plural comparison keys for a subject surface."""
+    value = re.sub(r"\[\[[^\]|]+\|([^\]]+)\]\]", r"\1", value or "")
+    value = re.sub(r"\[\[([^\]]+)\]\]", r"\1", value)
+    value = math_skeleton(value.replace("*", "").replace("_", "")).strip()
+    value = re.sub(r"^(?:the|a|an)\s+", "", value, flags=re.IGNORECASE)
+    if not value:
+        return set()
+    try:
+        return singular_keys(fold_name(slug_stem(value)))
+    except SlugError:
+        return set()
+
+
+def _cue_names_subject(prefix, subject_forms):
+    """Whether the cue's local grammatical subject is the entry subject.
+
+    This is intentionally a narrow proof, not a general parser.  It accepts a
+    title/base form bolded directly before the cue, a title/base form as the
+    local copular subject (including its plural), or explicit anaphora such as
+    ``it is`` / ``this method is``.  Component clauses therefore stay quiet:
+    ``the false-positive rate, also called fall-out`` in a ROC-curve entry and
+    ``binary attributes are sometimes called dummy attributes`` do not name
+    the entry itself.
+    """
+    wanted = set()
+    for form in subject_forms or ():
+        wanted.update(_surface_keys(form))
+        if has_parenthetical(form):
+            wanted.update(_surface_keys(base_term(form)))
+    if subject_forms is None:
+        return True                    # low-level callers may inspect candidates
+    if not wanted:
+        return False                   # no valid subject means no ownership proof
+
+    # A canonical bolded subject may carry an acronym/scientific annotation,
+    # a math symbol, punctuation, and the relative ``which`` before the cue.
+    for bold in _BOLD2_RE.finditer(prefix):
+        if not (_surface_keys(bold.group(1)) & wanted):
+            continue
+        tail = prefix[bold.end():]
+        if re.fullmatch(
+                r"\s*(?:\([^()\n]{0,80}\))?\s*(?:\$[^$\n]+\$)?\s*"
+                r"(?:[,;:—–-]\s*)?(?:which\s*)?", tail,
+                re.IGNORECASE):
+            return True
+
+    plain = prefix.replace("*", "").replace("_", "")
+    plain = re.sub(r"\[\[[^\]|]+\|([^\]]+)\]\]", r"\1", plain)
+    plain = re.sub(r"\[\[([^\]]+)\]\]", r"\1", plain).strip()
+    # Explicit anaphora is safer than guessing that any nearby noun is the
+    # entry subject.  ``that it is`` handles the live MNIST nickname shape.
+    if re.search(r"\b(?:it|that\s+it)\s+(?:is|was|has\s+been)\s*$", plain,
+                 re.IGNORECASE):
+        return True
+    if re.search(
+            r"\bthis\s+(?:entry|concept|method|algorithm|technique|approach|"
+            r"procedure|model|measure|metric|dataset|function|task|regime)\s+"
+            r"(?:is|was)\s*$", plain, re.IGNORECASE):
+        return True
+
+    # Compare the closest copular subject, trimming a relative clause or
+    # conjunction that introduces it.  ``Features are also called ...`` then
+    # matches a Feature entry; ``the resulting binary attributes are ...`` in
+    # a One-hot encoding entry does not.
+    copula = re.search(
+        r"(?P<subject>[A-Za-z][A-Za-z0-9'’ -]{0,80})\s+"
+        r"(?:is|are|was|were|has\s+been|have\s+been)\s*$", plain,
+        re.IGNORECASE)
+    if copula:
+        subject = re.split(r"\b(?:that|and|but)\b", copula.group("subject"),
+                           flags=re.IGNORECASE)[-1].strip(" ,;:—–-")
+        return bool(_surface_keys(subject) & wanted)
+    return False
+
+
+def _alias_candidates(sections, subject_forms=None):
     """Names the body introduces for the entry's subject: ``(name, where)``."""
     prose = "\n".join(sections["prose_lines"])
     seen, out = set(), []
@@ -853,9 +968,10 @@ def _alias_candidates(sections):
     for m in _BOLD_PAREN_RE.finditer(_opening_block(sections)):
         add(_clean_paren_name(m.group(1)), "opener parenthetical")
     for m in _SYN_CUE_RE.finditer(prose):
-        window = prose[m.end():m.end() + 160].split("\n\n", 1)[0]
-        for span in _ITALIC_SPAN_RE.finditer(window):
-            add(span.group(1), "italicized synonym")
+        direct = _DIRECT_SYNONYM_RE.match(prose[m.end():])
+        if (direct and _cue_names_subject(
+                _sentence_prefix(prose, m.start()), subject_forms)):
+            add(direct.group(1), "italicized synonym")
     return out
 
 
@@ -879,7 +995,12 @@ def _check_alias_completeness(fm, sections, findings, filename):
         except SlugError:
             pass
     inflections = set().union(*(singular_keys(form) for form in have))
-    for cand, where in _alias_candidates(sections):
+    title = fm.scalar("title") or ""
+    subject_forms = [title]
+    if has_parenthetical(title):
+        subject_forms.append(base_term(title))
+    subject_forms.extend(a for a in fm.values("aliases") if a)
+    for cand, where in _alias_candidates(sections, subject_forms):
         try:
             cslug = slug_stem(cand)
         except SlugError:
@@ -1049,7 +1170,7 @@ def strip_code(text):
                             strip_indented(strip_fenced(text)))
 
 
-def _check_duplicate_wikilinks(sections, findings):
+def _body_wikilink_occurrences(sections):
     # Extraction runs on the LISTING-MASKED prose (fenced blocks, inline code
     # spans, indented code), exactly as scan_vault's item10/dup reads
     # strip_code(prose): a target SHOWN in a listing and linked once in prose
@@ -1057,20 +1178,55 @@ def _check_duplicate_wikilinks(sections, findings):
     # listing or drops the real link.  Evidence text still quotes the raw line.
     prose_lines = sections["prose_lines"]
     masked_lines = strip_code("\n".join(prose_lines)).split("\n")
-    seen = {}
+    # Count the entry a link resolves to, not its raw spelling.  A single-file
+    # lint can safely fold case/normalization and an explicit ``.md`` suffix,
+    # but it must retain path qualification: ``[[a/target]]`` and
+    # ``[[b/target]]`` may name two distinct files.  Folder mode resolves paths,
+    # basenames, and aliases against the actual inventory below.
+    def target_key(target):
+        normalized = target.replace("\\", "/").strip().strip("/")
+        prefix, separator, bare = normalized.rpartition("/")
+        if bare.lower().endswith(".md"):
+            bare = bare[:-3]
+        normalized = prefix + separator + bare
+        return fold_name(normalized)
+
+    occurrences = []
     for offset, line in enumerate(masked_lines):
         for target, label in extract_wikilinks(line):
-            seen.setdefault(target, []).append(
-                {"body_line": offset + 1, "display": label,
-                 "text": prose_lines[offset].strip()})
-    for target, hits in seen.items():
+            key = target_key(target)
+            if not key:
+                continue
+            occurrences.append(
+                {"key": key, "body_line": offset + 1, "target": target,
+                 "display": label, "text": prose_lines[offset].strip()})
+    return occurrences
+
+
+def _append_duplicate_wikilink_findings(findings, occurrences, resolve=None):
+    seen = {}
+    for occurrence in occurrences:
+        key = (resolve(occurrence) if resolve else occurrence["key"])
+        if key is None:
+            # Whole-folder resolution found several possible owners.  The
+            # linter must preserve every occurrence until that ambiguity is
+            # resolved; a duplicate-removal finding would choose by accident.
+            continue
+        seen.setdefault(key, []).append(occurrence)
+    for key, hits in seen.items():
         if len(hits) > 1:
             findings.append(_f(
                 "10-duplicate-wikilink", "error",
-                "slug %r is wikilinked %d times in body prose -- keep the first "
+                "entry target %r is wikilinked %d times in body prose -- keep the first "
                 "and unlink the rest to bare text (counted by target slug, not "
-                "display text; the Related footer is exempt)" % (target, len(hits)),
-                {"target": target, "count": len(hits), "occurrences": hits}))
+                "raw path/case/display spelling; the Related footer is exempt)"
+                % (key, len(hits)),
+                {"target": key, "count": len(hits), "occurrences": hits}))
+
+
+def _check_duplicate_wikilinks(sections, findings):
+    _append_duplicate_wikilink_findings(
+        findings, _body_wikilink_occurrences(sections))
 
 
 def _check_bold_opener(fm, sections, findings):
@@ -1160,11 +1316,19 @@ def _flashcard_primary_answer(fm, sections):
         # title's direct acronym/full-form binding and therefore do not belong
         # on flashcard line 3.  Keep this narrower than `_clean_paren_name`,
         # whose lead-in stripping is correct for alias completeness.
-        if ("*" in raw_candidate or "_" in raw_candidate
-                or _PAREN_LEADIN_RE.match(raw_candidate)
-                or _NON_NAME_PAREN_RE.search(raw_candidate)):
-            continue
-        candidate = " ".join(raw_candidate.split()).strip()
+        short_for = bool(_SHORT_FOR_PAREN_RE.match(raw_candidate))
+        cleaned = _clean_paren_name(raw_candidate)
+        scientific_abbreviation = bool(
+            re.fullmatch(r"\*[^*\n]+\*", raw_candidate.strip())
+            and _SCI_ABBREV_RE.fullmatch(cleaned))
+        if short_for or scientific_abbreviation:
+            candidate = cleaned
+        else:
+            if ("*" in raw_candidate or "_" in raw_candidate
+                    or _PAREN_LEADIN_RE.match(raw_candidate)
+                    or _NON_NAME_PAREN_RE.search(raw_candidate)):
+                continue
+            candidate = " ".join(raw_candidate.split()).strip()
         try:
             candidate_slug = fold_name(slug_stem(candidate))
         except SlugError:
@@ -1565,6 +1729,103 @@ def _check_alias_collisions(results):
     return collisions
 
 
+def _recheck_folder_duplicate_wikilinks(results, root):
+    """Re-run item 10 with the folder's unambiguous alias ownership.
+
+    A single-file lint can normalize ``.md`` and case while preserving paths,
+    but only folder scope can know that ``[[sub/term]]``, ``[[term]]`` and an
+    alias reach one entry.  File names outrank aliases, and ambiguous basenames
+    or aliases remain unresolved rather than choosing an owner by walk order.
+    """
+    root = os.path.abspath(root)
+    root_key = fold_name(os.path.basename(root))
+    file_owners = set()
+    basename_owners = {}
+    owner_for_file = {}
+    for result in results:
+        relative = os.path.relpath(result["file"], root).replace(os.sep, "/")
+        if relative.lower().endswith(".md"):
+            relative = relative[:-3]
+        owner = fold_name(relative)
+        owner_for_file[result["file"]] = owner
+        file_owners.add(owner)
+        basename_owners.setdefault(owner.rsplit("/", 1)[-1], set()).add(owner)
+
+    alias_owners = {}
+    for result in results:
+        # A scalar/null aliases field is not a valid alias list.  scan_vault
+        # excludes it from its alias resolver too, so folder lint must not let
+        # malformed metadata establish ownership.
+        malformed_shape = any(
+            finding["item"] == "18-alias-form"
+            and (finding.get("evidence") or {}).get("kind") in ("scalar", "blank")
+            for finding in result["findings"])
+        if malformed_shape:
+            continue
+        owner = owner_for_file[result["file"]]
+        for alias in result["aliases"]:
+            key = fold_name(alias)
+            if key:
+                alias_owners.setdefault(key, set()).add(owner)
+
+    def resolve(occurrence):
+        key = occurrence["key"]
+        root_prefix = root_key + "/"
+        lookup = key[len(root_prefix):] if key.startswith(root_prefix) else key
+
+        # Prefer an exact path from the Wiki root.  If a shorter path suffix is
+        # used, accept it only when it identifies one file.  A bare basename
+        # follows the same rule.  This is what keeps ``a/foo`` and ``b/foo``
+        # distinct while still collapsing ``sub/only`` beside ``only``.
+        basename = lookup.rsplit("/", 1)[-1]
+        basename_matches = basename_owners.get(basename, set())
+        explicitly_qualified = "/" in key
+        if lookup in file_owners:
+            if explicitly_qualified or len(basename_matches) == 1:
+                return lookup
+            # Bare ``[[foo]]`` remains ambiguous when both a root entry and a
+            # nested entry own that basename; the root file must not win by
+            # accident.
+            return None
+        candidates = {
+            owner for owner in file_owners
+            if owner == lookup or owner.endswith("/" + lookup)
+        }
+        if len(candidates) == 1:
+            return next(iter(candidates))
+        if len(candidates) > 1:
+            return None
+
+        # An on-disk file always outranks an alias.  The basename inventory is
+        # consulted before alias ownership even when a qualified spelling did
+        # not resolve exactly.
+        if basename in basename_owners:
+            return None
+        owners = alias_owners.get(lookup, set())
+        if len(owners) == 1:
+            return next(iter(owners))
+        if len(owners) > 1:
+            return None
+        return "unresolved-target:" + lookup
+
+    for result in results:
+        try:
+            with open(result["file"], "r", encoding="utf-8-sig") as handle:
+                text = handle.read()
+            fm = parse_frontmatter(text)
+            if not fm.found:
+                continue
+            occurrences = _body_wikilink_occurrences(split_sections(fm.body))
+        except (OSError, UnicodeDecodeError):
+            continue
+        result["findings"] = [
+            finding for finding in result["findings"]
+            if finding["item"] != "10-duplicate-wikilink"
+        ]
+        _append_duplicate_wikilink_findings(
+            result["findings"], occurrences, resolve=resolve)
+
+
 def lint_path(target, severity_floor=None):
     """Lint a single entry file or a whole folder (recursively)."""
     target = os.path.abspath(target)
@@ -1588,6 +1849,7 @@ def lint_path(target, severity_floor=None):
     results = [lint_file(p) for p in paths]
     if folder_mode:
         report["alias_collisions"] = _check_alias_collisions(results)
+        _recheck_folder_duplicate_wikilinks(results, target)
 
     order = {"error": 0, "warning": 1, "info": 2}
     floor = order.get(severity_floor, 2) if severity_floor else 2
@@ -1706,6 +1968,19 @@ def run_self_test():
 
     def items(text, filename="roc-curve.md"):
         return _st_items(lint_text(text, filename))
+
+    def retitled(title, alias, description, opener, card_term):
+        """A schema-clean variant for title/alias binding regressions."""
+        return (good.replace('title: "ROC curve"', 'title: "%s"' % title)
+                    .replace('  - "auroc"', '  - "%s"' % alias)
+                    .replace(
+                        'description: "A plot of true positive rate against '
+                        'false positive rate."',
+                        'description: "%s"' % description)
+                    .replace(
+                        'A **ROC curve** plots the trade-off between two error '
+                        'rates as a decision threshold moves.', opener)
+                    .replace('\nROC curve\n', '\n%s\n' % card_term))
 
     check("the clean fixture produces NO finding at any severity",
           items(good), [])
@@ -2036,6 +2311,49 @@ def run_self_test():
           items(singular_alias.replace("??\nArchaea\n",
                                        "??\nArchaea (archaeon)\n"),
                 "archaea.md"), ["19-flashcards"])
+    short_for_card = retitled(
+        "AdaBoost", "adaptive-boosting",
+        "AdaBoost reweights mistakes before fitting each new predictor.",
+        "**AdaBoost** (short for *adaptive boosting*) reweights mistakes "
+        "before fitting each new predictor.",
+        "AdaBoost (adaptive boosting)")
+    check("a short-for expansion in the opener establishes the alias-bound "
+          "flashcard counterpart",
+          items(short_for_card, "adaboost.md"), [])
+    originally_called = retitled(
+        "Boosting", "hypothesis-boosting",
+        "Boosting combines weak learners into a strong learner.",
+        "**Boosting** (originally called *hypothesis boosting*) combines weak "
+        "learners into a strong learner.", "Boosting")
+    check("an originally-called synonym is an alias but not a required card "
+          "counterpart",
+          items(originally_called, "boosting.md"), [])
+    check("an originally-called synonym cannot be appended to card line 3 as "
+          "an acronym/full-form counterpart",
+          items(originally_called.replace(
+              "??\nBoosting\n", "??\nBoosting (hypothesis boosting)\n"),
+              "boosting.md"), ["19-flashcards"])
+    scientific_card = retitled(
+        "Saccharomyces cerevisiae", "s-cerevisiae",
+        "Saccharomyces cerevisiae is a model budding yeast.",
+        "**Saccharomyces cerevisiae** (*S. cerevisiae*) is a model budding "
+        "yeast.", "Saccharomyces cerevisiae (S. cerevisiae)")
+    check("a direct italic scientific abbreviation establishes its "
+          "alias-bound flashcard counterpart",
+          items(scientific_card, "saccharomyces-cerevisiae.md"), [])
+    knn_card = retitled(
+        "k-nearest neighbors", "knn",
+        "k-nearest neighbors predicts from nearby observations.",
+        "The **k-nearest neighbors** algorithm (KNN) predicts from nearby "
+        "observations.", "k-nearest neighbors (KNN)")
+    check("the documented intervening algorithm noun preserves an opener "
+          "acronym binding",
+          items(knn_card, "k-nearest-neighbors.md"), [])
+    check("an unrelated noun phrase and later parenthetical do not bind to "
+          "the bolded title",
+          bool(_BOLD_PAREN_RE.search(
+              "**ROC curve** compares a classifier (RC) across thresholds.")),
+          False)
     check("card line 1 leaking the title",
           items(mutate("The plot tracing the trade-off",
                        "The ROC curve traces the trade-off")),
@@ -2147,6 +2465,14 @@ def run_self_test():
                        "shows `[[precision]]` as syntax.\n\n"
                        "**Related:** [[precision|Precision]]")),
           [])
+    check("path, explicit .md, case, and Unicode-normalization variants count "
+          "as one body-link target",
+          items(mutate("A **ROC curve** plots the trade-off between two error "
+                       "rates as a decision threshold moves.",
+                       "A **ROC curve** compares [[Wiki/precision.md|Precision]] "
+                       "with [[WIKI/PRECISION|precision]] as two spellings of one "
+                       "destination.")),
+          ["10-duplicate-wikilink"])
     # A 1- or 2-line card is malformed, not silently clean.
     check("a card missing its term line is a malformed-card error",
           items(mutate("threshold moves.\n??\nROC curve\n",
@@ -2208,6 +2534,43 @@ def run_self_test():
               "**Min-max scaling** — which many people call *normalization* "
               "— rescales features to a fixed range."))],
           ["normalization"])
+    check("a short-for marker is stripped from the opener alias candidate",
+          [c for c, _w in _alias_candidates(split_sections(
+              "**AdaBoost** (short for *adaptive boosting*) reweights "
+              "mistakes."))],
+          ["adaptive boosting"])
+    check("an originally-called marker is stripped without changing the "
+          "synonym itself",
+          [c for c, _w in _alias_candidates(split_sections(
+              "**Boosting** (originally called *hypothesis boosting*) "
+              "combines weak learners."))],
+          ["hypothesis boosting"])
+    check("a synonym cue takes only its immediately following italic candidate",
+          [c for c, _w in _alias_candidates(
+              split_sections("**ROC curve**, also called *receiver plot*, "
+                             "contrasts *false positives*."),
+              ["ROC curve"])],
+          ["receiver plot"])
+    check("a component's also-called phrase is not an alias candidate for the "
+          "entry subject",
+          [c for c, _w in _alias_candidates(
+              split_sections("A **ROC curve** compares rates. The false "
+                             "positive rate, also called the *fall-out*, is "
+                             "one axis."), ["ROC curve"])],
+          [])
+    check("an explicit subject pronoun still introduces a genuine alias",
+          [c for c, _w in _alias_candidates(
+              split_sections("**MNIST** is widely studied. It is often called "
+                             "the *hello world* of machine learning."),
+              ["MNIST"])],
+          ["hello world"])
+    check("a plural canonical subject is recognized, while only the immediate "
+          "candidate is mechanical",
+          [c for c, _w in _alias_candidates(
+              split_sections("A **feature** is an input. Features are also "
+                             "called *predictors* or *attributes*."),
+              ["Feature (machine learning)"])],
+          ["predictors"])
     check("an opener parenthetical's lead-in marker and italics are stripped",
           [c for c, _w in _alias_candidates(split_sections(
               "**Archaea** (singular, *archaeon*) are single-celled "
@@ -2229,18 +2592,32 @@ def run_self_test():
 
         def put(rel, text, encoding="utf-8"):
             path = os.path.join(wiki, *rel.split("/"))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
             mode, kw = (("wb", {}) if isinstance(text, bytes)
                         else ("w", {"encoding": encoding}))
             with open(path, mode, **kw) as fh:
                 fh.write(text)
             return path
 
+        def named_good(title, alias, description, body):
+            return (good.replace('title: "ROC curve"', 'title: "%s"' % title)
+                        .replace('  - "auroc"', '  - "%s"' % alias)
+                        .replace(
+                            'description: "A plot of true positive rate against '
+                            'false positive rate."',
+                            'description: "%s"' % description)
+                        .replace(
+                            "A **ROC curve** plots the trade-off between two error "
+                            "rates as a decision threshold moves.", body)
+                        .replace("\nROC curve\n", "\n%s\n" % title))
+
         put("roc-curve.md", good)
         put("precision.md", stub)
         # a second entry claiming the same alias, in a different CASE
         put("sub/sensitivity.md",
             good.replace('title: "ROC curve"', 'title: "Sensitivity"')
-                .replace('  - "auroc"', '  - "AUROC"')
+                .replace('  - "auroc"',
+                         '  - "AUROC"\n  - "unique-sensitivity"')
                 .replace("A **ROC curve** plots", "**Sensitivity** plots")
                 .replace("\nROC curve\n", "\nSensitivity\n"))
         # an entry listing the SAME alias twice: its own per-entry fault,
@@ -2250,9 +2627,44 @@ def run_self_test():
                 .replace('  - "auroc"', '  - "dupme"\n  - "dupme"')
                 .replace("A **ROC curve** plots", "**Dupalias** plots")
                 .replace("\nROC curve\n", "\nDupalias\n"))
+        put("sub/reader.md",
+            good.replace('title: "ROC curve"', 'title: "Reader"')
+                .replace('  - "auroc"', '  - "reader-alias"')
+                .replace(
+                    "A **ROC curve** plots the trade-off between two error "
+                    "rates as a decision threshold moves.",
+                    "**Reader** compares [[sub/sensitivity.md|Sensitivity]] "
+                    "with [[unique-sensitivity|Sensitivity]] as two spellings "
+                    "of one destination.")
+                .replace("\nROC curve\n", "\nReader\n"))
+        put("foo.md", named_good(
+            "Foo", "foo-root", "Foo is the root ambiguous basename fixture.",
+            "**Foo** is the root ambiguous basename fixture."))
+        put("a/foo.md", named_good(
+            "Foo", "foo-a", "Foo is the first ambiguous basename fixture.",
+            "**Foo** is the first ambiguous basename fixture."))
+        put("b/foo.md", named_good(
+            "Foo", "foo-b", "Foo is the second ambiguous basename fixture.",
+            "**Foo** is the second ambiguous basename fixture."))
+        put("sub/path-reader.md", named_good(
+            "Path reader", "path-reader-alias",
+            "Path reader compares two path-qualified destinations.",
+            "**Path reader** compares [[a/foo|one Foo]] with "
+            "[[b/foo|another Foo]], while repeated ambiguous bare links "
+            "[[foo]] and [[FOO.md|Foo]] remain unresolved."))
+        put("sub/alias-reader.md", named_good(
+            "Alias reader", "alias-reader-name",
+            "Alias reader exercises an ambiguous alias.",
+            "**Alias reader** compares [[auroc|one claimant]] with "
+            "[[AUROC|another claimant]]."))
+        put("sub/exact-path-reader.md", named_good(
+            "Exact path reader", "exact-path-reader-name",
+            "Exact path reader repeats one qualified destination.",
+            "**Exact path reader** repeats [[a/foo|one Foo]] and "
+            "[[A/FOO.md|the same Foo]]."))
         report = lint_path(wiki)
         check("lint_path walks the folder recursively",
-              report["summary"]["files"], 4)
+              report["summary"]["files"], 11)
         check("...and counts the stubs", report["summary"]["stubs"], 1)
         check("an alias claimed by two entries is a folder-scope collision",
               [c["alias"] for c in report["alias_collisions"]], ["auroc"])
@@ -2268,6 +2680,30 @@ def run_self_test():
                for e in report["entries"]
                if e["file"].endswith("dupalias.md")],
               [["18-alias-duplicate"]])
+        check("folder lint resolves an unambiguous alias before enforcing the "
+              "one-body-link-per-entry rule",
+              [sorted({f["item"] for f in e["findings"]})
+               for e in report["entries"]
+               if os.path.basename(e["file"]) == "reader.md"],
+              [["10-duplicate-wikilink"]])
+        check("folder lint keeps path-qualified duplicate basenames distinct",
+              [f["item"] for e in report["entries"]
+               if os.path.basename(e["file"]) == "path-reader.md"
+               for f in e["findings"]
+               if f["item"] == "10-duplicate-wikilink"],
+              [])
+        check("folder lint does not prescribe removal for a repeated ambiguous alias",
+              [f["item"] for e in report["entries"]
+               if os.path.basename(e["file"]) == "alias-reader.md"
+               for f in e["findings"]
+               if f["item"] == "10-duplicate-wikilink"],
+              [])
+        check("folder lint still catches a repeated exact qualified path",
+              [f["item"] for e in report["entries"]
+               if os.path.basename(e["file"]) == "exact-path-reader.md"
+               for f in e["findings"]
+               if f["item"] == "10-duplicate-wikilink"],
+              ["10-duplicate-wikilink"])
 
         bom = put("bom.md", "﻿" + good.replace('title: "ROC curve"',
                                                     'title: "Bom"')

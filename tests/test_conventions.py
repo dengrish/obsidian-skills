@@ -122,6 +122,10 @@ CONVENTIONS = os.path.join(SHARED_DIR, "CONVENTIONS.md")
 SLUGIFY = os.path.join(SHARED_DIR, "scripts", "slugify.py")
 PLUGIN_PATHS = os.path.join(SHARED_DIR, "scripts", "plugin_paths.py")
 NAMING = os.path.join(SHARED_DIR, "scripts", "naming.py")
+FETCH_IMAGES = os.path.join(
+    SKILLS_DIR, "clipping-processor", "scripts", "fetch_images.py")
+SCAN_VAULT = os.path.join(
+    SKILLS_DIR, "wiki-linter", "scripts", "scan_vault.py")
 
 TEXT_EXT = (".md", ".py")
 
@@ -2077,7 +2081,7 @@ FIG_NEAR_MISS_RE = re.compile(
     r"|_fig[-.]%s(?:\.[a-z]{2,4}\b|\*)" % (FIG_NEAR_TAIL, FIG_NEAR_TAIL))
 
 #: §8a: "accept any extension".  A consumer that pins one is the strict-glob
-#: failure in a different spelling -- clippings give .jpg/.webp/.gif/.svg.
+#: failure in a different spelling -- clippings can produce nine formats.
 FIG_EXT_PINNED_RE = re.compile(r"_fig\*\.[a-z]{2,4}")
 
 #: §8a: "Match on `[source_stem]_fig`, never on `[source_stem]_fig_`".  Prose
@@ -3069,6 +3073,38 @@ def check_figure_naming(rep, conv):
             "the figure-naming check will name the files."
             % canonical_glob)
 
+    clipping_exts = set(canonical_csv_block(
+        conv, "clipping-image-extensions"))
+    if not clipping_exts:
+        raise HarnessError(
+            "canonical:clipping-image-extensions is empty, so producer and "
+            "consumer format support cannot be compared")
+    try:
+        fetch = _load_module(FETCH_IMAGES, "_fetch_image_extensions", screen=True)
+        scanner = _load_module(SCAN_VAULT, "_scan_image_extensions", screen=True)
+    except Exception as exc:
+        rep.fail(check, "could not load the image producer/consumer to compare "
+                 "CONVENTIONS.md §8a's extension set: %s" % exc)
+    else:
+        produced = set(getattr(fetch, "OUTPUT_EXTENSIONS", ()))
+        if produced != clipping_exts:
+            rep.fail(check, "fetch_images.py OUTPUT_EXTENSIONS is %s, but "
+                     "CONVENTIONS.md §8a publishes %s"
+                     % (sorted(produced), sorted(clipping_exts)))
+        else:
+            rep.ok(check, "clipping-processor's %d output extensions match "
+                   "CONVENTIONS.md §8a" % len(clipping_exts))
+        missed = [ext for ext in sorted(clipping_exts)
+                  if not scanner.EMB.fullmatch("![[X_fig_1.%s]]" % ext)
+                  or not scanner.IMG_EMBED.search("![[X_fig_1.%s]]" % ext)]
+        if missed:
+            rep.fail(check, "wiki-linter does not recognize clipping-processor "
+                     "output extension(s) as local image embeds: %s"
+                     % ", ".join(missed))
+        else:
+            rep.ok(check, "wiki-linter recognizes all %d clipping-processor "
+                   "output extensions" % len(clipping_exts))
+
     producers = _parse_producer_table(conv)
     if not producers:
         rows = _producer_table_rows(conv)
@@ -3175,7 +3211,8 @@ def check_figure_naming(rep, conv):
             rep.fail(check,
                      "%s pins an extension onto the consumer glob (`%s`). "
                      "CONVENTIONS.md §8a: match `%s` and accept ANY extension "
-                     "-- PDFs give .png, clippings give .jpg/.webp/.gif/.svg, "
+                     "-- PDFs give .png, and clipping-processor can emit "
+                     ".png/.jpg/.gif/.webp/.svg/.avif/.bmp/.tiff/.ico, "
                      "and a pinned extension drops every one of the others "
                      "silently."
                      % (rel(path), text[m.start():m.end()], canonical_glob),
@@ -3983,7 +4020,15 @@ def check_yaml_examples(rep, conv):
                             "value is silently lost." % (k, item), f)
             if name == "source-note":
                 f = by.get("author")
-                for item in (f[2] if f else []):
+                if f and f[1] and f[1] != "[]":
+                    bad("populated `author:` is inline (%s). §2b requires a "
+                        "block-form list; the only inline form is the exact "
+                        "authorless exception `author: []`" % f[1], f)
+                if f and not f[1] and not f[2]:
+                    bad("bare `author:` is YAML null. §2b requires populated "
+                        "block-list items or the exact authorless exception "
+                        "`author: []`", f)
+                for item in (f[2] if f and not f[1] else []):
                     if _dq(item) or item.startswith("[["):
                         bad("`author:` item %s keeps quotes or a `[[…]]` "
                             "wrapper; §2b says author items are unquoted with "
@@ -5495,26 +5540,26 @@ SELFTEST_MIN_CASES = {
     # mirror duty of the "lowering is a deliberate, reviewable statement" rule
     # below: new regression cases must not disappear with the harness green.
     "shared/scripts/figure_state.py": 6,
-    "shared/scripts/naming.py": 161,
+    "shared/scripts/naming.py": 191,
     "shared/scripts/plugin_paths.py": 95,
     "shared/scripts/plurals.py": 200,
     "shared/scripts/slugify.py": 61,
     "shared/scripts/yaml_scalars.py": 8,
-    "skills/clipping-processor/scripts/dedup_index.py": 108,
-    "skills/clipping-processor/scripts/fetch_images.py": 282,
+    "skills/clipping-processor/scripts/dedup_index.py": 113,
+    "skills/clipping-processor/scripts/fetch_images.py": 293,
     "skills/clipping-processor/scripts/slug.py": 120,
-    "skills/paper-summarizer/scripts/note_lint.py": 187,
+    "skills/paper-summarizer/scripts/note_lint.py": 190,
     "skills/paper-summarizer/scripts/paper_scan.py": 118,
     "skills/paper-summarizer/scripts/paper_text.py": 39,
     "skills/pdf-figure-extractor/scripts/auto_fig_bbox.py": 296,
-    "skills/pdf-figure-extractor/scripts/batch_extract.py": 226,
-    "skills/pdf-figure-extractor/scripts/extract_figures.py": 100,
+    "skills/pdf-figure-extractor/scripts/batch_extract.py": 235,
+    "skills/pdf-figure-extractor/scripts/extract_figures.py": 108,
     "skills/pdf-figure-extractor/scripts/render_page.py": 38,
-    "skills/pdf-organizer/scripts/organize.py": 210,
+    "skills/pdf-organizer/scripts/organize.py": 212,
     "skills/wiki-builder/scripts/find_collisions.py": 62,
-    "skills/wiki-builder/scripts/lint_entry.py": 147,
+    "skills/wiki-builder/scripts/lint_entry.py": 164,
     "skills/wiki-builder/scripts/vault_index.py": 63,
-    "skills/wiki-linter/scripts/scan_vault.py": 187,
+    "skills/wiki-linter/scripts/scan_vault.py": 202,
 }
 
 

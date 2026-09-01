@@ -22,10 +22,11 @@ Stdlib only, Python 3.8+.
         --images /path/to/vault/Sources/Images \
         --out '/tmp/wiki-scan-<run-id>.json'
 
-`--images` is optional and turns on one check: that every `![[…png]]` embed
-names a file that is actually in `Sources/Images/`.  CONVENTIONS.md §1 makes
-this skill that folder's embed validator, and without the argument there was no
-path from here to the folder at all.
+`--images` is optional. It checks that every local image embed names a file in
+`Sources/Images/` and emits report-only `image_folder_findings` for nested
+paths or recognizable temporary/staging residue. CONVENTIONS.md §§1 and 8 make
+this skill the folder's read-only validator; neither class of finding
+authorizes moving or deleting a file.
 """
 
 import argparse
@@ -176,18 +177,38 @@ def math_skeleton(text):
     return re.sub(r"\s+", " ", s).strip()
 
 
-_BOLD_PAREN_RE = re.compile(r"\*\*[^*\n]+\*\*\s*\(([A-Za-z][^()\n]{0,59})\)")
-_PAREN_LEADIN_RE = re.compile(
-    r"^(?:singular|plural|abbreviated|formerly|n[ée]e|or)[\s,:]+",
+_BOLD_PAREN_RE = re.compile(
+    r"\*\*[^*\n]+\*\*(?:\s+algorithm)?\s*\(([A-Za-z*][^()\n]{0,59})\)",
     re.IGNORECASE)
+_PAREN_LEADIN_RE = re.compile(
+    r"^(?:(?:short\s+for|originally\s+called|also\s+called|"
+    r"also\s+known\s+as|known\s+as)|singular|plural|abbreviated|"
+    r"formerly|n[ée]e|or)[\s,:]+", re.IGNORECASE)
+_SHORT_FOR_PAREN_RE = re.compile(r"^short\s+for[\s,:]+", re.IGNORECASE)
+_SCI_ABBREV_RE = re.compile(
+    r"^[A-Z]\.\s*[a-z][A-Za-z.-]*(?:\s+[a-z][A-Za-z.-]*)*$")
 _NON_NAME_PAREN_RE = re.compile(
     r"^(?:b\.|c\.|d\.|fl\.|r\.|e\.g|i\.e|cf\.|vs\.|see\s|a\s|an\s|the\s|"
     r"annual|ongoing)|\d{3,4}", re.IGNORECASE)
 
 
-def _clean_card_counterpart(raw):
-    """Return a plain direct acronym/full-form binding, or ``None``."""
+def _clean_paren_name(raw):
+    """Return a parenthetical name with a lexical lead-in and markup stripped."""
     value = " ".join((raw or "").split())
+    value = _PAREN_LEADIN_RE.sub("", value)
+    return value.replace("*", "").replace("_", "").strip()
+
+
+def _clean_card_counterpart(raw):
+    """Return a direct acronym/full-form binding, or ``None``."""
+    value = " ".join((raw or "").split())
+    cleaned = _clean_paren_name(value)
+    short_for = bool(_SHORT_FOR_PAREN_RE.match(value))
+    scientific_abbreviation = bool(
+        re.fullmatch(r"\*[^*\n]+\*", value.strip())
+        and _SCI_ABBREV_RE.fullmatch(cleaned))
+    if short_for or scientific_abbreviation:
+        return cleaned
     if ("*" in value or "_" in value or _PAREN_LEADIN_RE.match(value)
             or _NON_NAME_PAREN_RE.search(value)):
         return None
@@ -284,7 +305,7 @@ def leftover_dollars(body):
 
 REMOTE_IMG = re.compile(r"!\[[^\]]*\]\((https?://[^)]+)\)")
 # a standalone image-embed line (Obsidian ![[…png]] or markdown ![](url)) — for the caption check
-EMB = re.compile(r"^\s*(?:!\[\[[^\]]*\.(?:png|jpe?g|gif|svg|webp|tiff?|bmp|avif)(?:\|[^\]]*)?\]\]|!\[[^\]]*\]\([^)]*\))\s*$", re.I)
+EMB = re.compile(r"^\s*(?:!\[\[[^\]]*\.(?:png|jpe?g|gif|svg|webp|tiff?|bmp|avif|ico)(?:\|[^\]]*)?\]\]|!\[[^\]]*\]\([^)]*\))\s*$", re.I)
 #: An Obsidian image EMBED and the filename it names, anywhere on a line:
 #: `![[Doe_X_2025_fig_3.png]]`, with an optional `|width` display pipe. This is
 #: the `--images` existence check's reader. Markdown `![](…)` embeds are
@@ -292,7 +313,7 @@ EMB = re.compile(r"^\s*(?:!\[\[[^\]]*\.(?:png|jpe?g|gif|svg|webp|tiff?|bmp|avif)
 #: and the form wiki-builder mandates for a URL), and a local one is not a form
 #: wiki-builder writes.
 IMG_EMBED = re.compile(
-    r"!\[\[([^\]|\n]+\.(?:png|jpe?g|gif|svg|webp|tiff?|bmp|avif))(?:\|[^\]\n]*)?\]\]", re.I)
+    r"!\[\[([^\]|\n]+\.(?:png|jpe?g|gif|svg|webp|tiff?|bmp|avif|ico))(?:\|[^\]\n]*)?\]\]", re.I)
 
 # A Markdown table is established by a header row immediately followed by a
 # delimiter row with at least two `---` cells.  Looking for arbitrary pipes
@@ -520,6 +541,26 @@ def source_stem(item):
 
 WIKILINK = re.compile(r"(?<!\!)\[\[([^\]\|]+)(?:\|([^\]]+))?\]\]")  # (?<!!) excludes ![[embeds]]
 ANYLINK  = re.compile(r"!?\[\[[^\]]*\]\]")                          # links + embeds, for masking
+
+
+def entry_link_path_key(raw):
+    """Fold a body/Related target while retaining its vault path.
+
+    An explicit ``.md`` suffix, anchors, case and Unicode normalization do not
+    create different Obsidian destinations.  Path qualification is retained
+    because two files in different folders may share a basename.
+    """
+    target = raw.split("#", 1)[0].split("^", 1)[0].strip()
+    target = target.replace("\\", "/").strip().strip("/")
+    prefix, separator, bare = target.rpartition("/")
+    if bare.lower().endswith(".md"):
+        bare = bare[:-3]
+    return fold_name(prefix + separator + bare)
+
+
+def entry_link_key(raw):
+    """Fold a body/Related target to the entry basename it addresses."""
+    return entry_link_path_key(raw).rsplit("/", 1)[-1]
 
 #: A Flashcards heading, anchored to a whole line.  A substring `find()`
 #: matched the tail of a `### Flashcards` heading (mis-reporting a present
@@ -917,8 +958,8 @@ def iter_entry_files(wiki, on_error=None):
     for dirpath, dirnames, filenames in os.walk(wiki, followlinks=True, onerror=on_error):
         # followlinks, because a synced or shared subfolder under Wiki/ is a
         # symlink in plenty of real vaults, and skipping it made every link
-        # into it read as dangling -- whose documented fix writes a stub over
-        # the entry. `seen_dirs` keeps a symlink loop from walking forever.
+        # into it read as dangling -- whose repair would unlink a working
+        # reference. `seen_dirs` keeps a symlink loop from walking forever.
         try:
             key = os.stat(dirpath).st_ino, os.stat(dirpath).st_dev
         except OSError:
@@ -936,12 +977,28 @@ def iter_entry_files(wiki, on_error=None):
 
 #: Extensions a wikilink may legitimately name that are not wiki entries: the
 #: document forms CONVENTIONS 6/7 blesses in a `sources:` list. A link to one
-#: is not dangling and must never be stubbed.
+#: is not an entry dangler and must never be unlinked as one.
 _DOC_EXTS = {".pdf", ".epub", ".docx", ".md", ".html", ".txt"}
 
 
+_IMAGE_ALLOWED_HIDDEN = {".figure-manifest.tsv", ".figure-review.txt", ".DS_Store"}
+
+
+def _looks_temporary_image_path(relative):
+    """Whether an image-folder path has a recognizable staging name."""
+    for part in relative.replace("\\", "/").split("/"):
+        low = part.lower()
+        if low.startswith((".tmp", ".temp", ".trash")):
+            return True
+        if ".dltmp" in low:
+            return True
+        if re.search(r"\.(?:tmp|temp|part|partial|download|crdownload)(?:\.\d+)?$", low):
+            return True
+    return False
+
+
 def image_index(images):
-    """Every filename in the image folder, folded — or None when not given.
+    """Return folded image basenames and report-only folder-layout findings.
 
     Folded, not `os.path.isfile`, for the reason `fold_name` gives: the
     documented vault sits on a case- and normalization-insensitive volume, so
@@ -953,15 +1010,59 @@ def image_index(images):
     Walked recursively although CONVENTIONS §1 makes `Sources/Images/` flat:
     Obsidian resolves an embed by basename wherever the file sits, so a user
     who has nested a subfolder gets no false "missing" findings out of it.
+    Those nested paths, and recognizable temporary/staging artifacts, are
+    returned separately for the run report.  They never authorize deletion.
+    The two PDF ownership sidecars are intentional; `.DS_Store` is ignored OS
+    metadata rather than a plugin artifact.
     """
     if images is None:
-        return None
-    names = set()
-    for _dirpath, _dirnames, _filenames in os.walk(images):
-        for _n in _filenames:
-            if not _n.startswith("."):
-                names.add(fold_name(_n))
-    return names
+        return None, []
+    names, findings = set(), []
+    root = os.path.abspath(images)
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames.sort()
+        filenames.sort()
+        rel_dir = os.path.relpath(dirpath, root)
+        # Record directories when their parent exposes them, including a
+        # symlinked directory that os.walk (correctly) does not follow.
+        for dirname in dirnames:
+            relative_dir = (dirname if rel_dir == "."
+                            else os.path.join(rel_dir, dirname))
+            relative_dir = relative_dir.replace(os.sep, "/")
+            temporary = _looks_temporary_image_path(relative_dir)
+            findings.append({
+                "path": relative_dir,
+                "kind": "temporary-artifact" if temporary else "nested-directory",
+                "message": (
+                    "temporary/staging directory under Sources/Images; report only — "
+                    "do not delete without user approval and provenance"
+                    if temporary else
+                    "nested directory under the flat Sources/Images folder; report only — "
+                    "do not move or delete without user approval and provenance"),
+            })
+        for name in filenames:
+            relative = (name if rel_dir == "." else os.path.join(rel_dir, name))
+            relative = relative.replace(os.sep, "/")
+            # Keep recursively discovered visible basenames in the resolver so
+            # the layout finding never creates a false missing-image finding.
+            if not name.startswith("."):
+                names.add(fold_name(name))
+            if rel_dir == "." and name in _IMAGE_ALLOWED_HIDDEN:
+                continue
+            temporary = _looks_temporary_image_path(relative)
+            if temporary:
+                kind = "temporary-artifact"
+                message = ("temporary/staging artifact under Sources/Images; report only — "
+                           "do not delete without user approval and provenance")
+            elif rel_dir != ".":
+                kind = "nested-file"
+                message = ("file is nested under the flat Sources/Images folder; report only — "
+                           "do not move or delete without user approval and provenance")
+            else:
+                continue
+            findings.append({"path": relative, "kind": kind, "message": message})
+    findings.sort(key=lambda finding: (finding["path"], finding["kind"]))
+    return names, findings
 
 
 def scan(wiki, images=None):
@@ -976,13 +1077,14 @@ def scan(wiki, images=None):
     relies on for `Wiki/` — a source rename renames every figure with it, and
     the embeds left pointing at the old stem are silent otherwise.
     """
-    img_fold = image_index(images)
+    img_fold, image_folder_findings = image_index(images)
     entries, problems = {}, []
     # Every slug whose FILE is on disk, whether or not it parsed as an entry.
     # A link to an unparseable file resolves in Obsidian, so it is not dangling
     # -- and stubbing it would write over the file.
     on_disk = set()
     seen_paths = {}
+    paths_by_basename = {}
     ambiguous_files = set()
     def walk_error(exc):
         location = os.path.relpath(exc.filename, wiki) if exc.filename else "."
@@ -992,6 +1094,8 @@ def scan(wiki, images=None):
         fn = os.path.basename(path)
         sl = fn[:-3]
         rel = os.path.relpath(path, wiki)
+        paths_by_basename.setdefault(fold_name(sl), set()).add(
+            entry_link_path_key(rel))
         # Obsidian resolves a wikilink by basename, case-insensitively, so two
         # files with the same stem in different folders — INCLUDING two stems
         # that differ only in case or Unicode normalization, which are one name
@@ -1077,7 +1181,7 @@ def scan(wiki, images=None):
     for _sl in entries:
         fold_of.setdefault(fold_name(_sl), _sl)
     # Files on disk that did NOT parse into `entries`: a link to one of these
-    # resolves in Obsidian, so it is not a dangler and must never be stubbed.
+    # resolves in Obsidian, so it is not a dangler and must never be unlinked.
     on_disk_fold = {fold_name(_sl) for _sl in on_disk} - set(fold_of)
     # fold_name(alias) -> (owning slug, the alias as spelled). Obsidian
     # resolves [[tpr]] to the entry whose `aliases:` carries "tpr" when no FILE
@@ -1752,10 +1856,9 @@ def scan(wiki, images=None):
         # A target that misses every entry exactly but hits one case- or
         # normalization-insensitively is NOT dangling: Obsidian resolves it to
         # that entry on the vault's APFS volume. It gets its own key, because
-        # the two fixes are opposites — a dangler is stubbed or dropped, and
-        # stubbing THIS one is destructive: on a case-insensitive volume,
-        # writing Wiki/<tgt>.md opens the existing case-variant file and
-        # replaces a full entry with a one-line stub.
+        # the repairs are opposites — a genuine dangler is dropped to display
+        # text, while this resolving link is canonicalized in place.  Treating
+        # the case variant as missing would destroy a working reference.
         # Read the entry with its LISTINGS removed -- fenced blocks and inline
         # code spans -- for the reason item 13's own comment gives about the
         # sibling scar check: a fenced block is shown, not asserted. A
@@ -1778,13 +1881,14 @@ def scan(wiki, images=None):
             # CONVENTIONS 6/7 blesses in a `sources:` list).
             bare = tgt.replace("\\", "/").rsplit("/", 1)[-1]
             lookup = bare[:-3] if bare.lower().endswith(".md") else bare
-            if fold_name(lookup) in ambiguous_files:
+            lookup_key = entry_link_key(tgt)
+            if lookup_key in ambiguous_files:
                 problems.append((sl, "item10/ambiguous",
                                  f'wikilink target "{tgt}" shares a basename with multiple files; '
                                  f'preserve the link, its path, anchor and display text until the '
                                  f'destination is resolved. Report only; never choose a file by walk order'))
                 continue
-            actual = fold_of.get(fold_name(lookup))
+            actual = fold_of.get(lookup_key)
             if actual == lookup:
                 continue
             if actual:
@@ -1795,12 +1899,12 @@ def scan(wiki, images=None):
                                  f'any existing anchor and display label), '
                                  f'NEVER a stub: on the vault\'s case-insensitive volume a stub written '
                                  f'to "{tgt}.md" opens and overwrites "{actual}.md"'))
-            elif fold_name(lookup) in on_disk_fold:
+            elif lookup_key in on_disk_fold:
                 # The file EXISTS but did not parse (item0/item1), or lives in a
                 # symlinked subfolder the walk did not enter. Reporting it as a
                 # dangler is wrong twice over: the link resolves in Obsidian,
-                # and the documented fix -- write a stub at Wiki/<tgt>.md --
-                # opens that very file and replaces it with one line.
+                # and the retired stub remedy would have opened that very file
+                # and replaced it with one line.
                 problems.append((sl,"item10/unparsed",
                                  f'wikilink target "{tgt}" names a file that is '
                                  f'on disk but could not be parsed as an entry. '
@@ -1808,7 +1912,7 @@ def scan(wiki, images=None):
                                  f'this target -- the stub would overwrite it'))
             elif os.path.splitext(bare)[1].lower() in _DOC_EXTS:
                 continue
-            elif fold_name(lookup) in alias_of:
+            elif lookup_key in alias_of:
                 # An ALIAS of another entry. Obsidian resolves it, so it is not
                 # a dangler -- and the dangler remedy is the destructive one
                 # here: a stub at Wiki/<tgt>.md becomes a FILE with that name,
@@ -1817,13 +1921,13 @@ def scan(wiki, images=None):
                 # starts resolving to the one-line stub. Nothing downstream
                 # reports that as an item-18 clash, so the link is quietly
                 # re-pointed at an empty note for good.
-                if fold_name(lookup) in ambiguous_aliases:
+                if lookup_key in ambiguous_aliases:
                     problems.append((sl, "item10/ambiguous",
                                      f'wikilink target "{tgt}" is claimed as an alias by multiple '
                                      f'entries; preserve the link, anchor and display text until its '
                                      f'owner is resolved. Report only; never choose the first alias owner'))
                     continue
-                _own_sl, _own_raw = alias_of[fold_name(lookup)]
+                _own_sl, _own_raw = alias_of[lookup_key]
                 _anchor_match = re.search(r"[#^].*", m.group(1))
                 _anchor = _anchor_match.group(0) if _anchor_match else ""
                 _label = m.group(2) if m.group(2) is not None else tgt
@@ -1837,11 +1941,65 @@ def scan(wiki, images=None):
                                  f'"[[{tgt}]]" in the vault away from "{_own_sl}"'))
             else:
                 problems.append((sl,"item10/dangling",f'wikilink target "{tgt}" does not resolve'))
+        # Duplicate means one resolved entry, regardless of how the link was
+        # spelled.  Paths, ``.md``, case/Unicode variants, and an unambiguous
+        # alias all collapse to the same owner.  A file continues to outrank an
+        # alias, exactly as in the resolution branch above.
         seen = {}
+        spellings = {}
         for m in WIKILINK.finditer(_p10):
-            t = m.group(1).split("#")[0].split("^")[0].strip(); seen[t] = seen.get(t,0)+1
-        for t,c in seen.items():
-            if c > 1: problems.append((sl,"item10/dup",f'"{t}" wikilinked {c}× in prose — keep first only'))
+            raw_target = m.group(1).strip()
+            key = entry_link_key(raw_target)
+            if not key:
+                continue
+            if key in ambiguous_files:
+                # Two path-qualified links with one basename can resolve to
+                # different files.  Preserve the normalized path as identity;
+                # collapsing ``[[a/foo]]`` and ``[[b/foo]]`` here would tell
+                # Task 2 to unlink a valid reference.  Repeated spellings of
+                # the same qualified path still count as duplicates.
+                target_key = entry_link_path_key(raw_target)
+                root_prefix = fold_name(os.path.basename(wiki)) + "/"
+                lookup = (target_key[len(root_prefix):]
+                          if target_key.startswith(root_prefix) else target_key)
+                owners = paths_by_basename.get(key, set())
+                explicitly_qualified = "/" in target_key
+                if not explicitly_qualified and len(owners) > 1:
+                    # A root-level file must not accidentally win over a
+                    # same-basename nested file for bare ``[[foo]]``.
+                    continue
+                if lookup in owners:
+                    owner = lookup
+                else:
+                    candidates = {
+                        candidate for candidate in owners
+                        if candidate.endswith("/" + lookup)
+                    }
+                    if len(candidates) != 1:
+                        # A bare ambiguous basename or a non-unique partial
+                        # path has no safe duplicate-removal action.
+                        continue
+                    owner = next(iter(candidates))
+                key = "ambiguous-path:" + owner
+            else:
+                owner = fold_of.get(key)
+                if owner is not None:
+                    key = fold_name(owner)
+                elif key in ambiguous_aliases:
+                    # Preserve repeated ambiguous aliases until their owner is
+                    # resolved.  Counting the raw spelling would still tell
+                    # Task 2 to remove one by choosing an owner implicitly.
+                    continue
+                elif key in alias_of:
+                    key = fold_name(alias_of[key][0])
+            seen[key] = seen.get(key, 0) + 1
+            spellings.setdefault(key, []).append(raw_target)
+        for key, count in seen.items():
+            if count > 1:
+                forms = ", ".join(repr(x) for x in spellings[key])
+                problems.append((sl, "item10/dup",
+                                 f'entry target "{key}" is wikilinked {count}× in prose '
+                                 f'({forms}) — keep first only'))
         # ---- item 11: every Related footer link is piped to its canonical title ----
         for m in WIKILINK.finditer(e["rel"]):
             tgt, disp = m.group(1).strip(), m.group(2)
@@ -2259,6 +2417,10 @@ def scan(wiki, images=None):
         "backfill_candidates": [{"slug": s, "target": t, "surface": f,
                                  "bare_noun_alias": key in bare_noun_alias}
                                 for s,t,f,key in sorted(backfill)],
+        # Folder-level, report-only findings.  These are deliberately outside
+        # `problems`: they are not entry checklist violations and must not
+        # inflate per-entry problem tallies or imply deletion authority.
+        "image_folder_findings": image_folder_findings,
         "hierarchy_diagnostic": {
             "full_entries": len(fulls),
             "self_parented": selfp,
@@ -2280,12 +2442,10 @@ def scan(wiki, images=None):
 # self-test
 # ===========================================================================
 #
-# This scanner drives IN-PLACE EDITS to a whole vault, and several of its
-# findings prescribe writing a file: an `item10/dangling` is stubbed, which
-# means creating `Wiki/<target>.md`.  Every case below is one where being
-# wrong costs a file -- a link mis-classified as dangling whose "fix" opens
-# and truncates a real entry, a duplicate tag certified absent whose mandated
-# fix then creates it, a backfill proposal aimed at a line no link may be
+# This scanner drives IN-PLACE EDITS to a whole vault.  Every case below is
+# one where a wrong finding can destroy or misdirect user content -- a working
+# link mis-classified as dangling and unlinked, a duplicate destination whose
+# second link survives, or a backfill proposal aimed at a line no link may be
 # written on.  Fixtures are built under `tempfile` and deleted; nothing here
 # reads or writes anything outside the temp directory.
 #
@@ -2452,17 +2612,43 @@ def run_self_test():
 
         # ------------------------------------------------------------------
         # 2. item 10 -- the destructive one.  A target mis-called `dangling`
-        #    gets a stub written AT it, so every carve-out below is a file.
+        #    gets unlinked even though it resolves, so every carve-out below
+        #    is a real file or alias whose working link must survive.
         # ------------------------------------------------------------------
         v = os.path.join(tmp, "v2")
-        _st_write(v, "sub/delta.md", _st_entry("Delta", "**Delta** is a worked example."))
+        _st_write(v, "sub/delta.md", _st_entry(
+            "Delta", "**Delta** is a worked example.", aliases=('"delta-alias"',)))
         _st_write(v, "ROC-curve.md", _st_entry("ROC-curve", "**ROC-curve** is a worked example."))
         _st_write(v, "broken.md", "no frontmatter here either\n")
+        _st_write(v, "foo.md", _st_entry(
+            "Foo", "**Foo** is the root ambiguous basename fixture."))
+        _st_write(v, "a/foo.md", _st_entry(
+            "Foo", "**Foo** is the first ambiguous basename fixture."))
+        _st_write(v, "b/foo.md", _st_entry(
+            "Foo", "**Foo** is the second ambiguous basename fixture."))
+        _st_write(v, "path-reader.md", _st_entry(
+            "Path reader", "**Path reader** compares [[a/foo|one Foo]] with "
+            "[[b/foo|another Foo]], while repeated ambiguous bare links "
+            "[[foo]] and [[FOO.md|Foo]] remain unresolved."))
+        _st_write(v, "exact-path-reader.md", _st_entry(
+            "Exact path reader", "**Exact path reader** repeats "
+            "[[a/foo|one Foo]] and [[A/FOO.md|the same Foo]]."))
+        _st_write(v, "alias-a.md", _st_entry(
+            "Alias A", "**Alias A** is one ambiguous alias owner.",
+            aliases=('"shared-alias"',)))
+        _st_write(v, "alias-b.md", _st_entry(
+            "Alias B", "**Alias B** is another ambiguous alias owner.",
+            aliases=('"shared-alias"',)))
+        _st_write(v, "alias-reader.md", _st_entry(
+            "Alias reader", "**Alias reader** compares [[shared-alias|one owner]] "
+            "with [[SHARED-ALIAS|another owner]]."))
         _st_write(v, "hub.md", _st_entry(
             "Hub",
             "**Hub** is a worked example that links to [[nowhere]], to "
             "[[roc-curve]], to [[broken]], to [[sub/delta]], to [[delta.md]], "
-            "to [[Doe_Foo_2025.pdf]] and embeds ![[figure.png]].\n\n"
+            "to [[DELTA|Delta]], to [[delta-alias|Delta]], to "
+            "[[Doe_Foo_2025.pdf]] and embeds "
+            "![[figure.png]].\n\n"
             "It also links [[sub/delta]] a second time."))
         res = scan(v)
         got = sorted(set(k for k in _st_keys(res, "hub")))
@@ -2484,8 +2670,23 @@ def run_self_test():
               "Doe_Foo_2025.pdf" in _st_msg(res, "hub", "item10/dangling"), False)
         check("an ![[image.png]] embed is excluded from item 10 entirely",
               "figure.png" in " ".join(p["message"] for p in res["problems"]), False)
-        check("the same target twice in prose is item10/dup",
-              "sub/delta" in _st_msg(res, "hub", "item10/dup"), True)
+        check("path, explicit .md, and case variants of the same resolved "
+              "entry collapse into one item10/dup target",
+              ('entry target "delta" is wikilinked 5×'
+               in _st_msg(res, "hub", "item10/dup")), True)
+        check("two path-qualified links with one ambiguous basename are not "
+              "collapsed into item10/dup",
+              "item10/dup" in _st_keys(res, "path-reader"), False)
+        check("the ambiguous destinations remain report-only instead",
+              _st_msg(res, "path-reader", "item10/ambiguous").count(
+                  "shares a basename with multiple files"), 4)
+        check("an exact repeated qualified path still gets item10/dup",
+              "item10/dup" in _st_keys(res, "exact-path-reader"), True)
+        check("a repeated ambiguous alias gets no duplicate-removal finding",
+              "item10/dup" in _st_keys(res, "alias-reader"), False)
+        check("the ambiguous alias remains report-only instead",
+              _st_msg(res, "alias-reader", "item10/ambiguous").count(
+                  "claimed as an alias by multiple entries"), 2)
 
         # ------------------------------------------------------------------
         # 3. item 8 -- tag aliases, case variants, and the duplicate check
@@ -3007,14 +3208,27 @@ def run_self_test():
         v = os.path.join(tmp, "v13")
         _imgdir = os.path.join(tmp, "v13-images")
         os.makedirs(_imgdir)
-        for _f in ("Doe_X_2025_fig_2.png", "doe_x_2025_fig_3.png"):
+        for _f in ("Doe_X_2025_fig_2.png", "doe_x_2025_fig_3.png",
+                   "Doe_X_2025_fig_4.ico"):
             open(os.path.join(_imgdir, _f), "w").close()
+        # Valid sidecars/OS metadata stay quiet.  Nested and staging residue is
+        # reported without making a nested-but-resolving embed look missing.
+        for _f in (".figure-manifest.tsv", ".figure-review.txt", ".DS_Store"):
+            open(os.path.join(_imgdir, _f), "w").close()
+        os.makedirs(os.path.join(_imgdir, "nested"))
+        open(os.path.join(_imgdir, "nested", "nested-only.png"), "w").close()
+        os.makedirs(os.path.join(_imgdir, ".tmp"))
+        open(os.path.join(_imgdir, ".tmp", "dl_1"), "w").close()
+        open(os.path.join(_imgdir, ".trash_run.dltmp_1"), "w").close()
         _figbody = (
             "**Figured** is a worked example.\n\n"
             "![[Doe_X_2025_fig_99.png]]\n*A figure that is not on disk.*\n\n"
             "![[Doe_X_2025_fig_2.png]]\n*A figure that is.*\n\n"
             "![[Sources/Images/Doe_X_2025_fig_2.png]]\n*The same file, path-qualified.*\n\n"
             "![[Doe_X_2025_FIG_3.png]]\n*The same file in another case.*\n\n"
+            "![[nested-only.png]]\n*A nested file that still resolves.*\n\n"
+            "![[Doe_X_2025_fig_4.ico]]\n*An ICO that resolves.*\n\n"
+            "![[Doe_X_2025_fig_100.ico]]\n*An ICO that is not on disk.*\n\n"
             "```\n![[Doe_X_2025_fig_98.png]]\n```")
         _st_write(v, "figured.md", _st_entry("Figured", _figbody))
         res_noimg = scan(v)
@@ -3030,11 +3244,35 @@ def run_self_test():
         check("...and it says not to delete the embed (the repair is at the "
               "filesystem, or is a §1a rename)",
               "DO NOT DELETE" in _st_msg(res, "figured", "item12/missing-image"), True)
+        check("an .ico emitted by clipping-processor uses the same existence "
+              "check as every other supported image extension",
+              "fig_100.ico" in _st_msg(res, "figured", "item12/missing-image"), True)
         check("NEAR MISS: an embed that resolves — bare, path-qualified, or in "
-              "another case on the vault's case-insensitive volume — is clean, "
-              "and a fenced sample of embed syntax is not an embed",
+              "another case on the vault's case-insensitive volume, or from a "
+              "nested legacy folder — is clean, and a fenced sample of embed "
+              "syntax is not an embed; the existing ICO is clean",
               _st_msg(res, "figured", "item12/missing-image").count(
-                  "not in the image folder"), 1)
+                  "not in the image folder"), 2)
+        _folder_findings = {
+            (finding["path"], finding["kind"])
+            for finding in res["image_folder_findings"]
+        }
+        check("nested directories/files and recognizable staging residue are "
+              "reported outside per-entry problems",
+              _folder_findings,
+              {(".tmp", "temporary-artifact"),
+               (".tmp/dl_1", "temporary-artifact"),
+               (".trash_run.dltmp_1", "temporary-artifact"),
+               ("nested", "nested-directory"),
+               ("nested/nested-only.png", "nested-file")})
+        check("intentional PDF sidecars and .DS_Store stay out of image-folder "
+              "findings",
+              any(finding["path"] in _IMAGE_ALLOWED_HIDDEN
+                  for finding in res["image_folder_findings"]), False)
+        check("image-folder findings are explicitly report-only",
+              all("report only" in finding["message"]
+                  and "do not" in finding["message"]
+                  for finding in res["image_folder_findings"]), True)
 
         # ------------------------------------------------------------------
         # 11. item 19 -- the ## Flashcards heading is a LINE, not a substring
@@ -3466,6 +3704,31 @@ def run_self_test():
         _st_write(v, "singular-parenthetical.md", _st_entry(
             "Bacteria", "**Bacteria** (singular, *bacterium*) is a domain of organisms.",
             aliases=('"bacterium"',), card="Bacteria (bacterium)"))
+        _st_write(v, "adaboost.md", _st_entry(
+            "AdaBoost",
+            "**AdaBoost** (short for *adaptive boosting*) reweights mistakes.",
+            aliases=('"adaptive-boosting"',),
+            card="AdaBoost (adaptive boosting)"))
+        _st_write(v, "boosting.md", _st_entry(
+            "Boosting",
+            "**Boosting** (originally called *hypothesis boosting*) combines "
+            "weak learners.", aliases=('"hypothesis-boosting"',),
+            card="Boosting"))
+        _st_write(v, "boosting-with-synonym.md", _st_entry(
+            "Boosting with synonym",
+            "**Boosting with synonym** (originally called *early boosting*) "
+            "combines weak learners.", aliases=('"early-boosting"',),
+            card="Boosting with synonym (early boosting)"))
+        _st_write(v, "saccharomyces-cerevisiae.md", _st_entry(
+            "Saccharomyces cerevisiae",
+            "**Saccharomyces cerevisiae** (*S. cerevisiae*) is a model budding "
+            "yeast.", aliases=('"s-cerevisiae"',),
+            card="Saccharomyces cerevisiae (S. cerevisiae)"))
+        _st_write(v, "algorithm-counterpart.md", _st_entry(
+            "Algorithm counterpart",
+            "The **Algorithm counterpart** algorithm (AC) predicts from nearby "
+            "observations.", aliases=('"ac"',),
+            card="Algorithm counterpart (AC)"))
         res = scan(v)
         check("invalid and list-valued type fields both fail the canonical enum",
               ["item2/type-enum" in _st_keys(res, name)
@@ -3525,6 +3788,27 @@ def run_self_test():
         check("appending that singular synonym to line 3 is rejected",
               "not established"
               in _st_msg(res, "singular-parenthetical", "item19"), True)
+        check("a short-for expansion in the opener establishes its alias-bound "
+              "flashcard counterpart",
+              "item19" in _st_keys(res, "adaboost"), False)
+        check("an originally-called synonym remains excluded from the required "
+              "flashcard answer",
+              "item19" in _st_keys(res, "boosting"), False)
+        check("an originally-called synonym cannot be appended as an "
+              "acronym/full-form counterpart",
+              "not established" in _st_msg(
+                  res, "boosting-with-synonym", "item19"), True)
+        check("a direct italic scientific abbreviation establishes its "
+              "alias-bound flashcard counterpart",
+              "item19" in _st_keys(res, "saccharomyces-cerevisiae"), False)
+        check("the documented intervening algorithm noun preserves an opener "
+              "acronym binding",
+              "item19" in _st_keys(res, "algorithm-counterpart"), False)
+        check("an unrelated noun phrase and later parenthetical do not bind to "
+              "the bolded title",
+              bool(_BOLD_PAREN_RE.search(
+                  "**Algorithm counterpart** predicts a class (AC) nearby.")),
+              False)
 
         v = os.path.join(tmp, "v22-stub-structure")
         _st_write(v, "w-e-b-du-bois.md", _st_entry(
@@ -3630,7 +3914,9 @@ def main(argv=None):
     ap.add_argument("--images", metavar="DIR",
                     help="the vault's flat Sources/Images/ folder; with it, every "
                          "![[…]] image embed is checked to name a file that exists "
-                         "(item12/missing-image). Omitted, that one check does not run")
+                         "(item12/missing-image), and nested or temporary artifacts "
+                         "are reported in image_folder_findings. Omitted, neither "
+                         "folder check runs")
     ap.add_argument("--out", metavar="FILE",
                     help="write the JSON to FILE instead of stdout")
     ap.add_argument("--indent", type=int, default=2, metavar="N",

@@ -1118,8 +1118,11 @@ def _plan_figure_state(vault, ren):
             new = rewrite_sidecar(body, mapping, kind)
             if new != body:
                 check_manifest_writable(path)
-                if not os.access(os.path.dirname(path), os.W_OK):
-                    raise ValueError("sidecar is not writable")
+                real_dir = os.path.realpath(os.path.dirname(path) or ".")
+                if (not os.access(real_dir, os.W_OK)
+                        or not os.access(os.path.dirname(real_dir), os.W_OK)):
+                    raise ValueError("sidecar or its outside-folder staging "
+                                     "location is not writable")
                 edits[path] = new
         except (OSError, UnicodeError, ValueError) as exc:
             blockers.append("%s cannot safely follow the source rename (%s). "
@@ -1511,6 +1514,30 @@ def _write(path, text):
         mode = stat.S_IMODE(previous.st_mode) if stat.S_ISREG(previous.st_mode) else None
     except FileNotFoundError:
         mode = None
+    logical_dir = os.path.abspath(os.path.dirname(path) or ".")
+    is_image_sidecar = (
+        os.path.basename(path) in (MANIFEST_FILE, REVIEW_FILE)
+        and os.path.basename(logical_dir) == "Images"
+        and os.path.basename(os.path.dirname(logical_dir)) == "Sources"
+    )
+
+    # Image consumers inventory a shared flat folder, so even a hidden
+    # sidecar temporary is an unfinished visible artifact under §8b. Stage
+    # those two files in a unique sibling directory on the destination's
+    # resolved filesystem. Other notes retain same-directory staging: their
+    # parent may intentionally be read-only while the note folder is writable.
+    if is_image_sidecar:
+        real_dir = os.path.realpath(os.path.dirname(target) or ".")
+        with tempfile.TemporaryDirectory(prefix=".organize-stage-",
+                                         dir=os.path.dirname(real_dir)) as stage:
+            tmp = os.path.join(stage, os.path.basename(target))
+            with open(tmp, "w", encoding="utf-8", newline="") as fh:
+                fh.write(text)
+                if mode is not None:
+                    os.fchmod(fh.fileno(), mode)
+            os.replace(tmp, target)
+        return
+
     tmp = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -3021,6 +3048,22 @@ def _selftest():
         _review_body = "# checked manually\nDoe_Old_2025\t1\tkeep my note\nOther:2\n"
         _manifest = _put(_v, "Sources/Images/" + MANIFEST_FILE, _manifest_body)
         _review = _put(_v, "Sources/Images/" + REVIEW_FILE, _review_body)
+        _stage_parents = []
+        _real_tempdir = tempfile.TemporaryDirectory
+
+        def _tracked_tempdir(*args, **kwargs):
+            _stage_parents.append(kwargs.get("dir"))
+            return _real_tempdir(*args, **kwargs)
+
+        with patch.object(tempfile, "TemporaryDirectory",
+                          side_effect=_tracked_tempdir):
+            _write(_manifest, _manifest_body)
+        check("figure sidecar staging stays outside Sources/Images",
+              _stage_parents,
+              [os.path.realpath(os.path.join(_v, "Sources"))])
+        check("figure sidecar staging is cleaned after publication",
+              [n for n in os.listdir(os.path.join(_v, "Sources"))
+               if n.startswith(".organize-stage-")], [])
         _moves, _edits, _blockers = plan_rename(_v, _pdf, "Doe_New_2025.pdf")
         check("sidecar changes appear separately in a rename plan",
               (len(_edits), len(_edits.sidecars), _blockers), (0, 2, []))

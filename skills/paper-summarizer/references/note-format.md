@@ -47,7 +47,10 @@ read: false
   namespace collisions. Do not write the retired `source`/`url` pair.
 - **Author:** block-form list in the printed order, without wikilink wrappers.
   For more than about eight authors, list the first three and a final `et al.`
-  item. Preserve a collective byline rather than mining individuals from a footnote.
+  item. Preserve a collective byline rather than mining individuals from a
+  footnote. If the document supplies no byline, write the canonical empty
+  exception `author: []` and report it; never use bare `author:` or invent an
+  author from an affiliation, publisher or filename.
 - **Published:** valid `YYYY-MM-DD`, using every component the document prints.
   Pad an unstated month/day with `01` and report the padding. Do not look up a
   more precise date elsewhere. If the year is absent, stop for that note and

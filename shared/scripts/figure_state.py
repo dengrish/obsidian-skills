@@ -141,31 +141,49 @@ def check_manifest_writable(path):
             raise ValueError("%s is a read-only sidecar; refusing to replace it" % path)
 
 
-def write_manifest(path, manifest, header=""):
-    """Atomically write valid ownership records, preserving existing modes."""
-    body = header + "".join("%s\t%s\n" % (key, manifest[key]) for key in sorted(manifest))
-    parse_manifest(body)
+def _write_sidecar(path, body):
+    """Atomically replace one validated sidecar, preserving its mode.
+
+    Stage beside the destination directory, not inside the flat image folder.
+    The final ``os.replace`` remains same-filesystem atomic, while a killed
+    process cannot leave unfinished metadata among the files consumers list.
+    """
     check_manifest_writable(path)
     mode = stat.S_IMODE(os.stat(path).st_mode) if os.path.exists(path) else None
     directory = os.path.dirname(path) or "."
     os.makedirs(directory, exist_ok=True)
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory,
-                                         prefix=".figure-manifest-", delete=False) as fh:
-            temporary = fh.name
+    # Resolve the directory for staging only. A symlinked Images folder can
+    # point at another filesystem, where its logical parent would make the
+    # final replace cross-device and therefore non-atomic.
+    directory = os.path.realpath(directory)
+    stage_parent = os.path.dirname(directory)
+    with tempfile.TemporaryDirectory(prefix=".figure-state-stage-",
+                                     dir=stage_parent) as stage_dir:
+        temporary = os.path.join(stage_dir, os.path.basename(path))
+        with open(temporary, "w", encoding="utf-8", newline="") as fh:
             fh.write(body)
             if mode is not None:
                 os.fchmod(fh.fileno(), mode)
         os.replace(temporary, path)
-    finally:
-        if temporary and os.path.exists(temporary):
-            os.unlink(temporary)
+
+
+def write_manifest(path, manifest, header=""):
+    """Atomically write valid ownership records, preserving existing modes."""
+    body = header + "".join("%s\t%s\n" % (key, manifest[key]) for key in sorted(manifest))
+    parse_manifest(body)
+    _write_sidecar(path, body)
+
+
+def write_review(path, body):
+    """Atomically write a complete, valid review ledger."""
+    parse_reviewed(body)
+    _write_sidecar(path, body)
 
 
 def self_test():
     import io
     import unittest
+    from unittest import mock
 
     class StateTests(unittest.TestCase):
         def test_roundtrip_and_preservation(self):
@@ -179,6 +197,18 @@ def self_test():
             updated = rewrite_sidecar(text, {"Old": "New"}, "review")
             self.assertEqual(updated, text.replace("Old", "New"))
             self.assertEqual(parse_reviewed(updated), {("New", "1"), ("New", "2"), ("Other", "3")})
+            with tempfile.TemporaryDirectory() as directory:
+                images = os.path.join(directory, "Images")
+                path = os.path.join(images, REVIEW_FILE)
+                write_review(path, text)
+                before = open(path, "rb").read()
+                with mock.patch.object(os, "replace",
+                                       side_effect=OSError("interrupted")):
+                    with self.assertRaises(OSError):
+                        write_review(path, text + "New\t4\n")
+                self.assertEqual(open(path, "rb").read(), before)
+                self.assertFalse(any(name.startswith(".figure-state-stage-")
+                                     for name in os.listdir(directory)))
 
         def test_conflicts_and_malformed_rows(self):
             for text in ("broken", "A.png\tbad\n", "A.png\t" + "a" * 64 + "\na.png\t" + "b" * 64):
@@ -206,14 +236,61 @@ def self_test():
 
         def test_atomic_write_and_bad_input(self):
             with tempfile.TemporaryDirectory() as directory:
-                path = os.path.join(directory, MANIFEST_FILE)
-                write_manifest(path, {"A_fig_1.png": "a" * 64})
+                real_root = os.path.join(directory, "real")
+                real_images = os.path.join(real_root, "Images")
+                os.makedirs(real_images)
+                path = os.path.join(real_images, MANIFEST_FILE)
+                stage_parents = []
+                real_tempdir = tempfile.TemporaryDirectory
+
+                def tracked_tempdir(*args, **kwargs):
+                    stage_parents.append(kwargs.get("dir"))
+                    return real_tempdir(*args, **kwargs)
+
+                with mock.patch.object(tempfile, "TemporaryDirectory",
+                                       side_effect=tracked_tempdir):
+                    write_manifest(path, {"A_fig_1.png": "a" * 64})
+                self.assertEqual(stage_parents, [os.path.realpath(real_root)])
+                self.assertFalse(any(name.startswith(".figure-state-stage-")
+                                     for name in os.listdir(real_root)))
+                self.assertTrue(os.path.isfile(os.path.join(real_images,
+                                                            MANIFEST_FILE)))
                 before = open(path, "rb").read()
+                with mock.patch.object(os, "replace",
+                                       side_effect=OSError("blocked publication")):
+                    with self.assertRaises(OSError):
+                        write_manifest(path, {"B_fig_1.png": "b" * 64})
+                self.assertEqual(open(path, "rb").read(), before)
+                self.assertFalse(any(name.startswith(".figure-state-stage-")
+                                     for name in os.listdir(real_root)))
                 with self.assertRaises(ValueError):
                     write_manifest(path, {"A_fig_1.png": "bad"})
                 self.assertEqual(open(path, "rb").read(), before)
                 self.assertEqual(read_manifest(path), {"A_fig_1.png": "a" * 64})
-                self.assertEqual(read_manifest(os.path.join(directory, "absent")), {})
+                self.assertEqual(read_manifest(os.path.join(real_images, "absent")), {})
+
+                # A directory symlink can point to another volume. If this
+                # platform permits creating one, prove staging follows the
+                # resolved destination rather than its logical parent. Windows
+                # without developer mode commonly denies this operation; the
+                # ordinary-path assertions above still cover outside-folder
+                # staging and cleanup there.
+                logical_root = os.path.join(directory, "logical")
+                logical_images = os.path.join(logical_root, "Images")
+                os.makedirs(logical_root)
+                try:
+                    os.symlink(real_images, logical_images)
+                except (OSError, NotImplementedError):
+                    logical_images = None
+                if logical_images is not None:
+                    stage_parents[:] = []
+                    linked_path = os.path.join(logical_images, MANIFEST_FILE)
+                    with mock.patch.object(tempfile, "TemporaryDirectory",
+                                           side_effect=tracked_tempdir):
+                        write_manifest(linked_path, {"A_fig_1.png": "a" * 64})
+                    self.assertEqual(stage_parents, [os.path.realpath(real_root)])
+                    self.assertTrue(os.path.isfile(os.path.join(
+                        real_images, MANIFEST_FILE)))
 
         def test_read_only_and_linked_sidecars_remain_untouched(self):
             with tempfile.TemporaryDirectory() as directory:

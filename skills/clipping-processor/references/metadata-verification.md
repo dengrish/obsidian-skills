@@ -33,8 +33,10 @@ A short page (roughly under 500 body words) with “subscribe to continue”, �
 in to read” or similar gating text is a paywall stub, not verification evidence.
 For timeout, 404, network failure or paywall, retain the raw values and report
 which remain unverified. Recover missing author/publication fields from a usable
-page when possible; otherwise leave unknown values empty, use the filename
-fallbacks in [filename rules](filename-slug.md), and report the gaps.
+page when possible; otherwise keep an unknown author as the canonical
+`author: []`, use the filename fallbacks in [filename rules](filename-slug.md),
+and report the gaps. Never use bare `author:`, which is YAML null rather than an
+empty list.
 
 ## Frontmatter for the polished note
 
@@ -49,7 +51,8 @@ The clipping-specific choices are:
   can be `Article`.
 - `sources`: exactly the preserved capture URL as the first and only list item.
   A canonical URL found during verification is not a replacement origin.
-- `author`: block-form list of all known authors in source byline order.
+- `author`: block-form list of all known authors in source byline order, or
+  exactly `author: []` when no human author can be verified.
 - `published` and `created`: the dates determined above; do not confuse them.
 - `description`: one factual, informative sentence of at most 110 characters.
   Count characters before publication; retain essential scope when shortening.

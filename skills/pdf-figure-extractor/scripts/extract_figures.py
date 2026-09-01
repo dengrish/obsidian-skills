@@ -66,6 +66,7 @@ suffix it carries) — that is what `wiki-builder` globs for when it looks up
 import argparse
 import os
 import sys
+import tempfile
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
@@ -303,20 +304,24 @@ def extract_one_figure(doc, page_idx, bbox, out_path, dpi=250,
         )
     page = doc[page_idx]
     pix = page.get_pixmap(dpi=dpi, clip=rect)
-    # Render and trim on a temp path beside the target, then os.replace into
-    # place.  Writing the final path directly meant an interrupted run (a
+    # Render and trim in a unique sibling directory outside the flat output
+    # folder, then os.replace into place. Writing the final path directly
+    # meant an interrupted run (a
     # closed laptop lid, a killed batch) left a truncated PNG under the real
     # figure name — and every later run's idempotent "already exists" skip
     # then preserved the corrupt file forever, as a broken embed in Obsidian.
-    # Same-directory temp so the replace is atomic on one filesystem.  The
-    # leading dot keeps it out of every `[stem]_fig*` glob (they anchor on the
-    # stem) and out of Obsidian's file pane; the trailing `.png` stays, because
-    # both PyMuPDF's save and Pillow's pick their format from the suffix.
-    tmp_path = os.path.join(
-        os.path.dirname(out_path) or ".",
-        f".{os.path.splitext(os.path.basename(out_path))[0]}"
-        f".part-{os.getpid()}.png")
-    try:
+    # A sibling of `Sources/Images/` stays on the same filesystem for atomic
+    # publication without exposing an unfinished render to Obsidian or to a
+    # consumer that inventories every file in the flat folder. The `.png`
+    # suffix remains because PyMuPDF and Pillow select the format from it.
+    # Resolve the DIRECTORY for placement only. If Sources/Images is a symlink
+    # onto another volume, its logical parent may be on the wrong filesystem;
+    # the resolved sibling is still atomic with the requested final path.
+    output_dir = os.path.realpath(os.path.dirname(out_path) or ".")
+    stage_parent = os.path.dirname(output_dir)
+    with tempfile.TemporaryDirectory(prefix=".figure-stage-",
+                                     dir=stage_parent) as stage_dir:
+        tmp_path = os.path.join(stage_dir, os.path.basename(out_path))
         pix.save(tmp_path)
         rendered_size = (pix.width, pix.height)
         if trim:
@@ -336,12 +341,6 @@ def extract_one_figure(doc, page_idx, bbox, out_path, dpi=250,
             os.remove(tmp_path)
         else:
             os.replace(tmp_path, out_path)
-    except BaseException:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
-        raise
     return rendered_size, final_size, blank
 
 
@@ -393,6 +392,7 @@ def run_self_test():
     import io
     import shutil
     import tempfile
+    from unittest import mock
 
     state = {"n": 0, "bad": 0}
 
@@ -545,21 +545,71 @@ def run_self_test():
         # --- extract_one_figure -------------------------------------------
         pdf = _st_pdf(os.path.join(tmp, "Doe_Figs_2025.pdf"))
         doc = fitz.open(pdf)
-        out = os.path.join(tmp, "Doe_Figs_2025_fig_1.png")
-        rendered, final, blank = extract_one_figure(
-            doc, 0, (100, 150, 500, 350), out, dpi=72, trim=False)
+        render_root = os.path.join(tmp, "render-root")
+        render_images = os.path.join(render_root, "Images")
+        os.makedirs(render_images)
+        out = os.path.join(render_images, "Doe_Figs_2025_fig_1.png")
+        stage_parents = []
+        real_tempdir = tempfile.TemporaryDirectory
+
+        def tracked_tempdir(*args, **kwargs):
+            stage_parents.append(kwargs.get("dir"))
+            return real_tempdir(*args, **kwargs)
+
+        with mock.patch.object(tempfile, "TemporaryDirectory",
+                               side_effect=tracked_tempdir):
+            rendered, final, blank = extract_one_figure(
+                doc, 0, (100, 150, 500, 350), out, dpi=72, trim=False)
         check("extract_one_figure renders at the requested dpi",
               rendered, (400, 200))
         check("extract_one_figure without trim returns one size twice",
               final, rendered)
         check("extract_one_figure on a figure is not blank", blank, False)
         ok("extract_one_figure wrote the PNG", os.path.exists(out))
-        ok("no temp file is left beside the output",
-           not [f for f in os.listdir(tmp) if ".part-" in f])
+        check("render staging is outside the flat image folder",
+              stage_parents, [os.path.realpath(render_root)])
+        ok("no staging directory remains after publication",
+           not [f for f in os.listdir(render_root)
+                if f.startswith(".figure-stage-")])
+
+        # A directory symlink can point to another volume. Exercise that path
+        # when the platform permits creating one. Windows without developer
+        # mode commonly denies symlink creation, so the two checks retain their
+        # tally while explicitly skipping the symlink-specific condition; the
+        # ordinary path above still proves outside-folder staging and cleanup.
+        logical_root = os.path.join(tmp, "logical-root")
+        logical_images = os.path.join(logical_root, "Images")
+        os.makedirs(logical_root)
+        try:
+            os.symlink(render_images, logical_images)
+            have_output_symlink = True
+        except (OSError, NotImplementedError):
+            have_output_symlink = False
+        linked_stage_parents = []
+        if have_output_symlink:
+            def tracked_linked_tempdir(*args, **kwargs):
+                linked_stage_parents.append(kwargs.get("dir"))
+                return real_tempdir(*args, **kwargs)
+
+            linked_out = os.path.join(
+                logical_images, "Doe_Figs_2025_fig_7.png")
+            with mock.patch.object(tempfile, "TemporaryDirectory",
+                                   side_effect=tracked_linked_tempdir):
+                extract_one_figure(doc, 0, (100, 150, 500, 350), linked_out,
+                                   dpi=72, trim=False)
+        ok("a symlinked output folder stages by its resolved parent "
+           "(skipped when directory symlinks are unavailable)",
+           not have_output_symlink or linked_stage_parents == [
+               os.path.realpath(render_root)])
+        ok("publication follows a symlinked output folder "
+           "(skipped when directory symlinks are unavailable)",
+           not have_output_symlink or os.path.isfile(os.path.join(
+               render_images, "Doe_Figs_2025_fig_7.png")))
         state["n"] += 1
         try:
             extract_one_figure(doc, 0, (100, 150, 100, 350),
-                               os.path.join(tmp, "Doe_Figs_2025_fig_2.png"))
+                               os.path.join(render_images,
+                                            "Doe_Figs_2025_fig_2.png"))
             state["bad"] += 1
             print("FAIL extract_one_figure accepted a degenerate rect — "
                   "PyMuPDF answers one with a 1x1 PNG in the vault")
@@ -568,14 +618,16 @@ def run_self_test():
                 state["bad"] += 1
                 print("FAIL extract_one_figure's degenerate message: %s" % exc)
         ok("nothing was written for the degenerate rect",
-           not os.path.exists(os.path.join(tmp, "Doe_Figs_2025_fig_2.png")))
-        ok("no temp file survives a rejected rect",
-           not [f for f in os.listdir(tmp) if ".part-" in f])
+           not os.path.exists(os.path.join(render_images,
+                                           "Doe_Figs_2025_fig_2.png")))
+        ok("no staging directory survives a rejected rect",
+           not [f for f in os.listdir(render_root)
+                if f.startswith(".figure-stage-")])
         # A failure AFTER the render, which is the case the temp file exists
         # for: an interrupted run must not leave a half-written PNG under the
         # real figure name, where every later run's "already exists" skip
         # preserves it forever as a broken embed.
-        blocked = os.path.join(tmp, "Doe_Figs_2025_fig_3.png")
+        blocked = os.path.join(render_images, "Doe_Figs_2025_fig_3.png")
         os.makedirs(blocked)
         state["n"] += 1
         try:
@@ -586,8 +638,9 @@ def run_self_test():
                   "directory")
         except OSError:
             pass
-        ok("the temp file is cleaned up when the write fails late",
-           not [f for f in os.listdir(tmp) if ".part-" in f])
+        ok("the staging directory is cleaned up when publication fails late",
+           not [f for f in os.listdir(render_root)
+                if f.startswith(".figure-stage-")])
 
         # --- an all-white render ------------------------------------------
         # A caption whose figure is on the NEXT page: `auto_fig_bbox`'s
@@ -612,7 +665,8 @@ def run_self_test():
             check("render_is_blank on a PNG with one dark mark",
                   render_is_blank(marked), False)
 
-            blank_out = os.path.join(tmp, "Doe_Figs_2025_fig_9.png")
+            blank_out = os.path.join(render_images,
+                                     "Doe_Figs_2025_fig_9.png")
             rendered, final, blank = extract_one_figure(
                 doc, 0, (100, 450, 500, 700), blank_out, dpi=72)
             check("extract_one_figure reports an all-white render", blank, True)
@@ -621,11 +675,12 @@ def run_self_test():
             ok("...and writes NOTHING — a white PNG at a figure's name embeds "
                "everywhere and the next run's skip preserves it forever",
                not os.path.exists(blank_out))
-            ok("...leaving no temp file behind",
-               not [f for f in os.listdir(tmp) if ".part-" in f])
+            ok("...leaving no staging directory behind",
+               not [f for f in os.listdir(render_root)
+                    if f.startswith(".figure-stage-")])
             # ...and it cannot destroy a good figure that is already there,
             # which an --overwrite re-crop would otherwise do.
-            keep = os.path.join(tmp, "Doe_Figs_2025_fig_8.png")
+            keep = os.path.join(render_images, "Doe_Figs_2025_fig_8.png")
             _st_png(keep, (12, 12), (10, 20, 30))
             before = open(keep, "rb").read()
             _r, _f, blank = extract_one_figure(doc, 0, (100, 450, 500, 700),
@@ -722,6 +777,17 @@ def run_self_test():
            not any("escaped" in f for _r, _d, fs in os.walk(outdir)
                    for f in fs))
 
+        # The whole crop list is preflighted before the output directory is
+        # created. A bad later item cannot leave a good earlier item behind.
+        preflight_out = os.path.join(tmp, "PreflightFailure")
+        code, so, se = run([
+            pdf, "--out", preflight_out, "--stem", "Doe_Figs_2025",
+            "--crop", "1:1:100,150,500,350",
+            "--crop", "9:2:100,150,500,350",
+        ])
+        ok("a bad later crop is refused before any output-side effect",
+           code != 0 and not os.path.lexists(preflight_out))
+
         # `--stem` goes straight into a filename, so a path in it writes
         # outside `--out` entirely.
         code, so, se = run([pdf, "--out", outdir, "--stem", "../../escape",
@@ -750,6 +816,16 @@ def run_self_test():
                             "--crop", "1:1:1,2,3,4"])
         ok("...as is a dot-space one", "dotfile" in str(code))
 
+        mismatch_out = os.path.join(tmp, "MismatchedStem")
+        code, so, se = run([
+            pdf, "--out", mismatch_out, "--stem", "Doe_Other_2025",
+            "--crop", "1:1:100,150,500,350",
+        ])
+        ok("a manual crop cannot publish under a stem other than its source",
+           "exact on-disk stem" in str(code))
+        ok("a mismatched stem leaves no output directory",
+           not os.path.lexists(mismatch_out))
+
         # The missing-argument path: named, not an argparse usage dump, and
         # exit 2 the way `paper_scan.py` reports the same thing.
         code, so, se = run([pdf, "--out", outdir])
@@ -761,12 +837,33 @@ def run_self_test():
         html = os.path.join(tmp, "Doe_NotAPdf_2025.pdf")
         with open(html, "w", encoding="utf-8") as fh:
             fh.write("<html><body><h1>404</h1><p>Not found.</p></body></html>")
-        code, so, se = run([html, "--out", outdir, "--stem", "Doe_NotAPdf_2025",
+        html_out = os.path.join(tmp, "HtmlFailure")
+        code, so, se = run([html, "--out", html_out, "--stem", "Doe_NotAPdf_2025",
                             "--crop", "1:1:10,10,100,100"])
         ok("an HTML page named .pdf is refused", "not a PDF" in str(code))
-        ok("...and nothing was written for it",
-           not os.path.exists(os.path.join(outdir,
-                                           "Doe_NotAPdf_2025_fig_1.png")))
+        ok("...before creating an output directory",
+           not os.path.lexists(html_out))
+
+        # PyMuPDF opens a protected PDF object, but rendering it without a
+        # password fails later with a backend exception. Refuse it before the
+        # output folder exists and give the same scratch-copy recovery used by
+        # the batch and paper-reading workflows.
+        encrypted_plain = _st_pdf(os.path.join(tmp, "encrypted-plain.pdf"))
+        encrypted = os.path.join(tmp, "Doe_Encrypted_2025.pdf")
+        encrypted_doc = fitz.open(encrypted_plain)
+        encrypted_doc.save(
+            encrypted, encryption=fitz.PDF_ENCRYPT_AES_256,
+            owner_pw="owner-secret", user_pw="reader-secret")
+        encrypted_doc.close()
+        encrypted_out = os.path.join(tmp, "EncryptedFailure")
+        code, so, se = run([
+            encrypted, "--out", encrypted_out, "--stem", "Doe_Encrypted_2025",
+            "--crop", "1:1:100,150,500,350",
+        ])
+        ok("an encrypted PDF gets an actionable refusal",
+           "encrypted/password-protected" in str(code) and "scratch" in str(code))
+        ok("an encrypted PDF leaves no output directory",
+           not os.path.lexists(encrypted_out))
 
         # Follow the documented recovery path: batch -> manual crop -> batch.
         # The second batch must keep the repair rather than declaring its
@@ -906,8 +1003,18 @@ def main(argv=None):
         # same incident.
         sys.exit(f"--stem {args.stem!r} is only dots/spaces: the files would "
                  "be invisible dotfiles. Pass the PDF's real stem")
-    os.makedirs(out_dir, exist_ok=True)
     pdf_path = os.path.expanduser(args.pdf)
+    pdf_stem = os.path.splitext(os.path.basename(pdf_path))[0]
+    if args.stem != pdf_stem:
+        sys.exit(f"--stem {args.stem!r} does not equal the source PDF's exact "
+                 f"on-disk stem {pdf_stem!r}. Figure identity follows that "
+                 "filename; pass the exact stem or organize the PDF first")
+
+    # Parse every request before opening the source or creating `--out`. A
+    # malformed later crop must not leave earlier files behind from what the
+    # caller reasonably treats as one atomic preflighted command.
+    parsed_crops = [(spec,) + parse_crop(spec) for spec in args.crop]
+
     # A one-line message beats a traceback for the two things that land in
     # a Sources/PDFs folder and are not readable PDFs: a truncated or non-PDF
     # download, and a PDF with zero pages.
@@ -915,6 +1022,12 @@ def main(argv=None):
         doc = fitz.open(pdf_path)
     except Exception as e:
         sys.exit(f"{pdf_path}: could not open as a PDF ({e})")
+
+    def die(message):
+        """Close the source before an actionable CLI refusal."""
+        doc.close()
+        raise SystemExit(message)
+
     # PyMuPDF opens HTML, XPS and EPUB natively, so an error page or a
     # truncated download named `.pdf` opens without raising, renders, and
     # writes a PNG of somebody's 404 page into Sources/Images/ under a real
@@ -922,10 +1035,25 @@ def main(argv=None):
     # writes into the same folder and needs the same one.
     if not doc.is_pdf:
         fmt = (doc.metadata or {}).get("format") or "an unknown format"
-        sys.exit(f"{pdf_path}: not a PDF — opened as {fmt} (an HTML error page "
-                 f"or a truncated download saved with a .pdf extension)")
+        die(f"{pdf_path}: not a PDF — opened as {fmt} (an HTML error page "
+            f"or a truncated download saved with a .pdf extension)")
+    if getattr(doc, "needs_pass", False) or getattr(doc, "is_encrypted", False):
+        die(f"{pdf_path}: encrypted/password-protected PDF. Decrypt a unique "
+            "scratch directory outside Sources/PDFs, keep this exact basename "
+            "for the readable copy, preserve the organized source unchanged, "
+            "then run the manual crop against that copy")
     if len(doc) == 0:
-        sys.exit(f"{pdf_path}: PDF has zero pages — nothing to extract")
+        die(f"{pdf_path}: PDF has zero pages — nothing to extract")
+
+    # Page and geometry checks depend on the opened document, but still happen
+    # before `--out` is created or any existing output is inspected or changed.
+    for spec, page_idx, _fig_suffix, (x0, y0, x1, y1) in parsed_crops:
+        if page_idx < 0 or page_idx >= len(doc):
+            die(f"--crop {spec!r}: page {page_idx + 1} out of range "
+                f"(PDF has {len(doc)} pages)")
+        if x0 >= x1 or y0 >= y1:
+            die(f"--crop {spec!r}: degenerate rect — need x0 < x1 and "
+                f"y0 < y1, got x={x0},{x1} y={y0},{y1}")
 
     # A manual repair is this extractor's own output too. Without updating
     # its digest, the next batch called a repaired crop another skill's file
@@ -938,32 +1066,33 @@ def main(argv=None):
         try:
             manifest = read_manifest(manifest_path)
         except (OSError, UnicodeError, ValueError) as exc:
-            sys.exit(f"Refusing manual crops: cannot safely read {manifest_path}: {exc}")
+            die(f"Refusing manual crops: cannot safely read {manifest_path}: {exc}")
         if os.path.islink(manifest_path) or not os.access(manifest_path, os.W_OK):
-            sys.exit(f"Refusing manual crops: {manifest_path} is not a writable regular sidecar")
+            die(f"Refusing manual crops: {manifest_path} is not a writable regular sidecar")
     # Preflight every target even in a legacy folder. An absent manifest is
     # not proof that an occupied slot belongs to this PDF: clippings share
     # these filenames. A manual crop must not bypass the batch ownership guard.
-    for spec in args.crop:
-        _page_idx, suffix, _rect = parse_crop(spec)
+    for _spec, _page_idx, suffix, _rect in parsed_crops:
         target = os.path.join(out_dir, f"{args.stem}_fig_{suffix}.png")
         if not os.path.lexists(target):
             continue
         if os.path.islink(target):
-            sys.exit(f"Refusing manual crop of {target}: it is a symlink, not a recorded output file")
+            die(f"Refusing manual crop of {target}: it is a symlink, not a recorded output file")
         if manifest is None:
-            sys.exit(f"Refusing manual crop of {target}: no ownership manifest exists. "
-                     "Inspect this legacy image and run a scoped batch migration before "
-                     "replacing it; --overwrite does not claim another file.")
+            die(f"Refusing manual crop of {target}: no ownership manifest exists. "
+                "Inspect this legacy image and run a scoped batch migration before "
+                "replacing it; --overwrite does not claim another file.")
         try:
             digest = file_digest(target)
         except OSError as exc:
-            sys.exit(f"Refusing manual crop of {target}: {exc}")
+            die(f"Refusing manual crop of {target}: {exc}")
         key = manifest_key(manifest, os.path.basename(target))
         if manifest.get(key) != digest:
-            sys.exit(f"Refusing manual crop of {target}: ownership is unknown or its bytes changed. "
-                     "Inspect the occupant and reconcile its ownership record first; "
-                     "--overwrite does not claim another file.")
+            die(f"Refusing manual crop of {target}: ownership is unknown or its bytes changed. "
+                "Inspect the occupant and reconcile its ownership record first; "
+                "--overwrite does not claim another file.")
+
+    os.makedirs(out_dir, exist_ok=True)
 
     # Caption rects, for the "is the caption inside this crop?" warning.
     # Imported lazily and defensively: the check is a convenience, and a
@@ -982,18 +1111,7 @@ def main(argv=None):
             # this script's own crop down with it.
             print(f"note: caption-overlap check unavailable ({e})", file=sys.stderr)
 
-    for spec in args.crop:
-        page_idx, fig_suffix, (x0, y0, x1, y1) = parse_crop(spec)
-        if page_idx < 0 or page_idx >= len(doc):
-            sys.exit(
-                f"--crop {spec!r}: page {page_idx + 1} out of range "
-                f"(PDF has {len(doc)} pages)"
-            )
-        if x0 >= x1 or y0 >= y1:
-            sys.exit(
-                f"--crop {spec!r}: degenerate rect — need x0 < x1 and "
-                f"y0 < y1, got x={x0},{x1} y={y0},{y1}"
-            )
+    for spec, page_idx, fig_suffix, (x0, y0, x1, y1) in parsed_crops:
         # The crop must end above the caption. This is the constraint every
         # hand-set crop gets wrong first, and nothing about the result says
         # so: the PNG is written, looks fine at a glance, and carries the
@@ -1044,8 +1162,8 @@ def main(argv=None):
                                "# pdf-figure-extractor output manifest.\n"
                                "# One per line: <figure filename><TAB><sha256 of the bytes written>\n")
             except (OSError, UnicodeError, ValueError) as exc:
-                sys.exit(f"Crop written to {out_path}, but its ownership record could not be updated: {exc}. "
-                         "Do not run automatic overwrite; preserve this manual crop while repairing the sidecar.")
+                die(f"Crop written to {out_path}, but its ownership record could not be updated: {exc}. "
+                    "Do not run automatic overwrite; preserve this manual crop while repairing the sidecar.")
         msg = f"Wrote {out_path}: {rw}x{rh}"
         if args.trim:
             if (fw, fh) != (rw, rh):
@@ -1053,6 +1171,7 @@ def main(argv=None):
             else:
                 msg += " (no whitespace to trim)"
         print(msg)
+    doc.close()
     return 0
 
 

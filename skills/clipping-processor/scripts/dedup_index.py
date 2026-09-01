@@ -103,10 +103,10 @@ def _path_keys(path):
 # exactly what guard 2 (step 3's filename check) exists to catch. Strip what is
 # provably noise, and no further.
 TRACKING_PARAMS = {
-    "fbclid", "gclid", "mc_cid", "mc_eid", "referrer", "share",
-    "r", "showwelcome",
+    "fbclid", "gclid", "mc_cid", "mc_eid",
 }
 TRACKING_PREFIXES = ("utm_",)
+SUBSTACK_TRACKING_PARAMS = {"r", "showwelcome"}
 
 #: A fragment that ROUTES rather than anchors: `#/posts/1`, `#!/posts/1`.
 #: Dropping every fragment collapsed a fragment-routed SPA onto one key — every
@@ -141,16 +141,21 @@ def normalize_url(url):
     if host.startswith("www."):
         host = host[4:]
     path = parts.path.rstrip("/")
+    host_name = parts.hostname.lower().rstrip(".")
+    is_substack = host_name == "substack.com" or host_name.endswith(".substack.com")
     query_pairs = [
         (k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
         if k.lower() not in TRACKING_PARAMS
         and not any(k.lower().startswith(p) for p in TRACKING_PREFIXES)
+        and not (is_substack and k.lower() in SUBSTACK_TRACKING_PARAMS)
     ]
-    # Sorted, because parameter order carries no page identity either: a
-    # ?a=1&b=2 clip and a ?b=2&a=1 clip of one article would otherwise be two
-    # `new` verdicts, and the second one overwrites the first's note. Which
-    # parameters survive is unchanged — only their order is normalized.
-    query = urlencode(sorted(query_pairs))
+    # Preserve the order of surviving parameters. An HTTP query is opaque to
+    # the origin: some applications interpret repeated keys in order, and some
+    # route or sign even unique parameters in their original order. Sorting can
+    # therefore collapse two distinct pages onto one dedup key, whose second raw
+    # is silently skipped. A false negative here is caught by the later slug
+    # ownership check; a false duplicate has no downstream recovery.
+    query = urlencode(query_pairs)
     # An anchor fragment is dropped; a routing fragment is the page and stays.
     # An emptied query drops its trailing "?" too.
     fragment = parts.fragment
@@ -252,7 +257,7 @@ def _md_files(folder):
     out = []
     for root, _dirs, files in os.walk(folder, onerror=failed):
         for f in sorted(files):
-            if f.endswith(".md"):
+            if f.lower().endswith(".md"):
                 out.append(os.path.join(root, f))
     return sorted(out)
 
@@ -376,9 +381,15 @@ def run_self_test():
     case("an emptied query drops its `?`",
           normalize_url("https://example.com/a?utm_source=x"),
           "https://example.com/a")
-    case("query order does not matter",
+    case("query order is preserved",
           normalize_url("https://example.com/a?b=2&a=1"),
-          "https://example.com/a?a=1&b=2")
+          "https://example.com/a?b=2&a=1")
+    differ("origins may route unique query keys in order",
+           "https://example.com/a?a=1&b=2",
+           "https://example.com/a?b=2&a=1")
+    differ("repeated query keys can be order-sensitive",
+           "https://example.com/a?step=first&step=second",
+           "https://example.com/a?step=second&step=first")
     case("None is the empty key", normalize_url(None), "")
     case("blank is the empty key", normalize_url("   "), "")
     for bad in ("https://[broken/article", "https://", "http:///article",
@@ -391,11 +402,17 @@ def run_self_test():
     differ("a trailing apostrophe in a URL path is literal data",
            "https://example.com/rockin'", "https://example.com/rockin")
     for param in ("utm_source", "utm_medium", "utm_campaign", "fbclid",
-                  "gclid", "mc_cid", "mc_eid", "referrer", "share", "r",
-                  "showWelcome"):
+                  "gclid", "mc_cid", "mc_eid"):
         same("tracking %s carries no identity" % param,
              "https://example.com/a?%s=x" % param, "https://example.com/a")
-    for param in ("id", "p", "page", "v", "story", "q"):
+    for param in ("r", "showWelcome"):
+        same("Substack tracking %s carries no identity on Substack" % param,
+             "https://newsletter.substack.com/p/a?%s=x" % param,
+             "https://newsletter.substack.com/p/a")
+        differ("?%s= is preserved on an unrelated origin" % param,
+               "https://example.com/a?%s=1" % param,
+               "https://example.com/a?%s=2" % param)
+    for param in ("id", "p", "page", "v", "story", "q", "referrer", "share"):
         differ("?%s= often IS the page identity" % param,
                "https://example.com/a?%s=1" % param,
                "https://example.com/a?%s=2" % param)
@@ -546,6 +563,19 @@ def run_self_test():
         case("a missing file is not a source", read_source(
             os.path.join(tmp, "nope.md")), None)
         case("a directory is not a source", read_source(tmp), None)
+
+        # Extension dispatch is case-insensitive everywhere else in the plugin.
+        # On a case-sensitive Linux vault, the old lowercase-only scan silently
+        # omitted an existing `Reviewed.MD` from the supposedly complete dedup
+        # inventory and could classify its raw capture as new.
+        mixed_case = os.path.join(tmp, "mixed-case")
+        os.makedirs(mixed_case)
+        upper_md = note(os.path.join("mixed-case", "Reviewed.MD"),
+                        "---\nsource: %s\n---\n" % URL)
+        note(os.path.join("mixed-case", "Ignored.txt"),
+             "---\nsource: %s\n---\n" % URL)
+        case("a complete Markdown inventory includes uppercase .MD files",
+             _md_files(mixed_case), [upper_md])
 
         # --- build_index: what goes in, what is counted, what is set aside --
         vault = os.path.join(tmp, "Articles")

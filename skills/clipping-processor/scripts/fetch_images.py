@@ -34,12 +34,12 @@ moves the result in under the write guards below. Neither the fetch nor the
 final write is left to the rendering step, because a script that does its own
 `urlopen` and its own `os.replace` into Sources/Images has none of this.
 
-`rename`'s `--sources` is the vault's `Sources/PDFs`: given it, a `<old_slug>.pdf`
+`rename`'s required `--sources` is the vault's `Sources/PDFs`: a `<old_slug>.pdf`
 found anywhere beneath (the folder is recursive — book chapters live in
 `Sources/PDFs/<Work>/`) proves the figures under that stem are that document's,
 and the whole rename is refused. PDF manifest ownership is checked regardless
-of this flag. Without either a manifest record or `--sources`, only label
-spelling distinguishes PDF figures, so pass `--sources` on every `rename`.
+of this inventory. Label spelling alone cannot distinguish a PDF's plain-numbered
+figures from a clipping's, so a rename never runs without the inventory.
 
 URLs are processed in the order given, which must be the body's source order:
 the figure counter is shared and sequential. `--start` continues the counter
@@ -86,8 +86,9 @@ Importable
     fetch_source(url, out=None) -> dict                # non-image, outside the vault
     place_file(src, attachments, slug, index) -> dict  # rendered file -> the vault
     rename_slug(attachments, old_slug, new_slug, dry_run=False,
-                sources=None) -> list[dict]
+                *, sources=...) -> list[dict]
     validate_slug(slug, what="--slug") -> str          # raises ValueError
+    validate_index(index, what="figure index") -> int  # raises ValueError
     run_self_test() -> int                             # also `selftest`
 
 Output: one JSON object on stdout. Exit 0 if every item succeeded, 1 if any
@@ -167,6 +168,13 @@ ALLOWED_SCHEMES = {"http", "https", "data"}
 DEFAULT_MAX_BYTES = 25 * 1024 * 1024
 DEFAULT_MAX_SECONDS = 120
 CHUNK = 64 * 1024
+
+#: Every canonical extension this producer can return. CONVENTIONS.md §8a
+#: publishes the same set; the convention harness compares them and verifies
+#: wiki-linter recognizes every one as an image embed.
+OUTPUT_EXTENSIONS = frozenset((
+    "png", "jpg", "gif", "webp", "svg", "avif", "bmp", "tiff", "ico",
+))
 
 #: Control characters that appear in ordinary text. Anything else below 0x20,
 #: plus DEL, means the payload is binary and the text branch does not apply.
@@ -440,6 +448,23 @@ def validate_slug(slug, what="--slug"):
     return slug
 
 
+def validate_index(index, what="figure index"):
+    """Require the positive counter promised by the figure naming contract."""
+    if isinstance(index, bool) or not isinstance(index, int) or index < 1:
+        raise ValueError(f"{what} must be a positive integer starting at 1: {index!r}")
+    return index
+
+
+def _positive_index_arg(value):
+    """argparse adapter for :func:`validate_index`."""
+    try:
+        index = int(value)
+        validate_index(index)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+    return index
+
+
 def _ensure_within(directory, path):
     """Assert `path` really lands inside `directory`; return the resolved path."""
     root = os.path.realpath(directory)
@@ -695,6 +720,7 @@ def download_one(url, attachments, slug, index, timeout=45,
     tmp = _temp_path()
     try:
         validate_slug(slug)
+        validate_index(index)
         # Before the fetch: no reason to spend a download on a slot we are
         # going to refuse to write. Re-checked after, against the real path.
         _refuse_existing(attachments, slug, index, overwrite)
@@ -805,6 +831,7 @@ def place_file(src, attachments, slug, index, overwrite=False):
               "filename": None, "ext": None, "bytes": 0, "error": None}
     try:
         validate_slug(slug)
+        validate_index(index)
         if not os.path.isfile(src):
             raise ValueError(f"--from-file {src!r} is not a file")
         root = os.path.realpath(attachments)
@@ -902,7 +929,7 @@ _STRADDLE = ("refused: this set is renamed all or nothing, and %s blocked it. "
              "Nothing was renamed. Resolve that one and re-run.")
 
 
-def rename_slug(attachments, old_slug, new_slug, dry_run=False, sources=None):
+def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources):
     """Rename every <old_slug>_fig_N.<ext> attachment to the new slug.
 
     **All or nothing.** The whole set is planned first, and if any member is
@@ -932,15 +959,18 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, sources=None):
     whose figures `pdf-figure-extractor` wrote. Globbing the stem and renaming
     what comes back moved three of those out from under a summary note whose
     embeds then resolved to nothing. Two guards, both cheap: a label spelling
-    only the other producer writes, and — when `sources` is given — a PDF of
-    that stem on disk, which settles ownership outright. A PDF-only label is a
+    only the other producer writes, and the required `sources` inventory, where
+    a PDF of that stem settles ownership outright. A PDF-only label is a
     refusal for the WHOLE set, not just that file: it is evidence that the
     other producer owns this stem, and the plain-integer figures beside it are
     then just as likely to be its.
     """
     validate_slug(old_slug, "--old-slug")
     validate_slug(new_slug, "--new-slug")
-    if sources is not None and not os.path.isdir(sources):
+    if sources is None:
+        raise ValueError("--sources is required for every rename so PDF-owned "
+                         "figures cannot be mistaken for clipping images")
+    if not os.path.isdir(sources):
         raise ValueError("--sources is not a directory: %r — cannot verify PDF ownership" % sources)
     if sources and _pdf_named(sources, old_slug):
         return [{"from": old_slug + "_fig_*", "to": None, "ok": False,
@@ -1096,6 +1126,7 @@ def run_self_test():
         return ""
 
     # --- sniff_extension: bytes beat Content-Type beat the URL --------------
+    exercised_extensions = set()
     for label, head, ct, url, want in (
             ("PNG magic", _PNG, None, None, "png"),
             ("JPEG magic", b"\xff\xd8\xff\xe0JFIF", None, None, "jpg"),
@@ -1217,6 +1248,10 @@ def run_self_test():
              "application/octet-stream", "http://x/a.svg", None)):
         check("sniff_extension, %s" % label,
               sniff_extension(head, ct, url), want)
+        if want is not None:
+            exercised_extensions.add(want)
+    check("signature fixtures cover the full advertised output-extension set",
+          exercised_extensions, set(OUTPUT_EXTENSIONS))
 
     # describe_bytes is what turns a refusal into a diagnosis: "not an image"
     # sends the reader back to the URL with nothing, "a JSON body" says the CDN
@@ -1260,6 +1295,11 @@ def run_self_test():
     check("...and reports which argument was wrong",
           "--old-slug" in raises("validate_slug names its argument",
                                  validate_slug, "../x", "--old-slug"), True)
+    for bad in (0, -1, 1.5, "1", True, None):
+        raises("validate_index refuses a non-positive or non-integer index %r" % (bad,),
+               validate_index, bad)
+    check("validate_index accepts the first and later figure numbers",
+          [validate_index(1), validate_index(20)], [1, 20])
 
     import shutil
     tmp = tempfile.mkdtemp(prefix="fetch_images_selftest.")
@@ -1270,6 +1310,13 @@ def run_self_test():
         tempfile.tempdir = tmp
         att = os.path.join(tmp, "Sources", "Images")
         os.makedirs(att)
+        sources = os.path.join(tmp, "Sources", "PDFs")
+        os.makedirs(sources)
+
+        def checked_rename(*args, **kwargs):
+            """Every ordinary self-test call follows the required ownership path."""
+            kwargs.setdefault("sources", sources)
+            return rename_slug(*args, **kwargs)
 
         def touch(path, data=b"x"):
             with open(path, "wb") as fh:
@@ -1512,7 +1559,8 @@ def run_self_test():
                open(owned_file, "rb").read(), os.path.exists(owned_render)),
               (False, False, _PNG, True))
         check("recorded PDF figures cannot be renamed by a clipping either",
-              [row["ok"] for row in rename_slug(pdf_owned, "Doe_Paper_2026", "New_Note_2026")],
+              [row["ok"] for row in checked_rename(
+                  pdf_owned, "Doe_Paper_2026", "New_Note_2026")],
               [False])
         with open(os.path.join(pdf_owned, MANIFEST_FILE), "w") as fh:
             fh.write("not a valid ownership record\n")
@@ -1694,6 +1742,14 @@ def run_self_test():
         check("download_one refuses a file: URL", res["ok"], False)
         res = download_one(data_url, att, "../escape", 9)
         check("download_one refuses a slug that is a path", res["ok"], False)
+        res = download_one(data_url, att, "Teslo_Cancer_2026", 0)
+        check("download_one refuses figure zero and writes no slot",
+              (res["ok"], _glob_slug(att, "Teslo_Cancer_2026", "_fig_0.*")),
+              (False, []))
+        zero_render = touch(os.path.join(tmp, "zero-index.gif"), gif)
+        res = place_file(zero_render, att, "Teslo_Cancer_2026", 0)
+        check("place refuses figure zero without consuming the render",
+              (res["ok"], os.path.exists(zero_render)), (False, True))
         check("no failed download leaves its temp file behind",
               strays() - before, set())
 
@@ -1706,23 +1762,27 @@ def run_self_test():
                 touch(os.path.join(folder, slug + n), _PNG)
             return folder
 
+        missing_guard = figures("Needs_Ownership_2025", ("_fig_1.png",))
+        raises("rename refuses to run without the recursive PDF ownership inventory",
+               rename_slug, missing_guard, "Needs_Ownership_2025", "New_Slug_2026")
+
         folder = figures("Old_Slug_2025")
-        out = rename_slug(folder, "Old_Slug_2025", "New_Slug_2026")
+        out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
         check("a clean rename renames the whole set",
               ([e["ok"] for e in out], sorted(os.listdir(folder))),
               ([True, True, True],
                ["New_Slug_2026_fig_1.png", "New_Slug_2026_fig_2.png",
                 "New_Slug_2026_fig_3.png"]))
         check("renaming a stem with no figures is empty, not an error",
-              rename_slug(folder, "Nobody_Home_2020", "X_2021"), [])
+              checked_rename(folder, "Nobody_Home_2020", "X_2021"), [])
         folder = figures("müLLER_Trial_2025", ("_fig_1.png",))
-        out = rename_slug(folder, unicodedata.normalize("NFD", "Müller_Trial_2025"),
+        out = checked_rename(folder, unicodedata.normalize("NFD", "Müller_Trial_2025"),
                           "Muller_New_2026")
         check("a different case and Unicode spelling still renames the real figure",
               ([entry["ok"] for entry in out], sorted(os.listdir(folder))),
               ([True], ["Muller_New_2026_fig_1.png"]))
         folder = figures("STRASSE_Trial_2025", ("_fig_1.png",))
-        out = rename_slug(folder, "Straße_Trial_2025", "New_Trial_2026")
+        out = checked_rename(folder, "Straße_Trial_2025", "New_Trial_2026")
         check("casefold expansion does not cut the figure suffix at the wrong character",
               ([entry["to"] for entry in out], [entry["ok"] for entry in out]),
               (["New_Trial_2026_fig_1.png"], [True]))
@@ -1730,14 +1790,14 @@ def run_self_test():
         touch(os.path.join(folder, "new_slug_2026_fig_2.webp"), b"other owner")
         before_set = sorted(os.listdir(folder))
         for dry in (True, False):
-            out = rename_slug(folder, "Old_Slug_2025", "New_Slug_2026", dry_run=dry)
+            out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026", dry_run=dry)
             check("rename refuses another format in its destination slot (dry=%s)" % dry,
                   ([entry["ok"] for entry in out], sorted(os.listdir(folder))),
                   ([False, False, False], before_set))
         folder = figures("Old_Slug_2025")
         os.mkdir(os.path.join(folder, "Old_Slug_2025_fig_assets"))
         check("a matching directory refuses the rename instead of moving user content",
-              all(not entry["ok"] for entry in rename_slug(
+              all(not entry["ok"] for entry in checked_rename(
                   folder, "Old_Slug_2025", "New_Slug_2026")), True)
 
         # §8a: a CONSUMER matches `<stem>_fig`, never `<stem>_fig_`. This side
@@ -1751,7 +1811,7 @@ def run_self_test():
         old = "_fig3.png"                # pre-convergence: no separator
         old_s1 = "_figS1.png"            # pre-convergence, supplementary
         folder = figures("Old_Slug_2025", ("_fig_1.png", "_fig_2.webp", old))
-        out = rename_slug(folder, "Old_Slug_2025", "New_Slug_2026")
+        out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
         check("the loose §8a glob takes the pre-convergence spelling too",
               ([e["ok"] for e in out], sorted(os.listdir(folder))),
               ([True, True, True],
@@ -1762,7 +1822,7 @@ def run_self_test():
         # a hand-named `_figure_3.png` is this stem's figure as well, and its
         # tail is carried across verbatim rather than re-spelled
         folder = figures("Old_Slug_2025", ("_fig_1.png", "_figure_3.png"))
-        out = rename_slug(folder, "Old_Slug_2025", "New_Slug_2026")
+        out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
         check("...as is a hand-named `_figure_N`",
               ([e["ok"] for e in out], sorted(os.listdir(folder))),
               ([True, True],
@@ -1770,7 +1830,7 @@ def run_self_test():
         # the ownership guard has to read the older spelling as well, or a
         # loose glob just widens what gets taken from the other producer
         folder = figures("Doe_Old_2025", ("_fig_1.png", old_s1))
-        out = rename_slug(folder, "Doe_Old_2025", "New_Note_2026")
+        out = checked_rename(folder, "Doe_Old_2025", "New_Note_2026")
         check("a pre-convergence supplementary label still refuses the set",
               ([e["ok"] for e in out], sorted(os.listdir(folder))),
               ([False, False],
@@ -1784,7 +1844,7 @@ def run_self_test():
         # set back together.
         folder = figures("Old_Slug_2025")
         touch(os.path.join(folder, "New_Slug_2026_fig_2.png"), b"someone else's")
-        out = rename_slug(folder, "Old_Slug_2025", "New_Slug_2026")
+        out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
         check("one occupied destination refuses the whole set",
               [e["ok"] for e in out], [False, False, False])
         check("...naming the file that blocked it",
@@ -1798,13 +1858,13 @@ def run_self_test():
         check("...and the occupied destination is untouched",
               open(os.path.join(folder, "New_Slug_2026_fig_2.png"), "rb").read(),
               b"someone else's")
-        out = rename_slug(folder, "Old_Slug_2025", "New_Slug_2026", dry_run=True)
+        out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026", dry_run=True)
         check("--dry-run reports the same refusal the run would make",
               [e["ok"] for e in out], [False, False, False])
         check("...and is marked as a dry run",
               all(e.get("dry_run") for e in out), True)
         folder = figures("Old_Slug_2025")
-        out = rename_slug(folder, "Old_Slug_2025", "New_Slug_2026", dry_run=True)
+        out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026", dry_run=True)
         check("--dry-run on a clean set reports every file and writes nothing",
               ([e["ok"] for e in out],
                sorted(os.listdir(folder))[0]),
@@ -1826,7 +1886,7 @@ def run_self_test():
 
         os.rename = _flaky_rename
         try:
-            out = rename_slug(folder, "Old_Slug_2025", "New_Slug_2026")
+            out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
         finally:
             os.rename = real_rename
         check("a rename that fails part-way is rolled back",
@@ -1842,7 +1902,7 @@ def run_self_test():
         # old-convention reprocess, and on a case-insensitive volume src and
         # dst are one file.
         folder = figures("teslo_cancer_2026", ("_fig_1.png",))
-        out = rename_slug(folder, "teslo_cancer_2026", "Teslo_Cancer_2026")
+        out = checked_rename(folder, "teslo_cancer_2026", "Teslo_Cancer_2026")
         check("a case-only rename is allowed", [e["ok"] for e in out], [True])
         # ...which is decided by `_same_file`, not by the names. The vault's own
         # volume is case-insensitive, where src and dst ARE one file and
@@ -1864,12 +1924,12 @@ def run_self_test():
             pass                              # no hard links here: skip, silently
         else:
             check("a destination that IS the source is not a collision",
-                  all(e["ok"] for e in rename_slug(folder, "teslo_cancer_2026",
+                  all(e["ok"] for e in checked_rename(folder, "teslo_cancer_2026",
                                                    "Teslo_Cancer_2026")), True)
 
         # Sources/Images is FLAT and shared. Two guards say the stem is a PDF's.
         folder = figures("Doe_Foo_2025", ("_fig_1.png", "_fig_S1.png"))
-        out = rename_slug(folder, "Doe_Foo_2025", "New_Note_2026")
+        out = checked_rename(folder, "Doe_Foo_2025", "New_Note_2026")
         check("a supplementary label refuses the set",
               [e["ok"] for e in out], [False, False])
         check("...naming the label as the reason",
@@ -1880,40 +1940,39 @@ def run_self_test():
         for label in ("_fig_ED2.png", "_fig_SI3.png", "_fig_1-2.png",
                       "_fig_2.1.png"):
             folder = figures("Doe_Bar_2025", ("_fig_1.png", label))
-            out = rename_slug(folder, "Doe_Bar_2025", "New_Note_2026")
+            out = checked_rename(folder, "Doe_Bar_2025", "New_Note_2026")
             check("a %s label is pdf-figure-extractor's" % label,
                   any(e["ok"] for e in out), False)
         # ...and a plain integer label is this skill's own, so it renames
         folder = figures("Doe_Baz_2025", ("_fig_1.png", "_fig_12.png"))
-        out = rename_slug(folder, "Doe_Baz_2025", "New_Note_2026")
+        out = checked_rename(folder, "Doe_Baz_2025", "New_Note_2026")
         check("a plain integer label is this skill's", [e["ok"] for e in out],
               [True, True])
         folder = figures("Doe_Fig_S1_2025", ("_fig_1.png",))
         check("PDF-only label syntax inside a clipping title does not own its figures",
-              [e["ok"] for e in rename_slug(
+              [e["ok"] for e in checked_rename(
                   folder, "Doe_Fig_S1_2025", "Doe_Trial_2025")], [True])
 
         # ...and a `<stem>.pdf` on disk settles ownership outright
-        sources = os.path.join(tmp, "Sources", "PDFs")
         os.makedirs(os.path.join(sources, "sub"))
         touch(os.path.join(sources, "sub", "Doe_Qux_2025.pdf"))
         folder = figures("Clipping_Topic_2025", ("_fig_1.png",))
         check("a PDF also reserves the destination stem before figures exist",
-              [entry["ok"] for entry in rename_slug(
+              [entry["ok"] for entry in checked_rename(
                   folder, "Clipping_Topic_2025", "Doe_Qux_2025", sources=sources)],
               [False])
         with open(os.path.join(folder, MANIFEST_FILE), "w") as fh:
             fh.write("Reserved_Paper_2025_fig_1.png\t" + hashlib.sha256(_PNG).hexdigest() + "\n")
         check("a missing figure's PDF manifest record still reserves the rename destination",
-              [entry["ok"] for entry in rename_slug(
+              [entry["ok"] for entry in checked_rename(
                   folder, "Clipping_Topic_2025", "Reserved_Paper_2025")], [False])
         with open(os.path.join(folder, MANIFEST_FILE), "w") as fh:
             fh.write("Reserved_Paper_2025_fig_1.webp\t" + hashlib.sha256(_PNG).hexdigest() + "\n")
         check("manifest ownership reserves the destination index across extensions",
-              [entry["ok"] for entry in rename_slug(
+              [entry["ok"] for entry in checked_rename(
                   folder, "Clipping_Topic_2025", "Reserved_Paper_2025")], [False])
         folder = figures("Doe_Qux_2025", ("_fig_1.png",))
-        out = rename_slug(folder, "Doe_Qux_2025", "New_Note_2026",
+        out = checked_rename(folder, "Doe_Qux_2025", "New_Note_2026",
                           sources=sources)
         check("a PDF of that stem refuses the rename",
               [e["ok"] for e in out], [False])
@@ -1921,19 +1980,20 @@ def run_self_test():
               "pdf-organizer" in (out[0]["error"] or ""), True)
         check("...and leaves the figures alone",
               os.listdir(folder), ["Doe_Qux_2025_fig_1.png"])
+        folder = figures("Clipping_No_PDF_2025", ("_fig_1.png",))
         check("...while a stem with no PDF renames normally",
-              [e["ok"] for e in rename_slug(folder, "Doe_Qux_2025",
-                                            "New_Note_2026")], [True])
+              [e["ok"] for e in checked_rename(
+                  folder, "Clipping_No_PDF_2025", "New_Note_2026")], [True])
         accented = "Müller_Topic_2026"
         touch(os.path.join(sources, "sub", unicodedata.normalize("NFD", accented) + ".pdf"))
         folder = figures(accented, ("_fig_1.png",))
-        out = rename_slug(folder, accented, "New_Note_2026", sources=sources)
+        out = checked_rename(folder, accented, "New_Note_2026", sources=sources)
         check("an NFD PDF filename still owns an NFC figure stem",
               [e["ok"] for e in out], [False])
         check("...and its figures stay under their original stem",
               os.listdir(folder), [accented + "_fig_1.png"])
         raises("a mistyped --sources path cannot silently disable ownership checks",
-               rename_slug, folder, accented, "New_Note_2026",
+                   checked_rename, folder, accented, "New_Note_2026",
                sources=os.path.join(sources, "missing-folder"))
         scandir = os.scandir
 
@@ -1946,13 +2006,13 @@ def run_self_test():
                   for name in os.listdir(folder)}
         with patch.object(os, "scandir", side_effect=unreadable_sources):
             raises("an incomplete PDF inventory cannot authorize an image rename",
-                   rename_slug, folder, accented, "New_Note_2026", sources=sources)
+               checked_rename, folder, accented, "New_Note_2026", sources=sources)
         check("failed ownership enumeration preserves every image name and byte",
               {name: open(os.path.join(folder, name), "rb").read()
                for name in os.listdir(folder)}, before)
-        raises("rename_slug validates both slugs", rename_slug, folder,
+        raises("rename_slug validates both slugs", checked_rename, folder,
                "../old", "new")
-        raises("...including the new one", rename_slug, folder, "old",
+        raises("...including the new one", checked_rename, folder, "old",
                "../new")
 
         # --- the documented procedures, which are the other half of a guard --
@@ -2125,7 +2185,7 @@ def main(argv=None):
     d.add_argument("urls", nargs="*")
     d.add_argument("--attachments", required=True)
     d.add_argument("--slug", required=True)
-    d.add_argument("--start", type=int, default=1)
+    d.add_argument("--start", type=_positive_index_arg, default=1)
     d.add_argument("--urls-file", help="file with one URL per line; - for stdin")
     d.add_argument("--timeout", type=int, default=45,
                    help="per-socket-operation timeout, seconds (default 45)")
@@ -2165,7 +2225,7 @@ def main(argv=None):
                        "Sources/Images/ under this script's write guards")
     p.add_argument("--attachments", required=True)
     p.add_argument("--slug", required=True)
-    p.add_argument("--index", type=int, required=True)
+    p.add_argument("--index", type=_positive_index_arg, required=True)
     p.add_argument("--from-file", required=True, dest="from_file",
                    help="the rendered file, which must live OUTSIDE the "
                         "attachments folder; it is moved, not copied, and its "
@@ -2176,8 +2236,9 @@ def main(argv=None):
 
     r = sub.add_parser("rename", help="rename attachments after a slug change")
     r.add_argument("--attachments", required=True)
-    r.add_argument("--sources", help="the vault's Sources/PDFs folder; "
-                   "given, a <slug>.pdf there proves the figures are a "
+    r.add_argument("--sources", required=True,
+                   help="the vault's Sources/PDFs folder; "
+                   "a <slug>.pdf there proves the figures are a "
                    "PDF's and the rename is refused")
     r.add_argument("--old-slug", required=True)
     r.add_argument("--new-slug", required=True)
@@ -2239,7 +2300,7 @@ def main(argv=None):
 
     try:
         results = rename_slug(args.attachments, args.old_slug, args.new_slug,
-                              args.dry_run, getattr(args, 'sources', None))
+                              args.dry_run, sources=args.sources)
     except ValueError as exc:
         print(json.dumps({"mode": "rename", "old_slug": args.old_slug,
                           "new_slug": args.new_slug, "error": str(exc),

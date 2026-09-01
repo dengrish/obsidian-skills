@@ -62,6 +62,7 @@ familiar-looking word as proof.
 | 3 | Neither PDF backend is available; repair the permitted environment or read pages directly. It has not inspected the PDF. |
 | 4 | No extractable text; inspect page images or OCR to unique scratch outside the vault. |
 | 5 | Unreadable/corrupt or zero-page PDF; stop this note and report the need for a readable source. |
+| 6 | Encrypted/password-protected PDF; decrypt to a unique scratch directory outside the vault, preserve the organized source unchanged, and rerun the reader on the scratch copy. If a figure tool will use that copy, retain the source's exact basename inside the unique directory. |
 
 Do not place an OCR copy beside the original in `Sources/PDFs/`: that creates a
 second source identity with no matching figures. Keep the original PDF

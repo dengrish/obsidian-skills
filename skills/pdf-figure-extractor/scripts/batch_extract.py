@@ -155,7 +155,7 @@ from extract_figures import extract_one_figure, normalize_fig_num
 #: that never collide and never deduplicate. CONVENTIONS.md §1a, §8b.
 from naming import chapter_book_stem, core_stem, looks_canonical  # noqa: E402
 from figure_state import (MANIFEST_FILE, REVIEW_FILE, read_manifest,
-                          write_manifest, figure_identity, manifest_key,
+                          write_manifest, write_review, figure_identity, manifest_key,
                           check_manifest_writable, parse_reviewed)  # noqa: E402
 
 #: Default filename for the review ledger, written inside `--out`. A dotfile:
@@ -262,7 +262,7 @@ def load_reviewed(path):
         return set()
 
 
-def mark_reviewed(path, entries, dry_run=False):
+def mark_reviewed(path, entries, dry_run=False, allowed_stems=None):
     """Append `STEM:FIG` entries to the ledger; returns what was recorded.
 
     `dry_run` parses and validates the entries but writes nothing — not the
@@ -273,6 +273,7 @@ def mark_reviewed(path, entries, dry_run=False):
     A malformed `STEM:FIG` still exits here, because reporting the syntax
     error only on the real run is the same surprise the other way round.
     """
+    allowed_stems = None if allowed_stems is None else set(allowed_stems)
     recorded = []
     for e in entries:
         stem, sep, fig = e.rpartition(":")
@@ -281,7 +282,15 @@ def mark_reviewed(path, entries, dry_run=False):
                 f"--mark-reviewed {e!r}: expected STEM:FIG, e.g. "
                 f"--mark-reviewed Prince_UDL_2026_02_SupLearn:10-5"
             )
-        recorded.append((stem.strip(), fig.strip()))
+        stem = stem.strip()
+        fig = fig.strip()
+        if allowed_stems is not None and stem not in allowed_stems:
+            sys.exit(
+                f"--mark-reviewed {e!r}: {stem!r} is not the exact on-disk "
+                "stem of a PDF in this --src scope. Copy the stem from the "
+                "flagged report; no review record was written"
+            )
+        recorded.append((stem, fig))
     rows = "".join(f"{stem}\t{fig}\n" for stem, fig in recorded)
     try:
         parse_reviewed(rows)
@@ -294,14 +303,13 @@ def mark_reviewed(path, entries, dry_run=False):
         previous = ""
     if dry_run:
         return recorded
-    check_manifest_writable(path)
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "a", encoding="utf-8", newline="") as fh:
-        if fh.tell() == 0:                       # a fresh ledger: explain itself
-            fh.write(REVIEW_HEADER)
-        elif previous and not previous.endswith(("\n", "\r")):
-            fh.write("\n")
-        fh.write(rows)
+    body = previous
+    if not body:                                 # a fresh ledger: explain itself
+        body = REVIEW_HEADER
+    elif not body.endswith(("\n", "\r")):
+        body += "\n"
+    body += rows
+    write_review(path, body)
     return recorded
 
 
@@ -2053,10 +2061,50 @@ def run_self_test():
         code, so, se = run(["--out", run_out])
         check("a missing --src exits 2", code, 2)
         ok("...naming it", "--src" in se)
+        missing_out = Path(tmp) / "missing-source-output"
         code, so, se = run(["--src", os.path.join(tmp, "empty-dir"),
-                            "--out", run_out])
+                            "--out", str(missing_out)])
         ok("a --src that does not exist is refused",
-           code != 0 and "not a directory" in str(code))
+           code == 1 and "does not exist" in se)
+        ok("a missing source creates no output or review sidecar",
+           not missing_out.exists())
+
+        empty_src = Path(tmp) / "empty-source"
+        empty_src.mkdir()
+        empty_out = Path(tmp) / "empty-output"
+        code, so, se = run(["--src", str(empty_src), "--out", str(empty_out)])
+        check("a valid empty source reports no work successfully", code, 0)
+        ok("a valid empty source leaves no output directory",
+           not empty_out.exists())
+        empty_mark_out = Path(tmp) / "empty-mark-output"
+        code, so, se = run([
+            "--src", str(empty_src), "--out", str(empty_mark_out),
+            "--mark-reviewed", "Doe_Missing_2025:1",
+        ])
+        ok("an empty source cannot silently ignore a requested review mark",
+           code == 1 and "contains no PDFs" in se)
+        ok("the impossible empty-scope mark leaves no output or ledger",
+           not empty_mark_out.exists())
+
+        non_pdf_src = Path(tmp) / "not-a-pdf.txt"
+        non_pdf_src.write_text("not a source document", encoding="utf-8")
+        non_pdf_out = Path(tmp) / "non-pdf-output"
+        code, so, se = run(["--src", str(non_pdf_src),
+                            "--out", str(non_pdf_out)])
+        ok("a single non-PDF source file is refused explicitly",
+           code == 1 and "not a PDF" in se)
+        ok("a non-PDF source file leaves no output directory",
+           not non_pdf_out.exists())
+
+        wrong_mark_out = Path(tmp) / "wrong-review-stem"
+        code, so, se = run([
+            "--src", str(one), "--out", str(wrong_mark_out),
+            "--mark-reviewed", "Doe_Typo_2025:1",
+        ])
+        ok("a review mark must name an exact source stem",
+           code != 0 and "exact on-disk" in str(code))
+        ok("a mistyped review stem leaves no output or ledger",
+           not wrong_mark_out.exists())
 
         collision_src = Path(tmp) / "colliding-sources"
         for folder, name, fill in (("A", "Doe_Same_2025.pdf", (1, 0, 0)),
@@ -2301,6 +2349,29 @@ def main(argv=None):
 
     src_dir = os.path.expanduser(args.src)
     out_dir = os.path.expanduser(args.out)
+
+    source = Path(src_dir)
+    if not source.exists():
+        print(f"REFUSED: --src does not exist: {src_dir}", file=sys.stderr)
+        return 1
+    if source.is_file() and source.suffix.lower() != ".pdf":
+        print(f"REFUSED: --src is a file but not a PDF: {src_dir}",
+              file=sys.stderr)
+        return 1
+    if not source.is_file() and not source.is_dir():
+        print(f"REFUSED: --src is neither a PDF nor a directory: {src_dir}",
+              file=sys.stderr)
+        return 1
+    pdfs = find_pdfs(src_dir)
+    if not pdfs:
+        if args.mark_reviewed:
+            print("REFUSED: --mark-reviewed cannot be applied because this "
+                  "--src scope contains no PDFs; no review record was written",
+                  file=sys.stderr)
+            return 1
+        print(f"No PDFs found under {src_dir}")
+        return 0
+
     # Validate ownership before writing a review mark, creating output, or
     # rendering a PNG. A protected or malformed ledger is not a fresh run.
     manifest_file = os.path.join(out_dir, MANIFEST_FILE)
@@ -2314,9 +2385,6 @@ def main(argv=None):
               "Repair the ownership records before extracting; no figures were written.",
               file=sys.stderr)
         return 1
-    if not args.dry_run:
-        os.makedirs(out_dir, exist_ok=True)
-
     review_file = os.path.expanduser(
         args.review_file or os.path.join(out_dir, REVIEW_FILE))
     marked = []
@@ -2324,7 +2392,8 @@ def main(argv=None):
         reviewed = load_reviewed(review_file)
         if args.mark_reviewed:
             marked = mark_reviewed(review_file, args.mark_reviewed,
-                                   dry_run=args.dry_run)
+                                   dry_run=args.dry_run,
+                                   allowed_stems=(p.stem for p in pdfs))
             verb = "Would record" if args.dry_run else "Recorded"
             for stem, fig in marked:
                 print(f"{verb} as reviewed: {stem} Fig {fig}  → {review_file}")
@@ -2338,11 +2407,8 @@ def main(argv=None):
     # would report — otherwise the marks the user just passed come back as
     # fresh flags and the dry run disagrees with the run it is previewing.
     reviewed |= set(marked)
-
-    pdfs = find_pdfs(src_dir)
-    if not pdfs:
-        print(f"No PDFs found under {src_dir}")
-        return 0
+    if not args.dry_run:
+        os.makedirs(out_dir, exist_ok=True)
 
     # Capture the source scope before skipping whole books or refusing
     # noncanonical filenames. An explicit --allow-unorganized does not grant

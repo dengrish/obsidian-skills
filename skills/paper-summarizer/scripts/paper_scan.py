@@ -535,8 +535,10 @@ def render(result):
                          "--allow-unorganized and accept that a later rename "
                          "orphans its figures and its note (CONVENTIONS.md §1a)")
         if row["status"] == "book":
-            lines.append("      its chapters are in this scan and are the unit "
-                         "to summarise; the book's own stem has no figures")
+            lines.append("      its chapters are in this scan, so this whole-book "
+                         "PDF is skipped to avoid a duplicate. Chapters remain "
+                         "separate rows and a folder sweep normally skips them "
+                         "too; name one or pass --include-chapters to select it")
         if row["status"] == "collision":
             if row.get("source_conflicts"):
                 lines.append("      %s shares this PDF basename and the same "

@@ -442,11 +442,16 @@ def _check_front_matter(note, keys, kv):
                          % (len(bare), MAX_DESCRIPTION))
 
     if "author" in kv:
-        if kv["author"][0]:
-            note.fail(2, "`author` must be a block-form list, not inline")
+        inline = kv["author"][0]
         items = [l.strip() for l in kv["author"][1] if l.strip()]
-        if not items:
-            note.fail(2, "`author` has no entries")
+        if inline:
+            if inline != "[]" or items:
+                note.fail(2, "`author` must be a block-form list when populated, "
+                             "or exactly `author: []` when unknown")
+            items = []
+        elif not items:
+            note.fail(2, "a missing author uses exactly `author: []`; bare "
+                         "`author:` is YAML null, not an empty list")
         for it in items:
             if not it.startswith("- "):
                 note.fail(2, "`author` entry is not a block-list item: %r" % it)
@@ -1220,6 +1225,13 @@ def _cases():
          _mutate('  - Priya N. Doe', '  - null'), "non-empty YAML strings"),
         ("a mapping is not an author name",
          _mutate('  - Priya N. Doe', '  - Team: Trial group'), "invalid YAML in `author`"),
+        ("the canonical authorless source note is an empty list",
+         _mutate('author:\n  - Priya N. Doe', 'author: []'), CLEAN),
+        ("a bare author is YAML null, not the authorless list",
+         _mutate('author:\n  - Priya N. Doe', 'author:'), "exactly `author: []`"),
+        ("an inline populated author is not the empty exception",
+         _mutate('author:\n  - Priya N. Doe', 'author: [Priya N. Doe]'),
+         "block-form list when populated"),
         ("heading citations are not body prose",
          _mutate(I_H, I_H + '<sup>[[Doe_X_2025.pdf#page=6|6]]</sup>'),
          "page citation in a heading"),

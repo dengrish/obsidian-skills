@@ -56,7 +56,7 @@ override paths per-request, for that run only.
 | `Articles/` | **flat**; notes *about* a document — cleaned clippings and paper summaries, one schema (§2b), told apart by `sources:` item 1 | clipping-processor, paper-summarizer | wiki-builder, clipping-processor (dedup index), paper-summarizer (dedup and collision check) |
 | `Sources/PDFs/` | organized source documents, recursive. Everything pdf-organizer produces lands here — but the user may also drop a file in directly, which is why both consumers still check the stem and refuse a name pdf-organizer did not produce | pdf-organizer (renames an `Inbox/` file **and moves it here**), the user | pdf-figure-extractor, paper-summarizer, wiki-builder |
 | `Sources/PDFs/<Work>/` | book-chapter PDFs, e.g. `Sources/PDFs/Prince_UDL_2026/`. The folder is what pdf-organizer creates when it splits a book. paper-summarizer's batch **scans** it — a book is only recognisable as one when a chapter turns up beside it — and then **skips** every chapter it finds, so a sweep never becomes a book's worth of summaries | pdf-organizer, the user | pdf-figure-extractor, paper-summarizer (scans, skips), wiki-builder |
-| `Sources/Images/` | **flat**; every figure and downloaded image, all extensions, whatever it came from | pdf-figure-extractor, clipping-processor; **pdf-organizer** renames in place only within an approved source rename (§1a) | wiki-builder, paper-summarizer, clipping-processor (its `rename` path re-reads the folder — §8a), wiki-linter (validates the embeds pointing here **when run with `--images`**; it lists the folder's names and compares, and never opens a file) |
+| `Sources/Images/` | **flat**; every figure and downloaded image, all extensions, whatever it came from | pdf-figure-extractor, clipping-processor; **pdf-organizer** renames in place only within an approved source rename (§1a) | wiki-builder, paper-summarizer, clipping-processor (its `rename` path re-reads the folder — §8a), wiki-linter (with `--images`, validates embeds and reports nested/staging residue without opening or deleting files) |
 | `Wiki/` | wiki entries, one `.md` per entity (walked **recursively**) | wiki-builder, wiki-linter | wiki-builder, wiki-linter |
 | *vault root* | `<discipline>-moc.md`, `wiki-builder-suggestions.md`, `wiki-linter-suggestions.md`, `wiki-notes-suggestions.md` | wiki-linter | wiki-linter (reads each artifact before an in-place update) |
 
@@ -162,7 +162,9 @@ accept the unorganized PDF or merge its identity with another source.
 chapter number. Either form may end with an optional `_src` marker and an
 optional `_2`, `_3`, … disambiguator, in that order — and **that tail always
 comes last, after the chapter segment**: `Prince_UDL_2026_02_SupLearn_src`,
-never `Prince_UDL_2026_src_02_SupLearn`. Position and identity are separate:
+never `Prince_UDL_2026_src_02_SupLearn`. Numeric disambiguators start at 2 and
+have no leading zero, so `_0`, `_1` and `_02` are not output forms. Position
+and identity are separate:
 
 **`_src` and `_N` are not one thing.** They occupy the same end of the stem and
 carry opposite meanings, and only one of them ever comes off:
@@ -552,8 +554,11 @@ read: false
 - `sources` is the block-form list above: on a clipping one double-quoted URL
   item, verbatim from the raw; on a note about a local document the quoted PDF
   wikilink first, then any printed-origin URL item.
-- `author` is always a block-form list, even for one author; items unquoted, the
-  `[[…]]` wrapper stripped.
+- `author` is a block-form list when populated, even for one author; items are
+  unquoted and the `[[…]]` wrapper is stripped. When no human author can be
+  verified, write the one canonical empty exception, `author: []`. Do not use a
+  bare `author:` (YAML null), an empty item, or an invented publication/account
+  name.
 - `created` is the clipping date, preserved verbatim from the raw — never
   corrected — **on a clipping note**. A note about a local document has no raw
   to preserve anything from, so it is the date the note was written (today);
@@ -1008,10 +1013,15 @@ does not change the canonical output forms in §2.
 
 Rules that hold everywhere:
 
-- **First body occurrence only**, enforced by **target slug**, not by display
-  text: `[[label-machine-learning|labels]]` then `[[label-machine-learning|target]]`
-  is one slug twice — keep the first, unlink the rest to bare text. The Related
-  footer is a separate slot and is exempt.
+- **First body occurrence only**, enforced by the **entry the link resolves
+  to**, not raw target/display spelling: `[[label-machine-learning|labels]]`
+  then `[[label-machine-learning|target]]` is one entry twice, as are path,
+  explicit-`.md`, case/Unicode variants and an unambiguous alias beside its
+  canonical slug. Collapse path spellings only when the vault inventory
+  identifies one owner. If several files share a basename, distinct qualified
+  paths stay distinct and repeated bare or ambiguous-alias links are preserved
+  until ownership is resolved. Keep the first resolved occurrence and unlink
+  the rest to bare text. The Related footer is a separate slot and is exempt.
 - **Possessive and partitive mentions count** — `[[python|Python]]'s dict`.
 - **No self-links.** An entry's own subject is bare text (bolded on first
   appearance, still not linked).
@@ -1141,8 +1151,16 @@ so figures from any source are findable by prefix.
 **Match on `[source_stem]_fig`, never on `[source_stem]_fig_`, and accept any
 extension.** This includes older separator forms (§8c) as well as current
 output. Use the same broad inventory for selection and unused-figure reporting.
-PDF output is `.png`; clipping images can also be `.jpg`, `.webp`, `.gif` or
-`.svg`.
+PDF output is `.png`; clipping-processor can emit `.png`, `.jpg`, `.gif`,
+`.webp`, `.svg`, `.avif`, `.bmp`, `.tiff` or `.ico`, according to the bytes it
+actually downloads. Consumers still accept any extension rather than copying
+this producer list into a restrictive glob.
+
+<!-- canonical:clipping-image-extensions -->
+```
+png, jpg, gif, webp, svg, avif, bmp, tiff, ico
+```
+<!-- /canonical -->
 
 ### 8b. The producer conventions
 
@@ -1267,7 +1285,8 @@ paper-summarizer (consumes —
 has no figure-writing code of its own: it never crops or renames one, and the
 only way a file appears under its run is its step 1 invoking
 pdf-figure-extractor unmodified, which leaves that skill the single producer
-this section names), wiki-linter (checks embeds),
+this section names), wiki-linter (checks embeds and reports flat-folder or
+unfinished-artifact violations without moving/deleting them),
 pdf-organizer (renaming a PDF orphans the figures already keyed to its old
 stem — §1a).
 

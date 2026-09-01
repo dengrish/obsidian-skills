@@ -36,7 +36,7 @@ The linter does not set `created:` or `updated:`; invalid dates go to the user. 
 ## Files
 
 - Scan `<vault>/Wiki`, **not the vault root**. Apply user folder overrides for this run without editing installed skills.
-- Validate embeds against `<vault>/Sources/Images` with `--images` on every real scan.
+- Validate embeds against `<vault>/Sources/Images` with `--images` on every real scan. The same inventory reports nested files/directories and recognizable staging residue; these folder findings never authorize moving or deleting anything.
 - Task 3 writes `<vault>/<discipline-slug>-moc.md`, one per tag with at least one full entry. MOCs remain outside `Wiki/` so they are not scanned as entries.
 - Proposal logs are `<vault>/wiki-builder-suggestions.md`, `wiki-linter-suggestions.md`, and `wiki-notes-suggestions.md`. They are advisory vault artifacts, never permission to edit either skill.
 
@@ -54,7 +54,7 @@ python3 '<skill>/scripts/scan_vault.py' '<vault>/Wiki' \
 
 Use the selected paths, keep the output filename unique to this run, and retain it for subsequent slices. A fixed shared temporary filename can supply another vault's results. The image directory must exist; an invalid path is a usage error, not evidence that every figure is missing.
 
-**The scanner reads and reports; it never fixes the vault.** Save its initial `run_timestamp` for this run's backlog updates. Read the JSON in slices rather than loading a large vault report wholesale. Use `inventory`, `discipline_tags`, and `untagged_full` for scope; `problems` for QC/link work; `collision_candidates` and `rename_candidates` for proposals; `backfill_candidates` for Task 2; and `hierarchy_diagnostic` for Task 3. Counts and `problem_tally` also provide report/proposal evidence.
+**The scanner reads and reports; it never fixes the vault.** Save its initial `run_timestamp` for this run's backlog updates. Read the JSON in slices rather than loading a large vault report wholesale. Use `inventory`, `discipline_tags`, and `untagged_full` for scope; `problems` for QC/link work; `collision_candidates` and `rename_candidates` for proposals; `backfill_candidates` for Task 2; `image_folder_findings` for report-only nested/staging residue; and `hierarchy_diagnostic` for Task 3. Counts and `problem_tally` also provide report/proposal evidence.
 
 Read [the scanner contract](references/scanner.md) if it exits non-zero, a field or finding is unfamiliar, or `item16`/`item18` needs interpretation. Read [QC actions](references/qc-items.md) before fixing any Task 1 finding. Do not infer “fix in place” from a key's name: unreadable files, ambiguous identity, user-state problems, and valid user configuration may all appear in `problems` without authorizing an edit.
 

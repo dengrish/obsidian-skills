@@ -56,9 +56,13 @@ Normalize URLs for comparison only; retain the original URL in the note:
 - Lowercase scheme and host, drop a leading `www.`, and strip trailing path
   slashes. Do not rewrite other host/path variants such as `m.` or `/amp`.
 - Drop ordinary fragments, but keep routing fragments (`#/posts/1`, `#!/posts/1`).
-- Strip only known tracking parameters: `utm_*`, `fbclid`, `gclid`, `mc_cid`,
-  `mc_eid`, `referrer`, `share`, and Substack's `r` and `showWelcome`.
-  Preserve `ref` and unknown parameters, which can identify different pages.
+- Strip only conventional tracking parameters: `utm_*`, `fbclid`, `gclid`,
+  `mc_cid` and `mc_eid`; strip `r` and `showWelcome` only on `substack.com`
+  and its subdomains. Preserve `ref`, `referrer`, `share`, generic-domain `r`
+  and `showWelcome`, and unknown parameters, which can identify different pages.
+- Preserve the order of surviving query parameters. Origins may interpret
+  repeated keys, routing parameters or signed query strings in order; sorting
+  them can collapse distinct pages into one false duplicate.
 - Drop an empty trailing `?`. Preserve literal URL characters, including an
   unpaired apostrophe; quote decoding is a YAML operation, not URL trimming.
 

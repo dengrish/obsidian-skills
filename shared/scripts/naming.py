@@ -26,7 +26,9 @@ raises.  See CONVENTIONS.md §1a and §8b.
 `Year` is four digits or the literal `nd`.  `NN` is a zero-padded two-digit
 chapter number.  The tail is optional on either form: `_src` is the user's own
 marker for a source file that has a same-stemmed note beside it, and `_2`, `_3`
-… disambiguate two documents that would otherwise share a name.
+… disambiguate two documents that would otherwise share a name. A numeric
+disambiguator is an integer of 2 or greater with no leading zero: `_0`, `_1`
+and `_02` are not names this plugin writes.
 
 **The tail always comes last, after the chapter segment.**  That is the single
 fact the two consumers used to disagree about.  A chapter of a book whose own
@@ -62,7 +64,7 @@ import re
 import sys
 
 __all__ = [
-    "SAFE_NAME", "CANONICAL", "TAIL", "STANDALONE_CORE", "CHAPTER_CORE",
+    "SAFE_NAME", "CANONICAL", "DISAMBIGUATOR", "TAIL", "STANDALONE_CORE", "CHAPTER_CORE",
     "ChapterName", "looks_canonical", "core_stem", "split_tail",
     "chapter_parts", "chapter_book_stem", "stem_of",
 ]
@@ -74,6 +76,12 @@ __all__ = [
 #: filename is untrusted text and reaches tools this plugin does not control.
 SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 
+#: A collision suffix starts at 2 and has no leading zero. Accepting `_0`,
+#: `_1` or `_02` made the recognizer call names canonical that the naming
+#: workflow never writes, so the two downstream consumers would preserve an
+#: unorganized identity indefinitely.
+DISAMBIGUATOR = r"(?:[2-9]|[1-9][0-9]+)"
+
 #: The optional tail, in its only legal order: `_src` then a disambiguator.
 #: Written as a separate pattern because both consumers need to strip it
 #: before comparing a chapter against its book.
@@ -83,7 +91,7 @@ SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 #: leaves `Prince_UDL`, which silently unpairs every book from its chapters.
 #: The tail is only ever peeled off a stem whose canonical core has already
 #: been matched, which is what `_FULL_RE` below does.
-TAIL = r"(?:_src)?(?:_[0-9]+)?"
+TAIL = r"(?:_src)?(?:_%s)?" % DISAMBIGUATOR
 
 #: `<Author>_<AbbrevTitle>_<Year>`, no tail.
 STANDALONE_CORE = r"[A-Za-z0-9][A-Za-z0-9-]*_[A-Za-z0-9-]+_(?:[0-9]{4}|nd)"
@@ -102,7 +110,8 @@ CANONICAL = re.compile(r"(?:%s)(?:_[0-9]{2}_[A-Za-z0-9-]+)?%s\Z"
 #: The same shape, with the base, the `_src` marker and the disambiguator
 #: captured separately.  They are NOT one "tail": see `split_tail`.
 _FULL_RE = re.compile(r"\A(?P<base>%s(?:_[0-9]{2}_[A-Za-z0-9-]+)?)"
-                      r"(?P<src>(?:_src)?)(?P<disam>(?:_[0-9]+)?)\Z" % STANDALONE_CORE)
+                      r"(?P<src>(?:_src)?)(?P<disam>(?:_%s)?)\Z"
+                      % (STANDALONE_CORE, DISAMBIGUATOR))
 
 #: A chapter stem, tolerating a tail in *either* position.  `book` is always
 #: the tail-free standalone core, so a chapter pairs with its book whatever
@@ -239,8 +248,14 @@ TEST_CASES = [
     ("Geron_ML_2025",                        True,  None),
     # --- standalone with a tail ---
     ("Smith_WealthNations_1776_2",           True,  None),
+    ("Smith_WealthNations_1776_10",          True,  None),
     ("Prince_UDL_2026_src",                  True,  None),
     ("Prince_UDL_2026_src_2",                True,  None),
+    ("Prince_UDL_2026_src_10",               True,  None),
+    ("Prince_UDL_2026_0",                    False, None),
+    ("Prince_UDL_2026_1",                    False, None),
+    ("Prince_UDL_2026_02",                   False, None),
+    ("Prince_UDL_2026_src_1",                False, None),
     ("Prince_UDL_2026_2_01_Intro",           False, None),   # _N before the chapter
     ("-Foo_Bar_2020",                        False, None),   # not a SAFE_NAME
     # --- chapters ---
@@ -253,6 +268,9 @@ TEST_CASES = [
     ("Prince_UDL_2026_01_Intro_src",         True,  "Prince_UDL_2026"),
     ("Prince_UDL_2026_01_Intro_2",           True,  "Prince_UDL_2026"),
     ("Prince_UDL_2026_01_Intro_src_2",       True,  "Prince_UDL_2026"),
+    ("Prince_UDL_2026_01_Intro_10",          True,  "Prince_UDL_2026"),
+    ("Prince_UDL_2026_01_Intro_1",           False, None),
+    ("Prince_UDL_2026_01_Intro_src_02",      False, None),
     # --- tail in the wrong order is NOT canonical ---
     ("Prince_UDL_2026_2_src",                False, None),
     ("Prince_UDL_2026_01_Intro_2_src",       False, None),

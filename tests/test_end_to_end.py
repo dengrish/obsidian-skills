@@ -424,7 +424,9 @@ A compact definition used only to exercise the shared contract.
 ??
 {term}
 '''
-            (wiki / f"{slug}.md").write_text(text, encoding="utf-8")
+            path = wiki / f"{slug}.md"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
 
         write_entry(
             "arxiv", "arxiv", "**arxiv** is a repository for scholarly preprints.",
@@ -440,8 +442,9 @@ A compact definition used only to exercise the shared contract.
             description="Principal component analysis transforms variables into orthogonal components.")
         write_entry(
             "k-nearest-neighbors", "$k$-nearest neighbors",
-            "**$\\boldsymbol{k}$-nearest neighbors** predicts from nearby observations.",
-            card="k-nearest neighbors",
+            "**$\\boldsymbol{k}$-nearest neighbors** algorithm (KNN) predicts "
+            "from nearby observations.",
+            aliases=("knn",), card="k-nearest neighbors (KNN)",
             description="k-nearest neighbors predicts from nearby observations.")
         write_entry(
             "archaea", "Archaea",
@@ -451,6 +454,21 @@ A compact definition used only to exercise the shared contract.
             "hardwrapped-acronym", "Hardwrapped acronym",
             "**Hardwrapped acronym**\n(HWA) binds its counterpart across a hard wrap.",
             aliases=("hwa",), card="Hardwrapped acronym (HWA)")
+        write_entry(
+            "adaboost", "AdaBoost",
+            "**AdaBoost** (short for *adaptive boosting*) reweights mistakes.",
+            aliases=("adaptive-boosting",),
+            card="AdaBoost (adaptive boosting)")
+        write_entry(
+            "saccharomyces-cerevisiae", "Saccharomyces cerevisiae",
+            "**Saccharomyces cerevisiae** (*S. cerevisiae*) is a model budding yeast.",
+            aliases=("s-cerevisiae",),
+            card="Saccharomyces cerevisiae (S. cerevisiae)")
+        write_entry(
+            "historical-synonym", "Historical synonym",
+            "**Historical synonym** (originally called *former name*) is a "
+            "worked example.", aliases=("former-name",),
+            card="Historical synonym")
         write_entry(
             "alignment-sample", "Alignment sample",
             "**Alignment sample** is a deliberately malformed fixture.",
@@ -499,6 +517,22 @@ A compact definition used only to exercise the shared contract.
             "related-wrong-label", "Related wrong label",
             "**Related wrong label** has a noncanonical footer label.",
             related="[[arxiv#History|preprint archive]]")
+        write_entry(
+            "duplicate-link-forms", "Duplicate link forms",
+            "**Duplicate link forms** compares "
+            "[[Wiki/principal-component-analysis.md|Principal component analysis]] "
+            "with [[pca|PCA]] as two spellings of one destination.")
+        for qualified in ("shared-target", "sub/shared-target",
+                          "other/shared-target"):
+            write_entry(
+                qualified, "Shared target",
+                "**Shared target** is one of several same-basename fixtures.")
+        write_entry(
+            "ambiguous-path-links", "Ambiguous path links",
+            "**Ambiguous path links** compares [[sub/shared-target|one target]] "
+            "with [[other/shared-target|another target]], while bare "
+            "[[shared-target]] and [[SHARED-TARGET.md|Shared target]] remain "
+            "ambiguous because a root file has the same basename.")
 
         lint = json.loads(self.run_script(
             "skills/wiki-builder/scripts/lint_entry.py", wiki, "--compact").stdout)
@@ -512,7 +546,8 @@ A compact definition used only to exercise the shared contract.
                         lint_items["alignment-sample"])
         for slug in ("arxiv", "feature-machine-learning",
                      "principal-component-analysis", "k-nearest-neighbors",
-                     "archaea", "hardwrapped-acronym"):
+                     "archaea", "hardwrapped-acronym", "adaboost",
+                     "saccharomyces-cerevisiae", "historical-synonym"):
             self.assertEqual(lint_items[slug], set())
         for slug in ("scalar-alias", "blank-alias", "missing-counterpart",
                      "synonym-parenthetical", "wrong-title-case",
@@ -532,7 +567,8 @@ A compact definition used only to exercise the shared contract.
                         scan_items["alignment-sample"])
         for slug in ("arxiv", "feature-machine-learning",
                      "principal-component-analysis", "k-nearest-neighbors",
-                     "archaea", "hardwrapped-acronym"):
+                     "archaea", "hardwrapped-acronym", "adaboost",
+                     "saccharomyces-cerevisiae", "historical-synonym"):
             self.assertEqual(scan_items.get(slug, set()), set())
         for slug in ("scalar-alias", "blank-alias", "missing-counterpart",
                      "synonym-parenthetical", "wrong-title-case",
@@ -542,6 +578,16 @@ A compact definition used only to exercise the shared contract.
             self.assertIn(expected, scan_items.get(slug, set()), scan_items.get(slug))
         for slug in ("related-anchored", "related-wrong-label"):
             self.assertIn("item11", scan_items.get(slug, set()), scan_items.get(slug))
+        self.assertIn("10-duplicate-wikilink",
+                      lint_items["duplicate-link-forms"])
+        self.assertIn("item10/dup",
+                      scan_items.get("duplicate-link-forms", set()))
+        self.assertNotIn("10-duplicate-wikilink",
+                         lint_items["ambiguous-path-links"])
+        self.assertNotIn("item10/dup",
+                         scan_items.get("ambiguous-path-links", set()))
+        self.assertIn("item10/ambiguous",
+                      scan_items.get("ambiguous-path-links", set()))
 
         index = json.loads(self.run_script(
             "skills/wiki-builder/scripts/vault_index.py", wiki,

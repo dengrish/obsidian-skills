@@ -1,5 +1,6 @@
 {
   "name": "obsidian-skills",
+  "description": "Skills for turning PDFs and web clippings into a maintained Obsidian knowledge base.",
   "owner": {
     "name": "Dennis Grishin"
   },

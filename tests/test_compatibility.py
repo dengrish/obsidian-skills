@@ -52,6 +52,20 @@ class CompatibilityTests(unittest.TestCase):
         for path in skills:
             self.assertTrue((path.parent / "../../shared/RUNTIME.md").resolve().is_file())
 
+    def test_marketplace_metadata_identifies_the_authored_plugin(self):
+        manifest = json.loads((ROOT / ".claude-plugin/plugin.json").read_text())
+        marketplace = json.loads(
+            (ROOT / ".claude-plugin/marketplace.json").read_text())
+        self.assertEqual(marketplace["name"], "obsidian-skills")
+        self.assertIsInstance(marketplace["description"], str)
+        self.assertTrue(marketplace["description"].strip())
+        self.assertEqual(marketplace["owner"], manifest["author"])
+        self.assertEqual(len(marketplace["plugins"]), 1)
+        entry = marketplace["plugins"][0]
+        self.assertEqual(entry["name"], manifest["name"])
+        self.assertEqual(entry["source"], "./")
+        self.assertEqual(entry["description"], manifest["description"])
+
     def test_archive_is_complete_and_current(self):
         build = load("build_plugin", ROOT / "tools/build_plugin.py")
         expected = build.package_files(ROOT)
