@@ -151,8 +151,10 @@ historical explanations are harder to keep aligned.
 The shared implementations are `slugify.py` (wiki slugs), `naming.py` (source
 filenames and book identity), `plurals.py` (English singularization),
 `yaml_scalars.py` (decoded metadata), `figure_state.py` (figure ownership and
-review sidecars), and `plugin_paths.py` (shared-module lookup). Skill scripts
-import these instead of copying their algorithms.
+review sidecars), `organism_names.py` (Organism title/name classification),
+`entry_structure.py` (shared entry-opener checks), `markdown_tables.py` (GFM
+table spans and caption checks), and `plugin_paths.py` (shared-module lookup).
+Skill scripts import these instead of copying their algorithms.
 
 ## Developing and packaging
 

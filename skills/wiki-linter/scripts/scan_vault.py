@@ -121,6 +121,19 @@ from plurals import (  # noqa: E402
     pluralize, real_permutation, singular_key, singular_keys,
     stem_key, wordorder_key_singular,
 )
+from organism_names import (  # noqa: E402
+    bound_common_names,
+    first_sentence,
+    organism_title_classification,
+    scientific_abbreviation_matches,
+    taxon_title_parts,
+)
+from entry_structure import opener_has_subject_date  # noqa: E402
+from markdown_tables import (  # noqa: E402
+    caption_faults,
+    markdown_table_spans,
+    mask_line_spans,
+)
 
 
 def slug(title):
@@ -177,8 +190,59 @@ def math_skeleton(text):
     return re.sub(r"\s+", " ", s).strip()
 
 
+_LEADING_ARTICLE_RE = re.compile(r"^(?:a|an|the)\s+", re.IGNORECASE)
+_SUBJECT_BOUNDARY_RE = re.compile(r"^(?:$|[\s,(:;\u2013\u2014])")
+
+
+def _first_letter_ci_equal(a, b):
+    """Equality that is case-insensitive on the first letter only."""
+    if a is None or b is None or len(a) != len(b):
+        return False
+    if not a:
+        return True
+    return a[0].lower() == b[0].lower() and a[1:] == b[1:]
+
+
+def description_subject_forms(title):
+    """Canonical title/base/math-skeleton forms accepted as item-7 subjects."""
+    forms = []
+    subjects = (base_term(title),) if has_parenthetical(title) else (title,)
+    for subject in subjects:
+        for form in (subject, math_skeleton(subject) if subject else None):
+            form = (form or "").strip()
+            if form and form not in forms:
+                forms.append(form)
+    return forms
+
+
+def description_has_entity_subject(description, title):
+    """Conservative mechanical floor for the entity-as-subject rule."""
+    if not description or not title:
+        return True  # Presence/title validity have their own findings.
+    forms = description_subject_forms(title)
+    starts = [description.strip()]
+    article = _LEADING_ARTICLE_RE.match(starts[0])
+    if article and not any(_LEADING_ARTICLE_RE.match(form) for form in forms):
+        starts.append(starts[0][article.end():])
+    for text in starts:
+        if has_parenthetical(title):
+            full = text[:len(title)]
+            if (_first_letter_ci_equal(full, title)
+                    and _SUBJECT_BOUNDARY_RE.match(text[len(title):])):
+                continue
+        for form in forms:
+            if (_first_letter_ci_equal(text[:len(form)], form)
+                    and _SUBJECT_BOUNDARY_RE.match(text[len(form):])):
+                return True
+    return False
+
+
+_BOLD_OUTER_RE = re.compile(
+    r"(?<!\*)\*\*((?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)\*\*(?!\*)")
 _BOLD_PAREN_RE = re.compile(
-    r"\*\*[^*\n]+\*\*(?:\s+algorithm)?\s*\(([A-Za-z*][^()\n]{0,59})\)",
+    r"(?<!\*)\*\*(?P<bold>(?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)"
+    r"\*\*(?!\*)(?:\s+algorithm)?\s*"
+    r"\((?P<paren>[A-Za-z*][^()\n]{0,59})\)",
     re.IGNORECASE)
 _PAREN_LEADIN_RE = re.compile(
     r"^(?:(?:short\s+for|originally\s+called|also\s+called|"
@@ -192,6 +256,125 @@ _NON_NAME_PAREN_RE = re.compile(
     r"annual|ongoing)|\d{3,4}", re.IGNORECASE)
 
 
+def _initial_forms(value):
+    """Possible initial strings for a written-out name."""
+    words = re.findall(r"[A-Za-z0-9]+", value or "")
+    if not words:
+        return set()
+    stop = {"a", "an", "and", "of", "the", "to", "with"}
+
+    def initial(word):
+        return word if word.isupper() and 1 < len(word) <= 6 else word[:1]
+
+    all_words = "".join(initial(word) for word in words).casefold()
+    content = "".join(initial(word) for word in words
+                      if word.casefold() not in stop).casefold()
+    return {form for form in (all_words, content) if form}
+
+
+def _acronym_counterpart(term, candidate):
+    """Whether term/candidate has an acronym/full-form relationship."""
+    term_words = re.findall(r"[A-Za-z0-9]+", term or "")
+    cand_words = re.findall(r"[A-Za-z0-9]+", candidate or "")
+    if not term_words or not cand_words:
+        return False
+
+    def compact_forms(value, words):
+        forms = set()
+        first = re.sub(r"[^A-Za-z0-9]", "", words[0])
+        if len(first) >= 2:
+            forms.add(first.casefold())
+        uppers = "".join(ch for ch in value if ch.isupper())
+        if len(uppers) >= 2:
+            forms.add(uppers.casefold())
+        whole = re.sub(r"[^A-Za-z0-9]", "", value)
+        if len(words) == 1 and len(whole) >= 2:
+            forms.add(whole.casefold())
+        return forms
+
+    def related(short, long):
+        if len(short) < 2 or len(long) < len(short):
+            return False
+        if short == long or long.startswith(short):
+            return True
+        it = iter(long)
+        return all(ch in it for ch in short)
+
+    def acronym_tokens(value):
+        out = set()
+        for token in re.findall(r"[A-Za-z0-9]+", value or ""):
+            compact = re.sub(r"[^A-Za-z0-9]", "", token)
+            if (2 <= len(compact) <= 10
+                    and sum(1 for ch in token if ch.isupper()) >= 2):
+                out.add(compact.casefold())
+        return out
+
+    def lexical_compact(value):
+        return re.sub(r"[^A-Za-z0-9]", "", value or "").casefold()
+
+    term_compact = compact_forms(term, term_words)
+    cand_compact = compact_forms(candidate, cand_words)
+    initial_match = (
+        any(related(short, initials)
+            for short in cand_compact for initials in _initial_forms(term))
+        or any(related(short, initials)
+               for short in term_compact for initials in _initial_forms(candidate))
+    )
+    if initial_match:
+        return True
+    term_text, candidate_text = lexical_compact(term), lexical_compact(candidate)
+    return (
+        any(related(short, candidate_text) for short in acronym_tokens(term))
+        or any(related(short, term_text) for short in acronym_tokens(candidate))
+    )
+
+
+def _bold_parts(match):
+    """Return visible text, style, and italic prefix for an outer bold span."""
+    raw = match.group(1)
+    if raw.startswith("*"):
+        close = raw.find("*", 1)
+        if close > 1:
+            italic = raw[1:close]
+            suffix = raw[close + 1:]
+            return italic + suffix, ("full-italic" if not suffix else "mixed"), italic
+    return raw, "plain", None
+
+
+def organism_common_name_surfaces(entry):
+    """Locally bound common names; link surfaces, never global aliases."""
+    if not entry or entry.get("type") != "Organism":
+        return []
+    title = entry.get("title") or ""
+    running_title = base_term(title) if has_parenthetical(title) else title
+    opener = first_sentence(entry.get("prose") or "")
+    names = bound_common_names(running_title, entry.get("desc") or "", opener)
+    out = []
+    for name in names:
+        if name.casefold() not in {x.casefold() for x in out}:
+            out.append(name)
+    return out
+
+
+def organism_common_name_bound(entry, display):
+    """Whether an Organism explicitly equates its canonical title to label.
+
+    This is the narrow item-18 carve-out.  A mention elsewhere in the body or
+    an unsafe global alias is not enough: the description or opening sentence
+    must make the title/common-name equation directly.
+    """
+    if not entry or entry.get("type") != "Organism":
+        return False
+    label = " ".join((display or "").split())
+    if not re.fullmatch(r"[A-Za-z][A-Za-z'’ -]{0,49}", label):
+        return False
+    valid = set()
+    for surface in organism_common_name_surfaces(entry):
+        valid.add(surface.casefold())
+        valid.add(plural_surface(surface).casefold())
+    return label.casefold() in valid
+
+
 def _clean_paren_name(raw):
     """Return a parenthetical name with a lexical lead-in and markup stripped."""
     value = " ".join((raw or "").split())
@@ -199,23 +382,24 @@ def _clean_paren_name(raw):
     return value.replace("*", "").replace("_", "").strip()
 
 
-def _clean_card_counterpart(raw):
-    """Return a direct acronym/full-form binding, or ``None``."""
+def _clean_card_counterpart(raw, term, entry_type):
+    """Return one of the three direct counterpart classes, or ``None``."""
     value = " ".join((raw or "").split())
     cleaned = _clean_paren_name(value)
     short_for = bool(_SHORT_FOR_PAREN_RE.match(value))
     scientific_abbreviation = bool(
+        entry_type == "Organism"
+        and taxon_title_parts(term)
+        and scientific_abbreviation_matches(cleaned, taxon_title_parts(term)[0])
+        and
         re.fullmatch(r"\*[^*\n]+\*", value.strip())
         and _SCI_ABBREV_RE.fullmatch(cleaned))
-    if short_for or scientific_abbreviation:
+    if short_for or scientific_abbreviation or _acronym_counterpart(term, cleaned):
         return cleaned
-    if ("*" in value or "_" in value or _PAREN_LEADIN_RE.match(value)
-            or _NON_NAME_PAREN_RE.search(value)):
-        return None
-    return value.strip()
+    return None
 
 
-def flashcard_primary_answer(title, aliases, opener):
+def flashcard_primary_answer(title, aliases, opener, entry_type=""):
     """Return the exact plain-text term and any opener-bound counterpart."""
     term = base_term(title) if has_parenthetical(title) else (title or "")
     term = math_skeleton(term).strip()
@@ -224,7 +408,12 @@ def flashcard_primary_answer(title, aliases, opener):
     opening_block = " ".join(
         line.strip() for line in (opener or "").splitlines())
     for match in _BOLD_PAREN_RE.finditer(opening_block):
-        candidate = _clean_card_counterpart(match.group(1))
+        visible = math_skeleton(
+            match.group("bold").replace("*", "").replace("_", "")).strip()
+        if not _first_letter_ci_equal(visible, term):
+            continue
+        candidate = _clean_card_counterpart(
+            match.group("paren"), term, entry_type)
         if candidate is None:
             continue
         try:
@@ -237,10 +426,10 @@ def flashcard_primary_answer(title, aliases, opener):
     return term, counterpart
 
 
-def flashcard_line3_fault(line3, title, aliases, opener):
+def flashcard_line3_fault(line3, title, aliases, opener, entry_type=""):
     """Explain a line-3 contract violation, or return ``None``."""
     expected_term, required_counterpart = flashcard_primary_answer(
-        title, aliases, opener)
+        title, aliases, opener, entry_type)
     match = re.fullmatch(r"(?P<term>.*?)(?: \((?P<paren>[^()\n]+)\))?",
                          (line3 or "").strip())
     term = match.group("term") if match else (line3 or "").strip()
@@ -250,8 +439,8 @@ def flashcard_line3_fault(line3, title, aliases, opener):
 
     if counterpart is not None:
         if required_counterpart is None:
-            return ('the parenthetical "%s" is not established as the title\'s '
-                    "own acronym/full-form counterpart in the opener" % counterpart)
+            return ('the parenthetical "%s" is not an opener-established, '
+                    "alias-bound counterpart of the title" % counterpart)
         if counterpart != required_counterpart:
             return "the established counterpart must appear exactly as (%s)" % required_counterpart
     if required_counterpart is not None and counterpart != required_counterpart:
@@ -303,9 +492,112 @@ def leftover_dollars(body):
     s = re.sub(r"\$[^$\n]*\$", " ", s)               # inline math
     return s.count("$")                               # leftover literal $
 
-REMOTE_IMG = re.compile(r"!\[[^\]]*\]\((https?://[^)]+)\)")
-# a standalone image-embed line (Obsidian ![[…png]] or markdown ![](url)) — for the caption check
-EMB = re.compile(r"^\s*(?:!\[\[[^\]]*\.(?:png|jpe?g|gif|svg|webp|tiff?|bmp|avif|ico)(?:\|[^\]]*)?\]\]|!\[[^\]]*\]\([^)]*\))\s*$", re.I)
+# A standalone image-embed line (Obsidian ![[…png]] or Markdown ![](url))
+# for the caption check. Detection runs against listing-masked text below;
+# evidence and captions still come from the original lines.
+EMB = re.compile(
+    r"^\s*!\[\[[^\]\n]*\.(?:png|jpe?g|gif|svg|webp|tiff?|bmp|avif|ico)"
+    r"(?:\|[^\]\n]*)?\]\]\s*$", re.IGNORECASE)
+
+
+def _markdown_image_openers(text):
+    """Yield image start and destination start for unescaped CommonMark syntax."""
+    text = text or ""
+    n = len(text)
+    for match in re.finditer(r"!", text):
+        start = match.start()
+        backslashes, k = 0, start - 1
+        while k >= 0 and text[k] == "\\":
+            backslashes += 1
+            k -= 1
+        if backslashes % 2 or start + 1 >= n or text[start + 1] != "[":
+            continue
+        depth, i, escaped = 1, start + 2, False
+        while i < n and text[i] != "\n":
+            ch = text[i]
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        if depth == 0 and i + 1 < n and text[i + 1] == "(":
+            yield start, i + 2
+
+
+def markdown_image_spans(text):
+    """Yield valid one-line Markdown image spans and full destinations."""
+    for image_start, i in _markdown_image_openers(text):
+        n = len(text)
+        if i >= n or text[i] == "\n":
+            continue
+        destination = ""
+        if text[i] == "<":
+            j, escaped = i + 1, False
+            while j < n and text[j] != "\n":
+                ch = text[j]
+                if ch == ">" and not escaped:
+                    break
+                escaped = ch == "\\" and not escaped
+                if ch != "\\": escaped = False
+                j += 1
+            if j >= n or text[j] != ">":
+                continue
+            destination, i = text[i + 1:j], j + 1
+        else:
+            start, depth, escaped = i, 0, False
+            while i < n and text[i] != "\n":
+                ch = text[i]
+                if escaped:
+                    escaped = False; i += 1; continue
+                if ch == "\\":
+                    escaped = True; i += 1; continue
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    if depth == 0:
+                        destination = text[start:i]
+                        yield image_start, i + 1, destination
+                        break
+                    depth -= 1
+                elif ch.isspace() and depth == 0:
+                    destination = text[start:i]
+                    break
+                i += 1
+            else:
+                continue
+            if i < n and text[i] == ")":
+                continue
+        while i < n and text[i] in " \t":
+            i += 1
+        if i < n and text[i] in "\"'":
+            quote = text[i]; i += 1; escaped = False
+            while i < n and text[i] != "\n":
+                if text[i] == quote and not escaped:
+                    i += 1; break
+                escaped = text[i] == "\\" and not escaped
+                if text[i] != "\\": escaped = False
+                i += 1
+        elif i < n and text[i] == "(":
+            close = text.find(")", i + 1)
+            if close < 0 or "\n" in text[i:close]:
+                continue
+            i = close + 1
+        while i < n and text[i] in " \t":
+            i += 1
+        if i < n and text[i] == ")":
+            yield image_start, i + 1, destination
+
+
+def markdown_image_line(line):
+    stripped = (line or "").strip()
+    matches = list(markdown_image_spans(stripped))
+    return bool(matches and matches[0][0] == 0 and matches[0][1] == len(stripped))
 #: An Obsidian image EMBED and the filename it names, anywhere on a line:
 #: `![[Doe_X_2025_fig_3.png]]`, with an optional `|width` display pipe. This is
 #: the `--images` existence check's reader. Markdown `![](…)` embeds are
@@ -315,54 +607,62 @@ EMB = re.compile(r"^\s*(?:!\[\[[^\]]*\.(?:png|jpe?g|gif|svg|webp|tiff?|bmp|avif|
 IMG_EMBED = re.compile(
     r"!\[\[([^\]|\n]+\.(?:png|jpe?g|gif|svg|webp|tiff?|bmp|avif|ico))(?:\|[^\]\n]*)?\]\]", re.I)
 
-# A Markdown table is established by a header row immediately followed by a
-# delimiter row with at least two `---` cells.  Looking for arbitrary pipes
-# mistakes prose, shell syntax and type unions for tables; fenced listings are
-# blanked before this reader runs.
-_TABLE_DELIM_RE = re.compile(
-    r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")
+def image_embed_lines(body):
+    """Return original lines and real standalone embed indexes.
 
-
-def caption_faults(caption):
-    """Caption-format faults; outer single-asterisk italics are required."""
-    cap = (caption or "").strip()
-    if not (cap.startswith("*") and not cap.startswith("**")
-            and cap.endswith("*") and not cap.endswith("**") and len(cap) >= 3):
-        return ["missing italic caption"]
-    inner = cap[1:-1]
-    faults = [name for name, token in
-              (("wikilink", "[["), ("bold", "**"), ("backtick", "`"))
-              if token in inner]
-    if re.search(r"\*\w[^*]*\*", inner):
-        faults.append("italic")
-    return faults
+    ``strip_code`` preserves line positions while blanking fenced, indented and
+    inline-code listings. A syntax sample therefore cannot create a caption
+    repair finding, while caption markup remains visible in the original text.
+    """
+    original = body.split("\n")
+    masked = strip_code(body).split("\n")
+    return original, [i for i, line in enumerate(masked)
+                      if EMB.match(line) or markdown_image_line(line)]
 
 
 def markdown_tables(body):
     """Return ``(original_lines, [(header_index, last_row_index), ...])``.
 
     This is the deterministic CommonMark/GFM floor needed for caption checks,
-    not a table renderer.  A row continues while it is nonblank and contains a
-    pipe; the caption therefore has to be the immediate following line.  Table
+    not a table renderer.  A body row may contain fewer cells than the header,
+    including no pipe at all; the table ends at a blank, a new block, or this
+    vault's whole-line italic caption.  The caption has to be immediate. Table
     positions come from ``strip_code`` so fenced, indented and tab-indented
     listings cannot masquerade as tables.  Caption text comes from the original
     lines so real backticks remain visible to ``caption_faults``.
     """
     original_lines = body.split("\n")
-    lines = strip_code(body).split("\n")
-    tables, consumed_through = [], -1
-    for i in range(1, len(lines)):
-        if i <= consumed_through or not _TABLE_DELIM_RE.match(lines[i]):
-            continue
-        if not lines[i - 1].strip() or "|" not in lines[i - 1]:
-            continue
-        end = i
-        while end + 1 < len(lines) and lines[end + 1].strip() \
-                and "|" in lines[end + 1]:
-            end += 1
-        tables.append((i - 1, end))
-        consumed_through = end
-    return original_lines, tables
+    return original_lines, markdown_table_spans(strip_code(body))
+
+
+_NAVIGATION_ONLY_LINK_RE = re.compile(
+    r"(?:^|[.!?,;:]\s+|\(\s*|[—–-]\s+)"
+    r"(?:see(?:\s+also)?|refer\s+to|consult)\s+\[\[", re.IGNORECASE)
+
+
+def navigation_only_link_lines(body):
+    """Return prose lines whose directive cue points straight at a wikilink.
+
+    This is a deterministic floor for item 9, not a flow classifier.  Code,
+    figure/table material, and captions are excluded before matching.
+    """
+    raw_lines = (body or "").split("\n")
+    masked_lines = strip_code(body or "").split("\n")
+    skip = set()
+    _raw, tables = markdown_tables(body or "")
+    for header_i, end_i in tables:
+        skip.update(range(header_i, min(len(raw_lines), end_i + 2)))
+    _raw, embeds = image_embed_lines(body or "")
+    for embed_i in embeds:
+        skip.add(embed_i)
+        skip.add(embed_i + 1)
+    return [
+        (i + 1, raw_lines[i].strip())
+        for i, line in enumerate(masked_lines)
+        if i not in skip
+        and not re.match(r"^\s*\*.*\*\s*$", line)
+        and _NAVIGATION_ONLY_LINK_RE.search(line)
+    ]
 
 def split_frontmatter(text):
     # BOM only -- never whitespace: Obsidian reads properties only when the
@@ -910,7 +1210,13 @@ def build_backfill(entries, surf_map):
             alias_owners.setdefault(fold_name(alias), set()).add(sl)
     for sl, e in entries.items():
         if e["is_stub"]: continue  # Task 2 backfill operates on full entries only
-        prose = strip_code(e["prose"])
+        # Table links are prohibited and will be reduced to plain text by item
+        # 10, so they cannot prove that the entry already has a durable prose
+        # link. Mask the shared spans before both the existing-link inventory
+        # and the bare-surface scan; otherwise a bad cell link suppresses a
+        # legitimate proposal for a later prose mention.
+        prose = mask_line_spans(
+            strip_code(e["prose"]), e.get("table_spans", ()))
         linked = set()
         for link in WIKILINK.finditer(prose):
             target = link.group(1).split("#", 1)[0].split("^", 1)[0].strip()
@@ -933,8 +1239,7 @@ def build_backfill(entries, surf_map):
         #   * fenced code blocks — a listing is shown, not asserted, and a link
         #     written inside one renders as literal `[[...]]` text.
         masked = "\n".join(
-            ("" if (re.match(r"^\s*\*(?!\*).*\*\s*$", ln) or re.match(r"^\s*\|", ln))
-             else ln)
+            ("" if re.match(r"^\s*\*(?!\*).*\*\s*$", ln) else ln)
             for ln in masked.split("\n"))
         proposed = set()
         for surface, matched in _scan_surfaces(masked, by_tokens, maxwords):
@@ -1065,6 +1370,57 @@ def image_index(images):
     return names, findings
 
 
+MOC_TREE_START = "<!-- wiki-linter:moc-tree:start -->"
+MOC_TREE_END = "<!-- wiki-linter:moc-tree:end -->"
+
+
+def moc_marker_state(path):
+    """Describe one discipline MOC's ownership-marker state without writing it.
+
+    Task 3 permits an automatic tree replacement only when the file contains
+    one unique, ordered, unindented marker pair. A nonempty file with no
+    marker is the documented legacy-migration state; any partial, duplicate,
+    reversed, indented, or inline marker use is malformed. Keep this
+    diagnostic separate from ``problems``: observing a state never grants
+    permission to migrate or repair the MOC.
+    """
+    result = {
+        "path": os.path.abspath(path),
+        "state": "missing",
+        "start_markers": 0,
+        "end_markers": 0,
+    }
+    if not os.path.exists(path):
+        return result
+    try:
+        with open(path, encoding="utf-8-sig") as fh:
+            text = fh.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        result["state"] = "unreadable"
+        result["error"] = "%s: %s" % (type(exc).__name__, exc)
+        return result
+
+    result["start_markers"] = text.count(MOC_TREE_START)
+    result["end_markers"] = text.count(MOC_TREE_END)
+    if not text.strip():
+        result["state"] = "empty"
+        return result
+    if not result["start_markers"] and not result["end_markers"]:
+        result["state"] = "legacy-unmarked"
+        return result
+
+    lines = text.splitlines()
+    exact_start = [i for i, line in enumerate(lines) if line == MOC_TREE_START]
+    exact_end = [i for i, line in enumerate(lines) if line == MOC_TREE_END]
+    if (result["start_markers"] == result["end_markers"] == 1
+            and len(exact_start) == len(exact_end) == 1
+            and exact_start[0] < exact_end[0]):
+        result["state"] = "marked"
+    else:
+        result["state"] = "malformed-marker"
+    return result
+
+
 def scan(wiki, images=None):
     """Parse every entry in the `wiki` folder; return the Step 0 model as a dict.
 
@@ -1078,6 +1434,7 @@ def scan(wiki, images=None):
     the embeds left pointing at the old stem are silent otherwise.
     """
     img_fold, image_folder_findings = image_index(images)
+    vault_root = os.path.dirname(os.path.abspath(wiki))
     entries, problems = {}, []
     # Every slug whose FILE is on disk, whether or not it parsed as an entry.
     # A link to an unparseable file resolves in Obsidian, so it is not dangling
@@ -1085,6 +1442,7 @@ def scan(wiki, images=None):
     on_disk = set()
     seen_paths = {}
     paths_by_basename = {}
+    path_records = {}             # folded Wiki-relative path -> parsed record or None
     ambiguous_files = set()
     def walk_error(exc):
         location = os.path.relpath(exc.filename, wiki) if exc.filename else "."
@@ -1094,21 +1452,23 @@ def scan(wiki, images=None):
         fn = os.path.basename(path)
         sl = fn[:-3]
         rel = os.path.relpath(path, wiki)
-        paths_by_basename.setdefault(fold_name(sl), set()).add(
-            entry_link_path_key(rel))
+        path_key = entry_link_path_key(rel)
+        paths_by_basename.setdefault(fold_name(sl), set()).add(path_key)
+        path_records[path_key] = None
         # Obsidian resolves a wikilink by basename, case-insensitively, so two
         # files with the same stem in different folders — INCLUDING two stems
         # that differ only in case or Unicode normalization, which are one name
         # to Obsidian and to the vault's own APFS volume — are one slug with
         # two bodies. Report, keep the first.
-        if fold_name(sl) in seen_paths:
+        keep_entry = fold_name(sl) not in seen_paths
+        if not keep_entry:
             ambiguous_files.add(fold_name(sl))
             prev_sl, prev_rel = seen_paths[fold_name(sl)]
             problems.append((sl,"item5",f'slug "{sl}" occurs in two files ({prev_rel} and {rel}'
                                         f'{"" if prev_sl == sl else ", stems differing only in case/normalization"}) — '
                                         f'Obsidian resolves [[{sl}]] to only one of them; rename or merge'))
-            continue
-        seen_paths[fold_name(sl)] = (sl, rel)
+        else:
+            seen_paths[fold_name(sl)] = (sl, rel)
         # One unreadable file must not take the scan down with it: an unguarded
         # read() on a binary .md / dangling symlink / unreadable file raised, and
         # the traceback left stdout EMPTY, so the caller got no scan at all.
@@ -1160,18 +1520,23 @@ def scan(wiki, images=None):
         created = _scalar("created"); updated = _scalar("updated")
         key_order = [m.group(1) for line in fm_raw.split("\n") if (m:=FM_KEY.match(line))]
         prose, rel, fcsec, flash_off, flash_head = regions(body)
-        entries[sl] = dict(slug=sl, title=title, aliases=aliases,
-                           aliases_present=aliases_present,
-                           aliases_is_list=aliases_is_list, type=_scalar("type"),
-                           tags_raw=tags_raw, tag_slugs=tag_slugs, is_stub=is_stub,
-                           sources=sources, sources_is_list=isinstance(fm.get("sources"), list),
-                           body=body, prose=prose, rel=rel, fcsec=fcsec, desc=desc,
-                           created=created, updated=updated, blank_after=blank_after,
-                           parents=fm.get("parents", []) if isinstance(fm.get("parents"), list) else [],
-                           key_order=key_order, fm_raw=fm_raw,
-                           flash_off=flash_off, flash_head=flash_head,
-                           has_flashcards=(flash_off != -1),
-                           has_related=bool(rel))
+        _table_lines, table_spans = markdown_tables(body)
+        record = dict(slug=sl, title=title, aliases=aliases,
+                      aliases_present=aliases_present,
+                      aliases_is_list=aliases_is_list, type=_scalar("type"),
+                      tags_raw=tags_raw, tag_slugs=tag_slugs, is_stub=is_stub,
+                      sources=sources, sources_is_list=isinstance(fm.get("sources"), list),
+                      body=body, prose=prose, rel=rel, fcsec=fcsec, desc=desc,
+                      created=created, updated=updated, blank_after=blank_after,
+                      parents=fm.get("parents", []) if isinstance(fm.get("parents"), list) else [],
+                      key_order=key_order, fm_raw=fm_raw,
+                      flash_off=flash_off, flash_head=flash_head,
+                      has_flashcards=(flash_off != -1),
+                      has_related=bool(rel), path_key=path_key,
+                      table_spans=table_spans)
+        path_records[path_key] = record
+        if keep_entry:
+            entries[sl] = record
 
     # fold_name(slug) -> on-disk slug, for every comparison that asks "is this
     # the same FILE?" — Obsidian and the vault's APFS volume both resolve
@@ -1200,6 +1565,49 @@ def scan(wiki, images=None):
                 if _k in alias_of and alias_of[_k][0] != _sl:
                     ambiguous_aliases.add(_k)
                 alias_of.setdefault(_k, (_sl, _a))
+
+    _wiki_prefixes = {
+        fold_name(os.path.basename(os.path.abspath(wiki))) + "/",
+        "wiki/",
+    }
+
+    def _resolve_entry_file(raw_target):
+        """Resolve a Wiki file target without discarding path qualification.
+
+        Returns ``(record, status, path_key)``. ``record`` is a parsed path
+        record when available; ``status`` is ``parsed``, ``unparsed``,
+        ``ambiguous``, or ``missing``. A bare basename with multiple owners is
+        ambiguous even if one owner is at the Wiki root. A qualified target may
+        use a vault-root prefix (``Wiki/a/foo``) or a unique suffix
+        (``a/foo``), and therefore remains resolvable under a basename clash.
+        """
+        basename_key = entry_link_key(raw_target)
+        owners = paths_by_basename.get(basename_key, set())
+        if not owners:
+            return None, "missing", None
+
+        target_key = entry_link_path_key(raw_target)
+        lookup = target_key
+        for prefix in _wiki_prefixes:
+            if lookup.startswith(prefix):
+                lookup = lookup[len(prefix):]
+                break
+        if "/" not in target_key:
+            if len(owners) != 1:
+                return None, "ambiguous", None
+            owner = next(iter(owners))
+        elif lookup in owners:
+            owner = lookup
+        else:
+            candidates = {candidate for candidate in owners
+                          if candidate.endswith("/" + lookup)}
+            if len(candidates) != 1:
+                return None, ("ambiguous" if candidates or len(owners) > 1
+                              else "missing"), None
+            owner = next(iter(candidates))
+
+        record = path_records.get(owner)
+        return record, ("parsed" if record is not None else "unparsed"), owner
 
     for sl,e in entries.items():
         fm_raw, is_stub, title = e["fm_raw"], e["is_stub"], e["title"]
@@ -1493,17 +1901,18 @@ def scan(wiki, images=None):
             # `strip_fenced` above has always known that, so a `~~~` listing sat
             # in a Concept entry unreported by the one check that exists to find it.
             if re.search(r"(?m)^\s*(?:`{3}|~{3,})", e["body"]):
-                problems.append((sl,"item6","fenced code block — code listings belong in a Software entry (strip it, or reclassify if the entry is really software)"))
+                problems.append((sl,"item6","fenced code block — mechanically allowed only after genuine Software classification; reclassification does not waive Software's artifact-wide relevance gate"))
             # API-identifier cap — ZERO backticked identifiers in a non-Software entry.
             # (Rule change 2026-08-16: the one-name-only-signpost allowance is retired;
-            # identifiers live only in the library's own Software entry. A bare file
-            # extension and a bracket special token are still not identifiers.)
+            # Software is the only mechanically eligible type; its separate
+            # artifact-wide relevance gate can still reject the identifier. A
+            # bare extension and bracket special token are not identifiers.)
             inline = re.findall(r"`([^`\n]+)`", re.sub(r"`{3}.*?`{3}", " ", e["prose"], flags=re.S))
             idtoks = [t.strip() for t in inline if t.strip()
                       and not re.fullmatch(r"\.[A-Za-z0-9]+", t.strip())   # not a bare file extension (.csv)
                       and not re.fullmatch(r"\[.+\]", t.strip())]          # not a bracket special token ([CLS])
             if len(idtoks) >= 1:
-                problems.append((sl,"item6",f'{len(idtoks)} backticked identifier(s) (cap is 0 in a non-Software entry — API surface lives in the library\'s Software entry): {", ".join(idtoks[:6])}'))
+                problems.append((sl,"item6",f'{len(idtoks)} backticked identifier(s) (cap is 0 in a non-Software entry; Software may retain only artifact-wide design/interface API, never a usage catalog): {", ".join(idtoks[:6])}'))
         # ---- item 7: description length + presence (FULL ENTRIES AND STUBS) ----
         # Item 7 is NOT on the stub exemption list: wiki-builder's stub format carries a real
         # description ("Description follows the description field definition"), so the ≤110 cap, the
@@ -1519,6 +1928,14 @@ def scan(wiki, images=None):
         if marks:
             problems.append((sl,"item7",f'description has non-plain-text markup ({", ".join(marks)}) — renders literally in Obsidian Properties'))
         if e["desc"]:
+            if title and not description_has_entity_subject(e["desc"], title):
+                forms = ", ".join(repr(form)
+                                  for form in description_subject_forms(title))
+                problems.append((
+                    sl, "item7",
+                    "description subject does not begin with the canonical "
+                    "title/base term (an optional leading article is allowed); "
+                    "expected one of: %s" % forms))
             if e["desc"][0].isalpha() and not e["desc"][0].isupper():
                 subjects = []
                 for subject in (title, base_term(title) if title else None):
@@ -1592,8 +2009,15 @@ def scan(wiki, images=None):
             problems.append((sl,"item9","body does not open with a prose sentence"))
         if e["type"] in ("Person","Event"):
             opener = e["prose"].split("\n\n",1)[0]
-            if not re.search(r"\([^)]*\b\d{3,4}\b[^)]*\)", opener):
-                problems.append((sl,"item9",f'{e["type"]} opener missing parenthetical date(s)'))
+            if not opener_has_subject_date(opener):
+                problems.append((sl,"item9",f'{e["type"]} opener needs a year-bearing '
+                                             f'parenthetical immediately after the bolded subject'))
+        for line_no, cue_line in navigation_only_link_lines(e["prose"]):
+            problems.append((
+                sl, "item9/imperative-link",
+                f'navigation-only cross-reference on prose line {line_no}: '
+                f'"{cue_line[:100]}" — PROPOSAL ONLY for legacy text; integrate '
+                f'the link into the sentence claim during an authorized prose edit'))
         if is_stub:
             stub_prose = e["prose"].strip()
             paragraphs = [p for p in re.split(r"\n\s*\n", stub_prose) if p.strip()]
@@ -1607,8 +2031,9 @@ def scan(wiki, images=None):
                                      f'a stub body is one sentence; found roughly {sentence_count}'))
             else:
                 problems.append((sl,"stub-one-sentence-body","stub has no body sentence"))
-            if re.search(r"!\[\[[^\]\n]+\]\]|!\[[^\]\n]*\]\([^)\n]+\)",
-                         strip_code(e["body"])):
+            _stub_masked = strip_code(e["body"])
+            if (re.search(r"!\[\[[^\]\n]+\]\]", _stub_masked)
+                    or any(markdown_image_spans(_stub_masked))):
                 problems.append((sl,"stub-no-images","stubs never carry images"))
         # ---- item 12 (format): unescaped literal $ and remote image embeds ----
         if not is_stub:
@@ -1623,20 +2048,25 @@ def scan(wiki, images=None):
             # ![[Sources/Images/…]] — a path form wiki-builder does not use either (it embeds a BARE basename,
             # ![[Name_fig_3.png]]) — which resolves to nothing and throws the URL away. Its own item key
             # routes it to the run report instead. DO NOT re-file this as item12.
-            for url in REMOTE_IMG.findall(e["body"]):
+            for _start, _end, url in markdown_image_spans(strip_code(e["body"])):
+                if not re.match(r"https?://", url, re.IGNORECASE):
+                    continue
                 problems.append((sl,"item12/remote-image",f'remote image embed ![]({url[:50]}…) — VALID, DO NOT REWRITE (wiki-builder mandates markdown syntax for remote URLs); report only, as a candidate for localizing by re-running clipping-processor on the source clipping'))
-            # image embeds need an italic *caption* on the very next line (Captions rule); the caption is plain text
-            blines = e["body"].split("\n")
-            for i,ln in enumerate(blines):
-                if not EMB.match(ln): continue
+            # Image embeds need an italic *caption* on the very next line. Read
+            # embed positions from listing-masked text so syntax samples in
+            # fenced/indented code do not prescribe a caption edit; read the
+            # caption from the original text so forbidden markup remains visible.
+            blines, image_lines = image_embed_lines(e["body"])
+            for i in image_lines:
+                ln = blines[i]
                 cap = blines[i+1].strip() if i+1 < len(blines) else ""
                 cap_faults = caption_faults(cap)
                 if cap_faults == ["missing italic caption"]:
                     problems.append((sl,"item12",f'image embed without an italic *caption* on the next line: {ln.strip()[:48]}'))
                 elif cap_faults:
                     problems.append((sl,"item12",f'caption has {", ".join(cap_faults)} — captions are plain text (only LaTeX $…$ allowed): {cap[:48]}'))
-            table_lines, tables = markdown_tables(e["body"])
-            for header_i, end_i in tables:
+            table_lines = e["body"].split("\n")
+            for header_i, end_i in e["table_spans"]:
                 cap = table_lines[end_i + 1].strip() if end_i + 1 < len(table_lines) else ""
                 cap_faults = caption_faults(cap)
                 table_head = table_lines[header_i].strip()[:48]
@@ -1672,10 +2102,10 @@ def scan(wiki, images=None):
                                  f'(CONVENTIONS §1a), in which case the embed is rewritten to '
                                  f'the new stem. Deleting the embed throws away the one record '
                                  f'of which figure belongs here'))
-        # ---- item 16: body-opener bold vs title — compare skeletons, tolerating LaTeX in the bold and a disambiguation parenthetical in the title ----
+        # ---- item 16: opener title text plus type-specific emphasis ----------
         if not is_stub:
             opener = e["prose"].split("\n\n",1)[0]
-            mo = re.search(r"\*\*([^*]+)\*\*", opener)
+            mo = _BOLD_OUTER_RE.search(opener)
             # The PRESENCE half: an opener with no bold span at all used to be
             # silent (the coherence check below is gated on a bold to compare),
             # so the one entry that skipped the bold entirely was the one
@@ -1685,22 +2115,54 @@ def scan(wiki, images=None):
                                              "the opener bolds the entry title "
                                              "on first appearance"))
             if mo and title:
-                b = mo.group(1).strip()
+                b, bold_style, italic_prefix = _bold_parts(mo)
+                b = b.strip()
                 def _dex(s):                                  # strip LaTeX wrappers to a comparable text skeleton
                     s = re.sub(r"\\(?:boldsymbol|mathbf|mathrm|mathit|text)\s*\{([^}]*)\}", r"\1", s)
                     s = s.replace("$","").replace("\\","").replace("{","").replace("}","")
                     return re.sub(r"\s+"," ", s).strip()
                 t_norm = re.sub(r"\s*\([^)]*\)\s*$", "", title).strip()   # drop a trailing disambiguation parenthetical
-                bb, tt = _dex(b), _dex(t_norm)
+                taxon_status, taxon = (
+                    organism_title_classification(
+                        t_norm, e["aliases"], first_sentence(opener))
+                    if e["type"] == "Organism" else ("common", None))
+                compared_b = (b.replace("*", "").replace("_", "")
+                              if taxon_status == "ambiguous" else b)
+                bb, tt = _dex(compared_b), _dex(t_norm)
                 if bb and tt and (bb[:1].lower()+bb[1:] != tt[:1].lower()+tt[1:]):
                     problems.append((sl,"item16",f'body opener "**{b}**" ≠ title "{title}" (after dropping LaTeX wrappers and a disambiguation parenthetical)'))
+                else:
+                    if taxon_status == "ambiguous":
+                        # The semantic item-16 pass still checks the source, but
+                        # there is no stored resolution bit with which a scanner
+                        # warning could ever close.  Once the visible title is
+                        # correct, accept either style at the mechanical floor.
+                        pass
+                    else:
+                        expected_style = "full-italic" if e["type"] == "Work" else "plain"
+                        if taxon_status == "scientific":
+                            expected_style = "mixed" if taxon[1] else "full-italic"
+                        style_ok = bold_style == expected_style
+                        if expected_style == "mixed":
+                            style_ok = (style_ok and italic_prefix == taxon[0]
+                                        and b == taxon[0] + taxon[1])
+                        if not style_ok:
+                            if expected_style == "plain":
+                                expected_markup = "**%s**" % t_norm
+                            elif expected_style == "full-italic":
+                                expected_markup = "***%s***" % t_norm
+                            else:
+                                expected_markup = "***%s*%s**" % taxon
+                            problems.append((
+                                sl, "item16",
+                                f'body opener title has the wrong emphasis for {e["type"]}; '
+                                f'use "{expected_markup}"'))
         # ---- item 16b: unenumerated bold — only title-first-mention, `- **Term** —` anchor, **Related:** ----
-        tnorm = (title[:1].lower()+title[1:]) if title else ""
         in_opener = True; opener_skipped = False
-        for ln in e["prose"].split("\n"):
+        _item16_prose = mask_line_spans(
+            strip_code(e["prose"]), e.get("table_spans", ()))
+        for ln in _item16_prose.split("\n"):
             if in_opener and ln.strip() == "": in_opener = False   # opener = the first paragraph
-            if re.match(r"^\s*\|", ln):                            # table row: bold/italic permitted in cells
-                continue
             if re.match(r"^\s*\*(?!\*).*\*\s*$", ln):              # caption line (whole-line italic) — item-12 owns it
                 continue
             # bullet term-anchor line: legit. The bolded anchor may be followed by a short parenthetical or
@@ -1710,19 +2172,21 @@ def scan(wiki, images=None):
             # re-emitted it every run). Prose after the anchor with no delimiter is still flagged.
             if re.match(r"^\s*[-*]\s+\*\*[^*\n]+\*\*(?:\s*[*_]?[\(\[][^)\]\n]{1,60}[\)\]][*_]?)*\s*[—–:\-]", ln):
                 continue
-            for sp in re.findall(r"\*\*([^*\n]+)\*\*", ln):
+            for bold_match in _BOLD_OUTER_RE.finditer(ln):
                 if in_opener and not opener_skipped:               # opener's title slot — item 16 owns its form
                     opener_skipped = True; continue
-                spn = sp.strip()
+                spn, _sp_style, _sp_prefix = _bold_parts(bold_match)
+                spn = spn.strip()
                 if not spn or spn == "Related:":
                     continue
                 if re.fullmatch(r"\[\[[^\]]*\]\]|\$[^$]+\$|`[^`]+`", spn):   # emphasis around a single wikilink/math/code → emphasis-misuse check owns it
                     continue
-                if title and (spn[:1].lower()+spn[1:]) == tnorm:   # a later title bold (Pattern 1 first-mention)
-                    continue
                 problems.append((sl,"item16",f'unenumerated bold "**{spn}**" — bold is only for the title, `- **Term** (qualifier) —` bullet anchors, and **Related:** (use italics or a wikilink)'))
         # ---- item 16: emphasis (bold/italic) around a wikilink/math/code span — the markup itself is the styling ----
-        for m in re.finditer(r"(\*\*|\*)(\[\[[^\]\n]*\]\]|\$[^$\n]+\$|`[^`\n]+`)(\*\*|\*)", e["prose"]+"\n"+e["rel"]):
+        emphasis_zones = mask_line_spans(
+            strip_indented(strip_fenced(e["prose"])),
+            e.get("table_spans", ())) + "\n" + e["rel"]
+        for m in re.finditer(r"(\*\*|\*)(\[\[[^\]\n]*\]\]|\$[^$\n]+\$|`[^`\n]+`)(\*\*|\*)", emphasis_zones):
             if m.group(1) != m.group(3): continue              # require balanced ** ** or * *
             inner = m.group(2)
             kind, fix = ("wikilink","the link") if inner.startswith("[[") else (("math","LaTeX") if inner.startswith("$") else ("code","backticks"))
@@ -1773,7 +2237,7 @@ def scan(wiki, images=None):
             if not cards:
                 problems.append((sl,"item19","## Flashcards section has no card"))
             elif len(cards) > 1:
-                problems.append((sl,"item19",f'{len(cards)} cards in ## Flashcards — exactly one card per entry; keep the primary card whose line 3 uses the exact canonical title/base/math-skeleton term and includes any required opener-established acronym/full-form counterpart, then split or drop the rest'))
+                problems.append((sl,"item19",f'{len(cards)} cards in ## Flashcards — exactly one card per entry; keep the primary card whose line 3 uses the exact canonical title/base/math-skeleton term and includes any required opener-established, alias-bound counterpart, then split or drop the rest'))
             alias_forms = [x for a in e["aliases"] for x in (a, a.replace("-"," "))]
             for ci, block in enumerate(cards, 1):
                 cl = block.split("\n")
@@ -1837,7 +2301,7 @@ def scan(wiki, images=None):
                     problems.append((sl,"item19",f'{tag} line 3 (term) has {", ".join(l3)} — the term is plain text matching the title verbatim (no markup, including LaTeX)'))
                 opener = e["prose"].split("\n\n", 1)[0]
                 line3_fault = flashcard_line3_fault(
-                    line3, title, e["aliases"], opener)
+                    line3, title, e["aliases"], opener, e["type"])
                 if line3_fault:
                     problems.append((sl, "item19",
                                      f'{tag} line 3 is "{line3[:40]}" — '
@@ -1868,7 +2332,24 @@ def scan(wiki, images=None):
         # syntax. The dup scan reads the same masked text: a target shown in a
         # listing and linked once in prose is linked ONCE, and "keep first
         # only" applied to that pair edits the listing or drops the real link.
-        _p10, _r10 = strip_code(e["prose"]), strip_code(e["rel"])
+        # Table cells are a separate deterministic violation: the writing
+        # contract forbids wikilinks there.  Report each rendered link, then
+        # mask the parsed table spans so it cannot also look dangling, duplicate,
+        # or otherwise become input to a second item-10 repair.
+        _table_link_lines = strip_code(e["body"]).split("\n")
+        for _table_start, _table_end in e.get("table_spans", ()):
+            for _line_i in range(_table_start,
+                                 min(len(_table_link_lines), _table_end + 1)):
+                for _table_link in WIKILINK.finditer(_table_link_lines[_line_i]):
+                    _shown = _table_link.group(0)
+                    problems.append((
+                        sl, "item10/table",
+                        f'wikilink {_shown} appears in a Markdown table cell on '
+                        f'body line {_line_i + 1} — replace the link markup with '
+                        f'its rendered plain text; table cells do not take wikilinks'))
+        _p10 = mask_line_spans(
+            strip_code(e["prose"]), e.get("table_spans", ()))
+        _r10 = strip_code(e["rel"])
         for m in WIKILINK.finditer(_p10 + "\n" + _r10):
             tgt = m.group(1).split("#")[0].split("^")[0].strip()
             if not tgt:
@@ -1882,24 +2363,26 @@ def scan(wiki, images=None):
             bare = tgt.replace("\\", "/").rsplit("/", 1)[-1]
             lookup = bare[:-3] if bare.lower().endswith(".md") else bare
             lookup_key = entry_link_key(tgt)
-            if lookup_key in ambiguous_files:
+            file_record, file_status, _file_path = _resolve_entry_file(tgt)
+            if file_status == "ambiguous":
                 problems.append((sl, "item10/ambiguous",
-                                 f'wikilink target "{tgt}" shares a basename with multiple files; '
-                                 f'preserve the link, its path, anchor and display text until the '
-                                 f'destination is resolved. Report only; never choose a file by walk order'))
+                                 f'wikilink target "{tgt}" does not identify one file among '
+                                 f'multiple same-basename paths; preserve the link, its path, '
+                                 f'anchor and display text until the destination is resolved. '
+                                 f'Report only; never choose a file by walk order'))
                 continue
-            actual = fold_of.get(lookup_key)
+            actual = file_record["slug"] if file_record is not None else None
             if actual == lookup:
                 continue
             if actual:
                 problems.append((sl,"item10/case",
                                  f'wikilink target "{tgt}" matches the entry "{actual}" only case-/'
                                  f'normalization-insensitively — the link resolves in Obsidian, so this '
-                                 f'is a FIX IN PLACE (rewrite the link target to "{actual}", preserving '
-                                 f'any existing anchor and display label), '
+                                 f'is a FIX IN PLACE (correct the basename spelling to "{actual}", '
+                                 f'preserving any path, anchor and display label), '
                                  f'NEVER a stub: on the vault\'s case-insensitive volume a stub written '
                                  f'to "{tgt}.md" opens and overwrites "{actual}.md"'))
-            elif lookup_key in on_disk_fold:
+            elif file_status == "unparsed":
                 # The file EXISTS but did not parse (item0/item1), or lives in a
                 # symlinked subfolder the walk did not enter. Reporting it as a
                 # dangler is wrong twice over: the link resolves in Obsidian,
@@ -1952,46 +2435,24 @@ def scan(wiki, images=None):
             key = entry_link_key(raw_target)
             if not key:
                 continue
-            if key in ambiguous_files:
-                # Two path-qualified links with one basename can resolve to
-                # different files.  Preserve the normalized path as identity;
-                # collapsing ``[[a/foo]]`` and ``[[b/foo]]`` here would tell
-                # Task 2 to unlink a valid reference.  Repeated spellings of
-                # the same qualified path still count as duplicates.
-                target_key = entry_link_path_key(raw_target)
-                root_prefix = fold_name(os.path.basename(wiki)) + "/"
-                lookup = (target_key[len(root_prefix):]
-                          if target_key.startswith(root_prefix) else target_key)
-                owners = paths_by_basename.get(key, set())
-                explicitly_qualified = "/" in target_key
-                if not explicitly_qualified and len(owners) > 1:
-                    # A root-level file must not accidentally win over a
-                    # same-basename nested file for bare ``[[foo]]``.
-                    continue
-                if lookup in owners:
-                    owner = lookup
-                else:
-                    candidates = {
-                        candidate for candidate in owners
-                        if candidate.endswith("/" + lookup)
-                    }
-                    if len(candidates) != 1:
-                        # A bare ambiguous basename or a non-unique partial
-                        # path has no safe duplicate-removal action.
-                        continue
-                    owner = next(iter(candidates))
-                key = "ambiguous-path:" + owner
-            else:
-                owner = fold_of.get(key)
-                if owner is not None:
-                    key = fold_name(owner)
-                elif key in ambiguous_aliases:
-                    # Preserve repeated ambiguous aliases until their owner is
-                    # resolved.  Counting the raw spelling would still tell
-                    # Task 2 to remove one by choosing an owner implicitly.
-                    continue
-                elif key in alias_of:
-                    key = fold_name(alias_of[key][0])
+            record, status, owner_path = _resolve_entry_file(raw_target)
+            if status in ("parsed", "unparsed"):
+                owners = paths_by_basename.get(entry_link_key(raw_target), set())
+                key = ("file-path:" + owner_path if len(owners) > 1
+                       else fold_name(record["slug"] if record
+                                      else entry_link_key(raw_target)))
+            elif status == "ambiguous":
+                # No safe duplicate-removal action exists until the bare or
+                # partially qualified target identifies one file.
+                continue
+            elif key in ambiguous_aliases:
+                # Preserve repeated ambiguous aliases until their owner is
+                # resolved. Counting the raw spelling would still choose an
+                # owner implicitly.
+                continue
+            elif key in alias_of:
+                owner_slug = alias_of[key][0]
+                key = fold_name(owner_slug)
             seen[key] = seen.get(key, 0) + 1
             spellings.setdefault(key, []).append(raw_target)
         for key, count in seen.items():
@@ -2007,17 +2468,13 @@ def scan(wiki, images=None):
             # still resolving to an entry.  Resolve the underlying basename
             # before deciding whether item 11 applies; a direct dict lookup on
             # the rendered target let [[Wiki/term#Heading]] escape the rule.
-            lookup = tgt.split("#", 1)[0].split("^", 1)[0].strip()
-            lookup = lookup.replace("\\", "/").rsplit("/", 1)[-1]
-            if lookup.lower().endswith(".md"):
-                lookup = lookup[:-3]
-            lookup_key = fold_name(lookup)
-            if lookup_key in ambiguous_files or lookup_key in ambiguous_aliases:
+            lookup_key = entry_link_key(tgt)
+            record, status, _owner_path = _resolve_entry_file(tgt)
+            if status == "ambiguous" or lookup_key in ambiguous_aliases:
                 continue
-            actual = fold_of.get(lookup_key)
-            if actual is None and lookup_key in alias_of:
-                actual = alias_of[lookup_key][0]
-            tt = entries.get(actual, {}).get("title", "") if actual else ""
+            if record is None and status == "missing" and lookup_key in alias_of:
+                record = entries.get(alias_of[lookup_key][0])
+            tt = record.get("title", "") if record else ""
             if not tt:
                 continue
             if disp is None:
@@ -2107,7 +2564,6 @@ def scan(wiki, images=None):
             return True
         sa, sb = _stem(a), _stem(b)
         return len(sa) >= 3 and sa == sb
-    title_forms = {sl: [_toks(e["title"])] + [_toks(a) for a in e["aliases"]] for sl,e in entries.items()}
     for sl,e in entries.items():
         for m in re.finditer(r"\[\[([^\]|#^]+)(?:[#^][^\]|]*)?\|([^\]\n]+)\]\]", e["prose"]+"\n"+e["rel"]):
             tgt, disp = m.group(1).strip(), m.group(2).strip()
@@ -2128,16 +2584,72 @@ def scan(wiki, images=None):
             # case by adding the bare alias is exactly the silent cross-domain collision wiki-builder exists to prevent.
             # Do NOT re-tighten to exact match, and do NOT add a single-token-strict-subset guard (re-flags bare terms).
             # Still flags a label that is neither subset nor superset of any form (a wrong target / invented label).
-            if tgt in title_forms and disp:
+            target_key = entry_link_key(tgt)
+            target_record, target_status, _target_path = _resolve_entry_file(tgt)
+            if (target_record is None and target_status == "missing"
+                    and target_key not in ambiguous_aliases
+                    and target_key in alias_of):
+                target_record = entries.get(alias_of[target_key][0])
+            if target_record is not None and disp:
+                target_slug = target_record["slug"]
+                # The deliberately loose token floor below must accept
+                # qualified bare terms and inflections, but that same looseness
+                # can hide a concrete ownership conflict: `yeast` is a token
+                # subset of the aliases on Saccharomyces cerevisiae even when a
+                # real `yeast.md` entry owns the exact display.  Resolve the
+                # display as a slug first (real file before alias, just like
+                # item 10).  A unique different owner is a review finding, never
+                # authority to auto-retarget; ambiguous ownership stays silent.
+                display_slug = slug(disp)
+                display_record = None
+                display_path = None
+                display_claim = None
+                if display_slug:
+                    display_record, display_status, display_path = \
+                        _resolve_entry_file(display_slug)
+                    display_key = fold_name(display_slug)
+                    if display_record is not None and display_status == "parsed":
+                        display_claim = "canonical entry"
+                    elif (display_record is None and display_status == "missing"
+                          and display_key not in ambiguous_aliases
+                          and display_key in alias_of):
+                        display_record = entries.get(alias_of[display_key][0])
+                        if (display_record is not None
+                                and fold_name(display_record["slug"])
+                                not in ambiguous_files):
+                            display_path = display_record.get("path_key")
+                            display_claim = "unique alias"
+                        else:
+                            display_record = None
+                if (display_record is not None and display_claim is not None
+                        and display_record.get("path_key")
+                        != target_record.get("path_key")):
+                    display_title = (display_record.get("title")
+                                     or display_record.get("slug"))
+                    chosen_title = target_record.get("title") or target_slug
+                    problems.append((
+                        sl, "item18",
+                        f'wikilink [[{tgt}|{disp}]] uses display label "{disp}" '
+                        f'that exactly names a different {display_claim}, '
+                        f'"{display_title}" at "{display_path or display_record["slug"]}", '
+                        f'rather than the chosen target "{chosen_title}" — review '
+                        f'the target or label; do not auto-retarget'))
+                    continue
+                forms = ([_toks(target_record["title"])]
+                         + [_toks(a) for a in target_record["aliases"]])
                 dt = _toks(disp)
                 ok = False
-                for form in title_forms[tgt]:
+                for form in forms:
                     if not form: continue
                     sub = all(any(_tok_match(d, t) for t in form) for d in dt)   # label ⊆ form: bare term / inflection
                     sup = all(any(_tok_match(d, t) for d in dt) for t in form)   # label ⊇ form: qualifier-prefixed, more specific
                     if sub or sup: ok = True; break
+                if not ok and organism_common_name_bound(target_record, disp):
+                    ok = True
                 if dt and not ok:
-                    problems.append((sl,"item18",f'wikilink [[{tgt}|{disp}]] — "{disp}" shares no surface form with "{tgt}" (its title/aliases); likely wrong target or invented label'))
+                    target_title = target_record.get("title") or target_slug
+                    location = _target_path or target_slug
+                    problems.append((sl,"item18",f'wikilink [[{tgt}|{disp}]] — "{disp}" shares no surface form with the canonical target "{target_title}" at "{location}" (its title/aliases), and no explicit Organism common-name binding applies; likely wrong target or invented label'))
 
     # ---- item 5: collision probes across entries (REPORT as candidates; merge is the user's call) ----
     collisions = []
@@ -2217,16 +2729,24 @@ def scan(wiki, images=None):
 
     # ---- Surface map + backfill candidates (Task 2 worklist; model judges closeness) ----
     surface_owners = {}                   # lowercased surface form -> all owners
-    _title_surf, _alias_surf = set(), set()
+    _title_surf, _alias_surf, _organism_common_surf = set(), set(), set()
     for sl,e in entries.items():
-        forms = [("title", e["title"])] + [("alias", a.replace("-"," ")) for a in e["aliases"]]
+        forms = ([("title", e["title"])]
+                 + [("alias", a.replace("-", " ")) for a in e["aliases"]]
+                 + [("organism-common", name)
+                    for name in organism_common_name_surfaces(e)])
         for kind, f in forms:
             if not f or len(f) < 3: continue
             # `plural_surface`, not `pluralize`: the latter takes ONE token, and
             # a whole title matches no irregular in its table (see plural_surface).
             for variant in (f, plural_surface(f)):
                 surface_owners.setdefault(variant.lower(), set()).add(sl)
-                (_title_surf if kind == "title" else _alias_surf).add(variant.lower())
+                if kind == "title":
+                    _title_surf.add(variant.lower())
+                elif kind == "alias":
+                    _alias_surf.add(variant.lower())
+                else:
+                    _organism_common_surf.add(variant.lower())
     # A shared title/alias (or plural) supplies no unique link destination.
     # Choosing the first owner can link an entry's own opener to another
     # entity; duplicate basenames are ambiguous even with one parsed record.
@@ -2280,12 +2800,18 @@ def scan(wiki, images=None):
     # ---- Rename candidates (item 5): filename != slug(title). PROPOSE for approval — never auto-apply (a rename rewrites links vault-wide). ----
     inbound = {}
     for _e in entries.values():
-        for _m in WIKILINK.finditer(_e["prose"] + "\n" + (_e["rel"] or "")):
-            _k = _m.group(1).split("#")[0].split("^")[0].strip()
-            # count against the on-disk slug the link actually resolves to, so
-            # a case-variant inbound link still counts toward the file it opens
-            _k = fold_of.get(fold_name(_k), _k)
-            inbound[_k] = inbound.get(_k, 0) + 1
+        # Count actual entry links against the path record they resolve to.
+        # Basename-only folding loses qualified paths and explicit `.md`
+        # suffixes; raw-string counting also assigns an ambiguous bare basename
+        # to whichever duplicate happened to be walked first.  The item-10
+        # resolver already answers this safely, so reuse it here and decline to
+        # count anything ambiguous or unparsed.
+        _inbound_text = strip_code(_e["prose"]) + "\n" + strip_code(_e["rel"] or "")
+        for _m in WIKILINK.finditer(_inbound_text):
+            _record, _status, _owner_path = _resolve_entry_file(_m.group(1))
+            if _status != "parsed" or _record is None or _owner_path is None:
+                continue
+            inbound[_owner_path] = inbound.get(_owner_path, 0) + 1
     renames = []
     _rename_targets = {}                  # folded new_slug -> [entries proposing it]
     for _sl,_e in sorted(entries.items()):
@@ -2294,7 +2820,7 @@ def scan(wiki, images=None):
         # file literally called ".md".  Never propose it; item 5 already reports the title.
         if not _new or _new == _sl: continue
         _rename_targets.setdefault(fold_name(_new), []).append(_sl)
-        renames.append([_sl, _new, inbound.get(_sl, 0)])
+        renames.append([_sl, _new, inbound.get(_e["path_key"], 0)])
     for _r in renames:
         # target_exists ⇒ likely duplicate/disambiguation; do NOT rename into it, flag both.
         # Compared FOLDED, because the destination is "taken" whenever a file the
@@ -2318,7 +2844,7 @@ def scan(wiki, images=None):
                   or _fold_new in on_disk_fold
                   or len(_rename_targets[_fold_new]) > 1)
 
-    # ---- Hierarchy diagnostic (Task 3): how many full entries currently self-parent? ----
+    # ---- Hierarchy diagnostic (Task 3): existing parent/MOC state ----------
     # Reflects the EXISTING parents: from a prior run (blank on a never-linted vault). Under the MOC-root rule every
     # tree is rooted at the discipline's own MOC note, so NOTHING self-parents and the correct count is zero: every
     # slug reported here is stale parents: from a pre-MOC-root run or a hand-edit, which this run overwrites. That is
@@ -2337,9 +2863,125 @@ def scan(wiki, images=None):
             if target:
                 out.append(target)
         return out
-    def _self_parent(e):
-        return fold_name(e["slug"]) in {fold_name(t) for t in _parent_targets(e)}
-    selfp = sorted(sl for sl,e in entries.items() if not e["is_stub"] and _self_parent(e))
+    # The scanner used to say a parent absent from ``entries`` was owned by
+    # item10, but item10 deliberately scans body prose and Related only. That
+    # left a missing ``parents:`` target invisible. Resolve against parsed
+    # Wiki entries (including unambiguous aliases) and the discipline MOC
+    # files in the vault root; root MOCs are legal hierarchy parents even
+    # though they correctly sit outside the Wiki inventory.
+    moc_states = []
+    moc_root_keys = set()
+    for _discipline, _counts in sorted(tag_counts.items()):
+        if not _counts[0]:
+            continue
+        _moc_path = os.path.join(vault_root, _discipline + "-moc.md")
+        _state = moc_marker_state(_moc_path)
+        _state["discipline"] = _discipline
+        moc_states.append(_state)
+        if _state["state"] != "missing":
+            moc_root_keys.add(fold_name(_discipline + "-moc"))
+
+    def _resolve_parent_target(target):
+        """Return ``(canonical_owner, reason)`` under hierarchy rules.
+
+        A real filename precedes aliases.  A usable owner is a full Wiki entry
+        or a root MOC; a legacy stub is a leaf and therefore cannot parent a
+        full entry.  Root MOCs get an out-of-inventory sentinel so they cannot
+        participate in entry cycles.
+        """
+        key = fold_name(target)
+        if key in ambiguous_files:
+            return None, "ambiguous"
+        if key in fold_of and key in moc_root_keys:
+            return None, "ambiguous"
+        if key in fold_of:
+            owner = fold_of[key]
+            if entries[owner]["is_stub"]:
+                return None, "stub"
+            return owner, None
+        # A real Wiki file outranks an alias in Obsidian even when that file
+        # could not be parsed as an entry. It cannot serve as a hierarchy
+        # parent until its own item0/item1 problem is repaired.
+        if key in on_disk_fold:
+            return None, ("ambiguous" if key in moc_root_keys else "unparsed")
+        if key in moc_root_keys:
+            return "@moc:" + key, None
+        if key in ambiguous_aliases:
+            return None, "ambiguous"
+        if key in alias_of:
+            owner = alias_of[key][0]
+            if entries[owner]["is_stub"]:
+                return None, "stub"
+            return owner, None
+        return None, "missing"
+
+    canonical_parents = {
+        sl: [(_target, *_resolve_parent_target(_target))
+             for _target in _parent_targets(e)]
+        for sl, e in entries.items()
+    }
+    selfp = sorted(
+        sl for sl, e in entries.items()
+        if not e["is_stub"]
+        and any(owner == sl for _target, owner, _reason in canonical_parents[sl]))
+
+    # Placement is per discipline, because a multi-tagged entry stores the
+    # union of its nearest ancestors. One valid edge cannot hide an absent
+    # second-discipline edge, and a biology entry pointing only at the ML MOC
+    # is not placed in biology. A broader full parent represents each valid
+    # discipline it itself carries; a root MOC represents its own discipline.
+    placement_gaps = []
+    for sl, e in sorted(entries.items()):
+        if e["is_stub"]:
+            continue
+        required = {d.lower() for d in e["tag_slugs"]
+                    if d.lower() in VALID_TAGS}
+        if not required:
+            continue
+        represented = set()
+        for _target, owner, _reason in canonical_parents[sl]:
+            if owner is None or owner == sl:
+                continue
+            if owner.startswith("@moc:"):
+                moc_key = owner[len("@moc:"):]
+                represented.update(
+                    d for d in required
+                    if moc_key == fold_name(d + "-moc"))
+            elif owner in entries:
+                represented.update(
+                    d.lower() for d in entries[owner]["tag_slugs"]
+                    if d.lower() in required)
+        missing = sorted(required - represented)
+        if missing:
+            placement_gaps.append({
+                "slug": sl,
+                "missing_disciplines": missing,
+                "represented_disciplines": sorted(represented),
+            })
+    placed_unparented = [gap["slug"] for gap in placement_gaps]
+
+    unresolved_parents = []
+    for _sl, _e in sorted(entries.items()):
+        for _raw_parent in _e.get("parents", []):
+            _match = re.match(r"\s*\[\[([^\]|#]+)", str(_raw_parent))
+            if not _match:
+                # Frontmatter form checks own malformed non-wikilink list
+                # items. ``placed_unparented`` still exposes the resulting
+                # absence of a usable hierarchy edge.
+                continue
+            _target = _match.group(1).split("^", 1)[0].strip()
+            _target = _target.replace("\\", "/").rsplit("/", 1)[-1]
+            if _target.lower().endswith(".md"):
+                _target = _target[:-3]
+            _owner, _reason = _resolve_parent_target(_target)
+            if _reason is None:
+                continue
+            unresolved_parents.append({
+                "slug": _sl,
+                "parent": str(_raw_parent),
+                "target": _target,
+                "reason": _reason,
+            })
     # ---- parent CYCLES of length >= 2 (Task 3) ----
     # A self-parent is the 1-cycle and is reported above.  The 2-cycle — A
     # parents B and B parents A — is the one a hand-edit or an interrupted run
@@ -2348,7 +2990,10 @@ def scan(wiki, images=None):
     # forever.  Longer cycles come out of the same search for free.
     _parent_of = {}
     for _sl, _e in entries.items():
-        _parent_of[_sl] = [fold_of.get(fold_name(t), t) for t in _parent_targets(_e)]
+        _parent_of[_sl] = [
+            owner for _target, owner, _reason in canonical_parents[_sl]
+            if owner in entries and not entries[owner]["is_stub"]
+        ]
     # One depth-first walk with three-colour marking, so every EDGE is looked at
     # once and the pass is O(entries + parent links). Enumerating every simple
     # cycle instead is exponential on a densely mis-parented vault, and this is
@@ -2368,7 +3013,7 @@ def scan(wiki, images=None):
                 _state[_node] = 2
                 _stack.pop(); _path.pop()
                 continue
-            if _nxt not in entries:            # a dangling parent: item10 owns it
+            if _nxt not in entries:            # roots/missing targets cannot participate in an entry cycle
                 continue
             if _state.get(_nxt) == 1:          # a back edge, i.e. a cycle
                 _cyc = _path[_path.index(_nxt):]
@@ -2395,6 +3040,7 @@ def scan(wiki, images=None):
         # stamp the suggestion-log appends with this
         "run_timestamp": f"{datetime.datetime.now():%Y-%m-%d %H:%M}",
         "wiki_path": os.path.abspath(wiki),
+        "vault_root": vault_root,
         "inventory": {
             "entries": len(entries),
             "full": len(fulls),
@@ -2415,7 +3061,9 @@ def scan(wiki, images=None):
         # reached only through an alias — batch these in the report; the
         # closeness judgment itself stays with the model (see build_backfill).
         "backfill_candidates": [{"slug": s, "target": t, "surface": f,
-                                 "bare_noun_alias": key in bare_noun_alias}
+                                 "bare_noun_alias": key in bare_noun_alias,
+                                 "organism_common_name":
+                                     key in _organism_common_surf}
                                 for s,t,f,key in sorted(backfill)],
         # Folder-level, report-only findings.  These are deliberately outside
         # `problems`: they are not entry checklist violations and must not
@@ -2424,6 +3072,13 @@ def scan(wiki, images=None):
         "hierarchy_diagnostic": {
             "full_entries": len(fulls),
             "self_parented": selfp,
+            # Report-only state from the hierarchy last written (or not yet
+            # written). These worklists do not authorize Task 3 or its
+            # transitive scope expansion.
+            "placed_unparented": placed_unparented,
+            "placement_gaps": placement_gaps,
+            "unresolved_parents": unresolved_parents,
+            "moc_marker_states": moc_states,
             # Cycles of length >= 2 in `parents:` (the 1-cycle is `self_parented`).
             # Each is listed once, rotated to start at its alphabetically first
             # slug. Any entry named here has no path to a MOC root, so Task 3
@@ -2453,7 +3108,8 @@ def scan(wiki, images=None):
 
 def _st_entry(title, prose, tags=('"#statistics"',), type_="Concept",
               sources=('"[[Doe_X_2025.pdf#page=2]]"',), aliases=(),
-              parents=(), extra_keys="", card=None, related=None):
+              parents=(), extra_keys="", card=None, related=None,
+              description=None):
     """A schema-clean full entry, so a case only carries the fault it names.
 
     Anything left at its default produces NO finding -- the `clean entry`
@@ -2470,7 +3126,10 @@ def _st_entry(title, prose, tags=('"#statistics"',), type_="Concept",
         text += _block("aliases", aliases)
     text += _block("sources", sources)
     text += "created: 2026-01-01\nupdated: 2026-01-02\n"
-    text += 'description: "A worked example used by the self-test."\n'
+    if description is None:
+        subject = math_skeleton(base_term(title)) or math_skeleton(title) or title
+        description = "%s is a worked example used by the self-test." % subject
+    text += "description: %s\n" % json.dumps(description)
     text += _block("tags", tags)
     text += extra_keys
     text += _block("parents", parents)
@@ -2621,18 +3280,28 @@ def run_self_test():
         _st_write(v, "ROC-curve.md", _st_entry("ROC-curve", "**ROC-curve** is a worked example."))
         _st_write(v, "broken.md", "no frontmatter here either\n")
         _st_write(v, "foo.md", _st_entry(
-            "Foo", "**Foo** is the root ambiguous basename fixture."))
+            "Root Foo", "**Root Foo** is the root ambiguous basename fixture."))
         _st_write(v, "a/foo.md", _st_entry(
-            "Foo", "**Foo** is the first ambiguous basename fixture."))
+            "Alpha", "**Alpha** is the first ambiguous basename fixture."))
         _st_write(v, "b/foo.md", _st_entry(
-            "Foo", "**Foo** is the second ambiguous basename fixture."))
+            "Beta", "**Beta** is the second ambiguous basename fixture."))
         _st_write(v, "path-reader.md", _st_entry(
-            "Path reader", "**Path reader** compares [[a/foo|one Foo]] with "
-            "[[b/foo|another Foo]], while repeated ambiguous bare links "
-            "[[foo]] and [[FOO.md|Foo]] remain unresolved."))
+            "Path reader", "**Path reader** compares [[a/foo|Alpha]] with "
+            "[[b/foo|Beta]], while repeated ambiguous bare links "
+            "[[foo]] and [[FOO.md|Foo]] remain unresolved. A qualified path "
+            "that matches no owner, [[c/foo|Unknown path]], remains ambiguous "
+            "while those basename owners coexist."))
         _st_write(v, "exact-path-reader.md", _st_entry(
             "Exact path reader", "**Exact path reader** repeats "
-            "[[a/foo|one Foo]] and [[A/FOO.md|the same Foo]]."))
+            "[[a/foo|Alpha]] and [[A/FOO.md|Alpha]]."))
+        _st_write(v, "qualified-related-reader.md", _st_entry(
+            "Qualified related reader",
+            "**Qualified related reader** points to one colliding path.\n\n"
+            "**Related:** [[b/foo|Beta]]"))
+        _st_write(v, "wrong-qualified-reader.md", _st_entry(
+            "Wrong qualified reader",
+            "**Wrong qualified reader** points to [[b/foo|Alpha]].\n\n"
+            "**Related:** [[b/foo|Alpha]]"))
         _st_write(v, "alias-a.md", _st_entry(
             "Alias A", "**Alias A** is one ambiguous alias owner.",
             aliases=('"shared-alias"',)))
@@ -2679,9 +3348,17 @@ def run_self_test():
               "item10/dup" in _st_keys(res, "path-reader"), False)
         check("the ambiguous destinations remain report-only instead",
               _st_msg(res, "path-reader", "item10/ambiguous").count(
-                  "shares a basename with multiple files"), 4)
+                  "multiple same-basename paths"), 3)
         check("an exact repeated qualified path still gets item10/dup",
               "item10/dup" in _st_keys(res, "exact-path-reader"), True)
+        check("a qualified Related target under a basename collision uses that path's title",
+              [k for k in _st_keys(res, "qualified-related-reader")
+               if k in ("item10/ambiguous", "item11", "item18")], [])
+        check("item 11 and item 18 diagnose against the qualified path's owner",
+              ("Beta" in _st_msg(res, "wrong-qualified-reader", "item11"),
+               'canonical target "Beta" at "b/foo"'
+               in _st_msg(res, "wrong-qualified-reader", "item18")),
+              (True, True))
         check("a repeated ambiguous alias gets no duplicate-removal finding",
               "item10/dup" in _st_keys(res, "alias-reader"), False)
         check("the ambiguous alias remains report-only instead",
@@ -2922,20 +3599,166 @@ def run_self_test():
         _st_write(v, "leaf.md", _st_entry(
             "Leaf", "**Leaf** is a worked example.", parents=('"[[root]]"',)))
         _st_write(v, "root.md", _st_entry("Root", "**Root** is a worked example."))
+        _st_write(v, "alias-self.md", _st_entry(
+            "Alias self", "**Alias self** is a worked example.",
+            aliases=('"self-handle"',), parents=('"[[self-handle]]"',)))
+        _st_write(v, "alias-left.md", _st_entry(
+            "Alias left", "**Alias left** is a worked example.",
+            aliases=('"left-handle"',), parents=('"[[right-handle]]"',)))
+        _st_write(v, "alias-right.md", _st_entry(
+            "Alias right", "**Alias right** is a worked example.",
+            aliases=('"right-handle"',), parents=('"[[left-handle]]"',)))
+        _st_write(v, "stub-parent.md", _st_entry(
+            "Stub parent", "**Stub parent** is a placeholder.",
+            sources=('"stub"',), card=False))
+        _st_write(v, "stub-child.md", _st_entry(
+            "Stub child", "**Stub child** is a worked example.",
+            parents=('"[[stub-parent]]"',)))
+        _st_write(v, "unparsed-owner.md", "A user note without frontmatter.\n")
+        _st_write(v, "alias-shadow.md", _st_entry(
+            "Alias shadow", "**Alias shadow** is a worked example.",
+            aliases=('"unparsed-owner"',)))
+        _st_write(v, "unparsed-child.md", _st_entry(
+            "Unparsed child", "**Unparsed child** is a worked example.",
+            parents=('"[[unparsed-owner]]"',)))
         for _a, _b in (("tri-a", "tri-b"), ("tri-b", "tri-c"), ("tri-c", "tri-a")):
             _st_write(v, _a + ".md", _st_entry(
                 _a, "**%s** is a worked example." % _a, parents=('"[[%s]]"' % _b,)))
         res = scan(v)
         h = res["hierarchy_diagnostic"]
-        check("a self-parent is reported", h["self_parented"], ["selfy"])
+        check("exact and unambiguous-alias self-parents are reported",
+              h["self_parented"], ["alias-self", "selfy"])
         check("a 2-CYCLE is reported", ["ping", "pong"] in h["parent_cycles"], True)
         check("a longer cycle is reported too, rotated to its first slug",
               ["tri-a", "tri-b", "tri-c"] in h["parent_cycles"], True)
-        check("...each once, not once per member", len(h["parent_cycles"]), 2)
+        check("an alias-mediated two-cycle is canonicalized and reported",
+              ["alias-left", "alias-right"] in h["parent_cycles"], True)
+        check("...each once, not once per member", len(h["parent_cycles"]), 3)
         check("an ordinary parent edge is not a cycle",
               any("leaf" in c or "root" in c for c in h["parent_cycles"]), False)
         check("check_rooting fires on the self-parent's discipline",
               [d["check_rooting"] for d in h["per_discipline"]], [True])
+        check("a legacy stub cannot serve as a hierarchy parent",
+              [(x["slug"], x["target"], x["reason"])
+               for x in h["unresolved_parents"]],
+              [("stub-child", "stub-parent", "stub"),
+               ("unparsed-child", "unparsed-owner", "unparsed")])
+
+        # Parent resolution and MOC ownership live outside the entry-only
+        # inventory: the vault root is the parent of Wiki/, and a valid root
+        # MOC must resolve without being mistaken for a missing Wiki entry.
+        v = os.path.join(tmp, "v6b", "Wiki")
+        vr = os.path.dirname(v)
+        _st_write(v, "placed-empty.md", _st_entry(
+            "Placed empty", "**Placed empty** is a worked example.",
+            tags=('"#machine-learning"',)))
+        _st_write(v, "rooted.md", _st_entry(
+            "Rooted", "**Rooted** is a worked example.",
+            tags=('"#machine-learning"',),
+            parents=('"[[machine-learning-moc]]"',)))
+        _st_write(v, "exact-file-child.md", _st_entry(
+            "Exact file child", "**Exact file child** is a worked example.",
+            tags=('"#machine-learning"',), parents=('"[[rooted]]"',)))
+        _st_write(v, "ml-parent.md", _st_entry(
+            "ML parent", "**ML parent** is a worked example.",
+            tags=('"#machine-learning"',),
+            parents=('"[[machine-learning-moc]]"',)))
+        _st_write(v, "partial-multitag.md", _st_entry(
+            "Partial multitag", "**Partial multitag** is a worked example.",
+            tags=('"#machine-learning"', '"#statistics"'),
+            parents=('"[[machine-learning-moc]]"',)))
+        _st_write(v, "partial-via-entry.md", _st_entry(
+            "Partial via entry", "**Partial via entry** is a worked example.",
+            tags=('"#machine-learning"', '"#statistics"'),
+            parents=('"[[ml-parent]]"',)))
+        _st_write(v, "complete-multitag.md", _st_entry(
+            "Complete multitag", "**Complete multitag** is a worked example.",
+            tags=('"#machine-learning"', '"#statistics"'),
+            parents=('"[[ml-parent]]"', '"[[statistics-moc]]"')))
+        _st_write(v, "wrong-discipline-root.md", _st_entry(
+            "Wrong discipline root",
+            "**Wrong discipline root** is a worked example.",
+            tags=('"#biology"',), parents=('"[[machine-learning-moc]]"',)))
+        _st_write(v, "missing-entry-parent.md", _st_entry(
+            "Missing entry parent", "**Missing entry parent** is a worked example.",
+            tags=('"#machine-learning"',),
+            parents=('"[[definitely-missing-parent]]"',)))
+        _st_write(v, "alias-owner-a.md", _st_entry(
+            "Alias owner A", "**Alias owner A** is a worked example.",
+            tags=('"#machine-learning"',), aliases=('"rooted"',),
+            parents=('"[[machine-learning-moc]]"',)))
+        _st_write(v, "alias-owner-b.md", _st_entry(
+            "Alias owner B", "**Alias owner B** is a worked example.",
+            tags=('"#machine-learning"',), aliases=('"rooted"',),
+            parents=('"[[machine-learning-moc]]"',)))
+        for _discipline in ("statistics", "mathematics", "biology", "physics"):
+            _title = _discipline.title() + " rooted"
+            _st_write(v, _discipline + "-rooted.md", _st_entry(
+                _title, "**%s** is a worked example." % _title,
+                tags=(json.dumps("#" + _discipline),),
+                parents=(json.dumps("[[%s-moc]]" % _discipline),)))
+        _st_write(v, "chemistry-rooted.md", _st_entry(
+            "Chemistry rooted", "**Chemistry rooted** is a worked example.",
+            tags=('"#chemistry"',), parents=('"[[chemistry-moc]]"',)))
+        _st_write(vr, "machine-learning-moc.md",
+                  MOC_TREE_START + "\n- [[rooted|Rooted]]\n" + MOC_TREE_END + "\n")
+        _st_write(vr, "statistics-moc.md", "- [[statistics-rooted|Statistics rooted]]\n")
+        _st_write(vr, "mathematics-moc.md", "")
+        _st_write(vr, "biology-moc.md",
+                  "  " + MOC_TREE_START + "\n- [[biology-rooted|Biology rooted]]\n"
+                  "  " + MOC_TREE_END + "\n")
+        _st_write(vr, "chemistry-moc.md", b"\xff\xfe")
+        res = scan(v)
+        h = res["hierarchy_diagnostic"]
+        check("the vault root is derived from the scanned Wiki directory",
+              res["vault_root"], os.path.abspath(vr))
+        check("a tagged full entry with no usable parent is report-only hierarchy backlog",
+              h["placed_unparented"],
+              ["missing-entry-parent", "partial-multitag", "partial-via-entry",
+               "physics-rooted", "placed-empty", "wrong-discipline-root"])
+        check("placement gaps retain the missing discipline for partial unions and wrong roots",
+              [(x["slug"], x["missing_disciplines"],
+                x["represented_disciplines"])
+               for x in h["placement_gaps"]
+               if x["slug"] in ("partial-multitag", "partial-via-entry",
+                                "wrong-discipline-root")],
+              [("partial-multitag", ["statistics"], ["machine-learning"]),
+               ("partial-via-entry", ["statistics"], ["machine-learning"]),
+               ("wrong-discipline-root", ["biology"], [])])
+        check("a complete multi-discipline union has no placement gap",
+              any(x["slug"] == "complete-multitag"
+                  for x in h["placement_gaps"]), False)
+        check("missing entry and root-MOC parents are reported, while an existing root MOC resolves",
+              [(x["slug"], x["target"], x["reason"])
+               for x in h["unresolved_parents"]],
+              [("missing-entry-parent", "definitely-missing-parent", "missing"),
+               ("physics-rooted", "physics-moc", "missing")])
+        check("an exact parent file wins over entries that ambiguously claim the same alias",
+              any(x["slug"] == "exact-file-child" for x in h["unresolved_parents"]), False)
+        check("every discipline MOC has an explicit ownership-marker state",
+              {x["discipline"]: x["state"] for x in h["moc_marker_states"]},
+              {"biology": "malformed-marker", "machine-learning": "marked",
+               "chemistry": "unreadable", "mathematics": "empty", "physics": "missing",
+               "statistics": "legacy-unmarked"})
+        check("an unreadable MOC carries its read error through the scan",
+              [(x["state"], x.get("error", "").split(":", 1)[0])
+               for x in h["moc_marker_states"]
+               if x["discipline"] == "chemistry"],
+              [("unreadable", "UnicodeDecodeError")])
+        check("an indented marker pair is malformed even when both marker strings occur once",
+              [(x["start_markers"], x["end_markers"])
+               for x in h["moc_marker_states"] if x["discipline"] == "biology"],
+              [(1, 1)])
+
+        malformed = os.path.join(vr, "marker-shapes")
+        _st_write(malformed, "partial.md", MOC_TREE_START + "\n")
+        _st_write(malformed, "reversed.md", MOC_TREE_END + "\n" + MOC_TREE_START + "\n")
+        _st_write(malformed, "duplicate.md",
+                  MOC_TREE_START + "\n" + MOC_TREE_START + "\n" + MOC_TREE_END + "\n")
+        check("partial, reversed, and duplicate marker shapes are all malformed",
+              [moc_marker_state(os.path.join(malformed, name + ".md"))["state"]
+               for name in ("partial", "reversed", "duplicate")],
+              ["malformed-marker"] * 3)
 
         # ------------------------------------------------------------------
         # 7. rename candidates -- `target_exists` is the ONLY thing standing
@@ -2953,6 +3776,16 @@ def run_self_test():
             "Occupied", "**Occupied** is a worked example."))
         _st_write(v, "occupied.md", _st_entry(
             "Occupied elsewhere", "**Occupied elsewhere** is a worked example."))
+        _st_write(v, "a/path-old.md", _st_entry(
+            "Alpha renamed", "**Alpha renamed** is a worked example."))
+        _st_write(v, "b/path-old.md", _st_entry(
+            "Beta renamed", "**Beta renamed** is a worked example."))
+        _st_write(v, "rename-reader.md", _st_entry(
+            "Rename reader", "**Rename reader** links "
+            "[[a/path-old|Alpha renamed]] and "
+            "[[Wiki/a/path-old.md#Details|Alpha renamed]] to one owner, "
+            "[[b/path-old|Beta renamed]] to the other, and leaves the bare "
+            "[[path-old]] ambiguous."))
         res = scan(v)
         _tx = {r["slug"]: r["target_exists"] for r in res["rename_candidates"]}
         check("a rename onto a file that is ON DISK but did not parse is "
@@ -2966,6 +3799,11 @@ def run_self_test():
         check("a rename onto a destination held by a PARSED entry is still "
               "target_exists",
               _tx.get("taken-name"), True)
+        _path_rename = next(r for r in res["rename_candidates"]
+                            if r["slug"] == "path-old")
+        check("rename inbound counts resolve path-qualified and explicit-.md links "
+              "without assigning ambiguous or other-path links to the candidate",
+              _path_rename["inbound_links"], 2)
 
         # ------------------------------------------------------------------
         # 8. item 10 again -- the two ways a RESOLVING link was called
@@ -3132,7 +3970,8 @@ def run_self_test():
               "(the one-signpost allowance was retired 2026-08-16)",
               ("item6" in _st_keys(res, "capzero"),
                "cap is 0" in _st_msg(res, "capzero", "item6")), (True, True))
-        check("...but the same identifier in a Software entry is legitimate",
+        check("...the same identifier in Software is mechanically exempt; "
+              "semantic selection remains manual",
               _st_keys(res, "capzero-sw"), [])
         check("NEAR MISS: a bare backticked file extension is not an identifier",
               _st_keys(res, "extonly"), [])
@@ -3568,8 +4407,10 @@ def run_self_test():
                   '[[shared-name#Definition|the chosen term]], [[b/shared#Section]], '
                   'and [[single-name#Definition|the precise term]].'))
         res = scan(v)
-        check("ambiguous file and alias owners never produce an automatic rewrite or dangler",
-              _st_keys(res, 'reader').count('item10/ambiguous'), 2)
+        check("ambiguous alias owners never produce an automatic rewrite or dangler",
+              _st_keys(res, 'reader').count('item10/ambiguous'), 1)
+        check("a qualified file target still resolves under a basename collision",
+              'b/shared' in _st_msg(res, 'reader', 'item10/ambiguous'), False)
         check("an unambiguous alias rewrite keeps the existing anchor and display label",
               '[[first#Definition|the precise term]]' in _st_msg(res, 'reader', 'item10/alias'), True)
         check("ambiguous resolving links are not classified as dangling",
@@ -3623,17 +4464,20 @@ def run_self_test():
             "List type", "**List type** is a worked example.").replace(
             "type: Concept", "type: [Concept]"))
         _st_write(v, "lower-description.md", _st_entry(
-            "Lower description", "**Lower description** is a worked example.").replace(
-            'description: "A worked example used by the self-test."',
-            'description: "a worked example used by the self-test."'))
+            "Lower description", "**Lower description** is a worked example.",
+            description="lower description is a worked example used by the self-test."))
         _st_write(v, "periodless-description.md", _st_entry(
-            "Periodless description", "**Periodless description** is a worked example.").replace(
-            'description: "A worked example used by the self-test."',
-            'description: "A worked example used by the self-test"'))
+            "Periodless description", "**Periodless description** is a worked example.",
+            description="Periodless description is a worked example used by the self-test"))
         _st_write(v, "arxiv.md", _st_entry(
-            "arxiv", "**arxiv** is a scholarly archive.").replace(
-            'description: "A worked example used by the self-test."',
-            'description: "arxiv is a scholarly archive."'))
+            "arxiv", "**arxiv** is a scholarly archive.",
+            description="arxiv is a scholarly archive."))
+        _st_write(v, "fairness.md", _st_entry(
+            "Fairness", "**Fairness** compares group outcomes.",
+            description="Machine learning fairness compares group outcomes."))
+        _st_write(v, "placeholder-subject.md", _st_entry(
+            "Placeholder subject", "**Placeholder subject** compares groups.",
+            description="This method compares groups."))
         _st_write(v, "canonical-target.md", _st_entry(
             "Canonical target", "**Canonical target** is a worked example.",
             aliases=('"canonical-name"',)))
@@ -3673,20 +4517,26 @@ def run_self_test():
             card="Different term"))
         _st_write(v, "feature-machine-learning.md", _st_entry(
             "Feature (machine learning)", "**Feature** is a worked example.",
-            card="Feature"))
+            card="Feature", description="A feature is a worked example."))
+        _st_write(v, "feature-statistics.md", _st_entry(
+            "Feature (statistics)", "**Feature** is a worked example.",
+            card="Feature",
+            description="Feature (statistics) is a worked example."))
+        _st_write(v, "feature-biology.md", _st_entry(
+            "Feature (biology)", "**Feature (biology)** is a worked example.",
+            card="Feature", description="A feature is a worked example."))
         _st_write(v, "k-nearest-neighbors.md", _st_entry(
             "$k$-nearest neighbors",
             "**$\\boldsymbol{k}$-nearest neighbors** is a worked example.",
-            card="k-nearest neighbors").replace(
-            'description: "A worked example used by the self-test."',
-            'description: "k-nearest neighbors is a worked example."'))
+            card="k-nearest neighbors",
+            description="k-nearest neighbors is a worked example."))
         _st_write(v, "principal-component-analysis.md", _st_entry(
             "Principal component analysis",
             "**Principal component analysis** (PCA) is a worked example.",
             aliases=('"pca"',), card="Principal component analysis (PCA)"))
         _st_write(v, "missing-counterpart.md", _st_entry(
-            "Missing counterpart", "**Missing counterpart** (MCA) is a worked example.",
-            aliases=('"mca"',), card="Missing counterpart"))
+            "Missing counterpart", "**Missing counterpart** (MC) is a worked example.",
+            aliases=('"mc"',), card="Missing counterpart"))
         _st_write(v, "wrong-counterpart-case.md", _st_entry(
             "Wrong counterpart case",
             "**Wrong counterpart case** (WCC) is a worked example.",
@@ -3721,14 +4571,87 @@ def run_self_test():
             card="Boosting with synonym (early boosting)"))
         _st_write(v, "saccharomyces-cerevisiae.md", _st_entry(
             "Saccharomyces cerevisiae",
-            "**Saccharomyces cerevisiae** (*S. cerevisiae*) is a model budding "
-            "yeast.", aliases=('"s-cerevisiae"',),
+            "***Saccharomyces cerevisiae*** (*S. cerevisiae*) is a model "
+            "budding yeast.", type_="Organism", aliases=('"s-cerevisiae"',),
             card="Saccharomyces cerevisiae (S. cerevisiae)"))
+        _st_write(v, "mus-musculus.md", _st_entry(
+            "Mus musculus", "***Mus musculus*** is the mouse used in laboratories.",
+            type_="Organism",
+            description="Mus musculus is the mouse used in laboratories."))
+        _st_write(v, "mus-musculus-biology.md", _st_entry(
+            "Mus musculus (biology)",
+            "***Mus musculus*** is a laboratory model species.",
+            type_="Organism", aliases=('"m-musculus"',), card="Mus musculus",
+            description="Mus musculus is a laboratory model species."))
+        _st_write(v, "african-elephant.md", _st_entry(
+            "African elephant", "**African elephant** is a large land mammal.",
+            type_="Organism"))
+        _st_write(v, "canis-lupus-familiaris.md", _st_entry(
+            "Canis lupus familiaris",
+            "***Canis lupus familiaris*** is the domestic dog.",
+            type_="Organism", aliases=('"c-lupus-familiaris"',)))
+        _st_write(v, "drosophila-melanogaster.md", _st_entry(
+            "Drosophila melanogaster",
+            "**Drosophila melanogaster** is a model fruit fly.",
+            type_="Organism", aliases=('"d-melanogaster"',)))
+        _st_write(v, "e-coli-k-12.md", _st_entry(
+            "E. coli K-12", "***E. coli* K-12** is a laboratory strain.",
+            type_="Organism"))
+        _st_write(v, "e-coli-b-2.md", _st_entry(
+            "E. coli B-2", "***E. coli B-2*** is a laboratory strain.",
+            type_="Organism"))
+        _st_write(v, "hamlet.md", _st_entry(
+            "Hamlet", "***Hamlet*** is a tragedy by Shakespeare.", type_="Work"))
+        _st_write(v, "macbeth.md", _st_entry(
+            "Macbeth", "****Macbeth**** is a tragedy by Shakespeare.", type_="Work"))
+        _st_write(v, "pan-troglodytes.md", _st_entry(
+            "Pan troglodytes", "****Pan troglodytes**** is a great ape.",
+            type_="Organism", aliases=('"p-troglodytes"',)))
+        _st_write(v, "king-lear.md", _st_entry(
+            "King Lear", "**King Lear** is a tragedy by Shakespeare.", type_="Work"))
+        _st_write(v, "asgard-archaea.md", _st_entry(
+            "Asgard archaea", "**Asgard archaea** are an archaeal lineage.",
+            type_="Organism"))
+        _st_write(v, "rattus-norvegicus.md", _st_entry(
+            "Rattus norvegicus",
+            "***Rattus norvegicus*** is the laboratory rat; a mouse is a "
+            "different organism.", type_="Organism",
+            description="Rattus norvegicus is the laboratory rat."))
+        _st_write(v, "common-name-reader.md", _st_entry(
+            "Common name reader",
+            "**Common name reader** compares [[mus-musculus|mouse]] with "
+            "[[rattus-norvegicus|mouse]]."))
+        _st_write(v, "common-name-backfill-reader.md", _st_entry(
+            "Common name backfill reader",
+            "**Common name backfill reader** studies the mouse in laboratories."))
+        _st_write(v, "imperative-link.md", _st_entry(
+            "Imperative link", "**Imperative link** adds detail "
+            "(see [[canonical-target|Canonical target]])."))
+        _st_write(v, "ordinary-see.md", _st_entry(
+            "Ordinary see", "**Ordinary see** varies a threshold to see how "
+            "the error changes."))
+        _st_write(v, "semantic-see.md", _st_entry(
+            "Semantic see", "**Semantic see** records how researchers see "
+            "[[canonical-target|models]] as approximations."))
+        _st_write(v, "listed-imperative.md", _st_entry(
+            "Listed imperative", "**Listed imperative** shows syntax.\n\n"
+            "```markdown\nsee [[canonical-target]]\n```", type_="Software"))
         _st_write(v, "algorithm-counterpart.md", _st_entry(
             "Algorithm counterpart",
             "The **Algorithm counterpart** algorithm (AC) predicts from nearby "
             "observations.", aliases=('"ac"',),
             card="Algorithm counterpart (AC)"))
+        _st_write(v, "mark-twain.md", _st_entry(
+            "Mark Twain", "**Mark Twain** (Samuel Clemens) was an author.",
+            aliases=('"samuel-clemens"',), card="Mark Twain"))
+        _st_write(v, "counterpart-scope.md", _st_entry(
+            "Counterpart scope",
+            "**Counterpart scope** uses **Principal component analysis** (PCA).",
+            aliases=('"pca"',), card="Counterpart scope"))
+        _st_write(v, "a-star-search.md", _st_entry(
+            "$A^{*}$ search",
+            "**$\\boldsymbol{A}^{*}$ search** explores a graph.",
+            card="A search"))
         res = scan(v)
         check("invalid and list-valued type fields both fail the canonical enum",
               ["item2/type-enum" in _st_keys(res, name)
@@ -3739,6 +4662,21 @@ def run_self_test():
               (True, True))
         check("a lowercase canonical title may remain the description's subject",
               "item7" in _st_keys(res, "arxiv"), False)
+        check("a different prefixed noun phrase is not the canonical subject",
+              "canonical title/base term" in _st_msg(res, "fairness", "item7"), True)
+        check("a placeholder subject is an item-7 mismatch",
+              "canonical title/base term" in _st_msg(
+                  res, "placeholder-subject", "item7"), True)
+        check("a leading article plus parenthetical title's base term passes",
+              "item7" in _st_keys(res, "feature-machine-learning"), False)
+        check("the full qualified title is not a running-prose description subject",
+              "item7" in _st_keys(res, "feature-statistics"), True)
+        check("the full qualified title is not the bold running-prose opener",
+              "item16" in _st_keys(res, "feature-biology"), True)
+        check("first-letter case is the only case carve-out for a title subject",
+              (description_has_entity_subject("ArXiv stores preprints.", "arXiv"),
+               description_has_entity_subject("Arxiv stores preprints.", "arXiv")),
+              (True, False))
         check("a human-readable alias is rejected in favor of its slug form",
               'expected "true-positive-rate"'
               in _st_msg(res, "non-slug-alias", "item18"), True)
@@ -3753,6 +4691,42 @@ def run_self_test():
               "item18" in _st_keys(res, "empty-flow-alias"), False)
         check("a symbol title's plain-text skeleton may be the description subject",
               "item7" in _st_keys(res, "k-nearest-neighbors"), False)
+        check("Work, scientific taxon, mixed-strain, and common-name opener styles pass",
+              ["item16" in _st_keys(res, name) for name in
+               ("hamlet", "mus-musculus", "mus-musculus-biology",
+                "e-coli-k-12", "asgard-archaea", "african-elephant",
+                "canis-lupus-familiaris", "a-star-search")],
+              [False, False, False, False, False, False, False, False])
+        check("bad taxon/Work styles and over-emphasis fail",
+              ["item16" in _st_keys(res, name) for name in
+               ("drosophila-melanogaster", "king-lear", "e-coli-b-2",
+                "macbeth", "pan-troglodytes")],
+              [True, True, True, True, True])
+        check("an explicitly bound Organism common name is a valid display label",
+              "mouse" in _st_msg(res, "common-name-reader", "item18"), True)
+        check("only the unrelated target common-name display remains an item-18 finding",
+              _st_keys(res, "common-name-reader").count("item18"), 1)
+        check("a uniquely bound Organism common name enters backfill without becoming an alias",
+              [(b["target"], b["surface"], b["organism_common_name"])
+               for b in res["backfill_candidates"]
+               if b["slug"] == "common-name-backfill-reader"],
+              [("mus-musculus", "mouse", True)])
+        common_name_entry = {
+                  "type": "Organism", "title": "Canis lupus familiaris",
+                  "aliases": ["c-lupus-familiaris"],
+                  "desc": "Canis lupus familiaris is commonly known as the domestic dog.",
+                  "prose": "***Canis lupus familiaris*** is a model organism."
+              }
+        check("a binding covers the complete common-name phrase, not its head noun",
+              (organism_common_name_bound(common_name_entry, "domestic dog"),
+               organism_common_name_bound(common_name_entry, "dog")),
+              (True, False))
+        check("a navigation-only cue directly governing a wikilink is item9",
+              "item9/imperative-link" in _st_keys(res, "imperative-link"), True)
+        check("ordinary semantic uses of 'see' and fenced samples stay quiet",
+              ["item9/imperative-link" in _st_keys(res, name)
+               for name in ("ordinary-see", "semantic-see", "listed-imperative")],
+              [False, False, False])
         check("every bare Related link is item11, including a lowercase title",
               (_st_keys(res, "related-reader").count("item11"),
                "arxiv" in _st_msg(res, "related-reader", "item11"),
@@ -3774,11 +4748,19 @@ def run_self_test():
               ["item19" in _st_keys(res, name) for name in
                ("feature-machine-learning", "k-nearest-neighbors",
                 "principal-component-analysis")], [False, False, False])
+        check("compound-derived and shared-tail acronyms remain valid counterparts",
+              [_acronym_counterpart(short, long) for short, long in (
+                  ("ATP", "adenosine triphosphate"),
+                  ("DNA", "deoxyribonucleic acid"),
+                  ("RNA", "ribonucleic acid"),
+                  ("MLOps", "ML operations"),
+                  ("OOB evaluation", "out-of-bag evaluation"),
+              )], [True, True, True, True, True])
         check("an opener-bound counterpart is mandatory and case-exact",
               ["item19" in _st_keys(res, name) for name in
                ("missing-counterpart", "wrong-counterpart-case")], [True, True])
         check("a synonym alias cannot authorize a line-3 parenthetical",
-              "not established"
+              "not an opener-established"
               in _st_msg(res, "synonym-parenthetical", "item19"), True)
         check("line 3 preserves the canonical title's casing",
               "same canonical casing"
@@ -3786,7 +4768,7 @@ def run_self_test():
         check("a singular synonym in an annotated opener parenthetical is not a card counterpart",
               "item19" in _st_keys(res, "archaea"), False)
         check("appending that singular synonym to line 3 is rejected",
-              "not established"
+              "not an opener-established"
               in _st_msg(res, "singular-parenthetical", "item19"), True)
         check("a short-for expansion in the opener establishes its alias-bound "
               "flashcard counterpart",
@@ -3795,15 +4777,18 @@ def run_self_test():
               "flashcard answer",
               "item19" in _st_keys(res, "boosting"), False)
         check("an originally-called synonym cannot be appended as an "
-              "acronym/full-form counterpart",
-              "not established" in _st_msg(
+              "opener-established counterpart",
+              "not an opener-established" in _st_msg(
                   res, "boosting-with-synonym", "item19"), True)
-        check("a direct italic scientific abbreviation establishes its "
-              "alias-bound flashcard counterpart",
+        check("a canonical triple-emphasis Organism opener establishes its "
+              "direct italic scientific-abbreviation counterpart",
               "item19" in _st_keys(res, "saccharomyces-cerevisiae"), False)
         check("the documented intervening algorithm noun preserves an opener "
               "acronym binding",
               "item19" in _st_keys(res, "algorithm-counterpart"), False)
+        check("pseudonyms and a later bold parenthetical are not acronym counterparts",
+              ["item19" in _st_keys(res, name)
+               for name in ("mark-twain", "counterpart-scope")], [False, False])
         check("an unrelated noun phrase and later parenthetical do not bind to "
               "the bolded title",
               bool(_BOLD_PAREN_RE.search(
@@ -3837,10 +4822,28 @@ def run_self_test():
             "Image code stub",
             "**Image code stub** shows `![[figure.png]]` as literal syntax.",
             sources=('"stub"',), card=False))
+        _st_write(v, "dated-person.md", _st_entry(
+            "Dated person", "**Dated person** (1901–1980) was a researcher.",
+            type_="Person"))
+        _st_write(v, "misplaced-person-date.md", _st_entry(
+            "Misplaced person date",
+            "**Misplaced person date** received a 2020 prize (born 1980).",
+            type_="Person"))
+        _st_write(v, "dated-event.md", _st_entry(
+            "Dated event", "**Dated event** (1990–1992) was a conference series.",
+            type_="Event"))
+        _st_write(v, "missing-event-date.md", _st_entry(
+            "Missing event date", "**Missing event date** was a conference series.",
+            type_="Event"))
         res = scan(v)
         check("initials, abbreviations and a birth year keep a one-sentence Person stub valid",
               [k for k in _st_keys(res, "w-e-b-du-bois")
                if k in ("stub-one-sentence-body", "stub-no-images")], [])
+        check("Person/Event dates pass only in the parenthetical after the bold subject",
+              ["item9" in _st_keys(res, name) for name in
+               ("dated-person", "misplaced-person-date",
+                "dated-event", "missing-event-date")],
+              [False, True, False, True])
         check("two sentences, two paragraphs and no sentence each fail stub structure",
               ["stub-one-sentence-body" in _st_keys(res, name) for name in
                ("two-sentence-stub", "two-paragraph-stub", "empty-stub")],
@@ -3856,6 +4859,12 @@ def run_self_test():
         _st_write(v, "captioned-table.md", _st_entry(
             "Captioned table", "**Captioned table** is a worked example.\n\n"
             "Metric | Value\n--- | ---\nRecall | 0.8\n*Values by group.*"))
+        _st_write(v, "math-bar-caption.md", _st_entry(
+            "Math bar caption", "**Math bar caption** is a worked example.\n\n"
+            "Metric | Value\n--- | ---\nError | 0.2\n*Error is $|x-y|$.*"))
+        _st_write(v, "emphasized-row.md", _st_entry(
+            "Emphasized row", "**Emphasized row** is a worked example.\n\n"
+            "Metric | Value\n--- | ---\n*Recall* | *0.8*\n*Values by group.*"))
         _st_write(v, "missing-table-caption.md", _st_entry(
             "Missing table caption", "**Missing table caption** is a worked example.\n\n"
             "Metric | Value\n--- | ---\nRecall | 0.8"))
@@ -3879,9 +4888,46 @@ def run_self_test():
             "Indented table", "**Indented table** shows table syntax.\n\n"
             "    Metric | Value\n    --- | ---\n    Recall | 0.8",
             type_="Software"))
+        _st_write(v, "one-column-table.md", _st_entry(
+            "One column table", "**One column table** is a worked example.\n\n"
+            "| Metric |\n| --- |\n| Recall |\n*The reported metric.*"))
+        _st_write(v, "one-column-missing-caption.md", _st_entry(
+            "One column missing caption",
+            "**One column missing caption** is a worked example.\n\n"
+            "| Metric |\n| --- |\n| Recall |"))
+        _st_write(v, "fenced-emphasis.md", _st_entry(
+            "Fenced emphasis", "**Fenced emphasis** shows markup syntax.\n\n"
+            "```markdown\n**[[missing-target]]**\n*`value`*\n```",
+            type_="Software"))
+        _st_write(v, "target-term.md", _st_entry(
+            "Target term", "**Target term** is a worked example."))
+        _st_write(v, "pipe-less-table-row.md", _st_entry(
+            "Pipe-less table row",
+            "**Pipe-less table row** is a worked example.\n\n"
+            "Metric | Note\n--- | ---\n**Target term**\n"
+            "*A row with fewer cells than the header.*"))
+        _st_write(v, "linked-table-cell.md", _st_entry(
+            "Linked table cell",
+            "**Linked table cell** is a worked example.\n\n"
+            "Metric | Note\n--- | ---\n**[[target-term|Target term]]**\n"
+            "*A link inside a pipe-less table row.*"))
+        _st_write(v, "table-link-then-prose.md", _st_entry(
+            "Table link then prose",
+            "**Table link then prose** is a worked example.\n\n"
+            "Metric | Note\n--- | ---\n[[target-term|Target term]]\n"
+            "*A link inside a pipe-less table row.*\n\n"
+            "A later Target term mention belongs in prose."))
         res = scan(v)
         check("an immediate italic plain-text table caption passes item12",
               "item12" in _st_keys(res, "captioned-table"), False)
+        check("permitted LaTeX bars in a caption are not consumed as a table row",
+              "item12" in _st_keys(res, "math-bar-caption"), False)
+        check("one-column GFM tables are detected for both passing and missing captions",
+              ["item12" in _st_keys(res, name) for name in
+               ("one-column-table", "one-column-missing-caption")],
+              [False, True])
+        check("an emphasized table row is not mistaken for the caption",
+              "item12" in _st_keys(res, "emphasized-row"), False)
         check("a missing caption and an intervening blank are both detected",
               ["item12" in _st_keys(res, name) for name in
                ("missing-table-caption", "gapped-table-caption")], [True, True])
@@ -3893,6 +4939,147 @@ def run_self_test():
               ["item12" in _st_keys(res, name) for name in
                ("pipe-prose", "fenced-table", "indented-table")],
               [False, False, False])
+        check("emphasis-looking markup inside a fence is neither item 16 nor a link",
+              [key for key in _st_keys(res, "fenced-emphasis")
+               if key in ("item16", "item10/dangling")], [])
+        check("a pipe-less GFM body row is masked from item16 and backfill",
+              ([key for key in _st_keys(res, "pipe-less-table-row")
+                if key == "item16"],
+               [(b["slug"], b["target"]) for b in res["backfill_candidates"]
+                if b["slug"] == "pipe-less-table-row"]), ([], []))
+        check("a wikilink in any parsed table row gets the dedicated item10 finding",
+              ("item10/table" in _st_keys(res, "linked-table-cell"),
+               "[[target-term|Target term]]" in _st_msg(
+                   res, "linked-table-cell", "item10/table")), (True, True))
+        check("table spans also mask emphasis wrapped around a cell link from item16",
+              "item16" in _st_keys(res, "linked-table-cell"), False)
+        check("a table-cell link is masked from the ordinary item10 resolver",
+              [key for key in _st_keys(res, "linked-table-cell")
+               if key in ("item10/dangling", "item10/dup", "item10/case",
+                          "item10/alias", "item10/ambiguous", "item10/unparsed")], [])
+        check("a prohibited table-cell link cannot suppress a later prose backfill",
+              [(b["slug"], b["target"]) for b in res["backfill_candidates"]
+               if b["slug"] == "table-link-then-prose"],
+              [("table-link-then-prose", "target-term")])
+
+        v = os.path.join(tmp, "v24-image-captions")
+        _st_write(v, "captioned-images.md", _st_entry(
+            "Captioned images", "**Captioned images** is a worked example.\n\n"
+            "![[figure.png]]\n*A local figure with $x^*$ in its caption.*\n\n"
+            "![Alt](figure-2.png)\n*A Markdown image with a plain caption.*"))
+        _st_write(v, "missing-image-caption.md", _st_entry(
+            "Missing image caption", "**Missing image caption** is a worked example.\n\n"
+            "![[figure.png]]"))
+        _st_write(v, "gapped-image-caption.md", _st_entry(
+            "Gapped image caption", "**Gapped image caption** is a worked example.\n\n"
+            "![Alt](figure.png)\n\n*A caption after a gap.*"))
+        _st_write(v, "complex-image-destinations.md", _st_entry(
+            "Complex image destinations",
+            "**Complex image destinations** is a worked example.\n\n"
+            "![Balanced](https://example.test/plot_(x).png)\n"
+            "*A balanced-parenthesis destination.*\n\n"
+            "![Angle](<https://example.test/plot_(y).png>)\n"
+            "*An angle-bracket destination.*\n\n"
+            "![Plot [panel A]](https://example.test/panel.png)\n"
+            "*A nested-bracket alt label.*"))
+        _st_write(v, "escaped-image-syntax.md", _st_entry(
+            "Escaped image syntax", r"**Escaped image syntax** shows "
+            r"\![Alt](https://example.test/literal.png) as literal text."))
+        for name, markup in (("italic", "*nested detail*"),
+                             ("underscore-italic", "_nested detail_"),
+                             ("wikilink", "[[detail]]"),
+                             ("markdown-link", "[source](https://example.test)"),
+                             ("html", "<span>detail</span>"),
+                             ("strikethrough", "~~nested detail~~"),
+                             ("bold", "**nested detail**"),
+                             ("backtick", "`nested detail`")):
+            _st_write(v, name + "-image-caption.md", _st_entry(
+                name.title() + " image caption",
+                "**%s image caption** is a worked example.\n\n"
+                "![[figure.png]]\n*A caption with %s.*"
+                % (name.title(), markup)))
+        _st_write(v, "empty-image-caption.md", _st_entry(
+            "Empty image caption", "**Empty image caption** is a worked example.\n\n"
+            "![[figure.png]]\n* *"))
+        _st_write(v, "listing-images.md", _st_entry(
+            "Listing images", "**Listing images** shows embed syntax.\n\n"
+            "```markdown\n![[fenced.png]]\n```\n\n"
+            "    ![Indented](indented.png)", type_="Software"))
+        res = scan(v)
+        check("both image embed forms accept immediate plain captions and LaTeX",
+              "item12" in _st_keys(res, "captioned-images"), False)
+        check("balanced-parenthesis and angle-bracket destinations retain captions",
+              "item12" in _st_keys(res, "complex-image-destinations"), False)
+        check("remote-image reports retain the complete complex destinations",
+              (_st_keys(res, "complex-image-destinations").count("item12/remote-image"),
+               "plot_(x).png" in _st_msg(
+                   res, "complex-image-destinations", "item12/remote-image"),
+               "plot_(y).png" in _st_msg(
+                   res, "complex-image-destinations", "item12/remote-image")),
+              (3, True, True))
+        check("escaped Markdown image syntax is not an embed or remote image",
+              [key for key in _st_keys(res, "escaped-image-syntax")
+               if key.startswith("item12")], [])
+        check("a missing image caption and an intervening blank are detected",
+              ["item12" in _st_keys(res, name) for name in
+               ("missing-image-caption", "gapped-image-caption")], [True, True])
+        for name, fault in (("italic", "italic"),
+                            ("underscore-italic", "italic"),
+                            ("wikilink", "wikilink"),
+                            ("markdown-link", "Markdown link"),
+                            ("html", "HTML"),
+                            ("strikethrough", "strikethrough"),
+                            ("bold", "bold"),
+                            ("backtick", "backtick")):
+            check("an image caption rejects %s markup" % name,
+                  fault in _st_msg(res, name + "-image-caption", "item12"), True)
+        check("an empty italic caption is rejected",
+              "empty" in _st_msg(res, "empty-image-caption", "item12"), True)
+        check("fenced and indented image syntax samples need no caption",
+              "item12" in _st_keys(res, "listing-images"), False)
+
+        v = os.path.join(tmp, "v25-display-owner-conflicts")
+        _st_write(v, "yeast.md", _st_entry(
+            "Yeast", "**Yeast** is a worked example.",
+            aliases=('"budding-yeast"',)))
+        _st_write(v, "saccharomyces-cerevisiae.md", _st_entry(
+            "Saccharomyces cerevisiae",
+            "***Saccharomyces cerevisiae*** is a model organism.",
+            type_="Organism", aliases=('"s-cerevisiae"',)))
+        _st_write(v, "conflicting-display-reader.md", _st_entry(
+            "Conflicting display reader",
+            "**Conflicting display reader** compares "
+            "[[saccharomyces-cerevisiae|Yeast]] with "
+            "[[saccharomyces-cerevisiae|Budding yeast]]."))
+        _st_write(v, "same-owner-display-reader.md", _st_entry(
+            "Same owner display reader",
+            "**Same owner display reader** names [[yeast|Budding yeast]]."))
+        _st_write(v, "culture-a.md", _st_entry(
+            "Culture A", "**Culture A** is a worked example.",
+            aliases=('"culture"',)))
+        _st_write(v, "culture-b.md", _st_entry(
+            "Culture B", "**Culture B** is a worked example.",
+            aliases=('"culture"',)))
+        _st_write(v, "ambiguous-display-reader.md", _st_entry(
+            "Ambiguous display reader",
+            "**Ambiguous display reader** names "
+            "[[saccharomyces-cerevisiae|Culture]]."))
+        res = scan(v)
+        check("a display that exactly names a different canonical entry is item18",
+              ('different canonical entry' in _st_msg(
+                   res, "conflicting-display-reader", "item18"),
+               '"Yeast" at "yeast"' in _st_msg(
+                   res, "conflicting-display-reader", "item18")), (True, True))
+        check("a display that exactly names another entry's unique alias is item18",
+              ('different unique alias' in _st_msg(
+                   res, "conflicting-display-reader", "item18"),
+               "do not auto-retarget" in _st_msg(
+                   res, "conflicting-display-reader", "item18")), (True, True))
+        check("an exact alias display owned by the chosen target remains valid",
+              "item18" in _st_keys(res, "same-owner-display-reader"), False)
+        check("an ambiguously owned display never chooses the first alias owner",
+              "different unique alias" in _st_msg(
+                  res, "ambiguous-display-reader", "item18"), False)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

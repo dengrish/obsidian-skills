@@ -32,6 +32,10 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
   7   7-description           <= 110 chars (count reported), plain text, no
                               LaTeX/markdown/wikilinks, capitalised, ends "."
   8   8-tags                  #-prefixed, double-quoted, in the 27-slug enum
+  9   9-person-event-date     Person/Event opener has a year-bearing
+                              parenthetical immediately after its bold subject
+      9-link-integration      navigation-only cue points directly at a body
+                              wikilink (listings/displays masked)
   10  10-duplicate-wikilink   same TARGET SLUG linked >1x in body prose
                               (counted by target, not display text; the
                               Related footer is exempt).  This is item 10's
@@ -40,9 +44,17 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               to wiki-linter's scanner (CONVENTIONS.md §9),
                               which already carries the four carve-outs that
                               make the answer safe to act on
-  16  16-bold-opener          first bolded span of the opening sentence equals
-                              title:, with the parenthetical base-term and the
-                              symbol/variable math-skeleton carve-outs
+      10-table-cell-wikilink  rendered wikilink occurs inside a Markdown
+                              table cell, where links are forbidden
+  11  11-related-display      in folder mode, every Related-footer link is
+                              piped to the resolved target's canonical title
+  12  12-image-caption        every Obsidian or Markdown image embed has an
+                              immediate italic, plain-text caption
+      12-table-caption        every Markdown table has an immediate italic,
+                              plain-text caption
+  16  16-bold-opener          first outer-bold span equals the title/base/math
+                              skeleton and uses the type-specific plain,
+                              bold-italic, or mixed taxon/strain style
   17  17-alias-completeness   an alternative name the body introduces for the
                               entry's own subject -- an italicized also-called
                               synonym, or the opener's acronym/expansion
@@ -54,8 +66,8 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               one card; line 2 exactly `??` (or the user's
                               `!!`); line 3 the canonical title (base term for
                               a parenthetical title, math skeleton for a
-                              symbol title; optional trailing acronym
-                              parenthetical)
+                              symbol title; optional opener-established,
+                              alias-bound counterpart)
   19  19-flashcard-leak       case-insensitive substring search of card line 1
                               (including inside $...$) for the title and each
                               alias, in both the raw and the de-hyphenated
@@ -68,8 +80,10 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
   18  18-alias-form           every alias is itself in slug form (warning)
 
 NOT implemented (out of scope by design): item 4's file existence and page
-correctness, items 6, 9 beyond the structural opener, 11-15, 17 beyond the
-introduced-alias scan, and the interpretive halves of 8/18/19.
+correctness, items 6, 9 beyond the structural opener, item 12 beyond table
+caption form, items 13-15, 17 beyond the introduced-alias scan, and the
+interpretive halves of 8/18/19. Item 11's canonical target-title check needs
+folder mode; a single file does not contain the target inventory.
 
 Severity: ``error`` (a stated rule is violated), ``warning`` (very likely a
 violation but the rule has a documented carve-out), ``info`` (advisory).
@@ -157,6 +171,15 @@ _sys.path.append(_here)                    # own dir LAST: a local copy cannot s
 
 from slugify import SlugError, base_term, has_parenthetical, slug_stem  # noqa: E402
 from plurals import singular_keys  # noqa: E402
+from organism_names import (  # noqa: E402
+    organism_title_classification as _organism_title_classification,
+    scientific_abbreviation_matches as _scientific_abbreviation_matches,
+)
+from entry_structure import opener_has_subject_date  # noqa: E402
+from markdown_tables import (  # noqa: E402
+    caption_faults as _caption_faults,
+    markdown_table_spans,
+)
 from vault_index import (  # noqa: E402
     SCHEMA_ORDER,
     extract_wikilinks,
@@ -203,8 +226,13 @@ QUOTED_LIST_FIELDS = ["aliases", "sources", "tags", "parents"]
 DESCRIPTION_MAX = 110
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_BOLD3_RE = re.compile(r"\*\*\*(.+?)\*\*\*")
-_BOLD2_RE = re.compile(r"\*\*(.+?)\*\*")
+# One outer-bold reader for all title shapes.  The inner expression admits an
+# italic span, so it reads ordinary ``**Title**``, combined
+# ``***Latin binomial***``, and the mixed taxon/strain form
+# ``***E. coli* K-12**`` as one bold span instead of starting at the wrong pair
+# of asterisks.
+_BOLD_OUTER_RE = re.compile(
+    r"(?<!\*)\*\*((?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)\*\*(?!\*)")
 #: Abbreviations whose trailing period is not a sentence end.  Matched
 #: case-insensitively and only at a word boundary, against the text ending at
 #: the candidate period -- never with a bare ``str.replace``, which is what the
@@ -240,6 +268,29 @@ _INITIAL_RE = re.compile(r"(?:^|[^0-9A-Za-z'’])[A-Za-z]\.$")
 def _f(item, severity, message, evidence=None):
     return {"item": item, "severity": severity, "message": message,
             "evidence": evidence}
+
+
+def _bold_parts(match):
+    """Return ``(visible_text, style, italic_prefix)`` for an outer bold.
+
+    ``style`` is ``plain``, ``full-italic``, or ``mixed``.  The mixed form is
+    the only legal spelling for a taxon followed by a plain strain designator.
+    """
+    raw = match.group(1)
+    if raw.startswith("*"):
+        close = raw.find("*", 1)
+        if close > 1:
+            italic = raw[1:close]
+            suffix = raw[close + 1:]
+            return italic + suffix, ("full-italic" if not suffix else "mixed"), italic
+    return raw, "plain", None
+
+
+def _organism_title_parts(title, aliases=(), opening=""):
+    """Scientific taxon parts only when independent evidence proves the role."""
+    status, parts = _organism_title_classification(
+        title, aliases, opening)
+    return parts if status == "scientific" else None
 
 
 # --------------------------------------------------------------------------
@@ -600,6 +651,57 @@ def _check_slug(fm, findings, filename):
              "actual_filename": os.path.basename(filename)}))
 
 
+_LEADING_ARTICLE_RE = re.compile(r"^(?:a|an|the)\s+", re.IGNORECASE)
+_SUBJECT_BOUNDARY_RE = re.compile(r"^(?:$|[\s,(:;\u2013\u2014])")
+
+
+def _description_subject_forms(title):
+    """Canonical plain-text subjects accepted by item 7.
+
+    A parenthetical title contributes its base term, and a title containing
+    LaTeX contributes the same plain-text skeleton used by the opener and
+    flashcard checks.  Preserve every other letter's case: item 7 has only the
+    documented first-letter carve-out, not general case folding.
+    """
+    forms = []
+    # A disambiguation parenthetical belongs to the canonical title and file,
+    # not to running prose.  ``Feature (machine learning) supplies ...`` is
+    # therefore not an alternate accepted subject for ``Feature``.
+    subjects = (base_term(title),) if has_parenthetical(title) else (title,)
+    for subject in subjects:
+        for form in (subject, math_skeleton(subject) if subject else None):
+            form = (form or "").strip()
+            if form and form not in forms:
+                forms.append(form)
+    return forms
+
+
+def _description_has_entity_subject(description, title):
+    """Conservative mechanical floor for the entity-as-subject rule."""
+    if not description or not title:
+        return True  # Presence/title validity have their own findings.
+    forms = _description_subject_forms(title)
+    starts = [description.strip()]
+    article = _LEADING_ARTICLE_RE.match(starts[0])
+    # A leading article is optional only when it is not already part of the
+    # canonical name.  This keeps "The Iliad" valid without accepting the
+    # nonsensical "The The Iliad".
+    if article and not any(_LEADING_ARTICLE_RE.match(form) for form in forms):
+        starts.append(starts[0][article.end():])
+    for text in starts:
+        if has_parenthetical(title):
+            full = text[:len(title)]
+            if (first_letter_ci_equal(full, title)
+                    and _SUBJECT_BOUNDARY_RE.match(text[len(title):])):
+                continue
+        for form in forms:
+            prefix = text[:len(form)]
+            if (first_letter_ci_equal(prefix, form)
+                    and _SUBJECT_BOUNDARY_RE.match(text[len(form):])):
+                return True
+    return False
+
+
 def _check_description(fm, findings, title=None):
     field = fm.get("description")
     if field is None:
@@ -633,6 +735,14 @@ def _check_description(fm, findings, title=None):
             "7-description", "error",
             "description must be plain text -- found %s" % ", ".join(markup),
             {"chars": length, "description": desc}))
+
+    if title and not _description_has_entity_subject(desc, title):
+        findings.append(_f(
+            "7-description", "error",
+            "description subject must begin with the canonical title or base "
+            "term (an optional leading article is allowed)",
+            {"description": desc,
+             "expected_subjects": _description_subject_forms(title)}))
 
     if desc[0].isalpha() and not desc[0].isupper():
         # Carve-out: the description's subject must be the canonical title form,
@@ -791,14 +901,17 @@ _SYN_CUE_RE = re.compile(
     r"(?:often|commonly|usually)\s+called|"
     r"(?:many\s+)?people\s+call|some\s+call)\b", re.IGNORECASE)
 
-#: The opener's acronym/expansion binding: ``**Bolded title** (counterpart)``
+#: The opener's direct counterpart binding after any permitted outer-bold
+#: title form: ordinary, bold-italic Work/binomial, or mixed taxon/strain.
 #: or the explicitly documented ``**title** algorithm (counterpart)`` form
 #: (prose principle 5(e)/(f)).  Scanned in the opening block only, so a
 #: definition bullet's ``- **True positives** (TP)`` never reaches it.  Only
 #: the literal noun ``algorithm`` may intervene; a general word window would
 #: attach unrelated later parentheticals to the title.
 _BOLD_PAREN_RE = re.compile(
-    r"\*\*[^*\n]+\*\*(?:\s+algorithm)?\s*\(([A-Za-z*][^()\n]{0,59})\)",
+    r"(?<!\*)\*\*(?P<bold>(?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)"
+    r"\*\*(?!\*)(?:\s+algorithm)?\s*"
+    r"\((?P<paren>[A-Za-z*][^()\n]{0,59})\)",
     re.IGNORECASE)
 
 #: Parenthetical content that is annotation-but-not-a-name: dates, floruit
@@ -824,6 +937,91 @@ _SHORT_FOR_PAREN_RE = re.compile(r"^short\s+for[\s,:]+", re.IGNORECASE)
 #: synonym does not become a flashcard counterpart merely because it is also
 #: listed in aliases.
 _SCI_ABBREV_RE = re.compile(r"^[A-Z]\.\s*[a-z][A-Za-z.-]*(?:\s+[a-z][A-Za-z.-]*)*$")
+
+
+def _initial_forms(value):
+    """Possible initial strings for a written-out name."""
+    words = re.findall(r"[A-Za-z0-9]+", value or "")
+    if not words:
+        return set()
+    stop = {"a", "an", "and", "of", "the", "to", "with"}
+
+    def initial(word):
+        return word if word.isupper() and 1 < len(word) <= 6 else word[:1]
+
+    all_words = "".join(initial(word) for word in words).casefold()
+    content = "".join(initial(word) for word in words
+                      if word.casefold() not in stop).casefold()
+    return {form for form in (all_words, content) if form}
+
+
+def _acronym_counterpart(term, candidate):
+    """Whether the pair has an acronym/full-form relationship.
+
+    The check is deliberately structural.  It rejects arbitrary alternate
+    names such as Mark Twain/Samuel Clemens while admitting canonical shapes
+    such as PCA, CART, Lasso, MLOps, OOB, and t-SNE.
+    """
+    term_words = re.findall(r"[A-Za-z0-9]+", term or "")
+    cand_words = re.findall(r"[A-Za-z0-9]+", candidate or "")
+    if not term_words or not cand_words:
+        return False
+
+    def compact_forms(value, words):
+        forms = set()
+        first = re.sub(r"[^A-Za-z0-9]", "", words[0])
+        if len(first) >= 2:
+            forms.add(first.casefold())
+        uppers = "".join(ch for ch in value if ch.isupper())
+        if len(uppers) >= 2:
+            forms.add(uppers.casefold())
+        whole = re.sub(r"[^A-Za-z0-9]", "", value)
+        if len(words) == 1 and len(whole) >= 2:
+            forms.add(whole.casefold())
+        return forms
+
+    def related(short, long):
+        if len(short) < 2 or len(long) < len(short):
+            return False
+        if short == long or long.startswith(short):
+            return True
+        it = iter(long)
+        return all(ch in it for ch in short)
+
+    def acronym_tokens(value):
+        """Compact tokens that visibly behave as abbreviations.
+
+        Initials alone miss established forms whose letters come from a
+        compound or morpheme (ATP, DNA, RNA, MLOps) and a short token carried
+        beside a shared tail (OOB evaluation).  Requiring at least two written
+        capitals keeps ordinary title-cased names and pseudonyms out.
+        """
+        out = set()
+        for token in re.findall(r"[A-Za-z0-9]+", value or ""):
+            compact = re.sub(r"[^A-Za-z0-9]", "", token)
+            if (2 <= len(compact) <= 10
+                    and sum(1 for ch in token if ch.isupper()) >= 2):
+                out.add(compact.casefold())
+        return out
+
+    def lexical_compact(value):
+        return re.sub(r"[^A-Za-z0-9]", "", value or "").casefold()
+
+    term_compact = compact_forms(term, term_words)
+    cand_compact = compact_forms(candidate, cand_words)
+    initial_match = (
+        any(related(short, initials)
+            for short in cand_compact for initials in _initial_forms(term))
+        or any(related(short, initials)
+               for short in term_compact for initials in _initial_forms(candidate))
+    )
+    if initial_match:
+        return True
+    term_text, candidate_text = lexical_compact(term), lexical_compact(candidate)
+    return (
+        any(related(short, candidate_text) for short in acronym_tokens(term))
+        or any(related(short, term_text) for short in acronym_tokens(candidate))
+    )
 
 #: Exactly the first italic span after a synonym cue.  The old 160-character
 #: tail loop collected every later italic phrase in the paragraph: a cue for
@@ -912,8 +1110,9 @@ def _cue_names_subject(prefix, subject_forms):
 
     # A canonical bolded subject may carry an acronym/scientific annotation,
     # a math symbol, punctuation, and the relative ``which`` before the cue.
-    for bold in _BOLD2_RE.finditer(prefix):
-        if not (_surface_keys(bold.group(1)) & wanted):
+    for bold in _BOLD_OUTER_RE.finditer(prefix):
+        visible, _style, _italic = _bold_parts(bold)
+        if not (_surface_keys(visible) & wanted):
             continue
         tail = prefix[bold.end():]
         if re.fullmatch(
@@ -966,7 +1165,12 @@ def _alias_candidates(sections, subject_forms=None):
             out.append((cand, where))
 
     for m in _BOLD_PAREN_RE.finditer(_opening_block(sections)):
-        add(_clean_paren_name(m.group(1)), "opener parenthetical")
+        visible = math_skeleton(m.group("bold").replace("*", "").replace("_", ""))
+        if subject_forms is not None:
+            wanted = set().union(*(_surface_keys(form) for form in subject_forms))
+            if not (_surface_keys(visible) & wanted):
+                continue
+        add(_clean_paren_name(m.group("paren")), "opener parenthetical")
     for m in _SYN_CUE_RE.finditer(prose):
         direct = _DIRECT_SYNONYM_RE.match(prose[m.end():])
         if (direct and _cue_names_subject(
@@ -1170,6 +1374,233 @@ def strip_code(text):
                             strip_indented(strip_fenced(text)))
 
 
+_OBSIDIAN_IMAGE_EMBED_LINE_RE = re.compile(
+    r"^\s*!\[\[[^\]\n]*\.(?:png|jpe?g|gif|svg|webp|tiff?|bmp|avif|ico)"
+    r"(?:\|[^\]\n]*)?\]\]\s*$", re.IGNORECASE)
+
+
+def _markdown_image_openers(text):
+    """Yield image start and destination start for unescaped CommonMark syntax."""
+    text = text or ""
+    n = len(text)
+    for match in re.finditer(r"!", text):
+        start = match.start()
+        backslashes, k = 0, start - 1
+        while k >= 0 and text[k] == "\\":
+            backslashes += 1
+            k -= 1
+        if backslashes % 2 or start + 1 >= n or text[start + 1] != "[":
+            continue
+        depth, i, escaped = 1, start + 2, False
+        while i < n and text[i] != "\n":
+            ch = text[i]
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        if depth == 0 and i + 1 < n and text[i + 1] == "(":
+            yield start, i + 2
+
+
+def _markdown_image_spans(text):
+    """Yield ``(start, end, destination)`` for valid one-line Markdown images.
+
+    Unlike a ``[^)]*`` regex, this small parser accepts balanced parentheses
+    in bare destinations and CommonMark angle-bracket destinations.  It also
+    tolerates the optional quoted/parenthesized title after a destination.
+    """
+    for image_start, i in _markdown_image_openers(text):
+        n = len(text)
+        if i >= n or text[i] == "\n":
+            continue
+        destination = ""
+        if text[i] == "<":
+            j, escaped = i + 1, False
+            while j < n and text[j] != "\n":
+                ch = text[j]
+                if ch == ">" and not escaped:
+                    break
+                escaped = (ch == "\\" and not escaped)
+                if ch != "\\":
+                    escaped = False
+                j += 1
+            if j >= n or text[j] != ">":
+                continue
+            destination, i = text[i + 1:j], j + 1
+        else:
+            start, depth, escaped = i, 0, False
+            while i < n and text[i] != "\n":
+                ch = text[i]
+                if escaped:
+                    escaped = False; i += 1; continue
+                if ch == "\\":
+                    escaped = True; i += 1; continue
+                if ch == "(" :
+                    depth += 1
+                elif ch == ")":
+                    if depth == 0:
+                        destination = text[start:i]
+                        yield image_start, i + 1, destination
+                        break
+                    depth -= 1
+                elif ch.isspace() and depth == 0:
+                    destination = text[start:i]
+                    break
+                i += 1
+            else:
+                continue
+            if i < n and text[i] == ")":
+                continue  # already yielded the no-title form above
+
+        # Angle destinations and bare destinations followed by whitespace may
+        # carry one optional title.  Validate that tail and locate the outer ).
+        while i < n and text[i] in " \t":
+            i += 1
+        if i < n and text[i] in "\"'":
+            quote = text[i]; i += 1; escaped = False
+            while i < n and text[i] != "\n":
+                if text[i] == quote and not escaped:
+                    i += 1; break
+                escaped = text[i] == "\\" and not escaped
+                if text[i] != "\\": escaped = False
+                i += 1
+        elif i < n and text[i] == "(":
+            close = text.find(")", i + 1)
+            if close < 0 or "\n" in text[i:close]:
+                continue
+            i = close + 1
+        while i < n and text[i] in " \t":
+            i += 1
+        if i < n and text[i] == ")":
+            yield image_start, i + 1, destination
+
+
+def _markdown_image_line(line):
+    stripped = (line or "").strip()
+    matches = list(_markdown_image_spans(stripped))
+    return bool(matches and matches[0][0] == 0 and matches[0][1] == len(stripped))
+
+
+def _image_embed_lines(body):
+    """Return original lines and real standalone image-embed line indexes."""
+    original = body.split("\n")
+    masked = strip_code(body).split("\n")
+    return original, [
+        i for i, line in enumerate(masked)
+        if _OBSIDIAN_IMAGE_EMBED_LINE_RE.match(line) or _markdown_image_line(line)
+    ]
+
+
+def _check_image_captions(sections, findings):
+    """Item 12 image-caption adjacency and plainness for both embed forms."""
+    body = "\n".join(sections["prose_lines"])
+    lines, embeds = _image_embed_lines(body)
+    for embed_i in embeds:
+        caption = lines[embed_i + 1].strip() if embed_i + 1 < len(lines) else ""
+        faults = _caption_faults(caption)
+        if faults == ["missing italic caption"]:
+            findings.append(_f(
+                "12-image-caption", "error",
+                "image embed needs an italic plain-text caption on the "
+                "immediately following line",
+                {"line": embed_i + 1, "embed": lines[embed_i].strip()[:80]}))
+        elif faults:
+            findings.append(_f(
+                "12-image-caption", "error",
+                "image caption has %s; captions are italic plain text "
+                "(only inline LaTeX is allowed)" % ", ".join(faults),
+                {"line": embed_i + 2, "caption": caption[:80]}))
+
+
+def _markdown_tables(body):
+    """Return ``(original_lines, (header, end)...)`` for real Markdown tables.
+
+    Fenced and indented listings are masked for detection, while captions are
+    read from the original text so forbidden markup remains visible.
+    """
+    original = body.split("\n")
+    return original, markdown_table_spans(strip_code(body))
+
+
+def _check_table_captions(sections, findings):
+    """Item 12's mechanical table-caption adjacency and plainness check."""
+    body = "\n".join(sections["prose_lines"])
+    lines, tables = _markdown_tables(body)
+    for header_i, end_i in tables:
+        caption = lines[end_i + 1].strip() if end_i + 1 < len(lines) else ""
+        faults = _caption_faults(caption)
+        if faults == ["missing italic caption"]:
+            findings.append(_f(
+                "12-table-caption", "error",
+                "Markdown table needs an italic plain-text caption on the "
+                "immediately following line",
+                {"line": header_i + 1, "header": lines[header_i].strip()[:80]}))
+        elif faults:
+            findings.append(_f(
+                "12-table-caption", "error",
+                "Markdown table caption has %s; captions are italic plain text "
+                "(only inline LaTeX is allowed)" % ", ".join(faults),
+                {"line": end_i + 2, "caption": caption[:80]}))
+
+
+def _check_table_cell_wikilinks(sections, findings):
+    """Item 10: rendered wikilinks never belong inside table cells."""
+    body = "\n".join(sections["prose_lines"])
+    lines, tables = _markdown_tables(body)
+    for header_i, end_i in tables:
+        for line_i in range(header_i, end_i + 1):
+            # Inline-code examples render literally and are not links.  Fenced
+            # and indented listings cannot be table spans in _markdown_tables.
+            for target, _label in extract_wikilinks(strip_code(lines[line_i])):
+                findings.append(_f(
+                    "10-table-cell-wikilink", "error",
+                    "wikilinks are not allowed in Markdown table cells; use "
+                    "plain text in the table and integrate the link in prose",
+                    {"line": line_i + 1, "target": target,
+                     "text": lines[line_i].strip()[:160]}))
+
+
+_NAVIGATION_ONLY_LINK_RE = re.compile(
+    r"(?:^|[.!?,;:]\s+|\(\s*|[—–-]\s+)"
+    r"(?:see(?:\s+also)?|refer\s+to|consult)\s+\[\[", re.IGNORECASE)
+
+
+def _check_integrated_wikilinks(sections, findings):
+    """Item 9: a body link participates in the claim rather than directing.
+
+    This narrow floor catches only an imperative cue immediately governing a
+    wikilink.  Listings, figures/captions, and tables/captions are presentation
+    material and are masked.  Broader paragraph flow remains a reading task.
+    """
+    body = "\n".join(sections["prose_lines"])
+    raw_lines = body.split("\n")
+    masked_lines = strip_code(body).split("\n")
+    skip = set()
+    _original, tables = _markdown_tables(body)
+    for header_i, end_i in tables:
+        skip.update(range(header_i, min(len(raw_lines), end_i + 2)))
+    _original, embeds = _image_embed_lines(body)
+    for embed_i in embeds:
+        skip.add(embed_i)
+        skip.add(embed_i + 1)
+    for i, line in enumerate(masked_lines):
+        if i in skip or re.match(r"^\s*\*.*\*\s*$", line):
+            continue
+        if _NAVIGATION_ONLY_LINK_RE.search(line):
+            findings.append(_f(
+                "9-link-integration", "error",
+                "navigation-only cross-reference; integrate the wikilink into "
+                "the sentence's claim instead of directing the reader to see it",
+                {"line": i + 1, "text": raw_lines[i].strip()[:160]}))
+
+
 def _body_wikilink_occurrences(sections):
     # Extraction runs on the LISTING-MASKED prose (fenced blocks, inline code
     # spans, indented code), exactly as scan_vault's item10/dup reads
@@ -1177,7 +1608,15 @@ def _body_wikilink_occurrences(sections):
     # is linked ONCE, and "keep first only" applied to that pair edits the
     # listing or drops the real link.  Evidence text still quotes the raw line.
     prose_lines = sections["prose_lines"]
-    masked_lines = strip_code("\n".join(prose_lines)).split("\n")
+    body = "\n".join(prose_lines)
+    masked_lines = strip_code(body).split("\n")
+    # Tables and their captions are presentation surfaces rather than body
+    # prose.  Item 10 reports a real link in a cell directly, while item 12
+    # owns a caption link; neither should also distort the duplicate count.
+    skip = set()
+    _original, tables = _markdown_tables(body)
+    for header_i, end_i in tables:
+        skip.update(range(header_i, min(len(prose_lines), end_i + 2)))
     # Count the entry a link resolves to, not its raw spelling.  A single-file
     # lint can safely fold case/normalization and an explicit ``.md`` suffix,
     # but it must retain path qualification: ``[[a/target]]`` and
@@ -1193,6 +1632,8 @@ def _body_wikilink_occurrences(sections):
 
     occurrences = []
     for offset, line in enumerate(masked_lines):
+        if offset in skip:
+            continue
         for target, label in extract_wikilinks(line):
             key = target_key(target)
             if not key:
@@ -1229,6 +1670,20 @@ def _check_duplicate_wikilinks(sections, findings):
         findings, _body_wikilink_occurrences(sections))
 
 
+def _check_person_event_date(fm, sections, findings):
+    """Enforce item 9's placement floor for Person/Event dates."""
+    entry_type = fm.scalar("type") or ""
+    if entry_type not in ("Person", "Event"):
+        return
+    prose = "\n".join(sections["prose_lines"]).strip()
+    opener = prose.split("\n\n", 1)[0]
+    if not opener_has_subject_date(opener):
+        findings.append(_f(
+            "9-person-event-date", "error",
+            "%s opener needs a year-bearing parenthetical immediately after "
+            "the bolded subject" % entry_type))
+
+
 def _check_bold_opener(fm, sections, findings):
     title = fm.scalar("title")
     if not title:
@@ -1248,17 +1703,9 @@ def _check_bold_opener(fm, sections, findings):
         findings.append(_f("16-bold-opener", "error", "entry has no body prose"))
         return
 
-    # The FIRST bolded span is the one item 16 owns.  `_BOLD3_RE or _BOLD2_RE`
-    # preferred a ***bold-italic*** anywhere in the opener over an earlier
-    # plain **bold**, so an opener whose first bold was wrong passed whenever
-    # a bold-italic span appeared later (scan_vault flags the same opener).
-    # On a tie (both start at the same offset, i.e. the span IS ***…***) the
-    # bold-italic pattern wins so the inner text is captured without stars.
-    m3, m2 = _BOLD3_RE.search(opening), _BOLD2_RE.search(opening)
-    if m3 and m2:
-        m = m3 if m3.start() <= m2.start() else m2
-    else:
-        m = m3 or m2
+    # The FIRST outer-bold span is the one item 16 owns.  One parser handles
+    # ordinary, triple-emphasis, and mixed taxon/strain title forms.
+    m = _BOLD_OUTER_RE.search(opening)
     if not m:
         findings.append(_f(
             "16-bold-opener", "error",
@@ -1266,17 +1713,55 @@ def _check_bold_opener(fm, sections, findings):
             "the entry title", {"opening": opening[:200]}))
         return
 
-    bolded = m.group(1).strip()
-    accepted = [title]
-    if has_parenthetical(title):
-        accepted.append(base_term(title))
+    bolded, style, italic_prefix = _bold_parts(m)
+    bolded = bolded.strip()
+    # The parenthetical qualifier never appears in running prose.
+    accepted = [base_term(title) if has_parenthetical(title) else title]
+    entry_type = fm.scalar("type") or ""
+    organism_status, organism_parts = (
+        _organism_title_classification(
+            accepted[0], fm.values("aliases"), opening)
+        if entry_type == "Organism" else ("common", None))
 
-    if any(first_letter_ci_equal(bolded, cand) for cand in accepted):
-        return
-    # symbol/variable carve-out: compare math-stripped skeletons
-    skeleton = math_skeleton(bolded)
-    if any(first_letter_ci_equal(skeleton, math_skeleton(cand))
-           for cand in accepted):
+    # Rank-marked taxa can have discontiguous italic spans inside the outer
+    # bold.  Their style is a manual call, but their visible title must still be
+    # compared without leaving inner ``*`` markers in the text skeleton.
+    compared_bolded = (bolded.replace("*", "").replace("_", "")
+                       if organism_status == "ambiguous" else bolded)
+    title_matches = any(first_letter_ci_equal(compared_bolded, cand)
+                        for cand in accepted)
+    # symbol/variable carve-out: compare math-stripped skeletons.
+    skeleton = math_skeleton(compared_bolded)
+    title_matches = title_matches or any(
+        first_letter_ci_equal(skeleton, math_skeleton(cand)) for cand in accepted)
+
+    if title_matches:
+        if organism_status == "ambiguous":
+            # Typography is still a mandatory source-aware item-16 judgment,
+            # but ambiguity has no persistent metadata to close a recurring
+            # scanner warning.  Accept either style mechanically once the
+            # visible title is right; the model, not this regex floor, decides.
+            return
+        expected_style = "full-italic" if entry_type == "Work" else "plain"
+        if organism_status == "scientific":
+            expected_prefix, suffix = organism_parts
+            expected_style = "mixed" if suffix else "full-italic"
+        if style == expected_style and (
+                expected_style != "mixed"
+                or (italic_prefix == expected_prefix
+                    and bolded == expected_prefix + organism_parts[1])):
+            return
+        if expected_style == "plain":
+            readable = "**%s**" % accepted[0]
+        elif expected_style == "full-italic":
+            readable = "***%s***" % accepted[0]
+        else:
+            readable = "***%s*%s**" % organism_parts
+        findings.append(_f(
+            "16-bold-opener", "error",
+            "the opening title has the wrong bold/italic combination for "
+            "%s; use %s" % (entry_type or "this entry type", readable),
+            {"title": title, "type": entry_type, "opening": opening[:200]}))
         return
 
     findings.append(_f(
@@ -1295,7 +1780,7 @@ def _flashcard_primary_answer(fm, sections):
     base term for a disambiguation parenthetical, or its math skeleton for a
     symbol title.  An opener parenthetical becomes a required counterpart only
     when its slug is actually present in ``aliases:``; that distinguishes an
-    acronym/full-form binding from a date or explanatory aside and avoids
+    opener-established binding from a date or explanatory aside and avoids
     inferring counterpart semantics from an alias list that can also hold
     synonyms.
     """
@@ -1308,27 +1793,36 @@ def _flashcard_primary_answer(fm, sections):
         (alias_field.values if alias_field is not None and alias_field.is_list else [])
         if a
     }
+    entry_type = fm.scalar("type") or ""
+    opening = _opening_block(sections)
+    organism_parts = (_organism_title_parts(
+        term, fm.values("aliases"), opening)
+        if entry_type == "Organism" else None)
     counterpart = None
     for match in _BOLD_PAREN_RE.finditer(_opening_block(sections)):
-        raw_candidate = match.group(1)
+        visible = math_skeleton(
+            match.group("bold").replace("*", "").replace("_", "")).strip()
+        if not first_letter_ci_equal(visible, term):
+            continue
+        raw_candidate = match.group("paren")
         # Item 17 treats annotated parentheticals such as
         # ``(singular, *archaeon*)`` as alias evidence.  They are not the
-        # title's direct acronym/full-form binding and therefore do not belong
+        # title's direct opener-established binding and therefore do not belong
         # on flashcard line 3.  Keep this narrower than `_clean_paren_name`,
         # whose lead-in stripping is correct for alias completeness.
         short_for = bool(_SHORT_FOR_PAREN_RE.match(raw_candidate))
         cleaned = _clean_paren_name(raw_candidate)
         scientific_abbreviation = bool(
+            organism_parts
+            and _scientific_abbreviation_matches(cleaned, organism_parts[0])
+            and
             re.fullmatch(r"\*[^*\n]+\*", raw_candidate.strip())
             and _SCI_ABBREV_RE.fullmatch(cleaned))
-        if short_for or scientific_abbreviation:
+        acronym_binding = _acronym_counterpart(term, cleaned)
+        if short_for or scientific_abbreviation or acronym_binding:
             candidate = cleaned
         else:
-            if ("*" in raw_candidate or "_" in raw_candidate
-                    or _PAREN_LEADIN_RE.match(raw_candidate)
-                    or _NON_NAME_PAREN_RE.search(raw_candidate)):
-                continue
-            candidate = " ".join(raw_candidate.split()).strip()
+            continue
         try:
             candidate_slug = fold_name(slug_stem(candidate))
         except SlugError:
@@ -1351,7 +1845,7 @@ def _flashcard_line3_fault(line3, fm, sections):
     if counterpart is not None:
         if required_counterpart is None:
             return ("the parenthetical %r is not established as the title's own "
-                    "acronym/full-form counterpart in the opener" % counterpart)
+                    "opener-established, alias-bound counterpart" % counterpart)
         if counterpart != required_counterpart:
             return "the established counterpart must appear exactly as (%s)" % required_counterpart
     if required_counterpart is not None and counterpart != required_counterpart:
@@ -1418,7 +1912,7 @@ def _check_flashcards_present(fm, sections, findings, is_stub):
     # the canonical title: the base term for a parenthetical-disambiguated
     # title, the math-stripped skeleton for a symbol title (line 3 is plain
     # text, so `$k$-fold` can only ever appear there as `k-fold`), plus the
-    # entry's own acronym/full-form counterpart when the opener establishes it.
+    # entry's own opener-established, alias-bound counterpart.
     title = fm.scalar("title")
     for card_no, card in enumerate(cards, 1):
         if len(card) < 3:
@@ -1533,9 +2027,11 @@ def _check_stub_structure(fm, sections, findings, is_stub):
                            {"line": sections["related_line"]}))
     # A syntax sample inside inline/fenced/indented code is not an image.
     # Read the same listing-masked body as the linter's stub check.
-    stub_images = re.findall(
-        r"!\[\[[^\]\n]+\]\]|!\[[^\]\n]*\]\([^)\n]+\)",
-        strip_code(body_text))
+    masked_stub_body = strip_code(body_text)
+    stub_images = re.findall(r"!\[\[[^\]\n]+\]\]", masked_stub_body)
+    stub_images.extend(
+        masked_stub_body[start:end]
+        for start, end, _destination in _markdown_image_spans(masked_stub_body))
     if stub_images:
         findings.append(_f("stub-no-images", "error",
                            "stubs never carry images",
@@ -1644,7 +2140,13 @@ def lint_text(text, filename):
     _check_tags(fm, findings, is_stub)
     _check_aliases(fm, findings)
     _check_alias_completeness(fm, sections, findings, filename)
+    _check_table_cell_wikilinks(sections, findings)
     _check_duplicate_wikilinks(sections, findings)
+    _check_integrated_wikilinks(sections, findings)
+    _check_person_event_date(fm, sections, findings)
+    if not is_stub:
+        _check_image_captions(sections, findings)
+    _check_table_captions(sections, findings)
     _check_bold_opener(fm, sections, findings)
     _check_flashcards_present(fm, sections, findings, is_stub)
     _check_flashcard_leak(fm, sections, findings, is_stub)
@@ -1826,6 +2328,95 @@ def _recheck_folder_duplicate_wikilinks(results, root):
             result["findings"], occurrences, resolve=resolve)
 
 
+def _check_folder_related_labels(results, root):
+    """Item 11: resolve footer targets and require their canonical titles.
+
+    This is intentionally folder-only. A single entry cannot know whether a
+    target, basename, or alias has one owner, and choosing one would turn an
+    ambiguous link into a destructive false prescription.
+    """
+    root = os.path.abspath(root)
+    root_key = fold_name(os.path.basename(root))
+    owners = {}
+    basenames = {}
+    owner_for_file = {}
+    titles = {}
+    for result in results:
+        relative = os.path.relpath(result["file"], root).replace(os.sep, "/")
+        if relative.lower().endswith(".md"):
+            relative = relative[:-3]
+        owner = fold_name(relative)
+        owner_for_file[result["file"]] = owner
+        owners[owner] = result
+        basenames.setdefault(owner.rsplit("/", 1)[-1], set()).add(owner)
+        if result.get("title"):
+            titles[owner] = result["title"]
+
+    alias_owners = {}
+    for result in results:
+        owner = owner_for_file[result["file"]]
+        malformed = any(
+            finding["item"] == "18-alias-form"
+            and (finding.get("evidence") or {}).get("kind") in ("scalar", "blank")
+            for finding in result["findings"])
+        if malformed:
+            continue
+        for alias in result.get("aliases", []):
+            key = fold_name(alias)
+            if key:
+                alias_owners.setdefault(key, set()).add(owner)
+
+    def resolve(target):
+        normalized = target.replace("\\", "/").strip().strip("/")
+        if normalized.lower().endswith(".md"):
+            normalized = normalized[:-3]
+        key = fold_name(normalized)
+        prefix = root_key + "/"
+        lookup = key[len(prefix):] if key.startswith(prefix) else key
+        basename = lookup.rsplit("/", 1)[-1]
+        basename_matches = basenames.get(basename, set())
+        if lookup in owners:
+            if "/" in key or len(basename_matches) == 1:
+                return lookup
+            return None
+        path_matches = {owner for owner in owners
+                        if owner == lookup or owner.endswith("/" + lookup)}
+        if len(path_matches) == 1:
+            return next(iter(path_matches))
+        if path_matches or basename in basenames:
+            return None
+        alias_matches = alias_owners.get(lookup, set())
+        return next(iter(alias_matches)) if len(alias_matches) == 1 else None
+
+    for result in results:
+        try:
+            with open(result["file"], "r", encoding="utf-8-sig") as handle:
+                fm = parse_frontmatter(handle.read())
+            if not fm.found:
+                continue
+            related = split_sections(fm.body)["related_line"] or ""
+        except (OSError, UnicodeDecodeError):
+            continue
+        for target, display in extract_wikilinks(related):
+            owner = resolve(target)
+            canonical = titles.get(owner) if owner else None
+            if not canonical:
+                continue
+            if display is None:
+                result["findings"].append(_f(
+                    "11-related-display", "error",
+                    "Related footer link [[%s]] must be piped to the target's "
+                    "canonical title %r" % (target, canonical),
+                    {"target": target, "expected_display": canonical}))
+            elif display != canonical:
+                result["findings"].append(_f(
+                    "11-related-display", "error",
+                    "Related footer display %r must equal the target's canonical "
+                    "title %r" % (display, canonical),
+                    {"target": target, "display": display,
+                     "expected_display": canonical}))
+
+
 def lint_path(target, severity_floor=None):
     """Lint a single entry file or a whole folder (recursively)."""
     target = os.path.abspath(target)
@@ -1850,6 +2441,7 @@ def lint_path(target, severity_floor=None):
     if folder_mode:
         report["alias_collisions"] = _check_alias_collisions(results)
         _recheck_folder_duplicate_wikilinks(results, target)
+        _check_folder_related_labels(results, target)
 
     order = {"error": 0, "warning": 1, "info": 2}
     floor = order.get(severity_floor, 2) if severity_floor else 2
@@ -1903,8 +2495,8 @@ def _st_good():
         '  - "[[Doe_X_2025.pdf#page=2]]"\n'
         'created: 2026-01-01\n'
         'updated: 2026-01-02\n'
-        'description: "A plot of true positive rate against false positive '
-        'rate."\n'
+        'description: "A ROC curve plots true positive rate against false '
+        'positive rate."\n'
         'tags:\n'
         '  - "#statistics"\n'
         'parents: []\n'
@@ -1935,7 +2527,8 @@ def _st_stub():
         '  - "stub"\n'
         'created: 2026-01-01\n'
         'updated: 2026-01-02\n'
-        'description: "The share of predicted positives that are correct."\n'
+        'description: "Precision is the share of predicted positives that are '
+        'correct."\n'
         'tags:\n'
         '  - "#statistics"\n'
         'parents: []\n'
@@ -1969,13 +2562,14 @@ def run_self_test():
     def items(text, filename="roc-curve.md"):
         return _st_items(lint_text(text, filename))
 
-    def retitled(title, alias, description, opener, card_term):
+    def retitled(title, alias, description, opener, card_term, type_="Concept"):
         """A schema-clean variant for title/alias binding regressions."""
         return (good.replace('title: "ROC curve"', 'title: "%s"' % title)
+                    .replace('type: Concept', 'type: %s' % type_)
                     .replace('  - "auroc"', '  - "%s"' % alias)
                     .replace(
-                        'description: "A plot of true positive rate against '
-                        'false positive rate."',
+                        'description: "A ROC curve plots true positive rate '
+                        'against false positive rate."',
                         'description: "%s"' % description)
                     .replace(
                         'A **ROC curve** plots the trade-off between two error '
@@ -2169,13 +2763,14 @@ def run_self_test():
           sorted(set(items(mutate('title: "ROC curve"', 'title: "機械学習"'),
                            "roc-curve.md"))),
           # 19-flashcards is real fallout: only the title was mutated, so card
-          # line 3 ("ROC curve") genuinely no longer matches it
-          ["16-bold-opener", "19-flashcards", "5-slug"])
+          # line 3 ("ROC curve") and the description subject genuinely no
+          # longer match it
+          ["16-bold-opener", "19-flashcards", "5-slug", "7-description"])
 
     # -- item 7: description ----------------------------------------------
     check("a blank description",
-          items(mutate('description: "A plot of true positive rate against '
-                       'false positive rate."', 'description: ""')),
+          items(mutate('description: "A ROC curve plots true positive rate '
+                       'against false positive rate."', 'description: ""')),
           ["7-description"])
     check("a description over the 110-character cap",
           items(mutate("false positive rate.", "false positive rate, written "
@@ -2183,7 +2778,7 @@ def run_self_test():
                        "characters the rule allows.")),
           ["7-description"])
     check("markup in a description",
-          items(mutate("A plot of true", "A plot of `true`")), ["7-description"])
+          items(mutate("plots true", "plots `true`")), ["7-description"])
     check("a description with no closing period is INFO, not an error",
           [(f["item"], f["severity"])
            for f in lint_text(mutate("false positive rate.", "false positive rate"),
@@ -2192,16 +2787,45 @@ def run_self_test():
     check("a lowercase-initial description is exempt when the TITLE is one",
           items(mutate('title: "ROC curve"\n', 'title: "k-nearest neighbors"\n')
                 .replace("A **ROC curve** plots", "**k-nearest neighbors** plots")
-                .replace('description: "A plot', 'description: "k-nearest neighbors is a plot')
+                .replace('description: "A ROC curve plots',
+                         'description: "k-nearest neighbors plots')
                 .replace("ROC curve\n", "k-nearest neighbors\n"),
                 "k-nearest-neighbors.md"),
           [])
     check("a plain-text math skeleton is the subject of a symbol-title description",
           items(mutate('title: "ROC curve"\n', 'title: "$k$-fold"\n')
                 .replace("A **ROC curve** plots", "A **k-fold** plots")
-                .replace('description: "A plot', 'description: "k-fold is a plot')
+                .replace('description: "A ROC curve plots',
+                         'description: "k-fold plots')
                 .replace("ROC curve\n", "k-fold\n"), "k-fold.md"),
           [])
+    check("a first-letter case difference still names the canonical subject",
+          _description_has_entity_subject("ArXiv stores preprints.", "arXiv"), True)
+    check("a parenthetical title accepts its base term after a leading article",
+          _description_has_entity_subject(
+              "A feature supplies a model input.", "Feature (machine learning)"),
+          True)
+    check("a parenthetical title does not use its qualifier in running prose",
+          _description_has_entity_subject(
+              "Feature (machine learning) supplies a model input.",
+              "Feature (machine learning)"), False)
+    check("a placeholder subject is not the entry entity",
+          _description_has_entity_subject("This method compares groups.", "Fairness"),
+          False)
+    check("a different prefixed noun phrase cannot hide the title later in it",
+          _description_has_entity_subject(
+              "Machine learning fairness compares group outcomes.", "Fairness"),
+          False)
+    check("a title prefix must end at a subject boundary",
+          _description_has_entity_subject(
+              "Fairness-aware learning compares group outcomes.", "Fairness"),
+          False)
+    check("the clear placeholder mismatch is emitted as item 7",
+          items(mutate(
+              'description: "A ROC curve plots true positive rate against '
+              'false positive rate."',
+              'description: "This method plots true positive rate."')),
+          ["7-description"])
 
     # -- item 8: tags ------------------------------------------------------
     check("a tag with no # prefix",
@@ -2251,10 +2875,109 @@ def run_self_test():
           items(mutate('title: "ROC curve"', 'title: "ROC curve (statistics)"')
                 .replace("ROC curve\n??", "ROC curve\n??"),
                 "roc-curve-statistics.md"), [])
+    check("the full parenthetical title is invalid in the body opener",
+          items(mutate('title: "ROC curve"', 'title: "ROC curve (statistics)"')
+                .replace("A **ROC curve** plots",
+                         "A **ROC curve (statistics)** plots"),
+                "roc-curve-statistics.md"), ["16-bold-opener"])
     check("the math-skeleton carve-out",
           items(mutate('title: "ROC curve"', 'title: "$k$-fold"')
                 .replace("A **ROC curve** plots", "A **k-fold** plots")
+                .replace("A ROC curve plots", "k-fold plots")
                 .replace("ROC curve\n", "k-fold\n"), "k-fold.md"), [])
+
+    work_title = retitled(
+        "Hamlet", "tragedy-of-hamlet", "Hamlet is a tragedy by Shakespeare.",
+        "***Hamlet*** is a tragedy by Shakespeare.", "Hamlet", type_="Work")
+    check("a Work title combines bold and italics on first appearance",
+          items(work_title, "hamlet.md"), [])
+    check("a Work title in bold alone is rejected",
+          items(work_title.replace("***Hamlet***", "**Hamlet**"), "hamlet.md"),
+          ["16-bold-opener"])
+    check("an over-emphasized Work title is rejected rather than substring-matched",
+          items(work_title.replace("***Hamlet***", "****Hamlet****"), "hamlet.md"),
+          ["16-bold-opener"])
+    binomial_title = retitled(
+        "Mus musculus", "m-musculus",
+        "Mus musculus is the laboratory mouse.",
+        "***Mus musculus*** is the laboratory mouse.", "Mus musculus",
+        type_="Organism")
+    check("a Latin-binomial Organism title combines bold and italics",
+          items(binomial_title, "mus-musculus.md"), [])
+    check("a Latin-binomial Organism title in bold alone is rejected",
+          items(binomial_title.replace("***Mus musculus***", "**Mus musculus**"),
+                "mus-musculus.md"), ["16-bold-opener"])
+    qualified_binomial = retitled(
+        "Mus musculus (biology)", "m-musculus",
+        "Mus musculus is the laboratory mouse.",
+        "***Mus musculus*** is the laboratory mouse.", "Mus musculus",
+        type_="Organism")
+    check("an Organism disambiguation qualifier stays outside running prose styling",
+          items(qualified_binomial, "mus-musculus-biology.md"), [])
+    common_title = retitled(
+        "House mouse", "laboratory-mouse", "House mouse is a small rodent.",
+        "**House mouse** is a small rodent.", "House mouse", type_="Organism")
+    check("a common-name Organism title remains bold-only",
+          items(common_title, "house-mouse.md"), [])
+    african_elephant = retitled(
+        "African elephant", "savanna-elephant",
+        "African elephant is a large land mammal.",
+        "**African elephant** is a large land mammal.", "African elephant",
+        type_="Organism")
+    check("a two-word common-name Organism is not guessed to be a binomial",
+          items(african_elephant, "african-elephant.md"), [])
+    ambiguous_taxon = retitled(
+        "Pan troglodytes", "chimpanzee",
+        "Pan troglodytes is a great ape.",
+        "**Pan troglodytes** is a great ape.", "Pan troglodytes",
+        type_="Organism")
+    check("an evidence-poor taxon-shaped Organism is silent at the mechanical floor",
+          items(ambiguous_taxon, "pan-troglodytes.md"), [])
+    check("either plausible style stays mechanically quiet for a source-aware decision",
+          items(ambiguous_taxon.replace("**Pan troglodytes**",
+                                        "***Pan troglodytes***"),
+                "pan-troglodytes.md"), [])
+    rank_marked = retitled(
+        "Brassica oleracea var. capitata", "cabbage",
+        "Brassica oleracea var. capitata is a cultivated taxon.",
+        "***Brassica oleracea* var. *capitata*** is a cultivated taxon.",
+        "Brassica oleracea var. capitata", type_="Organism")
+    check("a rank-marked title can use discontiguous italics without a false title mismatch",
+          items(rank_marked, "brassica-oleracea-var-capitata.md"), [])
+    genus_title = retitled(
+        "Didinium", "predatory-ciliate",
+        "Didinium is a predatory ciliate.",
+        "***Didinium*** is a predatory ciliate.", "Didinium",
+        type_="Organism")
+    check("a genus-only title remains a silent source-aware typography judgment",
+          items(genus_title, "didinium.md"), [])
+    trinomial_title = retitled(
+        "Canis lupus familiaris", "c-lupus-familiaris",
+        "Canis lupus familiaris is the domestic dog.",
+        "***Canis lupus familiaris*** is the domestic dog.",
+        "Canis lupus familiaris", type_="Organism")
+    check("a lowercase infraspecific epithet stays inside the italic taxon",
+          items(trinomial_title, "canis-lupus-familiaris.md"), [])
+    check("treating an infraspecific epithet as a plain strain suffix fails",
+          items(trinomial_title.replace("***Canis lupus familiaris***",
+                                       "***Canis lupus* familiaris**"),
+                "canis-lupus-familiaris.md"), ["16-bold-opener"])
+    mixed_title = retitled(
+        "E. coli K-12", "k-12", "E. coli K-12 is a laboratory strain.",
+        "***E. coli* K-12** is a laboratory strain.", "E. coli K-12",
+        type_="Organism")
+    check("a strain-bearing Organism title italicizes only the taxon",
+          items(mixed_title, "e-coli-k-12.md"), [])
+    check("italicizing the strain designator is rejected",
+          items(mixed_title.replace("***E. coli* K-12**", "***E. coli K-12***"),
+                "e-coli-k-12.md"), ["16-bold-opener"])
+    symbol_star = retitled(
+        "$A^{*}$ search", "a-star-search", "A search is a graph algorithm.",
+        "**$\\boldsymbol{A}^{*}$ search** is a graph algorithm.",
+        "A search")
+    check("a literal LaTeX star inside a bold symbol title is parsed",
+          [f["item"] for f in lint_text(symbol_star, "a-star-search.md")["findings"]
+           if f["item"] == "16-bold-opener"], [])
 
     # -- item 19: presence, then the answer leak ---------------------------
     check("a full entry with NO ## Flashcards section",
@@ -2283,6 +3006,14 @@ def run_self_test():
     bound_card = bound_card.replace("A **ROC curve** plots", "A **ROC curve** (RC) plots")
     check("...but the exact title plus its established acronym counterpart is fine",
           items(bound_card.replace("??\nROC curve\n", "??\nROC curve (RC)\n")), [])
+    check("compound-derived and shared-tail acronyms remain valid counterparts",
+          [_acronym_counterpart(short, long) for short, long in (
+              ("ATP", "adenosine triphosphate"),
+              ("DNA", "deoxyribonucleic acid"),
+              ("RNA", "ribonucleic acid"),
+              ("MLOps", "ML operations"),
+              ("OOB evaluation", "out-of-bag evaluation"),
+          )], [True, True, True, True, True])
     check("an established counterpart is required on line 3",
           items(bound_card), ["19-flashcards"])
     check("an arbitrary line-3 parenthetical is not a counterpart",
@@ -2299,7 +3030,7 @@ def run_self_test():
     singular_alias = good.replace('title: "ROC curve"', 'title: "Archaea"')
     singular_alias = singular_alias.replace('  - "auroc"', '  - "archaeon"')
     singular_alias = singular_alias.replace(
-        'description: "A plot of true positive rate against false positive rate."',
+        'description: "A ROC curve plots true positive rate against false positive rate."',
         'description: "Archaea is a domain of single-celled organisms."')
     singular_alias = singular_alias.replace(
         'A **ROC curve** plots the trade-off between two error rates as a decision threshold moves.',
@@ -2329,17 +3060,18 @@ def run_self_test():
           "counterpart",
           items(originally_called, "boosting.md"), [])
     check("an originally-called synonym cannot be appended to card line 3 as "
-          "an acronym/full-form counterpart",
+          "an opener-established counterpart",
           items(originally_called.replace(
               "??\nBoosting\n", "??\nBoosting (hypothesis boosting)\n"),
               "boosting.md"), ["19-flashcards"])
     scientific_card = retitled(
         "Saccharomyces cerevisiae", "s-cerevisiae",
         "Saccharomyces cerevisiae is a model budding yeast.",
-        "**Saccharomyces cerevisiae** (*S. cerevisiae*) is a model budding "
-        "yeast.", "Saccharomyces cerevisiae (S. cerevisiae)")
-    check("a direct italic scientific abbreviation establishes its "
-          "alias-bound flashcard counterpart",
+        "***Saccharomyces cerevisiae*** (*S. cerevisiae*) is a model budding "
+        "yeast.", "Saccharomyces cerevisiae (S. cerevisiae)",
+        type_="Organism")
+    check("a canonical triple-emphasis Organism opener establishes its direct "
+          "italic scientific-abbreviation counterpart",
           items(scientific_card, "saccharomyces-cerevisiae.md"), [])
     knn_card = retitled(
         "k-nearest neighbors", "knn",
@@ -2349,6 +3081,20 @@ def run_self_test():
     check("the documented intervening algorithm noun preserves an opener "
           "acronym binding",
           items(knn_card, "k-nearest-neighbors.md"), [])
+    pseudonym_card = retitled(
+        "Mark Twain", "samuel-clemens", "Mark Twain was an American author.",
+        "**Mark Twain** (Samuel Clemens) was an American author.", "Mark Twain")
+    check("a pseudonym parenthetical is an alias but not an acronym counterpart",
+          items(pseudonym_card, "mark-twain.md"), [])
+    later_bold_card = retitled(
+        "Counterpart scope", "pca",
+        "Counterpart scope limits opener-bound flashcard answers.",
+        "**Counterpart scope** uses **Principal component analysis** (PCA).",
+        "Counterpart scope")
+    check("a later bold term cannot donate its parenthetical to the title card",
+          [f["item"] for f in lint_text(
+              later_bold_card, "counterpart-scope.md")["findings"]
+           if f["item"] == "19-flashcards"], [])
     check("an unrelated noun phrase and later parenthetical do not bind to "
           "the bolded title",
           bool(_BOLD_PAREN_RE.search(
@@ -2374,6 +3120,7 @@ def run_self_test():
     check("a short title is not leaked by a mid-word substring",
           items(mutate('title: "ROC curve"', 'title: "C"')
                 .replace("A **ROC curve** plots", "A **C** creates")
+                .replace("A ROC curve plots", "C creates")
                 .replace("ROC curve\n??", "C\n??").replace("\nROC curve\n", "\nC\n"),
                 "c.md"), [])
 
@@ -2387,6 +3134,9 @@ def run_self_test():
     check("a stub with Markdown image syntax is also rejected",
           items(mutate("correct.\n", "correct with ![alt](figure.png).\n", base=stub),
                 "precision.md"), ["stub-no-images"])
+    check("escaped Markdown image syntax remains literal text in a stub",
+          items(mutate("correct.\n", r"correct while showing \![alt](figure.png)." + "\n",
+                       base=stub), "precision.md"), [])
     check("image syntax shown in inline code is not a stub image",
           items(mutate("correct.\n", "correct while showing `![[figure.png]]` syntax.\n",
                        base=stub), "precision.md"), [])
@@ -2404,15 +3154,36 @@ def run_self_test():
                          "that are correct.",
                          "**A. M. Turing** (b. 1912, d. 1954) was a "
                          "mathematician, e.g. of computability.")
-                .replace('description: "The share of predicted positives that '
-                         'are correct."', 'description: "A mathematician."'),
+                .replace('description: "Precision is the share of predicted '
+                         'positives that are correct."',
+                         'description: "A. M. Turing was a mathematician."'),
                 "a-m-turing.md"), [])
     check('the "stub" marker beside a real source',
           items(mutate('  - "stub"\n', '  - "stub"\n  - "[[Doe_X_2025.pdf#page=2]]"\n',
                        base=stub), "precision.md"),
           ["19-flashcards", "stub-sources-marker"])
 
-    # -- item 9: no mechanical body-length or paragraph-flow rule ---------
+    # -- item 9: structure plus semantic body review -----------------------
+    dated_person = retitled(
+        "Ada Lovelace", "augusta-ada-king",
+        "Ada Lovelace was an English mathematician.",
+        "**Ada Lovelace** (1815–1852) was an English mathematician.",
+        "Ada Lovelace", type_="Person")
+    dated_event = retitled(
+        "Trinity test", "trinity-nuclear-test",
+        "The Trinity test was the first nuclear detonation.",
+        "The **Trinity test** (1945-07-16) was the first nuclear detonation.",
+        "Trinity test", type_="Event")
+    check("valid Person and Event opener dates pass builder lint",
+          (items(dated_person, "ada-lovelace.md"),
+           items(dated_event, "trinity-test.md")), ([], []))
+    check("missing or misplaced Person/Event years fail builder item 9",
+          (items(dated_person.replace(" (1815–1852)", ""),
+                 "ada-lovelace.md"),
+           items(dated_event.replace(" (1945-07-16) was",
+                                     " was first proposed in 1942 and"),
+                 "trinity-test.md")),
+          (["9-person-event-date"], ["9-person-event-date"]))
     check("a long, well-scoped full-entry sentence has no length finding",
           items(mutate("A **ROC curve** plots the trade-off between two error "
                        "rates as a decision threshold moves.\n",
@@ -2459,6 +3230,112 @@ def run_self_test():
                        "```\n[[precision]]\n```\n\n"
                        "**Related:** [[precision|Precision]]")),
           []),
+    check("a navigation-only cue pointing straight at a wikilink is item 9",
+          items(mutate("decision threshold moves.\n",
+                       "decision threshold moves (see [[precision|precision]]).\n")),
+          ["9-link-integration"])
+    check("ordinary 'to see how' prose is not a navigation-only link cue",
+          items(mutate("decision threshold moves.\n",
+                       "decision threshold moves; to see how it changes, vary the cutoff.\n")),
+          [])
+    check("semantic 'see X as Y' prose is not a navigation-only cue",
+          items(mutate("decision threshold moves.\n",
+                       "decision threshold moves. Researchers see "
+                       "[[precision|precision]] as context-dependent.\n")), [])
+    check("a navigation cue shown in a fenced listing is ignored",
+          items(mutate("\n**Related:**",
+                       "\n\n```markdown\nsee [[precision]]\n```\n\n**Related:**")),
+          [])
+    images = mutate(
+        "\n**Related:**",
+        "\n\n![[figure.png]]\n"
+        "*A local figure with $x^*$ shown in its caption.*\n\n"
+        "![Remote figure](https://example.test/figure.png)\n"
+        "*A remote figure with a plain caption.*\n\n**Related:**")
+    check("Obsidian and Markdown image embeds with immediate captions pass",
+          items(images), [])
+    complex_images = mutate(
+        "\n**Related:**",
+        "\n\n![Balanced](https://example.test/plot_(x).png)\n"
+        "*A destination containing balanced parentheses.*\n\n"
+        "![Angle](<https://example.test/plot_(y).png>)\n"
+        "*A CommonMark angle-bracket destination.*\n\n"
+        "![Plot [panel A]](https://example.test/panel.png)\n"
+        "*A nested-bracket alt label.*\n\n"
+        r"\![Literal](https://example.test/not-an-image.png)" "\n\n**Related:**")
+    check("balanced destinations, nested alt text, and escaped image syntax pass",
+          items(complex_images), [])
+    check("a blank line between an image and caption is an item-12 error",
+          items(images.replace(
+              "![[figure.png]]\n*A local", "![[figure.png]]\n\n*A local")),
+          ["12-image-caption"])
+    for label, markup, fault in (("nested italic", "*extra detail*", "italic"),
+                                 ("wikilink", "[[precision|precision]]", "wikilink"),
+                                 ("Markdown link", "[source](https://example.test)", "Markdown link"),
+                                 ("HTML", "<span>detail</span>", "HTML"),
+                                 ("strikethrough", "~~extra detail~~", "strikethrough"),
+                                 ("bold", "**extra detail**", "bold"),
+                                 ("backtick", "`extra detail`", "backtick")):
+        result = lint_text(
+            images.replace("a plain caption", "a plain caption with " + markup),
+            "roc-curve.md")
+        check("an image caption rejects %s markup" % label,
+              [(f["item"], fault in f["message"])
+               for f in result["findings"]],
+              [("12-image-caption", True)])
+    check("an empty italic caption is rejected",
+          items(images.replace("*A remote figure with a plain caption.*", "* *")),
+          ["12-image-caption"])
+    listing_images = mutate(
+        "\n**Related:**",
+        "\n\n```\n![[fenced.png]]\n```\n\n"
+        "    ![Indented](indented.png)\n\n**Related:**")
+    check("image syntax in fenced and indented listings needs no caption",
+          items(listing_images), [])
+    table = mutate(
+        "\n**Related:**",
+        "\n\n| Method | Score |\n| --- | --- |\n| A | 0.8 |\n"
+        "*Scores on the held-out set.*\n\n**Related:**")
+    check("a Markdown table with an immediate italic plain-text caption passes",
+          items(table), [])
+    check("a table caption containing permitted LaTeX bars remains a caption",
+          items(table.replace("Scores on the held-out set.",
+                              "Error is $|x-y|$ on the held-out set.")), [])
+    one_column_table = mutate(
+        "\n**Related:**",
+        "\n\n| Metric |\n| --- |\n| Recall |\n"
+        "*The reported metric.*\n\n**Related:**")
+    check("a one-column GFM table with an immediate caption is detected and passes",
+          items(one_column_table), [])
+    one_column_no_pipe_row = one_column_table.replace("| Recall |", "Recall")
+    check("a one-column GFM body row does not require a pipe",
+          items(one_column_no_pipe_row), [])
+    check("a bare wikilink in a pipe-less one-column table row is rejected",
+          items(one_column_no_pipe_row.replace("Recall", "[[precision]]")),
+          ["10-table-cell-wikilink"])
+    check("a one-column GFM table without a caption is detected",
+          items(one_column_table.replace("\n*The reported metric.*", "")),
+          ["12-table-caption"])
+    pipe_less_link_table = mutate(
+        "\n**Related:**",
+        "\n\nMetric | Value\n--- | ---\n"
+        "[[precision|Precision]] | 0.8\n"
+        "*The reported metric.*\n\n**Related:**")
+    check("a wikilink in a pipe-less GFM table cell is rejected",
+          items(pipe_less_link_table), ["10-table-cell-wikilink"])
+    check("wikilink syntax in inline code inside a table cell stays literal",
+          items(pipe_less_link_table.replace(
+              "[[precision|Precision]]", "`[[precision|Precision]]`")), [])
+    emphasized_row = table.replace("| A | 0.8 |",
+                                   "| A | 0.8 |\n*Recall* | *0.8*")
+    check("an emphasized table row is not mistaken for the caption",
+          items(emphasized_row), [])
+    check("a blank line between a table and its caption is an item-12 error",
+          items(table.replace("| A | 0.8 |\n*Scores", "| A | 0.8 |\n\n*Scores")),
+          ["12-table-caption"])
+    check("caption code markup is rejected even though table detection masks listings",
+          items(table.replace("held-out", "`held-out`")),
+          ["12-table-caption"])
     check("...same for an inline code span",
           items(mutate("**Related:** [[precision|Precision]]",
                        "It links [[precision|Precision]] once in prose, and "
@@ -2526,8 +3403,9 @@ def run_self_test():
                          "that are correct.",
                          "**A. M. Turing** (b. 1912, d. 1954) was a "
                          "mathematician, e.g. of computability.")
-                .replace('description: "The share of predicted positives that '
-                         'are correct."', 'description: "A mathematician."'),
+                .replace('description: "Precision is the share of predicted '
+                         'positives that are correct."',
+                         'description: "A. M. Turing was a mathematician."'),
                 "a-m-turing.md"), [])
     check("the cue catches 'which many people call *X*'",
           [c for c, _w in _alias_candidates(split_sections(
@@ -2603,8 +3481,8 @@ def run_self_test():
             return (good.replace('title: "ROC curve"', 'title: "%s"' % title)
                         .replace('  - "auroc"', '  - "%s"' % alias)
                         .replace(
-                            'description: "A plot of true positive rate against '
-                            'false positive rate."',
+                            'description: "A ROC curve plots true positive rate '
+                            'against false positive rate."',
                             'description: "%s"' % description)
                         .replace(
                             "A **ROC curve** plots the trade-off between two error "
@@ -2618,6 +3496,7 @@ def run_self_test():
             good.replace('title: "ROC curve"', 'title: "Sensitivity"')
                 .replace('  - "auroc"',
                          '  - "AUROC"\n  - "unique-sensitivity"')
+                .replace("A ROC curve plots", "Sensitivity measures")
                 .replace("A **ROC curve** plots", "**Sensitivity** plots")
                 .replace("\nROC curve\n", "\nSensitivity\n"))
         # an entry listing the SAME alias twice: its own per-entry fault,
@@ -2625,11 +3504,13 @@ def run_self_test():
         put("sub/dupalias.md",
             good.replace('title: "ROC curve"', 'title: "Dupalias"')
                 .replace('  - "auroc"', '  - "dupme"\n  - "dupme"')
+                .replace("A ROC curve plots", "Dupalias names")
                 .replace("A **ROC curve** plots", "**Dupalias** plots")
                 .replace("\nROC curve\n", "\nDupalias\n"))
         put("sub/reader.md",
             good.replace('title: "ROC curve"', 'title: "Reader"')
                 .replace('  - "auroc"', '  - "reader-alias"')
+                .replace("A ROC curve plots", "Reader compares")
                 .replace(
                     "A **ROC curve** plots the trade-off between two error "
                     "rates as a decision threshold moves.",
@@ -2662,9 +3543,15 @@ def run_self_test():
             "Exact path reader repeats one qualified destination.",
             "**Exact path reader** repeats [[a/foo|one Foo]] and "
             "[[A/FOO.md|the same Foo]]."))
+        put("sub/footer-reader.md", named_good(
+            "Footer reader", "footer-reader-name",
+            "Footer reader has a deliberately noncanonical footer label.",
+            "**Footer reader** exercises the canonical Related display check.")
+            .replace("**Related:** [[precision|Precision]]",
+                     "**Related:** [[Wiki/precision.md#Details|Positive predictive value]]"))
         report = lint_path(wiki)
         check("lint_path walks the folder recursively",
-              report["summary"]["files"], 11)
+              report["summary"]["files"], 12)
         check("...and counts the stubs", report["summary"]["stubs"], 1)
         check("an alias claimed by two entries is a folder-scope collision",
               [c["alias"] for c in report["alias_collisions"]], ["auroc"])
@@ -2704,9 +3591,15 @@ def run_self_test():
                for f in e["findings"]
                if f["item"] == "10-duplicate-wikilink"],
               ["10-duplicate-wikilink"])
+        check("folder lint requires a Related target's canonical title",
+              [f["item"] for e in report["entries"]
+               if os.path.basename(e["file"]) == "footer-reader.md"
+               for f in e["findings"]],
+              ["11-related-display"])
 
         bom = put("bom.md", "﻿" + good.replace('title: "ROC curve"',
                                                     'title: "Bom"')
+                  .replace("A ROC curve plots", "Bom records")
                   .replace("A **ROC curve** plots", "**Bom** plots")
                   .replace("\nROC curve\n", "\nBom\n"))
         check("a BOM does not defeat the parser (and skip all 13 checks)",

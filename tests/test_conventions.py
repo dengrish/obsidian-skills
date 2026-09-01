@@ -5536,11 +5536,14 @@ SELFTEST_TALLY = re.compile(
 #: fails.  Lowering a number here is a deliberate, reviewable statement that
 #: cases went away; a script with no line is checked for a clean tally only.
 SELFTEST_MIN_CASES = {
-    # Re-tuned to the exact tallies of 2026-08-31. Raising after growth is the
+    # Re-tuned to the exact tallies of 2026-09-01. Raising after growth is the
     # mirror duty of the "lowering is a deliberate, reviewable statement" rule
     # below: new regression cases must not disappear with the harness green.
     "shared/scripts/figure_state.py": 6,
+    "shared/scripts/markdown_tables.py": 35,
     "shared/scripts/naming.py": 191,
+    "shared/scripts/organism_names.py": 26,
+    "shared/scripts/entry_structure.py": 8,
     "shared/scripts/plugin_paths.py": 95,
     "shared/scripts/plurals.py": 200,
     "shared/scripts/slugify.py": 61,
@@ -5557,9 +5560,9 @@ SELFTEST_MIN_CASES = {
     "skills/pdf-figure-extractor/scripts/render_page.py": 38,
     "skills/pdf-organizer/scripts/organize.py": 212,
     "skills/wiki-builder/scripts/find_collisions.py": 62,
-    "skills/wiki-builder/scripts/lint_entry.py": 164,
+    "skills/wiki-builder/scripts/lint_entry.py": 223,
     "skills/wiki-builder/scripts/vault_index.py": 63,
-    "skills/wiki-linter/scripts/scan_vault.py": 202,
+    "skills/wiki-linter/scripts/scan_vault.py": 263,
 }
 
 

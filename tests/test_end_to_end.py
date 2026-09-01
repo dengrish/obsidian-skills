@@ -451,9 +451,9 @@ A compact definition used only to exercise the shared contract.
             "**Archaea** (singular, *archaeon*) is a domain of organisms.",
             aliases=("archaeon",), card="Archaea")
         write_entry(
-            "hardwrapped-acronym", "Hardwrapped acronym",
-            "**Hardwrapped acronym**\n(HWA) binds its counterpart across a hard wrap.",
-            aliases=("hwa",), card="Hardwrapped acronym (HWA)")
+            "hard-wrap-acronym", "Hard wrap acronym",
+            "**Hard wrap acronym**\n(HWA) binds its counterpart across a hard wrap.",
+            aliases=("hwa",), card="Hard wrap acronym (HWA)")
         write_entry(
             "adaboost", "AdaBoost",
             "**AdaBoost** (short for *adaptive boosting*) reweights mistakes.",
@@ -461,9 +461,9 @@ A compact definition used only to exercise the shared contract.
             card="AdaBoost (adaptive boosting)")
         write_entry(
             "saccharomyces-cerevisiae", "Saccharomyces cerevisiae",
-            "**Saccharomyces cerevisiae** (*S. cerevisiae*) is a model budding yeast.",
+            "***Saccharomyces cerevisiae*** (*S. cerevisiae*) is a model budding yeast.",
             aliases=("s-cerevisiae",),
-            card="Saccharomyces cerevisiae (S. cerevisiae)")
+            card="Saccharomyces cerevisiae (S. cerevisiae)", type_="Organism")
         write_entry(
             "historical-synonym", "Historical synonym",
             "**Historical synonym** (originally called *former name*) is a "
@@ -493,9 +493,9 @@ A compact definition used only to exercise the shared contract.
                 "sources:\n", "aliases:\nsources:\n", 1),
             encoding="utf-8")
         write_entry(
-            "missing-counterpart", "Missing counterpart",
-            "**Missing counterpart** (MCA) binds its acronym in the opener.",
-            aliases=("mca",), card="Missing counterpart")
+            "missing-counterpart-acronym", "Missing counterpart acronym",
+            "**Missing counterpart acronym** (MCA) binds its acronym in the opener.",
+            aliases=("mca",), card="Missing counterpart acronym")
         write_entry(
             "synonym-parenthetical", "Synonym parenthetical",
             "**Synonym parenthetical** has a synonym alias without an opener binding.",
@@ -546,15 +546,15 @@ A compact definition used only to exercise the shared contract.
                         lint_items["alignment-sample"])
         for slug in ("arxiv", "feature-machine-learning",
                      "principal-component-analysis", "k-nearest-neighbors",
-                     "archaea", "hardwrapped-acronym", "adaboost",
+                     "archaea", "hard-wrap-acronym", "adaboost",
                      "saccharomyces-cerevisiae", "historical-synonym"):
-            self.assertEqual(lint_items[slug], set())
-        for slug in ("scalar-alias", "blank-alias", "missing-counterpart",
+            self.assertEqual(lint_items[slug], set(), slug)
+        for slug in ("scalar-alias", "blank-alias", "missing-counterpart-acronym",
                      "synonym-parenthetical", "wrong-title-case",
                      "singular-parenthetical"):
             expected = ("18-alias-form" if slug in ("scalar-alias", "blank-alias")
                         else "19-flashcards")
-            self.assertIn(expected, lint_items[slug], lint_items[slug])
+            self.assertIn(expected, lint_items[slug], slug)
 
         scan = json.loads(self.run_script(
             "skills/wiki-linter/scripts/scan_vault.py", wiki, "--indent", "0").stdout)
@@ -567,10 +567,10 @@ A compact definition used only to exercise the shared contract.
                         scan_items["alignment-sample"])
         for slug in ("arxiv", "feature-machine-learning",
                      "principal-component-analysis", "k-nearest-neighbors",
-                     "archaea", "hardwrapped-acronym", "adaboost",
+                     "archaea", "hard-wrap-acronym", "adaboost",
                      "saccharomyces-cerevisiae", "historical-synonym"):
             self.assertEqual(scan_items.get(slug, set()), set())
-        for slug in ("scalar-alias", "blank-alias", "missing-counterpart",
+        for slug in ("scalar-alias", "blank-alias", "missing-counterpart-acronym",
                      "synonym-parenthetical", "wrong-title-case",
                      "singular-parenthetical"):
             expected = ("item18" if slug in ("scalar-alias", "blank-alias")

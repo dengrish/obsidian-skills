@@ -451,8 +451,9 @@ read: false
 - `description` is ≤ 110 characters, entity as grammatical subject, plain text
   (no LaTeX, no markdown, no wikilinks).
 - `created` never changes. `updated` equals `created` on creation and is bumped
-  to today on a merge **that changed something** — never on a no-op merge, and
-  never by wiki-linter at all.
+  to today whenever a wiki-builder run changes the entry, including a
+  source-no-op merge whose independent QC or metadata work changes the file. A
+  byte-unchanged source-no-op keeps the old date. wiki-linter never changes it.
 - **`read` is a boolean, written `read: false` on creation.** It is the user's
   review checkbox (`.obsidian/types.json` pins it as `checkbox`), and §2d is
   the whole rule for who may write it.
@@ -687,15 +688,16 @@ something they have already read and quietly erodes their trust in the
 checkbox, while a false non-reset is caught the next time they open the note.
 Say which way a close call went in the run report.
 
-**One lint edit does add body content, and the rule for it lives here.**
-wiki-linter's QC item 12 equation clause typesets a calculation the note's
-own prose already states (the policy's home is
+**Two localized lint edits can add body content, and the rule for them lives here.**
+wiki-linter may copy a missing Person/Event date into the required opener only
+when that exact date is already stated elsewhere in the entry, or typeset a
+calculation the note's own prose already states under item 12 (the equation policy's home is
 `wiki-builder/references/equations.md`). Even then the linter writes neither
-`read:` nor `updated:` — it reports the insertion under *Notes for the user*,
-naming any entry whose `read: true` now predates the new equation, and the
-checkbox stays the user's to clear. wiki-builder's own merges are the
-contrast: a merge that adds an equation resets `read: false` like any other
-body content.
+`read:` nor `updated:`. For either case, it reports the insertion under *Notes for the user*,
+naming every entry whose `read: true` now predates the added date or equation,
+and the checkbox stays the user's to clear. wiki-builder's own merge pass is
+the contrast: any newly added unread body content resets `read: false`, whether
+it came from the active source or from the builder's independent QC.
 
 The reset rule requires judgment about body substance. Scripts check the
 field's presence, type and position, but cannot decide whether new reading
@@ -985,8 +987,11 @@ the bootstrap verbatim; shared algorithms are not copied into skill folders.
 
 The shared modules own these rules: `slugify.py` (§4a), `plugin_paths.py` (this
 section), `naming.py` (§1a), `plurals.py` (English inflection and light
-collision stemming shared by both Wiki skills), `figure_state.py` (§8b), and
-`yaml_scalars.py` (§2).
+collision stemming shared by both Wiki skills), `organism_names.py` (Organism
+name and typography evidence shared by both Wiki skills), `entry_structure.py`
+(shared entry-opener placement checks), `markdown_tables.py` (Markdown-table
+spans and caption checks shared by both Wiki skills), `figure_state.py` (§8b),
+and `yaml_scalars.py` (§2).
 
 `yaml_scalars.py` decodes the single-line scalar values used in frontmatter:
 YAML double-quote escapes, doubled apostrophes in single quotes, trailing
@@ -1025,6 +1030,10 @@ Rules that hold everywhere:
 - **Possessive and partitive mentions count** — `[[python|Python]]'s dict`.
 - **No self-links.** An entry's own subject is bare text (bolded on first
   appearance, still not linked).
+- **Integrate body links into the sentence that states the relationship.** Do
+  not use navigation-only directions such as `see [[…]]`, `(see [[…]])`,
+  `refer to [[…]]`, or `consult [[…]]`. State how the concepts relate, or keep
+  a purely navigational link in the Related footer.
 - **No wikilinks in image captions, table captions, or table cells.**
 - **Every target must be a real file in `Wiki/`.** No target, no link: an
   entity with no entry stays bare text — neither skill creates stubs any more.
@@ -1035,11 +1044,21 @@ Rules that hold everywhere:
 - **`tags:` values are never wikilinks** (§3) and `sources:` points at documents,
   not entries (§7); neither participates in link audits.
 
-**Two carve-outs that must not be "fixed":** the cross-domain bare-term label
+**Three carve-outs that must not be "fixed":** the cross-domain bare-term label
 (`[[information-entropy|entropy]]`, deliberately *not* an alias of that entry),
-and a natural plural or verb inflection (`features` for `feature`). Otherwise a
-display label must be a surface form the target's `title:`/`aliases:` actually
-claims — reword, or add a genuine alias, but never invent a label.
+a natural plural or verb inflection (`features` for `feature`), and an
+organism's ordinary common name when the target's description or opening
+sentence explicitly binds it to that Organism's canonical title (`[[mus-musculus|mouse]]`
+where the target says “Mus musculus is the mouse”). The last form may be unsafe
+as a global alias because the same common word can name something in another
+domain. The carve-out covers the complete bound phrase and its natural
+inflection; it does not strip a qualifier (`fruit fly` does not establish
+`fly`). Otherwise a display label must be a surface form the target's
+`title:`/`aliases:` actually claims — reword, or add a genuine alias, but never
+invent a label. A label that exactly names another existing entry's title or
+unambiguous alias is stronger evidence of a target conflict than token overlap
+with the selected target: review the target and the sentence rather than
+silently blessing or retargeting the link.
 
 **Depended on by:** wiki-builder (writes links inside its own entries),
 wiki-linter (owns them vault-wide — §9), clipping-processor (`![[…]]` image
