@@ -46,7 +46,7 @@ Specifically forbidden:
 - **Image without a caption below it.** Every embed has a one-line italic caption on the next line — see "Captions" below.
 - **Image detached from its motivating prose, parked at the end of the body just before the Related footer.** This is the default "treat the image as a trailing afterthought" failure mode — and the most common image-placement mistake. If the image illustrates content from the second paragraph of a multi-paragraph body, the image goes between the second and third paragraphs — not at the bottom of the last paragraph. The rule is "next to the motivating prose" — wherever in the body that prose lives.
 - **Image at the top of the entry**, before the first prose paragraph. The opening sentence is the canonical definition; nothing visual precedes it.
-- **Multiple images grouped as a gallery** anywhere in the body. Each selected image belongs beside its own motivating paragraph, and that paragraph must already earn its place without the image. Do not write extra prose to create a slot. If two images compete for one paragraph, choose the more helpful one; do not stack them or expand the note to fit both.
+- **Multiple exhibits grouped as a gallery** anywhere in the body. Each selected image or table belongs beside its own motivating paragraph, and that paragraph must already earn its place without the exhibit. One paragraph supports at most one exhibit total: if two images, or an image and a table, compete for it, choose the more helpful form. Do not stack exhibits or write extra prose to create slots.
 
 Example of correct inline placement:
 

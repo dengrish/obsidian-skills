@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""The canonical English singulariser — the one implementation in this plugin.
+"""Canonical English inflection and light collision-stem helpers.
 
 Two skills ask the same question and must not answer it differently.
 `wiki-builder` probes a *candidate* title against the vault (`SKILL.md` step 3,
-probes (c) and (e)); `wiki-linter` sweeps the *whole vault* for near-duplicate
+probes (c), (e), and (f)); `wiki-linter` sweeps the *whole vault* for near-duplicate
 pairs, and CONVENTIONS.md §9 gives whole-vault dedup detection to wiki-linter
 alone. Both rest on one fact — which two word forms are the same word — and
 until this module existed each held its own copy: `singularize()` in
@@ -35,6 +35,7 @@ skills import it) and §9 is the ownership split this restores.
     singular_forms(word) -> set     singular_keys(slug) -> set
                                     wordorder_key_singular(slug)
                                     real_permutation(slug_a, slug_b)
+                                    stem_key(slug), stem_tokens(slug)
 
 **`singular_forms` / `singular_keys` are the SYMMETRIC pair, and a probe wants
 them.** English singularisation is ambiguous ("bases" = base | basis, "axes" =
@@ -50,6 +51,8 @@ Usage as a module (after the CONVENTIONS.md §5 bootstrap):
     plurals.singular_keys("bases")                  -> {'bases', 'base', 'basis'}
     plurals.wordorder_key_singular("testing-hypotheses")  -> 'hypothesis-testing'
     plurals.real_permutation("weight-tying", "tying-weights")   -> True
+    plurals.stem_key("masked-language-modeling")    -> 'languag-mask-model'
+    plurals.stem_tokens("k-means-clustering")       -> {'cluster', 'k', 'mean'}
 
 As a CLI:
 
@@ -66,7 +69,7 @@ __all__ = [
     "IRREGULAR_PLURALS", "IRREGULAR_SINGULARS", "AMBIGUOUS_IRREGULAR_PLURALS",
     "VES_IRREGULARS", "pluralize", "singularize", "singular_forms",
     "singular_key", "singular_keys", "plural_key", "wordorder_key_singular",
-    "real_permutation", "run_self_test",
+    "real_permutation", "stem_key", "stem_tokens", "run_self_test",
 ]
 
 IRREGULAR_PLURALS = {
@@ -229,6 +232,45 @@ def real_permutation(slug_a, slug_b):
         != [singularize(t) for t in slug_b.split("-") if t]
 
 
+# Probe (f)'s light morphology is shared for the same reason as the plural and
+# word-order keys above: wiki-builder tests an incoming candidate, while
+# wiki-linter is the only process that sees a pair already present in a vault.
+# A copied suffix table lets the two worklists silently disagree. Ordered
+# longest-first so ``ization`` wins over ``ation`` and ``ion``.
+_STEM_SUFFIXES = [
+    "izations", "isations", "ization", "isation", "ationally", "ational",
+    "izing", "ising", "izers", "isers", "izer", "iser", "ized", "ised",
+    "ize", "ise", "ations", "ation", "ating", "ates", "ated", "ate",
+    "ements", "ement", "ments", "ment",
+    "nesses", "ness", "ities", "ity", "ings", "ing", "ers", "er", "ors",
+    "or", "ies", "ied", "ed", "es", "s",
+]
+_DOUBLE_TAIL_RE = re.compile(r"([bdfglmnprt])\1$")
+
+
+def _stem_token(token):
+    """Light suffix stem used only for collision signals, never titles."""
+    value = token
+    for suffix in _STEM_SUFFIXES:
+        if value.endswith(suffix) and len(value) - len(suffix) >= 3:
+            value = value[: -len(suffix)]
+            break
+    value = _DOUBLE_TAIL_RE.sub(r"\1", value)  # modell -> model
+    if len(value) > 3 and value.endswith("e"):
+        value = value[:-1]                       # tokeniz(e) -> tokeniz
+    return value
+
+
+def stem_key(slug):
+    """Probe (f) key: tokens light-stemmed, then sorted."""
+    return "-".join(sorted(_stem_token(t) for t in slug.split("-") if t))
+
+
+def stem_tokens(slug):
+    """Probe (g) token set, using the same light stem as probe (f)."""
+    return {_stem_token(t) for t in slug.split("-") if t}
+
+
 # ---------------------------------------------------------------------------
 # self-test
 # ---------------------------------------------------------------------------
@@ -289,6 +331,16 @@ SLUG_CASES = [
     ("roc-curve",          "roc-curves",         True,  False),
     ("decision-tree",      "decision-trees",     True,  False),
     ("random-forest",      "gradient-boosting",  False, False),
+]
+
+# `(slug_a, slug_b, same stem key?)`. The positive pair is the documented gap
+# probe (f) exists to catch; the plural pair proves that callers still need to
+# prefer the earlier, more specific plural probe when both keys agree.
+STEM_CASES = [
+    ("masked-language-model", "masked-language-modeling", True),
+    ("tokenization", "tokenizer", True),
+    ("roc-curve", "roc-curves", True),
+    ("random-forest", "gradient-boosting", False),
 ]
 
 
@@ -357,6 +409,13 @@ def run_self_test():
         if perm != is_permutation:
             failures.append("word-order-singular %r ~ %r -> %r, expected %r"
                             % (a, b, perm, is_permutation))
+
+    for a, b, same_stem in STEM_CASES:
+        total += 1
+        got = stem_key(a) == stem_key(b)
+        if got != same_stem:
+            failures.append("stem_key(%r) == stem_key(%r) -> %r, expected %r"
+                            % (a, b, got, same_stem))
 
     # The head token is the only one probe (c) rewrites: a plural sitting
     # earlier in the slug is part of the qualifier, not the thing named.

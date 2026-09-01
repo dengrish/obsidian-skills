@@ -151,7 +151,7 @@ _ITEM_RE = re.compile(r"^(?P<indent>\s*)-(?:\s+(?P<val>.*)|\s*)$")
 _WIKILINK_RE = re.compile(r"(?<!\!)\[\[([^\[\]]+?)\]\]")
 _EMBED_RE = re.compile(r"\!\[\[([^\[\]]+?)\]\]")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_SOURCE_REF_RE = re.compile(r"\[\[[^\[\]|#]+\.(?:pdf#page=0*[1-9][0-9]*|md)\]\]", re.I)
+_SOURCE_REF_RE = re.compile(r"\[\[[^\[\]|#]+\.(?:pdf#page=[1-9][0-9]*|md)\]\]", re.I)
 
 
 # --------------------------------------------------------------------------
@@ -950,7 +950,9 @@ def run_self_test():
         # are compared literally (including numeric disambiguators).
         put("cited.md", _st_entry_text("Cited").replace(
             '"[[Doe_X_2025.pdf#page=2]]"',
-            '"[[Sources/PDFs/Garc\\u00eda_Study_2025.pdf#page=02]]" # origin'))
+            '"[[Sources/PDFs/Garc\\u00eda_Study_2025.pdf#page=2]]" # origin'))
+        put("leading-zero.md", _st_entry_text("Leading zero").replace(
+            'Doe_X_2025.pdf#page=2', 'Garc\\u00eda_Study_2025.pdf#page=02'))
         put("mentioned.md", _st_entry_text("Mentioned", body='An example uses [[García_Study_2025.pdf]].\n'))
         put("different.md", _st_entry_text("Different").replace(
             'Doe_X_2025.pdf', 'García_Study_2025_2.pdf'))
@@ -962,6 +964,12 @@ def run_self_test():
               ["cited"])
         check("malformed provenance remains a problem rather than an automatic source match",
               any("bad-source.md: sources:" in p for p in source_idx["problems"]), True)
+        check("a leading-zero PDF page is malformed and never source-matches",
+              (any("leading-zero.md: sources:" in p for p in source_idx["problems"]),
+               [r["slug"] for r in source_matches(
+                   source_idx, ["García_Study_2025.pdf"])
+                if r["slug"] == "leading-zero"]),
+              (True, []))
         out_path = os.path.join(tmp, "source-index.json")
         with contextlib.redirect_stdout(io.StringIO()):
             rc = main([wiki, "--source", "García_Study_2025.pdf", "--source", "DifferentNote.md", "-o", out_path])

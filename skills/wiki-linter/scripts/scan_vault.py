@@ -95,7 +95,12 @@ _sys.path.insert(0, _shared)               # shared/scripts/ FIRST
 _sys.path.append(_here)                    # own dir LAST: a local copy cannot shadow it
 # --- end bootstrap ---
 
-from slugify import SlugError as _SlugError, slug_stem as _slug_stem  # noqa: E402
+from slugify import (  # noqa: E402
+    SlugError as _SlugError,
+    base_term,
+    has_parenthetical,
+    slug_stem as _slug_stem,
+)
 from yaml_scalars import parse_scalar, strip_comment  # noqa: E402
 
 # ===========================================================================
@@ -113,7 +118,7 @@ from yaml_scalars import parse_scalar, strip_comment  # noqa: E402
 # ===========================================================================
 from plurals import (  # noqa: E402
     pluralize, real_permutation, singular_key, singular_keys,
-    wordorder_key_singular,
+    stem_key, wordorder_key_singular,
 )
 
 
@@ -134,13 +139,135 @@ def slug(title):
         return ""
 
 
-COMMON_NOUNS = {"regression","classification","clustering","inertia","entropy","policy",
- "return","transformer","kernel","filter","bias","gradient","tensor","attention","model",
- "vector","domain","field","function","label","shrinkage"}
+# The explicit mechanical floor in wiki-builder/references/writing.md,
+# Cross-domain term disambiguation.  The prose rule remains broader (dictionary
+# and drafting tests catch terms outside a finite set); every term it names
+# explicitly must at least be guarded here, both from a bare filename and from
+# becoming an automatic backfill destination.
+COMMON_NOUNS = {
+    "activation", "agent", "attention", "bias", "cell", "classification",
+    "clustering", "domain", "ensemble", "entropy", "feature", "field",
+    "filter", "function", "gradient", "inertia", "kernel", "label", "model",
+    "normalization", "policy", "regression", "return", "shrinkage",
+    "temperature", "tensor", "transformer", "vector",
+}
 
 # libraries used in item-6 API-surface failure-string scan
 LIBS = ["PyTorch","TensorFlow","JAX","NumPy","Pandas","scikit-learn","sklearn","Keras",
         "SciPy","Matplotlib","Hugging Face","XGBoost","LightGBM","CatBoost"]
+
+
+def math_skeleton(text):
+    """Plain-text title form used by the flashcard answer contract.
+
+    Line 3 cannot carry LaTeX, so a symbol-bearing title such as
+    ``$\\mathbf{k}$-nearest neighbors`` is represented there as
+    ``k-nearest neighbors``.  This intentionally mirrors wiki-builder's
+    single-entry lint check.
+    """
+    s = (text or "").replace("$", "")
+    for _ in range(4):
+        new = re.sub(r"\\[A-Za-z]+\s*\{([^{}]*)\}", r"\1", s)
+        if new == s:
+            break
+        s = new
+    s = re.sub(r"\\[A-Za-z]+", "", s)
+    s = s.replace("{", "").replace("}", "")
+    return re.sub(r"\s+", " ", s).strip()
+
+
+_BOLD_PAREN_RE = re.compile(r"\*\*[^*\n]+\*\*\s*\(([A-Za-z][^()\n]{0,59})\)")
+_PAREN_LEADIN_RE = re.compile(
+    r"^(?:singular|plural|abbreviated|formerly|n[ée]e|or)[\s,:]+",
+    re.IGNORECASE)
+_NON_NAME_PAREN_RE = re.compile(
+    r"^(?:b\.|c\.|d\.|fl\.|r\.|e\.g|i\.e|cf\.|vs\.|see\s|a\s|an\s|the\s|"
+    r"annual|ongoing)|\d{3,4}", re.IGNORECASE)
+
+
+def _clean_card_counterpart(raw):
+    """Return a plain direct acronym/full-form binding, or ``None``."""
+    value = " ".join((raw or "").split())
+    if ("*" in value or "_" in value or _PAREN_LEADIN_RE.match(value)
+            or _NON_NAME_PAREN_RE.search(value)):
+        return None
+    return value.strip()
+
+
+def flashcard_primary_answer(title, aliases, opener):
+    """Return the exact plain-text term and any opener-bound counterpart."""
+    term = base_term(title) if has_parenthetical(title) else (title or "")
+    term = math_skeleton(term).strip()
+    alias_keys = {fold_name(a) for a in aliases if a}
+    counterpart = None
+    opening_block = " ".join(
+        line.strip() for line in (opener or "").splitlines())
+    for match in _BOLD_PAREN_RE.finditer(opening_block):
+        candidate = _clean_card_counterpart(match.group(1))
+        if candidate is None:
+            continue
+        try:
+            candidate_slug = fold_name(_slug_stem(candidate))
+        except _SlugError:
+            continue
+        if candidate_slug in alias_keys:
+            counterpart = candidate
+            break
+    return term, counterpart
+
+
+def flashcard_line3_fault(line3, title, aliases, opener):
+    """Explain a line-3 contract violation, or return ``None``."""
+    expected_term, required_counterpart = flashcard_primary_answer(
+        title, aliases, opener)
+    match = re.fullmatch(r"(?P<term>.*?)(?: \((?P<paren>[^()\n]+)\))?",
+                         (line3 or "").strip())
+    term = match.group("term") if match else (line3 or "").strip()
+    counterpart = match.group("paren") if match else None
+    if expected_term and term != expected_term:
+        return 'the term must be exactly "%s" (same canonical casing)' % expected_term
+
+    if counterpart is not None:
+        if required_counterpart is None:
+            return ('the parenthetical "%s" is not established as the title\'s '
+                    "own acronym/full-form counterpart in the opener" % counterpart)
+        if counterpart != required_counterpart:
+            return "the established counterpart must appear exactly as (%s)" % required_counterpart
+    if required_counterpart is not None and counterpart != required_counterpart:
+        return "the established counterpart must appear exactly as (%s)" % required_counterpart
+    return None
+
+
+# The stub sentence counter intentionally mirrors lint_entry.count_sentences.
+# It is a conservative structure check, not a general prose parser: initials,
+# decimals/version dots and common abbreviations do not split a one-sentence
+# legacy stub into phantom sentences.
+_ABBREVS = [
+    "e.g.", "i.e.", "cf.", "et al.", "approx.", "vs.", "ca.", "c.", "fl.",
+    "Dr.", "Prof.", "Mr.", "Mrs.", "Ms.", "St.", "Jr.", "Sr.", "Fig.",
+    "No.", "b.", "d.", "r.", "U.S.", "U.K.",
+]
+_ABBREV_RE = re.compile(
+    r"(?:^|[^0-9A-Za-z])(?:%s)$"
+    % "|".join(re.escape(a) for a in sorted(_ABBREVS, key=len, reverse=True)),
+    re.IGNORECASE)
+_INITIAL_RE = re.compile(r"(?:^|[^0-9A-Za-z'’])[A-Za-z]\.$")
+
+
+def count_sentences(text):
+    """Conservative sentence-boundary count for legacy stub structure."""
+    compact = " ".join((text or "").split())
+    count = 0
+    for match in re.finditer(r"[.!?]+", compact):
+        following = compact[match.end():match.end() + 1]
+        if following and not following.isspace():
+            continue
+        if match.group(0) == ".":
+            head = compact[max(0, match.end() - 16):match.end()]
+            if _INITIAL_RE.search(head) or _ABBREV_RE.search(head):
+                continue
+        count += 1
+    return count
 
 def leftover_dollars(body):
     # `strip_fenced`, not a backtick-only regex: markdown fences a block with
@@ -166,6 +293,55 @@ EMB = re.compile(r"^\s*(?:!\[\[[^\]]*\.(?:png|jpe?g|gif|svg|webp|tiff?|bmp|avif)
 #: wiki-builder writes.
 IMG_EMBED = re.compile(
     r"!\[\[([^\]|\n]+\.(?:png|jpe?g|gif|svg|webp|tiff?|bmp|avif))(?:\|[^\]\n]*)?\]\]", re.I)
+
+# A Markdown table is established by a header row immediately followed by a
+# delimiter row with at least two `---` cells.  Looking for arbitrary pipes
+# mistakes prose, shell syntax and type unions for tables; fenced listings are
+# blanked before this reader runs.
+_TABLE_DELIM_RE = re.compile(
+    r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")
+
+
+def caption_faults(caption):
+    """Caption-format faults; outer single-asterisk italics are required."""
+    cap = (caption or "").strip()
+    if not (cap.startswith("*") and not cap.startswith("**")
+            and cap.endswith("*") and not cap.endswith("**") and len(cap) >= 3):
+        return ["missing italic caption"]
+    inner = cap[1:-1]
+    faults = [name for name, token in
+              (("wikilink", "[["), ("bold", "**"), ("backtick", "`"))
+              if token in inner]
+    if re.search(r"\*\w[^*]*\*", inner):
+        faults.append("italic")
+    return faults
+
+
+def markdown_tables(body):
+    """Return ``(original_lines, [(header_index, last_row_index), ...])``.
+
+    This is the deterministic CommonMark/GFM floor needed for caption checks,
+    not a table renderer.  A row continues while it is nonblank and contains a
+    pipe; the caption therefore has to be the immediate following line.  Table
+    positions come from ``strip_code`` so fenced, indented and tab-indented
+    listings cannot masquerade as tables.  Caption text comes from the original
+    lines so real backticks remain visible to ``caption_faults``.
+    """
+    original_lines = body.split("\n")
+    lines = strip_code(body).split("\n")
+    tables, consumed_through = [], -1
+    for i in range(1, len(lines)):
+        if i <= consumed_through or not _TABLE_DELIM_RE.match(lines[i]):
+            continue
+        if not lines[i - 1].strip() or "|" not in lines[i - 1]:
+            continue
+        end = i
+        while end + 1 < len(lines) and lines[end + 1].strip() \
+                and "|" in lines[end + 1]:
+            end += 1
+        tables.append((i - 1, end))
+        consumed_through = end
+    return original_lines, tables
 
 def split_frontmatter(text):
     # BOM only -- never whitespace: Obsidian reads properties only when the
@@ -420,6 +596,11 @@ READ_BOOLEANS = {"true", "false"}
 #: retype — so they route with the missing key, not with `read: yes`.  See the
 #: `read:` block in `scan()`.
 READ_NULLS = {"", "null", "~"}
+VALID_TYPES = [
+    "Concept", "Person", "Organization", "Dataset", "Software", "Device",
+    "Event", "Standard", "Gene/Protein", "Organism", "Chemical", "Reaction",
+    "Place", "Work", "Quote",
+]
 VALID_TAGS = {"mathematics","statistics","physics","chemistry","biology","earth-science",
  "medicine","engineering","computer-science","psychology","sociology","anthropology",
  "economics","finance","political-science","linguistics","history","philosophy","literature","law",
@@ -859,8 +1040,15 @@ def scan(wiki, images=None):
         if isinstance(sources, str): sources = [sources]
         is_stub = (sources == ["stub"])
         title = _scalar("title")
+        aliases_present = "aliases" in fm
+        aliases_spelling = raw_scalar(fm_raw, "aliases")
+        aliases_is_list = (
+            isinstance(fm.get("aliases"), list)
+            and (bool(aliases_spelling and aliases_spelling.startswith("[")
+                      and aliases_spelling.endswith("]"))
+                 or has_block_items(fm_raw, "aliases")))
         aliases = ([a for a in fm["aliases"] if isinstance(a, str) and a]
-                   if isinstance(fm.get("aliases"), list) else [])
+                   if aliases_is_list else [])
         tags_raw = fm.get("tags", []) if isinstance(fm.get("tags"), list) else ([fm["tags"]] if fm.get("tags") else [])
         tags_raw = [t.strip() for t in tags_raw if isinstance(t, str) and t.strip()]  # decoded, non-null tags
         tag_slugs = [t.lstrip("#").strip() for t in tags_raw]          # discipline slugs without the # prefix, for MOC/hierarchy use
@@ -868,7 +1056,9 @@ def scan(wiki, images=None):
         created = _scalar("created"); updated = _scalar("updated")
         key_order = [m.group(1) for line in fm_raw.split("\n") if (m:=FM_KEY.match(line))]
         prose, rel, fcsec, flash_off, flash_head = regions(body)
-        entries[sl] = dict(slug=sl, title=title, aliases=aliases, type=_scalar("type"),
+        entries[sl] = dict(slug=sl, title=title, aliases=aliases,
+                           aliases_present=aliases_present,
+                           aliases_is_list=aliases_is_list, type=_scalar("type"),
                            tags_raw=tags_raw, tag_slugs=tag_slugs, is_stub=is_stub,
                            sources=sources, sources_is_list=isinstance(fm.get("sources"), list),
                            body=body, prose=prose, rel=rel, fcsec=fcsec, desc=desc,
@@ -1046,6 +1236,12 @@ def scan(wiki, images=None):
                 problems.append((sl,"item2",'old roots: key, no tags: key — migrate roots → tags (one or more #-prefixed discipline slugs from the 27-enum, not a wikilink)'))
         elif "tags" not in e["key_order"]:
             problems.append((sl,"item2","missing tags: key (mandatory — present even when blank on a full entry)"))
+        if not e["type"]:
+            problems.append((sl,"item2/type-enum",
+                             "type: is blank or non-scalar — it must be one of the 15 canonical type values"))
+        elif e["type"] not in VALID_TYPES:
+            problems.append((sl,"item2/type-enum",
+                             f'type: "{e["type"]}" is not one of the 15 canonical type values'))
         cur = None
         for line in fm_raw.split("\n"):
             mt = FM_KEY.match(line)
@@ -1218,8 +1414,28 @@ def scan(wiki, images=None):
         if re.search(r"\*\*|\*\w[^*]*\*", e["desc"]): marks.append("* (bold/italic)")
         if marks:
             problems.append((sl,"item7",f'description has non-plain-text markup ({", ".join(marks)}) — renders literally in Obsidian Properties'))
+        if e["desc"]:
+            if e["desc"][0].isalpha() and not e["desc"][0].isupper():
+                subjects = []
+                for subject in (title, base_term(title) if title else None):
+                    for form in (subject, math_skeleton(subject) if subject else None):
+                        if form and form not in subjects:
+                            subjects.append(form)
+                lowercase_title_subject = any(
+                    s[0].islower() and e["desc"].startswith(s) for s in subjects)
+                if not lowercase_title_subject:
+                    problems.append((sl,"item7",
+                                     "description does not start with a capitalized word"))
+            if not e["desc"].rstrip().endswith("."):
+                problems.append((sl,"item7","description does not end with a period"))
         # ---- item 8: tags validity (#-prefixed discipline slugs from the 27-enum; NOT wikilinks) ----
         e_tags_raw, e_tag_slugs = e["tags_raw"], e["tag_slugs"]
+        raw_tags = raw_scalar(fm_raw, "tags")
+        if raw_tags not in (None, ""):
+            spelling = "flow-list" if raw_tags.startswith("[") else "scalar"
+            problems.append((sl,"item8",f'tags: uses {spelling} syntax — write a block-form '
+                             'list with one double-quoted tag per `-` line; a full entry with '
+                             'no disciplinary home uses a blank `tags:` key'))
         if not e_tags_raw:
             if is_stub:
                 problems.append((sl,"item8","stub has blank tags: — every stub needs ≥1 discipline tag, inherited from the entry that links it (wiki-builder's SKILL.md, Stubs (legacy): Structure)"))
@@ -1274,6 +1490,22 @@ def scan(wiki, images=None):
             opener = e["prose"].split("\n\n",1)[0]
             if not re.search(r"\([^)]*\b\d{3,4}\b[^)]*\)", opener):
                 problems.append((sl,"item9",f'{e["type"]} opener missing parenthetical date(s)'))
+        if is_stub:
+            stub_prose = e["prose"].strip()
+            paragraphs = [p for p in re.split(r"\n\s*\n", stub_prose) if p.strip()]
+            if len(paragraphs) > 1:
+                problems.append((sl,"stub-one-sentence-body",
+                                 f'a stub body is one sentence; found {len(paragraphs)} paragraphs'))
+            elif paragraphs:
+                sentence_count = count_sentences(paragraphs[0])
+                if sentence_count > 1:
+                    problems.append((sl,"stub-one-sentence-body",
+                                     f'a stub body is one sentence; found roughly {sentence_count}'))
+            else:
+                problems.append((sl,"stub-one-sentence-body","stub has no body sentence"))
+            if re.search(r"!\[\[[^\]\n]+\]\]|!\[[^\]\n]*\]\([^)\n]+\)",
+                         strip_code(e["body"])):
+                problems.append((sl,"stub-no-images","stubs never carry images"))
         # ---- item 12 (format): unescaped literal $ and remote image embeds ----
         if not is_stub:
             nd = leftover_dollars(e["body"])
@@ -1294,14 +1526,22 @@ def scan(wiki, images=None):
             for i,ln in enumerate(blines):
                 if not EMB.match(ln): continue
                 cap = blines[i+1].strip() if i+1 < len(blines) else ""
-                if not (cap.startswith("*") and not cap.startswith("**") and cap.endswith("*") and len(cap) >= 3):
+                cap_faults = caption_faults(cap)
+                if cap_faults == ["missing italic caption"]:
                     problems.append((sl,"item12",f'image embed without an italic *caption* on the next line: {ln.strip()[:48]}'))
-                else:
-                    inner = cap.strip("*")
-                    cbad = [n for n,c in (("wikilink","[["),("bold","**"),("backtick","`")) if c in inner]
-                    if re.search(r"\*\w[^*]*\*", inner): cbad.append("italic")
-                    if cbad:
-                        problems.append((sl,"item12",f'caption has {", ".join(cbad)} — captions are plain text (only LaTeX $…$ allowed): {cap[:48]}'))
+                elif cap_faults:
+                    problems.append((sl,"item12",f'caption has {", ".join(cap_faults)} — captions are plain text (only LaTeX $…$ allowed): {cap[:48]}'))
+            table_lines, tables = markdown_tables(e["body"])
+            for header_i, end_i in tables:
+                cap = table_lines[end_i + 1].strip() if end_i + 1 < len(table_lines) else ""
+                cap_faults = caption_faults(cap)
+                table_head = table_lines[header_i].strip()[:48]
+                if cap_faults == ["missing italic caption"]:
+                    problems.append((sl,"item12",f'Markdown table without an italic *caption* '
+                                     f'on the immediately following line: {table_head}'))
+                elif cap_faults:
+                    problems.append((sl,"item12",f'table caption has {", ".join(cap_faults)} — '
+                                     f'captions are plain text (only LaTeX $…$ allowed): {cap[:48]}'))
         # ---- item 12 (embeds): every ![[…]] image names a file that is there ----
         # Only with --images: without the folder there is nothing to compare
         # against, and guessing would report every embed in the vault as broken.
@@ -1429,7 +1669,7 @@ def scan(wiki, images=None):
             if not cards:
                 problems.append((sl,"item19","## Flashcards section has no card"))
             elif len(cards) > 1:
-                problems.append((sl,"item19",f'{len(cards)} cards in ## Flashcards — exactly one card per entry; keep the card whose line 3 matches the title (the BASE term, for a parenthetical-disambiguated title), split or drop the rest'))
+                problems.append((sl,"item19",f'{len(cards)} cards in ## Flashcards — exactly one card per entry; keep the primary card whose line 3 uses the exact canonical title/base/math-skeleton term and includes any required opener-established acronym/full-form counterpart, then split or drop the rest'))
             alias_forms = [x for a in e["aliases"] for x in (a, a.replace("-"," "))]
             for ci, block in enumerate(cards, 1):
                 cl = block.split("\n")
@@ -1491,6 +1731,13 @@ def scan(wiki, images=None):
                 elif re.search(r"\*\w[^*]*\*", line3): l3.append("italic")
                 if l3:
                     problems.append((sl,"item19",f'{tag} line 3 (term) has {", ".join(l3)} — the term is plain text matching the title verbatim (no markup, including LaTeX)'))
+                opener = e["prose"].split("\n\n", 1)[0]
+                line3_fault = flashcard_line3_fault(
+                    line3, title, e["aliases"], opener)
+                if line3_fault:
+                    problems.append((sl, "item19",
+                                     f'{tag} line 3 is "{line3[:40]}" — '
+                                     f'{line3_fault}'))
         # ---- stubs have no Related footer ----
         if is_stub and e["has_related"]:
             problems.append((sl,"stub","stub has a **Related:** footer"))
@@ -1595,18 +1842,46 @@ def scan(wiki, images=None):
             t = m.group(1).split("#")[0].split("^")[0].strip(); seen[t] = seen.get(t,0)+1
         for t,c in seen.items():
             if c > 1: problems.append((sl,"item10/dup",f'"{t}" wikilinked {c}× in prose — keep first only'))
-        # ---- item 11: Related footer bare links rendering lowercase ----
+        # ---- item 11: every Related footer link is piped to its canonical title ----
         for m in WIKILINK.finditer(e["rel"]):
             tgt, disp = m.group(1).strip(), m.group(2)
+            # The link target may carry an anchor and/or a vault path while
+            # still resolving to an entry.  Resolve the underlying basename
+            # before deciding whether item 11 applies; a direct dict lookup on
+            # the rendered target let [[Wiki/term#Heading]] escape the rule.
+            lookup = tgt.split("#", 1)[0].split("^", 1)[0].strip()
+            lookup = lookup.replace("\\", "/").rsplit("/", 1)[-1]
+            if lookup.lower().endswith(".md"):
+                lookup = lookup[:-3]
+            lookup_key = fold_name(lookup)
+            if lookup_key in ambiguous_files or lookup_key in ambiguous_aliases:
+                continue
+            actual = fold_of.get(lookup_key)
+            if actual is None and lookup_key in alias_of:
+                actual = alias_of[lookup_key][0]
+            tt = entries.get(actual, {}).get("title", "") if actual else ""
+            if not tt:
+                continue
             if disp is None:
-                tt = entries.get(tgt,{}).get("title","")
-                if tt and tt != tt.lower():
-                    problems.append((sl,"item11",f'Related footer bare link [[{tgt}]] should be piped to "{tt}"'))
+                problems.append((sl,"item11",f'Related footer bare link [[{tgt}]] should be piped to "{tt}"'))
+            elif disp != tt:
+                problems.append((sl, "item11",
+                                 f'Related footer link [[{tgt}|{disp}]] must use '
+                                 f'the canonical title "{tt}" as its display label'))
 
     # ---- item 18: alias collisions + within-entry dup + display-label sanity ----
     alias_owner = {}
     for sl,e in entries.items():
         al = e["aliases"]
+        if e["aliases_present"] and not e["aliases_is_list"]:
+            if raw_scalar(e["fm_raw"], "aliases") == "":
+                message = ("aliases: must be a list; a bare key is YAML null — "
+                           "remove this optional key when there are no aliases, "
+                           "or write aliases: [] for an explicit empty list")
+            else:
+                message = ("aliases: must be a list, not a scalar — wrap the "
+                           "existing value as one quoted list item without changing it")
+            problems.append((sl, "item18", message))
         for a in sorted({x for x in al if al.count(x) > 1}):
             problems.append((sl,"item18",f'alias "{a}" listed {al.count(a)}× within this entry'))
         # Case/normalization-variant duplicates WITHIN one entry: by the
@@ -1624,6 +1899,15 @@ def scan(wiki, images=None):
                                  f'aliases "{_fold_first[_k]}" and "{a}" differ only in '
                                  f'case/normalization — one name to Obsidian; keep one'))
             _fold_first.setdefault(_k, a)
+        for a in al:
+            try:
+                expected = _slug_stem(a)
+            except _SlugError:
+                problems.append((sl,"item18",f'alias "{a}" cannot be converted to a slug'))
+                continue
+            if a != expected:
+                problems.append((sl,"item18",
+                                 f'alias "{a}" is not in slug form (expected "{expected}")'))
         # Keyed on fold_name, like every other "is this the same name?"
         # comparison in this file (see fold_name's docstring). Two aliases that
         # differ only in case or Unicode normalization are ONE name to Obsidian
@@ -1706,7 +1990,7 @@ def scan(wiki, images=None):
                 collisions.append((sl, ident_owner[ident], "exact", ident))
             else:
                 ident_owner.setdefault(ident, sl)
-    def group_probe(keyfn, name, pair_ok=None):
+    def group_probe(keyfn, name, pair_ok=None, skip_pairs=None):
         # `pair_ok(ident_a, ident_b)` is an optional last-word filter on a grouped pair —
         # for a probe whose key deliberately over-groups (see word-order-singular below).
         # `keyfn` may return one key or a SET of them: English singularization is
@@ -1725,7 +2009,10 @@ def scan(wiki, images=None):
                 ms = sorted(members)
                 for i in range(len(ms)):
                     for j in range(i+1,len(ms)):
-                        if ms[i][0] != ms[j][0] and (pair_ok is None or pair_ok(ms[i][1], ms[j][1])):
+                        pair = frozenset((ms[i][0], ms[j][0]))
+                        if (ms[i][0] != ms[j][0]
+                                and (pair_ok is None or pair_ok(ms[i][1], ms[j][1]))
+                                and (skip_pairs is None or pair not in skip_pairs)):
                             collisions.append((ms[i][0], ms[j][0], name, f"{ms[i][1]}~{ms[j][1]}"))
     # `singular_keys` is shared/scripts/plurals.py's probe-(c) key SET — every plausible
     # singular of the identifier's head token, the identifier itself included — so an
@@ -1755,6 +2042,14 @@ def scan(wiki, images=None):
             alt = slug(t.replace("µ","\u03bc")) if "µ" in t else slug(t.replace("\u03bc","µ"))
             if alt != sl and alt in entries:
                 collisions.append((sl, alt, "µ-variant", f"{sl}~{alt}"))
+    # Probe (f), light stem morphology, is the last whole-key probe in
+    # wiki-builder.  It only adds a signal when none of the earlier probes
+    # already covered the pair, so a plural such as roc-curve/roc-curves keeps
+    # the more precise `plural` label instead of acquiring a second finding.
+    # The key itself lives in shared/scripts/plurals.py and is therefore
+    # byte-for-byte the builder's create-time key rather than a local copy.
+    covered_pairs = {frozenset((a, b)) for a, b, _p, _d in collisions}
+    group_probe(stem_key, "stem-morphology", skip_pairs=covered_pairs)
     # dedup collisions (unordered pair + probe)
     seen_c = set(); collisions2 = []
     for a,b,p,d in collisions:
@@ -2208,6 +2503,15 @@ def run_self_test():
             tags=('"#statistics"', '"#statistics"')))
         _st_write(v, "offenum.md", _st_entry(
             "Offenum", "**Offenum** is a worked example.", tags=('"#astrology"',)))
+        _st_write(v, "flow-tags.md", _st_entry(
+            "Flow tags", "**Flow tags** is a worked example.").replace(
+            'tags:\n  - "#statistics"\n', 'tags: ["#statistics"]\n'))
+        _st_write(v, "scalar-tags.md", _st_entry(
+            "Scalar tags", "**Scalar tags** is a worked example.").replace(
+            'tags:\n  - "#statistics"\n', 'tags: "#statistics"\n'))
+        _st_write(v, "blank-tags.md", _st_entry(
+            "Blank tags", "**Blank tags** is a worked example.").replace(
+            'tags:\n  - "#statistics"\n', 'tags:\n'))
         _st_write(v, "twocards.md", _st_entry(
             "Twocards", "**Twocards** is a worked example.",
             tags=('"#physics"',)).replace(
@@ -2245,8 +2549,14 @@ def run_self_test():
         check("an off-enum tag is reported and lands in off_enum_tags",
               ("not one of the 27" in _st_msg(res, "offenum", "item8"),
                sorted(res["off_enum_tags"])), (True, ["astrology", "ml"]))
+        check("flow-form tags are rejected even when every value is valid",
+              "flow-list syntax" in _st_msg(res, "flow-tags", "item8"), True)
+        check("scalar tags are rejected even when the value is valid",
+              "scalar syntax" in _st_msg(res, "scalar-tags", "item8"), True)
+        check("a blank block-form tags key remains valid on a full entry",
+              _st_keys(res, "blank-tags"), [])
         check("the tag census counts the enum tags",
-              res["discipline_tags"].get("statistics", {}).get("full"), 1)
+              res["discipline_tags"].get("statistics", {}).get("full"), 3)
         check("a second flashcard trips the one-card cap",
               "exactly one card per entry" in _st_msg(res, "twocards", "item19"), True)
 
@@ -2309,6 +2619,40 @@ def run_self_test():
         check("a plural pair already in the vault is a collision candidate",
               [(c["a"], c["b"], c["probe"]) for c in res4b["collision_candidates"]],
               [("roc-curve", "roc-curves", "plural")])
+
+        # Probe (f) uses the exact same shared stem key as wiki-builder, and it
+        # runs only after the more specific probes have had first claim.
+        v = os.path.join(tmp, "v4c")
+        for name, title in (("masked-language-model", "Masked language model"),
+                            ("masked-language-modeling", "Masked language modeling")):
+            _st_write(v, name + ".md", _st_entry(
+                title, "**%s** is a worked example." % title, card=title))
+        res4c = scan(v)
+        check("a noun/gerund pair already in the vault fires shared probe (f)",
+              [(c["a"], c["b"], c["probe"])
+               for c in res4c["collision_candidates"]],
+              [("masked-language-model", "masked-language-modeling",
+                "stem-morphology")])
+
+        # writing.md's named corpus is the scanner's mechanical minimum.  A
+        # single fixture over every term prevents additions to one copied list
+        # from silently escaping both the filename and backfill gates.
+        v = os.path.join(tmp, "v4d")
+        for term in sorted(COMMON_NOUNS):
+            title = term.capitalize()
+            _st_write(v, term + ".md", _st_entry(
+                title, "**%s** is a worked example." % title, card=title))
+        _st_write(v, "reader.md", _st_entry(
+            "Reader", "**Reader** compares " + ", ".join(sorted(COMMON_NOUNS))
+            + "."))
+        res4d = scan(v)
+        check("every explicitly named common noun is rejected as a bare slug",
+              {p["slug"] for p in res4d["problems"]
+               if p["item"] == "item5" and "bare-slug common noun" in p["message"]},
+              COMMON_NOUNS)
+        check("none of the common-noun corpus becomes an automatic backfill target",
+              [b for b in res4d["backfill_candidates"]
+               if b["slug"] == "reader" and b["target"] in COMMON_NOUNS], [])
 
         # ------------------------------------------------------------------
         # 5. item 13 (stray key) and item 2 (unexpected key)
@@ -2835,6 +3179,7 @@ def run_self_test():
 
         v = os.path.join(tmp, "v13-validation")
         for i, source in enumerate(("[[Doe_X_2025.pdf]]", "[[Doe_X_2025.pdf#page=0]]",
+                                  "[[Doe_X_2025.pdf#page=01]]",
                                   "[[Doe_X_2025.pdf#page=1garbage]]",
                                   "https://example.test/Doe_X_2025.pdf#page=1",
                                   "Doe_X_2025.pdf#page=1", "[[Note.md#Heading]]")):
@@ -2864,7 +3209,7 @@ def run_self_test():
                   parents=('"[[cycle-left.md]]"',)))
         res = scan(v)
         check("every malformed source is an item4 finding",
-              ["item4" in _st_keys(res, "source-%d" % i) for i in range(6)], [True] * 6)
+              ["item4" in _st_keys(res, "source-%d" % i) for i in range(7)], [True] * 7)
         check("empty provenance is not a clean full entry", "item4" in _st_keys(res, "no-source"), True)
         check("unknown review states route report-only, never read-type",
               [sorted(k for k in _st_keys(res, "unknown-%d" % i) if k.startswith("item2/read"))
@@ -3032,6 +3377,238 @@ def run_self_test():
         check("a plural cannot bypass the bare-common-noun destination gate",
               [(b['target'], b['surface']) for b in scan(v)['backfill_candidates']
                if b['slug'] == 'reader'], [('information-entropy', 'information entropies')])
+
+        v = os.path.join(tmp, "v21-public-contract")
+        _st_write(v, "invalid-type.md", _st_entry(
+            "Invalid type", "**Invalid type** is a worked example.", type_="Model"))
+        _st_write(v, "list-type.md", _st_entry(
+            "List type", "**List type** is a worked example.").replace(
+            "type: Concept", "type: [Concept]"))
+        _st_write(v, "lower-description.md", _st_entry(
+            "Lower description", "**Lower description** is a worked example.").replace(
+            'description: "A worked example used by the self-test."',
+            'description: "a worked example used by the self-test."'))
+        _st_write(v, "periodless-description.md", _st_entry(
+            "Periodless description", "**Periodless description** is a worked example.").replace(
+            'description: "A worked example used by the self-test."',
+            'description: "A worked example used by the self-test"'))
+        _st_write(v, "arxiv.md", _st_entry(
+            "arxiv", "**arxiv** is a scholarly archive.").replace(
+            'description: "A worked example used by the self-test."',
+            'description: "arxiv is a scholarly archive."'))
+        _st_write(v, "canonical-target.md", _st_entry(
+            "Canonical target", "**Canonical target** is a worked example.",
+            aliases=('"canonical-name"',)))
+        _st_write(v, "non-slug-alias.md", _st_entry(
+            "Non-slug alias", "**Non-slug alias** is a worked example.",
+            aliases=('"True Positive Rate"',)))
+        _st_write(v, "scalar-alias.md", _st_entry(
+            "Scalar alias", "**Scalar alias** is a worked example.").replace(
+            "sources:\n", 'aliases: "scalar-alias-name"\nsources:\n', 1))
+        _st_write(v, "scalar-bound-card.md", _st_entry(
+            "Scalar bound card", "**Scalar bound card** (SBC) is a worked example.",
+            aliases=('"sbc"',), card="Scalar bound card (SBC)").replace(
+            'aliases:\n  - "sbc"\n', 'aliases: "sbc"\n'))
+        _st_write(v, "blank-alias.md", _st_entry(
+            "Blank alias", "**Blank alias** is a worked example.").replace(
+            "sources:\n", "aliases:\nsources:\n", 1))
+        _st_write(v, "empty-flow-alias.md", _st_entry(
+            "Empty flow alias", "**Empty flow alias** is a worked example.").replace(
+            "sources:\n", "aliases: []\nsources:\n", 1))
+        _st_write(v, "related-reader.md", _st_entry(
+            "Related reader", "**Related reader** is a worked example.",
+            related="[[arxiv]] · [[canonical-target]]"))
+        _st_write(v, "related-anchored.md", _st_entry(
+            "Related anchored", "**Related anchored** is a worked example.",
+            related="[[canonical-target#Details]] · [[Wiki/canonical-target.md^block]]"))
+        _st_write(v, "related-alias.md", _st_entry(
+            "Related alias", "**Related alias** is a worked example.",
+            related="[[canonical-name#Details]]"))
+        _st_write(v, "related-wrong-label.md", _st_entry(
+            "Related wrong label", "**Related wrong label** is a worked example.",
+            related="[[canonical-target#Details|target]]"))
+        _st_write(v, "related-piped.md", _st_entry(
+            "Related piped", "**Related piped** is a worked example.",
+            related="[[arxiv|arxiv]] · [[Wiki/canonical-target#Details|Canonical target]]"))
+        _st_write(v, "wrong-card.md", _st_entry(
+            "Wrong card", "**Wrong card** is a worked example.",
+            card="Different term"))
+        _st_write(v, "feature-machine-learning.md", _st_entry(
+            "Feature (machine learning)", "**Feature** is a worked example.",
+            card="Feature"))
+        _st_write(v, "k-nearest-neighbors.md", _st_entry(
+            "$k$-nearest neighbors",
+            "**$\\boldsymbol{k}$-nearest neighbors** is a worked example.",
+            card="k-nearest neighbors").replace(
+            'description: "A worked example used by the self-test."',
+            'description: "k-nearest neighbors is a worked example."'))
+        _st_write(v, "principal-component-analysis.md", _st_entry(
+            "Principal component analysis",
+            "**Principal component analysis** (PCA) is a worked example.",
+            aliases=('"pca"',), card="Principal component analysis (PCA)"))
+        _st_write(v, "missing-counterpart.md", _st_entry(
+            "Missing counterpart", "**Missing counterpart** (MCA) is a worked example.",
+            aliases=('"mca"',), card="Missing counterpart"))
+        _st_write(v, "wrong-counterpart-case.md", _st_entry(
+            "Wrong counterpart case",
+            "**Wrong counterpart case** (WCC) is a worked example.",
+            aliases=('"wcc"',), card="Wrong counterpart case (wcc)"))
+        _st_write(v, "synonym-parenthetical.md", _st_entry(
+            "Synonym parenthetical", "**Synonym parenthetical** is a worked example.",
+            aliases=('"alternate-name"',),
+            card="Synonym parenthetical (alternate-name)"))
+        _st_write(v, "wrong-title-case.md", _st_entry(
+            "Wrong title case", "**Wrong title case** is a worked example.",
+            card="wrong title case"))
+        _st_write(v, "archaea.md", _st_entry(
+            "Archaea", "**Archaea** (singular, *archaeon*) is a domain of organisms.",
+            aliases=('"archaeon"',), card="Archaea"))
+        _st_write(v, "singular-parenthetical.md", _st_entry(
+            "Bacteria", "**Bacteria** (singular, *bacterium*) is a domain of organisms.",
+            aliases=('"bacterium"',), card="Bacteria (bacterium)"))
+        res = scan(v)
+        check("invalid and list-valued type fields both fail the canonical enum",
+              ["item2/type-enum" in _st_keys(res, name)
+               for name in ("invalid-type", "list-type")], [True, True])
+        check("description capitalization and terminal-period checks are independent",
+              ("capitalized" in _st_msg(res, "lower-description", "item7"),
+               "period" in _st_msg(res, "periodless-description", "item7")),
+              (True, True))
+        check("a lowercase canonical title may remain the description's subject",
+              "item7" in _st_keys(res, "arxiv"), False)
+        check("a human-readable alias is rejected in favor of its slug form",
+              'expected "true-positive-rate"'
+              in _st_msg(res, "non-slug-alias", "item18"), True)
+        check("a scalar aliases field is rejected even when its value is a valid slug",
+              "must be a list" in _st_msg(res, "scalar-alias", "item18"), True)
+        check("a malformed scalar alias cannot establish a card counterpart",
+              ("item18" in _st_keys(res, "scalar-bound-card"),
+               "item19" in _st_keys(res, "scalar-bound-card")), (True, True))
+        check("a bare aliases key is not an empty list",
+              "must be a list" in _st_msg(res, "blank-alias", "item18"), True)
+        check("an explicitly empty flow aliases list has list shape",
+              "item18" in _st_keys(res, "empty-flow-alias"), False)
+        check("a symbol title's plain-text skeleton may be the description subject",
+              "item7" in _st_keys(res, "k-nearest-neighbors"), False)
+        check("every bare Related link is item11, including a lowercase title",
+              (_st_keys(res, "related-reader").count("item11"),
+               "arxiv" in _st_msg(res, "related-reader", "item11"),
+               "Canonical target" in _st_msg(res, "related-reader", "item11")),
+              (2, True, True))
+        check("anchors and vault paths cannot hide bare Related links",
+              _st_keys(res, "related-anchored").count("item11"), 2)
+        check("a resolving alias target cannot hide a bare Related link",
+              "Canonical target" in _st_msg(res, "related-alias", "item11"), True)
+        check("a Related display label must equal the target's canonical title",
+              "canonical title"
+              in _st_msg(res, "related-wrong-label", "item11"), True)
+        check("fully piped Related links are the valid near miss",
+              "item11" in _st_keys(res, "related-piped"), False)
+        check("a flashcard term unrelated to the canonical title is rejected",
+              "must be exactly"
+              in _st_msg(res, "wrong-card", "item19"), True)
+        check("parenthetical, math and acronym primary-answer forms stay valid",
+              ["item19" in _st_keys(res, name) for name in
+               ("feature-machine-learning", "k-nearest-neighbors",
+                "principal-component-analysis")], [False, False, False])
+        check("an opener-bound counterpart is mandatory and case-exact",
+              ["item19" in _st_keys(res, name) for name in
+               ("missing-counterpart", "wrong-counterpart-case")], [True, True])
+        check("a synonym alias cannot authorize a line-3 parenthetical",
+              "not established"
+              in _st_msg(res, "synonym-parenthetical", "item19"), True)
+        check("line 3 preserves the canonical title's casing",
+              "same canonical casing"
+              in _st_msg(res, "wrong-title-case", "item19"), True)
+        check("a singular synonym in an annotated opener parenthetical is not a card counterpart",
+              "item19" in _st_keys(res, "archaea"), False)
+        check("appending that singular synonym to line 3 is rejected",
+              "not established"
+              in _st_msg(res, "singular-parenthetical", "item19"), True)
+
+        v = os.path.join(tmp, "v22-stub-structure")
+        _st_write(v, "w-e-b-du-bois.md", _st_entry(
+            "W. E. B. Du Bois",
+            "**W. E. B. Du Bois** (b. 1868) was an American sociologist.",
+            type_="Person", sources=('"stub"',), card=False))
+        _st_write(v, "two-sentence-stub.md", _st_entry(
+            "Two sentence stub",
+            "**Two sentence stub** is a placeholder. It has another sentence.",
+            sources=('"stub"',), card=False))
+        _st_write(v, "two-paragraph-stub.md", _st_entry(
+            "Two paragraph stub",
+            "**Two paragraph stub** is a placeholder.\n\nIt has another paragraph.",
+            sources=('"stub"',), card=False))
+        _st_write(v, "empty-stub.md", _st_entry(
+            "Empty stub", "", sources=('"stub"',), card=False))
+        _st_write(v, "image-stub.md", _st_entry(
+            "Image stub",
+            "**Image stub** contains ![[figure.png]] and ![alt](figure-2.png).",
+            sources=('"stub"',), card=False))
+        _st_write(v, "image-text-stub.md", _st_entry(
+            "Image text stub",
+            "**Image text stub** names figure.png and the word image in prose.",
+            sources=('"stub"',), card=False))
+        _st_write(v, "image-code-stub.md", _st_entry(
+            "Image code stub",
+            "**Image code stub** shows `![[figure.png]]` as literal syntax.",
+            sources=('"stub"',), card=False))
+        res = scan(v)
+        check("initials, abbreviations and a birth year keep a one-sentence Person stub valid",
+              [k for k in _st_keys(res, "w-e-b-du-bois")
+               if k in ("stub-one-sentence-body", "stub-no-images")], [])
+        check("two sentences, two paragraphs and no sentence each fail stub structure",
+              ["stub-one-sentence-body" in _st_keys(res, name) for name in
+               ("two-sentence-stub", "two-paragraph-stub", "empty-stub")],
+              [True, True, True])
+        check("Obsidian and Markdown image syntax both trigger the stub no-image rule",
+              _st_keys(res, "image-stub").count("stub-no-images"), 1)
+        check("image filenames in ordinary prose are the valid near miss",
+              "stub-no-images" in _st_keys(res, "image-text-stub"), False)
+        check("image syntax inside inline code is not a stub image",
+              "stub-no-images" in _st_keys(res, "image-code-stub"), False)
+
+        v = os.path.join(tmp, "v23-table-captions")
+        _st_write(v, "captioned-table.md", _st_entry(
+            "Captioned table", "**Captioned table** is a worked example.\n\n"
+            "Metric | Value\n--- | ---\nRecall | 0.8\n*Values by group.*"))
+        _st_write(v, "missing-table-caption.md", _st_entry(
+            "Missing table caption", "**Missing table caption** is a worked example.\n\n"
+            "Metric | Value\n--- | ---\nRecall | 0.8"))
+        _st_write(v, "gapped-table-caption.md", _st_entry(
+            "Gapped table caption", "**Gapped table caption** is a worked example.\n\n"
+            "Metric | Value\n--- | ---\nRecall | 0.8\n\n*Values by group.*"))
+        _st_write(v, "linked-table-caption.md", _st_entry(
+            "Linked table caption", "**Linked table caption** is a worked example.\n\n"
+            "Metric | Value\n--- | ---\nRecall | 0.8\n*Values for [[group]].*"))
+        _st_write(v, "coded-table-caption.md", _st_entry(
+            "Coded table caption", "**Coded table caption** is a worked example.\n\n"
+            "Metric | Value\n--- | ---\nRecall | 0.8\n*Values for `group`.*"))
+        _st_write(v, "pipe-prose.md", _st_entry(
+            "Pipe prose", "**Pipe prose** compares A | B in ordinary prose.\n"
+            "The next line is not a delimiter."))
+        _st_write(v, "fenced-table.md", _st_entry(
+            "Fenced table", "**Fenced table** shows table syntax.\n\n"
+            "```markdown\nMetric | Value\n--- | ---\nRecall | 0.8\n```",
+            type_="Software"))
+        _st_write(v, "indented-table.md", _st_entry(
+            "Indented table", "**Indented table** shows table syntax.\n\n"
+            "    Metric | Value\n    --- | ---\n    Recall | 0.8",
+            type_="Software"))
+        res = scan(v)
+        check("an immediate italic plain-text table caption passes item12",
+              "item12" in _st_keys(res, "captioned-table"), False)
+        check("a missing caption and an intervening blank are both detected",
+              ["item12" in _st_keys(res, name) for name in
+               ("missing-table-caption", "gapped-table-caption")], [True, True])
+        check("a wikilink makes an otherwise italic table caption non-plain-text",
+              "wikilink" in _st_msg(res, "linked-table-caption", "item12"), True)
+        check("caption validation reads original text after code-masked table detection",
+              "backtick" in _st_msg(res, "coded-table-caption", "item12"), True)
+        check("pipe prose and fenced or indented table samples are not tables",
+              ["item12" in _st_keys(res, name) for name in
+               ("pipe-prose", "fenced-table", "indented-table")],
+              [False, False, False])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

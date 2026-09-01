@@ -63,7 +63,6 @@ import argparse
 import json
 import os
 import unicodedata
-import re
 import sys
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
@@ -106,7 +105,8 @@ from slugify import SlugError, mu_variants, slug_stem  # noqa: E402
 from plurals import (  # noqa: E402
     AMBIGUOUS_IRREGULAR_PLURALS, IRREGULAR_PLURALS, IRREGULAR_SINGULARS,
     VES_IRREGULARS, plural_key, pluralize, real_permutation, singular_forms,
-    singular_key, singular_keys, singularize, wordorder_key_singular,
+    singular_key, singular_keys, singularize, stem_key, stem_tokens,
+    wordorder_key_singular,
 )
 import vault_index as _vault_index  # noqa: E402
 
@@ -167,45 +167,6 @@ def hyphen_key(slug):
 def wordorder_key(slug):
     """Probe (e) key: tokens sorted alphabetically."""
     return "-".join(sorted(t for t in slug.split("-") if t))
-
-
-# probe (f) -- ordered, longest-first so "ization" beats "ation" beats "ion"
-_STEM_SUFFIXES = [
-    "izations", "isations", "ization", "isation", "ationally", "ational",
-    "izing", "ising", "izers", "isers", "izer", "iser", "ized", "ised",
-    "ize", "ise", "ations", "ation", "ating", "ates", "ated", "ate",
-    "ements", "ement", "ments", "ment",
-    "nesses", "ness", "ities", "ity", "ings", "ing", "ers", "er", "ors",
-    "or", "ies", "ied", "ed", "es", "s",
-]
-_DOUBLE_TAIL_RE = re.compile(r"([bdfglmnprt])\1$")
-
-
-def _stem_token(token):
-    t = token
-    for suffix in _STEM_SUFFIXES:
-        if t.endswith(suffix) and len(t) - len(suffix) >= 3:
-            t = t[: -len(suffix)]
-            break
-    t = _DOUBLE_TAIL_RE.sub(r"\1", t)     # modell -> model
-    if len(t) > 3 and t.endswith("e"):
-        t = t[:-1]                        # tokeniz(e) -> tokeniz
-    return t
-
-
-def stem_key(slug):
-    """Probe (f) key (EXTENSION): tokens light-stemmed, then sorted."""
-    return "-".join(sorted(_stem_token(t) for t in slug.split("-") if t))
-
-
-def stem_tokens(slug):
-    """Probe (g) tokens (EXTENSION): the slug's stemmed token SET.
-
-    Probe (f)'s stemmer, but a set instead of a sorted join: probe (g) asks
-    whether one slug's tokens properly CONTAIN the other's, which no
-    whole-multiset key can answer.
-    """
-    return {_stem_token(t) for t in slug.split("-") if t}
 
 
 # --------------------------------------------------------------------------

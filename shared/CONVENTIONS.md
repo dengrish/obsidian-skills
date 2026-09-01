@@ -58,7 +58,7 @@ override paths per-request, for that run only.
 | `Sources/PDFs/<Work>/` | book-chapter PDFs, e.g. `Sources/PDFs/Prince_UDL_2026/`. The folder is what pdf-organizer creates when it splits a book. paper-summarizer's batch **scans** it — a book is only recognisable as one when a chapter turns up beside it — and then **skips** every chapter it finds, so a sweep never becomes a book's worth of summaries | pdf-organizer, the user | pdf-figure-extractor, paper-summarizer (scans, skips), wiki-builder |
 | `Sources/Images/` | **flat**; every figure and downloaded image, all extensions, whatever it came from | pdf-figure-extractor, clipping-processor; **pdf-organizer** renames in place only within an approved source rename (§1a) | wiki-builder, paper-summarizer, clipping-processor (its `rename` path re-reads the folder — §8a), wiki-linter (validates the embeds pointing here **when run with `--images`**; it lists the folder's names and compares, and never opens a file) |
 | `Wiki/` | wiki entries, one `.md` per entity (walked **recursively**) | wiki-builder, wiki-linter | wiki-builder, wiki-linter |
-| *vault root* | `<discipline>-moc.md`, `wiki-builder-suggestions.md`, `wiki-linter-suggestions.md`, `wiki-notes-suggestions.md` | wiki-linter | — |
+| *vault root* | `<discipline>-moc.md`, `wiki-builder-suggestions.md`, `wiki-linter-suggestions.md`, `wiki-notes-suggestions.md` | wiki-linter | wiki-linter (reads each artifact before an in-place update) |
 
 **Source routes.** Choose the skill by the requested result; these are not
 six mandatory stages. For PDFs, organize the filename before creating derived
@@ -68,6 +68,14 @@ finished reading note, never an intermediate source for wiki-builder. A web
 capture follows clipping-processor into `Articles/`, and that cleaned note
 can become a wiki-builder source. wiki-linter maintains existing entries
 without needing a new source or an earlier stage in the same run.
+An interrupted or partial wiki-builder run is resumed by **wiki-builder** with
+explicit resume/re-run intent; wiki-linter can repair only the
+source-independent residue it owns and cannot finish extraction or a source
+merge.
+An interrupted wiki-linter hierarchy write is recovered by rerunning Task 3
+over the same previously authorized transitive discipline/entry/MOC closure;
+its multi-file writes are not treated as a transaction or resumed at the next
+filename.
 
 **`Inbox/` drains for PDFs and accumulates for clippings.** pdf-organizer moves
 PDFs into `Sources/PDFs/`; clipping-processor preserves the raw capture in
@@ -656,7 +664,7 @@ These cases are **report-only**, with the note and the value found named under
 None contains a known boolean answer to preserve. Do not substitute `false`
 or `true`, even during otherwise mechanical frontmatter repairs.
 
-**The reset rule — body prose only.** wiki-builder sets `read: false` on an
+**The reset rule — body content only.** wiki-builder sets `read: false` on an
 existing entry when, and only when, **the merge adds content to the body** — new
 prose, a new paragraph, a new image or table, a rewritten explanation, or a stub
 promoted to a full entry (whose body is rewritten from scratch). It does **not**
@@ -748,10 +756,11 @@ tags:
   discipline note. Those notes no longer exist.)
 - **The quotes are mandatory.** An unquoted `- #machine-learning` parses as a
   YAML comment and the discipline is silently lost.
-- **Cardinality: one or more.** Most entities have a single canonical home. Tag
-  a second discipline only when the entity is genuinely a primary topic in it.
+- **Cardinality: zero or more on a full entry; one or more on a stub.** Most
+  tagged entities have a single canonical home. Tag a second discipline only
+  when the entity is genuinely a primary topic in it.
 - **Blank is valid on a full entry** (key present, no value) only when *no*
-  discipline applies — and is **never** valid on a stub.
+  discipline applies. It is **never** valid on a stub.
 - **Selection test:** tag the discipline that *owns* the entity — where it would
   be a primary topic in a textbook table of contents — not every discipline that
   *uses* it.
@@ -840,6 +849,20 @@ is one implementation.
 Every `aliases:` item is slug-form, because aliases *are* alternative slugs: a
 future candidate that slugs to one of them resolves to this entry. An alias that
 slugs identically to the filename is redundant — omit it.
+
+**A semantic-invalid alias is a refactoring proposal, not a routine list
+cleanup.** Removing an alias can redirect every inbound wikilink that resolves
+through it. wiki-builder reports one it can disprove from the active source;
+wiki-linter owns vault-wide discovery and the proposal record. Neither removes
+it during ordinary generation or lint. An approved removal first identifies the
+canonical owner, then finds and rewrites every inbound entry-link surface that
+resolves through the alias: Wiki body prose and Related footers, entry
+frontmatter such as `parents:`, and root MOCs. Preserve display labels,
+headings, and block anchors. Do not rewrite `sources:`, image embeds, or
+suggestion-log examples merely because their text matches the alias. Verify
+that no ambiguous owner or inbound alias-target link remains, and only then
+delete the alias. A duplicate spelling inside one entry is a format defect,
+not this semantic-removal case.
 
 ### 4c. Source-note filenames are a *different* rule
 
@@ -956,8 +979,9 @@ python3 shared/scripts/plugin_paths.py --from skills/wiki-linter/scripts/scan_va
 the bootstrap verbatim; shared algorithms are not copied into skill folders.
 
 The shared modules own these rules: `slugify.py` (§4a), `plugin_paths.py` (this
-section), `naming.py` (§1a), `plurals.py` (English singularisation for both Wiki
-collision probes), `figure_state.py` (§8b), and `yaml_scalars.py` (§2).
+section), `naming.py` (§1a), `plurals.py` (English inflection and light
+collision stemming shared by both Wiki skills), `figure_state.py` (§8b), and
+`yaml_scalars.py` (§2).
 
 `yaml_scalars.py` decodes the single-line scalar values used in frontmatter:
 YAML double-quote escapes, doubled apostrophes in single quotes, trailing
@@ -1021,7 +1045,8 @@ A wiki entry's `sources:` list names the documents that contributed to it. Each
 item is a double-quoted wikilink carrying the source's **literal on-disk
 filename, extension included** — not a slug, never invented, never renamed.
 
-- **PDF:** `"[[Author_Title_Year.pdf#page=N]]"` — always with a page anchor.
+- **PDF:** `"[[Author_Title_Year.pdf#page=N]]"` — always with a page anchor;
+  `N` is a positive decimal written without leading zeros (`[1-9][0-9]*`).
 - **Markdown note:** `"[[Author_Title_Year.md]]"` — never an anchor.
 - **Legacy stub marker:** the literal string `"stub"`, quoted, as the sole
   item — identifies a stub created by an earlier version (neither skill writes
@@ -1078,7 +1103,7 @@ python3 '<plugin>/skills/wiki-builder/scripts/vault_index.py' '<wiki-folder>' \
 ```
 
 `source_matches` compares literal local basenames with NFC and case folding,
-ignoring folder qualification, anchors and display labels. A mention in body
+ignoring folder qualification and anchors. A mention in body
 prose is not evidence that an entry used that source. Inspect index problems
 and ambiguous ownership before deciding to skip; an incomplete index cannot
 establish that a source was fully processed.
@@ -1282,8 +1307,11 @@ Not that the vault contains none.
 
 ### wiki-linter — everything vault-wide and retroactive
 
-Nothing about its run is scoped to one document, and nothing else links
-vault-wide, so the whole retroactive and cross-entry surface is its alone:
+Its ownership and reach are vault-wide and retroactive rather than tied to one
+source document. Each run still honors the task and entry scope the user
+requested; hierarchy work expands only through its separately authorized scope
+closure. Within that scope, the retroactive and cross-entry surface is its
+alone:
 
 - **Backfill** a bare-text mention of an existing entry, anywhere, including in
   entries a wiki-builder run passed over.
@@ -1314,17 +1342,24 @@ Formatting repair does not authorize a new relationship or an identity guess.
 ### Why the split is drawn here
 
 **The retrospective linking bar has one home: wiki-linter.** This prevents a
-later source integration from restoring weak links that maintenance deliberately
-removed. A merged entry is in both skills' scopes, so **wiki-builder links only
-the prose it wrote or rewrote in that run**:
+later source integration from restoring a weak link merely because the merge
+rephrased its sentence. A merged entry is in both skills' scopes, so
+**wiki-builder's link provenance is the active source's contribution, not which
+sentences happened to be rewritten**:
 
-- **Body prose:** wrap first occurrences **inside the sentences this run wrote
-  or rewrote**. Prose carried over from before the merge is not re-linked, not
-  by the interlink sweep and not by the frequency-inverted self-sweep that
-  closes it.
+- **Body prose:** wrap a first occurrence when the active source introduces the
+  target or adds a substantive relationship to it. Rewording a carried-over
+  claim for coherence does not make the target source-introduced and does not
+  restore a prior link. Apply the frequency-inverted self-sweep to the active
+  source's contributed claims under the same test.
 - **Related footer:** still additive and still never pruned, but it grows only
   for targets the new source's own text introduces — not for a target whose
   only support is a pre-existing bare mention.
+- **New evidence after a prune:** a later source may genuinely introduce a new
+  substantive relationship to the same target. wiki-builder may then link that
+  source-backed relationship and report it; wiki-linter judges the resulting
+  link on its next retrospective pass. Sentence rewriting alone is never that
+  evidence.
 - **A pre-existing bare mention that genuinely should be linked** is
   wiki-linter's to backfill, under wiki-linter's bar, on its next pass. That is
   the same answer §9 gives everywhere else, and it is now the answer inside a

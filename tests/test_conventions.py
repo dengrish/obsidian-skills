@@ -5497,7 +5497,7 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/figure_state.py": 6,
     "shared/scripts/naming.py": 161,
     "shared/scripts/plugin_paths.py": 95,
-    "shared/scripts/plurals.py": 196,
+    "shared/scripts/plurals.py": 200,
     "shared/scripts/slugify.py": 61,
     "shared/scripts/yaml_scalars.py": 8,
     "skills/clipping-processor/scripts/dedup_index.py": 108,
@@ -5512,9 +5512,9 @@ SELFTEST_MIN_CASES = {
     "skills/pdf-figure-extractor/scripts/render_page.py": 38,
     "skills/pdf-organizer/scripts/organize.py": 210,
     "skills/wiki-builder/scripts/find_collisions.py": 62,
-    "skills/wiki-builder/scripts/lint_entry.py": 130,
-    "skills/wiki-builder/scripts/vault_index.py": 62,
-    "skills/wiki-linter/scripts/scan_vault.py": 150,
+    "skills/wiki-builder/scripts/lint_entry.py": 147,
+    "skills/wiki-builder/scripts/vault_index.py": 63,
+    "skills/wiki-linter/scripts/scan_vault.py": 187,
 }
 
 

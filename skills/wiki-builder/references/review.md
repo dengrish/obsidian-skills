@@ -41,7 +41,7 @@ The audit re-runs extraction with a different question than step 2: not "what's 
 Each bullet appears only when it has content, except the audit bullets, which report their count even when zero (so it's visible the audit ran):
 
 - **Sources processed** — filename(s), classification, counts: `attention.pdf — primary; 9 entries created, 2 merged`. When step 1 resolved a pairing, name both files and which one was read: `attention.pdf — primary (read in place of the note attention.md the run was handed)`.
-- **Sources skipped (previously processed, no re-run intent)** — `<filename> (already in N entries)`
+- **Sources skipped (previously processed, no rerun/resume intent)** — `<filename> (already in N entries)`
 - **Sources skipped (no durable content)** — `<filename> — <classification>; <one-line reason>`
 - **Entities accepted** — with type breakdown
 - **Entities rejected** — one-line reason each (code-identifier 2a, substance 2b, durability 2c, or thin-mention-on-existing-entry)
@@ -54,6 +54,8 @@ Each bullet appears only when it has content, except the audit bullets, which re
 - **Atomicity decisions** — name borderline split/keep calls: an umbrella and children partitioned from this source, an inherent facet kept with its entity, or a pre-existing mixed entry proposed for later refactoring. Give the identity and source-support reason; note length alone is never the reason.
 - **Presentation exceptions** — name an example beyond the usual single ~2-sentence illustration or an additional figure, and give one concrete line explaining its benefit under [writing guidance](writing.md#2-the-body) and [figure selection](media.md#selection). Put the justification here, not in the note itself.
 - **Review-pass fixes** — anything caught and fixed, including paragraph-focus or progression repairs.
+- **Source-backed relinks after an earlier prune** — entry → target, plus the active source's new substantive relationship. Rewording or moving an old sentence is never listed as evidence.
+- **Semantic-invalid aliases proposed for removal** — entry, alias, active-source evidence that it names another entity, and the likely canonical owner when known. These are proposals, never review-pass fixes.
 - **Notes for the user** — anything else, with two-options framing wherever a call could go either way: contested claims, Contested-topic exemptions, a Related footer past ~12, borderline substance/durability/classification calls, blank `tags:`, debatable tag calibration, a proposed consolidation or removal of existing media, an image or table replaced under the narrow same-aspect rule (name both and the benefit), a merged entry that became a split candidate, an entity thin in each source but substantive combined, a proposed rename or deletion, a contradiction noticed between two existing entries.
 
 **Close every report with one standing line:** *vault-wide cross-linking is `wiki-linter`'s job — run it when you want cross-source connections.* It states a property of the skill boundary, not a finding about this run, so it reads identically every time and never gets dressed up as an observation about what this particular run left undone.

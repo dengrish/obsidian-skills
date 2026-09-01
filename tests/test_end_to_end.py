@@ -5,6 +5,7 @@ Run with the interpreter holding requirements-dev.txt. No live vault, network,
 host configuration or installed plugin cache is used.
 """
 
+import ast
 import hashlib
 import json
 import os
@@ -387,6 +388,193 @@ Control sample
         self.assertEqual(report["backfill_candidates"], [])
         for key in ("self_parented", "parent_cycles"):
             self.assertEqual(report["hierarchy_diagnostic"][key], [])
+
+    def test_builder_and_linter_share_the_same_entry_contract_floor(self):
+        wiki = self.vault / "Wiki"
+
+        def write_entry(slug, title, body, *, type_="Concept", aliases=(),
+                        source="[[Clean.pdf#page=1]]", description=None,
+                        tags_block='tags:\n  - "#statistics"', card=None,
+                        related=None):
+            alias_yaml = ""
+            if aliases:
+                alias_yaml = "aliases:\n" + "".join(
+                    f'  - "{alias}"\n' for alias in aliases)
+            footer = f"\n\n**Related:** {related}" if related else ""
+            term = card if card is not None else title
+            text = f'''---
+title: "{title}"
+type: {type_}
+{alias_yaml}sources:
+  - "{source}"
+created: 2026-08-31
+updated: 2026-08-31
+description: "{description or title + ' is a synthetic alignment fixture.'}"
+{tags_block}
+parents: []
+read: false
+---
+{body}{footer}
+
+---
+
+## Flashcards
+
+A compact definition used only to exercise the shared contract.
+??
+{term}
+'''
+            (wiki / f"{slug}.md").write_text(text, encoding="utf-8")
+
+        write_entry(
+            "arxiv", "arxiv", "**arxiv** is a repository for scholarly preprints.",
+            description="arxiv stores scholarly preprints.")
+        write_entry(
+            "feature-machine-learning", "Feature (machine learning)",
+            "**Feature** is an input variable supplied to a model.", card="Feature",
+            description="A feature is an input variable supplied to a model.")
+        write_entry(
+            "principal-component-analysis", "Principal component analysis",
+            "**Principal component analysis** (PCA) is an orthogonal linear transformation.",
+            aliases=("pca",), card="Principal component analysis (PCA)",
+            description="Principal component analysis transforms variables into orthogonal components.")
+        write_entry(
+            "k-nearest-neighbors", "$k$-nearest neighbors",
+            "**$\\boldsymbol{k}$-nearest neighbors** predicts from nearby observations.",
+            card="k-nearest neighbors",
+            description="k-nearest neighbors predicts from nearby observations.")
+        write_entry(
+            "archaea", "Archaea",
+            "**Archaea** (singular, *archaeon*) is a domain of organisms.",
+            aliases=("archaeon",), card="Archaea")
+        write_entry(
+            "hardwrapped-acronym", "Hardwrapped acronym",
+            "**Hardwrapped acronym**\n(HWA) binds its counterpart across a hard wrap.",
+            aliases=("hwa",), card="Hardwrapped acronym (HWA)")
+        write_entry(
+            "alignment-sample", "Alignment sample",
+            "**Alignment sample** is a deliberately malformed fixture.",
+            type_="Widget", aliases=("Wrong Alias",),
+            source="[[LeadingZero.pdf#page=02]]",
+            description="bad description", tags_block='tags: ["#statistics"]',
+            card="Different term", related="[[arxiv]]")
+        write_entry(
+            "scalar-alias", "Scalar alias",
+            "**Scalar alias** is a deliberately malformed alias fixture.")
+        scalar_alias = wiki / "scalar-alias.md"
+        scalar_alias.write_text(
+            scalar_alias.read_text(encoding="utf-8").replace(
+                "sources:\n", 'aliases: "scalar-alias-name"\nsources:\n', 1),
+            encoding="utf-8")
+        write_entry(
+            "blank-alias", "Blank alias",
+            "**Blank alias** is a deliberately malformed alias fixture.")
+        blank_alias = wiki / "blank-alias.md"
+        blank_alias.write_text(
+            blank_alias.read_text(encoding="utf-8").replace(
+                "sources:\n", "aliases:\nsources:\n", 1),
+            encoding="utf-8")
+        write_entry(
+            "missing-counterpart", "Missing counterpart",
+            "**Missing counterpart** (MCA) binds its acronym in the opener.",
+            aliases=("mca",), card="Missing counterpart")
+        write_entry(
+            "synonym-parenthetical", "Synonym parenthetical",
+            "**Synonym parenthetical** has a synonym alias without an opener binding.",
+            aliases=("alternate-name",),
+            card="Synonym parenthetical (alternate-name)")
+        write_entry(
+            "wrong-title-case", "Wrong title case",
+            "**Wrong title case** is a case-sensitive answer fixture.",
+            card="wrong title case")
+        write_entry(
+            "singular-parenthetical", "Bacteria",
+            "**Bacteria** (singular, *bacterium*) is a domain of organisms.",
+            aliases=("bacterium",), card="Bacteria (bacterium)")
+        write_entry(
+            "related-anchored", "Related anchored",
+            "**Related anchored** has a path-qualified anchored footer link.",
+            related="[[Wiki/arxiv.md#History]]")
+        write_entry(
+            "related-wrong-label", "Related wrong label",
+            "**Related wrong label** has a noncanonical footer label.",
+            related="[[arxiv#History|preprint archive]]")
+
+        lint = json.loads(self.run_script(
+            "skills/wiki-builder/scripts/lint_entry.py", wiki, "--compact").stdout)
+        lint_items = {
+            Path(entry["file"]).stem: {finding["item"] for finding in entry["findings"]}
+            for entry in lint["entries"]
+        }
+        self.assertTrue({"2-type-enum", "4-sources", "7-description",
+                         "8-tags", "18-alias-form", "19-flashcards"}
+                        .issubset(lint_items["alignment-sample"]),
+                        lint_items["alignment-sample"])
+        for slug in ("arxiv", "feature-machine-learning",
+                     "principal-component-analysis", "k-nearest-neighbors",
+                     "archaea", "hardwrapped-acronym"):
+            self.assertEqual(lint_items[slug], set())
+        for slug in ("scalar-alias", "blank-alias", "missing-counterpart",
+                     "synonym-parenthetical", "wrong-title-case",
+                     "singular-parenthetical"):
+            expected = ("18-alias-form" if slug in ("scalar-alias", "blank-alias")
+                        else "19-flashcards")
+            self.assertIn(expected, lint_items[slug], lint_items[slug])
+
+        scan = json.loads(self.run_script(
+            "skills/wiki-linter/scripts/scan_vault.py", wiki, "--indent", "0").stdout)
+        scan_items = {}
+        for problem in scan["problems"]:
+            scan_items.setdefault(problem["slug"], set()).add(problem["item"])
+        self.assertTrue({"item2/type-enum", "item4", "item7", "item8",
+                         "item11", "item18", "item19"}
+                        .issubset(scan_items["alignment-sample"]),
+                        scan_items["alignment-sample"])
+        for slug in ("arxiv", "feature-machine-learning",
+                     "principal-component-analysis", "k-nearest-neighbors",
+                     "archaea", "hardwrapped-acronym"):
+            self.assertEqual(scan_items.get(slug, set()), set())
+        for slug in ("scalar-alias", "blank-alias", "missing-counterpart",
+                     "synonym-parenthetical", "wrong-title-case",
+                     "singular-parenthetical"):
+            expected = ("item18" if slug in ("scalar-alias", "blank-alias")
+                        else "item19")
+            self.assertIn(expected, scan_items.get(slug, set()), scan_items.get(slug))
+        for slug in ("related-anchored", "related-wrong-label"):
+            self.assertIn("item11", scan_items.get(slug, set()), scan_items.get(slug))
+
+        index = json.loads(self.run_script(
+            "skills/wiki-builder/scripts/vault_index.py", wiki,
+            "--source", "LeadingZero.pdf").stdout)
+        self.assertNotIn("alignment-sample",
+                         {match["slug"] for match in index["source_matches"]})
+        self.assertTrue(any("alignment-sample.md: sources:" in problem
+                            for problem in index["problems"]))
+
+    def test_builder_and_linter_literal_contract_constants_stay_aligned(self):
+        def literal(relative, name):
+            tree = ast.parse((ROOT / relative).read_text(encoding="utf-8"),
+                             filename=relative)
+            for node in tree.body:
+                if not isinstance(node, ast.Assign):
+                    continue
+                if any(isinstance(target, ast.Name) and target.id == name
+                       for target in node.targets):
+                    return ast.literal_eval(node.value)
+            self.fail(f"{relative} has no literal assignment for {name}")
+
+        builder = "skills/wiki-builder/scripts/lint_entry.py"
+        linter = "skills/wiki-linter/scripts/scan_vault.py"
+        self.assertEqual(literal(builder, "OBSIDIAN_KEYS"),
+                         literal(linter, "OBSIDIAN_KEYS"))
+        self.assertEqual(literal(builder, "TYPE_ENUM"),
+                         literal(linter, "VALID_TYPES"))
+        self.assertEqual(set(literal(builder, "TAG_ENUM")),
+                         literal(linter, "VALID_TAGS"))
+        self.assertEqual(
+            literal(builder, "MANDATORY_KEYS"),
+            [key for key in literal(linter, "CANON")
+             if key not in ("aliases", "importance")])
 
 
 if __name__ == "__main__":

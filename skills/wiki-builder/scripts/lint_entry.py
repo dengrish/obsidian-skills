@@ -174,6 +174,13 @@ MANDATORY_KEYS = ["title", "type", "sources", "created", "updated",
                   "description", "tags", "parents", "read"]
 OPTIONAL_KEYS = ["aliases"]
 
+# Obsidian's own appearance/publish properties are outside the wiki-entry
+# schema, but they are user configuration rather than stacked-merge debris.
+# A merge must preserve them exactly; wiki-linter reports the same set under a
+# report-only key.  Keep this list in parity with scan_vault.OBSIDIAN_KEYS.
+OBSIDIAN_KEYS = {"cssclasses", "cssclass", "publish", "permalink", "cover",
+                 "image", "banner", "icon"}
+
 TYPE_ENUM = [
     "Concept", "Person", "Organization", "Dataset", "Software", "Device",
     "Event", "Standard", "Gene/Protein", "Organism", "Chemical", "Reaction",
@@ -421,8 +428,15 @@ def _check_field_order(fm, findings):
     unknown = [k for k in fm.order
                if k not in SCHEMA_ORDER and k not in OPTIONAL_KEYS]
     for key in unknown:
-        findings.append(_f("2-field-order", "warning",
-                           "key %r is not part of the entry schema" % key))
+        if key.lower() in OBSIDIAN_KEYS:
+            findings.append(_f(
+                "2-obsidian-key", "info",
+                "key %r is an Obsidian-owned appearance/publish property -- "
+                "REPORT ONLY; preserve it exactly on merge" % key,
+                {"key": key, "report_only": True}))
+        else:
+            findings.append(_f("2-field-order", "warning",
+                               "key %r is not part of the entry schema" % key))
 
     # An empty `parents:` is written `parents: []`, never bare: a bare key is
     # YAML null, and the vault pins the property as multitext, so Obsidian
@@ -626,7 +640,15 @@ def _check_description(fm, findings, title=None):
         # legitimately produces a lowercase-initial description.  The skill's
         # "Capitalized first word" rule and its entity-as-subject rule collide
         # here; entity-as-subject wins.
-        subjects = [s for s in (title, base_term(title) if title else None) if s]
+        # A symbol-bearing title cannot appear literally in this plain-text
+        # field: ``$k$-nearest neighbors`` has to be written
+        # ``k-nearest neighbors`` here.  Treat that math skeleton as the
+        # canonical subject too, exactly as item 16 and line 3 do.
+        subjects = []
+        for subject in (title, base_term(title) if title else None):
+            for form in (subject, math_skeleton(subject) if subject else None):
+                if form and form not in subjects:
+                    subjects.append(form)
         lowercase_title_subject = any(
             s[0].islower() and desc.startswith(s) for s in subjects)
         if not lowercase_title_subject:
@@ -643,6 +665,13 @@ def _check_tags(fm, findings, is_stub):
     field = fm.get("tags")
     if field is None:
         return
+    if field.kind in ("scalar", "flow_list"):
+        findings.append(_f(
+            "8-tags", "error",
+            "tags: must be a block-form list (one double-quoted tag per `-` "
+            "line); a full entry with no disciplinary home uses a blank "
+            "`tags:` key, not scalar or flow-list syntax",
+            {"line": field.line, "kind": field.kind}))
     values = [v for v in field.values if v not in (None, "")]
     # An unquoted # tag is a comment, not a parsed value. Its original text
     # still tells the user which discipline was lost and how to repair it.
@@ -687,6 +716,18 @@ def _check_aliases(fm, findings):
     field = fm.get("aliases")
     if field is None:
         return
+    if not field.is_list:
+        if field.kind == "blank":
+            message = ("aliases: must be a list; a bare key is YAML null -- "
+                       "remove this optional key when there are no aliases, or "
+                       "write `aliases: []` for an explicit empty list")
+        else:
+            message = ("aliases: must be a list, not a scalar -- wrap the "
+                       "existing value as one quoted list item without changing it")
+        findings.append(_f(
+            "18-alias-form", "error",
+            message,
+            {"line": field.line, "kind": field.kind}))
     # The same alias twice on ONE entry is its own fault, not a cross-entry
     # collision (scan_vault reports it the same way, as a within-entry item18).
     # Counted raw, exactly as scan_vault counts it.
@@ -1091,6 +1132,69 @@ def _check_bold_opener(fm, sections, findings):
          "bolded_skeleton": skeleton, "opening": opening[:200]}))
 
 
+def _flashcard_primary_answer(fm, sections):
+    """Return ``(term, counterpart)`` established by the entry itself.
+
+    The main term has one exact plain-text spelling: ``title:`` verbatim, its
+    base term for a disambiguation parenthetical, or its math skeleton for a
+    symbol title.  An opener parenthetical becomes a required counterpart only
+    when its slug is actually present in ``aliases:``; that distinguishes an
+    acronym/full-form binding from a date or explanatory aside and avoids
+    inferring counterpart semantics from an alias list that can also hold
+    synonyms.
+    """
+    title = fm.scalar("title") or ""
+    term = base_term(title) if has_parenthetical(title) else title
+    term = math_skeleton(term).strip()
+    alias_field = fm.get("aliases")
+    aliases = {
+        fold_name(a) for a in
+        (alias_field.values if alias_field is not None and alias_field.is_list else [])
+        if a
+    }
+    counterpart = None
+    for match in _BOLD_PAREN_RE.finditer(_opening_block(sections)):
+        raw_candidate = match.group(1)
+        # Item 17 treats annotated parentheticals such as
+        # ``(singular, *archaeon*)`` as alias evidence.  They are not the
+        # title's direct acronym/full-form binding and therefore do not belong
+        # on flashcard line 3.  Keep this narrower than `_clean_paren_name`,
+        # whose lead-in stripping is correct for alias completeness.
+        if ("*" in raw_candidate or "_" in raw_candidate
+                or _PAREN_LEADIN_RE.match(raw_candidate)
+                or _NON_NAME_PAREN_RE.search(raw_candidate)):
+            continue
+        candidate = " ".join(raw_candidate.split()).strip()
+        try:
+            candidate_slug = fold_name(slug_stem(candidate))
+        except SlugError:
+            continue
+        if candidate_slug in aliases:
+            counterpart = candidate
+            break
+    return term, counterpart
+
+
+def _flashcard_line3_fault(line3, fm, sections):
+    """Explain a line-3 contract violation, or return ``None``."""
+    expected_term, required_counterpart = _flashcard_primary_answer(fm, sections)
+    match = re.fullmatch(r"(?P<term>.*?)(?: \((?P<paren>[^()\n]+)\))?", line3.strip())
+    term = match.group("term") if match else line3.strip()
+    counterpart = match.group("paren") if match else None
+    if expected_term and term != expected_term:
+        return "the term must be exactly %r (same canonical casing)" % expected_term
+
+    if counterpart is not None:
+        if required_counterpart is None:
+            return ("the parenthetical %r is not established as the title's own "
+                    "acronym/full-form counterpart in the opener" % counterpart)
+        if counterpart != required_counterpart:
+            return "the established counterpart must appear exactly as (%s)" % required_counterpart
+    if required_counterpart is not None and counterpart != required_counterpart:
+        return "the established counterpart must appear exactly as (%s)" % required_counterpart
+    return None
+
+
 def _check_flashcards_present(fm, sections, findings, is_stub):
     """Item 19's PRESENCE half: every full entry carries `## Flashcards`.
 
@@ -1149,15 +1253,9 @@ def _check_flashcards_present(fm, sections, findings, is_stub):
     # marks a card they disabled and is preserved, never converted.  Line 3 is
     # the canonical title: the base term for a parenthetical-disambiguated
     # title, the math-stripped skeleton for a symbol title (line 3 is plain
-    # text, so `$k$-fold` can only ever appear there as `k-fold`), with an
-    # optional trailing acronym-counterpart parenthetical -- compared with the
-    # parenthetical stripped and case-insensitively, as scan_vault does.
+    # text, so `$k$-fold` can only ever appear there as `k-fold`), plus the
+    # entry's own acronym/full-form counterpart when the opener establishes it.
     title = fm.scalar("title")
-    accepted = set()
-    for cand in ([title, base_term(title)] if title else []):
-        if cand:
-            accepted.add(cand.strip().lower())
-            accepted.add(math_skeleton(cand).strip().lower())
     for card_no, card in enumerate(cards, 1):
         if len(card) < 3:
             # A 1- or 2-line block is not a card at all (canon: definition /
@@ -1181,17 +1279,14 @@ def _check_flashcards_present(fm, sections, findings, is_stub):
                     "the user's `!!`, preserved verbatim, never converted)"
                     % (card_no, line2[:20]),
                     {"card": card_no, "line2": line2[:40]}))
-        if len(card) >= 3 and accepted:
+        if len(card) >= 3 and title:
             line3 = card[2].strip()
-            m3 = re.match(r"^(?P<term>.*?)\s*(?:\([^()\n]*\))?\s*$", line3)
-            term = (m3.group("term") if m3 else line3).strip()
-            if term.lower() not in accepted:
+            fault = _flashcard_line3_fault(line3, fm, sections)
+            if fault:
                 findings.append(_f(
                     "19-flashcards", "error",
-                    "flashcard %d line 3 is %r -- it must be the canonical "
-                    "title %r (base term for a parenthetical-disambiguated "
-                    "title; an acronym counterpart may follow in parentheses)"
-                    % (card_no, line3[:40], title),
+                    "flashcard %d line 3 is %r -- %s"
+                    % (card_no, line3[:40], fault),
                     {"card": card_no, "line3": line3[:60], "title": title}))
 
 
@@ -1272,10 +1367,15 @@ def _check_stub_structure(fm, sections, findings, is_stub):
         findings.append(_f("stub-no-related", "error",
                            "stubs carry no **Related:** footer",
                            {"line": sections["related_line"]}))
-    if "![[" in body_text:
+    # A syntax sample inside inline/fenced/indented code is not an image.
+    # Read the same listing-masked body as the linter's stub check.
+    stub_images = re.findall(
+        r"!\[\[[^\]\n]+\]\]|!\[[^\]\n]*\]\([^)\n]+\)",
+        strip_code(body_text))
+    if stub_images:
         findings.append(_f("stub-no-images", "error",
                            "stubs never carry images",
-                           {"embeds": re.findall(r"\!\[\[[^\]]+\]\]", body_text)}))
+                           {"embeds": stub_images}))
     if sections["flashcards_index"] is not None:
         findings.append(_f("stub-no-flashcards", "error",
                            "stubs have no ## Flashcards section"))
@@ -1664,6 +1764,7 @@ def run_self_test():
 
     # Invalid provenance and review state used to pass the creation gate.
     for source in ("[[Doe_X_2025.pdf]]", "[[Doe_X_2025.pdf#page=0]]",
+                   "[[Doe_X_2025.pdf#page=01]]",
                    "[[Doe_X_2025.pdf#page=1garbage]]",
                    "https://example.test/Doe_X_2025.pdf#page=1",
                    "Doe_X_2025.pdf#page=1", "[[Note.md#Heading]]"):
@@ -1708,6 +1809,18 @@ def run_self_test():
            for f in lint_text(mutate("read: false\n", "mood: bright\nread: false\n"),
                               "roc-curve.md")["findings"]],
           [("2-field-order", "warning")])
+    obsidian_fields = (
+        "cssclasses: wide\ncssclass: legacy\npublish: true\n"
+        "permalink: /roc\ncover: cover.png\nimage: image.png\n"
+        "banner: banner.png\nicon: chart\n")
+    obsidian_findings = lint_text(
+        mutate("read: false\n", obsidian_fields + "read: false\n"),
+        "roc-curve.md")["findings"]
+    check("all Obsidian-owned appearance/publish keys are report-only and "
+          "never schema-cleanup findings",
+          [(f["item"], f["severity"], f["evidence"].get("report_only"))
+           for f in obsidian_findings],
+          [("2-obsidian-key", "info", True)] * len(OBSIDIAN_KEYS))
     check("a legacy `importance:` in its historical slot is NOT a finding",
           items(mutate("parents: []\n", "importance: high\nparents: []\n")), [])
     check("a bare `parents:` (YAML null) is a 2-field-order error",
@@ -1731,6 +1844,14 @@ def run_self_test():
           items(mutate("read: false", 'read: "false"')), ["2-quoting"])
     check("a single-quoted list item",
           items(mutate('  - "auroc"', "  - 'auroc'")), ["2-quoting"])
+    check("a scalar aliases field is rejected even when its value is a valid slug",
+          items(mutate('aliases:\n  - "auroc"\n', 'aliases: "auroc"\n')),
+          ["18-alias-form"])
+    check("a bare aliases key is not an empty list",
+          items(mutate('aliases:\n  - "auroc"\n', 'aliases:\n')),
+          ["18-alias-form"])
+    check("an explicitly empty flow aliases list has list shape",
+          items(mutate('aliases:\n  - "auroc"\n', 'aliases: []\n')), [])
     check("an UNQUOTED #tag, which YAML reads as a comment",
           items(mutate('  - "#statistics"', "  - #statistics")),
           ["2-quoting", "8-tags"])
@@ -1800,12 +1921,26 @@ def run_self_test():
                 .replace("ROC curve\n", "k-nearest neighbors\n"),
                 "k-nearest-neighbors.md"),
           [])
+    check("a plain-text math skeleton is the subject of a symbol-title description",
+          items(mutate('title: "ROC curve"\n', 'title: "$k$-fold"\n')
+                .replace("A **ROC curve** plots", "A **k-fold** plots")
+                .replace('description: "A plot', 'description: "k-fold is a plot')
+                .replace("ROC curve\n", "k-fold\n"), "k-fold.md"),
+          [])
 
     # -- item 8: tags ------------------------------------------------------
     check("a tag with no # prefix",
           items(mutate('  - "#statistics"', '  - "statistics"')), ["8-tags"])
     check("a tag outside the 27-slug enum",
           items(mutate('  - "#statistics"', '  - "#astrology"')), ["8-tags"])
+    check("a flow-form tags list is rejected even when its value is valid",
+          items(mutate('tags:\n  - "#statistics"\n',
+                       'tags: ["#statistics"]\n')), ["8-tags"])
+    check("a scalar tags value is rejected even when its value is valid",
+          items(mutate('tags:\n  - "#statistics"\n',
+                       'tags: "#statistics"\n')), ["8-tags"])
+    check("a blank tags: key remains valid on a full entry",
+          items(mutate('tags:\n  - "#statistics"\n', "tags:\n")), [])
     check("a stub with blank tags: (the one field where a stub is stricter)",
           items(mutate('tags:\n  - "#statistics"\n', "tags:\n", base=stub),
                 "precision.md"),
@@ -1869,8 +2004,38 @@ def run_self_test():
           items(mutate("??\nROC curve\n", "!!\nROC curve\n")), [])
     check("card line 3 that is not the canonical title",
           items(mutate("??\nROC curve\n", "??\nThe ROC\n")), ["19-flashcards"])
-    check("...but the title plus an acronym-counterpart parenthetical is fine",
-          items(mutate("??\nROC curve\n", "??\nROC curve (RC)\n")), [])
+    bound_card = mutate('  - "auroc"', '  - "rc"')
+    bound_card = bound_card.replace("A **ROC curve** plots", "A **ROC curve** (RC) plots")
+    check("...but the exact title plus its established acronym counterpart is fine",
+          items(bound_card.replace("??\nROC curve\n", "??\nROC curve (RC)\n")), [])
+    check("an established counterpart is required on line 3",
+          items(bound_card), ["19-flashcards"])
+    check("an arbitrary line-3 parenthetical is not a counterpart",
+          items(mutate("??\nROC curve\n", "??\nROC curve (RC)\n")),
+          ["19-flashcards"])
+    scalar_bound_card = bound_card.replace(
+        'aliases:\n  - "rc"\n', 'aliases: "rc"\n').replace(
+        "??\nROC curve\n", "??\nROC curve (RC)\n")
+    check("a malformed scalar alias cannot establish a card counterpart",
+          items(scalar_bound_card), ["18-alias-form", "19-flashcards"])
+    check("line 3 preserves the canonical title's casing",
+          items(mutate("??\nROC curve\n", "??\nroc curve\n")),
+          ["19-flashcards"])
+    singular_alias = good.replace('title: "ROC curve"', 'title: "Archaea"')
+    singular_alias = singular_alias.replace('  - "auroc"', '  - "archaeon"')
+    singular_alias = singular_alias.replace(
+        'description: "A plot of true positive rate against false positive rate."',
+        'description: "Archaea is a domain of single-celled organisms."')
+    singular_alias = singular_alias.replace(
+        'A **ROC curve** plots the trade-off between two error rates as a decision threshold moves.',
+        '**Archaea** (singular, *archaeon*) is a domain of single-celled organisms.')
+    singular_alias = singular_alias.replace('\nROC curve\n', '\nArchaea\n')
+    check("a singular synonym in an annotated opener parenthetical is not a card counterpart",
+          items(singular_alias, "archaea.md"), [])
+    check("appending that singular synonym to line 3 is rejected",
+          items(singular_alias.replace("??\nArchaea\n",
+                                       "??\nArchaea (archaeon)\n"),
+                "archaea.md"), ["19-flashcards"])
     check("card line 1 leaking the title",
           items(mutate("The plot tracing the trade-off",
                        "The ROC curve traces the trade-off")),
@@ -1901,6 +2066,12 @@ def run_self_test():
     check("a stub with an image (which is also a second block, hence both)",
           items(mutate("correct.\n", "correct.\n\n![[figure.png]]\n", base=stub),
                 "precision.md"), ["stub-no-images", "stub-one-sentence-body"])
+    check("a stub with Markdown image syntax is also rejected",
+          items(mutate("correct.\n", "correct with ![alt](figure.png).\n", base=stub),
+                "precision.md"), ["stub-no-images"])
+    check("image syntax shown in inline code is not a stub image",
+          items(mutate("correct.\n", "correct while showing `![[figure.png]]` syntax.\n",
+                       base=stub), "precision.md"), [])
     check("a stub with a Flashcards section",
           items(mutate("correct.\n",
                        "correct.\n\n---\n\n## Flashcards\n\nDef.\n??\nPrecision\n",
