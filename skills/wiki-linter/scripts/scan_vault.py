@@ -1259,12 +1259,12 @@ def scan(wiki, images=None):
             spellings = ", ".join(f'"{t}"' for t, c in _canon_by_tag if c == d)
             problems.append((sl,"item8",f'discipline "#{d}" tagged more than once (as {spellings}) — keep one'))
         # ---- item 9: body structure (FULL ENTRIES AND STUBS) ----
-        # A stub is exempt from item 9's LENGTH guidance only, not from item 9 wholesale: wiki-builder's
-        # stub format is a prose sentence on the line straight after the frontmatter, and its Person/Event
-        # stubs carry the date parenthetical after the bolded subject "following the same discipline as full
-        # entries" (wiki-builder's SKILL.md, Stubs (legacy)). None of the three checks below is a length check, so all three run
-        # on stubs too — this block used to sit behind `if not is_stub:`, which dropped rules the stub format
-        # requires.
+        # The scanner has no body-length, paragraph-flow, or atomicity check. The structural
+        # floor still applies to stubs: prose starts immediately after the
+        # frontmatter, and Person/Event stubs carry the date parenthetical after
+        # the bolded subject (wiki-builder's SKILL.md, Stubs (legacy)). All three
+        # checks below therefore run on stubs too; this block once sat behind
+        # `if not is_stub:`, which dropped rules the stub format requires.
         if e["blank_after"]:
             problems.append((sl,"item9","blank line immediately after frontmatter"))
         bstrip = e["body"].lstrip()

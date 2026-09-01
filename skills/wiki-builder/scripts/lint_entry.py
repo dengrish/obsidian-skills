@@ -32,10 +32,6 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
   7   7-description           <= 110 chars (count reported), plain text, no
                               LaTeX/markdown/wikilinks, capitalised, ends "."
   8   8-tags                  #-prefixed, double-quoted, in the 27-slug enum
-  9   9-sentence-length       any body-prose sentence of >= 35 words (warning:
-                              item 9's split rule; captions, table rows,
-                              display math and embeds are excluded, and how to
-                              split stays the model's call)
   10  10-duplicate-wikilink   same TARGET SLUG linked >1x in body prose
                               (counted by target, not display text; the
                               Related footer is exempt).  This is item 10's
@@ -72,9 +68,8 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
   18  18-alias-form           every alias is itself in slug form (warning)
 
 NOT implemented (out of scope by design): item 4's file existence and page
-correctness, items 6, 9 beyond the opener and
-the sentence-length flag, 11-15, 17 beyond the introduced-alias scan, and the
-interpretive halves of 8/18/19.
+correctness, items 6, 9 beyond the structural opener, 11-15, 17 beyond the
+introduced-alias scan, and the interpretive halves of 8/18/19.
 
 Severity: ``error`` (a stated rule is violated), ``warning`` (very likely a
 violation but the rule has a documented carve-out), ``info`` (advisory).
@@ -200,12 +195,6 @@ QUOTED_LIST_FIELDS = ["aliases", "sources", "tags", "parents"]
 
 DESCRIPTION_MAX = 110
 
-#: Item 9's sentence-length rule: any body-prose sentence of this many words
-#: or more is flagged for splitting.  The prose target is ~25; the flag sits
-#: at 35 so it fires on the unambiguous offenders, not on every long-ish
-#: sentence -- the reference is `writing.md` §2, prose principle 9.
-SENTENCE_MAX_WORDS = 35
-
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _BOLD3_RE = re.compile(r"\*\*\*(.+?)\*\*\*")
 _BOLD2_RE = re.compile(r"\*\*(.+?)\*\*")
@@ -235,10 +224,9 @@ _ABBREV_RE = re.compile(
 #: bolding the name, so the first initial is preceded by ``**`` and not by a
 #: space (``**W. E. B. Du Bois** ...``).  Apostrophes are EXCLUDED from that
 #: left context: the ``s`` of a sentence-final possessive (``the predictor's.
-#: The next ...``) is preceded by ``'``, which read as an initial and MERGED
-#: the two sentences -- four entries on a real vault re-flagged a phantom
-#: 35+-word "sentence" every run.  A genuine initial preceded by an apostrophe
-#: does not occur in practice; a possessive ends nearly every affected clause.
+#: The next ...``) is preceded by ``'``. Reading that ``s.`` as an initial
+#: merges two sentences and lets an invalid two-sentence legacy stub pass. A
+#: genuine initial preceded by an apostrophe does not occur in practice.
 _INITIAL_RE = re.compile(r"(?:^|[^0-9A-Za-z'’])[A-Za-z]\.$")
 
 
@@ -746,7 +734,7 @@ def _check_aliases(fm, findings):
 
 
 # --------------------------------------------------------------------------
-# item 17's introduced-alias scan, and item 9's sentence-length flag
+# item 17's introduced-alias scan
 # --------------------------------------------------------------------------
 
 #: A synonym-introduction cue in body prose.  Per the emphasis rules
@@ -864,75 +852,6 @@ def _check_alias_completeness(fm, sections, findings, filename):
             "entity; a cross-domain bare term or a wrong-entity name stays "
             "out (checklist item 17)" % (cand, where, cslug),
             {"candidate": cand, "where": where, "expected_alias": cslug}))
-
-
-def _sentence_scan_text(sections):
-    """Body prose ready for the sentence scan.
-
-    Whole-line captions, table rows, image embeds and display math are not
-    sentences and are dropped; wikilinks collapse to their display text and
-    inline math to one token, so neither inflates a word count.
-    """
-    kept = []
-    for raw in sections["prose_lines"]:
-        s = raw.strip()
-        if not s:
-            kept.append("")
-            continue
-        if s.startswith("|"):
-            continue
-        if re.match(r"^!\[\[[^\]]+\]\]\s*$", s) or re.match(r"^!\[[^\]]*\]\([^)]*\)\s*$", s):
-            continue
-        if s.startswith("*") and s.endswith("*") and not s.startswith("**"):
-            continue                                   # caption line
-        kept.append(raw)
-    text = "\n".join(kept)
-    # A DISPLAY block ends the sentence around it: "... is defined as: $$...$$
-    # where ..." merged into one phantom 35+-word "sentence" because a colon is
-    # not a boundary, and the real parts on either side are each under the cap.
-    # The placeholder's own period gives the splitter the boundary the block
-    # visually is.  Inline math stays a plain token -- it sits INSIDE a sentence.
-    text = re.sub(r"\$\$.*?\$\$", " EQN. ", text, flags=re.S)
-    text = re.sub(r"\[\[([^\]|]+)\|([^\]]+)\]\]", r"\2", text)
-    text = re.sub(r"\[\[([^\]]+)\]\]", r"\1", text)
-    text = re.sub(r"\$[^$\n]*\$", " EQN ", text)
-    return text
-
-
-def _iter_sentences(text):
-    """Yield sentences, using the same boundary rules as count_sentences."""
-    s = " ".join(text.split())
-    start = 0
-    for m in re.finditer(r"[.!?]+", s):
-        nxt = s[m.end():m.end() + 1]
-        if nxt and not nxt.isspace():
-            continue
-        if m.group(0) == ".":
-            # Tail slice for the same two reasons count_sentences gives.
-            head = s[max(0, m.end() - 16):m.end()]
-            if _INITIAL_RE.search(head) or _ABBREV_RE.search(head):
-                continue
-        chunk = s[start:m.end()].strip()
-        if chunk:
-            yield chunk
-        start = m.end()
-    tail = s[start:].strip()
-    if tail:
-        yield tail
-
-
-def _check_sentence_length(sections, findings, is_stub):
-    """Item 9's sentence-length flag.  Legacy stubs are exempt (length clause)."""
-    if is_stub:
-        return
-    for sent in _iter_sentences(_sentence_scan_text(sections)):
-        words = len(sent.split())
-        if words >= SENTENCE_MAX_WORDS:
-            findings.append(_f(
-                "9-sentence-length", "warning",
-                "a %d-word sentence -- item 9 splits any sentence of %d+ "
-                "words into one idea per sentence" % (words, SENTENCE_MAX_WORDS),
-                {"words": words, "sentence": sent[:200]}))
 
 
 # NOTE: there is deliberately no _check_importance either.  The field was
@@ -1461,7 +1380,6 @@ def lint_text(text, filename):
     _check_tags(fm, findings, is_stub)
     _check_aliases(fm, findings)
     _check_alias_completeness(fm, sections, findings, filename)
-    _check_sentence_length(sections, findings, is_stub)
     _check_duplicate_wikilinks(sections, findings)
     _check_bold_opener(fm, sections, findings)
     _check_flashcards_present(fm, sections, findings, is_stub)
@@ -2005,54 +1923,41 @@ def run_self_test():
                        base=stub), "precision.md"),
           ["19-flashcards", "stub-sources-marker"])
 
-    # -- item 9: the sentence-length flag ----------------------------------
-    check("a 35+-word body sentence is flagged for splitting",
+    # -- item 9: no mechanical body-length or paragraph-flow rule ---------
+    check("a long, well-scoped full-entry sentence has no length finding",
           items(mutate("A **ROC curve** plots the trade-off between two error "
                        "rates as a decision threshold moves.\n",
-                       "A **ROC curve** plots the trade-off between two error "
-                       "rates as a decision threshold moves across every "
-                       "possible operating point, which analysts read as a "
-                       "single summary picture of classifier behaviour over "
-                       "all thresholds rather than one fixed choice of cutoff "
-                       "for the model.\n")),
-          ["9-sentence-length"])
-    check("a legacy stub is exempt from the sentence-length flag",
+                       "A **ROC curve** plots the trade-off between false "
+                       "positive and true positive rates as a decision "
+                       "threshold moves through every operating point, while "
+                       "preserving the relationship between threshold choice, "
+                       "ranking behaviour, and the classifier's error profile "
+                       "in one clear scoped statement.\n")),
+          [])
+    check("a long one-sentence legacy stub still follows its own shape rule",
           items(mutate("**Precision** is the share of predicted positives "
                        "that are correct.",
                        "**Precision** is the share of predicted positives "
                        "that are correct when a classifier's positive calls "
-                       "are compared against the labels, a proportion "
-                       "practitioners quote alongside recall to summarise "
-                       "detection quality on imbalanced data over many "
-                       "operating thresholds.", base=stub),
+                       "are compared against labels across all operating "
+                       "thresholds used in the evaluation.", base=stub),
                 "precision.md"),
           [])
-    # A sentence-final POSSESSIVE is a boundary: the `'s.` tail read as an
-    # initial and merged the two sentences, so two conforming sentences
-    # re-flagged as one phantom 35+-word sentence on every run (four entries
-    # on a real vault).
-    check("a possessive before the period does not merge two sentences",
-          items(mutate("A **ROC curve** plots the trade-off between two error "
-                       "rates as a decision threshold moves.\n",
-                       "A **ROC curve** plots the threshold trade-off that "
-                       "analysts read from each classifier and its "
-                       "predictor's. The same curve summarises ranking "
-                       "quality over every operating point an evaluation "
-                       "could pick for the model under test.\n")),
-          [])
+    # Sentence boundaries remain relevant only to the legacy stub's required
+    # one-sentence shape. A possessive must end a sentence; an initial must not.
+    check("a possessive before the period separates two sentences",
+          count_sentences("One belongs to the predictor's. Another follows."), 2)
     check("...and a genuine initial still does not split (B. F. Skinner)",
           count_sentences("It was described by B. F. Skinner in 1948."), 1)
-    # A DISPLAY math block ends the sentence around it: the colon-introduced
-    # "$$...$$ where ..." shape merged into one phantom 35+-word "sentence".
-    check("a display equation is a sentence boundary, not a merge point",
+    check("display math beside long prose creates no body-length finding",
           items(mutate("A **ROC curve** plots the trade-off between two error "
                        "rates as a decision threshold moves.\n",
-                       "A **ROC curve** plots one error-rate pair per "
-                       "threshold, and analysts define the summary statistic "
-                       "for the comparison as:\n\n$$A = \\int_0^1 f(x)\\,dx$$\n\n"
-                       "where the integral runs over the false positive rate "
-                       "and larger areas mean better ranking quality across "
-                       "operating points.\n")),
+                       "A **ROC curve** plots one error-rate pair per threshold "
+                       "and can be summarized by the area under the curve:\n\n"
+                       "$$A = \\int_0^1 f(x)\\,dx$$\n\n"
+                       "The integral aggregates ranking behaviour across all "
+                       "operating points while the curve preserves the "
+                       "threshold-specific trade-off.\n")),
           [])
     # Listings are SHOWN, not asserted: a link displayed in a fence, an inline
     # code span or an indented block beside one real prose link is ONE link

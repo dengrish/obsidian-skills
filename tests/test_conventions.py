@@ -5503,7 +5503,7 @@ SELFTEST_MIN_CASES = {
     "skills/clipping-processor/scripts/dedup_index.py": 108,
     "skills/clipping-processor/scripts/fetch_images.py": 282,
     "skills/clipping-processor/scripts/slug.py": 120,
-    "skills/paper-summarizer/scripts/note_lint.py": 183,
+    "skills/paper-summarizer/scripts/note_lint.py": 187,
     "skills/paper-summarizer/scripts/paper_scan.py": 118,
     "skills/paper-summarizer/scripts/paper_text.py": 39,
     "skills/pdf-figure-extractor/scripts/auto_fig_bbox.py": 296,

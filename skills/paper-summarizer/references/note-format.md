@@ -7,8 +7,8 @@
 - [Citations](#citations)
 - [Complete shape](#complete-shape)
 
-Read before drafting. This file owns the output shape and mechanical writing
-limits; [summary standards](summary-standards.md) owns factual claims and
+Read before drafting. This file owns the output shape, writing limits and
+brevity targets; [summary standards](summary-standards.md) owns factual claims and
 confidence, and [figures](figures.md) owns exhibit selection and captions.
 
 ## Frontmatter
@@ -109,9 +109,10 @@ the claim rules; a cautious paragraph cannot repair an overstated heading.
   If the stated aim and actual analysis differ, name that and carry the
   methodological consequence into Limitations.
 - **Methods:** a short paragraph naming the design, then 3–8 numbered steps in
-  simple past, active voice, one action each, at most 20 words. Put each step's
-  numbers inside it. A theory paper or comment without a procedure uses only
-  the paragraph. Include methodological preregistration where the paper has it.
+  simple past, active voice, one action each, targeting at most 20 words. Put
+  each step's numbers inside it. A theory paper or comment without a procedure
+  uses only the paragraph. Include methodological preregistration where the
+  paper has it.
 - **Results:** develop the main finding for a scientist from another field.
   Include harms and negative findings alongside benefits. A secondary experiment
   earns at most a sentence when it changes the main result's reading. Put every
@@ -134,9 +135,15 @@ or a relevant missing-disclosure limitation, not in Availability.
 
 Write for a scientist outside the paper's field. Keep technical terms and gloss
 unfamiliar ones once, in their own sentence. Use active voice, simple tenses and
-one topic per paragraph. No prose sentence exceeds 25 words; a numbered step
-has at most 20, and a paragraph at most six sentences. These limits include
-callout bullets and exhibit captions. Shortening must not drop a qualification.
+one topic per paragraph, with at most six sentences per paragraph.
+
+Aim for at most **25 words per prose sentence and 20 per numbered step**,
+including callout bullets and exhibit captions. These are strong brevity targets.
+Split or shorten first, preserving complete sentences and necessary qualifications.
+Keep a longer sentence only when shortening or splitting it would make the
+meaning, scope or qualification less clear. Use the shortest clear version and
+explain the exception in the run report, not in the note. A word-count advisory
+calls for this judgment; it is not permission to retain avoidable detail.
 
 The Summary callout holds 3–7 `> - ` bullets, one line per bullet. Lead with the
 main finding; include its scope, absolute comparison and confidence limitation,
@@ -209,6 +216,7 @@ apart from the Methods procedure and Results exhibits. Every embed/table has
 its italic caption on the next line. No figure or table number appears in the
 prose or captions. End after Availability with a single newline.
 
-Run `note_lint.py` on the complete draft. Its clean result covers mechanical
+Run `note_lint.py` on the complete draft. Fix its violations and review its
+sentence-length advisories using the targets above. Its result covers mechanical
 format, not the scientific meaning, physical page upper bounds or image contents.
 The [verification checklist](review-checklist.md) covers those independent checks.

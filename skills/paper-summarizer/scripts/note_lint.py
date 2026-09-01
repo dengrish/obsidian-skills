@@ -10,7 +10,9 @@ drift is invisible from inside the note that has it.
     python3 note_lint.py '<note.md>' --images '<vault>/Sources/Images'
     python3 note_lint.py --test
 
-Exit 0 clean, 1 with one line per violation, 2 for a bad invocation.
+Exit 0 with no violations, 1 with one line per violation, 2 for a bad invocation.
+Sentence-length advisories are reported separately and do not affect the exit
+code. Review them before publication; word counts cannot judge clarity.
 
 Stdlib only. The nine-key schema and list shapes are checked here; scalar
 decoding is shared with the source-ownership readers so valid YAML escapes do
@@ -110,13 +112,9 @@ MIN_LIMITATIONS, MAX_LIMITATIONS = 2, 4
 MIN_AVAILABILITY, MAX_AVAILABILITY = 1, 3
 MAX_LIMITATION_CHARS = 420
 
-#: The house sentence limits: 25 words of prose, 20 inside a numbered step
-#: (references/note-format.md).  The cap used to be 45, chosen as a generous edge around
-#: a 30-word target; a third of the sentences in a finished note still sat
-#: above 25, and those were the ones that had to be read twice.  These two
-#: numbers came in with a controlled-language standard that this skill no
-#: longer follows -- they stayed because the prose they produce is what the
-#: vault wanted, not because a specification asked for them.
+#: Strong brevity targets, reviewed for justified clarity exceptions under
+#: references/note-format.md. Keep the existing constant names for callers;
+#: exceeding either target is an advisory, not a format violation.
 MAX_SENTENCE_WORDS = 25
 MAX_STEP_WORDS = 20
 
@@ -265,11 +263,16 @@ class Note(object):
         self.text = text
         self.raw_lines = text.split("\n")
         self.findings = []
+        self.advisories = []
         self.source = None
 
     def fail(self, line, msg):
         """`line` is 1-indexed, or 0 when the finding is about the whole file."""
         self.findings.append((line, msg))
+
+    def advise(self, line, msg):
+        """Record a non-blocking writing judgment at a 1-indexed line."""
+        self.advisories.append((line, msg))
 
 
 def _split_front_matter(note):
@@ -748,25 +751,23 @@ def _prose_lines(note, start, end, captions, fenced):
 
 
 def _check_prose(note, bounds, captions, fenced, body_start):
-    """The two readability rules that can be checked mechanically.
+    """Flag sentence-length targets; enforce paragraph, procedure and Results caps.
 
-    Neither can tell whether the note is *clear* -- that is the writing, and no
-    linter reaches it.  What they catch is the two shapes that make a note
-    unreadable whatever the writing: the sentence that carries three claims,
-    and the Results section that carries the whole paper.
+    Counts cannot decide whether a longer sentence is needed for clarity.
+    Keep those advisories separate from the required structural limits.
     """
     for n, s, step in _prose_blocks(note, body_start, captions, fenced):
-        cap = MAX_STEP_WORDS if step else MAX_SENTENCE_WORDS
+        target = MAX_STEP_WORDS if step else MAX_SENTENCE_WORDS
         counted = sentences(s)
         for sent in counted:
             words = len(sent.split())
-            if words > cap:
-                note.fail(n + 1, "a %s runs %d words, over %d -- one idea per "
-                                 "sentence: a sentence is capped at %d words "
-                                 "and a numbered step at %d (references/note-format.md). "
-                                 "Starts: %r"
-                          % ("step" if step else "sentence", words, cap,
-                             MAX_SENTENCE_WORDS, MAX_STEP_WORDS,
+            if words > target:
+                note.advise(n + 1, "a %s runs %d words, over the %d-word target -- "
+                                   "split or shorten first; retain only if that would "
+                                   "obscure meaning, scope or a needed qualification. "
+                                   "Explain the exception in the run report "
+                                   "(references/note-format.md). Starts: %r"
+                            % ("step" if step else "sentence", words, target,
                              " ".join(sent.split()[:9]) + "…"))
                 break
         if not step and len(counted) > MAX_PARAGRAPH_SENTENCES:
@@ -812,7 +813,7 @@ def _prose_blocks(note, body_start, captions, fenced):
 
     A soft-wrapped sentence is still one sentence, and seven adjacent lines
     are still one paragraph. Blank lines, exhibits, headings, fences and new
-    list items separate blocks; wrapped numbered steps retain their 20-word cap.
+    list items separate blocks; wrapped numbered steps retain their 20-word target.
     """
     pending = []
     first, is_step = 0, False
@@ -1045,8 +1046,13 @@ def _name_key(name):
     return unicodedata.normalize("NFC", name).casefold()
 
 
-def lint(text, path="<note>", images=None):
-    """Return a sorted list of (line, message).  Empty means the note is clean."""
+def lint(text, path="<note>", images=None, *, advisories=None):
+    """Return sorted blocking (line, message) pairs, preserving the list API.
+
+    An empty result means no format violations. If supplied, append sorted
+    sentence-length advisories to the caller's list; they need writing review
+    but never suppress a violation or change the returned list's shape.
+    """
     note = Note(text, path)
     # CRLF first, and normalise before anything else looks at a line.  Left in
     # place it makes every `---` fence read as `---\r`, so the note reports as
@@ -1073,6 +1079,8 @@ def lint(text, path="<note>", images=None):
     _check_exhibit_numbers(note, body_start, captions, fenced)
     _check_prose(note, bounds, captions, fenced, body_start)
     _check_citations(note, body_start, captions, fenced, src)
+    if advisories is not None:
+        advisories.extend(sorted(note.advisories))
     return sorted(note.findings)
 
 
@@ -1226,7 +1234,7 @@ def _cases():
                  "The investigators compared the outcomes for each of the treated participants\n"
                  "with the corresponding measurements from the matched untreated participants\n"
                  "in every ward during the scheduled follow-up visit."),
-         "one idea per sentence"),
+         "__ADVISORY__a sentence runs"),
         ("a soft-wrapped paragraph retains its sentence count",
          _mutate("Prose.", "One is stated.\nTwo follows.\nThree lands.\n"
                  "Four holds.\nFive stands.\nSix ends.\nSeven overflows."),
@@ -1234,12 +1242,12 @@ def _cases():
         ("blank lines separate short paragraphs",
          _mutate("Prose.", "One is stated.\n\nTwo follows.\n\nThree lands.\n\n"
                  "Four holds.\n\nFive stands.\n\nSix ends.\n\nSeven follows."), CLEAN),
-        ("a wrapped numbered step keeps its tighter cap",
+        ("a wrapped numbered step keeps its tighter target",
          _mutate(M_H + "\n\nProse.", M_H + "\n\nProse.\n\n"
                  "1. The investigators collected the original measurements from every participant\n"
                  "   and compared those measurements with the same measurements from matched controls across all participating hospitals.\n"
                  "2. They fitted the model.\n3. They evaluated the predictions."),
-         "a step runs 24 words"),
+         "__ADVISORY__a step runs 24 words"),
         # A single-letter initial is not a sentence boundary: "B. F. Skinner"
         # split into three "sentences", pushing a conforming 5-sentence
         # paragraph over the 6-sentence cap (lint_entry guards this shape;
@@ -1632,12 +1640,12 @@ def _cases():
          _mutate("*The arms separated", "*Figures 2 and 3 - the arms separated"),
          "opens with an exhibit number"),
 
-        # --- sentence and paragraph limits (step 7a) -------------------------
-        ("a sentence over the STE limit",
+        # --- sentence targets and required paragraph limits ----------------
+        ("a sentence over the target is advisory only",
          _mutate("More prose.",
                  " ".join(["Recurrence"] * (MAX_SENTENCE_WORDS + 1)) + "."),
-         "over %d" % MAX_SENTENCE_WORDS),
-        ("NEAR MISS: a sentence exactly at the cap is clean",
+         "__ADVISORY__over the %d-word target" % MAX_SENTENCE_WORDS),
+        ("NEAR MISS: a sentence exactly at the target is clean",
          _mutate("More prose.",
                  " ".join(["Recurrence"] * MAX_SENTENCE_WORDS) + "."),
          CLEAN),
@@ -1645,22 +1653,22 @@ def _cases():
          _mutate("*The arms separated",
                  "*" + " ".join(["Separation"] * (MAX_SENTENCE_WORDS + 1))
                  + ". The arms separated"),
-         "one idea per sentence"),
+         "__ADVISORY__a sentence runs"),
         ("a long sentence in the callout is caught too",
          _mutate("> - Two.",
                  "> - " + " ".join(["Message"] * (MAX_SENTENCE_WORDS + 1)) + "."),
-         "one idea per sentence"),
+         "__ADVISORY__a sentence runs"),
         ("NEAR MISS: a decimal does not end a sentence, so the clauses either "
          "side of one are counted together",
          _mutate("More prose.",
                  " ".join(["Recurrence"] * 14) + " r = 0.51 "
                  + " ".join(["and"] * 14) + " end."),
-         "one idea per sentence"),
+         "__ADVISORY__a sentence runs"),
         ("NEAR MISS: `et al.` does not end a sentence either",
          _mutate("More prose.",
                  " ".join(["Recurrence"] * 12) + " per Smith et al. 2019 "
                  + " ".join(["again"] * 12) + "."),
-         "one idea per sentence"),
+         "__ADVISORY__a sentence runs"),
         ("a paragraph over six sentences",
          _mutate("More prose.", "Prose. " * (MAX_PARAGRAPH_SENTENCES + 1)),
          "one topic per paragraph"),
@@ -1705,14 +1713,14 @@ def _cases():
                  "1. The team did a thing.\n3. The team did another.\n"
                  "4. The team did a third."),
          "they run 1.."),
-        ("a step over the 20-word procedural limit",
+        ("a step over the 20-word target is advisory only",
          _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  "1. " + " ".join(["The"] * (MAX_STEP_WORDS + 1)) + ".\n"
                  "2. The team did another.\n3. The team did a third."),
-         "a step runs %d words" % (MAX_STEP_WORDS + 1)),
+         "__ADVISORY__a step runs %d words" % (MAX_STEP_WORDS + 1)),
         ("NEAR MISS: a step exactly at 20 words is clean, though the same "
-         "words as prose would still be under the 25-word cap",
+         "words as prose would still be under the 25-word target",
          _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  "1. " + " ".join(["The"] * MAX_STEP_WORDS) + ".\n"
@@ -1722,16 +1730,21 @@ def _cases():
 
 
 def _selftest():
-    """Three kinds of case: CLEAN (must produce nothing), a needle (must produce
-    a finding containing it), and `__ONLY__x` (must produce x and nothing else --
-    which is how a check that reports one fault as seven gets caught)."""
+    """CLEAN must produce nothing; a needle must produce a violation containing
+    it; `__ADVISORY__x` must produce exactly one advisory and no violations;
+    `__ONLY__x` must produce one violation containing x and nothing else --
+    which is how a check that reports one fault as seven gets caught."""
     ok = fail = 0
     for name, text, needle in _cases():
-        got = lint(text)
+        advisories = []
+        got = lint(text, advisories=advisories)
         if needle is CLEAN:
-            good = not got
+            good = not got and not advisories
         elif needle is None:
             good = bool(got)
+        elif needle.startswith("__ADVISORY__"):
+            want = needle[len("__ADVISORY__"):]
+            good = not got and len(advisories) == 1 and want in advisories[0][1]
         elif needle.startswith("__ONLY__"):
             want = needle[len("__ONLY__"):]
             good = len(got) == 1 and want in got[0][1]
@@ -1741,9 +1754,50 @@ def _selftest():
             ok += 1
         else:
             fail += 1
-            print("FAIL  %-30s expected %r, got: %s"
-                  % (name, needle, "; ".join(m for _, m in got) or "(clean)"))
-    # The clean fixture must also survive an --images check against real files.
+            print("FAIL  %-30s expected %r, got violations: %s; advisories: %s"
+                  % (name, needle, "; ".join(m for _, m in got) or "(none)",
+                     "; ".join(m for _, m in advisories) or "(none)"))
+
+    # Exercise both the original list-returning API and the command's status:
+    # an advisory must not block publication or hide a real violation. Images
+    # are only checked for existence here; their contents need visual review.
+    import contextlib
+    import io
+    import tempfile
+    long_note = _mutate("More prose.",
+                        " ".join(["Recurrence"] * (MAX_SENTENCE_WORDS + 1)) + ".")
+    if lint(long_note) == []:
+        ok += 1
+    else:
+        fail += 1
+        print("FAIL  the original lint API returns only blocking violations")
+    with tempfile.TemporaryDirectory() as scratch:
+        image_path = os.path.join(scratch, "Doe_X_2025_fig_2.png")
+        with open(image_path, "wb") as fh:
+            fh.write(b"")
+        invalid_note = (long_note.replace("read: false", 'read: "false"')
+                        .replace("#page=5|5", "#page=0|0")
+                        .replace("Doe_X_2025_fig_2.png", "Doe_X_2025_fig_9.png"))
+        for name, text, status, required in [
+                ("CLI clean note with existing image", GOOD, 0, [": clean"]),
+                ("CLI sentence advisory does not fail", long_note, 0,
+                 [": advisory:", "no violations", "1 sentence-length advisory"]),
+                ("CLI advisory preserves schema, citation and image failures",
+                 invalid_note, 1,
+                 [": advisory:", "bare boolean", "physical pages starting at 1",
+                  "embed names a file", "violation(s)"])]:
+            note_path = os.path.join(scratch, "note.md")
+            with open(note_path, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(text)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main([note_path, "--images", scratch])
+            if result == status and all(part in output.getvalue() for part in required):
+                ok += 1
+            else:
+                fail += 1
+                print("FAIL  %s: status %r, output %r"
+                      % (name, result, output.getvalue()))
     # Same trailer as every other script in the plugin ("N/M self-test cases
     # pass"), which README.md documents as uniform and this one alone did not
     # emit -- so a caller grepping for it read a passing run as a missing suite.
@@ -1770,14 +1824,21 @@ def main(argv=None):
         return 2
     with open(a.note, encoding="utf-8") as fh:
         text = fh.read()
-    findings = lint(text, a.note, a.images)
+    advisories = []
+    findings = lint(text, a.note, a.images, advisories=advisories)
     for line, msg in findings:
         print("%s:%s: %s" % (a.note, line if line else "-", msg))
-    if not findings:
+    for line, msg in advisories:
+        print("%s:%s: advisory: %s" % (a.note, line if line else "-", msg))
+    if findings:
+        print("%d violation(s)" % len(findings))
+    elif advisories:
+        print("%s: no violations" % a.note)
+    else:
         print("%s: clean" % a.note)
-        return 0
-    print("%d violation(s)" % len(findings))
-    return 1
+    if advisories:
+        print("%d sentence-length advisory(s); review before publication" % len(advisories))
+    return 1 if findings else 0
 
 
 if __name__ == "__main__":

@@ -70,6 +70,9 @@ Walk the callout, headings, body and captions with their supporting pages open:
 - [ ] Methods identifies the design and walks the actual procedure where one
   exists. Results develops the main finding rather than cataloguing secondary
   experiments. Active voice and simple tenses make the actions clear.
+- [ ] Sentences follow the [brevity targets](note-format.md#prose-and-key-messages).
+  Split or shorten first without losing meaning or necessary qualifications;
+  any longer sentence retained for clarity has a reason in the run report.
 - [ ] Harms, failed secondary outcomes and negative results accompany benefits.
   Interpretation attributes the authors' conclusions and labels another reading
   as such; no unsupported clinical or practical inference is smuggled in.
@@ -112,9 +115,11 @@ python3 '<skill>/scripts/note_lint.py' '<drafted note>' --images '<vault>/Source
 ```
 
 Use `--images` for embeds; omit it only for a figureless note when the directory
-does not exist. Exit 1 lists violations to fix and rerun. Exit 0 checks the
-schema, role/heading mechanics, callout/separator shape, citation syntax,
-length/count limits, exhibit placement/captions and referenced image paths.
+does not exist. Exit 1 lists violations to fix and rerun. Exit 0 means no
+blocking violations of schema, role/heading mechanics, callout/separator shape,
+citation syntax, required length/count limits, exhibit placement/captions or
+referenced image paths. Sentence-length advisories do not change the exit code:
+review them using the brevity targets and report any justified exceptions.
 It does not verify provenance, page upper bounds, source facts or image content.
 
 Do not repeat every machine check by eye or treat clean lint as factual proof.
@@ -136,6 +141,9 @@ Always distinguish source verification from lint:
   could not be checked. A slow or difficult paper is not a reason to skip it.
 - `Lint: clean`, or `Lint: N violations fixed; rerun clean`. If it could not run,
   report `Lint: SKIPPED — <reason>; draft not published`.
+- When sentence-length advisories remain, report `Lint: no violations;
+  N sentence-length advisories reviewed` and identify each retained exception
+  with its clarity reason. Do not report an unreviewed advisory as clean lint.
 
-Only a source-verified, cleanly linted draft reaches
-[guarded publication](../SKILL.md#6-publish-the-verified-linted-note).
+Only a source-verified draft with no lint violations and reviewed advisories
+reaches [guarded publication](../SKILL.md#6-publish-the-verified-linted-note).

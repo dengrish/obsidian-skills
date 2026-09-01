@@ -1236,7 +1236,7 @@ is a reading compatibility rule, not another permitted producer convention.
 (**produces and consumes** — its `rename` path re-reads `Sources/Images/`
 through 8a's loose glob to carry a note's whole figure set across a slug
 change), wiki-builder (consumes — the
-use-by-default figure rule and the unused-figure diagnostic both walk 8a),
+figure selection and unused-figure accounting both walk 8a),
 paper-summarizer (consumes —
 `scripts/paper_scan.py` walks 8a to inventory a stem's figures, and the skill
 has no figure-writing code of its own: it never crops or renames one, and the
@@ -1268,7 +1268,9 @@ stops there.
   (the missed full entry created, or the link dropped to bare text); the rest
   of the vault is left alone.
 - It **never refactors**: never renames a slug and rewrites inbound links, never
-  splits a sprawled entry, never merges two entries, never populates `parents:`.
+  splits a pre-existing mixed-scope entry, never merges two entries, never
+  populates `parents:`. Partitioning one new source into atomic candidates before
+  their files exist is ordinary extraction, not this prohibited refactoring.
 - **Renaming or deleting a pre-existing entry is out of bounds** — both have
   vault-wide reach this skill cannot see the edges of (inbound links in
   untouched entries, `parents:`, the root-level MOCs). It records the proposal

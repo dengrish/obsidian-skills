@@ -108,7 +108,8 @@ could not be read.
 ## 3. Assemble the draft and its exhibits
 
 Read [the note format](references/note-format.md) before writing. It owns the
-source-note frontmatter, exact output shape, citation syntax and length limits.
+source-note frontmatter, exact output shape, citation syntax, length limits and
+brevity targets.
 Use the shared [source-note schema](../../shared/CONVENTIONS.md#2b-source-note--a-note-about-a-document)
 with this PDF's bare wikilink first; a second URL is allowed only for a DOI/arXiv
 identifier actually printed in the document, never for `Book`. Do not infer a
@@ -168,9 +169,10 @@ python3 '<skill>/scripts/note_lint.py' '<draft note>' --images '<vault>/Sources/
 ```
 
 Use `--images` for notes with embeds; omit it only for a figureless note when
-that directory does not exist. Fix violations and rerun. The linter checks
-format and file references, not factual accuracy, image contents or page upper
-bounds; it does not replace the source verification above.
+that directory does not exist. Fix violations and rerun; review sentence-length
+advisories against the [brevity targets](references/note-format.md#prose-and-key-messages).
+The linter checks format and file references, not factual accuracy, image
+contents or page upper bounds; it does not replace the source verification above.
 
 If `note_lint.py` cannot run, fix the permitted runtime or leave the draft
 unpublished and report the blocker. A manual checklist is not a clean lint
@@ -201,6 +203,7 @@ Include note/source paths, format/tags and confidence basis (or why no rung
 applies), embedded and unused whole-figure counts, rebuilt-table trims, and
 any extractor diagnostics. Distinguish file/panel counts from whole figures.
 Report source-verification counts and cuts/corrections separately from the lint
-result, plus missing methodological/data/code information, padded dates,
-low-confidence calls, approved rewrites and explicit scan overrides. Do not
-report out-of-scope governance fields as missing disclosures.
+result, with reasons for any retained sentence-length exceptions, plus missing
+methodological/data/code information, padded dates, low-confidence calls,
+approved rewrites and explicit scan overrides. Do not report out-of-scope
+governance fields as missing disclosures.
