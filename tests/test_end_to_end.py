@@ -358,6 +358,8 @@ read: false
 ---
 A **control sample** provides a baseline for comparing an experimental treatment with an otherwise matched condition. The treatment is withheld while the preparation and measurement procedure remain the same. A difference between the treated and untreated groups can then be interpreted within the limits of that comparison.
 
+**Related:**
+
 ---
 
 ## Flashcards
@@ -400,7 +402,7 @@ Control sample
             if aliases:
                 alias_yaml = "aliases:\n" + "".join(
                     f'  - "{alias}"\n' for alias in aliases)
-            footer = f"\n\n**Related:** {related}" if related else ""
+            footer = "\n\n**Related:**" + (f" {related}" if related else "")
             term = card if card is not None else title
             text = f'''---
 title: "{title}"
@@ -469,6 +471,32 @@ A compact definition used only to exercise the shared contract.
             "**Historical synonym** (originally called *former name*) is a "
             "worked example.", aliases=("former-name",),
             card="Historical synonym")
+        write_entry(
+            "introduced-alias", "Introduced alias",
+            "**Introduced alias** — which many people call *alternate name* — "
+            "is a worked example.")
+        write_entry(
+            "two-sentence-description", "Two sentence description",
+            "**Two sentence description** is a deliberately malformed fixture.",
+            description="Two sentence description states one claim. It adds another.")
+        write_entry(
+            "malformed-flow-list", "Malformed flow list",
+            "**Malformed flow list** is a deliberately malformed fixture.")
+        malformed_flow = wiki / "malformed-flow-list.md"
+        malformed_flow.write_text(
+            malformed_flow.read_text(encoding="utf-8").replace(
+                "sources:\n", 'aliases: ["one",, "two"]\nsources:\n', 1),
+            encoding="utf-8")
+        write_entry(
+            "malformed-person-date", "Malformed person date",
+            "**Malformed person date** (1947 to 2020) was a researcher.",
+            type_="Person")
+        write_entry(
+            "bare-code-shapes", "Bare code shapes",
+            "**Bare code shapes** uses [CLS] and writes a .csv file.")
+        write_entry(
+            "canonical-code-shapes", "Canonical code shapes",
+            "**Canonical code shapes** uses `[CLS]` and writes a `.csv` file.")
         write_entry(
             "alignment-sample", "Alignment sample",
             "**Alignment sample** is a deliberately malformed fixture.",
@@ -547,7 +575,8 @@ A compact definition used only to exercise the shared contract.
         for slug in ("arxiv", "feature-machine-learning",
                      "principal-component-analysis", "k-nearest-neighbors",
                      "archaea", "hard-wrap-acronym", "adaboost",
-                     "saccharomyces-cerevisiae", "historical-synonym"):
+                     "saccharomyces-cerevisiae", "historical-synonym",
+                     "canonical-code-shapes"):
             self.assertEqual(lint_items[slug], set(), slug)
         for slug in ("scalar-alias", "blank-alias", "missing-counterpart-acronym",
                      "synonym-parenthetical", "wrong-title-case",
@@ -555,6 +584,12 @@ A compact definition used only to exercise the shared contract.
             expected = ("18-alias-form" if slug in ("scalar-alias", "blank-alias")
                         else "19-flashcards")
             self.assertIn(expected, lint_items[slug], slug)
+        self.assertIn("17-alias-completeness", lint_items["introduced-alias"])
+        self.assertIn("7-description", lint_items["two-sentence-description"])
+        self.assertIn("1-valid-yaml", lint_items["malformed-flow-list"])
+        self.assertIn("9-person-event-date",
+                      lint_items["malformed-person-date"])
+        self.assertIn("16-code-typography", lint_items["bare-code-shapes"])
 
         scan = json.loads(self.run_script(
             "skills/wiki-linter/scripts/scan_vault.py", wiki, "--indent", "0").stdout)
@@ -568,7 +603,8 @@ A compact definition used only to exercise the shared contract.
         for slug in ("arxiv", "feature-machine-learning",
                      "principal-component-analysis", "k-nearest-neighbors",
                      "archaea", "hard-wrap-acronym", "adaboost",
-                     "saccharomyces-cerevisiae", "historical-synonym"):
+                     "saccharomyces-cerevisiae", "historical-synonym",
+                     "canonical-code-shapes"):
             self.assertEqual(scan_items.get(slug, set()), set())
         for slug in ("scalar-alias", "blank-alias", "missing-counterpart-acronym",
                      "synonym-parenthetical", "wrong-title-case",
@@ -576,6 +612,12 @@ A compact definition used only to exercise the shared contract.
             expected = ("item18" if slug in ("scalar-alias", "blank-alias")
                         else "item19")
             self.assertIn(expected, scan_items.get(slug, set()), scan_items.get(slug))
+        self.assertIn("item17/alias-candidate",
+                      scan_items.get("introduced-alias", set()))
+        self.assertIn("item7", scan_items.get("two-sentence-description", set()))
+        self.assertIn("item1", scan_items.get("malformed-flow-list", set()))
+        self.assertIn("item9", scan_items.get("malformed-person-date", set()))
+        self.assertIn("item16", scan_items.get("bare-code-shapes", set()))
         for slug in ("related-anchored", "related-wrong-label"):
             self.assertIn("item11", scan_items.get(slug, set()), scan_items.get(slug))
         self.assertIn("10-duplicate-wikilink",
@@ -621,6 +663,68 @@ A compact definition used only to exercise the shared contract.
             literal(builder, "MANDATORY_KEYS"),
             [key for key in literal(linter, "CANON")
              if key not in ("aliases", "importance")])
+
+    def test_builder_and_linter_share_equation_coverage_candidate(self):
+        entry = self.vault / "Wiki/synthetic-deviation.md"
+        equationless = '''---
+title: "Synthetic deviation"
+type: Concept
+sources:
+  - "[[Clean.pdf#page=1]]"
+created: 2026-08-31
+updated: 2026-08-31
+description: "Synthetic deviation is a spread measure used by this alignment fixture."
+tags:
+  - "#statistics"
+parents: []
+read: false
+---
+**Synthetic deviation** measures the spread of a quantity $X$. Its value $\\sigma$ is the square root of the variance $\\operatorname{Var}(X)$.
+
+**Related:**
+
+---
+
+## Flashcards
+
+A spread measure derived from variance.
+??
+Synthetic deviation
+'''
+        entry.write_text(equationless, encoding="utf-8")
+
+        builder = json.loads(self.run_script(
+            "skills/wiki-builder/scripts/lint_entry.py", entry,
+            "--compact").stdout)
+        builder_items = {finding["item"]
+                         for finding in builder["entries"][0]["findings"]}
+        self.assertIn("12-equation-coverage-candidate", builder_items)
+
+        scanner = json.loads(self.run_script(
+            "skills/wiki-linter/scripts/scan_vault.py", self.vault / "Wiki",
+            "--indent", "0").stdout)
+        scanner_items = {problem["item"] for problem in scanner["problems"]
+                         if problem["slug"] == "synthetic-deviation"}
+        self.assertIn("item12/equation-coverage-candidate", scanner_items)
+
+        entry.write_text(equationless.replace(
+            "$\\operatorname{Var}(X)$.\n",
+            "$\\operatorname{Var}(X)$:\n\n$$\n"
+            "\\sigma = \\sqrt{\\operatorname{Var}(X)}\n$$\n"),
+            encoding="utf-8")
+        builder = json.loads(self.run_script(
+            "skills/wiki-builder/scripts/lint_entry.py", entry,
+            "--compact").stdout)
+        self.assertNotIn(
+            "12-equation-coverage-candidate",
+            {finding["item"] for finding in builder["entries"][0]["findings"]})
+        scanner = json.loads(self.run_script(
+            "skills/wiki-linter/scripts/scan_vault.py", self.vault / "Wiki",
+            "--indent", "0").stdout)
+        self.assertNotIn(
+            "item12/equation-coverage-candidate",
+            {problem["item"] for problem in scanner["problems"]
+             if problem["slug"] == "synthetic-deviation"})
 
 
 if __name__ == "__main__":

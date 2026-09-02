@@ -221,7 +221,13 @@ def unquote_scalar(raw):
 
 
 def _split_flow(inner):
-    """Split a flow-list payload, respecting YAML quote and escape boundaries."""
+    """Split a valid non-nested flow-list payload.
+
+    An empty payload is the valid list ``[]``. A comma-delimited empty element
+    is invalid YAML and raises ``ValueError`` instead of being silently dropped.
+    """
+    if not inner.strip():
+        return []
     out, buf, quote = [], [], None
     i = 0
     while i < len(inner):
@@ -247,7 +253,9 @@ def _split_flow(inner):
             buf.append(ch)
         i += 1
     out.append("".join(buf).strip())
-    return [x for x in out if x != ""]
+    if any(x == "" for x in out):
+        raise ValueError("flow list contains an empty comma-delimited item")
+    return out
 
 
 def parse_frontmatter(text):
@@ -336,7 +344,13 @@ def parse_frontmatter(text):
             field = Field(key, "blank", "", lineno)
         elif raw_value.startswith("[") and raw_value.endswith("]"):
             field = Field(key, "flow_list", raw_value, lineno)
-            for raw_item in _split_flow(raw_value[1:-1]):
+            try:
+                flow_items = _split_flow(raw_value[1:-1])
+            except ValueError as exc:
+                fm.errors.append("line %d: invalid YAML flow list: %s"
+                                 % (lineno, exc))
+                flow_items = []
+            for raw_item in flow_items:
                 try:
                     val, _style = unquote_scalar(raw_item)
                 except ValueError as exc:
@@ -932,8 +946,12 @@ def run_self_test():
         fm = parse_frontmatter('---\r\ntitle: "A"\r\n---\r\nbody\r\n')
         check("CRLF text still parses (trailing \\r tolerated on the fences)",
               (fm.found, fm.scalar("title")), (True, "A"))
-        check("a degenerate flow list `[,]` holds no phantom empty items",
-              _split_flow(","), [])
+        check("an empty flow list is valid but comma-delimited empty items are not",
+              (_split_flow(""),
+               [bool(parse_frontmatter(
+                   '---\naliases: [' + raw + ']\n---\n').errors)
+                for raw in (",", '"a",', ',"a"', '"a",,"b"')]),
+              ([], [True] * 4))
 
         # -- a bad date is reported on the record ------------------------------
         rec = index_entry(os.path.join(wiki, "anchor.md"),

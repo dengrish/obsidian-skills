@@ -215,8 +215,8 @@ def organism_title_classification(title, aliases=(), opening=""):
     alias, or an immediate title-bound abbreviation.  A common-name equation
     proves only that two names denote the same organism; it cannot prove that
     either name is Latin.  Merely Latin-looking, rank-marked, and genus-only
-    titles remain ambiguous.  Ambiguity is not a lint error; the model checks
-    the source and chooses the appropriate typography.
+    titles remain ambiguous. Ambiguity is not a lint error; the executing agent
+    checks the source and chooses the appropriate typography.
     """
     raw = (title or "").strip()
     if not raw:
@@ -246,7 +246,7 @@ def _self_test():
     cases = [
         ("binomial with suffix", taxon_title_parts("E. coli K-12"),
          ("E. coli", " K-12")),
-        ("rank-marked title stays manual",
+        ("rank-marked title stays source-aware",
          organism_title_classification("Brassica oleracea var. capitata")[0],
          "ambiguous"),
         ("common two-word title is common",
@@ -271,9 +271,9 @@ def _self_test():
          organism_title_classification(
              "Mus musculus", opening="**Mus musculus** is the mouse used in genetics.")[0],
          "ambiguous"),
-        ("evidence-poor genus stays manual",
+        ("evidence-poor genus stays source-aware",
          organism_title_classification("Didinium")[0], "ambiguous"),
-        ("even direct genus prose stays source-aware and manual",
+        ("even direct genus prose stays source-aware",
          organism_title_classification(
              "Didinium", opening="**Didinium** is a genus of predatory ciliates.")[0],
          "ambiguous"),

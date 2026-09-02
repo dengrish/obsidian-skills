@@ -477,8 +477,10 @@ required key and not an unexpected one — exactly the treatment a populated
 **Body math has a canonical home too.** The vault-wide equation policy —
 coverage from the note's own prose, display form, notation, normalization —
 lives in `wiki-builder/references/equations.md`, and wiki-linter enforces it
-vault-wide under its QC item 12; §2d records what that enforcement may and
-may not write.
+vault-wide under its QC item 12. Both Wiki validators import the conservative
+`shared/scripts/equation_coverage.py` candidate floor; the executing agent
+still performs the complete semantic coverage review. Section 2d records what
+that enforcement may and may not write.
 
 **Depended on by:** wiki-builder (writes it), wiki-linter (validates and fixes
 it; owns `parents:`, writes neither date). Both bundle scripts carrying the
@@ -588,7 +590,7 @@ link and a `wiki:` key is an empty slot. **Both are stripped, not preserved**,
 and a populated `roots:` is first migrated into `tags:`: its inner slug maps to
 a §3 enum member where one is unambiguous (`[[artificial-intelligence]]` →
 `"#machine-learning"`, the same expansion `scan_vault.py`'s `TAG_ALIASES`
-already applies), and is reported for a human call where it is not.
+already applies), and is reported as unresolved where it is not; processing still completes.
 
 This is a deliberate exception to §1's *legacy files are left alone*, and the
 only one: it is the user's standing instruction, the keys carry no information
@@ -990,8 +992,9 @@ section), `naming.py` (§1a), `plurals.py` (English inflection and light
 collision stemming shared by both Wiki skills), `organism_names.py` (Organism
 name and typography evidence shared by both Wiki skills), `entry_structure.py`
 (shared entry-opener placement checks), `markdown_tables.py` (Markdown-table
-spans and caption checks shared by both Wiki skills), `figure_state.py` (§8b),
-and `yaml_scalars.py` (§2).
+spans and caption checks shared by both Wiki skills), `equation_coverage.py`
+(the conservative missing-display candidate shared by both Wiki skills),
+`figure_state.py` (§8b), and `yaml_scalars.py` (§2).
 
 `yaml_scalars.py` decodes the single-line scalar values used in frontmatter:
 YAML double-quote escapes, doubled apostrophes in single quotes, trailing
@@ -1351,10 +1354,21 @@ requested; hierarchy work expands only through its separately authorized scope
 closure. Within that scope, the retroactive and cross-entry surface is its
 alone:
 
+**An ordinary wiki-linter run is autonomous.** The scanner supplies the
+deterministic inventory and findings, and the executing agent performs the
+remaining semantic checks and applies the skill's authorized repairs. The user
+or another human is never required to read every note, validate the agent's
+judgments, or sign off before the run completes. Missing source evidence and
+user-owned state remain unchanged and are reported as nonblocking unresolved
+items. Explicit approval is reserved for the destructive or vault-wide
+refactors named below, and an unapplied proposal does not make the current lint
+run incomplete.
+
 - **Backfill** a bare-text mention of an existing entry, anywhere, including in
   entries a wiki-builder run passed over.
-- **Prune, both kinds** — dropping a *resolving* link too weak to keep, and
-  de-duplicating a target linked twice in one body. This is the one deliberate
+- **Prune, all three kinds** — removing a self-link, dropping a *resolving*
+  link too weak to keep, and de-duplicating a target linked twice in one body.
+  This is the one deliberate
   suspension of wiki-builder's additive-only footer rule, and it applies only to
   body-prose and Related-footer links: `tags:`, `sources:` and `parents:` are
   never pruned by this mechanism.
@@ -1435,8 +1449,8 @@ line.)
 
 **To park one:** add its key to the matching block below. The harness reads these
 blocks by name — a registry line whose violation no longer exists is reported as
-stale, with an instruction to delete it. The list can only shrink: nothing removes
-a line but a human, and nothing keeps one alive but a real violation.
+stale, with an instruction to delete it. The list can only shrink: a line is removed only by an explicit repository
+edit, and nothing keeps one alive but a real violation.
 
 **The key is not free-form prose.** Each block is consumed by a specific check,
 which looks up a specific string, and a line that is not that string registers

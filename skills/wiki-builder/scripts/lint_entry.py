@@ -29,11 +29,13 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               (stems compared case- and
                               NFC-insensitively, anchor and folder stripped)
   5   5-slug                  re-run slugify on title:; must equal the filename
-  7   7-description           <= 110 chars (count reported), plain text, no
-                              LaTeX/markdown/wikilinks, capitalised, ends "."
+  7   7-description           one sentence, <= 110 chars (count reported),
+                              plain text, no LaTeX/markdown/wikilinks,
+                              capitalised, ends "."
   8   8-tags                  #-prefixed, double-quoted, in the 27-slug enum
-  9   9-person-event-date     Person/Event opener has a year-bearing
-                              parenthetical immediately after its bold subject
+  9   9-person-event-date     Person/Event opener has a date parenthetical in
+                              a documented form immediately after its bold
+                              subject
       9-link-integration      navigation-only cue points directly at a body
                               wikilink (listings/displays masked)
   10  10-duplicate-wikilink   same TARGET SLUG linked >1x in body prose
@@ -52,22 +54,27 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               immediate italic, plain-text caption
       12-table-caption        every Markdown table has an immediate italic,
                               plain-text caption
+      12-equation-coverage-candidate
+                              explicit square-root-of-variance definition but
+                              no display equation; agent verifies and typesets
   16  16-bold-opener          first outer-bold span equals the title/base/math
                               skeleton and uses the type-specific plain,
                               bold-italic, or mixed taxon/strain style
+      16-code-typography      known bracket special tokens and common literal
+                              file extensions use backticks in running prose
   17  17-alias-completeness   an alternative name the body introduces for the
                               entry's own subject -- an italicized also-called
                               synonym, or the opener's acronym/expansion
                               parenthetical -- whose slug is missing from
                               aliases: (warning: the same-entity test and the
-                              cross-domain carve-out stay with the model)
+                              cross-domain carve-out stay with the executing agent)
   19  19-flashcards          `## Flashcards` present on every full entry,
                               preceded by a `---` separator, holding exactly
-                              one card; line 2 exactly `??` (or the user's
-                              `!!`); line 3 the canonical title (base term for
-                              a parenthetical title, math skeleton for a
-                              symbol title; optional opener-established,
-                              alias-bound counterpart)
+                              one card; line 1 one sentence; line 2 exactly
+                              `??` (or the user's `!!`); line 3 the canonical
+                              title (base term for a parenthetical title, math
+                              skeleton for a symbol title; optional
+                              opener-established, alias-bound counterpart)
   19  19-flashcard-leak       case-insensitive substring search of card line 1
                               (including inside $...$) for the title and each
                               alias, in both the raw and the de-hyphenated
@@ -80,8 +87,9 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
   18  18-alias-form           every alias is itself in slug form (warning)
 
 NOT implemented (out of scope by design): item 4's file existence and page
-correctness, items 6, 9 beyond the structural opener, item 12 beyond table
-caption form, items 13-15, 17 beyond the introduced-alias scan, and the
+correctness, items 6, 9 beyond the structural opener, item 12 beyond image/table
+caption form and its narrow equation candidate, items 13-15, 17 beyond the
+introduced-alias scan, and the
 interpretive halves of 8/18/19. Item 11's canonical target-title check needs
 folder mode; a single file does not contain the target inventory.
 
@@ -115,7 +123,8 @@ and is unquoted (``2-quoting``) -- a quoted
 ``"false"`` is a string, which Obsidian's checkbox renders as permanently
 checked.  Whether a merge should have RESET the field is not mechanisable --
 no script can see whether a body gained substance -- and a missing, null, or
-unrecognizable ``read:`` is reported for a human to resolve, never repaired:
+unrecognizable ``read:`` is left unchanged and reported as nonblocking
+user-owned state, never repaired:
 writing ``read: false``
 into an entry the user had already marked read destroys the state the field
 exists to hold.
@@ -170,12 +179,20 @@ _sys.path.append(_here)                    # own dir LAST: a local copy cannot s
 # --- end bootstrap ---
 
 from slugify import SlugError, base_term, has_parenthetical, slug_stem  # noqa: E402
+from introduced_aliases import (  # noqa: E402
+    introduced_alias_candidates,
+    missing_introduced_aliases,
+)
 from plurals import singular_keys  # noqa: E402
 from organism_names import (  # noqa: E402
     organism_title_classification as _organism_title_classification,
     scientific_abbreviation_matches as _scientific_abbreviation_matches,
 )
-from entry_structure import opener_has_subject_date  # noqa: E402
+from code_typography import find_bare_code_shapes  # noqa: E402
+from equation_coverage import (  # noqa: E402
+    find_missing_display_equation_candidates,
+)
+from entry_structure import opener_subject_date_status  # noqa: E402
 from markdown_tables import (  # noqa: E402
     caption_faults as _caption_faults,
     markdown_table_spans,
@@ -243,7 +260,8 @@ _BOLD_OUTER_RE = re.compile(
 _ABBREVS = [
     "e.g.", "i.e.", "cf.", "et al.", "approx.", "vs.", "ca.", "c.", "fl.",
     "Dr.", "Prof.", "Mr.", "Mrs.", "Ms.", "St.", "Jr.", "Sr.", "Fig.",
-    "No.", "b.", "d.", "r.", "U.S.", "U.K.",
+    "No.", "b.", "d.", "r.", "U.S.", "U.K.", "var.", "subsp.", "ssp.",
+    "sp.", "spp.", "aff.", "cv.", "fo.",
 ]
 
 #: ``<head>`` ends with a known abbreviation, at a word boundary.
@@ -592,6 +610,14 @@ def _check_sources(fm, findings):
         findings.append(_f(
             "4-sources", "error", "sources: must be a list, not a scalar",
             {"line": field.line}))
+    values = [value for value in field.values if value is not None]
+    for duplicate in sorted({value for value in values
+                             if values.count(value) > 1}):
+        findings.append(_f(
+            "4-sources", "error",
+            "source %r is listed %d times -- keep one exact citation"
+            % (duplicate, values.count(duplicate)),
+            {"source": duplicate, "count": values.count(duplicate)}))
     for value, line in zip(field.values, field.item_lines):
         if value is None:
             findings.append(_f("4-sources", "error", "sources: contains a null or invalid item",
@@ -736,6 +762,14 @@ def _check_description(fm, findings, title=None):
             "description must be plain text -- found %s" % ", ".join(markup),
             {"chars": length, "description": desc}))
 
+    sentence_count = count_sentences(desc)
+    if sentence_count > 1:
+        findings.append(_f(
+            "7-description", "error",
+            "description must be one sentence; found roughly %d"
+            % sentence_count,
+            {"sentences": sentence_count, "description": desc}))
+
     if title and not _description_has_entity_subject(desc, title):
         findings.append(_f(
             "7-description", "error",
@@ -814,7 +848,7 @@ def _check_tags(fm, findings, is_stub):
                 {"line": line, "value": value, "enum": TAG_ENUM}))
 
 
-def _check_aliases(fm, findings):
+def _check_aliases(fm, findings, filename):
     """Every alias is itself a slug (writing.md, `aliases` field definition).
 
     An alias written as prose ("receiver operating characteristic") never
@@ -842,6 +876,13 @@ def _check_aliases(fm, findings):
     # collision (scan_vault reports it the same way, as a within-entry item18).
     # Counted raw, exactly as scan_vault counts it.
     values = [v for v in field.values if v]
+    for value, line in zip(field.values, field.item_lines):
+        if value == "":
+            findings.append(_f(
+                "18-alias-form", "error",
+                "aliases: contains an empty item -- remove the item; an empty "
+                "string is not an alternate name",
+                {"line": line, "alias": value}))
     for dup in sorted({v for v in values if values.count(v) > 1}):
         findings.append(_f(
             "18-alias-duplicate", "error",
@@ -865,6 +906,9 @@ def _check_aliases(fm, findings):
                 "name to Obsidian; keep one" % (_fold_first[_k], v),
                 {"alias": v, "other": _fold_first[_k]}))
         _fold_first.setdefault(_k, v)
+    own_slug = os.path.splitext(os.path.basename(filename))[0]
+    own_family = singular_keys(fold_name(own_slug))
+    alias_families = []
     for value, line in zip(field.values, field.item_lines):
         if not value:
             continue
@@ -875,31 +919,43 @@ def _check_aliases(fm, findings):
                                "alias %r cannot be slugged at all" % value,
                                {"line": line, "alias": value}))
             continue
-        if value != expected:
+        if fold_name(expected) == fold_name(own_slug):
+            findings.append(_f(
+                "18-alias-form", "error",
+                "alias %r resolves to this entry's own filename -- remove the "
+                "redundant self-alias" % value,
+                {"line": line, "alias": value, "slug": own_slug}))
+        elif singular_keys(fold_name(expected)) & own_family:
+            findings.append(_f(
+                "18-alias-form", "error",
+                "alias %r differs from this entry's filename only by "
+                "singular/plural normalization -- remove the redundant alias"
+                % value,
+                {"line": line, "alias": value, "slug": own_slug}))
+        elif value != expected:
             findings.append(_f(
                 "18-alias-form", "warning",
                 "alias %r is not in slug form (expected %r) -- aliases follow the "
                 "same slug rule as the filename, and the collision probes read "
                 "them as slugs" % (value, expected),
                 {"line": line, "alias": value, "expected": expected}))
+        family = singular_keys(fold_name(expected))
+        for other, other_expected, other_family in alias_families:
+            if (fold_name(expected) != fold_name(other_expected)
+                    and family & other_family):
+                findings.append(_f(
+                    "18-alias-duplicate", "error",
+                    "aliases %r and %r differ only by singular/plural "
+                    "normalization -- keep one surface family"
+                    % (other, value),
+                    {"alias": value, "other": other}))
+                break
+        alias_families.append((value, expected, family))
 
 
 # --------------------------------------------------------------------------
 # item 17's introduced-alias scan
 # --------------------------------------------------------------------------
-
-#: A synonym-introduction cue in body prose.  Per the emphasis rules
-#: (flashcards-and-emphasis.md §5, Italic Pattern 8) the alternate name that
-#: follows one of these is italicized, which is what keeps this scan quiet:
-#: only an italic span inside the trailing window is a candidate.
-_SYN_CUE_RE = re.compile(
-    r"\b(?:also\s+(?:called|known\s+as|termed|named)|known\s+as|short\s+for|"
-    r"informally\s+called|sometimes\s+called|or\s+simply|"
-    # the shapes the first cut missed on a real vault: "which many people
-    # call *X*" fired nothing, so the italicized synonym was never scanned
-    r"referred\s+to\s+as|a\.k\.a\.?|"
-    r"(?:often|commonly|usually)\s+called|"
-    r"(?:many\s+)?people\s+call|some\s+call)\b", re.IGNORECASE)
 
 #: The opener's direct counterpart binding after any permitted outer-bold
 #: title form: ordinary, bold-italic Work/binomial, or mixed taxon/strain.
@@ -913,12 +969,6 @@ _BOLD_PAREN_RE = re.compile(
     r"\*\*(?!\*)(?:\s+algorithm)?\s*"
     r"\((?P<paren>[A-Za-z*][^()\n]{0,59})\)",
     re.IGNORECASE)
-
-#: Parenthetical content that is annotation-but-not-a-name: dates, floruit
-#: markers, cross-references.  Any of these disqualifies the candidate.
-_NON_NAME_PAREN_RE = re.compile(
-    r"^(?:b\.|c\.|d\.|fl\.|r\.|e\.g|i\.e|cf\.|vs\.|see\s|a\s|an\s|the\s|"
-    r"annual|ongoing)|\d{3,4}", re.IGNORECASE)
 
 #: A lexical marker LEADING the parenthetical name -- ``(singular,
 #: *archaeon*)``, ``(formerly Facebook)``.  Annotation, not part of the name:
@@ -1023,14 +1073,6 @@ def _acronym_counterpart(term, candidate):
         or any(related(short, term_text) for short in acronym_tokens(candidate))
     )
 
-#: Exactly the first italic span after a synonym cue.  The old 160-character
-#: tail loop collected every later italic phrase in the paragraph: a cue for
-#: ``type I errors`` also nominated ``false negatives`` and ``type II errors``.
-#: Optional ``the`` is part of the grammar, not the name.
-_DIRECT_SYNONYM_RE = re.compile(
-    r"^\s*(?:the\s+)?\*([^*\n]{2,60})\*", re.IGNORECASE)
-
-
 def _clean_paren_name(raw):
     """The name inside an opener parenthetical, markers stripped.
 
@@ -1053,130 +1095,10 @@ def _opening_block(sections):
     return " ".join(block)
 
 
-def _sentence_prefix(text, end):
-    """The current sentence's text before ``end``, preserving markup.
-
-    This mirrors ``count_sentences``' exclusions closely enough for ownership
-    gating: an initial in ``S. cerevisiae`` and a known abbreviation do not
-    detach the cue from the bolded subject that precedes them.
-    """
-    start = 0
-    for match in re.finditer(r"[.!?]+", text[:end]):
-        following = text[match.end():match.end() + 1]
-        if following and not following.isspace():
-            continue
-        if match.group(0) == ".":
-            head = text[max(0, match.end() - 16):match.end()]
-            if _INITIAL_RE.search(head) or _ABBREV_RE.search(head):
-                continue
-        start = match.end()
-    return text[start:end].lstrip()
-
-
-def _surface_keys(value):
-    """Singular/plural comparison keys for a subject surface."""
-    value = re.sub(r"\[\[[^\]|]+\|([^\]]+)\]\]", r"\1", value or "")
-    value = re.sub(r"\[\[([^\]]+)\]\]", r"\1", value)
-    value = math_skeleton(value.replace("*", "").replace("_", "")).strip()
-    value = re.sub(r"^(?:the|a|an)\s+", "", value, flags=re.IGNORECASE)
-    if not value:
-        return set()
-    try:
-        return singular_keys(fold_name(slug_stem(value)))
-    except SlugError:
-        return set()
-
-
-def _cue_names_subject(prefix, subject_forms):
-    """Whether the cue's local grammatical subject is the entry subject.
-
-    This is intentionally a narrow proof, not a general parser.  It accepts a
-    title/base form bolded directly before the cue, a title/base form as the
-    local copular subject (including its plural), or explicit anaphora such as
-    ``it is`` / ``this method is``.  Component clauses therefore stay quiet:
-    ``the false-positive rate, also called fall-out`` in a ROC-curve entry and
-    ``binary attributes are sometimes called dummy attributes`` do not name
-    the entry itself.
-    """
-    wanted = set()
-    for form in subject_forms or ():
-        wanted.update(_surface_keys(form))
-        if has_parenthetical(form):
-            wanted.update(_surface_keys(base_term(form)))
-    if subject_forms is None:
-        return True                    # low-level callers may inspect candidates
-    if not wanted:
-        return False                   # no valid subject means no ownership proof
-
-    # A canonical bolded subject may carry an acronym/scientific annotation,
-    # a math symbol, punctuation, and the relative ``which`` before the cue.
-    for bold in _BOLD_OUTER_RE.finditer(prefix):
-        visible, _style, _italic = _bold_parts(bold)
-        if not (_surface_keys(visible) & wanted):
-            continue
-        tail = prefix[bold.end():]
-        if re.fullmatch(
-                r"\s*(?:\([^()\n]{0,80}\))?\s*(?:\$[^$\n]+\$)?\s*"
-                r"(?:[,;:—–-]\s*)?(?:which\s*)?", tail,
-                re.IGNORECASE):
-            return True
-
-    plain = prefix.replace("*", "").replace("_", "")
-    plain = re.sub(r"\[\[[^\]|]+\|([^\]]+)\]\]", r"\1", plain)
-    plain = re.sub(r"\[\[([^\]]+)\]\]", r"\1", plain).strip()
-    # Explicit anaphora is safer than guessing that any nearby noun is the
-    # entry subject.  ``that it is`` handles the live MNIST nickname shape.
-    if re.search(r"\b(?:it|that\s+it)\s+(?:is|was|has\s+been)\s*$", plain,
-                 re.IGNORECASE):
-        return True
-    if re.search(
-            r"\bthis\s+(?:entry|concept|method|algorithm|technique|approach|"
-            r"procedure|model|measure|metric|dataset|function|task|regime)\s+"
-            r"(?:is|was)\s*$", plain, re.IGNORECASE):
-        return True
-
-    # Compare the closest copular subject, trimming a relative clause or
-    # conjunction that introduces it.  ``Features are also called ...`` then
-    # matches a Feature entry; ``the resulting binary attributes are ...`` in
-    # a One-hot encoding entry does not.
-    copula = re.search(
-        r"(?P<subject>[A-Za-z][A-Za-z0-9'’ -]{0,80})\s+"
-        r"(?:is|are|was|were|has\s+been|have\s+been)\s*$", plain,
-        re.IGNORECASE)
-    if copula:
-        subject = re.split(r"\b(?:that|and|but)\b", copula.group("subject"),
-                           flags=re.IGNORECASE)[-1].strip(" ,;:—–-")
-        return bool(_surface_keys(subject) & wanted)
-    return False
-
-
 def _alias_candidates(sections, subject_forms=None):
     """Names the body introduces for the entry's subject: ``(name, where)``."""
-    prose = "\n".join(sections["prose_lines"])
-    seen, out = set(), []
-
-    def add(cand, where):
-        cand = " ".join(cand.split()).strip(" ,;:.")
-        if not cand or _NON_NAME_PAREN_RE.match(cand):
-            return
-        key = cand.lower()
-        if key not in seen:
-            seen.add(key)
-            out.append((cand, where))
-
-    for m in _BOLD_PAREN_RE.finditer(_opening_block(sections)):
-        visible = math_skeleton(m.group("bold").replace("*", "").replace("_", ""))
-        if subject_forms is not None:
-            wanted = set().union(*(_surface_keys(form) for form in subject_forms))
-            if not (_surface_keys(visible) & wanted):
-                continue
-        add(_clean_paren_name(m.group("paren")), "opener parenthetical")
-    for m in _SYN_CUE_RE.finditer(prose):
-        direct = _DIRECT_SYNONYM_RE.match(prose[m.end():])
-        if (direct and _cue_names_subject(
-                _sentence_prefix(prose, m.start()), subject_forms)):
-            add(direct.group(1), "italicized synonym")
-    return out
+    prose_lines = strip_code("\n".join(sections["prose_lines"])).split("\n")
+    return introduced_alias_candidates(prose_lines, subject_forms)
 
 
 def _check_alias_completeness(fm, sections, findings, filename):
@@ -1184,33 +1106,16 @@ def _check_alias_completeness(fm, sections, findings, filename):
 
     Warning, never error: the same-entity test ("*dummy attributes* names the
     produced attributes, not the encoding") and the cross-domain bare-term
-    carve-out are judgment, so the finding hands the model a candidate, not a
+    carve-out are judgment, so the finding hands the executing agent a candidate, not a
     verdict.  The two mechanical exclusions ARE applied: a form that slugs
     identically to the filename, and a singular/plural form already covered by the filename or ``aliases:``.
     """
-    stem = os.path.splitext(os.path.basename(filename))[0]
-    have = {fold_name(stem)}
-    for alias in fm.values("aliases"):
-        if not alias:
-            continue
-        have.add(fold_name(alias))
-        try:
-            have.add(fold_name(slug_stem(alias)))
-        except SlugError:
-            pass
-    inflections = set().union(*(singular_keys(form) for form in have))
     title = fm.scalar("title") or ""
-    subject_forms = [title]
-    if has_parenthetical(title):
-        subject_forms.append(base_term(title))
-    subject_forms.extend(a for a in fm.values("aliases") if a)
-    for cand, where in _alias_candidates(sections, subject_forms):
-        try:
-            cslug = slug_stem(cand)
-        except SlugError:
-            continue
-        if singular_keys(fold_name(cslug)) & inflections:
-            continue
+    aliases = fm.values("aliases")
+    stem = os.path.splitext(os.path.basename(filename))[0]
+    prose_lines = strip_code("\n".join(sections["prose_lines"])).split("\n")
+    for cand, where, cslug in missing_introduced_aliases(
+            prose_lines, title, aliases, stem):
         findings.append(_f(
             "17-alias-completeness", "warning",
             "the body introduces %r (%s) as a name for the subject, but "
@@ -1550,6 +1455,21 @@ def _check_table_captions(sections, findings):
                 {"line": end_i + 2, "caption": caption[:80]}))
 
 
+def _check_equation_coverage_candidates(sections, findings):
+    """Item 12's narrow mechanical floor for prose-defined equations."""
+    prose = "\n".join(sections["prose_lines"])
+    masked = strip_code(prose)
+    _lines, table_spans = _markdown_tables(prose)
+    candidates = find_missing_display_equation_candidates(masked, table_spans)
+    if candidates:
+        findings.append(_f(
+            "12-equation-coverage-candidate", "warning",
+            "prose appears to define a calculation but the entry has no "
+            "display equation; verify the stated operands and operations, "
+            "then typeset only that relationship under the equation policy",
+            {"matches": candidates, "agent_review": True}))
+
+
 def _check_table_cell_wikilinks(sections, findings):
     """Item 10: rendered wikilinks never belong inside table cells."""
     body = "\n".join(sections["prose_lines"])
@@ -1671,17 +1591,37 @@ def _check_duplicate_wikilinks(sections, findings):
 
 
 def _check_person_event_date(fm, sections, findings):
-    """Enforce item 9's placement floor for Person/Event dates."""
+    """Enforce item 9's placement and exact-form floor for dates."""
     entry_type = fm.scalar("type") or ""
     if entry_type not in ("Person", "Event"):
         return
     prose = "\n".join(sections["prose_lines"]).strip()
     opener = prose.split("\n\n", 1)[0]
-    if not opener_has_subject_date(opener):
+    status = opener_subject_date_status(opener, entry_type)
+    if status == "missing":
         findings.append(_f(
             "9-person-event-date", "error",
-            "%s opener needs a year-bearing parenthetical immediately after "
-            "the bolded subject" % entry_type))
+            "%s opener needs a date parenthetical immediately after the "
+            "bolded subject" % entry_type))
+    elif status == "malformed":
+        findings.append(_f(
+            "9-person-event-date", "error",
+            "%s opener date parenthetical is not one of the exact forms in "
+            "references/rare-types.md (including qualifier punctuation and "
+            "en-dash spacing)" % entry_type))
+
+
+def _check_code_typography(sections, findings):
+    """Enforce item 16's backticks on safe, recognizable prose shapes."""
+    body = "\n".join(sections["prose_lines"])
+    masked = strip_code(body)
+    tables = markdown_table_spans(masked)
+    for occurrence in find_bare_code_shapes(masked, tables):
+        findings.append(_f(
+            "16-code-typography", "error",
+            "bare %(kind)s %(token)r in running prose -- wrap the literal "
+            "shape in backticks" % occurrence,
+            occurrence))
 
 
 def _check_bold_opener(fm, sections, findings):
@@ -1724,7 +1664,7 @@ def _check_bold_opener(fm, sections, findings):
         if entry_type == "Organism" else ("common", None))
 
     # Rank-marked taxa can have discontiguous italic spans inside the outer
-    # bold.  Their style is a manual call, but their visible title must still be
+    # bold. Their style is a source-aware agent judgment, but their visible title must still be
     # compared without leaving inner ``*`` markers in the text skeleton.
     compared_bolded = (bolded.replace("*", "").replace("_", "")
                        if organism_status == "ambiguous" else bolded)
@@ -1737,10 +1677,10 @@ def _check_bold_opener(fm, sections, findings):
 
     if title_matches:
         if organism_status == "ambiguous":
-            # Typography is still a mandatory source-aware item-16 judgment,
+            # Typography still needs source-aware item-16 agent judgment,
             # but ambiguity has no persistent metadata to close a recurring
             # scanner warning.  Accept either style mechanically once the
-            # visible title is right; the model, not this regex floor, decides.
+            # visible title is right; the executing agent, not this regex, decides.
             return
         expected_style = "full-italic" if entry_type == "Work" else "plain"
         if organism_status == "scientific":
@@ -1892,6 +1832,24 @@ def _check_flashcards_present(fm, sections, findings, is_stub):
             "`## Flashcards` is not preceded by a `---` separator line of its "
             "own (Body Structure -> Flashcards)",
             {"line": fm.body_start_line + sections["flashcards_index"]}))
+    else:
+        separator_index = sections["separator_index"]
+        flashcards_index = sections["flashcards_index"]
+        lines = sections["lines"]
+        if (separator_index + 1 >= len(lines)
+                or lines[separator_index + 1].strip()):
+            findings.append(_f(
+                "19-flashcards", "error",
+                "the `---` separator must be followed by a blank line before "
+                "`## Flashcards`",
+                {"line": fm.body_start_line + separator_index}))
+        if (flashcards_index + 1 >= len(lines)
+                or lines[flashcards_index + 1].strip()):
+            findings.append(_f(
+                "19-flashcards", "error",
+                "`## Flashcards` must be followed by a blank line before card "
+                "line 1",
+                {"line": fm.body_start_line + flashcards_index}))
     cards = parse_flashcards(sections["flashcard_lines"])
     if not cards:
         findings.append(_f(
@@ -1906,13 +1864,14 @@ def _check_flashcards_present(fm, sections, findings, is_stub):
             "its own entry, not a second card" % len(cards),
             {"cards": len(cards)}))
 
-    # Item 19's other two mechanical clauses (scan_vault checks both; the two
-    # tools must agree).  Line 2 is exactly `??` -- or the user's `!!`, which
-    # marks a card they disabled and is preserved, never converted.  Line 3 is
-    # the canonical title: the base term for a parenthetical-disambiguated
-    # title, the math-stripped skeleton for a symbol title (line 3 is plain
-    # text, so `$k$-fold` can only ever appear there as `k-fold`), plus the
-    # entry's own opener-established, alias-bound counterpart.
+    # Item 19's remaining mechanical clauses (scan_vault checks them too; the
+    # two tools must agree). Line 1 is one sentence. Line 2 is exactly `??` --
+    # or the user's `!!`, which marks a card they disabled and is preserved,
+    # never converted. Line 3 is the canonical title: the base term for a
+    # parenthetical-disambiguated title, the math-stripped skeleton for a
+    # symbol title (line 3 is plain text, so `$k$-fold` can only ever appear
+    # there as `k-fold`), plus the entry's own opener-established, alias-bound
+    # counterpart.
     title = fm.scalar("title")
     for card_no, card in enumerate(cards, 1):
         if len(card) < 3:
@@ -1928,6 +1887,14 @@ def _check_flashcards_present(fm, sections, findings, is_stub):
                 "lines 1-3 breaks the card)" % (card_no, len(card)),
                 {"card": card_no, "lines": len(card)}))
             continue
+        line1 = card[0].strip()
+        sentence_count = count_sentences(line1)
+        if sentence_count > 1:
+            findings.append(_f(
+                "19-flashcards", "error",
+                "flashcard %d line 1 must be one sentence; found roughly %d"
+                % (card_no, sentence_count),
+                {"card": card_no, "sentences": sentence_count}))
         if len(card) >= 2:
             line2 = card[1].strip()
             if line2 not in ("??", "!!"):
@@ -2138,7 +2105,7 @@ def lint_text(text, filename):
     _check_slug(fm, findings, filename)
     _check_description(fm, findings, title=result["title"])
     _check_tags(fm, findings, is_stub)
-    _check_aliases(fm, findings)
+    _check_aliases(fm, findings, filename)
     _check_alias_completeness(fm, sections, findings, filename)
     _check_table_cell_wikilinks(sections, findings)
     _check_duplicate_wikilinks(sections, findings)
@@ -2146,8 +2113,10 @@ def lint_text(text, filename):
     _check_person_event_date(fm, sections, findings)
     if not is_stub:
         _check_image_captions(sections, findings)
+        _check_equation_coverage_candidates(sections, findings)
     _check_table_captions(sections, findings)
     _check_bold_opener(fm, sections, findings)
+    _check_code_typography(sections, findings)
     _check_flashcards_present(fm, sections, findings, is_stub)
     _check_flashcard_leak(fm, sections, findings, is_stub)
     _check_stub_structure(fm, sections, findings, is_stub)
@@ -2590,6 +2559,11 @@ def run_self_test():
         bad = lint_text(mutate('title: "ROC curve"', 'title: ' + raw), 'roc-curve.md')
         check("malformed YAML produces a validity finding rather than a fabricated title",
               "1-valid-yaml" in _st_items(bad), True)
+    check("flow lists with leading, middle, or trailing empty elements are invalid YAML",
+          ["1-valid-yaml" in items(mutate(
+              'aliases:\n  - "auroc"\n', 'aliases: [' + raw + ']\n'))
+           for raw in (',"auroc"', '"auroc",,"roc"', '"auroc",')],
+          [True] * 3)
     for raw in ('null', '~'):
         bad = lint_text(mutate('title: "ROC curve"', 'title: ' + raw), 'roc-curve.md')
         check("a null title never creates a rename target",
@@ -2700,6 +2674,12 @@ def run_self_test():
               mutate('sources:\n  - "[[Doe_X_2025.pdf#page=2]]"\n', ""),
               "roc-curve.md")["findings"]],
           ["2-field-order"])
+    check("an exact duplicate source citation is rejected",
+          items(mutate(
+              'sources:\n  - "[[Doe_X_2025.pdf#page=2]]"\n',
+              'sources:\n  - "[[Doe_X_2025.pdf#page=2]]"\n'
+              '  - "[[Doe_X_2025.pdf#page=2]]"\n')),
+          ["4-sources"])
     check("type: off the 15-value enum",
           items(mutate("type: Concept", "type: Widget")), ["2-type-enum"])
     # `type:` present-but-blank is a 2-type-enum finding only: the KEY is
@@ -2784,6 +2764,27 @@ def run_self_test():
            for f in lint_text(mutate("false positive rate.", "false positive rate"),
                               "roc-curve.md")["findings"]],
           [("7-description", "info")])
+    check("two declarative or question-ended description sentences are rejected",
+          (items(mutate(
+              'description: "A ROC curve plots true positive rate against '
+              'false positive rate."',
+              'description: "A ROC curve plots rates. It compares errors."')),
+           items(mutate(
+              'description: "A ROC curve plots true positive rate against '
+              'false positive rate."',
+              'description: "A ROC curve asks why? It compares errors."'))),
+          (["7-description"], ["7-description"]))
+    check("decimals, versions, initials, abbreviations, and taxonomic ranks do not create phantom description sentences",
+          [items(mutate(
+              'description: "A ROC curve plots true positive rate against '
+              'false positive rate."', replacement))
+           for replacement in (
+               'description: "A ROC curve reports 3.5 percent error."',
+               'description: "A ROC curve covers GPT-4.5 behavior."',
+               'description: "A ROC curve follows work by B. F. Skinner."',
+               'description: "A ROC curve operates in the U.S."',
+               'description: "A ROC curve compares Brassica var. capitata."')],
+          [[]] * 5)
     check("a lowercase-initial description is exempt when the TITLE is one",
           items(mutate('title: "ROC curve"\n', 'title: "k-nearest neighbors"\n')
                 .replace("A **ROC curve** plots", "**k-nearest neighbors** plots")
@@ -2978,6 +2979,31 @@ def run_self_test():
     check("a literal LaTeX star inside a bold symbol title is parsed",
           [f["item"] for f in lint_text(symbol_star, "a-star-search.md")["findings"]
            if f["item"] == "16-bold-opener"], [])
+    check("bare known special tokens and literal extensions require backticks",
+          (items(mutate("decision threshold moves.\n",
+                        "decision threshold moves using [CLS].\n")),
+           items(mutate("decision threshold moves.\n",
+                        "decision threshold moves in a .csv file.\n"))),
+          (["16-code-typography"], ["16-code-typography"]))
+    check("backticked special tokens and literal extensions are canonical",
+          items(mutate("decision threshold moves.\n",
+                       "decision threshold moves using `[CLS]` in a `.csv` "
+                       "file.\n")), [])
+    check("decimals, domains, and extensions attached to filenames are near misses",
+          items(mutate("decision threshold moves.\n",
+                       "decision threshold moves by 3.5 at example.com and "
+                       "writes results.csv.\n")), [])
+    check("wikilink and Markdown-link labels are not literal special tokens",
+          items(mutate("decision threshold moves.\n",
+                       "decision threshold moves with [[CLS]] and the "
+                       "[MASK](https://example.test/token.md) reference.\n")), [])
+    check("tables, headings, captions, and listings keep their own typography rules",
+          items(mutate("decision threshold moves.\n",
+                       "decision threshold moves.\n\n"
+                       "## Files named .csv\n\n"
+                       "Format | Token\n--- | ---\n.csv | [CLS]\n"
+                       "*A .csv lookup table.*\n\n"
+                       "```text\n[CLS] .csv\n```\n")), [])
 
     # -- item 19: presence, then the answer leak ---------------------------
     check("a full entry with NO ## Flashcards section",
@@ -2996,10 +3022,20 @@ def run_self_test():
     check("a ## Flashcards heading with no --- separator above it",
           items(mutate("\n---\n\n## Flashcards", "\n## Flashcards")),
           ["19-flashcards"])
+    check("the separator and Flashcards heading each require a following blank line",
+          (items(mutate("\n---\n\n## Flashcards", "\n---\n## Flashcards")),
+           items(mutate("## Flashcards\n\nThe plot", "## Flashcards\nThe plot"))),
+          (["19-flashcards"], ["19-flashcards"]))
     check("card line 2 that is not exactly `??` (or `!!`)",
           items(mutate("??\nROC curve\n", "?\nROC curve\n")), ["19-flashcards"])
     check("a user-disabled `!!` card is preserved, not a line-2 finding",
           items(mutate("??\nROC curve\n", "!!\nROC curve\n")), [])
+    check("card line 1 must be one sentence",
+          items(mutate(
+              "The plot tracing the trade-off between two error rates as a "
+              "decision threshold moves.",
+              "One identifying statement. Another statement.")),
+          ["19-flashcards"])
     check("card line 3 that is not the canonical title",
           items(mutate("??\nROC curve\n", "??\nThe ROC\n")), ["19-flashcards"])
     bound_card = mutate('  - "auroc"', '  - "rc"')
@@ -3147,12 +3183,12 @@ def run_self_test():
     check("a stub body of two paragraphs",
           items(mutate("correct.\n", "correct.\n\nA second paragraph.\n", base=stub),
                 "precision.md"), ["stub-one-sentence-body"])
-    check("a Person stub's `(b. 1912)` initials do not read as three sentences",
+    check("a Person stub's initials and lifespan do not read as extra sentences",
           items(mutate('title: "Precision"', 'title: "A. M. Turing"', base=stub)
                 .replace("type: Concept", "type: Person")
                 .replace("**Precision** is the share of predicted positives "
                          "that are correct.",
-                         "**A. M. Turing** (b. 1912, d. 1954) was a "
+                         "**A. M. Turing** (1912–1954) was a "
                          "mathematician, e.g. of computability.")
                 .replace('description: "Precision is the share of predicted '
                          'positives that are correct."',
@@ -3184,6 +3220,18 @@ def run_self_test():
                                      " was first proposed in 1942 and"),
                  "trinity-test.md")),
           (["9-person-event-date"], ["9-person-event-date"]))
+    check("a noncanonical or impossible Person/Event date form fails item 9",
+          (items(dated_person.replace("(1815–1852)", "(1815 to 1852)"),
+                 "ada-lovelace.md"),
+           items(dated_person.replace(" (1815–1852)", "(1815–1852)"),
+                 "ada-lovelace.md"),
+           items(dated_event.replace("(1945-07-16)", "(1945/07/16)"),
+                 "trinity-test.md"),
+           items(dated_event.replace("(1945-07-16)", "(1945-02-31)"),
+                 "trinity-test.md")),
+          (["9-person-event-date"], ["9-person-event-date"],
+           ["9-person-event-date"],
+           ["9-person-event-date"]))
     check("a long, well-scoped full-entry sentence has no length finding",
           items(mutate("A **ROC curve** plots the trade-off between two error "
                        "rates as a decision threshold moves.\n",
@@ -3219,6 +3267,46 @@ def run_self_test():
                        "operating points while the curve preserves the "
                        "threshold-specific trade-off.\n")),
           [])
+    equationless = mutate(
+        "A **ROC curve** plots the trade-off between two error "
+        "rates as a decision threshold moves.\n",
+        "A **ROC curve** plots the trade-off between two error rates as a "
+        "decision threshold moves. Its spread is the square root of the "
+        "variance.\n")
+    check("an explicit square-root-of-variance definition without display math "
+          "is an equation-coverage candidate",
+          items(equationless), ["12-equation-coverage-candidate"])
+    check("a canonical display block clears the narrow equation candidate",
+          items(equationless.replace(
+              "variance.\n", "variance:\n\n$$\n"
+              "\\sigma = \\sqrt{\\operatorname{Var}(X)}\n$$\n", 1)), [])
+    check("a square-root-of-variance phrase in a table is not body-equation "
+          "evidence",
+          items(mutate(
+              "A **ROC curve** plots the trade-off between two error rates as "
+              "a decision threshold moves.\n",
+              "A **ROC curve** plots the trade-off between two error rates as "
+              "a decision threshold moves.\n\nClaim | Value\n--- | ---\n"
+              "Spread | It is the square root of variance.\n"
+              "*Values by measure.*\n")), [])
+    check("Flashcards are outside the equation-coverage prose region",
+          "12-equation-coverage-candidate" in items(
+              mutate("The plot tracing the trade-off between two error rates "
+                     "as a decision threshold moves.",
+                     "It is the square root of variance.")), False)
+    check("legacy stubs do not acquire equations",
+          "12-equation-coverage-candidate" in items(
+              mutate("**Precision** is the share of predicted positives that "
+                     "are correct.",
+                     "**Precision** is defined as the square root of variance.",
+                     base=stub), "precision.md"), False)
+    check("equation wording shown in inline or fenced code is not asserted prose",
+          "12-equation-coverage-candidate" in items(mutate(
+              "A **ROC curve** plots the trade-off between two error rates as "
+              "a decision threshold moves.\n",
+              "A **ROC curve** shows `it is the square root of variance` as "
+              "literal text.\n\n```text\nIt is the square root of variance.\n```\n")),
+          False)
     # Listings are SHOWN, not asserted: a link displayed in a fence, an inline
     # code span or an indented block beside one real prose link is ONE link
     # (scan_vault's item10/dup reads the same masked text; the remedy for a
@@ -3375,10 +3463,10 @@ def run_self_test():
           "(the non-slug-form spelling is real fallout, reported too)",
           items(mutate('  - "auroc"', '  - "auroc"\n  - "AUROC"')),
           ["18-alias-duplicate", "18-alias-form"])
-    # `aliases: [,]` holds no items: no phantom quoting findings.
-    check("a degenerate flow list holds no phantom unquoted items",
+    # A comma-delimited empty element is invalid YAML, not an empty list.
+    check("a degenerate flow list is a YAML validity finding",
           items(mutate('aliases:\n  - "auroc"\n', "aliases: [,]\n")),
-          [])
+          ["1-valid-yaml"])
 
     # -- item 17: the introduced-alias completeness scan --------------------
     check("an opener acronym parenthetical missing from aliases: is flagged",
@@ -3401,7 +3489,7 @@ def run_self_test():
                 .replace("type: Concept", "type: Person")
                 .replace("**Precision** is the share of predicted positives "
                          "that are correct.",
-                         "**A. M. Turing** (b. 1912, d. 1954) was a "
+                         "**A. M. Turing** (1912–1954) was a "
                          "mathematician, e.g. of computability.")
                 .replace('description: "Precision is the share of predicted '
                          'positives that are correct."',
@@ -3454,6 +3542,14 @@ def run_self_test():
               "**Archaea** (singular, *archaeon*) are single-celled "
               "prokaryotes."))],
           ["archaeon"])
+    check("synonym cues shown in inline, fenced, and indented code are not aliases",
+          [c for c, _w in _alias_candidates(split_sections(
+              "**ROC curve** is a worked example.\n\n"
+              "`ROC curve is also called *inline fake*.`\n\n"
+              "```text\nROC curve is also called *fenced fake*.\n```\n\n"
+              "    ROC curve is also called *indented fake*."),
+              ["ROC curve"])],
+          [])
 
     # -- item 18: alias form, and alias collisions in FOLDER scope ----------
     check("an alias that is not itself in slug form is a WARNING",
@@ -3462,6 +3558,15 @@ def run_self_test():
                                      '  - "receiver operating characteristic"'),
                               "roc-curve.md")["findings"]],
           [("18-alias-form", "warning")])
+    check("an empty alias item is rejected",
+          items(mutate('  - "auroc"', '  - ""')),
+          ["18-alias-form"])
+    check("an alias equal to the entry's own slug is rejected",
+          items(mutate('  - "auroc"', '  - "roc-curve"')),
+          ["18-alias-form"])
+    check("a singular/plural-only alias of the canonical slug is rejected",
+          items(mutate('  - "auroc"', '  - "roc-curves"')),
+          ["18-alias-form"])
 
     tmp = tempfile.mkdtemp(prefix="lint_entry-selftest-")
     try:

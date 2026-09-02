@@ -5539,11 +5539,14 @@ SELFTEST_MIN_CASES = {
     # Re-tuned to the exact tallies of 2026-09-01. Raising after growth is the
     # mirror duty of the "lowering is a deliberate, reviewable statement" rule
     # below: new regression cases must not disappear with the harness green.
+    "shared/scripts/code_typography.py": 16,
+    "shared/scripts/equation_coverage.py": 19,
     "shared/scripts/figure_state.py": 6,
+    "shared/scripts/introduced_aliases.py": 18,
     "shared/scripts/markdown_tables.py": 35,
     "shared/scripts/naming.py": 191,
     "shared/scripts/organism_names.py": 26,
-    "shared/scripts/entry_structure.py": 8,
+    "shared/scripts/entry_structure.py": 21,
     "shared/scripts/plugin_paths.py": 95,
     "shared/scripts/plurals.py": 200,
     "shared/scripts/slugify.py": 61,
@@ -5560,9 +5563,9 @@ SELFTEST_MIN_CASES = {
     "skills/pdf-figure-extractor/scripts/render_page.py": 38,
     "skills/pdf-organizer/scripts/organize.py": 212,
     "skills/wiki-builder/scripts/find_collisions.py": 62,
-    "skills/wiki-builder/scripts/lint_entry.py": 223,
+    "skills/wiki-builder/scripts/lint_entry.py": 245,
     "skills/wiki-builder/scripts/vault_index.py": 63,
-    "skills/wiki-linter/scripts/scan_vault.py": 263,
+    "skills/wiki-linter/scripts/scan_vault.py": 307,
 }
 
 
@@ -6287,21 +6290,30 @@ def check_note_headings(rep, conv):
 
 
 def check_equation_policy(rep, conv):
-    """The v1.31 equation policy, held to agree across its three homes.
+    """The equation policy and its shared mechanical floor stay aligned.
 
     wiki-builder/references/equations.md owns the policy; CONVENTIONS §2d
-    records it; wiki-linter's qc-items item 12 restates it.  The one live
-    contradiction the 2026-08-20 review found was exactly here (the linter's
-    restatement dropped the read-reset split), and until now nothing watched
-    the seam.
+    records it; wiki-linter's qc-items item 12 restates it. The builder lint
+    and linter scanner also import one conservative candidate detector, whose
+    public finding key is documented by the scanner contract. The one live
+    contradiction the 2026-08-20 review found was exactly in this policy seam.
     """
     check = "equation-policy"
     eq_path = os.path.join(SKILLS_DIR, "wiki-builder", "references",
                            "equations.md")
     qc_path = os.path.join(SKILLS_DIR, "wiki-linter", "references",
                            "qc-items.md")
+    builder_lint_path = os.path.join(
+        SKILLS_DIR, "wiki-builder", "scripts", "lint_entry.py")
+    scanner_path = os.path.join(
+        SKILLS_DIR, "wiki-linter", "scripts", "scan_vault.py")
+    scanner_ref_path = os.path.join(
+        SKILLS_DIR, "wiki-linter", "references", "scanner.md")
     try:
         eq, qc = read(eq_path), read(qc_path)
+        builder_lint = read(builder_lint_path)
+        scanner = read(scanner_path)
+        scanner_ref = read(scanner_ref_path)
     except OSError as exc:
         rep.fail(check, "cannot read a policy home: %s" % exc)
         return
@@ -6340,6 +6352,29 @@ def check_equation_policy(rep, conv):
          "qc-items.md item 12 no longer states that an insertion into a "
          "`read: true` entry is named under *Notes for the user* -- the "
          "silent-unread-math gap the 2026-08-20 review closed"),
+        (eq_path, eq, r"equation_coverage\.py",
+         "equations.md no longer identifies the conservative shared "
+         "equation-coverage candidate floor"),
+        (eq_path, eq,
+         r"\| \$\\operatorname\{Var\}\(X\)\$ \| variance operator",
+         "equations.md no longer distinguishes the variance operator from "
+         "the scalar variance notation sigma-squared"),
+        (qc_path, qc, r"item12/equation-coverage-candidate",
+         "qc-items.md no longer dispatches the scanner's conservative "
+         "equation-coverage candidate"),
+        (scanner_ref_path, scanner_ref,
+         r"`item12/equation-coverage-candidate`",
+         "scanner.md no longer documents the equation-coverage candidate key"),
+        (builder_lint_path, builder_lint,
+         r"from equation_coverage import[^\n]*\n\s*"
+         r"find_missing_display_equation_candidates",
+         "wiki-builder lint no longer imports the shared equation-coverage "
+         "candidate detector"),
+        (scanner_path, scanner,
+         r"from equation_coverage import[^\n]*\n\s*"
+         r"find_missing_display_equation_candidates",
+         "wiki-linter scanner no longer imports the shared equation-coverage "
+         "candidate detector"),
     ]
     n = 0
     for path, text, pat, msg in pins:
@@ -6491,6 +6526,60 @@ def check_physical_page(rep, conv):
                % stated, rel(SKILLS_DIR))
 
 
+def check_autonomous_wiki_lint(rep, conv):
+    """wiki-linter's semantic pass belongs to the agent, not a human gate."""
+    check = "autonomous-wiki-lint"
+    pins = [
+        (CONVENTIONS, conv, "An ordinary wiki-linter run is autonomous."),
+        (os.path.join(SKILLS_DIR, "wiki-linter", "SKILL.md"), None,
+         "This is autonomous agent work"),
+        (os.path.join(SKILLS_DIR, "wiki-linter", "references", "qc-items.md"),
+         None, "carried out autonomously by the executing agent"),
+        (os.path.join(SKILLS_DIR, "wiki-linter", "references", "scanner.md"),
+         None, "No user or other human must review"),
+        (os.path.join(SKILLS_DIR, "wiki-linter", "references", "link-hygiene.md"),
+         None, "not an approval or review gate"),
+        (os.path.join(SKILLS_DIR, "wiki-linter", "references", "backlogs.md"),
+         None, "not a required review queue"),
+        (os.path.join(SKILLS_DIR, "wiki-linter", "scripts", "scan_vault.py"),
+         None, "no user or other human review is required"),
+    ]
+    forbidden = (
+        "anything needing a human call",
+        "require human judgment",
+        "semantic selection remains manual",
+        "all signed off",
+        "so the user can review",
+        "read-reviewed",
+        "read-detected",
+        "item3/user-action",
+    )
+    scanned = 0
+    for path, supplied, marker in pins:
+        try:
+            text = supplied if supplied is not None else read(path)
+        except OSError as exc:
+            rep.fail(check, "cannot read autonomous-lint contract: %s" % exc,
+                     rel(path))
+            continue
+        scanned += 1
+        if marker not in text:
+            rep.fail(check, "missing autonomous-lint statement %r" % marker,
+                     rel(path))
+        for phrase in forbidden:
+            if phrase.lower() in text.lower():
+                rep.fail(check,
+                         "ordinary lint again implies a human/manual gate: %r"
+                         % phrase, rel(path))
+    rep.saw(check, "autonomous-lint contract files", scanned)
+    if scanned == len(pins) and not any(
+            status == "FAIL" and name == check
+            for name, status, _where, _message in rep.results):
+        rep.ok(check, "wiki-linter assigns semantic review to the executing "
+               "agent and keeps unresolved evidence nonblocking",
+               rel(os.path.join(SKILLS_DIR, "wiki-linter")))
+
+
 CHECKS = [
     check_readability,
     check_note_headings,
@@ -6514,6 +6603,7 @@ CHECKS = [
     check_moc_placement,
     check_link_rules,
     check_physical_page,
+    check_autonomous_wiki_lint,
 ]
 
 

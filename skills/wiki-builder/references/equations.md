@@ -14,7 +14,17 @@ $$
 
 Leaving it as prose ships the observed corpus failure: a `Standardization (machine learning)` entry that walks through the computation in words and shows no equation, sitting beside `RMSE` and `MAE` entries that typeset theirs — the vault's math coverage tracking each source's typesetting habits instead of its content.
 
+The same rule covers a source saying that standard deviation is the square root of variance:
+
+$$
+\sigma = \sqrt{\operatorname{Var}(X)}
+$$
+
+Bind $X$ and $\operatorname{Var}(X)$ in the nearby prose. Do not expand the variance into a denominator the source does not choose: a general statement of this relationship does not by itself say whether the context uses a population or sample variance.
+
 **The bar: the source's words must determine the equation.** Every operand and operation is recoverable from what the source says — the words pin down the math, and the equation states exactly what the words state, in the vault's notation. What the source leaves genuinely underdetermined is not filled in from background knowledge: a source saying only that "a correction factor is applied" or that "the score balances precision against recall" has gestured at math, not stated it, and a gesture gets no equation. (Choosing the standard *symbols* for quantities the source names is notation, not imported content — §3 exists precisely so that choice is not re-made per entry.)
+
+The post-write linter and the whole-vault scanner share `shared/scripts/equation_coverage.py`, a deliberately narrow mechanical cue for “is the square root of variance,” “is equal to the square root of variance,” and “equals the square root of variance” when an entry has no display block. That cue only makes an agent-review candidate; it never generates the equation or replaces the full semantic coverage pass, which must still catch other prose calculations.
 
 The rule reaches every formal definition, named quantity, metric, loss function, probability law, rate, or fraction the source states by either route. A concept the source treats purely qualitatively takes no equation — this file adds no math the sources don't carry.
 
@@ -53,7 +63,9 @@ Display blocks appear only in body prose. `description:` is plain text (writing.
 | $h$ | the hypothesis — the model's prediction function |
 | $\theta$ | a model parameter ($\boldsymbol{\theta}$ for the parameter vector) |
 | $\mu$ | mean |
-| $\sigma$, $\sigma^2$ | standard deviation, variance |
+| $\sigma$ | standard deviation |
+| $\sigma^2$ | variance paired with an already established standard deviation $\sigma$ |
+| $\operatorname{Var}(X)$ | variance operator applied to a nearby-bound quantity $X$ |
 | $\bar{x}$ | sample mean of $x$ |
 | $x'$ | the transformed (rescaled, encoded) value of $x$ |
 
@@ -66,6 +78,7 @@ This is the notation the vault's equation-bearing entries already use — Géron
 - **Instances superscript, components subscript.** $\mathbf{x}^{(i)}$ is the $i$-th instance; $v_j$ (or $x_1$) is a component. Never $x_i$ for an instance.
 - **Vectors bold lowercase, matrices bold uppercase** — `\mathbf{v}`, `\mathbf{X}`; scalars in default math italic. (Making math bold *inside a bolded prose span* needs `\boldsymbol{}`/`\mathbf{}` — that is writing.md §2's *Inline formatting* rule about markdown, not this one.)
 - **Multi-letter names upright** via `\text{…}`: $\text{RMSE}(\mathbf{X}, \mathbf{y}, h)$, $\text{MAE}$, $\text{precision}$. Single-letter quantities stay italic. Standard operators use their macros — `\min`, `\max`, `\log`, `\exp` — and as subscripts, $x_{\min}$, $x_{\max}$.
+- **Variance uses the form the relationship needs.** Write $\operatorname{Var}(X)$ when applying the variance operator to a bound quantity $X$; write $\sigma^2$ for the scalar variance paired with an already established standard deviation $\sigma$. These are consistent forms of the same quantity, not competing notation to normalize away.
 - **Named norms** as $\ell_1$, $\ell_2$, $\ell_\infty$ (`\ell`); the general form $\|\cdot\|_p$.
 - **Every symbol is bound in nearby prose.** Each symbol a display equation uses is introduced in the sentences around it — "For a dataset of $m$ instances with feature vectors $\mathbf{x}^{(i)}$ and labels $y^{(i)}$, and a prediction function $h$…" is the worked pattern (the vault's `RMSE` entry). The table standardizes *which* symbol to pick; it does not excuse the entry from saying what the symbol means, because entries are self-contained (prose principle 5) and the table is not in front of the reader.
 

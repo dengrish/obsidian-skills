@@ -152,9 +152,12 @@ The shared implementations are `slugify.py` (wiki slugs), `naming.py` (source
 filenames and book identity), `plurals.py` (English singularization),
 `yaml_scalars.py` (decoded metadata), `figure_state.py` (figure ownership and
 review sidecars), `organism_names.py` (Organism title/name classification),
-`entry_structure.py` (shared entry-opener checks), `markdown_tables.py` (GFM
-table spans and caption checks), and `plugin_paths.py` (shared-module lookup).
-Skill scripts import these instead of copying their algorithms.
+`entry_structure.py` (shared entry-opener checks), `introduced_aliases.py`
+(body-introduced alias candidates), `code_typography.py` (literal prose shapes
+that require backticks), `equation_coverage.py` (a conservative missing-display
+equation candidate shared by both Wiki skills), `markdown_tables.py` (GFM table
+spans and caption checks), and `plugin_paths.py` (shared-module lookup). Skill
+scripts import these instead of copying their algorithms.
 
 ## Developing and packaging
 
