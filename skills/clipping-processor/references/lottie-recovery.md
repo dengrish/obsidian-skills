@@ -48,8 +48,11 @@ fixed renderer-library URL but refuses animation-supplied network requests and
 JavaScript expressions. External image/font dependencies take the fallback,
 not an unguarded network fetch.
 
-1. Fetch through the transport guards. A supplied local Lottie file can be used
-   directly; an arbitrary path in webpage text is not a supplied local file.
+1. Fetch through the transport guards. `fetch` accepts only a Lottie JSON object
+   or a dotLottie ZIP containing bounded animation JSON; an HTML response,
+   executable, unrelated JSON or arbitrary archive is refused before it reaches
+   the scratch output. A supplied local Lottie file can be used directly; an
+   arbitrary path in webpage text is not a supplied local file.
 
    ```bash
    python3 '<skill>/scripts/fetch_images.py' fetch '<lottie_src .json/.lottie URL>' --out '<scratch>/lottie_src'
@@ -58,8 +61,9 @@ not an unguarded network fetch.
    Use the returned local `path`. A nonzero exit means the source could not be
    fetched; report its `error` and take the fallback.
 2. Write the renderer recipe below to scratch and run it on that local source.
-   Inspect the output: a blank-image detector cannot prove every label is
-   correct.
+   Give each run a new output pathname; the recipe creates it exclusively and
+   refuses an occupant left by another run. Inspect the output: a blank-image
+   detector cannot prove every label is correct.
 3. Publish the verified GIF through the shared occupied-slot and ownership
    guards, using the next free number:
 
@@ -71,7 +75,9 @@ not an unguarded network fetch.
    Use the returned filename. `place` moves the scratch asset after safe
    publication. If it fails, inspect the reported cause; do not assume every
    failure is a collision or pass `--overwrite` to bypass it. An intentional
-   replacement must be this reprocess's own figure and obey [image rules](images.md).
+   replacement must be this reprocess's own figure, pass the unchanged
+   `--owner-note '<vault>/Articles/<slug>.md'` together with `--overwrite`, and
+   obey [image rules](images.md).
 
 ## Scratch renderer recipe
 
@@ -82,20 +88,71 @@ its fixed CDN URL, the sole permitted network request in the renderer. Keep the
 
 ```bash
 cat > '<scratch>/lottie_to_gif.py' <<'PYEOF'
-import json, io, sys, os, shutil, zipfile, tempfile, math
+import json, io, sys, os, zipfile, tempfile, math, re
 LOTTIE_CDN = "https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.12.2/lottie.min.js"
 MAX_JSON_BYTES = 25 * 1024 * 1024
+def animation_path(manifest):
+    version = manifest.get("version") if isinstance(manifest, dict) else None
+    if not isinstance(version, str) or version.split(".", 1)[0] not in ("1", "2"):
+        raise ValueError("dotLottie manifest version must be 1 or 2")
+    major = version.split(".", 1)[0]
+    animations = manifest.get("animations")
+    if not isinstance(animations, list) or not animations:
+        raise ValueError("dotLottie manifest has no animations")
+    ids = []
+    for item in animations:
+        animation_id = item.get("id") if isinstance(item, dict) else None
+        if (not isinstance(animation_id, str)
+                or not re.fullmatch(r"[A-Za-z0-9._ -]+", animation_id)
+                or animation_id in (".", "..") or animation_id in ids):
+            raise ValueError("dotLottie animation id is missing, duplicate or unsafe")
+        ids.append(animation_id)
+    if major == "2":
+        initial = manifest.get("initial")
+        if initial is not None and not isinstance(initial, dict):
+            raise ValueError("dotLottie v2 initial must be an object")
+        selected = initial.get("animation") if initial else None
+        folder = "a"
+    else:
+        selected = manifest.get("activeAnimationId"); folder = "animations"
+    selected = selected or ids[0]
+    if not isinstance(selected, str) or selected not in ids:
+        raise ValueError("dotLottie initial animation is not in the manifest")
+    return f"{folder}/{selected}.json"
+def reject_duplicate_members(z):
+    seen, duplicates = set(), set()
+    for info in z.infolist():
+        if info.filename in seen:
+            duplicates.add(info.filename)
+        seen.add(info.filename)
+    if duplicates:
+        raise ValueError("dotLottie ZIP has duplicate member names: %s" %
+                         ", ".join(repr(name) for name in sorted(duplicates)))
 def load_anim(src):
     if zipfile.is_zipfile(src):
         with zipfile.ZipFile(src) as z:
-            inner = next(n for n in z.namelist()
-                         if n.endswith(".json") and n != "manifest.json")
-            if z.getinfo(inner).file_size > MAX_JSON_BYTES:
+            reject_duplicate_members(z)
+            manifest_info = z.getinfo("manifest.json")
+            if manifest_info.file_size > MAX_JSON_BYTES:
+                raise ValueError("dotLottie manifest exceeds the size cap")
+            with z.open(manifest_info) as source:
+                manifest_raw = source.read(MAX_JSON_BYTES + 1)
+            if len(manifest_raw) > MAX_JSON_BYTES:
+                raise ValueError("dotLottie manifest exceeds the size cap")
+            manifest = json.loads(manifest_raw.decode("utf-8-sig"))
+            inner = animation_path(manifest)
+            info = z.getinfo(inner)
+            if info.file_size > MAX_JSON_BYTES:
                 raise ValueError("expanded animation JSON exceeds the size cap")
-            return json.loads(z.read(inner).decode("utf-8"))
+            with z.open(info) as source:
+                raw = source.read(MAX_JSON_BYTES + 1)
+            if len(raw) > MAX_JSON_BYTES:
+                raise ValueError("expanded animation JSON exceeds the size cap")
+            return json.loads(raw.decode("utf-8-sig"))
     if os.path.getsize(src) > MAX_JSON_BYTES:
         raise ValueError("animation JSON exceeds the size cap")
-    return json.load(open(src, encoding="utf-8"))
+    with open(src, encoding="utf-8-sig", errors="strict") as source:
+        return json.load(source)
 def validate_anim(anim):
     if not isinstance(anim, dict):
         raise ValueError("animation must be a JSON object")
@@ -134,8 +191,36 @@ def json_for_script(obj):
 def lottie_js():
     local = os.path.join(os.path.dirname(__file__), "lottie.min.js")
     if os.path.exists(local):
-        return "<script>" + open(local).read() + "</script>"
+        with open(local, encoding="utf-8", errors="strict") as source:
+            return "<script>" + source.read() + "</script>"
     return '<script src="' + LOTTIE_CDN + '"></script>'
+def publish_scratch(tmp, out):
+    # `out` is still scratch, but it may belong to another run. Create it
+    # exclusively, stream complete bytes, and remove only the inode this run
+    # created if copying or verification fails.
+    created = None
+    try:
+        with open(tmp, "rb") as source, open(out, "xb") as target:
+            st = os.fstat(target.fileno())
+            created = (st.st_dev, st.st_ino)
+            while True:
+                block = source.read(1024 * 1024)
+                if not block:
+                    break
+                target.write(block)
+            target.flush(); os.fsync(target.fileno())
+        if os.path.getsize(out) != os.path.getsize(tmp):
+            raise OSError("published scratch GIF failed size verification")
+    except Exception:
+        if created is not None:
+            try:
+                current = os.lstat(out)
+                if (current.st_dev, current.st_ino) == created:
+                    os.unlink(out)
+            except FileNotFoundError:
+                pass
+        raise
+    os.unlink(tmp)
 def main(src, out):
     from playwright.sync_api import sync_playwright
     from PIL import Image, ImageStat
@@ -189,7 +274,7 @@ def main(src, out):
         os.remove(tmp); print("BLANK render (stddev<2) - discarding", file=sys.stderr); return 2
     if os.path.getsize(tmp) > 8_000_000:
         os.remove(tmp); print("GIF too large - discarding", file=sys.stderr); return 3
-    shutil.move(tmp, out)
+    publish_scratch(tmp, out)
     print(f"OK {out}  {os.path.getsize(out)} bytes  {len(frames)} frames  mid-stddev={mid.stddev[0]:.1f}")
     return 0
 if __name__ == "__main__":
@@ -211,8 +296,11 @@ python3 '<scratch>/lottie_to_gif.py' '<lottie_src .json/.lottie path>' '<scratch
 Paths are untrusted data too: use argument lists or the [shared quoting rules](../../../shared/CONVENTIONS.md#1b-filenames-titles-and-urls-are-untrusted-text).
 The renderer detects JSON versus dotLottie ZIP, bounds expanded JSON, renders on
 white, caps the longest side at 960px and frames at about 150, and rejects a
-blank middle frame or GIF over 8 MB. It never writes into `Sources/Images/`.
-Failure means unconverted, even if an intermediate file exists.
+blank middle frame or GIF over 8 MB. For dotLottie v1/v2 it loads the manifest's
+active/initial animation, or the first manifest animation when none is selected;
+ZIP member order cannot substitute a theme or unrelated JSON file. It never
+writes into `Sources/Images/`. Failure means unconverted, even if an intermediate
+file exists.
 
 ## Caption or fall back honestly
 

@@ -57,7 +57,9 @@ Legacy entries still carrying the key are simply not reported on.
 
 ``is_stub`` is true only when ``sources:`` is exactly the literal string
 ``stub``.  Obsidian embeds (``![[fig.png]]``) are excluded from the wikilink
-targets, and dot-directories are skipped during the walk.
+targets, and dot-directories are skipped during the walk. A leaf ``.md``
+symlink remains an occupied slug but contributes no target-derived metadata;
+its record and the top-level problems explain the refusal.
 
 Exit codes: 0 ok, 2 wiki folder missing / unreadable.
 """
@@ -69,12 +71,17 @@ import datetime as _dt
 import json
 import os
 import re
+import stat
 import sys
 import unicodedata as _ud
+
+_OBSIDIAN_SHARED_MODULES = ('yaml_scalars',)
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
 _here = _os.path.dirname(_os.path.abspath(__file__))
+_required = tuple(_m + ".py" for _m in (
+    globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
 if _env:                                   # explicit override: authoritative, no fallback
     _tried = [_os.path.abspath(_os.path.expanduser(_env))]
@@ -83,33 +90,40 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
-_shared = next((_p for _p in _tried if _os.path.isdir(_p)), None)
+_missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
+            for _p in _tried if _os.path.isdir(_p)}
+_shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
 if _shared is None:
     raise SystemExit("""obsidian: cannot find the plugin's shared/scripts/ folder, which holds
-the one canonical copy of the conventions this script depends on.
+the one canonical copy of the conventions this script depends on. A usable
+folder must contain these required module(s): %s
 Looked for:
   %s
 Fix: install the whole plugin tree, or set OBSIDIAN_VAULT_SHARED to the
 shared/scripts/ directory (unset it to use the plugin-relative walk-up).
 Do NOT paste a second copy of the algorithm into this skill -- a divergent
-copy is the bug the shared layer exists to prevent.""" % "\n  ".join(_tried))
+copy is the bug the shared layer exists to prevent.""" % (
+    ", ".join(_required), "\n  ".join(
+        _p + (" (not a directory)" if _p not in _missing else
+              " (missing: %s)" % ", ".join(_missing[_p]))
+        for _p in _tried)))
 _sys.path[:] = [_p for _p in _sys.path if _p not in (_shared, _here)]
 _sys.path.insert(0, _shared)               # shared/scripts/ FIRST
-_sys.path.append(_here)                    # own dir LAST: a local copy cannot shadow it
+if _here != _shared:
+    _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
 from yaml_scalars import parse_scalar, strip_comment  # noqa: E402
 
 
 def fold_name(s):
-    """Case- and Unicode-normalization-folded form of a slug or link target.
+    """Portable case/Unicode identity for a slug or link target.
 
-    Obsidian resolves wikilinks case-insensitively, and the documented vault
-    lives on APFS, which is case- AND normalization-insensitive — so two slugs
-    that differ only this way are one file there, and a link spelled either
-    way opens it.  Any comparison answering "same file?" must go through this;
-    exact string comparison is only right on the case-sensitive filesystems
-    the plugin is tested on, which is why the mismatch never showed there.
+    The plugin treats case and normalization variants as one ownership class,
+    then rewrites references to the exact on-disk spelling.  That gives the
+    same collision decision on filesystems that alias those spellings and ones
+    that can store both; a raw-string comparison would make safety depend on
+    the host filesystem.
     """
     return _ud.normalize("NFC", s or "").casefold()
 
@@ -521,21 +535,54 @@ def index_entry(path, text=None, root=None):
 
     if text is None:
         try:
+            # A leaf symlink is an occupied slug, but its target is not this
+            # vault entry's owned bytes. Following it can import metadata from
+            # outside Wiki/, make an alias/source probe claim an owner that the
+            # vault does not own, and later direct a merge through the link.
+            # Keep the path record for collision protection and suppress all
+            # target-derived metadata, as we already do for invalid UTF-8.
+            item = os.stat(abspath, follow_symlinks=False)
+            if stat.S_ISLNK(item.st_mode):
+                record["errors"].append(
+                    "file is a symlink; target metadata was not indexed")
+                return record
+            if not stat.S_ISREG(item.st_mode):
+                record["errors"].append(
+                    "file is not a regular file; metadata was not indexed")
+                return record
+            stable = lambda value: (
+                value.st_dev, value.st_ino, value.st_size,
+                getattr(value, "st_mtime_ns", int(value.st_mtime * 1e9)),
+                getattr(value, "st_ctime_ns", int(value.st_ctime * 1e9)),
+                stat.S_IFMT(value.st_mode),
+            )
             # utf-8-sig, not utf-8: a leading BOM becomes part of the first line,
             # so `lines[0].strip() != "---"` and a perfectly valid entry was
             # reported as having "no YAML frontmatter".
-            with open(abspath, "r", encoding="utf-8-sig") as fh:
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(abspath, flags)
+            with os.fdopen(descriptor, "r", encoding="utf-8-sig") as fh:
+                opened_before = os.fstat(fh.fileno())
+                if stable(item) != stable(opened_before):
+                    record["errors"].append(
+                        "file changed while it was opened; metadata was not indexed")
+                    return record
                 text = fh.read()
-        except UnicodeDecodeError:
-            try:
-                with open(abspath, "r", encoding="utf-8-sig", errors="replace") as fh:
-                    text = fh.read()
-                record["errors"].append("file is not valid UTF-8; decoded with "
-                                        "replacement characters")
-            except Exception as exc:
-                record["errors"].append("unreadable: %s: %s"
-                                        % (type(exc).__name__, exc))
+                opened_after = os.fstat(fh.fileno())
+            after = os.stat(abspath, follow_symlinks=False)
+            if not (stable(item) == stable(opened_before)
+                    == stable(opened_after) == stable(after)):
+                record["errors"].append(
+                    "file changed while it was read; metadata was not indexed")
                 return record
+        except UnicodeDecodeError:
+            # Keep the occupied slug visible to collision checks, but never
+            # let a lossy decode manufacture title, alias, source, or link
+            # ownership.  A caller may inspect and repair the file; it may not
+            # use metadata from bytes that were not valid UTF-8.
+            record["errors"].append(
+                "file is not valid UTF-8; metadata was not indexed")
+            return record
         except Exception as exc:
             record["errors"].append("unreadable: %s: %s" % (type(exc).__name__, exc))
             return record
@@ -635,17 +682,17 @@ def build_index(root):
     index["entries"].sort(key=lambda r: r["slug"])
     index["entry_count"] = len(index["entries"])
     index["stub_count"] = sum(1 for r in index["entries"] if r["is_stub"])
-    # Grouped on the FOLDED slug: two stems differing only in case or Unicode
-    # normalization are one name to Obsidian and to the vault's own APFS
-    # volume, so they collide exactly like two identical stems in subfolders.
+    # Group on the portable folded identity. Case/normalization variants may
+    # alias on one filesystem and coexist on another, but either shape makes a
+    # bare link owner ambiguous across supported hosts.
     index["duplicate_slugs"] = {
         pairs[0][0]: [p for _s, p in pairs]
         for _f, pairs in by_slug.items() if len(pairs) > 1}
     for slug, paths in sorted(index["duplicate_slugs"].items()):
         index["problems"].append(
-            "slug %r occurs in %d files (Obsidian resolves links to it case-"
-            "insensitively, so subfolder and case/normalization variants all "
-            "collide): %s" % (slug, len(paths), ", ".join(paths)))
+            "slug %r occurs in %d files (subfolder and case/normalization "
+            "variants share one portable link identity): %s"
+            % (slug, len(paths), ", ".join(paths)))
     return index
 
 
@@ -720,6 +767,7 @@ def run_self_test():
     import contextlib
     import shutil
     import tempfile
+    from unittest import mock
     cases = []
 
     def check(label, got, want):
@@ -748,6 +796,9 @@ def run_self_test():
         put("no-fm.md", "just prose, no fence\n")
         put("bom.md", "﻿" + _st_entry_text("Bom"))
         put("binary.md", b'---\ntitle: "Caf\xe9"\n---\nbody\n')
+        put("tainted.md",
+            b'---\ntitle: "Tainted"\nsources:\n'
+            b'  - "[[Tainted_Source.pdf#page=1]]"\n---\nbody\xff\n')
         put("sub/Anchor.md", _st_entry_text("Anchor"))     # case-variant duplicate
 
         # a symlinked subfolder: real vaults hold synced folders this way, and
@@ -762,6 +813,20 @@ def run_self_test():
             os.symlink(linked, os.path.join(wiki, "linkdir"))
         except (OSError, NotImplementedError, AttributeError):
             have_symlink = False
+
+        # A leaf link is different from a linked folder. The folder establishes
+        # an intentional in-Wiki tree; a leaf link can point at arbitrary
+        # outside bytes and must not donate their title/aliases/provenance.
+        leaf_target = os.path.join(tmp, "outside-entry.md")
+        with open(leaf_target, "w", encoding="utf-8") as fh:
+            fh.write(_st_entry_text("Outside owner").replace(
+                "Doe_X_2025.pdf", "Outside_Source_2025.pdf"))
+        leaf_link = os.path.join(wiki, "leaf-link.md")
+        try:
+            os.symlink(leaf_target, leaf_link)
+            have_leaf_symlink = True
+        except (OSError, NotImplementedError, AttributeError):
+            have_leaf_symlink = False
 
         idx = build_index(wiki)
         slugs = [r["slug"] for r in idx["entries"]]
@@ -836,6 +901,48 @@ def run_self_test():
               any("not valid UTF-8" in e
                   for r in idx["entries"] if r["slug"] == "binary"
                   for e in r["errors"]), True)
+        binary = [r for r in idx["entries"] if r["slug"] == "binary"][0]
+        check("invalid UTF-8 cannot establish metadata ownership",
+              (binary["title"], binary["aliases"], binary["sources"]),
+              (None, [], []))
+        check("valid-looking frontmatter in a tainted file cannot source-match",
+              source_matches(idx, ["Tainted_Source.pdf"]), [])
+        leaf_records = [r for r in idx["entries"] if r["slug"] == "leaf-link"]
+        check("a leaf symlink remains an occupied slug where supported",
+              (not have_leaf_symlink or len(leaf_records) == 1), True)
+        check("a leaf symlink contributes no outside metadata or provenance",
+              (not have_leaf_symlink or
+               (leaf_records[0]["title"], leaf_records[0]["aliases"],
+                leaf_records[0]["sources"]) == (None, [], [])), True)
+        check("a leaf symlink is an explicit index problem",
+              (not have_leaf_symlink or any(
+                  "leaf-link.md: file is a symlink" in problem
+                  for problem in idx["problems"])), True)
+        check("outside provenance behind a leaf symlink cannot source-match",
+              (not have_leaf_symlink or
+               source_matches(idx, ["Outside_Source_2025.pdf"]) == []), True)
+        if have_leaf_symlink:
+            race_path = os.path.join(wiki, "race.md")
+            with open(race_path, "w", encoding="utf-8") as fh:
+                fh.write(_st_entry_text("Original owner"))
+            real_open = os.open
+            swapped = []
+
+            def swap_to_link_before_open(path, flags, *args, **kwargs):
+                if os.path.abspath(path) == os.path.abspath(race_path) and not swapped:
+                    os.unlink(race_path)
+                    os.symlink(leaf_target, race_path)
+                    swapped.append(True)
+                return real_open(path, flags, *args, **kwargs)
+
+            with mock.patch.object(os, "open", side_effect=swap_to_link_before_open):
+                raced = index_entry(race_path, root=wiki)
+            check("a leaf-symlink swap before open contributes no outside metadata",
+                  (raced["title"], raced["aliases"], raced["sources"],
+                   bool(raced["errors"])), (None, [], [], True))
+        else:
+            check("leaf-symlink swap regression skipped without symlinks",
+                  True, True)
         check("a file with no frontmatter is an error on the record, not a crash",
               any("no YAML frontmatter" in e
                   for r in idx["entries"] if r["slug"] == "no-fm"

@@ -20,14 +20,23 @@ it does not independently rename unrelated notes or images.
   ownership. The sole metadata-free legacy exception is a body consisting
   only of an embed of this PDF. Publisher URLs remain external sources.
 - Figure candidates follow the consumer convention
-  `[pdf_stem]_fig*`, including older accepted names. A same-stem clipping or
-  unclaimed note makes ownership ambiguous. The figure manifest and the
-  image's current digest must then establish PDF ownership before it moves.
-  Do not infer ownership merely from the `_fig` name, delete a conflicting
-  occupant, or reset a manifest to make the plan pass.
+  `[pdf_stem]_fig*`, including older accepted names, but **every image moves only
+  when the figure manifest records its exact current digest**. A same-stem
+  clipping, a deleted note, or no visible rival does not prove PDF ownership.
+  An unrecorded legacy image must first pass pdf-figure-extractor's explicit
+  legacy-adoption procedure against the named PDF. Do not infer ownership from
+  the `_fig` name, delete a conflicting occupant, or reset a manifest to make
+  the plan pass.
 - Folder-qualified links are resolved against the keyed file's actual
   location. Extensionless note links, case variants, Unicode normalization,
-  and symlinked folders are handled by the helper. Local Markdown URL escapes
+  and symlinked **directories** are handled by the helper. Vault containment
+  follows the logical path: a PDF reached beneath a linked source directory
+  is in scope, while the link target's direct physical path is not. A
+  case/normalization spelling is accepted only when filesystem identity proves
+  it is the selected vault. A leaf `.md` symlink is a blocker: following it
+  for a rewrite could mutate an external target outside the selected vault, so
+  reconcile the link or establish a regular in-scope note before retrying.
+  Local Markdown URL escapes
   are decoded once; a literal percent sequence in a wikilink stays literal.
   Do not replace this with whole-body substring matching.
 
@@ -114,4 +123,8 @@ hand-patch them with global replacement: an old stem can be part of the new
 stem, so a second replacement may corrupt already-correct links. If applying
 raises `RenameFailed`, report whether rollback completed and any remaining
 state named in the exception. Do not claim that a failed operation succeeded
-or delete files to conceal a partial result.
+or delete files to conceal a partial result. A file changed after planning is
+new input, so the apply refuses to overwrite it. Re-plan from that version. If
+a second writer claimed a name during publication, the exception may name
+private recovery paths holding displaced versions; retain every file until
+their contents are reconciled.

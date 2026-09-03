@@ -13,20 +13,45 @@ replace it with a hand-written downloader.
 
 Keep `![[…]]` embeds and figure numbers. If the slug is unchanged, leave their
 files alone. If it changes, prepare a `fetch_images.py rename --dry-run` plan
-with `--sources '<vault>/Sources/PDFs'`; this checks recursive PDF ownership on
+with `--sources '<vault>/Sources/PDFs'` and
+`--owner-note '<vault>/Articles/<old_slug>.md'`. The unchanged owner note must
+have a valid web URL as its first current `sources:` item, and every attachment
+in the plan must appear there as an exact rendered filename-only embed. The
+helper snapshots that evidence while also checking recursive PDF ownership on
 both stems. Update draft embeds from the plan, but defer live renames until the
 [approved replacement](duplicates-and-reprocessing.md#publish-an-approved-replacement).
-Never use bare `mv` or omit the PDF guard to make a rename succeed.
+Never use bare `mv` or omit either ownership guard to make a rename succeed.
+For canonical vault paths, the same plan scans every Markdown note outside the
+owner for inbound links to the old note and references to each old image name.
+It refuses the whole set on any hit, unreadable note or incomplete walk and
+returns exact blocker paths. This skill has no implicit authority to rewrite
+those other notes.
 
 ```bash
 python3 '<skill>/scripts/fetch_images.py' rename --attachments '<vault>/Sources/Images' \
-    --sources '<vault>/Sources/PDFs' --old-slug '<old_slug>' --new-slug '<new_slug>' --dry-run
+    --sources '<vault>/Sources/PDFs' --owner-note '<vault>/Articles/<old_slug>.md' \
+    --old-slug '<old_slug>' --new-slug '<new_slug>' --dry-run
 ```
 
-A missing old attachment gets `<!-- missing attachment: Oldslug_fig_N.ext -->`
-and a report entry, not a silently dropped embed. A body can contain both old
-embeds and new remote images; download only the remote images, starting after
-the highest occupied number, even if they appear earlier in document order.
+The plan inventories the note in both directions: an old-slug image embed with
+no exact attachment is a blocking result, including legacy loose `_figN`
+spellings. Either restore the file or stop the changed-slug operation and first
+publish a separate approved same-slug rewrite that replaces the broken embed
+with `<!-- missing attachment: Oldslug_fig_N.ext -->`; retain a report entry,
+then restart the rename from a fresh snapshot. Do not edit the owner note under
+a plan already in flight. The missing reference is never silently omitted from
+an otherwise successful rename. Other-slug and non-image embeds are outside
+this plan. A body can contain both old embeds and new remote images; download
+only the remote images, starting after the highest occupied number, even if
+they appear earlier in document order.
+
+The rename rechecks external dependencies around every image move, so a link
+introduced after the dry run causes rollback. After the new note is published,
+run `fetch_images.py dependencies --attachments '<vault>/Sources/Images'
+--owner-note '<vault>/Articles/<old_slug>.md' --old-slug '<old_slug>'` once more
+before removing the old note path. Cleanup requires `ok: true`. Otherwise keep
+the old path, report every blocker, and stop or roll back; never discover and
+announce broken links only after deleting their target.
 
 ## Download and publish
 
@@ -40,24 +65,35 @@ python3 '<skill>/scripts/fetch_images.py' download --attachments '<vault>/Source
     --slug '<slug>' --start <N> '<url1>' '<url2>'
 ```
 
-The helper permits HTTP(S) and data URIs, checks schemes and resolved hosts at
-every redirect, detects format from bytes, and stages complete files outside
-the image directory before publication. New files use exclusive creation;
-explicit replacements are atomic. A failure to provide safe publication leaves
-existing files alone. These are reasons to use the helper, not instructions to
-reimplement it with `curl` and `mv`.
+The helper permits HTTP(S) and data URIs. For each HTTP(S) hop it resolves once,
+rejects the whole answer set if any address is non-public, and connects the
+socket only to a vetted address. The logical hostname remains in the Host header
+and in TLS SNI/certificate validation. Redirect targets repeat that process
+before another request; HTTPS cannot downgrade to HTTP. It detects image format
+from bytes and stages complete files outside the image directory before
+publication. New files use exclusive creation; explicit replacements are
+atomic. A failure to provide safe publication leaves existing files alone.
+These are reasons to use the helper, not instructions to reimplement it with
+`curl` and `mv`.
+
+The network policy is direct-only: ambient HTTP(S) proxy settings are not used.
+A forward proxy could resolve the hostname again after the local check and undo
+address pinning. Run the helper where direct egress is available. There is no
+unguarded proxy fallback; `--allow-private-hosts` changes which resolved target
+addresses are permitted, not the proxy policy.
 
 | Option | Default | Use |
 |---|---|---|
 | `--max-bytes` | 25 MB (`26214400`) | Raise only for an identified large figure; this is the received-byte cap. |
 | `--max-seconds` | 120 | Whole-transfer wall-clock budget. |
 | `--timeout` | 45 | Per-socket-operation timeout, capped by the whole-transfer budget. |
-| `--allow-private-hosts` | Off | Only for the user's intended private image host, never because a fetched page requests it. This enables loopback/link-local/private destinations; report its use. |
+| `--allow-private-hosts` | Off | Only for the user's intended private image host, never because a fetched page requests it. This enables loopback/link-local/private destinations but does not enable proxies; report its use. |
 
 Keep downloads sequential. Do not resize a large figure merely to reduce size;
 if it exceeds the chosen cap, use the failure path below. Data URIs share that
-cap and the same counter. Scheme restrictions and redirect checks are not
-optional flags.
+cap, deadline and counter; percent/base64 decoding is streamed so encoded input
+cannot allocate an unbounded decoded copy before the cap is checked. Scheme
+restrictions and redirect checks are not optional flags.
 
 Use the returned filename and extension. Recognized raster signatures override
 URL suffixes and claimed MIME types. SVG requires an SVG root, not an HTML/XML
@@ -67,9 +103,15 @@ extension for them. A format needing conversion must be converted at a scratch
 path and checked before guarded `place` publication.
 
 An occupied `<slug>_fig_<N>.*` slot is refused across extensions. Only an explicit,
-owned replacement may use `--overwrite`, and only for the same filename. If the
-format changed, keep the old file, allocate a new number and update the draft;
-do not leave extension twins at one number. Renames enforce the same rule.
+owned replacement may use `--overwrite`, and only for the same filename. Pass
+`--owner-note '<vault>/Articles/<slug>.md'`; the helper accepts the replacement
+only when that unchanged note's first current `sources:` item is a web URL and
+its rendered body contains the exact filename-only embed. Embed-shaped strings
+in frontmatter, comments, escaped text, or code do not establish ownership. If
+the format changed, keep the old file, allocate a new number and update the
+draft; do not leave extension twins at one number. Renames enforce the same
+rule. Migrate a legacy scalar `source:` to current `sources:` before a
+destructive attachment operation.
 
 ## Captions and embeds
 

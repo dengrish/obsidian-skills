@@ -11,6 +11,12 @@ fields, then rerun with the intended `--topic` before any image is written.
 
 The polished note's filename is an abbreviation, not the full title — the full title still lives in YAML. Three segments joined by underscores: **`<Author>_<short_topic>_<year>.md`**. Keeping filenames short keeps the file pane scannable and avoids OS path-length issues; the full title in YAML is what shows up in Obsidian's preview and search anyway.
 
+The complete stem must also be portable. `CON`, `PRN`, `AUX`, `NUL`,
+`COM1`–`COM9`, and `LPT1`–`LPT9` are reserved Windows device basenames even
+when `.md` is appended. The helper refuses them on every host. Add the real
+author or year, or choose a more specific topic; do not publish a Unix-only
+note name and expect a later rename to carry its attachment namespace safely.
+
 ## Author segment
 
 Use the surname of the first author. Resolve it in two stages so commas do not confuse the name with a list:

@@ -98,7 +98,7 @@ Squaring a correlation is not a general-purpose estimate of explained variation.
 
 | Rung | When | The second sentence |
 |---|---|---|
-| 1 | a randomised, controlled, adequately-powered experiment, or a preregistered replication | none needed beyond the scope: *"The trial shows that the transplant reduces recurrence."* |
+| 1 | an adequately powered randomised controlled experiment with its reported outcome prespecified | none needed beyond the scope: *"The trial shows that the transplant reduces recurrence."* |
 | 2 | strong quasi-experimental design, or consistent evidence across designs, with the confounders addressed | *"The design is not randomised. Other causes are possible, and the authors tested for the known ones."* |
 | 3 | a single observational study, a correlational finding, an underpowered or unregistered experiment | *"It does not show that exercise causes the difference."* |
 | 4 | mechanistic, in-vitro, animal-only, simulation, a pilot, or a case series | *"The test was in cells only. The paper does not show an effect in people."* |
@@ -132,7 +132,11 @@ unexplained. For effect claims, apply the design ceiling below.
 | Qualitative study | off the effect ladder | it characterises and it does not estimate; describe what it found and who it asked, and make no frequency claim from it |
 | Pilot, feasibility, "preliminary" by the authors' own word | rung 4 | whatever the design |
 
-**Take the lower of two rungs — the design's, and the authors' own.** Authors overstate their own observational findings routinely; that does not license the note to. The reverse also holds: a rung-1 design whose authors hedge is written at their hedge, with a line noting that the design would have supported more.
+**Take the more conservative (numerically higher) of two rungs — the design's,
+and the authors' own.** Authors overstate their own observational findings
+routinely; that does not license the note to. The reverse also holds: a rung-1
+design whose authors hedge is written at their hedge, with a line noting that
+the design would have supported more.
 
 **Peer-review status does not move a rung**, and this note does not report it ([scope](note-format.md#body-content)). A preprint's design is its design; describe the design and let the rung follow from it. "Preprint" is not a design and can never stand in for one.
 

@@ -17,8 +17,8 @@ library at all, and importing this module has no side effects — which is what
 execute a bundled script.
 
 Why this is a script and not a fenced block in SKILL.md: the four things a
-model re-derives wrongly — `keyed_files`' four-way stem fan-out, the
-case-insensitive symlink-safe vault walk, the boundary-anchored single-pass
+model re-derives wrongly — `keyed_files`' four-way stem fan-out, the portable
+case/normalization-folded symlink-safe vault walk, the boundary-anchored single-pass
 rewrite, and `_norm`-based +/-2 page verification — are now covered by
 `selftest` and compiled/imported by the plugin's test harness on every run.
 
@@ -54,18 +54,29 @@ Usage:
     python3 organize.py selftest
 """
 import argparse
+import hashlib
 import json
 import os
 import re
+import shutil
 import stat
 import sys
 import tempfile
 import unicodedata
 from urllib.parse import quote, unquote
 
+_OBSIDIAN_SHARED_MODULES = (
+    'atomic_move',
+    'figure_state',
+    'naming',
+    'yaml_scalars',
+)
+
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
 _here = _os.path.dirname(_os.path.abspath(__file__))
+_required = tuple(_m + ".py" for _m in (
+    globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
 if _env:                                   # explicit override: authoritative, no fallback
     _tried = [_os.path.abspath(_os.path.expanduser(_env))]
@@ -74,19 +85,27 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
-_shared = next((_p for _p in _tried if _os.path.isdir(_p)), None)
+_missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
+            for _p in _tried if _os.path.isdir(_p)}
+_shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
 if _shared is None:
     raise SystemExit("""obsidian: cannot find the plugin's shared/scripts/ folder, which holds
-the one canonical copy of the conventions this script depends on.
+the one canonical copy of the conventions this script depends on. A usable
+folder must contain these required module(s): %s
 Looked for:
   %s
 Fix: install the whole plugin tree, or set OBSIDIAN_VAULT_SHARED to the
 shared/scripts/ directory (unset it to use the plugin-relative walk-up).
 Do NOT paste a second copy of the algorithm into this skill -- a divergent
-copy is the bug the shared layer exists to prevent.""" % "\n  ".join(_tried))
+copy is the bug the shared layer exists to prevent.""" % (
+    ", ".join(_required), "\n  ".join(
+        _p + (" (not a directory)" if _p not in _missing else
+              " (missing: %s)" % ", ".join(_missing[_p]))
+        for _p in _tried)))
 _sys.path[:] = [_p for _p in _sys.path if _p not in (_shared, _here)]
 _sys.path.insert(0, _shared)               # shared/scripts/ FIRST
-_sys.path.append(_here)                    # own dir LAST: a local copy cannot shadow it
+if _here != _shared:
+    _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
 #: The filename shape is the plugin's, not this skill's: `pdf-figure-extractor`
@@ -105,6 +124,11 @@ from naming import (                       # noqa: E402  (after the bootstrap)
 from figure_state import (MANIFEST_FILE, REVIEW_FILE, rewrite_sidecar,
                           read_manifest, manifest_key, file_digest,
                           check_manifest_writable)  # noqa: E402
+import atomic_move as _atomic_move          # noqa: E402
+from atomic_move import (MoveIncomplete, PublicationConflict,
+                         file_identity, move_noreplace, publish_new,
+                         remove_expected, replace_expected,
+                         set_private_mode)  # noqa: E402
 from yaml_scalars import parse_scalar, strip_comment  # noqa: E402
 
 #: Folders never walked: VCS and editor state, and the trash, whose contents
@@ -157,6 +181,15 @@ class Edits(dict):
         # Keep the public dict note-only. These plugin-owned records are
         # displayed separately and join the same preflight/write/rollback.
         self.sidecars = {}
+        # {path: (exact text, file identity)} captured by the plan. The apply
+        # pass compares this again immediately before publication so an editor
+        # save after the scan is never overwritten by the stale rewrite.
+        self.expected = {}
+        # {source path: (kind, identity-and-bytes snapshot)}. Regular files
+        # carry a digest as well as inode identity; otherwise an in-place edit
+        # after planning can be moved under a new stem while sidecar ownership
+        # is rewritten for the older bytes.
+        self.move_expected = {}
 
 
 class RenameFailed(OSError):
@@ -169,6 +202,18 @@ class RenameFailed(OSError):
     def __init__(self, message, rolled_back=True):
         OSError.__init__(self, message)
         self.rolled_back = rolled_back
+
+
+class StaleRenamePlan(OSError):
+    """A note or sidecar changed after its rewrite was computed."""
+
+    def __init__(self, message, recovery_path=None):
+        OSError.__init__(self, message)
+        self.recovery_path = recovery_path
+
+
+class InventoryFailed(OSError):
+    """A directory could not be read completely enough to authorize writes."""
 
 
 # ---------------------------------------------------------------------------
@@ -184,8 +229,14 @@ def _walk(root):
     authorises a rename.  The realpath set is what keeps a folder that links
     back into itself from walking forever.
     """
+    def failed(exc):
+        raise InventoryFailed(
+            "cannot complete vault scan of %r: %s" %
+            (getattr(exc, "filename", None) or root, exc)) from exc
+
     seen = set()
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
+    for dirpath, dirnames, filenames in os.walk(
+            root, followlinks=True, onerror=failed):
         real = os.path.realpath(dirpath)
         if real in seen:
             dirnames[:] = []
@@ -206,9 +257,9 @@ def md_files(vault):
 def vault_names(vault):
     """{``_nfc_low`` basename: [paths]} for every file and folder in the vault.
 
-    Vault-wide and case-insensitive, because that is how Obsidian resolves a
-    bare embed — a folder-local check is not the guarantee CONVENTIONS.md
-    1a(1) promises.
+    Vault-wide and folded to the plugin's portable name identity. A folder-local
+    or literal-spelling check is not the uniqueness guarantee CONVENTIONS.md
+    1a(1) promises across supported filesystems.
 
     Every path is kept, not the first one walked: a name that already exists
     TWICE is the case the user most needs spelled out, and `setdefault` used
@@ -219,43 +270,42 @@ def vault_names(vault):
     out = {}
     for dirpath, dirnames, filenames in _walk(vault):
         for f in filenames + dirnames:
-            # `_nfc_low`, not bare `lower()`: Obsidian (and the vault's APFS
-            # volume) also folds Unicode normalization, so an NFD twin on disk
-            # IS the name a derived NFC destination collides with.
+            # `_nfc_low`, not bare `lower()`: an NFD twin and a derived NFC
+            # destination share one portable collision identity.
             out.setdefault(_nfc_low(f), []).append(os.path.join(dirpath, f))
     return {low: sorted(paths) for low, paths in out.items()}
 
 
 def _listdir(path):
-    """`os.listdir`, or [] for anything unreadable.
+    """`os.listdir`, or [] only when the optional directory is absent.
 
-    A permission-denied `Sources/Images/` must not abort a rename plan; it makes
-    the plan incomplete, which is what `blockers` is for, not a traceback.
+    An unreadable directory makes an ownership/collision inventory incomplete.
+    Raise a typed error so the caller can turn that into a blocker rather than
+    silently treating the directory as empty.
     """
     try:
         return os.listdir(path)
-    except OSError:
+    except FileNotFoundError:
         return []
+    except OSError as exc:
+        raise InventoryFailed("cannot inventory %r: %s" % (path, exc)) from exc
 
 
 def _nfc_low(name):
     """A filename reduced to the one spelling two of them are compared as.
 
-    NFC first, then lowercased, and the SAME on both sides of every
-    comparison — which is what `_dirkey` already does for directories and for
-    the same two reasons.  Lowercased because the documented vault sits on a
-    case-insensitive volume; NFC because macOS hands back NFD from
-    `os.listdir` while the note that cites the file, the shell that typed it
-    and this plugin's own earlier output all carry NFC, and the two spellings
-    are byte-different, equal in every rendering, and so silently unequal to
-    `str.lower()` alone.
+    NFC first, then lowercased, identically on both sides of every comparison.
+    This is the plugin's conservative portable identity: some filesystems alias
+    case/normalization variants and others can store both, so raw comparison
+    would produce different ownership and collision decisions by host. A name
+    returned as NFD and a citation typed as NFC are byte-different despite
+    representing the same spelling.
 
     That miss is not cosmetic where `keyed_files` uses it: a source stored NFC
     whose figures are stored NFD fans out to the source alone, the rename
     moves the document and orphans the figures under a stem nothing looks for,
     and `references()` — which is asked about the names the fan-out found —
-    comes back empty and tells the caller to proceed.  Reachable on APFS,
-    which preserves whichever form each name was created with.
+    comes back empty and tells the caller to proceed.
 
     Not `casefold`: it maps `ß` to `ss`, which would key a figure named
     `Strasse_fig_1.png` to an unrelated `Straße.pdf` and rename a file that is
@@ -403,10 +453,12 @@ def _map_source_text(text, transform):
     return "".join(out)
 
 
-# External source URLs are not vault references, even when their last path
-# segment is the PDF being renamed. Stop before brackets so an immediately
-# adjacent wikilink remains independently repairable.
-_EXTERNAL_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s<>\[\]\"]+")
+# External URIs are not vault references, even when their last path segment is
+# the PDF being renamed. Cover hierarchical URLs, protocol-relative URLs and
+# non-hierarchical schemes such as `mailto:`. Stop before brackets so an
+# immediately adjacent wikilink remains independently repairable.
+_EXTERNAL_URL = re.compile(
+    r"(?<![A-Za-z0-9+.-])(?:[A-Za-z][A-Za-z0-9+.-]*:|//)[^\s<>\[\]\"]+")
 
 
 def _external_url_spans(text):
@@ -495,12 +547,9 @@ def keyed_files(vault, path, _seen=None):
     The file itself, its figures in `Sources/Images/`, any note named after it in
     a `NOTE_DIRS` folder, and — if it is a split book — its chapter folder
     under `Sources/PDFs/` and every chapter, each keyed the same way in turn.
-    Returns {absolute path: basename}.  Matching is case-insensitive
-    throughout, because the default vault sits on a case-insensitive volume
-    and Obsidian resolves links case-insensitively either way — and
-    normalisation-insensitive with it (`_nfc_low`), because a source stored
-    NFC beside figures stored NFD is one document to every human reading the
-    folder and two to `str.lower()`.
+    Returns {absolute path: basename}. Matching uses `_nfc_low` throughout so
+    a source and derived files have the same owner on every supported host,
+    including when one spelling is NFC and another NFD.
 
     A probe that only looks for `OldName.pdf` misses all but the first.
     """
@@ -554,8 +603,8 @@ def _dirkey(path):
     carry-every-spelling trick: that one feeds a regex, which matches literal
     text and so has to hold each form, while this is a set-membership test,
     where normalising both sides to one canonical form settles NFD-on-disk vs
-    NFC-in-note outright.  Lowercased for the reason `keyed_files` matches
-    that way — the documented vault sits on a case-insensitive volume.
+    NFC-in-note outright. Lowercasing keeps the same portable identity used by
+    `keyed_files`.
 
     Each segment is stripped, because one side of the comparison is text a
     human typed inside a wikilink: Obsidian resolves `[[ Articles/UDL_2026 ]]`
@@ -856,10 +905,36 @@ def references(vault, names, dirs=None):
     hits = {}
     for md in md_files(vault):
         try:
-            with open(md, encoding="utf-8", errors="replace") as fh:
+            occupant = os.stat(md, follow_symlinks=False)
+            if stat.S_ISLNK(occupant.st_mode):
+                raise InventoryFailed(
+                    "leaf Markdown path %r is a symlink; its target is not an "
+                    "editable file owned by this vault scan" % md)
+            if not stat.S_ISREG(occupant.st_mode):
+                raise InventoryFailed(
+                    "leaf Markdown path %r is not a regular file" % md)
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(md, flags)
+            with os.fdopen(descriptor, "r", encoding="utf-8",
+                           errors="replace") as fh:
+                opened_before = os.fstat(fh.fileno())
+                if _file_identity(occupant) != _file_identity(opened_before):
+                    raise InventoryFailed(
+                        "leaf Markdown path %r changed while it was opened" % md)
                 body = fh.read()
-        except OSError:
-            continue
+                opened_after = os.fstat(fh.fileno())
+            final = os.stat(md, follow_symlinks=False)
+            if not (_change_identity(occupant)
+                    == _change_identity(opened_before)
+                    == _change_identity(opened_after)
+                    == _change_identity(final)):
+                raise InventoryFailed(
+                    "leaf Markdown path %r changed while it was read" % md)
+        except InventoryFailed:
+            raise
+        except OSError as exc:
+            raise InventoryFailed("cannot read Markdown note %r during the "
+                                  "reference scan: %s" % (md, exc)) from exc
         note_dir = os.path.relpath(os.path.dirname(md), vault)
         found = set()
         for _original, part, _style in _source_text_parts(body):
@@ -913,9 +988,11 @@ def _debase_res(name):
     # warns about, keyed on the NEW name where no reference check can see it.
     # The markdown form gets no such tolerance: a space before `)` is part of
     # the target, not padding a renderer looks past.
-    return (re.compile(r"(!?\[\[)((?!\w+:)[^\[\]\n|#]*/)(%s)(?=[ \t]*[\]\\|#])"
-                       % esc),
-            re.compile(r"(\]\()((?!\w+:)[^()\s\n]*/)(%s)(?=[)#])" % esc))
+    uri_guard = r"(?![A-Za-z][A-Za-z0-9+.-]*:|//)"
+    return (re.compile(r"(!?\[\[)(%s[^\[\]\n|#]*/)(%s)(?=[ \t]*[\]\\|#])"
+                       % (uri_guard, esc)),
+            re.compile(r"(\]\()(%s[^()\s\n]*/)(%s)(?=[)#])"
+                       % (uri_guard, esc)))
 
 
 def debase_links(text, names):
@@ -1045,10 +1122,82 @@ def _derive(old_stem, basename, new_stem):
 
 
 def _inside(vault, path):
-    """True when `path` is the vault itself or sits under it."""
-    v = os.path.realpath(vault)
-    p = os.path.realpath(path)
-    return p == v or p.startswith(v + os.sep)
+    """True when ``path`` is logically beneath this exact vault directory.
+
+    Resolving both arguments with ``realpath`` is too strict for a vault whose
+    ``Sources/PDFs`` directory deliberately links to another volume: the PDF
+    is part of the selected vault through that logical path even though its
+    physical target is elsewhere.  Comparing folded strings alone has the
+    opposite problem on a case-sensitive filesystem, where ``Vault`` and
+    ``vault`` can be two unrelated directories.
+
+    Walk the candidate's *logical* ancestors instead.  A case/normalization
+    spelling may identify the vault only when the filesystem says that
+    ancestor has the selected vault's directory identity.  An explicit
+    parent traversal is refused before ``abspath`` can hide a symlink/``..``
+    escape, and a direct physical path to a linked directory's target has no
+    logical vault ancestor, so it remains outside the selected scope.
+    """
+    try:
+        vault_text = os.fsdecode(os.fspath(vault))
+        path_text = os.fsdecode(os.fspath(path))
+
+        # ``abspath`` collapses ``..`` lexically, but the filesystem resolves
+        # it after any preceding symlink.  Reject the ambiguous spelling
+        # rather than certify a path that can escape through ``link/..``.
+        _drive, path_tail = os.path.splitdrive(path_text)
+        if os.altsep:
+            path_tail = path_tail.replace(os.altsep, os.sep)
+        if os.pardir in path_tail.split(os.sep):
+            return False
+
+        vault_abs = os.path.abspath(vault_text)
+        path_abs = os.path.abspath(path_text)
+        vault_entry = os.lstat(vault_abs)
+        vault_stat = os.stat(vault_abs)
+        if not stat.S_ISDIR(vault_stat.st_mode):
+            return False
+        vault_entry_identity = (vault_entry.st_dev, vault_entry.st_ino,
+                                stat.S_IFMT(vault_entry.st_mode))
+        vault_identity = (vault_stat.st_dev, vault_stat.st_ino)
+
+        def logical_key(value):
+            native = os.path.normcase(os.path.normpath(value))
+            return unicodedata.normalize("NFC", native).casefold()
+
+        vault_key = logical_key(vault_abs)
+        current = path_abs
+        while True:
+            if logical_key(current) == vault_key:
+                candidate_entry = os.lstat(current)
+                candidate_stat = os.stat(current)
+                return (stat.S_ISDIR(candidate_stat.st_mode)
+                        and (candidate_stat.st_dev, candidate_stat.st_ino)
+                        == vault_identity
+                        and (candidate_entry.st_dev, candidate_entry.st_ino,
+                             stat.S_IFMT(candidate_entry.st_mode))
+                        == vault_entry_identity)
+            parent = os.path.dirname(current)
+            if parent == current:
+                return False
+            current = parent
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _source_problem(path):
+    """Why `path` cannot be a rename source, or None for a regular file/link.
+
+    Symlinks reach the more specific ownership refusal in ``plan_rename``.
+    Everything else must be an existing regular file; otherwise a dry run can
+    advertise a move that fails only after note rewrites, and a directory whose
+    name ends in ``.pdf`` can be moved into the source tree as if it were a PDF.
+    """
+    if not os.path.lexists(path):
+        return "%s does not exist; refusing to plan a rename for a missing source" % path
+    if not os.path.islink(path) and not os.path.isfile(path):
+        return "%s is not a regular file; this skill renames PDF files, not directories or devices" % path
+    return None
 
 
 def obsolete_names(moves):
@@ -1060,49 +1209,131 @@ def obsolete_names(moves):
 
 
 def _image_ownership_blockers(vault, source, keyed):
-    """Do not carry a same-stem clipping's images along with an unrelated PDF."""
+    """Require positive PDF-manifest ownership for every derived image."""
     images = os.path.join(vault, "Sources", "Images")
-    sources = {source} | {p for p, name in keyed.items()
-                          if name.lower().endswith(".pdf")}
-    ambiguous = []
-    for pdf in sources:
-        stem = os.path.splitext(os.path.basename(pdf))[0]
-        outsiders = []
-        for parts in NOTE_DIRS:
-            home = os.path.join(vault, *parts)
-            for name in _listdir(home):
-                note = os.path.join(home, name)
-                if (_nfc_low(name) == _nfc_low(stem + ".md")
-                        and not _note_is_about(note, stem)):
-                    outsiders.append(note)
-        if outsiders:
-            ambiguous.extend((p, outsiders) for p, name in keyed.items()
-                             if os.path.dirname(p) == images
-                             and _nfc_low(name).startswith(_nfc_low(stem) + "_fig"))
-    if not ambiguous:
+    candidates = [(path, name) for path, name in keyed.items()
+                  if os.path.abspath(os.path.dirname(path)) == os.path.abspath(images)
+                  and "_fig" in _nfc_low(name)]
+    if not candidates:
         return []
     try:
         manifest = read_manifest(os.path.join(images, MANIFEST_FILE))
         blockers = []
-        for image_path, notes in ambiguous:
-            key = manifest_key(manifest, os.path.basename(image_path))
-            if key is not None and file_digest(image_path) == manifest[key]:
-                continue
-            blockers.append(
-                "%s has ambiguous ownership: %s shares this stem but is not "
-                "a note about this PDF, and the image is not verified in the "
-                "figure manifest. Resolve which source owns the image before "
-                "renaming; matching filenames alone are not ownership."
-                % (image_path, ", ".join(notes)))
+        for image_path, image_name in candidates:
+            try:
+                key = manifest_key(manifest, image_name)
+                snapshot = _stable_file_snapshot(image_path)
+                owned = key is not None and snapshot[1] == manifest[key]
+            except (OSError, UnicodeError, ValueError):
+                owned = False
+            if not owned:
+                blockers.append(
+                    "%s has no matching current PDF ownership record. "
+                    "Matching a source stem is not ownership; explicitly adopt "
+                    "or repair this legacy figure through pdf-figure-extractor "
+                    "before renaming the PDF." % image_path)
         return blockers
     except (OSError, UnicodeError, ValueError) as exc:
-        return ["Cannot establish ownership of same-stem images (%s). "
+        return ["Cannot establish PDF ownership of derived images (%s). "
                 "Repair the figure records before renaming." % exc]
+
+
+def _file_identity(st):
+    """The directory-entry identity an expected-content check is tied to."""
+    return st.st_dev, st.st_ino, stat.S_IFMT(st.st_mode)
+
+
+def _change_identity(st):
+    """Metadata that changes when a file is replaced or written in place."""
+    return (st.st_dev, st.st_ino, st.st_size,
+            getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)),
+            getattr(st, "st_ctime_ns", int(st.st_ctime * 1e9)),
+            stat.S_IMODE(st.st_mode))
+
+
+def _stable_file_snapshot(path):
+    """Identity and digest read from one stable, no-follow descriptor."""
+    before = os.lstat(path)
+    if not stat.S_ISREG(before.st_mode):
+        raise StaleRenamePlan("%s is not a regular file" % path)
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise StaleRenamePlan(
+            "%s changed or could not be opened safely: %s" % (path, exc)) from exc
+    digest = hashlib.sha256()
+    with os.fdopen(descriptor, "rb") as source:
+        opened_before = os.fstat(source.fileno())
+        if (not stat.S_ISREG(opened_before.st_mode)
+                or _file_identity(before) != _file_identity(opened_before)):
+            raise StaleRenamePlan("%s changed while it was opened" % path)
+        while True:
+            chunk = source.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+        opened_after = os.fstat(source.fileno())
+    try:
+        after = os.lstat(path)
+    except OSError as exc:
+        raise StaleRenamePlan(
+            "%s changed while its move snapshot was read: %s" % (path, exc)) from exc
+    if not (_change_identity(before) == _change_identity(opened_before)
+            == _change_identity(opened_after) == _change_identity(after)):
+        raise StaleRenamePlan(
+            "%s changed while its move snapshot was read" % path)
+    return _file_identity(after), digest.hexdigest()
+
+
+def _move_snapshot(path):
+    """Content-bearing move guard for files; identity guard for directories."""
+    item = os.stat(path, follow_symlinks=False)
+    if stat.S_ISREG(item.st_mode):
+        return "regular", _stable_file_snapshot(path)
+    if stat.S_ISDIR(item.st_mode):
+        return "directory", _file_identity(item)
+    raise StaleRenamePlan(
+        "%s is a symlink or unsupported non-regular move source" % path)
+
+
+def _move_snapshot_identity(snapshot):
+    """Directory-entry identity accepted by the exclusive move primitive."""
+    kind, value = snapshot
+    return value[0] if kind == "regular" else value
+
+
+def _read_snapshot(path):
+    """Read exact text and reject a file that changes during that read."""
+    entry = os.stat(path, follow_symlinks=False)
+    if stat.S_ISLNK(entry.st_mode):
+        raise StaleRenamePlan(
+            "%s is a leaf symlink; refusing to read or rewrite its target" % path)
+    if not stat.S_ISREG(entry.st_mode):
+        raise StaleRenamePlan("%s is not a regular file" % path)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    with os.fdopen(descriptor, "r", encoding="utf-8", newline="") as fh:
+        before = os.fstat(fh.fileno())
+        if _file_identity(entry) != _file_identity(before):
+            raise StaleRenamePlan(
+                "%s changed while it was being opened" % path)
+        body = fh.read()
+        after = os.fstat(fh.fileno())
+    final = os.stat(path, follow_symlinks=False)
+    if not (_change_identity(entry) == _change_identity(before)
+            == _change_identity(after) == _change_identity(final)):
+        raise StaleRenamePlan(
+            "%s changed while it was being read; refusing a mixed snapshot"
+            % path)
+    return body, _file_identity(after)
 
 
 def _plan_figure_state(vault, ren):
     """Plan metadata updates for the images and PDF stems being renamed."""
-    edits, blockers = {}, []
+    edits, expected, blockers = {}, {}, []
     stems = {os.path.splitext(old)[0]: os.path.splitext(new)[0]
              for old, new in ren.items() if old.lower().endswith(".pdf")}
     for filename, kind, mapping in ((MANIFEST_FILE, "manifest", ren),
@@ -1113,8 +1344,7 @@ def _plan_figure_state(vault, ren):
         try:
             if os.path.islink(path):
                 raise ValueError("sidecar is a symlink; reconcile its real location first")
-            with open(path, encoding="utf-8", newline="") as fh:
-                body = fh.read()
+            body, identity = _read_snapshot(path)
             new = rewrite_sidecar(body, mapping, kind)
             if new != body:
                 check_manifest_writable(path)
@@ -1124,11 +1354,12 @@ def _plan_figure_state(vault, ren):
                     raise ValueError("sidecar or its outside-folder staging "
                                      "location is not writable")
                 edits[path] = new
+                expected[path] = (body, identity)
         except (OSError, UnicodeError, ValueError) as exc:
             blockers.append("%s cannot safely follow the source rename (%s). "
                             "Repair its records first; do not delete/reset ownership metadata."
                             % (path, exc))
-    return edits, blockers
+    return edits, expected, blockers
 
 
 def plan_rename(vault, path, new_basename, dest=None):
@@ -1159,7 +1390,10 @@ def plan_rename(vault, path, new_basename, dest=None):
     old_stem, old_ext = os.path.splitext(src_basename)
     new_stem, new_ext = os.path.splitext(new_basename)
     have_vault = bool(vault) and os.path.isdir(vault)
-    if have_vault and not _inside(vault, path) and not os.path.islink(path):
+    source_problem = _source_problem(path)
+    if source_problem:
+        return [], Edits(), [source_problem]
+    if have_vault and not _inside(vault, path):
         return [], Edits(), [
             "%s is outside the vault passed as --vault. Its stem cannot "
             "establish ownership of files inside that vault. Omit --vault "
@@ -1233,8 +1467,13 @@ def plan_rename(vault, path, new_basename, dest=None):
             "refusing to write %r: this skill organises PDFs, so the name it "
             "writes ends in .pdf." % new_basename]
 
-    keyed = keyed_files(vault, path) if have_vault \
-        else {path: src_basename}
+    try:
+        keyed = keyed_files(vault, path) if have_vault \
+            else {path: src_basename}
+    except InventoryFailed as exc:
+        return [], Edits(), [
+            "%s The owned source family cannot be established, so nothing "
+            "may be renamed." % exc]
     ren = {b: _derive(old_stem, b, new_stem) for b in keyed.values()}
 
     # A source that arrived with no extension at all (`download`, a browser
@@ -1245,7 +1484,12 @@ def plan_rename(vault, path, new_basename, dest=None):
     if not old_ext and new_ext:
         ren[src_basename] = new_stem + new_ext
 
-    blockers = _image_ownership_blockers(vault, path, keyed) if have_vault else []
+    try:
+        blockers = (_image_ownership_blockers(vault, path, keyed)
+                    if have_vault else [])
+    except InventoryFailed as exc:
+        blockers = ["%s Image ownership cannot be established from an "
+                    "incomplete inventory." % exc]
 
     # Renaming an already-split book must not mint chapter names a later
     # extractor refuses or attributes to a different book. In particular a
@@ -1288,18 +1532,16 @@ def plan_rename(vault, path, new_basename, dest=None):
                 "file would be moved out of the vault while every reference "
                 "to it was rewritten. Pass an absolute path." % dest)
         elif have_vault:
-            vreal = os.path.realpath(vault)
-            dreal = os.path.realpath(dest)
-            if dreal != vreal and not dreal.startswith(vreal + os.sep):
+            if not _inside(vault, dest):
                 blockers.append(
                     "destination %s is outside the vault %s. Moving a document "
                     "out of the vault while rewriting the notes that cite it "
                     "leaves every one of those links resolving to nothing."
                     % (dest, vault))
 
-    # Two keyed names differing only in case OR Unicode normalization are two
-    # files on a plain Linux volume and one file on the vault's own, and they
-    # derive to ONE new name (`_derive` writes NFC).  Left alone, the second
+    # Two keyed names differing only in case or Unicode normalization may be
+    # distinct on one filesystem and aliases on another, but derive to one new
+    # name (`_derive` writes NFC). Left alone, the second
     # `os.rename` destroys the first silently — a file the user cannot get
     # back, in the operation with no downstream safety net.  Grouped under
     # `_nfc_low`, the SAME fold the fan-out used to collect these names: the
@@ -1323,7 +1565,12 @@ def plan_rename(vault, path, new_basename, dest=None):
                             % (old, new, len(os.fsencode(new)), MAX_NAME_BYTES))
 
     mine = {os.path.realpath(p) for p in keyed}
-    existing = vault_names(vault) if have_vault else {}
+    try:
+        existing = vault_names(vault) if have_vault else {}
+    except InventoryFailed as exc:
+        blockers.append("%s Vault-wide basename uniqueness could not be "
+                        "checked." % exc)
+        existing = {}
     # Every colliding path, not just one: two files already sharing a
     # lowercased basename are two separate obstacles, and naming one of them
     # sends the user back around the same refusal after they have moved it.
@@ -1369,8 +1616,8 @@ def plan_rename(vault, path, new_basename, dest=None):
     # sitting in that folder is a plain `os.rename`: it destroys the
     # destination with no error and no way back. `lexists`, not `exists`, so a
     # broken symlink still counts as something there.
-    # `os.path.realpath` does not case-fold, so on a case-INSENSITIVE volume --
-    # the documented default vault -- a case-only rename (`foo.pdf` ->
+    # `os.path.realpath` does not case-fold, so on a case-insensitive volume a
+    # case-only rename (`foo.pdf` ->
     # `Foo.pdf`) has src and dst as the same file while the two realpaths
     # differ, and this refused it as a collision.  SKILL.md then tells the model
     # to append `_2`, producing a name `split_book` refuses to split forever.
@@ -1402,7 +1649,7 @@ def plan_rename(vault, path, new_basename, dest=None):
     # Writability is settled HERE, not discovered half-way through the moves.
     # `os.rename` needs the containing directory writable — a read-only file
     # still moves — while a note needs the file itself writable, because
-    # `_write`'s temp-file-plus-`os.replace` goes straight through a read-only
+    # `_write`'s staged publication can go straight through a read-only
     # bit that a plain `open(path, "w")` would have stopped at. A note the
     # user protected on purpose is a refusal, and it is one the plan shows
     # before anything is written.
@@ -1431,11 +1678,26 @@ def plan_rename(vault, path, new_basename, dest=None):
     edits = Edits()
     unreadable = []
     if have_vault:
-        for md in md_files(vault):
+        try:
+            markdown_files = list(md_files(vault))
+        except InventoryFailed as exc:
+            blockers.append("%s Markdown references could not be scanned "
+                            "completely." % exc)
+            markdown_files = []
+        for md in markdown_files:
             try:
-                with open(md, encoding="utf-8") as fh:
-                    body = fh.read()
-            except (OSError, UnicodeDecodeError) as exc:
+                body, identity = _read_snapshot(md)
+            except OSError as exc:
+                # Unlike a decoding error, an I/O failure cannot be re-read
+                # leniently to prove that the note cites nothing. Treating it
+                # as a harmless unreadable note would authorize a rename on no
+                # evidence at all.
+                blockers.append(
+                    "%s could not be read (%s), so the vault-wide reference "
+                    "scan is incomplete. Restore access, then re-run."
+                    % (md, exc))
+                continue
+            except UnicodeDecodeError as exc:
                 # A blocker here dead-ends every rename in the vault on one
                 # stray legacy note, including renames that note does not
                 # mention -- and SKILL.md says never work around a blocker.
@@ -1445,8 +1707,12 @@ def plan_rename(vault, path, new_basename, dest=None):
                 try:
                     with open(md, encoding="utf-8", errors="replace") as fh:
                         loose = fh.read()
-                except OSError:
-                    loose = ""
+                except OSError as retry:
+                    blockers.append(
+                        "%s could not be re-read to inspect its non-UTF-8 "
+                        "contents (%s), so its references are unknown. "
+                        "Restore access, then re-run." % (md, retry))
+                    continue
                 if loose and references_in_text(loose, ren, stem_ren):
                     blockers.append(
                         "%s cites a name this rename changes but could not be "
@@ -1462,6 +1728,7 @@ def plan_rename(vault, path, new_basename, dest=None):
                 new = debase_links(new, moved_names)
             if new != body:
                 edits[md] = new
+                edits.expected[md] = (body, identity)
                 if not (os.access(md, os.W_OK)
                         and os.access(os.path.dirname(md), os.W_OK)):
                     blockers.append("%s cites this file but is not writable, "
@@ -1478,8 +1745,17 @@ def plan_rename(vault, path, new_basename, dest=None):
     # `_report_plan` listed the sentinel as a note it was about to rewrite.
     edits.unreadable = tuple(unreadable)
     if have_vault:
-        edits.sidecars, sidecar_blockers = _plan_figure_state(vault, ren)
+        (edits.sidecars, sidecar_expected,
+         sidecar_blockers) = _plan_figure_state(vault, ren)
+        edits.expected.update(sidecar_expected)
         blockers.extend(sidecar_blockers)
+    for src, _dst in moves:
+        try:
+            edits.move_expected[src] = _move_snapshot(src)
+        except OSError as exc:
+            blockers.append(
+                "%s changed while the move plan was being finalized (%s: %s); "
+                "nothing may be renamed" % (src, type(exc).__name__, exc))
     return moves, edits, blockers
 
 
@@ -1496,64 +1772,60 @@ def references_in_text(text, ren, stem_ren):
     return False
 
 
-def _write(path, text):
-    """Replace `path` atomically without widening existing file permissions.
+def _write(path, text, expected=None):
+    """Publish complete text while preserving permissions and late edits.
 
-    Temp file plus `os.replace`, so a write that dies part-way leaves the
-    original intact rather than a truncated note — "nothing from this rename
-    is on disk" has to be true of the notes as well as the files. A unique
-    temporary also leaves any occupant of an old staging pathname untouched.
+    Runtime rename writes pass the exact text and inode identity read during
+    planning. The current inode is hard-linked, verified, displaced, verified
+    again, and the staged inode is then linked at the now-free name with
+    exclusive-create semantics. A writer in any compare/write gap keeps the
+    public path; the displaced predecessor is restored or retained in a named
+    recovery directory. Rollback uses the same operation.
     """
-    # `_walk` follows symlinks so a synced or shared subfolder is covered.
-    # Replacing a symlinked note would sever it: the vault gets a regular file
-    # and the shared original keeps the old, now-dangling reference.  Write
-    # through the link instead, to the file it actually names.
-    target = os.path.realpath(path) if os.path.islink(path) else path
-    try:
-        previous = os.stat(target)
-        mode = stat.S_IMODE(previous.st_mode) if stat.S_ISREG(previous.st_mode) else None
-    except FileNotFoundError:
-        mode = None
+    # Directory symlinks remain part of the selected recursive vault scope,
+    # but a leaf symlink can target arbitrary bytes outside it. Never follow a
+    # leaf for mutation; the planning scan reports it as a blocker instead.
+    target = path
+    previous = os.stat(target, follow_symlinks=False)
+    if stat.S_ISLNK(previous.st_mode):
+        raise StaleRenamePlan(
+            "%s is a leaf symlink; refusing to rewrite its target" % target)
+    if not stat.S_ISREG(previous.st_mode):
+        raise StaleRenamePlan("%s is no longer a regular file" % target)
+    if expected is None:
+        expected = _read_snapshot(target)
+    mode = stat.S_IMODE(previous.st_mode)
     logical_dir = os.path.abspath(os.path.dirname(path) or ".")
     is_image_sidecar = (
         os.path.basename(path) in (MANIFEST_FILE, REVIEW_FILE)
         and os.path.basename(logical_dir) == "Images"
         and os.path.basename(os.path.dirname(logical_dir)) == "Sources"
     )
-
-    # Image consumers inventory a shared flat folder, so even a hidden
-    # sidecar temporary is an unfinished visible artifact under §8b. Stage
-    # those two files in a unique sibling directory on the destination's
-    # resolved filesystem. Other notes retain same-directory staging: their
-    # parent may intentionally be read-only while the note folder is writable.
-    if is_image_sidecar:
-        real_dir = os.path.realpath(os.path.dirname(target) or ".")
-        with tempfile.TemporaryDirectory(prefix=".organize-stage-",
-                                         dir=os.path.dirname(real_dir)) as stage:
-            tmp = os.path.join(stage, os.path.basename(target))
-            with open(tmp, "w", encoding="utf-8", newline="") as fh:
-                fh.write(text)
-                if mode is not None:
-                    os.fchmod(fh.fileno(), mode)
-            os.replace(tmp, target)
-        return
-
-    tmp = None
+    real_dir = os.path.realpath(os.path.dirname(target) or ".")
+    # Sidecar staging stays outside the flat Images consumer folder. Ordinary
+    # notes use their own directory so publication and hard links stay on the
+    # target filesystem.
+    stage_parent = (os.path.dirname(real_dir) if is_image_sidecar else real_dir)
+    stage = tempfile.mkdtemp(prefix=".organize-stage-", dir=stage_parent)
+    keep_stage = False
     try:
-        with tempfile.NamedTemporaryFile(
-                mode="w", encoding="utf-8", dir=os.path.dirname(target) or ".",
-                prefix=".organize-", suffix=".tmp", delete=False) as fh:
-            tmp = fh.name
+        staged = os.path.join(stage, os.path.basename(target))
+        with open(staged, "x", encoding="utf-8", newline="") as fh:
             fh.write(text)
-            if mode is not None:
-                os.fchmod(fh.fileno(), mode)
-        os.replace(tmp, target)
+            set_private_mode(fh, staged, mode)
+            published = (text, _file_identity(os.fstat(fh.fileno())))
+        published = replace_expected(
+            staged, target, expected, _read_snapshot, stage,
+            stage_parent=stage_parent,
+            recovery_prefix=".organize-recovery-")
+        return published
+    except PublicationConflict as exc:
+        keep_stage = exc.keep_stage
+        raise StaleRenamePlan(
+            str(exc), recovery_path=exc.recovery_path) from exc
     finally:
-        if tmp is not None:
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
+        if not keep_stage:
+            shutil.rmtree(stage, ignore_errors=True)
 
 
 def rename_all(vault, path, new_basename, apply=False, dest=None):
@@ -1572,6 +1844,12 @@ def rename_all(vault, path, new_basename, apply=False, dest=None):
     keyed to a path that no longer existed.  Every rename of a PDF that had
     such a note — the ordinary vault case — died on that and rolled back, so
     the rename simply never happened.
+
+    Every filesystem move is exclusive at the operation itself, including
+    rollback. Note and sidecar publication displaces and revalidates the exact
+    planned inode before linking the new one into the free name. A competing
+    writer is preserved at the public path; when two predecessors cannot share
+    it, the error names the private recovery copy instead of deleting either.
     """
     moves, edits, blockers = plan_rename(vault, path, new_basename, dest)
     if not apply or blockers:
@@ -1599,23 +1877,49 @@ def rename_all(vault, path, new_basename, apply=False, dest=None):
                 os.makedirs(d)
                 made_dirs.extend(reversed(missing))
         for md, new in list(edits.items()) + list(edits.sidecars.items()):
-            with open(md, encoding="utf-8", newline="") as fh:
-                done_edits[md] = fh.read()
-            _write(md, new)
+            expected = edits.expected[md]
+            published = _write(md, new, expected=expected)
+            done_edits[md] = (expected[0], published)
+            # A source-family note can be rewritten and then renamed. Its
+            # planned inode was just replaced by the staged inode, so the move
+            # guard must follow the publication identity this transaction now
+            # owns rather than reject its own earlier write as interference.
+            if md in edits.move_expected:
+                edits.move_expected[md] = _move_snapshot(md)
         for src, dst in moves:
             if os.path.realpath(src) != os.path.realpath(dst):
-                os.rename(src, dst)
-                done_moves.append((src, dst))
+                expected_move = edits.move_expected[src]
+                if _move_snapshot(src) != expected_move:
+                    raise StaleRenamePlan(
+                        "%s changed after the rename plan; refusing to move "
+                        "different bytes" % src)
+                identity = _move_snapshot_identity(expected_move)
+                move_noreplace(src, dst, expected=identity)
+                # Record the move before readback so a failed content check
+                # restores the same inode to its old name through the ordinary
+                # exclusive rollback path.
+                done_moves.append((src, dst, expected_move))
+                if _move_snapshot(dst) != expected_move:
+                    raise StaleRenamePlan(
+                        "%s changed while it was being moved; refusing to "
+                        "complete a rename derived from different bytes" % src)
     except BaseException as exc:
         failed = []
-        for src, dst in reversed(done_moves):
+        if isinstance(exc, MoveIncomplete):
+            failed.append("current move residue at %s and/or %s (%s)" %
+                          (exc.src, exc.dst, exc))
+        if (isinstance(exc, StaleRenamePlan)
+                and exc.recovery_path is not None):
+            failed.append("preserved displaced file at %s" % exc.recovery_path)
+        for src, dst, expected_move in reversed(done_moves):
             try:
-                os.rename(dst, src)
+                identity = _move_snapshot_identity(expected_move)
+                move_noreplace(dst, src, expected=identity)
             except OSError as back:
                 failed.append("%s -> %s (%s)" % (dst, src, back))
-        for md, old_body in done_edits.items():
+        for md, (old_body, published) in reversed(list(done_edits.items())):
             try:
-                _write(md, old_body)
+                _write(md, old_body, expected=published)
             except OSError as back:
                 failed.append("%s (%s)" % (md, back))
         for d in reversed(made_dirs):
@@ -1688,11 +1992,23 @@ def _reader(pdf_path):
 def _resolve(chapters, text, n_pages, out_dir, taken, book_stem=None):
     """(plan, problems, notes) — pass 1 of `split_book`.  Writes nothing."""
     plan, problems, notes, seen = [], [], [], {}
-    for ch in chapters:
+    for position, ch in enumerate(chapters, 1):
+        if not isinstance(ch, dict):
+            problems.append("chapter item %d: expected a JSON object, got %s"
+                            % (position, type(ch).__name__))
+            continue
         missing = {"heading_text", "filename", "start_idx", "end_idx"} - set(ch)
         if missing:
             problems.append("chapter %r: missing %s"
                             % (ch.get("filename", ch), ", ".join(sorted(missing))))
+            continue
+        if not isinstance(ch["heading_text"], str):
+            problems.append("chapter item %d: heading_text must be a string, got %s"
+                            % (position, type(ch["heading_text"]).__name__))
+            continue
+        if not isinstance(ch["filename"], str):
+            problems.append("chapter item %d: filename must be a string, got %s"
+                            % (position, type(ch["filename"]).__name__))
             continue
         name, needle = ch["filename"], _norm(ch["heading_text"])
         start, end = ch["start_idx"], ch["end_idx"]
@@ -1736,7 +2052,8 @@ def _resolve(chapters, text, n_pages, out_dir, taken, book_stem=None):
                             "heading, not a placeholder."
                             % (name, ch["heading_text"]))
             continue
-        if not isinstance(start, int) or not isinstance(end, int):
+        if (isinstance(start, bool) or isinstance(end, bool)
+                or not isinstance(start, int) or not isinstance(end, int)):
             problems.append("%s: start_idx/end_idx must be integer 0-based "
                             "page indices, got %r and %r"
                             % (name, start, end))
@@ -1777,9 +2094,8 @@ def _resolve(chapters, text, n_pages, out_dir, taken, book_stem=None):
             start -= 1
 
         # `islink` as well as `exists`: a broken symlink is not `exists`, and
-        # `os.replace` would silently consume it. Matched case-insensitively,
-        # because the default vault sits on a case-insensitive volume where
-        # `..._01_NormSci.pdf` and `..._01_normsci.pdf` are one path.
+        # `os.replace` would silently consume it. Case variants share the
+        # portable destination identity.
         target = os.path.join(out_dir, name)
         clash = next((f for f in _listdir(out_dir)
                       if f.lower() == name.lower()), None)
@@ -1795,8 +2111,8 @@ def _resolve(chapters, text, n_pages, out_dir, taken, book_stem=None):
         # write".
         if name.lower() in seen:
             problems.append("%s: two chapters resolve to this filename (also "
-                            "%r; filenames differing only in case are one file "
-                            "on a case-insensitive volume) — keep more words "
+                            "%r; filenames differing only in case share one "
+                            "portable destination identity) — keep more words "
                             "in each" % (name, seen[name.lower()]))
             continue
         if name.lower() in taken:
@@ -1830,6 +2146,83 @@ def _resolve(chapters, text, n_pages, out_dir, taken, book_stem=None):
     return plan, problems, notes
 
 
+def _publish_new(staged, target):
+    """Publish a staged chapter only when ``target`` is still unoccupied.
+
+    The shared helper links exclusively, reads the public entry back, and on a
+    verification failure withdraws only the exact unmodified staged snapshot.
+    A file created after inventory or an editor save after linking is retained.
+    """
+    target_dir = os.path.realpath(os.path.dirname(target) or ".")
+    stage_parent = os.path.dirname(target_dir)
+    return publish_new(
+        staged, target, _published_snapshot, stage_parent=stage_parent,
+        recovery_prefix=".organize-recovery-")
+
+
+def _published_snapshot(path):
+    """Identity and digest of one stable regular file."""
+    return _stable_file_snapshot(path)
+
+
+def _remove_published(path, expected, stage_parent):
+    """Remove only the exact inode this split published at ``path``."""
+    if not os.path.lexists(path):
+        return None
+    stage = tempfile.mkdtemp(prefix=".split-rollback-", dir=stage_parent)
+    keep_stage = False
+    try:
+        try:
+            remove_expected(
+                path, expected, _published_snapshot, stage,
+                stage_parent=stage_parent,
+                recovery_prefix=".organize-recovery-")
+        except PublicationConflict as exc:
+            keep_stage = exc.keep_stage
+            return ("%s was retained because cleanup conflicted with a "
+                    "different identity or byte snapshot: %s" % (path, exc))
+        # Both private names are hard links to exactly the inode this split
+        # published. Cleaning the stage removes them; a later public occupant
+        # is independent and remains untouched.
+        return None
+    finally:
+        if not keep_stage:
+            shutil.rmtree(stage, ignore_errors=True)
+
+
+def _rollback_split(written, out_dir, made_dir):
+    """Remove this split's published chapters; return any cleanup failures."""
+    failures = []
+    stage_parent = os.path.dirname(os.path.realpath(out_dir))
+    for path, expected in written:
+        try:
+            problem = _remove_published(path, expected, stage_parent)
+        except OSError as exc:
+            problem = "%s (%s: %s)" % (path, type(exc).__name__, exc)
+        if problem:
+            failures.append(problem)
+    if made_dir:
+        try:
+            os.rmdir(out_dir)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            failures.append("%s [output directory] (%s: %s)" %
+                            (out_dir, type(exc).__name__, exc))
+    return failures
+
+
+def _split_failure_message(pdf_path, written_count, plan_count, exc,
+                           cleanup_failures):
+    """Describe a failed split without overstating its rollback state."""
+    lead = "%s: write failed after %d of %d chapters (%s: %s)." % (
+        pdf_path, written_count, plan_count, type(exc).__name__, exc)
+    if cleanup_failures:
+        return (lead + " ROLLBACK INCOMPLETE — these paths may remain; inspect "
+                "them before retrying:\n  - " + "\n  - ".join(cleanup_failures))
+    return lead + " Rolled back — nothing from this split is on disk."
+
+
 def split_book(pdf_path, chapters, out_dir, taken=None, verbose=True):
     """Split `pdf_path` into one PDF per chapter, under `out_dir`.
 
@@ -1843,8 +2236,9 @@ def split_book(pdf_path, chapters, out_dir, taken=None, verbose=True):
     and half of it is worse than none, so nothing reaches disk until every
     chapter has a verified start page, a non-overlapping in-range end page, a
     usable filename, and a target proved free vault-wide.  A write that fails
-    part-way removes what this run just created, so the same holds for the
-    second pass.
+    part-way attempts to remove what this run just created. Any cleanup failure
+    is named as an incomplete rollback so the caller can inspect it before
+    retrying.
 
     A `_2`/`_3`-disambiguated book is refused outright, before anything is read
     or written: it has no legal chapter name to give.
@@ -1882,6 +2276,38 @@ def split_book(pdf_path, chapters, out_dir, taken=None, verbose=True):
             "`Prince_UDLPractice_2026`), rename this one with `organize.py "
             "rename`, then split it."
             % (os.path.basename(pdf_path), identity, identity))
+    if not isinstance(chapters, list):
+        raise SplitRefused(
+            "%s: chapter plan must be a JSON array/list, got %s. Nothing was written."
+            % (pdf_path, type(chapters).__name__))
+    if not chapters:
+        raise SplitRefused("%s: no chapters detected — ask the user for page "
+                           "ranges rather than writing an empty folder."
+                           % pdf_path)
+    if os.path.lexists(out_dir) and not os.path.isdir(out_dir):
+        raise SplitRefused("%s: output path exists but is not a directory; "
+                           "refusing to replace it." % out_dir)
+
+    # An existing chapter set is authoritative even when the new plan chose
+    # different abbreviations, so checking only the exact planned targets can
+    # create two parallel splits of one book. Detect any recognized chapter of
+    # this book before opening the PDF or creating the output directory.
+    try:
+        existing_chapters = []
+        for name in _listdir(out_dir):
+            book = chapter_book_stem(name)
+            if (book is not None
+                    and _nfc_low(core_stem(book, is_stem=True))
+                    == _nfc_low(identity)):
+                existing_chapters.append(name)
+    except InventoryFailed as exc:
+        raise SplitRefused("%s: cannot verify whether a chapter set already "
+                           "exists (%s). Nothing was written." % (out_dir, exc))
+    if existing_chapters:
+        raise SplitRefused(
+            "%s: an existing chapter set for this book is authoritative (%s). "
+            "Leave it unchanged; do not create a second split."
+            % (out_dir, ", ".join(sorted(existing_chapters))))
     taken = taken or {}
     # `_reader` first, and the writer import after it: both come from pypdf,
     # and `_reader` is the one that turns a missing pypdf into a `SplitRefused`
@@ -1906,51 +2332,45 @@ def split_book(pdf_path, chapters, out_dir, taken=None, verbose=True):
         raise SplitRefused("%s: no extractable text (a scan?). Chapter "
                            "boundaries can't be found — OCR it first, then "
                            "re-run." % pdf_path)
-    if not chapters:
-        raise SplitRefused("%s: no chapters detected — ask the user for page "
-                           "ranges rather than writing an empty folder."
-                           % pdf_path)
-
-    plan, problems, notes = _resolve(chapters, text, n_pages, out_dir, taken,
-                                     core_stem(pdf_path))
+    try:
+        plan, problems, notes = _resolve(chapters, text, n_pages, out_dir, taken,
+                                         core_stem(pdf_path))
+    except InventoryFailed as exc:
+        raise SplitRefused("%s: chapter destinations could not be inventoried "
+                           "completely (%s). Nothing was written."
+                           % (out_dir, exc))
     if problems:
         raise SplitRefused("Not splitting %s. Fix these first:\n  - "
                            % os.path.basename(pdf_path)
                            + "\n  - ".join(problems))
 
     # --- Pass 2: write. Every target is in range and proved free. A failure
-    # part-way removes what this run just created — half a split is worse
-    # than none, and these are files that did not exist a second ago. ---
+    # part-way attempts to remove what this run just created — half a split is
+    # worse than none. Any cleanup failure is retained in the error. ---
     made_dir = not os.path.isdir(out_dir)
-    os.makedirs(out_dir, exist_ok=True)
-    tmp = os.path.join(out_dir, ".split-%d.part" % os.getpid())
     written = []
     try:
-        for start, end, target, name in plan:
-            writer = PdfWriter()
-            for i in range(start, end):
-                writer.add_page(reader.pages[i])
-            with open(tmp, "wb") as fh:
-                writer.write(fh)
-            os.replace(tmp, target)
-            written.append(target)
-            if verbose:
-                print("%s  pages %d-%d" % (name, start + 1, end))
+        os.makedirs(out_dir, exist_ok=True)
+        stage_parent = os.path.dirname(os.path.realpath(out_dir))
+        with tempfile.TemporaryDirectory(prefix=".split-stage-",
+                                         dir=stage_parent) as stage:
+            for ordinal, (start, end, target, name) in enumerate(plan, 1):
+                writer = PdfWriter()
+                for i in range(start, end):
+                    writer.add_page(reader.pages[i])
+                tmp = os.path.join(stage, "chapter-%04d.part" % ordinal)
+                with open(tmp, "xb") as fh:
+                    writer.write(fh)
+                # Exclusive publication closes the plan/write race. os.replace
+                # used to overwrite a chapter that appeared after preflight.
+                published = _publish_new(tmp, target)
+                written.append((target, published))
+                if verbose:
+                    print("%s  pages %d-%d" % (name, start + 1, end))
     except BaseException as exc:
-        for f in written + [tmp]:
-            try:
-                os.remove(f)
-            except OSError:
-                pass
-        if made_dir:
-            try:
-                os.rmdir(out_dir)
-            except OSError:
-                pass
-        raise SplitRefused("%s: write failed after %d of %d chapters (%s: %s). "
-                           "Rolled back — nothing from this split is on disk."
-                           % (pdf_path, len(written), len(plan),
-                              type(exc).__name__, exc))
+        cleanup_failures = _rollback_split(written, out_dir, made_dir)
+        raise SplitRefused(_split_failure_message(
+            pdf_path, len(written), len(plan), exc, cleanup_failures)) from exc
     if verbose:
         for n in notes:
             print("note:", n)
@@ -1993,24 +2413,57 @@ def _report_plan(moves, edits, blockers, apply_done):
         print("No blockers. Re-run with --apply to write it.")
 
 
+def _cli_vault(value):
+    """Resolve an explicitly supplied vault, without silently dropping typos.
+
+    Omitting ``--vault`` deliberately selects external-file mode. Supplying a
+    path that is missing or not a directory is different: treating it as an
+    omission bypasses the uniqueness/reference checks the caller requested.
+    """
+    if value is None:
+        return None
+    vault = os.path.expanduser(value)
+    if not os.path.isdir(vault):
+        raise ValueError("--vault is not a directory: %s. Fix the path; omit "
+                         "--vault only for a document genuinely outside any "
+                         "vault." % vault)
+    return vault
+
+
 def _cmd_check(args):
-    vault = os.path.expanduser(args.vault) if args.vault else None
+    try:
+        vault = _cli_vault(args.vault)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     path = os.path.expanduser(args.path)
-    if not vault or not os.path.isdir(vault):
-        print("No vault to scan (--vault %s). The vault-wide reference check "
+    if not vault:
+        print("No vault to scan (--vault not given). The vault-wide reference check "
               "did NOT run; say so in the report rather than reporting the "
-              "file as unreferenced." % (args.vault or "not given"))
+              "file as unreferenced.")
         return 0
     if not _inside(vault, path):
         print("The source is outside --vault. Omit --vault for an independent "
               "download; matching its basename cannot establish ownership of "
               "the vault's notes or images.", file=sys.stderr)
         return 1
-    keyed = keyed_files(vault, path)
+    problem = _source_problem(path)
+    if problem:
+        print(problem, file=sys.stderr)
+        return 1
+    try:
+        keyed = keyed_files(vault, path)
+    except InventoryFailed as exc:
+        print("Reference check incomplete: %s" % exc, file=sys.stderr)
+        return 1
     print("Names keyed to %s (%d):" % (os.path.basename(path), len(keyed)))
     for p, b in sorted(keyed.items()):
         print("  %-44s %s" % (b, p))
-    refs = references(vault, set(keyed.values()), keyed_dirs(vault, keyed))
+    try:
+        refs = references(vault, set(keyed.values()), keyed_dirs(vault, keyed))
+    except InventoryFailed as exc:
+        print("Reference check incomplete: %s" % exc, file=sys.stderr)
+        return 1
     if not refs:
         print("\nNo references. Review the rename plan; no extra authorization is needed.")
         return 0
@@ -2021,13 +2474,21 @@ def _cmd_check(args):
 
 
 def _cmd_rename(args):
-    vault = os.path.expanduser(args.vault) if args.vault else None
+    try:
+        vault = _cli_vault(args.vault)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     path = os.path.expanduser(args.path)
-    if not vault or not os.path.isdir(vault):
-        print("No vault (--vault %s): the vault-wide uniqueness and reference "
+    if not vault:
+        print("No vault (--vault not given): the vault-wide uniqueness and reference "
               "checks did not run. Only the literal destination is checked."
-              % (args.vault or "not given"))
-    keyed = keyed_files(vault, path) if vault and os.path.isdir(vault) else {}
+              )
+    try:
+        keyed = keyed_files(vault, path) if vault else {}
+    except InventoryFailed as exc:
+        print("Rename plan incomplete: %s" % exc, file=sys.stderr)
+        return 1
     old = set(keyed.values())
     # Located BEFORE the rename and reused after it, so this still says where
     # each old name lived, including when --dest files the source elsewhere —
@@ -2049,7 +2510,12 @@ def _cmd_rename(args):
     # Only names that actually became obsolete belong in this final check.
     old.intersection_update(obsolete_names(moves))
     if args.apply and old:
-        left = references(vault, old, old_dirs)
+        try:
+            left = references(vault, old, old_dirs)
+        except InventoryFailed as exc:
+            print("INCOMPLETE — the post-rename reference scan failed: %s" % exc,
+                  file=sys.stderr)
+            return 1
         if left:
             print("INCOMPLETE — these notes still cite an old name:",
                   file=sys.stderr)
@@ -2061,13 +2527,44 @@ def _cmd_rename(args):
 
 
 def _cmd_split(args):
-    vault = os.path.expanduser(args.vault) if args.vault else None
-    with open(os.path.expanduser(args.chapters), encoding="utf-8") as fh:
-        chapters = json.load(fh)
-    taken = vault_names(vault) if vault and os.path.isdir(vault) else {}
     try:
-        split_book(os.path.expanduser(args.pdf), chapters,
-                   os.path.expanduser(args.out), taken)
+        vault = _cli_vault(args.vault)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    pdf = os.path.expanduser(args.pdf)
+    out = os.path.expanduser(args.out)
+    if vault:
+        if not _inside(vault, pdf):
+            print("The book is outside --vault. Omit --vault and place --out "
+                  "beside the external book; this command does not import it.",
+                  file=sys.stderr)
+            return 1
+        if not os.path.isabs(out):
+            print("--out must be absolute when --vault is used; a relative "
+                  "path resolves against the shell's working directory.",
+                  file=sys.stderr)
+            return 1
+        if not _inside(vault, out):
+            print("--out is outside --vault. Vault chapters must remain inside "
+                  "the selected vault's source tree.", file=sys.stderr)
+            return 1
+    chapters_path = os.path.expanduser(args.chapters)
+    try:
+        with open(chapters_path, encoding="utf-8") as fh:
+            chapters = json.load(fh)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        print("Cannot read --chapters %s (%s: %s). Nothing was written."
+              % (chapters_path, type(exc).__name__, exc), file=sys.stderr)
+        return 1
+    try:
+        taken = vault_names(vault) if vault else {}
+    except InventoryFailed as exc:
+        print("Cannot establish vault-wide chapter-name uniqueness: %s" % exc,
+              file=sys.stderr)
+        return 1
+    try:
+        split_book(pdf, chapters, out, taken)
     except SplitRefused as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -2264,9 +2761,8 @@ def _selftest():
              "![[Articles/Prince_UDL_2026]]"),
             ("embed, different path",  "Notes",
              "![[Wiki/Sub/UDL_2026]]",      "![[Wiki/Sub/UDL_2026]]"),
-            # The path is compared the way the vault resolves it: case-folded
-            # (the documented vault is on a case-insensitive volume) and past a
-            # heading anchor.
+            # Path comparison uses the portable case-folded identity and ignores
+            # the heading anchor.
             ("path differing only in case", "Notes",
              "[[ARTICLES/UDL_2026#heading]]",
              "[[ARTICLES/Prince_UDL_2026#heading]]"),
@@ -2341,7 +2837,9 @@ def _selftest():
         return p
 
     _inbox_pdf = _dw("Inbox/download (1).pdf", "%PDF")
-    _dw("Sources/Images/download (1)_fig_1.png", "x")
+    _dimage = _dw("Sources/Images/download (1)_fig_1.png", "x")
+    _dw("Sources/Images/" + MANIFEST_FILE,
+        "download (1)_fig_1.png\t" + file_digest(_dimage) + "\n")
     _dw("Articles/download (1).md", "![[download (1).pdf]]\n")
     _dmoves, _, _dblock = plan_rename(_dv, _inbox_pdf,
                                       "Smith_WealthNations_1776.pdf",
@@ -2621,9 +3119,8 @@ def _selftest():
     for _twin in _twins:
         with open(os.path.join(_uv, "Sources", "Images", _twin), "w") as fh:
             fh.write(_twin)
-    # APFS cannot store both normalization spellings in one directory. Model
-    # the listing a normalization-sensitive filesystem supplies, so the same
-    # collision guard is exercised on macOS and Linux without skipping it.
+    # Model a normalization-sensitive directory listing so the collision guard
+    # is exercised on every test host without depending on its filesystem.
     from unittest.mock import patch
     _real_listdir = _listdir
     _images_dir = os.path.join(_uv, "Sources", "Images")
@@ -2761,23 +3258,53 @@ def _selftest():
     check("a symlinked source is refused",
           any("is a symlink to" in b for b in _b), True)
 
-    # A symlinked note is written THROUGH the link, not replaced.
-    _v = _vault("Store", "Sources")
-    _put(_v, "Store/n.md", "![[old.pdf]]\n")
-    os.chmod(os.path.join(_v, "Store/n.md"), 0o640)
-    os.symlink("../Store/n.md", os.path.join(_v, "Sources/n.md"))
-    _previous_umask = os.umask(0o022)
+    # Symlinked directories are an intentional recursive scope; leaf symlinks
+    # are not permission to rewrite an arbitrary target outside the vault.
+    _v = _vault("Inbox", "Wiki", "Outside", "Sources/PDFs")
+    _put(_v, "Inbox/download.pdf")
+    _put(_v, "Outside/n.md", "![[download.pdf]]\n")
+    _leaf_link = os.path.join(_v, "Wiki/n.md")
+    os.symlink("../Outside/n.md", _leaf_link)
+    _m, _e, _b = rename_all(
+        _v, os.path.join(_v, "Inbox/download.pdf"), "Smith_X_1776.pdf",
+        dest=os.path.join(_v, "Sources/PDFs"), apply=True)
+    check("a leaf Markdown symlink blocks the complete rename",
+          any("symlink" in blocker for blocker in _b), True)
+    check("the blocked plan leaves the symlink and its external target unchanged",
+          (os.path.islink(_leaf_link),
+           open(os.path.join(_v, "Outside/n.md")).read(),
+           os.path.exists(os.path.join(_v, "Inbox/download.pdf"))),
+          (True, "![[download.pdf]]\n", True))
     try:
-        _write(os.path.join(_v, "Sources/n.md"), "![[new.pdf]]\n")
-    finally:
-        os.umask(_previous_umask)
-    check("a symlinked note stays a symlink",
-          os.path.islink(os.path.join(_v, "Sources/n.md")), True)
-    check("a symlinked note's target retains its private permissions",
-          stat.S_IMODE(os.stat(os.path.join(_v, "Store/n.md")).st_mode), 0o640)
-    with open(os.path.join(_v, "Store/n.md")) as _fh:
-        check("the shared original is what got rewritten", _fh.read(),
-              "![[new.pdf]]\n")
+        _write(_leaf_link, "![[new.pdf]]\n")
+    except StaleRenamePlan as _exc:
+        _refused_leaf = "symlink" in str(_exc)
+    else:
+        _refused_leaf = False
+    check("the low-level note writer also refuses a leaf symlink",
+          _refused_leaf, True)
+
+    _v = _vault("Wiki", "Outside")
+    _race_note = _put(_v, "Wiki/race.md", "ordinary prose\n")
+    _race_target = _put(_v, "Outside/race-target.md", "![[download.pdf]]\n")
+    _real_open = os.open
+    _swapped = []
+
+    def _swap_reference_to_link(path, flags, *args, **kwargs):
+        if os.path.abspath(path) == os.path.abspath(_race_note) and not _swapped:
+            os.unlink(_race_note)
+            os.symlink(_race_target, _race_note)
+            _swapped.append(True)
+        return _real_open(path, flags, *args, **kwargs)
+
+    try:
+        with patch.object(os, "open", side_effect=_swap_reference_to_link):
+            references(_v, {"download.pdf"})
+        _reference_race_refused = False
+    except InventoryFailed:
+        _reference_race_refused = True
+    check("a Markdown leaf swapped to a symlink before open blocks the scan",
+          _reference_race_refused, True)
 
     # An unreadable note that cites nothing must not dead-end the vault.
     _v = _vault("Inbox", "Sources/PDFs", "Wiki")
@@ -2915,8 +3442,7 @@ def _selftest():
     check("one unreadable note does not dead-end the rename it never mentions",
           _got, True)
 
-    # 4. A source stored NFC beside figures stored NFD -- ordinary on APFS,
-    #    which keeps whichever form each name was created with.  The fan-out
+    # 4. A source stored NFC beside figures stored NFD. The fan-out
     #    compared raw `str.lower()`, so it found the document alone: the
     #    rename moved it, orphaned three figures under a stem nothing looks
     #    for, and `references()` -- asked only about the name it did find --
@@ -2925,8 +3451,13 @@ def _selftest():
     _nfd = unicodedata.normalize("NFD", "M\xfcller_Uber_2001")
     _v = _vault("Inbox", "Sources/PDFs", "Sources/Images", "Articles")
     _put(_v, "Inbox/%s.pdf" % _nfc)
+    _nfd_images = []
     for _i in (1, 2, 3):
-        _put(_v, "Sources/Images/%s_fig_%d.png" % (_nfd, _i))
+        _nfd_images.append(_put(
+            _v, "Sources/Images/%s_fig_%d.png" % (_nfd, _i)))
+    _put(_v, "Sources/Images/" + MANIFEST_FILE,
+         "".join("%s\t%s\n" % (os.path.basename(_p), file_digest(_p))
+                 for _p in _nfd_images))
     # The note's filename AND its `source:` link are both NFD, which is what a
     # tool that read the name back from `os.listdir` on macOS writes: the
     # `source:` test is the gate on the note half of the fan-out, so it has to
@@ -2941,6 +3472,7 @@ def _selftest():
                dest=os.path.join(_v, "Sources/PDFs"))
     check("...and they are renamed with it rather than left orphaned",
           sorted(_listdir(os.path.join(_v, "Sources/Images"))),
+          [MANIFEST_FILE] +
           ["Muller_Uber_2001_fig_%d.png" % _i for _i in (1, 2, 3)])
     check("...the note among them",
           sorted(_listdir(os.path.join(_v, "Articles"))),
@@ -3043,24 +3575,24 @@ def _selftest():
     with _tf.TemporaryDirectory(prefix="org-sidecar-test-") as _v:
         _pdf = _put(_v, "Sources/PDFs/Doe_Old_2025.pdf")
         _img = _put(_v, "Sources/Images/Doe_Old_2025_fig_1.png", b"figure bytes")
-        _manifest_body = ("# keep metadata comments\nDoe_Old_2025_fig_1.png\t" + "a" * 64
+        _owned_digest = file_digest(_img)
+        _manifest_body = ("# keep metadata comments\nDoe_Old_2025_fig_1.png\t" + _owned_digest
                           + "\nOther_fig_2.png\t" + "b" * 64 + "\n")
         _review_body = "# checked manually\nDoe_Old_2025\t1\tkeep my note\nOther:2\n"
         _manifest = _put(_v, "Sources/Images/" + MANIFEST_FILE, _manifest_body)
         _review = _put(_v, "Sources/Images/" + REVIEW_FILE, _review_body)
         _stage_parents = []
-        _real_tempdir = tempfile.TemporaryDirectory
+        _real_mkdtemp = tempfile.mkdtemp
 
-        def _tracked_tempdir(*args, **kwargs):
+        def _tracked_mkdtemp(*args, **kwargs):
             _stage_parents.append(kwargs.get("dir"))
-            return _real_tempdir(*args, **kwargs)
+            return _real_mkdtemp(*args, **kwargs)
 
-        with patch.object(tempfile, "TemporaryDirectory",
-                          side_effect=_tracked_tempdir):
+        with patch.object(tempfile, "mkdtemp", side_effect=_tracked_mkdtemp):
             _write(_manifest, _manifest_body)
         check("figure sidecar staging stays outside Sources/Images",
-              _stage_parents,
-              [os.path.realpath(os.path.join(_v, "Sources"))])
+              (bool(_stage_parents), set(map(os.path.realpath, _stage_parents))),
+              (True, {os.path.realpath(os.path.join(_v, "Sources"))}))
         check("figure sidecar staging is cleaned after publication",
               [n for n in os.listdir(os.path.join(_v, "Sources"))
                if n.startswith(".organize-stage-")], [])
@@ -3070,7 +3602,10 @@ def _selftest():
         with open(_manifest) as _fh:
             check("a sidecar dry run writes nothing", _fh.read(), _manifest_body)
         # Force a move failure after the state updates to exercise rollback.
-        with patch("os.rename", side_effect=OSError("injected move failure")):
+        def _fail_move(_src, _dst, expected=None):
+            raise OSError("injected move failure")
+
+        with patch.dict(globals(), move_noreplace=_fail_move):
             try:
                 rename_all(_v, _pdf, "Doe_New_2025.pdf", apply=True)
                 _rolled_back = False
@@ -3085,7 +3620,8 @@ def _selftest():
         with open(_manifest) as _fh:
             check("successful rename carries ownership and unrelated records",
                   parse_manifest(_fh.read()),
-                  {"Doe_New_2025_fig_1.png": "a" * 64, "Other_fig_2.png": "b" * 64})
+                  {"Doe_New_2025_fig_1.png": _owned_digest,
+                   "Other_fig_2.png": "b" * 64})
         with open(_review) as _fh:
             _body = _fh.read()
             check("successful rename carries reviewed figure labels",
@@ -3106,6 +3642,517 @@ def _selftest():
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             code = main(argv)
         return code, stdout.getvalue(), stderr.getvalue()
+
+    # Supplying a bad --vault is never the same as deliberately omitting it.
+    # The old CLI silently selected external mode and --apply renamed the file
+    # with no uniqueness or reference scan.
+    with _tf.TemporaryDirectory(prefix="org-invalid-vault-test-") as _v:
+        _pdf = _put(_v, "download.pdf", b"%PDF-1.4\n")
+        _missing_vault = os.path.join(_v, "missing-vault")
+        _code, _stdout, _stderr = _run_cli([
+            "rename", _pdf, "--vault", _missing_vault,
+            "--to", "Doe_Study_2025.pdf", "--apply"])
+        check("an explicit invalid --vault blocks rather than selecting external mode",
+              (_code, os.path.exists(_pdf),
+               os.path.exists(os.path.join(_v, "Doe_Study_2025.pdf")),
+               "--vault is not a directory" in _stderr),
+              (1, True, False, True))
+        _code, _stdout, _stderr = _run_cli([
+            "check", _pdf, "--vault", _missing_vault])
+        check("the reference-check CLI rejects the same invalid vault",
+              (_code, "--vault is not a directory" in _stderr), (1, True))
+        _chapters = _put(_v, "chapters.json", "[]\n")
+        _out = os.path.join(_v, "chapters")
+        _code, _stdout, _stderr = _run_cli([
+            "split", _pdf, "--chapters", _chapters, "--out", _out,
+            "--vault", _missing_vault])
+        check("the split CLI rejects the same invalid vault before writing",
+              (_code, os.path.lexists(_out),
+               "--vault is not a directory" in _stderr), (1, False, True))
+
+    # A directory or missing path whose spelling ends in .pdf is not a source
+    # file. It used to produce a plausible dry-run plan (and a .pdf directory
+    # could then be moved into Sources/PDFs/).
+    with _tf.TemporaryDirectory(prefix="org-source-kind-test-") as _v:
+        _directory = os.path.join(_v, "folder.pdf")
+        os.mkdir(_directory)
+        _moves, _edits, _blockers = plan_rename(
+            None, _directory, "Doe_Study_2025.pdf")
+        check("a .pdf directory is refused as a rename source",
+              (bool(_moves), any("not a regular file" in b for b in _blockers)),
+              (False, True))
+        _moves, _edits, _blockers = plan_rename(
+            None, os.path.join(_v, "missing.pdf"), "Doe_Study_2025.pdf")
+        check("a missing rename source is refused during planning",
+              (bool(_moves), any("does not exist" in b for b in _blockers)),
+              (False, True))
+
+    # Destination checks are diagnostic only. The write must still refuse a
+    # name claimed after the plan and preserve both files byte-for-byte.
+    with _tf.TemporaryDirectory(prefix="org-late-rename-target-") as _v:
+        _src = _put(_v, "download.pdf", b"source bytes")
+        _dst = os.path.join(_v, "Doe_Study_2025.pdf")
+        _real_move = move_noreplace
+
+        def _occupy_move_target(src, dst, expected=None):
+            if dst == _dst and not os.path.lexists(dst):
+                with open(dst, "wb") as _fh:
+                    _fh.write(b"late destination")
+            return _real_move(src, dst, expected=expected)
+
+        with patch.dict(globals(), move_noreplace=_occupy_move_target):
+            try:
+                rename_all(None, _src, "Doe_Study_2025.pdf", apply=True)
+                _late_failure = None
+            except RenameFailed as _exc:
+                _late_failure = _exc
+        check("a rename destination created after preflight is never replaced",
+              (open(_src, "rb").read(), open(_dst, "rb").read(),
+               bool(_late_failure and _late_failure.rolled_back)),
+              (b"source bytes", b"late destination", True))
+
+    with _tf.TemporaryDirectory(prefix="org-case-only-move-") as _v:
+        _src = _put(_v, "doe_study_2025.pdf", b"case-only bytes")
+        _dst = os.path.join(_v, "Doe_Study_2025.pdf")
+        rename_all(None, _src, "Doe_Study_2025.pdf", apply=True)
+        check("an applied case-only move preserves the source on this filesystem",
+              (os.listdir(_v), open(_dst, "rb").read()),
+              (["Doe_Study_2025.pdf"], b"case-only bytes"))
+
+    with _tf.TemporaryDirectory(prefix="org-snapshot-open-race-") as _v:
+        _src = _put(_v, "source.pdf", b"inspected bytes")
+        _replacement = _put(_v, "replacement.pdf", b"late bytes")
+        _real_open = os.open
+        _swapped = [False]
+
+        def _swap_before_descriptor(path, flags, *args, **kwargs):
+            if path == _src and not _swapped[0]:
+                _swapped[0] = True
+                os.replace(_replacement, _src)
+            return _real_open(path, flags, *args, **kwargs)
+
+        with patch.object(os, "open", side_effect=_swap_before_descriptor):
+            try:
+                _stable_file_snapshot(_src)
+                _snapshot_failure = None
+            except StaleRenamePlan as _exc:
+                _snapshot_failure = _exc
+        check("a move snapshot binds its digest to the inspected pathname owner",
+              bool(_snapshot_failure), True)
+        check("...and leaves the late occupant untouched",
+              open(_src, "rb").read(), b"late bytes")
+
+    with _tf.TemporaryDirectory(prefix="org-late-source-identity-") as _v:
+        _src = _put(_v, "download.pdf", b"planned source")
+        _dst = os.path.join(_v, "Doe_Study_2025.pdf")
+        _real_move = move_noreplace
+
+        def _replace_planned_source(src, dst, expected=None):
+            os.unlink(src)
+            with open(src, "wb") as _fh:
+                _fh.write(b"late source")
+            return _real_move(src, dst, expected=expected)
+
+        with patch.dict(globals(), move_noreplace=_replace_planned_source):
+            try:
+                rename_all(None, _src, "Doe_Study_2025.pdf", apply=True)
+                _identity_failure = None
+            except RenameFailed as _exc:
+                _identity_failure = _exc
+        check("a source replaced after planning is retained rather than renamed",
+              (open(_src, "rb").read(), os.path.lexists(_dst),
+               bool(_identity_failure and _identity_failure.rolled_back)),
+              (b"late source", False, True))
+
+    # Rewriting a regular file in place preserves its inode, so the exclusive
+    # move helper's identity guard alone cannot see it. A manifest-owned figure
+    # changed after planning must not be moved while the manifest is rewritten
+    # with the digest of the older bytes.
+    with _tf.TemporaryDirectory(prefix="org-late-source-bytes-") as _v:
+        _pdf = _put(_v, "Sources/PDFs/Doe_Old_2025.pdf", b"pdf bytes")
+        _image = _put(_v, "Sources/Images/Doe_Old_2025_fig_1.png",
+                      b"planned image")
+        _old_digest = file_digest(_image)
+        _manifest = _put(
+            _v, "Sources/Images/" + MANIFEST_FILE,
+            "Doe_Old_2025_fig_1.png\t" + _old_digest + "\n")
+        _new_image = os.path.join(
+            _v, "Sources/Images/Doe_New_2025_fig_1.png")
+        _real_move = move_noreplace
+
+        def _mutate_planned_bytes(src, dst, expected=None):
+            if src == _image:
+                with open(src, "ab") as _fh:
+                    _fh.write(b" changed in place")
+            return _real_move(src, dst, expected=expected)
+
+        with patch.dict(globals(), move_noreplace=_mutate_planned_bytes):
+            try:
+                rename_all(_v, _pdf, "Doe_New_2025.pdf", apply=True)
+                _byte_failure = None
+            except RenameFailed as _exc:
+                _byte_failure = _exc
+        with open(_manifest, encoding="utf-8") as _fh:
+            _manifest_after = _fh.read()
+        check("an in-place figure edit after planning aborts and restores old names",
+              (open(_image, "rb").read(), os.path.lexists(_new_image),
+               _manifest_after,
+               bool(_byte_failure and _byte_failure.rolled_back)),
+              (b"planned image changed in place", False,
+               "Doe_Old_2025_fig_1.png\t" + _old_digest + "\n", True))
+
+    # A rollback source can be reclaimed after its file moved. The reverse
+    # move is exclusive too, so the late file stays at the old name and the
+    # transaction reports the original at its new name for manual recovery.
+    with _tf.TemporaryDirectory(prefix="org-late-rollback-source-") as _v:
+        _pdf = _put(_v, "Sources/PDFs/Doe_Old_2025.pdf", b"pdf bytes")
+        _image = _put(_v, "Sources/Images/Doe_Old_2025_fig_1.png",
+                      b"image bytes")
+        _put(_v, "Sources/Images/" + MANIFEST_FILE,
+             "Doe_Old_2025_fig_1.png\t" + file_digest(_image) + "\n")
+        _moves, _edits, _blockers = plan_rename(
+            _v, _pdf, "Doe_New_2025.pdf")
+        _first_src, _first_dst = _moves[0]
+        _first_bytes = open(_first_src, "rb").read()
+        _real_move, _calls = move_noreplace, []
+
+        def _reclaim_before_rollback(src, dst, expected=None):
+            _calls.append((src, dst))
+            if len(_calls) == 2:
+                with open(_first_src, "wb") as _fh:
+                    _fh.write(b"late rollback source")
+                raise OSError(28, "injected later move failure")
+            return _real_move(src, dst, expected=expected)
+
+        with patch.dict(globals(), move_noreplace=_reclaim_before_rollback):
+            try:
+                rename_all(_v, _pdf, "Doe_New_2025.pdf", apply=True)
+                _rollback_failure = None
+            except RenameFailed as _exc:
+                _rollback_failure = _exc
+        check("rollback never overwrites a source reclaimed after preflight",
+              (open(_first_src, "rb").read(), open(_first_dst, "rb").read(),
+               bool(_rollback_failure and not _rollback_failure.rolled_back)),
+              (b"late rollback source", _first_bytes, True))
+
+    # Directories cannot use the hard-link fallback. On supported hosts the
+    # native exclusive rename must preserve even a late *empty* directory,
+    # which ordinary POSIX rename would silently remove.
+    with _tf.TemporaryDirectory(prefix="org-late-directory-target-") as _v:
+        _book = _put(_v, "Sources/PDFs/Doe_Book_2025.pdf", b"book")
+        _chapter = _put(
+            _v, "Sources/PDFs/Doe_Book_2025/Doe_Book_2025_01_Intro.pdf",
+            b"chapter")
+        _old_folder = os.path.dirname(_chapter)
+        _new_folder = os.path.join(_v, "Sources/PDFs/Doe_NewBook_2025")
+        _new_chapter = os.path.join(_new_folder,
+                                    "Doe_NewBook_2025_01_Intro.pdf")
+        _real_move = move_noreplace
+
+        def _occupy_directory_target(src, dst, expected=None):
+            if src == _old_folder and not os.path.lexists(dst):
+                os.mkdir(dst, 0o700)
+                os.chmod(dst, 0o700)
+            return _real_move(src, dst, expected=expected)
+
+        with patch.dict(globals(), move_noreplace=_occupy_directory_target):
+            try:
+                rename_all(_v, _book, "Doe_NewBook_2025.pdf", apply=True)
+                _directory_failure = None
+            except RenameFailed as _exc:
+                _directory_failure = _exc
+        check("a late empty directory is preserved by exclusive rename",
+              (os.path.isdir(_old_folder), open(_chapter, "rb").read(),
+               os.path.isdir(_new_folder),
+               stat.S_IMODE(os.stat(_new_folder).st_mode),
+               os.path.lexists(_new_chapter), bool(_directory_failure)),
+              (True, b"chapter", True, 0o700, False, True))
+
+    # The hard-link fallback can publish the destination and then fail to
+    # unlink the source. That is explicit residue, never a successful rollback.
+    with _tf.TemporaryDirectory(prefix="org-incomplete-move-") as _v:
+        _src = _put(_v, "download.pdf", b"linked source")
+        _dst = os.path.join(_v, "Doe_Study_2025.pdf")
+
+        def _incomplete_move(src, dst, expected=None):
+            os.link(src, dst)
+            raise MoveIncomplete(src, dst, OSError("injected unlink failure"))
+
+        with patch.dict(globals(), move_noreplace=_incomplete_move):
+            try:
+                rename_all(None, _src, "Doe_Study_2025.pdf", apply=True)
+                _incomplete_failure = None
+            except RenameFailed as _exc:
+                _incomplete_failure = _exc
+        check("a partially landed move is retained and reported incomplete",
+              (open(_src, "rb").read(), open(_dst, "rb").read(),
+               bool(_incomplete_failure and not _incomplete_failure.rolled_back),
+               "current move residue" in str(_incomplete_failure)),
+              (b"linked source", b"linked source", True, True))
+
+    # A note save after its rewrite was planned is newer user content. Refuse
+    # it before displacement and leave the whole source family unmoved.
+    with _tf.TemporaryDirectory(prefix="org-stale-note-") as _v:
+        _pdf = _put(_v, "Sources/PDFs/Doe_Old_2025.pdf", b"pdf bytes")
+        _note = _put(_v, "Wiki/topic.md", "[[Doe_Old_2025.pdf]]\n")
+        _real_write = _write
+
+        def _edit_before_write(path, text, expected=None):
+            if path == _note:
+                with open(path, "a", encoding="utf-8") as _fh:
+                    _fh.write("editor addition\n")
+            return _real_write(path, text, expected=expected)
+
+        with patch.dict(globals(), _write=_edit_before_write):
+            try:
+                rename_all(_v, _pdf, "Doe_New_2025.pdf", apply=True)
+                _stale_note_failure = None
+            except RenameFailed as _exc:
+                _stale_note_failure = _exc
+        check("a note edited after planning is preserved and blocks apply",
+              (open(_note, encoding="utf-8").read(), os.path.exists(_pdf),
+               bool(_stale_note_failure and _stale_note_failure.rolled_back)),
+              ("[[Doe_Old_2025.pdf]]\neditor addition\n", True, True))
+
+    # Identity is guarded as well as text: an editor's atomic save can replace
+    # a sidecar inode with byte-identical content before the apply reaches it.
+    with _tf.TemporaryDirectory(prefix="org-stale-sidecar-") as _v:
+        _pdf = _put(_v, "Sources/PDFs/Doe_Old_2025.pdf", b"pdf bytes")
+        _image = _put(_v, "Sources/Images/Doe_Old_2025_fig_1.png", b"image")
+        _manifest_body = ("Doe_Old_2025_fig_1.png\t" +
+                          file_digest(_image) + "\n")
+        _manifest = _put(_v, "Sources/Images/" + MANIFEST_FILE,
+                         _manifest_body)
+        _real_write = _write
+
+        def _replace_sidecar_before_write(path, text, expected=None):
+            if path == _manifest:
+                _replacement = _put(_v, "replacement-sidecar", _manifest_body)
+                os.replace(_replacement, path)
+            return _real_write(path, text, expected=expected)
+
+        with patch.dict(globals(), _write=_replace_sidecar_before_write):
+            try:
+                rename_all(_v, _pdf, "Doe_New_2025.pdf", apply=True)
+                _stale_sidecar_failure = None
+            except RenameFailed as _exc:
+                _stale_sidecar_failure = _exc
+        check("a byte-identical sidecar replacement is still a stale plan",
+              (open(_manifest).read(), os.path.exists(_pdf),
+               bool(_stale_sidecar_failure
+                    and _stale_sidecar_failure.rolled_back)),
+              (_manifest_body, True, True))
+
+    # Inject a writer in the exact old compare/os.replace gap: after the
+    # planned note was displaced but before the staged rewrite is published.
+    # Exclusive publication preserves the writer and saves the predecessor at
+    # a named recovery path rather than clobbering either one.
+    with _tf.TemporaryDirectory(prefix="org-note-cas-gap-") as _v:
+        _pdf = _put(_v, "Sources/PDFs/Doe_Old_2025.pdf", b"pdf bytes")
+        _old_note = "[[Doe_Old_2025.pdf]]\n"
+        _note = _put(_v, "Wiki/topic.md", _old_note)
+        _real_link_new = _atomic_move.link_noreplace
+        _injected = {"done": False}
+
+        def _occupy_before_text_publication(source, target):
+            if target == _note and not _injected["done"]:
+                _injected["done"] = True
+                with open(target, "w", encoding="utf-8") as _fh:
+                    _fh.write("late editor save\n")
+            return _real_link_new(source, target)
+
+        with patch.object(
+                _atomic_move, "link_noreplace",
+                side_effect=_occupy_before_text_publication):
+            try:
+                rename_all(_v, _pdf, "Doe_New_2025.pdf", apply=True)
+                _cas_failure = None
+            except RenameFailed as _exc:
+                _cas_failure = _exc
+        _recoveries = [os.path.join(_v, "Wiki", name)
+                       for name in os.listdir(os.path.join(_v, "Wiki"))
+                       if name.startswith(".organize-recovery-")]
+        _recovered = (open(os.path.join(_recoveries[0], "topic.md"),
+                           encoding="utf-8").read() if _recoveries else None)
+        check("the final text-publication CAS gap preserves both writers",
+              (open(_note).read(), _recovered,
+               bool(_cas_failure and not _cas_failure.rolled_back),
+               bool(_recoveries and _recoveries[0] in str(_cas_failure))),
+              ("late editor save\n", _old_note, True, True))
+
+    # A link reaching the public name is still provisional until readback.
+    # Inject an in-place editor save immediately after that link: conditional
+    # rollback must retain the edit and recover the planned predecessor.
+    with _tf.TemporaryDirectory(prefix="org-note-readback-gap-") as _v:
+        _pdf = _put(_v, "Sources/PDFs/Doe_Old_2025.pdf", b"pdf bytes")
+        _old_note = "[[Doe_Old_2025.pdf]]\n"
+        _note = _put(_v, "Wiki/topic.md", _old_note)
+        _real_link_new = _atomic_move.link_noreplace
+        _injected = {"done": False}
+
+        def _edit_after_text_publication(source, target):
+            result = _real_link_new(source, target)
+            if (target == _note and not _injected["done"]
+                    and ".organize-stage-" in source):
+                _injected["done"] = True
+                with open(target, "w", encoding="utf-8") as _fh:
+                    _fh.write("late editor readback save\n")
+            return result
+
+        with patch.object(
+                _atomic_move, "link_noreplace",
+                side_effect=_edit_after_text_publication):
+            try:
+                rename_all(_v, _pdf, "Doe_New_2025.pdf", apply=True)
+                _readback_failure = None
+            except RenameFailed as _exc:
+                _readback_failure = _exc
+        _recoveries = [os.path.join(_v, "Wiki", name)
+                       for name in os.listdir(os.path.join(_v, "Wiki"))
+                       if name.startswith(".organize-recovery-")]
+        _recovered = (open(os.path.join(_recoveries[0], "topic.md"),
+                           encoding="utf-8").read() if _recoveries else None)
+        check("text readback preserves an editor save and the predecessor",
+              (open(_note).read(), _recovered,
+               bool(_readback_failure and not _readback_failure.rolled_back),
+               bool(_recoveries
+                    and _recoveries[0] in str(_readback_failure))),
+              ("late editor readback save\n", _old_note, True, True))
+
+    # Remote URI paths are source data, not local vault references. Cover the
+    # two forms the old `scheme://` span missed, and the filing debase pass as
+    # well as the basename rewrite.
+    _uri_body = ("[cdn](//cdn.example.org/files/download.pdf) "
+                 "mailto:download.pdf [[download.pdf]]")
+    check("protocol-relative and non-hierarchical URIs survive a rewrite",
+          rewrite_text(_uri_body, {"download.pdf": "Doe_Study_2025.pdf"}, {}),
+          ("[cdn](//cdn.example.org/files/download.pdf) "
+           "mailto:download.pdf [[Doe_Study_2025.pdf]]"))
+    _uri_new = ("[cdn](//cdn.example.org/files/Doe_Study_2025.pdf) "
+                "[local](Inbox/Doe_Study_2025.pdf)")
+    check("filing debases a local link without corrupting a protocol-relative URI",
+          debase_links(_uri_new, {"Doe_Study_2025.pdf"}),
+          ("[cdn](//cdn.example.org/files/Doe_Study_2025.pdf) "
+           "[local](Doe_Study_2025.pdf)"))
+    with _tf.TemporaryDirectory(prefix="org-external-uri-test-") as _v:
+        _put(_v, "Wiki/only-remote.md",
+             "//cdn.example.org/files/download.pdf mailto:download.pdf\n")
+        check("external URI basenames do not count as vault references",
+              references(_v, {"download.pdf"}), {})
+
+    # Malformed JSON values are reported as chapter-plan problems rather than
+    # escaping as AttributeError/TypeError, and YAML booleans are not accepted
+    # as integer page indices through Python's bool-is-int relationship.
+    _bad_chapters = [
+        None,
+        {"heading_text": 7, "filename": "Kuhn_S_2012_01_Intro.pdf",
+         "start_idx": 0, "end_idx": 1},
+        {"heading_text": "Chapter 1", "filename": 7,
+         "start_idx": 0, "end_idx": 1},
+        {"heading_text": "Chapter 1", "filename": "Kuhn_S_2012_01_Intro.pdf",
+         "start_idx": False, "end_idx": 1},
+    ]
+    _bad_plan, _bad_problems, _bad_notes = _resolve(
+        _bad_chapters, ["chapter 1"], 1, "/tmp/unused", {}, "Kuhn_S_2012")
+    check("malformed chapter objects and boolean indices are refused cleanly",
+          (bool(_bad_plan), len(_bad_problems), bool(_bad_notes)),
+          (False, 4, False))
+
+    # The final publication primitive is no-replace. A late destination must
+    # retain its bytes, even after the earlier plan found the path free.
+    with _tf.TemporaryDirectory(prefix="org-exclusive-chapter-test-") as _v:
+        _staged = _put(_v, "staged.part", b"new chapter")
+        _target = _put(_v, "chapter.pdf", b"late user file")
+        try:
+            _publish_new(_staged, _target)
+            _exclusive = False
+        except FileExistsError:
+            _exclusive = True
+        with open(_target, "rb") as _fh:
+            _target_bytes = _fh.read()
+        check("exclusive chapter publication preserves a late destination",
+              (_exclusive, _target_bytes), (True, b"late user file"))
+
+    with _tf.TemporaryDirectory(prefix="org-chapter-readback-test-") as _v:
+        _staged = _put(_v, "staged.part", b"new chapter")
+        _target = os.path.join(_v, "chapter.pdf")
+        _real_link_new = _atomic_move.link_noreplace
+        _injected = {"done": False}
+
+        def _edit_chapter_after_publication(source, target):
+            result = _real_link_new(source, target)
+            if (source == _staged and target == _target
+                    and not _injected["done"]):
+                _injected["done"] = True
+                with open(target, "wb") as _fh:
+                    _fh.write(b"late chapter edit")
+            return result
+
+        with patch.object(
+                _atomic_move, "link_noreplace",
+                side_effect=_edit_chapter_after_publication):
+            try:
+                _publish_new(_staged, _target)
+                _chapter_readback_refused = False
+            except PublicationConflict:
+                _chapter_readback_refused = True
+        check("chapter readback preserves a post-link editor save",
+              (_chapter_readback_refused, open(_target, "rb").read()),
+              (True, b"late chapter edit"))
+
+    # Rollback may run after another writer replaced a published chapter. The
+    # old pathname-only cleanup deleted that foreign file and then claimed the
+    # split left nothing behind.
+    with _tf.TemporaryDirectory(prefix="org-split-rollback-test-") as _v:
+        _out = os.path.join(_v, "Kuhn_S_2012")
+        _chapter = _put(_v, "Kuhn_S_2012/Kuhn_S_2012_01_Intro.pdf",
+                        b"published chapter")
+        _published_identity = _published_snapshot(_chapter)
+        _replacement = _put(_v, "replacement.part", b"late foreign chapter")
+        os.replace(_replacement, _chapter)
+        _cleanup = _rollback_split(
+            [(_chapter, _published_identity)], _out, True)
+        _failure = _split_failure_message(
+            os.path.join(_v, "Kuhn_S_2012.pdf"), 1, 2,
+            OSError("injected publication failure"), _cleanup)
+        check("split rollback preserves and names a late replacement",
+              (open(_chapter, "rb").read(), "ROLLBACK INCOMPLETE" in _failure,
+               _chapter in _failure, "different identity" in _failure,
+               "nothing from this split is on disk" in _failure),
+              (b"late foreign chapter", True, True, True, False))
+
+    with _tf.TemporaryDirectory(prefix="org-split-rollback-edit-") as _v:
+        _out = os.path.join(_v, "Kuhn_S_2012")
+        _chapter = _put(_v, "Kuhn_S_2012/Kuhn_S_2012_01_Intro.pdf",
+                        b"published chapter")
+        _published = _published_snapshot(_chapter)
+        # An in-place writer retains the inode; the digest is what prevents
+        # rollback from deleting its later bytes.
+        with open(_chapter, "wb") as _fh:
+            _fh.write(b"late in-place edit")
+        _cleanup = _rollback_split([(_chapter, _published)], _out, False)
+        check("split rollback also preserves a same-inode late edit",
+              (open(_chapter, "rb").read(),
+               any("different identity" in item for item in _cleanup)),
+              (b"late in-place edit", True))
+
+    # Any recognized existing chapter of this book blocks a second split even
+    # when the incoming plan picked a different abbreviation. This guard runs
+    # before pypdf is needed.
+    with _tf.TemporaryDirectory(prefix="org-existing-split-test-") as _v:
+        _book = _put(_v, "Kuhn_S_2012.pdf", b"%PDF-1.4\n")
+        _out = os.path.join(_v, "Kuhn_S_2012")
+        _put(_v, "Kuhn_S_2012/Kuhn_S_2012_01_Intro.pdf", b"existing")
+        try:
+            split_book(_book, [{"heading_text": "Chapter 1",
+                                "filename": "Kuhn_S_2012_01_Different.pdf",
+                                "start_idx": 0, "end_idx": 1}],
+                       _out, verbose=False)
+            _existing_refusal = ""
+        except SplitRefused as _exc:
+            _existing_refusal = str(_exc)
+        check("an existing chapter set blocks a parallel second split",
+              "existing chapter set" in _existing_refusal, True)
 
     # Obsidian encodes local Markdown destinations. Repair those alongside
     # wikilinks, but decode only once and leave other documents/URLs alone.
@@ -3185,7 +4232,7 @@ def _selftest():
                     _before[_file] = _fh.read()
             _previous_umask = os.umask(0o022)
             try:
-                with (patch("os.rename", side_effect=OSError("injected move failure"))
+                with (patch.dict(globals(), move_noreplace=_fail_move)
                       if _rollback else contextlib.nullcontext()):
                     _code, _stdout, _stderr = _run_cli([
                         "rename", _pdf, "--vault", _v,
@@ -3295,6 +4342,18 @@ def _selftest():
                     check("decoded source is rewritten without losing surrounding metadata",
                           _fh.read(), _body.replace(_quoted, _expected))
 
+    with _tf.TemporaryDirectory(prefix="org-unowned-image-test-") as _v:
+        _pdf = _put(_v, "Sources/PDFs/Doe_Old_2025.pdf", b"pdf bytes")
+        _image = _put(_v, "Sources/Images/Doe_Old_2025_fig_1.png",
+                      b"unattributed image bytes")
+        _moves, _edits, _blockers = rename_all(
+            _v, _pdf, "Doe_New_2025.pdf", apply=True)
+        check("a loose same-stem image is never claimed without manifest ownership",
+              (bool(_blockers), open(_pdf, "rb").read(),
+               open(_image, "rb").read(), os.path.lexists(os.path.join(
+                   _v, "Sources/Images/Doe_New_2025_fig_1.png"))),
+              (True, b"pdf bytes", b"unattributed image bytes", False))
+
     with _tf.TemporaryDirectory(prefix="org-clipping-image-test-") as _v:
         _pdf = _put(_v, "Inbox/download.pdf")
         _body = ("---\nsources: # capture\n- 'https://example.org/O''Reilly'\n---\n"
@@ -3333,10 +4392,80 @@ def _selftest():
               (_code, os.path.isfile(os.path.join(_tmp, "Downloads/Doe_Outside_2025.pdf")),
                os.path.isfile(_inside_pdf)), (0, True, True))
 
+    # A linked source directory belongs to the vault through its logical path.
+    # Resolving the candidate before the containment check rejects this normal
+    # setup, while accepting the physical target path would let an unrelated
+    # external invocation claim same-stem notes and figures from the vault.
+    with _tf.TemporaryDirectory(prefix="org-linked-source-test-") as _tmp:
+        _v = os.path.join(_tmp, "Vault")
+        _store = os.path.join(_tmp, "pdf-store")
+        os.makedirs(os.path.join(_v, "Inbox"))
+        os.makedirs(os.path.join(_v, "Sources"))
+        os.makedirs(_store)
+        _linked_sources = os.path.join(_v, "Sources", "PDFs")
+        os.symlink(_store, _linked_sources, target_is_directory=True)
+        _inbox_pdf = _put(_v, "Inbox/download.pdf", b"linked destination")
+        _moves, _edits, _blockers = rename_all(
+            _v, _inbox_pdf, "Doe_Linked_2025.pdf", apply=True,
+            dest=_linked_sources)
+        _logical_pdf = os.path.join(_linked_sources, "Doe_Linked_2025.pdf")
+        check("a linked source directory is an in-vault filing destination",
+              (_blockers, os.path.isfile(_logical_pdf)), ([], True))
+
+        _moves, _edits, _blockers = rename_all(
+            _v, _logical_pdf, "Doe_Linked_Revised_2025.pdf", apply=True)
+        _logical_revised = os.path.join(
+            _linked_sources, "Doe_Linked_Revised_2025.pdf")
+        check("a PDF reached through a linked source directory stays in scope",
+              (_blockers, os.path.isfile(_logical_revised)), ([], True))
+
+        _physical_pdf = os.path.join(_store, "Doe_Linked_Revised_2025.pdf")
+        _moves, _edits, _blockers = plan_rename(
+            _v, _physical_pdf, "Doe_Physical_2025.pdf")
+        check("the linked directory's direct physical target stays outside",
+              (bool(_blockers), any("outside the vault" in b
+                                    for b in _blockers)), (True, True))
+        check("a symlink followed by parent traversal cannot escape scope",
+              _inside(_v, os.path.join(
+                  _linked_sources, os.pardir, "escape.pdf")), False)
+
+    # Folded spelling is only a candidate identity. On an insensitive volume
+    # the alternate spelling reaches the same inode and must work; on a
+    # sensitive volume a distinct twin can exist and must remain outside.
+    for _vault_name, _alias_name, _label in (
+            ("CaseVault", "casevault", "case"),
+            ("V\u00e4ult", unicodedata.normalize("NFD", "V\u00e4ult"),
+             "Unicode normalization")):
+        with _tf.TemporaryDirectory(prefix="org-vault-alias-test-") as _tmp:
+            _v = os.path.join(_tmp, _vault_name)
+            _alias = os.path.join(_tmp, _alias_name)
+            os.makedirs(os.path.join(_v, "Inbox"))
+            try:
+                os.makedirs(os.path.join(_alias, "Inbox"))
+            except FileExistsError:
+                pass
+            _same_directory = os.path.samefile(_v, _alias)
+            check("%s alias follows filesystem directory identity" % _label,
+                  _inside(_v, os.path.join(_alias, "Inbox", "future.pdf")),
+                  _same_directory)
+
+    with _tf.TemporaryDirectory(prefix="org-vault-symlink-alias-test-") as _tmp:
+        _v = os.path.join(_tmp, "AliasVault")
+        _alias = os.path.join(_tmp, "aliasvault")
+        os.makedirs(_v)
+        if not os.path.lexists(_alias):
+            os.symlink(_v, _alias, target_is_directory=True)
+            check("a distinct folded-name symlink is not a filesystem alias",
+                  _inside(_v, os.path.join(_alias, "future.pdf")), False)
+
     with _tf.TemporaryDirectory(prefix="org-src-book-test-") as _v:
         _book = _put(_v, "Sources/PDFs/Doe_Book_2025_src.pdf")
         _chapter = _put(_v, "Sources/PDFs/Doe_Book_2025_src/Doe_Book_2025_01_Intro.pdf")
-        _put(_v, "Sources/Images/Doe_Book_2025_01_Intro_fig_1.png")
+        _book_image = _put(
+            _v, "Sources/Images/Doe_Book_2025_01_Intro_fig_1.png")
+        _put(_v, "Sources/Images/" + MANIFEST_FILE,
+             "Doe_Book_2025_01_Intro_fig_1.png\t" +
+             file_digest(_book_image) + "\n")
         _put(_v, "Wiki/topic.md", "[[Doe_Book_2025_01_Intro.pdf#page=1]]\n"
              "![[Doe_Book_2025_01_Intro_fig_1.png]]\n")
         _moves, _edits, _blockers = rename_all(_v, _book, "Doe_Renamed_2025_src.pdf", apply=True)

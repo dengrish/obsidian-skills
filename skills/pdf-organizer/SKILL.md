@@ -165,8 +165,11 @@ including figures and notes. An unchanged basename during filing or a
 case-only rename is still valid. If verification fails, **report and stop
 that repair; do not hand-patch the reported notes**. A failed operation may
 report complete or incomplete rollback: describe the actual result rather
-than claiming success. API callers must perform the verification described
-in [rename repair](references/rename-repair.md).
+than claiming success. A destination, note, sidecar, or rollback source that
+changes after the scan is preserved and makes the apply fail closed. Re-plan
+from the current files; if the error names recovery paths, keep every version
+until their contents are reconciled. API callers must perform the verification
+described in [rename repair](references/rename-repair.md).
 
 In batches, handle each file independently. Record referenced files awaiting
 approval, `OSError`, unreadable/encrypted PDFs, and `SplitRefused`, then

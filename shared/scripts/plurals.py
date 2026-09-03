@@ -81,8 +81,9 @@ IRREGULAR_PLURALS = {
     "matrix": "matrices", "index": "indices", "vertex": "vertices",
     "appendix": "appendices", "corpus": "corpora", "genus": "genera",
     "nucleus": "nuclei", "radius": "radii", "stimulus": "stimuli",
-    "bacterium": "bacteria", "curriculum": "curricula", "series": "series",
-    "species": "species",
+    "bacterium": "bacteria", "archaeon": "archaea", "fungus": "fungi",
+    "protozoan": "protozoa", "mitochondrion": "mitochondria",
+    "curriculum": "curricula", "series": "series", "species": "species",
 }
 IRREGULAR_SINGULARS = {v: k for k, v in IRREGULAR_PLURALS.items()}
 
@@ -292,6 +293,8 @@ PLURAL_PAIRS = [
     ("theses", "thesis"), ("vertices", "vertex"), ("appendices", "appendix"),
     ("corpora", "corpus"), ("genera", "genus"), ("nuclei", "nucleus"),
     ("radii", "radius"), ("stimuli", "stimulus"), ("bacteria", "bacterium"),
+    ("archaea", "archaeon"), ("fungi", "fungus"),
+    ("protozoa", "protozoan"), ("mitochondria", "mitochondrion"),
     ("curricula", "curriculum"), ("species", "species"),
     # --- -f / -fe plurals that really are -ves ---
     ("halves", "half"), ("knives", "knife"), ("wolves", "wolf"),

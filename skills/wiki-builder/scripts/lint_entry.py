@@ -30,9 +30,11 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               NFC-insensitively, anchor and folder stripped)
   5   5-slug                  re-run slugify on title:; must equal the filename
   7   7-description           one sentence, <= 110 chars (count reported),
-                              plain text, no LaTeX/markdown/wikilinks,
+                              plain text, no LaTeX/Markdown/HTML,
                               capitalised, ends "."
   8   8-tags                  #-prefixed, double-quoted, in the 27-slug enum
+  9   9-body-structure        body starts immediately with prose; body headings
+                              use plain-text ATX `##`, never Setext
   9   9-person-event-date     Person/Event opener has a date parenthetical in
                               a documented form immediately after its bold
                               subject
@@ -55,8 +57,8 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
       12-table-caption        every Markdown table has an immediate italic,
                               plain-text caption
       12-equation-coverage-candidate
-                              explicit square-root-of-variance definition but
-                              no display equation; agent verifies and typesets
+                              corpus-backed defining prose or inline formula
+                              lacks canonical nearby display form; agent reviews
   16  16-bold-opener          first outer-bold span equals the title/base/math
                               skeleton and uses the type-specific plain,
                               bold-italic, or mixed taxon/strain style
@@ -70,15 +72,18 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               cross-domain carve-out stay with the executing agent)
   19  19-flashcards          `## Flashcards` present on every full entry,
                               preceded by a `---` separator, holding exactly
-                              one card; line 1 one sentence; line 2 exactly
+                              one card; line 1 one capitalized, period-ended
+                              sentence with inline LaTeX as its only markup;
+                              line 2 exactly
                               `??` (or the user's `!!`); line 3 the canonical
                               title (base term for a parenthetical title, math
                               skeleton for a symbol title; optional
                               opener-established, alias-bound counterpart)
-  19  19-flashcard-leak       case-insensitive substring search of card line 1
-                              (including inside $...$) for the title and each
-                              alias, in both the raw and the de-hyphenated
-                              surface form
+  19  19-flashcard-leak       Unicode/case/punctuation-normalized answer-
+                              surface search of card line 1 (including inside
+                              $...$) for that card's own line-3 answer and
+                              counterpart; entry aliases join the search only
+                              for the canonical/base/math-plain primary card
   --  stub-*                  stub structural rules: one-sentence body, no
                               Related footer, no images, no Flashcards,
                               sources: ["stub"], >=1 tag
@@ -87,8 +92,8 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
   18  18-alias-form           every alias is itself in slug form (warning)
 
 NOT implemented (out of scope by design): item 4's file existence and page
-correctness, items 6, 9 beyond the structural opener, item 12 beyond image/table
-caption form and its narrow equation candidate, items 13-15, 17 beyond the
+correctness, item 6, item 9's semantic flow/atomicity judgments, item 12 beyond
+image/table caption form and its conservative equation candidates, items 13-15, 17 beyond the
 introduced-alias scan, and the
 interpretive halves of 8/18/19. Item 11's canonical target-title check needs
 folder mode; a single file does not contain the target inventory.
@@ -152,9 +157,23 @@ import re
 import sys
 import unicodedata
 
+_OBSIDIAN_SHARED_MODULES = (
+    'code_typography',
+    'entry_structure',
+    'equation_coverage',
+    'introduced_aliases',
+    'markdown_tables',
+    'organism_names',
+    'plurals',
+    'slugify',
+    'yaml_scalars',
+)
+
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
 _here = _os.path.dirname(_os.path.abspath(__file__))
+_required = tuple(_m + ".py" for _m in (
+    globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
 if _env:                                   # explicit override: authoritative, no fallback
     _tried = [_os.path.abspath(_os.path.expanduser(_env))]
@@ -163,19 +182,27 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
-_shared = next((_p for _p in _tried if _os.path.isdir(_p)), None)
+_missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
+            for _p in _tried if _os.path.isdir(_p)}
+_shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
 if _shared is None:
     raise SystemExit("""obsidian: cannot find the plugin's shared/scripts/ folder, which holds
-the one canonical copy of the conventions this script depends on.
+the one canonical copy of the conventions this script depends on. A usable
+folder must contain these required module(s): %s
 Looked for:
   %s
 Fix: install the whole plugin tree, or set OBSIDIAN_VAULT_SHARED to the
 shared/scripts/ directory (unset it to use the plugin-relative walk-up).
 Do NOT paste a second copy of the algorithm into this skill -- a divergent
-copy is the bug the shared layer exists to prevent.""" % "\n  ".join(_tried))
+copy is the bug the shared layer exists to prevent.""" % (
+    ", ".join(_required), "\n  ".join(
+        _p + (" (not a directory)" if _p not in _missing else
+              " (missing: %s)" % ", ".join(_missing[_p]))
+        for _p in _tried)))
 _sys.path[:] = [_p for _p in _sys.path if _p not in (_shared, _here)]
 _sys.path.insert(0, _shared)               # shared/scripts/ FIRST
-_sys.path.append(_here)                    # own dir LAST: a local copy cannot shadow it
+if _here != _shared:
+    _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
 from slugify import SlugError, base_term, has_parenthetical, slug_stem  # noqa: E402
@@ -192,7 +219,19 @@ from code_typography import find_bare_code_shapes  # noqa: E402
 from equation_coverage import (  # noqa: E402
     find_missing_display_equation_candidates,
 )
-from entry_structure import opener_subject_date_status  # noqa: E402
+from entry_structure import (  # noqa: E402
+    answer_surface_match,
+    body_opens_with_prose,
+    count_sentences,
+    ends_with_sentence_period,
+    flashcard_line1_markup,
+    flashcard_line1_faults,
+    math_title_plain_text,
+    normalized_answer_surface,
+    opening_paragraph,
+    opener_subject_date_status,
+    parse_flashcard_blocks,
+)
 from markdown_tables import (  # noqa: E402
     caption_faults as _caption_faults,
     markdown_table_spans,
@@ -250,39 +289,6 @@ _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # of asterisks.
 _BOLD_OUTER_RE = re.compile(
     r"(?<!\*)\*\*((?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)\*\*(?!\*)")
-#: Abbreviations whose trailing period is not a sentence end.  Matched
-#: case-insensitively and only at a word boundary, against the text ending at
-#: the candidate period -- never with a bare ``str.replace``, which is what the
-#: first version did: it rewrote the ``c.`` inside ``Inc.`` and the ``d.``
-#: inside ``Ltd.``, and it was case-sensitive, so the ``b.`` entry here never
-#: matched the ``B.`` of a name.  Single letters are listed for documentation;
-#: ``_INITIAL_RE`` below covers them in any case.
-_ABBREVS = [
-    "e.g.", "i.e.", "cf.", "et al.", "approx.", "vs.", "ca.", "c.", "fl.",
-    "Dr.", "Prof.", "Mr.", "Mrs.", "Ms.", "St.", "Jr.", "Sr.", "Fig.",
-    "No.", "b.", "d.", "r.", "U.S.", "U.K.", "var.", "subsp.", "ssp.",
-    "sp.", "spp.", "aff.", "cv.", "fo.",
-]
-
-#: ``<head>`` ends with a known abbreviation, at a word boundary.
-_ABBREV_RE = re.compile(
-    r"(?:^|[^0-9A-Za-z])(?:%s)$"
-    % "|".join(re.escape(a) for a in sorted(_ABBREVS, key=len, reverse=True)),
-    re.IGNORECASE)
-
-#: ``<head>`` ends with a single-letter initial -- ``B. F. Skinner``,
-#: ``W. E. B. Du Bois``, and the ``(b. 1960)`` / ``(fl. 1200)`` parentheticals
-#: the stub format requires on a ``Person`` opener.  The left context is "not a
-#: letter or digit" rather than "whitespace", because a stub body opens by
-#: bolding the name, so the first initial is preceded by ``**`` and not by a
-#: space (``**W. E. B. Du Bois** ...``).  Apostrophes are EXCLUDED from that
-#: left context: the ``s`` of a sentence-final possessive (``the predictor's.
-#: The next ...``) is preceded by ``'``. Reading that ``s.`` as an initial
-#: merges two sentences and lets an invalid two-sentence legacy stub pass. A
-#: genuine initial preceded by an apostrophe does not occur in practice.
-_INITIAL_RE = re.compile(r"(?:^|[^0-9A-Za-z'’])[A-Za-z]\.$")
-
-
 def _f(item, severity, message, evidence=None):
     return {"item": item, "severity": severity, "message": message,
             "evidence": evidence}
@@ -315,22 +321,6 @@ def _organism_title_parts(title, aliases=(), opening=""):
 # small text helpers
 # --------------------------------------------------------------------------
 
-def math_skeleton(text):
-    """Strip LaTeX wrappers down to the plain-text skeleton of a title.
-
-    ``$\\mathbf{k}$-nearest neighbors`` -> ``k-nearest neighbors``.
-    """
-    s = text.replace("$", "")
-    for _ in range(4):
-        new = re.sub(r"\\[A-Za-z]+\s*\{([^{}]*)\}", r"\1", s)
-        if new == s:
-            break
-        s = new
-    s = re.sub(r"\\[A-Za-z]+", "", s)
-    s = s.replace("{", "").replace("}", "")
-    return re.sub(r"\s+", " ", s).strip()
-
-
 def first_letter_ci_equal(a, b):
     """Equality that is case-insensitive on the FIRST letter only (item 16)."""
     if a is None or b is None:
@@ -340,49 +330,6 @@ def first_letter_ci_equal(a, b):
     if not a:
         return True
     return a[0].lower() == b[0].lower() and a[1:] == b[1:]
-
-
-def count_sentences(text):
-    """Rough sentence count: how many ``.``/``!``/``?`` runs really end a sentence.
-
-    A run counts only when it is followed by whitespace or end-of-text *and*
-    is not one of the three things that merely look like a sentence end:
-
-    * **A decimal point or version dot** -- ``3.5``, ``GPT-4.5``, ``v1.2.3``.
-      The dot has a digit hard up against it, so it is not a boundary at all.
-    * **A single-letter initial** -- ``B. F. Skinner``, ``W. E. B. Du Bois``,
-      and the ``(b. 1960)`` / ``(c. 1500)`` parentheticals a ``Person`` stub's
-      opener carries.  This is the false positive that mattered: the skill's
-      own conventions make every ``Person`` stub open with the bolded name, so
-      an initialled subject reported ``found roughly 3`` on a one-sentence body
-      forever, while the byte-identical body under ``Jane Doe`` reported
-      nothing.
-    * **A known abbreviation** -- ``et al.``, ``e.g.``, ``i.e.``, ``cf.``,
-      ``vs.``, ``Dr.``, ``Prof.``, ``St.``, ``Jr.`` and the rest of
-      ``_ABBREVS``, matched case-insensitively at a word boundary.
-
-    It stays deliberately rough, and it errs toward *under*-counting: a
-    sentence genuinely ending in an abbreviation or an initial ("...written in
-    C. It compiles...") folds into the next one.  The only consumer is the stub
-    one-sentence check, which reports "roughly N" at ``warning`` severity, so a
-    missed split is cheap and a phantom split is not.
-    """
-    s = " ".join(text.split())
-    count = 0
-    for m in re.finditer(r"[.!?]+", s):
-        nxt = s[m.end():m.end() + 1]
-        if nxt and not nxt.isspace():
-            continue          # not a boundary: `3.5`, `GPT-4.5`, `e.g.`'s inner dot
-        if m.group(0) == ".":
-            # Only the TAIL can match the $-anchored patterns (longest
-            # abbreviation is 7 chars; 16 keeps the boundary char in view), and
-            # searching the whole growing head made the scan quadratic -- 26 s
-            # on a 125 KB body, stalling a folder lint on one oversized entry.
-            head = s[max(0, m.end() - 16):m.end()]
-            if _INITIAL_RE.search(head) or _ABBREV_RE.search(head):
-                continue
-        count += 1
-    return count
 
 
 def _valid_date(value):
@@ -408,9 +355,9 @@ def source_stem(item):
     that can vary without changing which document that is gets dropped: the
     ``[[ ]]`` wrapper, a ``#page=N`` anchor, a display pipe, and any folder
     qualification (``Sources/PDFs/X.pdf`` and ``X.pdf`` are one file).
-    Case AND Unicode normalization are folded because the documented vault
-    lives on a filesystem that is insensitive to both, where ``X.md``,
-    ``x.md`` and the NFD spelling of either are all the same name.
+    Case and Unicode normalization are folded so document identity stays
+    stable across filesystems that alias those spellings and ones that can
+    store both.
 
     ``("", "")`` when the item carries no extension at all -- the ``"stub"``
     marker, or a malformed item whose missing extension is item 4's own
@@ -425,35 +372,23 @@ def source_stem(item):
     stem, dot, ext = inner.rpartition(".")
     if not dot:
         return "", ""
-    # NFC as well as case: a ``.pdf`` item read off an APFS disk is NFD and the
-    # ``.md`` twin typed into a note is NFC -- one document to the filesystem
-    # and to Obsidian, two unequal strings here, so the ``4-duplicate-source``
-    # pair went unreported. CONVENTIONS.md 7 requires this to agree exactly
+    # NFC as well as case: one document may be spelled NFD on disk and NFC in a
+    # note. Raw strings would miss the ``4-duplicate-source`` pair and make the
+    # result host-dependent. CONVENTIONS.md 7 requires this to agree exactly
     # with wiki-linter's scan_vault.source_stem(); keep the two lines identical.
     return (unicodedata.normalize("NFC", stem.strip()).lower(),
             unicodedata.normalize("NFC", ext.strip()).lower())
 
 
 def parse_flashcards(flashcard_lines):
-    """Group visible card content, excluding preserved HTML review metadata.
+    """Group card content, excluding protected review metadata from the view.
 
-    Blank lines inside or between line-4+ comments do not start another
-    card. Counting them as cards prescribed deleting the stored schedule.
-    The source text is never changed; only the linting view omits comments.
+    The shared parser recognizes the Spaced Repetition plugin's inline,
+    next-line, and metadata-callout storage forms plus attached block IDs.
+    Counting any of them as card content prescribed deleting user-owned state.
+    The source text is never changed; only the linting view omits that state.
     """
-    visible = re.sub(r"<!--.*?(?:-->|\Z)", "", "\n".join(flashcard_lines),
-                     flags=re.S)
-    cards, buf = [], []
-    for line in visible.split("\n"):
-        if line.strip() == "":
-            if buf:
-                cards.append(buf)
-                buf = []
-        else:
-            buf.append(line)
-    if buf:
-        cards.append(buf)
-    return cards
+    return parse_flashcard_blocks("\n".join(flashcard_lines))
 
 
 # --------------------------------------------------------------------------
@@ -685,8 +620,8 @@ def _description_subject_forms(title):
     """Canonical plain-text subjects accepted by item 7.
 
     A parenthetical title contributes its base term, and a title containing
-    LaTeX contributes the same plain-text skeleton used by the opener and
-    flashcard checks.  Preserve every other letter's case: item 7 has only the
+    LaTeX contributes the same meaning-preserving plain form used by the
+    opener and flashcard checks. Preserve every other letter's case: item 7 has only the
     documented first-letter carve-out, not general case folding.
     """
     forms = []
@@ -695,7 +630,9 @@ def _description_subject_forms(title):
     # therefore not an alternate accepted subject for ``Feature``.
     subjects = (base_term(title),) if has_parenthetical(title) else (title,)
     for subject in subjects:
-        for form in (subject, math_skeleton(subject) if subject else None):
+        for form in (
+                subject,
+                math_title_plain_text(subject) if subject else None):
             form = (form or "").strip()
             if form and form not in forms:
                 forms.append(form)
@@ -747,15 +684,12 @@ def _check_description(fm, findings, title=None):
     markup = []
     if "$" in desc:
         markup.append("$ (LaTeX / literal dollar)")
-    # The rule forbids markdown CONSTRUCTS, not the character: "A 5* rating
-    # system." is plain text.  Match a bold pair or a complete italic span, the
-    # same pattern wiki-linter's scanner uses.
-    if re.search(r"\*\*|\*\w[^*]*\*", desc):
-        markup.append("* (markdown emphasis)")
-    if "`" in desc:
-        markup.append("` (backtick code)")
-    if "[[" in desc:
-        markup.append("[[ (wikilink)")
+    # Description is plain text, whereas flashcard line 1 permits inline
+    # LaTeX. Reuse the shared Markdown/HTML detector, then add the stricter
+    # no-dollar rule above. The previous spot check missed ordinary Markdown
+    # links, underscore emphasis, HTML, Obsidian tags/comments, highlights,
+    # footnotes, and reference definitions; all render literally in Properties.
+    markup.extend(flashcard_line1_markup(desc))
     if markup:
         findings.append(_f(
             "7-description", "error",
@@ -786,11 +720,13 @@ def _check_description(fm, findings, title=None):
         # here; entity-as-subject wins.
         # A symbol-bearing title cannot appear literally in this plain-text
         # field: ``$k$-nearest neighbors`` has to be written
-        # ``k-nearest neighbors`` here.  Treat that math skeleton as the
-        # canonical subject too, exactly as item 16 and line 3 do.
+        # ``k-nearest neighbors`` here. Treat that mathematical plain form as
+        # the canonical subject too, exactly as item 16 and line 3 do.
         subjects = []
         for subject in (title, base_term(title) if title else None):
-            for form in (subject, math_skeleton(subject) if subject else None):
+            for form in (
+                    subject,
+                    math_title_plain_text(subject) if subject else None):
                 if form and form not in subjects:
                     subjects.append(form)
         lowercase_title_subject = any(
@@ -799,10 +735,71 @@ def _check_description(fm, findings, title=None):
             findings.append(_f("7-description", "info",
                                "description does not start with a capitalised word",
                                {"description": desc}))
-    if not desc.rstrip().endswith("."):
+    if not ends_with_sentence_period(desc):
         findings.append(_f("7-description", "info",
                            "description does not end with a period",
                            {"description": desc}))
+
+
+def _check_body_structure(fm, sections, findings):
+    """Item 9's deterministic entry-opening and heading floor.
+
+    wiki-linter applies these same source-independent assertions vault-wide.
+    Catching them here prevents a builder run from publishing a note that the
+    next maintenance pass must immediately repair.
+    """
+    if fm.body.startswith(("\n", "\r\n")):
+        findings.append(_f(
+            "9-body-structure", "error",
+            "body must begin immediately after frontmatter with no blank line"))
+
+    prose = "\n".join(sections["prose_lines"])
+    if not body_opens_with_prose(prose):
+        findings.append(_f(
+            "9-body-structure", "error",
+            "body must open with a prose sentence that states the entry's main claim"))
+
+    # Listings are presentation samples and must not be parsed as headings,
+    # but inline code is itself forbidden heading markup.  `strip_code` masks
+    # both, which made ``## `Example` `` look like a clean blank heading.
+    visible_lines = strip_indented(strip_fenced(prose)).split("\n")
+    _table_lines, table_spans = _markdown_tables(prose)
+    table_rows = {
+        line_i
+        for header_i, end_i in table_spans
+        for line_i in range(header_i, end_i + 1)
+    }
+    for line_i, line in enumerate(visible_lines):
+        if line_i in table_rows:
+            continue
+        heading = re.match(r"^ {0,3}(#{1,6})[ \t]+(.+?)\s*$", line)
+        if heading:
+            faults = []
+            if heading.group(1) != "##":
+                faults.append("level must be exactly ##")
+            heading_text = heading.group(2).rstrip("#").rstrip()
+            heading_markup = []
+            if "$" in heading_text:
+                heading_markup.append("LaTeX")
+            heading_markup.extend(flashcard_line1_markup(heading_text))
+            if heading_markup:
+                faults.append("plain text only (found %s)" % ", ".join(heading_markup))
+            if faults:
+                findings.append(_f(
+                    "9-body-structure", "error",
+                    "body heading is noncanonical: %s" % "; ".join(faults),
+                    {"body_line": line_i + 1, "text": line.strip()[:160]}))
+
+        # A Setext underline renders the preceding body line as a heading even
+        # though it contains no '#'. The entry schema permits only ATX `##`
+        # headings, so this must not escape both builder and whole-vault lint.
+        if (line_i > 0 and visible_lines[line_i - 1].strip()
+                and re.fullmatch(r" {0,3}(?:=+|-+)[ \t]*", line)):
+            findings.append(_f(
+                "9-body-structure", "error",
+                "Setext body headings are noncanonical; use a plain-text `##` heading",
+                {"body_line": line_i + 1,
+                 "text": visible_lines[line_i - 1].strip()[:160]}))
 
 
 def _check_tags(fm, findings, is_stub):
@@ -1086,13 +1083,8 @@ def _clean_paren_name(raw):
 
 def _opening_block(sections):
     """The first contiguous run of non-empty prose lines (the opener)."""
-    block = []
-    for line in sections["prose_lines"]:
-        if line.strip():
-            block.append(line.strip())
-        elif block:
-            break
-    return " ".join(block)
+    block = opening_paragraph("\n".join(sections["prose_lines"]))
+    return " ".join(line.strip() for line in block.splitlines())
 
 
 def _alias_candidates(sections, subject_forms=None):
@@ -1456,7 +1448,7 @@ def _check_table_captions(sections, findings):
 
 
 def _check_equation_coverage_candidates(sections, findings):
-    """Item 12's narrow mechanical floor for prose-defined equations."""
+    """Item 12's conservative floor for prose/inline defining math."""
     prose = "\n".join(sections["prose_lines"])
     masked = strip_code(prose)
     _lines, table_spans = _markdown_tables(prose)
@@ -1464,9 +1456,10 @@ def _check_equation_coverage_candidates(sections, findings):
     if candidates:
         findings.append(_f(
             "12-equation-coverage-candidate", "warning",
-            "prose appears to define a calculation but the entry has no "
-            "display equation; verify the stated operands and operations, "
-            "then typeset only that relationship under the equation policy",
+            "prose or inline math appears to define a calculation without "
+            "canonical nearby display form; verify the stated operands and "
+            "operations, then typeset only that relationship under the "
+            "equation policy",
             {"matches": candidates, "agent_review": True}))
 
 
@@ -1596,7 +1589,7 @@ def _check_person_event_date(fm, sections, findings):
     if entry_type not in ("Person", "Event"):
         return
     prose = "\n".join(sections["prose_lines"]).strip()
-    opener = prose.split("\n\n", 1)[0]
+    opener = opening_paragraph(prose)
     status = opener_subject_date_status(opener, entry_type)
     if status == "missing":
         findings.append(_f(
@@ -1670,10 +1663,12 @@ def _check_bold_opener(fm, sections, findings):
                        if organism_status == "ambiguous" else bolded)
     title_matches = any(first_letter_ci_equal(compared_bolded, cand)
                         for cand in accepted)
-    # symbol/variable carve-out: compare math-stripped skeletons.
-    skeleton = math_skeleton(compared_bolded)
+    # Symbol/variable carve-out: compare meaning-preserving mathematical
+    # plain forms.
+    skeleton = math_title_plain_text(compared_bolded)
     title_matches = title_matches or any(
-        first_letter_ci_equal(skeleton, math_skeleton(cand)) for cand in accepted)
+        first_letter_ci_equal(skeleton, math_title_plain_text(cand))
+        for cand in accepted)
 
     if title_matches:
         if organism_status == "ambiguous":
@@ -1708,7 +1703,7 @@ def _check_bold_opener(fm, sections, findings):
         "16-bold-opener", "error",
         "first bolded span %r does not equal title: %r "
         "(compared case-insensitively on the first letter only; base-term and "
-        "math-skeleton carve-outs applied)" % (bolded, title),
+        "math-title plain-form carve-outs applied)" % (bolded, title),
         {"bolded": bolded, "title": title, "accepted": accepted,
          "bolded_skeleton": skeleton, "opening": opening[:200]}))
 
@@ -1717,8 +1712,8 @@ def _flashcard_primary_answer(fm, sections):
     """Return ``(term, counterpart)`` established by the entry itself.
 
     The main term has one exact plain-text spelling: ``title:`` verbatim, its
-    base term for a disambiguation parenthetical, or its math skeleton for a
-    symbol title.  An opener parenthetical becomes a required counterpart only
+    base term for a disambiguation parenthetical, or its mathematical plain
+    form for a symbol title. An opener parenthetical becomes a required counterpart only
     when its slug is actually present in ``aliases:``; that distinguishes an
     opener-established binding from a date or explanatory aside and avoids
     inferring counterpart semantics from an alias list that can also hold
@@ -1726,7 +1721,7 @@ def _flashcard_primary_answer(fm, sections):
     """
     title = fm.scalar("title") or ""
     term = base_term(title) if has_parenthetical(title) else title
-    term = math_skeleton(term).strip()
+    term = math_title_plain_text(term).strip()
     alias_field = fm.get("aliases")
     aliases = {
         fold_name(a) for a in
@@ -1740,8 +1735,8 @@ def _flashcard_primary_answer(fm, sections):
         if entry_type == "Organism" else None)
     counterpart = None
     for match in _BOLD_PAREN_RE.finditer(_opening_block(sections)):
-        visible = math_skeleton(
-            match.group("bold").replace("*", "").replace("_", "")).strip()
+        visible, _style, _italic = _bold_parts(match)
+        visible = math_title_plain_text(visible).strip()
         if not first_letter_ci_equal(visible, term):
             continue
         raw_candidate = match.group("paren")
@@ -1868,7 +1863,7 @@ def _check_flashcards_present(fm, sections, findings, is_stub):
     # two tools must agree). Line 1 is one sentence. Line 2 is exactly `??` --
     # or the user's `!!`, which marks a card they disabled and is preserved,
     # never converted. Line 3 is the canonical title: the base term for a
-    # parenthetical-disambiguated title, the math-stripped skeleton for a
+    # parenthetical-disambiguated title, the meaning-preserving plain form for a
     # symbol title (line 3 is plain text, so `$k$-fold` can only ever appear
     # there as `k-fold`), plus the entry's own opener-established, alias-bound
     # counterpart.
@@ -1887,14 +1882,28 @@ def _check_flashcards_present(fm, sections, findings, is_stub):
                 "lines 1-3 breaks the card)" % (card_no, len(card)),
                 {"card": card_no, "lines": len(card)}))
             continue
-        line1 = card[0].strip()
-        sentence_count = count_sentences(line1)
-        if sentence_count > 1:
+        if len(card) > 3:
             findings.append(_f(
                 "19-flashcards", "error",
-                "flashcard %d line 1 must be one sentence; found roughly %d"
-                % (card_no, sentence_count),
-                {"card": card_no, "sentences": sentence_count}))
+                "flashcard %d has %d visible lines -- only the first three "
+                "may be card content; recognized Spaced Repetition state may "
+                "be attached to line 3, follow it as `<!--SR:` metadata, or "
+                "use the exact `sr|card-metadata` callout, so other content "
+                "after the term is "
+                "malformed" % (card_no, len(card)),
+                {"card": card_no, "lines": len(card)}))
+        # Preserve indentation for the shared block-Markdown check; sentence
+        # checks normalize their own surrounding whitespace.
+        line1 = card[0]
+        line1_faults = flashcard_line1_faults(line1)
+        if line1_faults:
+            findings.append(_f(
+                "19-flashcards", "error",
+                "flashcard %d line 1 %s -- the definition must be one "
+                "capitalized, period-terminated sentence and takes inline "
+                "LaTeX only (no Markdown or HTML)"
+                % (card_no, " and ".join(line1_faults)),
+                {"card": card_no, "faults": line1_faults}))
         if len(card) >= 2:
             line2 = card[1].strip()
             if line2 not in ("??", "!!"):
@@ -1921,46 +1930,46 @@ def _check_flashcard_leak(fm, sections, findings, is_stub):
     title = fm.scalar("title")
     if not title:
         return
-    needle_title = base_term(title) if has_parenthetical(title) else title
-    # Both spellings of every surface: an alias is slug-form but a leak can be
-    # written either way ("lloyd-algorithm" or "lloyd algorithm"), and a
-    # hyphenated title leaks the same two ways.  scan_vault's alias_forms
-    # checks both; the two tools must agree.  Deduped so a hyphen-free
-    # surface is not tested (and reported) twice.
-    needles, seen_forms = [], set()
-    for kind, surface in [("title", needle_title)] + [
-            ("alias", a) for a in fm.values("aliases") if a]:
-        for form in (surface, surface.replace("-", " ")):
-            if form and form.lower() not in seen_forms:
-                seen_forms.add(form.lower())
-                needles.append((kind, form))
-
+    # The shared normalizer folds Unicode punctuation, slash/dash variants,
+    # and whitespace, so an answer cannot evade the leak floor by changing
+    # ``bias/variance`` to ``bias – variance``. The two tools must agree.
+    expected_term, _counterpart = _flashcard_primary_answer(fm, sections)
+    aliases = [alias for alias in fm.values("aliases") if alias]
     for card_no, card in enumerate(parse_flashcards(sections["flashcard_lines"]), 1):
         line1 = card[0]
-        low = line1.lower()
+        line3 = card[2].strip() if len(card) >= 3 else ""
+        match = re.fullmatch(
+            r"(?P<term>.*?)(?: \((?P<paren>[^()\n]+)\))?", line3)
+        term_main = match.group("term") if match else line3
+        paren = match.group("paren") if match else None
+        paren_is_discipline = False
+        if paren:
+            try:
+                paren_is_discipline = slug_stem(paren) in TAG_ENUM
+            except SlugError:
+                pass
+        raw_needles = [("answer", term_main)]
+        if paren and not paren_is_discipline:
+            raw_needles.append(("answer counterpart", paren))
+        if expected_term and term_main == expected_term:
+            raw_needles.extend(("alias", alias) for alias in aliases)
+
+        needles, seen_forms = [], set()
+        for kind, surface in raw_needles:
+            normalized = normalized_answer_surface(surface)
+            if normalized and normalized not in seen_forms:
+                seen_forms.add(normalized)
+                needles.append((kind, surface))
         for kind, needle in needles:
-            if not needle:
+            match_kind = answer_surface_match(line1, needle)
+            if match_kind is None:
                 continue
-            # A bare substring test made every short title a guaranteed false
-            # positive: for the entry titled "C", the "c" inside "create" fired.
-            # And the severity discriminator used a LEFT-only boundary, so that
-            # word-INITIAL substring was then escalated from warning to error.
-            n = needle.lower()
-            bounded = re.search(r"(?<![A-Za-z0-9])" + re.escape(n) + r"(?![A-Za-z0-9])",
-                                low) is not None
-            if len(n) <= 4:
-                if not bounded:
-                    continue          # short needle: whole-word match only
-            elif n not in low:
-                continue
-            at_boundary = bounded
             findings.append(_f(
                 "19-flashcard-leak",
-                "error" if at_boundary else "warning",
-                "flashcard %d line 1 leaks the %s %r (case-insensitive "
-                "substring, math regions included)%s"
-                % (card_no, kind, needle,
-                   "" if at_boundary else " -- match is mid-word, likely incidental"),
+                "error",
+                "flashcard %d line 1 leaks the %s %r (Unicode/case/punctuation "
+                "normalized whole surface, math regions included)"
+                % (card_no, kind, needle),
                 {"card": card_no, "needle": needle, "kind": kind,
                  "line1": line1}))
 
@@ -2107,6 +2116,7 @@ def lint_text(text, filename):
     _check_tags(fm, findings, is_stub)
     _check_aliases(fm, findings, filename)
     _check_alias_completeness(fm, sections, findings, filename)
+    _check_body_structure(fm, sections, findings)
     _check_table_cell_wikilinks(sections, findings)
     _check_duplicate_wikilinks(sections, findings)
     _check_integrated_wikilinks(sections, findings)
@@ -2168,10 +2178,9 @@ def lint_file(path):
 def _check_alias_collisions(results):
     """Item 18, folder scope: no two entries share an ``aliases:`` string.
 
-    Compared case- and normalization-folded (``vault_index.fold_name``):
-    Obsidian resolves an alias exactly like a filename — case-insensitively —
-    so ``Lambda-Rank`` on one entry and ``lambda-rank`` on another collide for
-    every lookup a user actually performs, whatever the bytes say.
+    Compared with the portable case/normalization identity from
+    ``vault_index.fold_name``. ``Lambda-Rank`` on one entry and ``lambda-rank``
+    on another would otherwise have filesystem-dependent ownership.
     """
     owners = {}                    # folded alias -> (display alias, [files])
     for res in results:
@@ -2577,17 +2586,49 @@ def run_self_test():
           [(f['severity'], f['evidence'].get('review_only'), 'delete' in f['evidence'])
            for f in pair_findings], [('warning', True, False)])
 
-    for review_tail in (
-            '<!--SR:!2026-09-20,30,250!2026-09-21,31,250-->\n\n<!-- preserved state -->\n',
-            '<!--SR:\n!2026-09-20,30,250\n\n!2026-09-21,31,250\n-->\n'):
-        studied = good.replace('read: false', 'read: true').replace('\n??\n', '\n!!\n') + review_tail
-        check("blank lines in preserved review comments are not extra cards",
-              items(studied), [])
+    review_base = good.replace('read: false', 'read: true').replace(
+        '\n??\n', '\n!!\n')
+    review_cards = (
+        ("next-line",
+         review_base.rstrip('\n') + '\n'
+         + '<!--SR:!2026-09-20,30,250!2026-09-21,31,250-->\n'
+           '<!--SR:preserved-state-->\n'),
+        ("multiline next-line",
+         review_base.rstrip('\n') + '\n'
+         + '<!--SR:\n!2026-09-20,30,250\n\n!2026-09-21,31,250\n-->\n'),
+        ("same-line plus block ID",
+         review_base.replace(
+             '\nROC curve\n',
+             '\nROC curve <!--SR:!2026-09-20,30,250--> ^roc-card\n')),
+        ("next-line plus term block ID",
+         review_base.replace('\nROC curve\n', '\nROC curve ^roc-card\n')
+         .rstrip('\n') + '\n<!--SR:!2026-09-20,30,250-->\n'),
+        ("metadata callout plus block ID",
+         review_base.rstrip('\n') + '\n'
+         + '> [!sr|card-metadata] \n'
+           '>  <!--SR:!2026-09-20,30,250--> ^roc-card\n'),
+    )
+    for storage_form, studied in review_cards:
+        before_bytes = studied.encode('utf-8')
+        studied_result = lint_text(studied, 'roc-curve.md')
+        check("protected %s state is not extra card content" % storage_form,
+              _st_items(studied_result), [])
+        check("checking %s state preserves every source byte" % storage_form,
+              studied.encode('utf-8'), before_bytes)
         extra = studied + '\nA different main claim.\n??\nAnother term\n'
-        check("review comments do not hide a genuine extra card",
+        check("%s state does not hide a genuine extra card" % storage_form,
               any(f.get('evidence', {}).get('cards') == 2
                   for f in lint_text(extra, 'roc-curve.md')['findings']
                   if isinstance(f.get('evidence'), dict)), True)
+    detached = review_base + '\n<!--SR:detached-after-blank-->\n'
+    check("a blank detaches next-line state so item 19 can report it",
+          "19-flashcards" in _st_items(
+              lint_text(detached, 'roc-curve.md')), True)
+    unterminated = (review_base.rstrip('\n')
+                    + '\n<!--SR:unterminated-state\n')
+    check("an unterminated attached SR comment remains reportable content",
+          "19-flashcards" in _st_items(
+              lint_text(unterminated, 'roc-curve.md')), True)
     for fence in ('```', '~~~'):
         example = good.replace('\n**Related:**',
                                '\n' + fence + 'text\n' + fence + 'not-a-close\n'
@@ -2759,6 +2800,21 @@ def run_self_test():
           ["7-description"])
     check("markup in a description",
           items(mutate("plots true", "plots `true`")), ["7-description"])
+    check("Markdown links, underscore emphasis, HTML, strikethrough, "
+          "footnotes, tags, highlights, and comments are non-plain "
+          "description markup",
+          [items(mutate("plots true", replacement)) for replacement in (
+              "plots [true](https://example.test)",
+              "plots [true][target]",
+              "plots _true_",
+              "plots <em>true</em>",
+              "plots ~~true~~",
+              "plots true[^1]",
+              "plots #true",
+              "plots ==true==",
+              "plots %%true%%",
+          )],
+          [["7-description"]] * 9)
     check("a description with no closing period is INFO, not an error",
           [(f["item"], f["severity"])
            for f in lint_text(mutate("false positive rate.", "false positive rate"),
@@ -2793,7 +2849,7 @@ def run_self_test():
                 .replace("ROC curve\n", "k-nearest neighbors\n"),
                 "k-nearest-neighbors.md"),
           [])
-    check("a plain-text math skeleton is the subject of a symbol-title description",
+    check("a mathematical title's plain form is its description subject",
           items(mutate('title: "ROC curve"\n', 'title: "$k$-fold"\n')
                 .replace("A **ROC curve** plots", "A **k-fold** plots")
                 .replace('description: "A ROC curve plots',
@@ -2872,6 +2928,13 @@ def run_self_test():
     check("a hard-wrapped opener whose bold lands on line 2 is accepted",
           items(mutate("A **ROC curve** plots the trade-off",
                        "A\n**ROC curve** plots the trade-off")), [])
+    check("a whitespace-only blank line ends the opener paragraph",
+          items(mutate(
+              "A **ROC curve** plots the trade-off between two error rates "
+              "as a decision threshold moves.",
+              "A ROC curve plots a trade-off.\n   \n"
+              "Later prose names **ROC curve** explicitly.")),
+          ["16-bold-opener"])
     check("the parenthetical base-term carve-out",
           items(mutate('title: "ROC curve"', 'title: "ROC curve (statistics)"')
                 .replace("ROC curve\n??", "ROC curve\n??"),
@@ -2881,7 +2944,7 @@ def run_self_test():
                 .replace("A **ROC curve** plots",
                          "A **ROC curve (statistics)** plots"),
                 "roc-curve-statistics.md"), ["16-bold-opener"])
-    check("the math-skeleton carve-out",
+    check("the math-title plain-form carve-out",
           items(mutate('title: "ROC curve"', 'title: "$k$-fold"')
                 .replace("A **ROC curve** plots", "A **k-fold** plots")
                 .replace("A ROC curve plots", "k-fold plots")
@@ -2973,12 +3036,56 @@ def run_self_test():
           items(mixed_title.replace("***E. coli* K-12**", "***E. coli K-12***"),
                 "e-coli-k-12.md"), ["16-bold-opener"])
     symbol_star = retitled(
-        "$A^{*}$ search", "a-star-search", "A search is a graph algorithm.",
+        "$A^{*}$ search", "astar", "A-star search is a graph algorithm.",
         "**$\\boldsymbol{A}^{*}$ search** is a graph algorithm.",
-        "A search")
-    check("a literal LaTeX star inside a bold symbol title is parsed",
-          [f["item"] for f in lint_text(symbol_star, "a-star-search.md")["findings"]
-           if f["item"] == "16-bold-opener"], [])
+        "A-star search")
+    check("a LaTeX star remains semantic in the description, opener, and card",
+          items(symbol_star, "a-star-search.md"), [])
+    check("the former lossy A-search card spelling is rejected",
+          items(symbol_star.replace("??\nA-star search\n", "??\nA search\n"),
+                "a-star-search.md"),
+          ["19-flashcards"])
+    check("LaTeX A-star notation cannot hide a flashcard answer leak",
+          items(symbol_star.replace(
+              "The plot tracing",
+              "An $A^{*}$ search algorithm tracing"),
+              "a-star-search.md"),
+          ["19-flashcard-leak"])
+    chi_squared = retitled(
+        "$\\\\chi^2$ test", "chi-square-test",
+        "chi-squared test compares observed and expected categorical counts.",
+        "**$\\chi^2$ test** compares observed and expected categorical counts.",
+        "chi-squared test")
+    check("the documented LaTeX chi-squared title has one readable plain form",
+          items(chi_squared, "chi-2-test.md"), [])
+    ell_one = retitled(
+        "$\\\\ell_1$ norm", "l1-norm",
+        "ell-one norm measures vector magnitude using absolute values.",
+        "**$\\ell_1$ norm** measures vector magnitude using absolute values.",
+        "ell-one norm")
+    check("an ell-one subscript stays semantic across title fields",
+          items(ell_one, "ell-1-norm.md"), [])
+    inverse_title = retitled(
+        "$L^{-1}$ regularization", "inverse-regularization",
+        "L-inverse regularization is a worked mathematical example.",
+        "**$L^{-1}$ regularization** is a worked mathematical example.",
+        "L-inverse regularization")
+    check("an inverse exponent stays semantic across title fields",
+          items(inverse_title, "l-1-regularization.md"), [])
+    half_power = retitled(
+        "$x^{1/2}$ transform", "half-power-transform",
+        "x-to-the-one-half transform is a worked mathematical example.",
+        "**$x^{1/2}$ transform** is a worked mathematical example.",
+        "x-to-the-one-half transform")
+    check("a one-half exponent stays semantic across title fields",
+          items(half_power, "x-1-2-transform.md"), [])
+    positive_superscript = retitled(
+        "$R^{+}$", "positive-r",
+        "R-plus is a worked mathematical example.",
+        "**$R^{+}$** is a worked mathematical example.",
+        "R-plus")
+    check("a positive superscript stays semantic across title fields",
+          items(positive_superscript, "r-plus.md"), [])
     check("bare known special tokens and literal extensions require backticks",
           (items(mutate("decision threshold moves.\n",
                         "decision threshold moves using [CLS].\n")),
@@ -3036,6 +3143,46 @@ def run_self_test():
               "decision threshold moves.",
               "One identifying statement. Another statement.")),
           ["19-flashcards"])
+    check("card line 1 must start with a capitalized word",
+          items(mutate(
+              "The plot tracing the trade-off between two error rates as a "
+              "decision threshold moves.",
+              "an identifying statement about two error rates.")),
+          ["19-flashcards"])
+    check("card line 1 must end with a period",
+          items(mutate(
+              "The plot tracing the trade-off between two error rates as a "
+              "decision threshold moves.",
+              "An identifying statement about two error rates")),
+          ["19-flashcards"])
+    check("a period inside closing quotation marks terminates a card sentence",
+          items(mutate(
+              "The plot tracing the trade-off between two error rates as a "
+              "decision threshold moves.",
+              'The plot Hooke might have called "a curve."')),
+          [])
+    check("Markdown links, emphasis, display math, and HTML are "
+          "forbidden on card line 1",
+          [items(mutate(
+              "The plot tracing the trade-off between two error rates as a "
+              "decision threshold moves.", replacement))
+           for replacement in (
+               "A [linked](target) definition.",
+               "A [linked][target] definition.",
+               "An _italic_ definition.",
+               "A ~~deleted~~ definition.",
+               "An <span>HTML</span> definition.",
+               "An <!-- hidden --> definition.",
+               "An %%hidden%% definition.",
+               "[Source]: https://example.com.",
+               "A [Source]: https://example.com.",
+               "<!--SR:misplaced-->\nA complete definition.",
+               "A $$x=1$$ definition.",
+               "# A heading definition.",
+               "    An indented definition.",
+               "A quantity uses $x.",
+           )],
+          [["19-flashcards"]] * 14)
     check("card line 3 that is not the canonical title",
           items(mutate("??\nROC curve\n", "??\nThe ROC\n")), ["19-flashcards"])
     bound_card = mutate('  - "auroc"', '  - "rc"')
@@ -3073,11 +3220,11 @@ def run_self_test():
         '**Archaea** (singular, *archaeon*) is a domain of single-celled organisms.')
     singular_alias = singular_alias.replace('\nROC curve\n', '\nArchaea\n')
     check("a singular synonym in an annotated opener parenthetical is not a card counterpart",
-          items(singular_alias, "archaea.md"), [])
+          items(singular_alias, "archaea.md"), ["18-alias-form"])
     check("appending that singular synonym to line 3 is rejected",
           items(singular_alias.replace("??\nArchaea\n",
                                        "??\nArchaea (archaeon)\n"),
-                "archaea.md"), ["19-flashcards"])
+                "archaea.md"), ["18-alias-form", "19-flashcards"])
     short_for_card = retitled(
         "AdaBoost", "adaptive-boosting",
         "AdaBoost reweights mistakes before fitting each new predictor.",
@@ -3131,6 +3278,17 @@ def run_self_test():
           [f["item"] for f in lint_text(
               later_bold_card, "counterpart-scope.md")["findings"]
            if f["item"] == "19-flashcards"], [])
+    counterpart_after_opener = bound_card.replace(
+        "A **ROC curve** (RC) plots the trade-off between two error rates as "
+        "a decision threshold moves.",
+        "A **ROC curve** plots the trade-off between two error rates as a "
+        "decision threshold moves.\n   \nLater, **ROC curve** (RC) is used "
+        "as an abbreviation example.")
+    check("a counterpart introduced after a whitespace-only paragraph break "
+          "does not alter the title card",
+          [f["item"] for f in lint_text(
+              counterpart_after_opener, "roc-curve.md")["findings"]
+           if f["item"] == "19-flashcards"], [])
     check("an unrelated noun phrase and later parenthetical do not bind to "
           "the bolded title",
           bool(_BOLD_PAREN_RE.search(
@@ -3150,15 +3308,58 @@ def run_self_test():
                 .replace("The plot tracing",
                          "The lloyd-algorithm plot tracing")),
           ["19-flashcard-leak"])
+    check("slash and Unicode-dash variants cannot hide an alias leak",
+          items(mutate('  - "auroc"',
+                       '  - "bias-variance-trade-off"')
+                .replace("The plot tracing",
+                         "The bias/variance trade–off curve tracing")),
+          ["19-flashcard-leak"])
     check("a leak inside $...$ is still a leak",
           items(mutate("The plot tracing", "The $\\text{ROC curve}$ tracing")),
           ["19-flashcard-leak"])
+    math_answer_card = retitled(
+        "$k$-nearest neighbors", "nearest-neighbor-rule",
+        "k-nearest neighbors predicts from nearby observations.",
+        "**$\\boldsymbol{k}$-nearest neighbors** predicts from nearby "
+        "observations.", "k-nearest neighbors")
+    check("a math-title answer leaks through its plain line-3 skeleton",
+          items(math_answer_card.replace(
+              "The plot tracing", "A k-nearest neighbors method tracing"),
+              "k-nearest-neighbors.md"), ["19-flashcard-leak"])
+    check("math delimiters cannot hide a math-title answer leak",
+          [items(math_answer_card.replace("The plot tracing", replacement),
+                 "k-nearest-neighbors.md")
+           for replacement in (
+               "A $k$-nearest neighbors method tracing",
+               "A $\\boldsymbol{k}$-nearest neighbors method tracing")],
+          [["19-flashcard-leak"]] * 2)
+    math_alias_card = math_answer_card.replace(
+        '  - "nearest-neighbor-rule"', '  - "knn"')
+    check("a math-title primary card still gets the entry aliases",
+          items(math_alias_card.replace(
+              "The plot tracing", "A KNN method tracing"),
+              "k-nearest-neighbors.md"), ["19-flashcard-leak"])
+    secondary_names_primary = mutate(
+        "??\nROC curve\n",
+        "??\nROC curve\n\nA ROC curve can illustrate this separate notion.\n"
+        "??\nSecond idea\n")
+    check("a legacy secondary card may name the primary while its own answer "
+          "remains leak-free",
+          items(secondary_names_primary), ["19-flashcards"])
     check("a short title is not leaked by a mid-word substring",
           items(mutate('title: "ROC curve"', 'title: "C"')
                 .replace("A **ROC curve** plots", "A **C** creates")
                 .replace("A ROC curve plots", "C creates")
                 .replace("ROC curve\n??", "C\n??").replace("\nROC curve\n", "\nC\n"),
                 "c.md"), [])
+    check("a long title is not leaked inside a different word",
+          items(mutate('title: "ROC curve"', 'title: "Variance"')
+                .replace("A **ROC curve** plots", "**Variance** describes")
+                .replace("A ROC curve plots", "Variance describes")
+                .replace("The plot tracing", "A covariance plot tracing")
+                .replace("ROC curve\n??", "Variance\n??")
+                .replace("\nROC curve\n", "\nVariance\n"),
+                "variance.md"), [])
 
     # -- stub structure ----------------------------------------------------
     check("a stub with a Related footer",
@@ -3200,6 +3401,42 @@ def run_self_test():
           ["19-flashcards", "stub-sources-marker"])
 
     # -- item 9: structure plus semantic body review -----------------------
+    check("the body starts immediately after frontmatter",
+          items(mutate("read: false\n---\nA **ROC curve**",
+                       "read: false\n---\n\nA **ROC curve**")),
+          ["9-body-structure"])
+    opener_sentence = ("A **ROC curve** plots the trade-off between two error "
+                       "rates as a decision threshold moves.\n\n")
+    check("the body cannot start with an empty or Markdown-block opener",
+          ["9-body-structure" in items(mutate(opener_sentence, replacement))
+           for replacement in (
+               "", "+ item\n\n", "1. item\n\n", "1) item\n\n",
+               ">quoted\n\n", "```text\nlisting\n```\n\n",
+               "~~~text\nlisting\n~~~\n\n", "    listing\n\n",
+               "\tlisting\n\n")],
+          [True] * 9)
+    check("body headings use exactly plain-text ## ATX form",
+          (items(mutate("\n**Related:**",
+                        "\n\n### Details\n\nA narrower claim.\n\n**Related:**")),
+           items(mutate("\n**Related:**",
+                        "\n\n## *Details*\n\nA narrower claim.\n\n**Related:**")),
+           items(mutate("\n**Related:**",
+                        "\n\n## [Details](target)\n\nA narrower claim.\n\n**Related:**")),
+           items(mutate("\n**Related:**",
+                        "\n\n## <em>Details</em>\n\nA narrower claim.\n\n**Related:**")),
+           items(mutate("\n**Related:**",
+                        "\n\n## `Details`\n\nA narrower claim.\n\n**Related:**"))),
+          (["9-body-structure"], ["9-body-structure"],
+           ["9-body-structure"], ["9-body-structure"],
+           ["9-body-structure"]))
+    check("a Setext body heading cannot evade the exactly-## rule",
+          items(mutate("\n**Related:**",
+                       "\n\nDetails\n-------\n\nA narrower claim.\n\n**Related:**")),
+          ["9-body-structure"])
+    check("a canonical plain-text ## body heading remains valid",
+          items(mutate("\n**Related:**",
+                       "\n\n## Details\n\nA narrower claim.\n\n**Related:**")),
+          [])
     dated_person = retitled(
         "Ada Lovelace", "augusta-ada-king",
         "Ada Lovelace was an English mathematician.",
@@ -3276,10 +3513,33 @@ def run_self_test():
     check("an explicit square-root-of-variance definition without display math "
           "is an equation-coverage candidate",
           items(equationless), ["12-equation-coverage-candidate"])
-    check("a canonical display block clears the narrow equation candidate",
+    check("a nearby canonical display block clears the prose equation candidate",
           items(equationless.replace(
               "variance.\n", "variance:\n\n$$\n"
               "\\sigma = \\sqrt{\\operatorname{Var}(X)}\n$$\n", 1)), [])
+    check("an expanded squared-deviation average clears the prose equation candidate",
+          items(equationless.replace(
+              "variance.\n", "variance:\n\n$$\n"
+              "\\sigma = \\sqrt{\\frac{1}{N}"
+              "\\sum_i (x_i - \\mu)^2}\n$$\n", 1)), [])
+    check("unrelated square-root and variance terms in one display do not clear "
+          "the prose equation candidate",
+          items(equationless.replace(
+              "variance.\n", "variance:\n\n$$\n"
+              "f(x) = \\sqrt{x} + \\operatorname{Var}(Y)\n$$\n", 1)),
+          ["12-equation-coverage-candidate"])
+    inline_definition = mutate(
+        "A **ROC curve** plots the trade-off between two error "
+        "rates as a decision threshold moves.\n",
+        "A **ROC curve** plots one similarity score. For input $x$ and "
+        "center $c$, the similarity is $\\exp(-\\gamma (x-c)^2)$.\n")
+    check("a defining expression left inline is an equation-form candidate",
+          items(inline_definition), ["12-equation-coverage-candidate"])
+    check("an unrelated display elsewhere does not clear an inline defining formula",
+          items(inline_definition.replace(
+              "plots one similarity score.",
+              "plots one similarity score.\n\n$$\nq = 1\n$$\n\n")),
+          ["12-equation-coverage-candidate"])
     check("a square-root-of-variance phrase in a table is not body-equation "
           "evidence",
           items(mutate(
@@ -3443,6 +3703,25 @@ def run_self_test():
           items(mutate("threshold moves.\n??\nROC curve\n",
                        "threshold moves.\n??\n")),
           ["19-flashcards"])
+    joined_cards = mutate(
+        "threshold moves.\n??\nROC curve\n",
+        "One identifying statement.\n??\nROC curve\n"
+        "A second definition.\n??\nSecond term\n")
+    check("a second card joined without a blank line is malformed visible content",
+          "visible lines" in " ".join(
+              finding["message"] for finding in
+              lint_text(joined_cards, "roc-curve.md")["findings"]
+              if finding["item"] == "19-flashcards"),
+          True)
+    ordinary_line4_comment = mutate(
+        "threshold moves.\n??\nROC curve\n",
+        "threshold moves.\n??\nROC curve\n<!--ordinary comment-->\n")
+    check("a non-SR line-four HTML comment is malformed visible content",
+          "visible lines" in " ".join(
+              finding["message"] for finding in
+              lint_text(ordinary_line4_comment, "roc-curve.md")["findings"]
+              if finding["item"] == "19-flashcards"),
+          True)
     # A tolerated heading spelling is a PRESENT section plus a heading to fix.
     check("### Flashcards is present-but-noncanonical, never missing",
           (items(mutate("## Flashcards", "### Flashcards")),
@@ -3731,8 +4010,14 @@ def run_self_test():
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             rc = main([wiki, "-o", os.path.join(tmp, "out.json")])
-        check("the exit code is always 0 -- this is a reporting tool, not a gate",
+        check("a delivered lint report exits 0 even when it contains findings",
               (rc, os.path.isfile(os.path.join(tmp, "out.json"))), (0, True))
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = main([wiki, "-o", tmp])
+        check("a requested report that cannot be written exits nonzero",
+              (rc, '"ok": false' in buf.getvalue().lower()), (1, True))
 
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
@@ -3758,7 +4043,8 @@ def _build_parser():
     p = argparse.ArgumentParser(
         prog="lint_entry.py",
         description="Mechanical Quality Checklist checks for wiki-builder "
-                    "entries (stdlib only).  Always exits 0.",
+                    "entries (stdlib only). Findings do not set the exit "
+                    "status; invocation and report-write failures do.",
         epilog="example: lint_entry.py ~/Vault/Wiki --severity error",
     )
     # `nargs="?"`, so `--test` is reachable: argparse refuses a missing
@@ -3799,9 +4085,10 @@ def main(argv=None):
         except Exception as exc:
             print(json.dumps({"ok": False, "error": str(exc),
                               "summary": report["summary"]}, indent=2))
+            return 1
     else:
         print(dumped)
-    return 0  # reporting tool, never a gate
+    return 0  # findings are a report; failure to deliver that report is not
 
 
 if __name__ == "__main__":

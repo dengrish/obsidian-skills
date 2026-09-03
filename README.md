@@ -122,11 +122,13 @@ Both note writers share `Articles/` and check provenance before claiming an
 existing note: `sources:` item 1 identifies its origin. MOCs and proposal logs
 stay outside `Wiki/` so they are not treated as entries.
 
-No skill deletes user files. A reprocess may remove its own old note after
-safely publishing a renamed replacement; pdf-organizer may rename or move the
-PDFs in its authorized scope but never overwrite another file. Unrelated
-folders and legacy notes remain untouched. The full path/ownership table is
-in [conventions §1](shared/CONVENTIONS.md#1-vault-folder-layout).
+No skill discards user content. An authorized reprocess or refactor may
+conditionally remove an obsolete path only after its replacement and dependent
+references are safely published and verified; a later occupant always survives.
+pdf-organizer may rename or move PDFs in its authorized scope but never
+overwrite another file. Unrelated folders and legacy notes remain untouched.
+The full path/ownership table is in
+[conventions §1](shared/CONVENTIONS.md#1-vault-folder-layout).
 
 ## Where guidance lives
 
@@ -136,6 +138,7 @@ in [conventions §1](shared/CONVENTIONS.md#1-vault-folder-layout).
 | `skills/<name>/references/` | Detailed rules, examples or procedures, linked where the workflow needs them |
 | [shared/RUNTIME.md](shared/RUNTIME.md) | Host-independent paths, Python setup and tool fallbacks |
 | [shared/CONVENTIONS.md](shared/CONVENTIONS.md) | Shared layout, schemas, enums, naming, links and ownership |
+| [shared/SAFE_WRITES.md](shared/SAFE_WRITES.md) | Exclusive creation, conditional replacement, cleanup and rollback safety |
 | `skills/<name>/scripts/` | Executable helpers and their embedded self-tests |
 | `shared/scripts/` | Canonical implementations used by several skills |
 | [AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md) | Repository contribution instructions, with one authored copy |
@@ -148,11 +151,15 @@ and link to them rather than maintaining independent copies. Short reminders
 at a risky step are useful; duplicated schemas, exhaustive dispatch lists and
 historical explanations are harder to keep aligned.
 
-The shared implementations are `slugify.py` (wiki slugs), `naming.py` (source
-filenames and book identity), `plurals.py` (English singularization),
+The shared implementations are `slugify.py` (wiki slugs), `atomic_move.py`
+(exclusive moves and verified regular-file publication/removal), `naming.py`
+(source filenames and book identity),
+`plurals.py` (English singularization),
 `yaml_scalars.py` (decoded metadata), `figure_state.py` (figure ownership and
-review sidecars), `organism_names.py` (Organism title/name classification),
-`entry_structure.py` (shared entry-opener checks), `introduced_aliases.py`
+review sidecars), `vault_artifacts.py` (portable PDF and source-figure
+inventories), `organism_names.py` (Organism title/name classification),
+`entry_structure.py` (shared sentence, opener, answer-surface, and flashcard
+structure checks), `introduced_aliases.py`
 (body-introduced alias candidates), `code_typography.py` (literal prose shapes
 that require backticks), `equation_coverage.py` (a conservative missing-display
 equation candidate shared by both Wiki skills), `markdown_tables.py` (GFM table
@@ -198,7 +205,10 @@ claude plugin validate skills
 Author common metadata in `.claude-plugin/plugin.json`. The build command
 generates `.codex-plugin/plugin.json` and `obsidian.plugin`, including all
 references and shared helpers while excluding local environments and Git
-state. `--check` detects stale generated files without rewriting them.
+state. Completed outputs are staged on the destination filesystem and replace
+only the exact generated files observed before publication; a late edit or
+occupant stops publication unchanged. `--check` detects stale generated files
+without rewriting them.
 
 For a release, bump the authored manifest's version, validate, rebuild, then
 commit source and generated files together before pushing. An explicit

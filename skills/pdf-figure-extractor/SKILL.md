@@ -44,11 +44,22 @@ Use `--allow-unorganized` only for a deliberate one-off exception and explain
 that downstream source identity will depend on the current name. The shared
 rule is [conventions §1a](../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organizer-runs-first).
 
-`--src` accepts a single PDF or a recursively scanned folder. Across that
-scope, PDFs must have distinct stems, including case and Unicode normalization
-variants. Colliding sources are refused before either writes or adopts
-images, even with `--overwrite`; organize their names before retrying.
-Other independent PDFs may continue, but the run exits nonzero.
+`--src` accepts a single PDF or a recursively scanned folder. Recursive
+inventory follows directory symlinks and preserves distinct logical paths;
+a symlink loop or unreadable subtree makes the scope incomplete and blocks the
+run instead of silently omitting sources. When `--out` is
+the selected vault's canonical `Sources/Images/`, the helper inventories PDF
+basenames across that whole vault before any figure or sidecar write. Thus a
+single named PDF is still refused when another PDF elsewhere in the vault has
+the same stem, including case and Unicode-normalization variants. At an
+arbitrary external output path, the collision check stays within `--src` so a
+deliberate one-off does not imply or scan a vault. Colliding sources are refused
+before either writes or adopts images, even with `--overwrite`; organize their
+names before retrying. Other independent PDFs may continue, but the run exits
+nonzero. If the inferred vault cannot be inventoried completely, nothing is
+written. Existing case aliases of the canonical `Sources/Images` directory
+receive the same check on case-insensitive filesystems; spelling an arbitrary
+new scratch directory similarly does not make it a vault.
 
 **In a recursive run containing both a book and its chapters, extract the
 chapters and skip the whole book.** This pairing uses the shared naming
@@ -73,21 +84,37 @@ directory. For less common options, use the script's `--help`.
 
 Verified existing figures are skipped. `--overwrite` replaces **verified
 output only**; an unknown or conflicting occupant is protected in both batch
-and manual extraction. Malformed, protected, or symlinked ownership manifests
-block extraction. Do not delete sidecars or occupied images to force a run.
+and explicit-coordinate extraction. Malformed, protected, or symlinked
+ownership manifests block extraction. Do not delete sidecars or occupied images
+to force a run.
+Ownership is checked for the whole portable figure slot, not only the intended
+`.png` pathname. A `.jpg`, `.webp`, or other inventoried image with the same
+case/Unicode-normalized `<stem>_fig_<label>` identity blocks publication; an
+exact existing PNG proceeds only when its manifest digest verifies ownership.
+Every conflicting file is preserved and named in the occupied-output report.
 Read [review and repair](references/review-and-repair.md) when ownership or
 legacy migration needs attention.
 
-On the first batch run without a manifest, adoption is limited to complete
-legacy PNGs keyed to canonical, uniquely named PDFs within `--src`, and is
-reported. Other images remain unclaimed. For an initial migration of existing
-PDF figures, use the full intended `Sources/PDFs/` scope; a single-PDF run
-cannot establish ownership of other papers' figures.
+No occupied image is adopted automatically, even when its filename matches a
+canonical PDF stem: a Web Clipper image can occupy that same name. During an
+absent-manifest migration, inspect each confirmed historical extractor crop
+and select it exactly with the repeatable option
+`--adopt-legacy '<pdf_stem>:<figure_label>'`. The helper accepts only a complete
+PNG for one eligible, uniquely identified PDF in the selected scope, records
+only those named files, and reports every selection. Once a manifest exists,
+reconcile its records directly rather than using the migration option.
+Do not combine `--adopt-legacy` with `--overwrite`: establish ownership in one
+run, then request any re-extraction separately.
 
 Choose `--ed-prefix ED` when Supplementary Figure 1 and Extended Data Figure 1
 are distinct figures; the default folds both into `S`. `SI` remains distinct.
 Use `--keep-frame` if the publisher's surrounding frame should be preserved;
 otherwise detected frames are cropped away.
+
+Large folder summaries can exceed a host's displayed command output. Capture
+stdout and stderr into separate files in one unique scratch directory, retain
+the exit status, and read both files completely in slices. Truncated UI output
+is not the complete summary required by the next step.
 
 Output is `[pdf_stem]_fig_<label>.png`, with the exact PDF stem including
 `_src` and disambiguators. The label comes from the caption, **not extraction
@@ -107,8 +134,13 @@ an image reached disk.
 Use [review and repair](references/review-and-repair.md) for any flagged crop,
 caption collision, partial detection, missing figures, duplicate pixels, or
 ownership failure. Render the relevant pages and compare them with the PNGs.
-A “PARTIAL” result may be a real missed figure or a reference to another
-work; inspect it rather than assuming either. Duplicates are review findings,
+A “PARTIAL” result may be a real missed figure or an unresolved external
+reference; inspect it rather than assuming either. A canonically named split
+chapter's different-prefix figure references are reported separately only when
+its filename and every detected numeric caption establish one local chapter
+namespace and the exact caption is found in the one canonical same-book sibling
+chapter. An absent, ambiguous, unreadable, or nonmatching sibling leaves the
+reference PARTIAL. Duplicates are review findings,
 not authority to delete files.
 
 **Inspect figures from multi-column papers even when the summary is clean.**
@@ -117,17 +149,21 @@ generally, clean geometry checks do not establish visual correctness. If
 page/image viewing is unavailable, report the verification limit and leave
 uncertain crops unresolved.
 
-Caption text in a crop must be removed before a note embeds it. Set a manual
+Caption text in a crop must be removed before a note embeds it. Set an explicit
 crop when needed, then inspect the resulting PNG. Only after checking and
 repairing a flagged figure may you record `--mark-reviewed '<stem>:<fig>'`;
 that option suppresses future warnings and does not itself verify anything.
-The reference provides the crop and review commands with coordinate units.
+The explicit crop helper performs the same complete, portable whole-vault PDF
+basename check before reading an ownership sidecar or writing into canonical
+`Sources/Images`; it cannot bypass the batch namespace gate. An arbitrary
+external output keeps one-off behavior. The reference provides the crop and
+review commands with coordinate units.
 
 ### 4. Report completed and unresolved work
 
 Give the source scope, output folder, figures written, verified skips, and any
 legacy adoptions. Name skipped whole books, conflicting sources/occupants,
-failed PDFs, remaining warnings, and manual repairs. State what visual review
-was completed and any review marks recorded. Other PDFs may have succeeded
+failed PDFs, remaining warnings, and explicit crop repairs. State what visual
+review was completed and any review marks recorded. Other PDFs may have succeeded
 during a nonzero run; report that partial outcome without calling the whole
 request complete. Preserve originals, legacy panels, and all unrelated images.

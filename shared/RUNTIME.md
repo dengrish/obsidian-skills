@@ -8,8 +8,15 @@ to a vault, install Python packages, or enable browser tools.
 `SKILL.md` gives the active workflow and its decision gates. Follow its links
 when a step requires a reference; do not load every reference preemptively.
 [`CONVENTIONS.md`](CONVENTIONS.md) owns shared layout, naming, metadata and
-ownership rules. Start with §1 and §§1b–1c, then read the sections needed by
-the selected task. Its §§5 and 10 concern development and troubleshooting.
+ownership rules. Read its §§1b–1c safety rules before handling external
+values or content; consult §1's layout only when resolving folders or routes,
+then follow the active workflow's links for other subjects. Its §§5 and 10
+concern development and troubleshooting.
+
+Before creating, replacing, moving, or removing a vault artifact, follow the
+shared [safe-write protocol](SAFE_WRITES.md). A scan or preflight does not
+reserve a pathname, and permission to edit the version that was read does not
+authorize overwriting a later editor save.
 
 ## Resolve the paths before acting
 
@@ -46,7 +53,14 @@ for both installation and every script invocation:
 ```bash
 python3 -m venv '<venv>'
 '<venv>/bin/python' -m pip install -r '<plugin>/requirements.txt'
-'<venv>/bin/python' -c 'import pypdf, pymupdf, PIL'
+'<venv>/bin/python' - <<'PY'
+import pypdf
+import PIL
+try:
+    import pymupdf
+except ImportError:
+    import fitz
+PY
 ```
 
 Older supported PyMuPDF versions expose `fitz` instead of `pymupdf`; the

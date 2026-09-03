@@ -23,7 +23,11 @@ CLI
         --slug Teslo_Pancreatic_Cancer_2026 --index 3 --from-file '<rendered file>'
     python3 fetch_images.py rename --attachments '<vault>/Sources/Images' \\
         --sources '<vault>/Sources/PDFs' \\
+        --owner-note '<vault>/Articles/Old_Slug_2025.md' \\
         --old-slug Old_Slug_2025 --new-slug New_Slug_2026 [--dry-run]
+    python3 fetch_images.py dependencies --attachments '<vault>/Sources/Images' \\
+        --owner-note '<vault>/Articles/Old_Slug_2025.md' \\
+        --old-slug Old_Slug_2025
     python3 fetch_images.py selftest        # the built-in cases; offline
 
 `fetch` and `place` are the two halves of a figure this skill does not download
@@ -60,15 +64,31 @@ Guards, because this is the only script in the skill that writes into the vault:
   the one file, because the note's embeds are rewritten to a single slug and a
   half-renamed set leaves half of them resolving to nothing under a stem no
   re-run can reassemble. A case-only rename of the same file
-  (`teslo_…` → `Teslo_…` on a case-insensitive volume) is still allowed.
+  (`teslo_…` → `Teslo_…`) is still allowed when identity checks confirm it.
+  The final move and every rollback move are exclusive too, so a destination
+  or old name claimed after the plan is preserved and the mixed state is
+  reported for inspection.
   `download` refuses an occupied `<slug>_fig_<N>.*` slot the same way —
   `shutil.move` replaces silently, so a re-run with the wrong `--start`
   destroyed figures with no way back. Pass `--overwrite` for the documented
-  reprocess-in-place case.
-* **Only `http`, `https` and `data:`** — `urlopen` also speaks `file:` and
-  `ftp:`, and clipped markdown legitimately carries `file://` image links.
-  Redirect targets are re-checked at every hop. Hosts resolving to loopback,
-  link-local or private ranges are refused unless `--allow-private-hosts`.
+  reprocess-in-place case, together with `--owner-note` naming the unchanged
+  clipping note whose rendered embed exactly names the file being replaced.
+* **A changed clipping stem has no hidden dependants.** For a canonical vault,
+  `rename` inventories every other Markdown note for inbound old-note links and
+  old-image references before and during the operation. Any dependency or
+  incomplete scan refuses the set with exact blocker paths. `dependencies`
+  repeats that complete check before the old Articles path is retired.
+* **Only `http`, `https` and `data:`** — generic URL clients also speak `file:`
+  and `ftp:`, and clipped markdown legitimately carries `file://` image links.
+  Each HTTP(S) hop is resolved once, every answer is checked, and the actual
+  socket is pinned to that vetted address while the logical hostname remains in
+  Host and TLS SNI/certificate checks. Redirects repeat the process before any
+  target body is read. Loopback, link-local and private ranges are refused
+  unless `--allow-private-hosts`.
+* **Direct connections only** — ambient proxy settings are not used. Letting a
+  forward proxy resolve the logical hostname would recreate the DNS-rebinding
+  gap after local validation. Run this helper where direct egress is available;
+  `--allow-private-hosts` changes the address policy, not the proxy policy.
 * **Bounded downloads** — `--max-bytes` (25 MB default) and `--max-seconds`
   (120 s default, wall-clock across the whole transfer, unlike the per-socket
   `--timeout`), so a huge or slow-dripping response can't fill the vault.
@@ -82,11 +102,12 @@ Guards, because this is the only script in the skill that writes into the vault:
 Importable
     sniff_extension(head, content_type=None, url=None) -> str | None
     describe_bytes(head) -> str                        # "a JSON body", "a PDF", …
-    download_one(url, attachments, slug, index) -> dict
-    fetch_source(url, out=None) -> dict                # non-image, outside the vault
-    place_file(src, attachments, slug, index) -> dict  # rendered file -> the vault
+    download_one(url, attachments, slug, index, owner_note=None) -> dict
+    fetch_source(url, out=None) -> dict                # Lottie source, outside vault
+    place_file(src, attachments, slug, index, owner_note=None) -> dict
     rename_slug(attachments, old_slug, new_slug, dry_run=False,
-                *, sources=...) -> list[dict]
+                *, sources=..., owner_note=...) -> list[dict]
+    dependency_status(attachments, owner_note, old_slug) -> dict
     validate_slug(slug, what="--slug") -> str          # raises ValueError
     validate_index(index, what="figure index") -> int  # raises ValueError
     run_self_test() -> int                             # also `selftest`
@@ -97,25 +118,38 @@ failed (the JSON lists which). Stdlib only.
 
 import argparse
 import base64
+import binascii
+import errno
 import fnmatch
 import glob
+import hashlib
+import http.client
+import io
 import ipaddress
 import json
+import math
 import os
 import re
 import shutil
 import socket
+import ssl
+import stat
 import sys
 import tempfile
 import time
 import unicodedata
 import urllib.error
 import urllib.parse
-import urllib.request
+import warnings
+import zipfile
+
+_OBSIDIAN_SHARED_MODULES = ("atomic_move", "figure_state", "slugify", "yaml_scalars")
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
 _here = _os.path.dirname(_os.path.abspath(__file__))
+_required = tuple(_m + ".py" for _m in (
+    globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
 if _env:                                   # explicit override: authoritative, no fallback
     _tried = [_os.path.abspath(_os.path.expanduser(_env))]
@@ -124,26 +158,133 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
-_shared = next((_p for _p in _tried if _os.path.isdir(_p)), None)
+_missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
+            for _p in _tried if _os.path.isdir(_p)}
+_shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
 if _shared is None:
     raise SystemExit("""obsidian: cannot find the plugin's shared/scripts/ folder, which holds
-the one canonical copy of the conventions this script depends on.
+the one canonical copy of the conventions this script depends on. A usable
+folder must contain these required module(s): %s
 Looked for:
   %s
 Fix: install the whole plugin tree, or set OBSIDIAN_VAULT_SHARED to the
 shared/scripts/ directory (unset it to use the plugin-relative walk-up).
 Do NOT paste a second copy of the algorithm into this skill -- a divergent
-copy is the bug the shared layer exists to prevent.""" % "\n  ".join(_tried))
+copy is the bug the shared layer exists to prevent.""" % (
+    ", ".join(_required), "\n  ".join(
+        _p + (" (not a directory)" if _p not in _missing else
+              " (missing: %s)" % ", ".join(_missing[_p]))
+        for _p in _tried)))
 _sys.path[:] = [_p for _p in _sys.path if _p not in (_shared, _here)]
 _sys.path.insert(0, _shared)               # shared/scripts/ FIRST
-_sys.path.append(_here)                    # own dir LAST: a local copy cannot shadow it
+if _here != _shared:
+    _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
+from atomic_move import (MoveIncomplete, PublicationConflict, file_identity,
+                         link_noreplace, move_noreplace, remove_expected,
+                         replace_expected, publish_new, set_private_mode)
+from dedup_index import normalize_url, read_source
 from figure_state import MANIFEST_FILE, read_manifest
+from slugify import is_windows_device_stem
 
 
 def _name_key(name):
+    # Do not use casefold here. Expansions such as `ß` -> `ss` are one name on
+    # the default macOS volume but two legitimate names on a case-sensitive
+    # Linux volume. Filesystem identity below settles the expansion only where
+    # the active filesystem itself treats the spellings as equivalent.
+    return unicodedata.normalize("NFC", name).lower()
+
+
+def _manifest_name_key(name):
+    """Conservative identity for ownership records, including absent files."""
     return unicodedata.normalize("NFC", name).casefold()
+
+
+def _same_directory_name(directory, actual_name, wanted_name):
+    """Whether two spellings resolve to one directory entry on this filesystem."""
+    if _name_key(actual_name) == _name_key(wanted_name):
+        return True
+    try:
+        return os.path.samefile(os.path.join(directory, actual_name),
+                                os.path.join(directory, wanted_name))
+    except OSError:
+        return False
+
+
+def _inside_existing_directory(path, directory, *, require_all=False):
+    """Whether an existing path is physically beneath an existing directory.
+
+    Textual ``realpath`` prefixes are not filesystem identity. On a default
+    APFS volume, two differently-cased spellings can name the same directory
+    while ``realpath`` preserves the caller's spelling. The old place guard
+    consequently accepted an attachment passed through the other spelling and
+    later removed that live vault entry as its scratch source. Compare ancestor
+    directory identities instead, considering both the logical entry path and
+    a symlink-resolved source. Any unreadable identity fails closed.
+    """
+    try:
+        wanted = os.stat(directory)
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise ValueError("cannot identify the attachments folder %r safely: %s" %
+                         (directory, exc)) from exc
+    if not stat.S_ISDIR(wanted.st_mode):
+        raise ValueError("attachments path is not a directory: %r" % directory)
+    wanted_id = (wanted.st_dev, wanted.st_ino)
+
+    starts = [os.path.dirname(os.path.abspath(path))]
+    resolved = os.path.dirname(os.path.realpath(path))
+    if resolved not in starts:
+        starts.append(resolved)
+    results = []
+    for start in starts:
+        current = start
+        seen = set()
+        inside = False
+        while True:
+            try:
+                item = os.stat(current)
+            except OSError as exc:
+                raise ValueError("cannot establish whether %r is inside %r: %s" %
+                                 (path, directory, exc)) from exc
+            identity = (item.st_dev, item.st_ino)
+            if identity == wanted_id:
+                inside = True
+                break
+            if identity in seen:
+                raise ValueError("directory identity loop while checking whether %r "
+                                 "is inside %r" % (path, directory))
+            seen.add(identity)
+            parent = os.path.dirname(current)
+            if parent == current:
+                break
+            current = parent
+        results.append(inside)
+        if inside and not require_all:
+            return True
+    return all(results) if require_all else any(results)
+
+
+def _figure_stem_end(attachments, filename, slug, tail_pattern):
+    """End offset of ``slug`` in a matching figure basename, or None.
+
+    The suffix supplies a real directory entry for ``samefile``. This lets a
+    case-folding filesystem confirm an expansion such as Straße/STRASSE without
+    imposing that expansion on case-sensitive filesystems.
+    """
+    pattern = _name_key(tail_pattern)
+    for i, char in enumerate(filename):
+        if char != "_":
+            continue
+        suffix = filename[i:]
+        if not fnmatch.fnmatchcase(_name_key(suffix), pattern):
+            continue
+        if _same_directory_name(attachments, filename, slug + suffix):
+            return i
+    return None
 
 
 def _glob_slug(attachments, slug, tail):
@@ -153,11 +294,11 @@ def _glob_slug(attachments, slug, tail):
     Scanning the literal directory also keeps brackets in a vault path from
     being interpreted as a glob expression.
     """
-    pattern = glob.escape(_name_key(slug)) + _name_key(tail)
     try:
         with os.scandir(attachments) as entries:
             return sorted(entry.path for entry in entries
-                          if fnmatch.fnmatchcase(_name_key(entry.name), pattern))
+                          if _figure_stem_end(attachments, entry.name, slug, tail)
+                          is not None)
     except FileNotFoundError:
         return []
 
@@ -167,7 +308,18 @@ UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
 ALLOWED_SCHEMES = {"http", "https", "data"}
 DEFAULT_MAX_BYTES = 25 * 1024 * 1024
 DEFAULT_MAX_SECONDS = 120
+MAX_REDIRECTS = 10
+REDIRECT_STATUSES = frozenset((301, 302, 303, 307, 308))
 CHUNK = 64 * 1024
+
+# Ambient HTTP(S) proxies are deliberately not consulted. A forward proxy that
+# receives the logical hostname can resolve it again after this process vets
+# DNS, recreating the exact rebinding gap this transport closes. Supporting a
+# proxy safely would require pinning the proxy connection *and* defining a
+# protocol that makes the proxy connect to the vetted target address while the
+# origin Host/SNI stay unchanged. The stdlib proxy path makes no such promise,
+# so this helper is direct-only instead of silently weakening its address guard.
+PROXY_POLICY = "direct-only"
 
 #: Every canonical extension this producer can return. CONVENTIONS.md §8a
 #: publishes the same set; the convention harness compares them and verifies
@@ -391,33 +543,758 @@ def _temp_path():
     return path
 
 
-def _publish_file(src, final, overwrite=False, staging_parent=None, mode=0o644,
-                  before_publish=None):
-    """Publish complete bytes without risking the previous destination.
+def _stable_regular_snapshot(path, copy_to=None, copy_mode=None):
+    """Read one regular file consistently; optionally stage the same bytes.
 
-    A cross-filesystem shutil.move copies onto the final name before unlinking
-    its source. An interrupted copy exposes a partial image and, on overwrite,
-    destroys the old one. Stage beside the destination folder instead, then
-    publish on that filesystem. New files use an exclusive hard link so a
-    competing writer cannot be overwritten between the check and publication.
+    The returned equality key intentionally omits ctime and link count: the
+    guarded publication protocol creates private hard links, which changes
+    those fields without changing the authorized content. They remain part of
+    the before/after read stability check.
     """
+    path = os.path.abspath(path)
+    try:
+        before = os.lstat(path)
+    except OSError as exc:
+        raise OSError(errno.ENOENT, "%r is missing or unreadable (%s)" %
+                      (path, exc), path) from exc
+    if not stat.S_ISREG(before.st_mode):
+        raise OSError(errno.EINVAL, "%r is a symlink or non-regular file" % path,
+                      path)
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise OSError(getattr(exc, "errno", None) or errno.EIO,
+                      "%r changed or could not be opened safely (%s)" %
+                      (path, exc), path) from exc
+
+    digest = hashlib.sha256()
+    destination = None
+    try:
+        with os.fdopen(descriptor, "rb") as source:
+            opened_before = os.fstat(source.fileno())
+            if (not stat.S_ISREG(opened_before.st_mode)
+                    or file_identity(path) != (
+                        opened_before.st_dev, opened_before.st_ino,
+                        stat.S_IFMT(opened_before.st_mode))):
+                raise OSError(errno.EBUSY, "%r changed while it was opened" % path,
+                              path)
+            if copy_to is not None:
+                destination = open(copy_to, "xb")
+            try:
+                while True:
+                    chunk = source.read(CHUNK)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                    if destination is not None:
+                        destination.write(chunk)
+                if destination is not None:
+                    set_private_mode(destination, copy_to, copy_mode)
+                    destination.flush()
+                    os.fsync(destination.fileno())
+                opened_after = os.fstat(source.fileno())
+            finally:
+                if destination is not None:
+                    destination.close()
+    except Exception:
+        if copy_to is not None:
+            try:
+                os.unlink(copy_to)
+            except OSError:
+                pass
+        raise
+
+    try:
+        after = os.lstat(path)
+    except OSError as exc:
+        if copy_to is not None:
+            try:
+                os.unlink(copy_to)
+            except OSError:
+                pass
+        raise OSError(getattr(exc, "errno", None) or errno.EIO,
+                      "%r changed while it was read (%s)" % (path, exc),
+                      path) from exc
+    stable = lambda item: (
+        item.st_dev, item.st_ino, stat.S_IFMT(item.st_mode), item.st_size,
+        getattr(item, "st_mtime_ns", int(item.st_mtime * 1e9)),
+        getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)),
+    )
+    if not (stable(before) == stable(opened_before) == stable(opened_after)
+            == stable(after)):
+        if copy_to is not None:
+            try:
+                os.unlink(copy_to)
+            except OSError:
+                pass
+        raise OSError(errno.EBUSY,
+                      "%r changed while its bytes were copied" % path, path)
+    snapshot = (
+        (after.st_dev, after.st_ino, stat.S_IFMT(after.st_mode)),
+        digest.hexdigest(), stat.S_IMODE(after.st_mode), after.st_size,
+    )
+    if copy_to is not None:
+        staged = _stable_regular_snapshot(copy_to)
+        if (staged[1], staged[3]) != (snapshot[1], snapshot[3]):
+            raise OSError(errno.EIO, "staged bytes do not match %r" % path,
+                          copy_to)
+    return snapshot
+
+
+def _body_after_frontmatter(text):
+    """Return the body behind a closed leading YAML block, or ``None``.
+
+    This deliberately follows ``dedup_index.read_source``'s two harmless
+    tolerances (a BOM, already removed by ``utf-8-sig``, and leading blank
+    lines). Ownership evidence never comes from frontmatter text itself.
+    """
+    lines = text.splitlines(keepends=True)
+    opening = None
+    for index, line in enumerate(lines):
+        if line.strip():
+            opening = index
+            break
+    if opening is None or lines[opening].strip() != "---":
+        return None
+    for index in range(opening + 1, len(lines)):
+        if lines[index].strip() == "---":
+            return "".join(lines[index + 1:])
+    return None
+
+
+def _has_current_sources_key(text):
+    """Whether the closed leading YAML block has one top-level ``sources``."""
+    lines = text.splitlines()
+    opening = next((index for index, line in enumerate(lines) if line.strip()), None)
+    if opening is None or lines[opening].strip() != "---":
+        return False
+    count = 0
+    for line in lines[opening + 1:]:
+        if line.strip() == "---":
+            return count == 1
+        if re.match(r"\Asources\s*:", line, re.IGNORECASE):
+            count += 1
+    return False
+
+
+def _mask_span(text, opening, closing):
+    """Blank delimited spans without changing lines or surrounding text."""
+    chars = list(text)
+    cursor = 0
+    while True:
+        start = text.find(opening, cursor)
+        if start < 0:
+            break
+        end = text.find(closing, start + len(opening))
+        stop = len(text) if end < 0 else end + len(closing)
+        for index in range(start, stop):
+            if chars[index] not in "\r\n":
+                chars[index] = " "
+        if end < 0:
+            break
+        cursor = stop
+    return "".join(chars)
+
+
+def _mask_inline_code(text):
+    """Blank CommonMark-style backtick spans, including multiline spans."""
+    chars = list(text)
+    cursor = 0
+    while cursor < len(text):
+        start = text.find("`", cursor)
+        if start < 0:
+            break
+        width = 1
+        while start + width < len(text) and text[start + width] == "`":
+            width += 1
+        marker = "`" * width
+        end = text.find(marker, start + width)
+        stop = len(text) if end < 0 else end + width
+        for index in range(start, stop):
+            if chars[index] not in "\r\n":
+                chars[index] = " "
+        if end < 0:
+            break
+        cursor = stop
+    return "".join(chars)
+
+
+def _mask_html_literal_blocks(text):
+    """Blank raw HTML regions whose contents render as code or non-content."""
+    chars = list(text)
+    cursor = 0
+    opening = re.compile(r"<(pre|code|script|style)\b[^>]*>", re.IGNORECASE)
+    while True:
+        match = opening.search(text, cursor)
+        if match is None:
+            break
+        closing = re.compile(r"</%s\s*>" % re.escape(match.group(1)),
+                             re.IGNORECASE)
+        end_match = closing.search(text, match.end())
+        stop = len(text) if end_match is None else end_match.end()
+        for index in range(match.start(), stop):
+            if chars[index] not in "\r\n":
+                chars[index] = " "
+        if end_match is None:
+            break
+        cursor = stop
+    return "".join(chars)
+
+
+def _rendered_embed_basenames(body):
+    """Return filename-only Obsidian image embeds outside code/comments.
+
+    A clipped article can quote ``![[name.png]]`` in prose, code, or comments.
+    Those strings are not rendered attachment references and cannot prove that
+    the note owns a same-named file. False negatives are intentional here: an
+    owner check may refuse and ask for inspection, but it must never take a
+    shared-folder file based on inert source text.
+    """
+    visible = _mask_inline_code(_mask_html_literal_blocks(
+        _mask_span(_mask_span(body, "<!--", "-->"), "%%", "%%")))
+    out = []
+    fence = None
+    for line in visible.splitlines(keepends=True):
+        stripped = line.rstrip("\r\n")
+        if fence is not None:
+            close = re.match(r" {0,3}(%s{%d,})[ \t]*$" %
+                             (re.escape(fence[0]), fence[1]), stripped)
+            if close:
+                fence = None
+            continue
+        opened = re.match(r" {0,3}(`{3,}|~{3,})", stripped)
+        if opened:
+            marker = opened.group(1)
+            fence = (marker[0], len(marker))
+            continue
+        if line.startswith("\t") or line.startswith("    "):
+            continue
+        for match in re.finditer(r"(?<!\\)!\[\[([^\]\r\n]+)\]\]", line):
+            target = match.group(1).split("|", 1)[0].split("#", 1)[0].strip()
+            # The plugin's attachment convention is filename-only. Accepting
+            # a path-qualified target and reducing it to basename would let a
+            # reference to some other folder claim this shared flat namespace.
+            if (not target or "/" in target or "\\" in target
+                    or target in (".", "..")):
+                continue
+            out.append(target)
+    return frozenset(out)
+
+
+_DEPENDENCY_SKIP_DIRS = frozenset((".git", ".obsidian", ".trash", "node_modules"))
+_MARKDOWN_LINK_TARGET = re.compile(
+    r"!?\[[^\]\r\n]*\]\(\s*(?:<(?P<angle>[^>\r\n]+)>|(?P<plain>[^)\s\r\n]+))")
+_MARKDOWN_REFERENCE_TARGET = re.compile(
+    r"^[ \t]{0,3}\[[^\]\r\n]+\]:[ \t]*(?:<(?P<angle>[^>\r\n]+)>|(?P<plain>\S+))",
+    re.MULTILINE)
+_HTML_REFERENCE_TARGET = re.compile(
+    r"\b(?:src|href)[ \t]*=[ \t]*(?:\"([^\"\r\n]+)\"|'([^'\r\n]+)')",
+    re.IGNORECASE)
+
+
+def _visible_markdown(text):
+    """Mask literal/comment regions while retaining rendered link syntax."""
+    visible = _mask_inline_code(_mask_html_literal_blocks(
+        _mask_span(_mask_span(text, "<!--", "-->"), "%%", "%%")))
+    lines = visible.splitlines(keepends=True)
+    out = []
+    fence = None
+    for line in lines:
+        stripped = line.rstrip("\r\n")
+        if fence is not None:
+            close = re.match(r" {0,3}(%s{%d,})[ \t]*$" %
+                             (re.escape(fence[0]), fence[1]), stripped)
+            if close:
+                fence = None
+            out.append("\n" if line.endswith(("\n", "\r")) else "")
+            continue
+        opened = re.match(r" {0,3}(`{3,}|~{3,})", stripped)
+        if opened:
+            marker = opened.group(1)
+            fence = (marker[0], len(marker))
+            out.append("\n" if line.endswith(("\n", "\r")) else "")
+            continue
+        if line.startswith("\t") or line.startswith("    "):
+            out.append("\n" if line.endswith(("\n", "\r")) else "")
+            continue
+        out.append(line)
+    return "".join(out)
+
+
+def _local_target_basename(target, *, wikilink=False):
+    """Return the basename of a local Markdown target, never a remote URL."""
+    target = str(target).strip()
+    if wikilink:
+        # An escaped pipe is still the display separator in an Obsidian table.
+        target = re.split(r"(?<!\\)\||\\\|", target, maxsplit=1)[0]
+        target = target.split("#", 1)[0].strip()
+    else:
+        target = target.strip("<>")
+        target = target.split("#", 1)[0].split("?", 1)[0]
+    if not target or target.startswith("//") \
+            or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", target):
+        return None
+    try:
+        target = urllib.parse.unquote(target)
+    except (UnicodeError, ValueError):
+        return None
+    target = target.replace("\\", "/").rstrip("/")
+    return target.rsplit("/", 1)[-1].strip() or None
+
+
+def _markdown_dependency_names(text, image_names, old_slug):
+    """Known old image/note targets referenced by rendered Markdown."""
+    visible = _visible_markdown(text)
+    images = {_manifest_name_key(name): name for name in image_names}
+    note_key = _manifest_name_key(old_slug)
+    found = set()
+
+    def inspect(target, wikilink=False):
+        base = _local_target_basename(target, wikilink=wikilink)
+        if not base:
+            return
+        image = images.get(_manifest_name_key(base))
+        if image is not None:
+            found.add(image)
+        stem, extension = os.path.splitext(base)
+        if ((_manifest_name_key(base) == note_key and not extension)
+                or (extension.casefold() == ".md"
+                    and _manifest_name_key(stem) == note_key)):
+            found.add(old_slug + ".md")
+
+    for match in re.finditer(r"(?<!\\)!?\[\[([^\]\r\n]+)\]\]", visible):
+        inspect(match.group(1), wikilink=True)
+    for pattern in (_MARKDOWN_LINK_TARGET, _MARKDOWN_REFERENCE_TARGET):
+        for match in pattern.finditer(visible):
+            inspect(match.group("angle") or match.group("plain"))
+    for match in _HTML_REFERENCE_TARGET.finditer(visible):
+        inspect(match.group(1) or match.group(2))
+    return sorted(found, key=lambda item: (_manifest_name_key(item), item))
+
+
+def _stable_markdown_text(path):
+    """Read one complete UTF-8 Markdown entry and reject concurrent changes."""
+    def stable(item):
+        return (item.st_dev, item.st_ino, stat.S_IFMT(item.st_mode), item.st_size,
+                getattr(item, "st_mtime_ns", int(item.st_mtime * 1e9)),
+                getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)))
+
+    entry_before = os.lstat(path)
+    target_before = os.stat(path)
+    if not stat.S_ISREG(target_before.st_mode):
+        raise ValueError("not a regular Markdown file")
+    with open(path, "rb") as source:
+        opened_before = os.fstat(source.fileno())
+        raw = source.read()
+        opened_after = os.fstat(source.fileno())
+    entry_after = os.lstat(path)
+    target_after = os.stat(path)
+    if (stable(entry_before) != stable(entry_after)
+            or not (stable(target_before) == stable(opened_before)
+                    == stable(opened_after) == stable(target_after))):
+        raise ValueError("changed while the dependency inventory read it")
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError("is not complete valid UTF-8 (%s)" % exc) from exc
+
+
+def _vault_markdown_files(vault):
+    """Yield every vault Markdown file, following folder links without cycles."""
+    def failed(exc):
+        raise ValueError("cannot scan vault directory %r: %s" %
+                         (getattr(exc, "filename", None) or vault, exc)) from exc
+
+    seen = set()
+    for root, dirs, files in os.walk(vault, followlinks=True, onerror=failed):
+        try:
+            item = os.stat(root)
+        except OSError as exc:
+            raise ValueError("cannot identify vault directory %r: %s" %
+                             (root, exc)) from exc
+        identity = (item.st_dev, item.st_ino)
+        if identity in seen:
+            dirs[:] = []
+            continue
+        seen.add(identity)
+        dirs[:] = [name for name in dirs
+                   if name.casefold() not in _DEPENDENCY_SKIP_DIRS]
+        for name in files:
+            if name.casefold().endswith(".md"):
+                yield os.path.join(root, name)
+
+
+def _same_logical_note(path, owner_path):
+    """Identity-safe match for one directory entry, not a foreign hard link."""
+    if (_manifest_name_key(os.path.basename(path))
+            != _manifest_name_key(os.path.basename(owner_path))):
+        return False
+    try:
+        return (os.path.samefile(path, owner_path)
+                and os.path.samefile(os.path.dirname(path),
+                                     os.path.dirname(owner_path)))
+    except OSError as exc:
+        raise ValueError("cannot distinguish owner note %r from %r: %s" %
+                         (owner_path, path, exc)) from exc
+
+
+def _canonical_vault_root(owner_path, attachments):
+    """Infer the vault only when owner and images are the canonical pair."""
+    return _bound_attachment_vault_root(owner_path, attachments)
+
+
+def _vault_dependency_blockers(owner, old_slug, image_names):
+    """External old-note/image references, or incomplete-scan blockers."""
+    vault = owner.get("vault")
+    if vault is None:
+        return []
+    blockers = []
+    try:
+        paths = _vault_markdown_files(vault)
+        for path in paths:
+            if _same_logical_note(path, owner["path"]):
+                continue
+            try:
+                text = _stable_markdown_text(path)
+            except (OSError, ValueError, UnicodeError) as exc:
+                blockers.append({"path": os.path.abspath(path),
+                                 "error": "cannot scan Markdown dependency: %s" % exc})
+                continue
+            found = _markdown_dependency_names(text, image_names, old_slug)
+            if found:
+                blockers.append({"path": os.path.abspath(path),
+                                 "references": found})
+    except (OSError, ValueError, UnicodeError) as exc:
+        path = getattr(exc, "filename", None) or vault
+        blockers.append({"path": os.path.abspath(path),
+                         "error": "cannot complete vault Markdown inventory: %s" % exc})
+    return sorted(blockers, key=lambda row: (
+        _manifest_name_key(row["path"]), row["path"]))
+
+
+def _dependency_error(blockers):
+    details = []
+    for blocker in blockers:
+        reason = blocker.get("error") or ("references " +
+                 ", ".join(blocker.get("references", ())))
+        details.append("%s (%s)" % (blocker["path"], reason))
+    return ("external Markdown dependencies block this changed-slug rename; "
+            "rewrite them through a separately authorized complete dependency "
+            "operation, or retain the old note and image paths: " +
+            "; ".join(details))
+
+
+def _attachment_vault_roots(attachments):
+    """Logical and physical vault-root candidates for Sources/Images.
+
+    A vault may symlink its whole ``Sources`` directory to a storage location.
+    The logical path then owns the vault's ``Articles`` folder while the real
+    target usually has none. Retaining both candidates lets owner identity
+    choose that logical vault without letting an alias between two complete
+    vaults borrow either one's note as attachment ownership evidence.
+    """
+    logical = os.path.abspath(attachments)
+    resolved = os.path.realpath(logical)
+    roots = []
+    for path in (logical, resolved):
+        parent = os.path.dirname(path)
+        if (os.path.basename(path).casefold() == "images"
+                and os.path.basename(parent).casefold() == "sources"):
+            root = os.path.dirname(parent)
+            if root not in roots:
+                roots.append(root)
+    return tuple(roots)
+
+
+def _bound_attachment_vault_root(owner_path, attachments):
+    """Bind canonical attachments to exactly one owner ``Articles`` identity."""
+    roots = _attachment_vault_roots(attachments)
+    if not roots:
+        return None
+    owner_parent = os.path.dirname(os.path.abspath(owner_path))
+    try:
+        owner_stat = os.stat(owner_parent)
+    except OSError as exc:
+        raise ValueError("cannot establish the owner note's Articles/ folder "
+                         "identity: %s" % exc) from exc
+    if not stat.S_ISDIR(owner_stat.st_mode):
+        raise ValueError("--owner-note parent is not an Articles directory")
+    owner_identity = owner_stat.st_dev, owner_stat.st_ino
+
+    candidates = []
+    for root in roots:
+        articles = os.path.join(root, "Articles")
+        try:
+            item = os.stat(articles)
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise ValueError("cannot establish the owner note's vault binding "
+                             "through %r: %s" % (articles, exc)) from exc
+        if not stat.S_ISDIR(item.st_mode):
+            raise ValueError("canonical vault path is not an Articles directory: "
+                             "%r" % articles)
+        candidates.append((root, (item.st_dev, item.st_ino)))
+
+    identities = {identity for _root, identity in candidates}
+    if len(identities) > 1:
+        raise ValueError(
+            "--attachments resolves between multiple vaults with distinct "
+            "Articles/ folders; use the canonical Sources/Images path for the "
+            "owner note's vault")
+    matches = [root for root, identity in candidates
+               if identity == owner_identity]
+    if not matches:
+        raise ValueError("--owner-note is not in the Articles/ folder for this "
+                         "Sources/Images vault")
+
+    lexical_owner_root = os.path.dirname(owner_parent)
+    chosen = (lexical_owner_root if lexical_owner_root in matches else matches[0])
+    # Preserve the established canonical spelling used in blocker reports
+    # (`/private/var/...` on macOS), while resolving only the vault root itself;
+    # a symlinked Sources/ child still stays attached to this logical vault.
+    return os.path.realpath(chosen)
+
+
+def _owner_namespace(owner_note, slug, attachments):
+    """Validate the note name, its unique Articles slot, and vault binding."""
+    path = os.path.abspath(os.fspath(owner_note))
+    parent = os.path.dirname(path)
+    expected = slug + ".md"
+    if os.path.basename(parent).casefold() != "articles":
+        raise ValueError("--owner-note must be a direct child of Articles/: %r" % path)
+    if _manifest_name_key(os.path.basename(path)) != _manifest_name_key(expected):
+        raise ValueError("--owner-note must be Articles/%s for this operation" % expected)
+
+    # Bind canonical <vault>/Sources/Images paths to that same vault's
+    # Articles folder. Noncanonical attachment folders remain usable for
+    # isolated tests and deliberate library calls, but still require an
+    # Articles direct child and all positive evidence below.
+    # A noncanonical attachment folder returns None and keeps the documented
+    # isolated-library behavior. A canonical logical or physical path must bind
+    # to this exact Articles directory, and ambiguity raises here.
+    _bound_attachment_vault_root(path, attachments)
+
+    try:
+        with os.scandir(parent) as entries:
+            matches = [entry.path for entry in entries
+                       if _manifest_name_key(entry.name)
+                       == _manifest_name_key(expected)]
+    except OSError as exc:
+        raise ValueError("cannot inventory the owner note's Articles folder: %s" % exc) from exc
+    if len(matches) != 1:
+        raise ValueError("Articles/%s has %d portable name occupants; ownership "
+                         "is ambiguous" % (expected, len(matches)))
+    try:
+        if not os.path.samefile(path, matches[0]):
+            raise ValueError("--owner-note does not identify the unique Articles/%s" % expected)
+    except OSError as exc:
+        raise ValueError("--owner-note cannot be identified safely: %s" % exc) from exc
+    return path
+
+
+def _load_clipping_owner(owner_note, slug, attachments):
+    """Snapshot exact clipping-note evidence for a destructive image action."""
+    if not owner_note:
+        raise ValueError("--owner-note is required to overwrite or rename clipping images")
+    path = _owner_namespace(owner_note, slug, attachments)
+    with tempfile.TemporaryDirectory(prefix="clipping_owner.") as scratch:
+        copied = os.path.join(scratch, "owner.md")
+        snapshot = _stable_regular_snapshot(path, copy_to=copied, copy_mode=0o600)
+        try:
+            with open(copied, "r", encoding="utf-8-sig") as fh:
+                note_text = fh.read()
+        except (OSError, UnicodeDecodeError) as exc:
+            raise ValueError("--owner-note is not a stable UTF-8 clipping note: %s" % exc) from exc
+        origin = read_source(copied)
+        if (not _has_current_sources_key(note_text) or not origin
+                or not normalize_url(origin)):
+            raise ValueError("--owner-note does not have a valid HTTP(S) URL as "
+                             "its first current sources item")
+        body = _body_after_frontmatter(note_text)
+        if body is None:
+            raise ValueError("--owner-note has no closed leading YAML frontmatter")
+        embeds = _rendered_embed_basenames(body)
+    return {"path": path, "slug": slug, "attachments": attachments,
+            "snapshot": snapshot, "embeds": embeds,
+            "vault": _canonical_vault_root(path, attachments)}
+
+
+def _validate_clipping_owner(owner):
+    """Refuse if either the owner bytes or its portable note slot changed."""
+    path = _owner_namespace(owner["path"], owner["slug"], owner["attachments"])
+    current = _stable_regular_snapshot(path)
+    if current != owner["snapshot"]:
+        raise ValueError("--owner-note changed during the image operation; refusing stale ownership")
+
+
+def _require_owned_attachment(owner, filename):
+    _validate_clipping_owner(owner)
+    if filename not in owner["embeds"]:
+        raise ValueError("%s is not an exact rendered filename-only embed in %s; "
+                         "refusing to claim an unattributed attachment" %
+                         (filename, owner["path"]))
+
+
+def _restore_after_slot_conflict(final, published, predecessor, predecessor_snapshot,
+                                 stage, stage_parent):
+    """Conditionally undo this publication after a late extension twin."""
+    rollback = os.path.join(stage, ".slot-conflict-rollback")
+    os.mkdir(rollback)
+    if predecessor is None:
+        remove_expected(final, published, _stable_regular_snapshot, rollback,
+                        stage_parent=stage_parent,
+                        recovery_prefix=".clipping-recovery-")
+        return
+    if not os.path.lexists(final):
+        link_noreplace(predecessor, final)
+        if _stable_regular_snapshot(final) != predecessor_snapshot:
+            raise PublicationConflict(
+                "%s could not be verified after restoration" % final,
+                recovery_path=predecessor, keep_stage=True)
+        return
+    replace_expected(predecessor, final, published, _stable_regular_snapshot,
+                     rollback, stage_parent=stage_parent,
+                     recovery_prefix=".clipping-recovery-")
+
+
+def _remove_copied_source(src, expected):
+    """Remove only the exact source copied into the publication stage."""
+    src = os.path.abspath(src)
+    parent = os.path.dirname(src) or "."
+    try:
+        stage = tempfile.mkdtemp(prefix=".clipping-source-cleanup.", dir=parent)
+    except OSError as exc:
+        return ("published successfully, but retained scratch source %r because "
+                "conditional cleanup could not be staged: %s" % (src, exc))
+    keep_stage = False
+    try:
+        try:
+            removed = remove_expected(
+                src, expected, _stable_regular_snapshot, stage,
+                stage_parent=parent, recovery_prefix=".clipping-recovery-")
+        except PublicationConflict as exc:
+            keep_stage = exc.keep_stage
+            return ("published successfully, but retained the changed scratch "
+                    "source %r%s: %s" %
+                    (src, " (recovery: %s)" % exc.recovery_path
+                     if exc.recovery_path else "", exc))
+        except (OSError, UnicodeError) as exc:
+            # The conditional helper normally reports every partial state as a
+            # PublicationConflict. Preserve the private stage as a last-resort
+            # recovery path if the host raises outside that contract.
+            keep_stage = True
+            return ("published successfully, but scratch-source cleanup failed; "
+                    "preserve %s and %r: %s" % (stage, src, exc))
+        if not removed:
+            return None
+        displaced = os.path.join(stage, ".atomic-displaced")
+        try:
+            unchanged = _stable_regular_snapshot(displaced) == expected
+        except (OSError, ValueError):
+            unchanged = False
+        if unchanged:
+            return None
+        try:
+            link_noreplace(displaced, src)
+            restored = "restored at its original path"
+        except OSError as exc:
+            keep_stage = True
+            restored = "preserved at %s (%s)" % (displaced, exc)
+        return ("published successfully, but the scratch source changed during "
+                "conditional cleanup and was %s" % restored)
+    finally:
+        if not keep_stage:
+            shutil.rmtree(stage, ignore_errors=True)
+
+
+def _publish_file(src, final, overwrite=False, staging_parent=None, mode=0o644,
+                  before_publish=None, after_publish=None,
+                  expected_source=None):
+    """Publish complete bytes and conditionally remove the copied source.
+
+    New names use exclusive creation. An overwrite displaces and revalidates
+    only the exact regular file inspected on entry, preserves its permissions,
+    and reads the replacement back before success. The optional callbacks let
+    an image caller guard its broader ``stem_fig_N.*`` namespace on both sides
+    of the per-file publication; a late extension twin triggers conditional
+    rollback rather than leaving two current files.
+    """
+    src = os.path.abspath(src)
     final = os.path.abspath(final)
-    parent = staging_parent or os.path.dirname(final)
-    with tempfile.TemporaryDirectory(prefix=".clipping-stage.", dir=parent) as stage:
+    parent = os.path.abspath(staging_parent or os.path.dirname(final) or ".")
+    if os.path.lexists(final):
+        if not overwrite:
+            raise FileExistsError(final)
+        target_expected = _stable_regular_snapshot(final)
+        publish_mode = target_expected[2]
+    else:
+        target_expected = None
+        publish_mode = mode
+    try:
+        if os.path.samefile(src, final):
+            raise ValueError("source and publication path are the same file")
+    except FileNotFoundError:
+        pass
+
+    stage = tempfile.mkdtemp(prefix=".clipping-stage.", dir=parent)
+    keep_stage = False
+    predecessor = None
+    predecessor_snapshot = None
+    try:
         staged = os.path.join(stage, "complete")
-        shutil.copyfile(src, staged)
-        os.chmod(staged, mode)
+        source_observed = _stable_regular_snapshot(
+            src, copy_to=staged, copy_mode=publish_mode)
+        if (expected_source is not None
+                and source_observed != expected_source):
+            raise PublicationConflict(
+                "%s changed after its bytes were inspected; refusing to "
+                "publish a different render" % src)
         if before_publish is not None:
             before_publish()
-        if overwrite:
-            os.replace(staged, final)
+        if target_expected is None:
+            published = publish_new(
+                staged, final, _stable_regular_snapshot, parent,
+                recovery_prefix=".clipping-recovery-")
         else:
-            os.link(staged, final)
-    try:
-        os.remove(src)
-    except OSError as exc:
-        return "published successfully, but could not remove scratch source %r: %s" % (src, exc)
-    return None
+            predecessor = os.path.join(stage, "predecessor")
+            link_noreplace(final, predecessor)
+            predecessor_snapshot = _stable_regular_snapshot(predecessor)
+            if predecessor_snapshot != target_expected:
+                raise PublicationConflict(
+                    "%s changed before its predecessor could be retained" % final)
+            published = replace_expected(
+                staged, final, target_expected, _stable_regular_snapshot,
+                stage, stage_parent=parent,
+                recovery_prefix=".clipping-recovery-")
+        if after_publish is not None:
+            try:
+                after_publish()
+            except Exception as conflict:
+                try:
+                    _restore_after_slot_conflict(
+                        final, published, predecessor, predecessor_snapshot,
+                        stage, parent)
+                except (OSError, PublicationConflict) as rollback_exc:
+                    keep_stage = True
+                    raise PublicationConflict(
+                        "late figure-slot conflict (%s); rollback was incomplete: "
+                        "%s; preserve %s" % (conflict, rollback_exc, stage),
+                        recovery_path=(getattr(rollback_exc, "recovery_path", None)
+                                       or stage), keep_stage=True) from rollback_exc
+                raise
+        return _remove_copied_source(src, source_observed)
+    except PublicationConflict as exc:
+        keep_stage = keep_stage or exc.keep_stage
+        if keep_stage and not exc.recovery_path:
+            exc.recovery_path = stage
+        raise
+    finally:
+        if not keep_stage:
+            shutil.rmtree(stage, ignore_errors=True)
 
 
 def validate_slug(slug, what="--slug"):
@@ -431,10 +1308,14 @@ def validate_slug(slug, what="--slug"):
     if slug is None or not str(slug).strip():
         raise ValueError(f"{what} is empty — refusing to write '<empty>_fig_N.ext'")
     slug = str(slug)
-    for bad in ("/", "\\", "\x00"):
-        if bad in slug:
-            raise ValueError(f"{what} contains {bad!r}: {slug!r} — a slug is a "
-                             "filename stem, not a path")
+    invalid = [ch for ch in slug
+               if ord(ch) < 0x20 or ord(ch) == 0x7f
+               or ch in '<>:"/\\|?*']
+    if invalid:
+        bad = invalid[0]
+        raise ValueError(f"{what} contains Windows-forbidden filename character "
+                         f"{bad!r}: {slug!r} — use the portable slug returned by "
+                         "the clipping slug helper")
     if ".." in slug:
         raise ValueError(f"{what} contains '..': {slug!r} — a slug is a "
                          "filename stem, not a path")
@@ -445,6 +1326,12 @@ def validate_slug(slug, what="--slug"):
     if not slug.strip(". "):
         raise ValueError(f"{what} is {slug!r} — that names no note; a slug is a "
                          "filename stem, not a directory")
+    if slug.endswith((".", " ")):
+        raise ValueError(f"{what} ends in a dot or space: {slug!r} — Windows "
+                         "cannot store that filename portably")
+    if is_windows_device_stem(slug):
+        raise ValueError(f"{what} is reserved as a Windows device filename: "
+                         f"{slug!r} — qualify the clipping slug")
     return slug
 
 
@@ -465,68 +1352,142 @@ def _positive_index_arg(value):
     return index
 
 
+def _positive_int_arg(value):
+    """Argparse adapter for positive transfer byte/time limits."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError("must be a positive integer") from exc
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def _validate_transfer_limits(timeout, max_bytes, max_seconds):
+    """Reject disabled or ill-typed resource bounds on programmatic calls."""
+    for value, name in ((timeout, "timeout"), (max_seconds, "max_seconds")):
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or value <= 0):
+            raise ValueError(f"{name} must be a positive finite number")
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes <= 0:
+        raise ValueError("max_bytes must be a positive integer")
+
+
 def _ensure_within(directory, path):
     """Assert `path` really lands inside `directory`; return the resolved path."""
     root = os.path.realpath(directory)
     real = os.path.realpath(path)
-    if not real.startswith(root + os.sep):
+    if not _inside_existing_directory(path, directory, require_all=True):
         raise ValueError(f"refusing to touch {real!r}: outside the attachments "
                          f"folder {root!r}")
     return real
 
 
-def _reject_non_public(host, scheme="https"):
-    """Refuse a host that resolves to loopback, link-local or private space.
+class _VettedTarget:
+    """One parsed URL hop and the exact socket addresses vetted for that hop."""
 
-    Best-effort, and racy by construction — a KNOWN, ACCEPTED limitation: the
-    verdict comes from this resolution, while the fetch itself resolves the
-    name again inside urlopen with nothing pinning the vetted address.  A host
-    whose DNS answers a public address here and a private one there (deliberate
-    rebinding, or plain short-TTL round-robin) is therefore fetched despite the
-    refusal.  Closing that means resolving once and connecting by IP with a
-    Host header, which urllib does not offer cleanly; the guard still stops
-    every straightforward `file:`/loopback/RFC1918 URL and every redirect to
-    one, which is the attack a clipped page actually carries.
+    __slots__ = ("url", "scheme", "host", "port", "addresses",
+                 "request_target", "host_header")
+
+    def __init__(self, url, scheme, host, port, addresses, request_target,
+                 host_header):
+        self.url = url
+        self.scheme = scheme
+        self.host = host
+        self.port = port
+        self.addresses = tuple(addresses)
+        self.request_target = request_target
+        self.host_header = host_header
+
+
+# Integer prefixes keep module import declarative: constructing ``IPv6Network``
+# objects here trips the repository's no-import-time-execution contract. The
+# shifts retain respectively the high 96 or 48 bits used by those networks.
+_NAT64_WELL_KNOWN_PREFIX_96 = 0x64FF9B0000000000000000
+_NAT64_LOCAL_USE_PREFIX_48 = 0x64FF9B0001
+_IPV4_COMPATIBLE_PREFIX_96 = 0
+
+
+def _embedded_ipv4_addresses(ip):
+    """Return IPv4 endpoints carried by a known IPv6 transition form.
+
+    Some IPv6 spellings are classified globally by Python 3.9 even when the
+    endpoint they tunnel or translate to is private.  The socket receives the
+    IPv6 spelling, so checking only ``IPv6Address.is_global`` is insufficient
+    for SSRF policy.  Where the outer IPv6 form itself meets the policy,
+    subject its embedded IPv4 endpoint(s) to the same test as well.
     """
-    # inet_aton accepts legacy numeric forms that getaddrinfo interprets
-    # differently across operating systems (0177.0.0.1 is 127.0.0.1 on Linux,
-    # but can resolve as 177.0.0.1 on macOS). A proxy may use either reading.
-    # Refuse ambiguous forms before DNS; do not trust one platform's answer.
-    try:
-        numeric = socket.inet_ntoa(socket.inet_aton(host))
-    except OSError:
-        numeric = None
-    if numeric is not None and numeric != host:
-        raise ValueError(f"ambiguous numeric IPv4 host {host!r} — use {numeric!r} "
-                         "instead (pass --allow-private-hosts if intended)")
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except socket.gaierror as exc:
-        # Behind a proxy the name may only be resolvable at the proxy, so an
-        # unresolvable host is not evidence of anything; let the fetch itself
-        # fail. Without a proxy it would fail anyway, so say so here.
-        if urllib.request.getproxies().get(scheme):
-            return
-        raise ValueError(f"cannot resolve host {host!r}: {exc}")
-    for info in infos:
-        addr = info[4][0].split("%")[0]
-        try:
-            ip = ipaddress.ip_address(addr)
-        except ValueError:
-            continue
-        if (not ip.is_global or ip.is_loopback or ip.is_link_local or ip.is_private
-                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
-            raise ValueError(
-                f"host {host!r} resolves to the non-public address {ip} — "
-                "refusing (pass --allow-private-hosts if that is intended)")
+    if not isinstance(ip, ipaddress.IPv6Address):
+        return ()
+
+    found = []
+
+    def add(value):
+        if value is not None and value not in found:
+            found.append(value)
+
+    add(ip.ipv4_mapped)
+    add(ip.sixtofour)
+    if ip.teredo is not None:
+        add(ip.teredo[0])  # relay/server IPv4 address
+        add(ip.teredo[1])  # de-obfuscated client IPv4 address
+
+    packed = ip.packed
+    value = int(ip)
+    if value >> 32 == _NAT64_WELL_KNOWN_PREFIX_96:
+        add(ipaddress.IPv4Address(packed[12:16]))
+    elif value >> 80 == _NAT64_LOCAL_USE_PREFIX_48:
+        # RFC 6052's /48 layout splits the 32 IPv4 bits around the reserved
+        # ``u`` octet: prefix(48), v4[0:16], u(8), v4[16:32], suffix(40).
+        # A nonzero u octet is not a canonical translated address and is
+        # represented by 0.0.0.0 so the public-policy caller refuses it.
+        add(ipaddress.IPv4Address(
+            packed[6:8] + packed[9:11] if packed[8] == 0 else b"\0\0\0\0"))
+
+    # Deprecated IPv4-compatible form. Python 3.9 reports even
+    # ``::127.0.0.1`` as global, though an IPv6 stack may translate it to the
+    # IPv4 endpoint. The mapped form above occupies a different prefix.
+    if (value >> 32 == _IPV4_COMPATIBLE_PREFIX_96
+            and ip.ipv4_mapped is None):
+        add(ipaddress.IPv4Address(packed[12:16]))
+
+    # ISATAP interface identifiers end in 0000:5efe:v4 or 0200:5efe:v4.
+    if packed[8:12] in (b"\0\0\x5e\xfe", b"\x02\0\x5e\xfe"):
+        add(ipaddress.IPv4Address(packed[12:16]))
+    return tuple(found)
 
 
-def check_url(url, allow_private=False):
-    """Allow only http/https/data:, and (by default) only public hosts.
+def _public_ip(ip):
+    """Whether an address is suitable for the default open-web fetch policy."""
+    ordinary_public = (
+        ip.is_global and not ip.is_loopback and not ip.is_link_local
+        and not ip.is_private and not ip.is_reserved and not ip.is_multicast
+        and not ip.is_unspecified)
+    if not ordinary_public:
+        return False
+    return all(_public_ip(embedded)
+               for embedded in _embedded_ipv4_addresses(ip))
 
-    urlopen speaks `file:` and `ftp:` natively and Web Clipper markdown carries
-    `file://` image links from the user's own disk, so an unfiltered fetch will
-    happily copy /etc/passwd into the vault under an image name.
+
+def _request_path(parts, original_url):
+    """Build an ASCII origin-form request target without re-parsing the URL."""
+    path = urllib.parse.quote(
+        parts.path or "/", safe="/%:@!$&'()*+,;=-._~")
+    # SplitResult does not distinguish `/path` from `/path?`; preserve that
+    # delimiter because an origin is allowed to route the two targets apart.
+    if "?" in original_url.split("#", 1)[0]:
+        path += "?" + urllib.parse.quote(
+            parts.query, safe="/%?:@!$&'()*+,;=-._~")
+    return path
+
+
+def _vetted_target(url, allow_private=False):
+    """Parse and resolve one URL hop exactly once.
+
+    For HTTP(S), every returned address is classified before any socket opens,
+    then the complete vetted ``getaddrinfo`` result is carried to
+    :func:`_connect_vetted`. The hostname is never handed to a connector a
+    second time. ``data:`` returns ``None`` because it has no network target.
     """
     parts = urllib.parse.urlsplit(url)
     scheme = parts.scheme.lower()
@@ -534,33 +1495,139 @@ def check_url(url, allow_private=False):
         raise ValueError(f"unsupported URL scheme {scheme or '(none)'!r} — only "
                          "http, https and data: URIs are fetched")
     if scheme == "data":
-        return
+        return None
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7f for ch in url):
+        raise ValueError("HTTP(S) URL contains a control character")
     if not parts.hostname:
         raise ValueError(f"URL has no host: {url[:120]!r}")
+    if parts.username is not None or parts.password is not None:
+        raise ValueError("credentials in HTTP(S) URLs are not supported")
+    try:
+        port = parts.port or (443 if scheme == "https" else 80)
+    except ValueError as exc:
+        raise ValueError(f"invalid port in URL: {exc}") from exc
+
+    logical_host = parts.hostname
+    try:
+        host = logical_host.encode("idna").decode("ascii")
+    except UnicodeError as exc:
+        raise ValueError(f"invalid internationalized host {logical_host!r}") from exc
+
+    # inet_aton accepts legacy numeric forms that getaddrinfo interprets
+    # differently across operating systems (0177.0.0.1 is 127.0.0.1 on Linux,
+    # but 177.0.0.1 on macOS). Refuse those before DNS under the public policy.
     if not allow_private:
-        _reject_non_public(parts.hostname, scheme)
+        try:
+            numeric = socket.inet_ntoa(socket.inet_aton(host))
+        except OSError:
+            numeric = None
+        if numeric is not None and numeric != host:
+            raise ValueError(
+                f"ambiguous numeric IPv4 host {logical_host!r} — use {numeric!r} "
+                "instead (pass --allow-private-hosts if intended)")
+
+    try:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError(f"cannot resolve host {logical_host!r}: {exc}") from exc
+    if not infos:
+        raise ValueError(f"host {logical_host!r} resolved to no addresses")
+
+    addresses = []
+    seen = set()
+    for family, socktype, proto, canonname, sockaddr in infos:
+        if family not in (socket.AF_INET, socket.AF_INET6) or not sockaddr:
+            raise ValueError(
+                f"host {logical_host!r} resolved to an unsupported address family")
+        addr = str(sockaddr[0]).split("%", 1)[0]
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError as exc:
+            raise ValueError(
+                f"host {logical_host!r} resolved to an invalid address {addr!r}") from exc
+        if not allow_private and not _public_ip(ip):
+            raise ValueError(
+                f"host {logical_host!r} resolves to the non-public address {ip} — "
+                "refusing (pass --allow-private-hosts if that is intended)")
+        item = (family, socktype or socket.SOCK_STREAM, proto, canonname, sockaddr)
+        key = (family, item[1], proto, sockaddr)
+        if key not in seen:
+            addresses.append(item)
+            seen.add(key)
+
+    host_literal = f"[{host}]" if ":" in host else host
+    authority = parts.netloc.rsplit("@", 1)[-1]
+    if authority.startswith("["):
+        explicit_port = authority.partition("]")[2].startswith(":")
+    else:
+        explicit_port = ":" in authority
+    if explicit_port and authority.endswith(":"):
+        raise ValueError("invalid empty port in URL")
+    host_header = (f"{host_literal}:{port}" if explicit_port else host_literal)
+    return _VettedTarget(url, scheme, host, port, addresses,
+                         _request_path(parts, url), host_header)
 
 
-class _GuardedRedirectHandler(urllib.request.HTTPRedirectHandler):
-    """Re-run check_url on every redirect hop.
-
-    urllib's own handler permits an http → ftp redirect and does not care where
-    the target resolves, so a redirect is otherwise a way straight around
-    check_url.
-    """
-
-    def __init__(self, allow_private=False):
-        self.allow_private = allow_private
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        check_url(newurl, self.allow_private)
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+def check_url(url, allow_private=False):
+    """Allow only HTTP(S)/data and, by default, only public HTTP(S) targets."""
+    _vetted_target(url, allow_private)
 
 
-def _opener(allow_private=False):
-    # build_opener keeps the default ProxyHandler (a corporate proxy still
-    # works) and swaps in the guarded redirect handler for the stock one.
-    return urllib.request.build_opener(_GuardedRedirectHandler(allow_private))
+def _remaining_timeout(timeout, deadline):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("exceeded the wall-clock budget before the response body")
+    return min(timeout, remaining)
+
+
+def _connect_vetted(target, timeout, deadline):
+    """Connect only to an address returned by this hop's single resolution."""
+    errors = []
+    for family, socktype, proto, _canonname, sockaddr in target.addresses:
+        sock = socket.socket(family, socktype, proto)
+        try:
+            sock.settimeout(_remaining_timeout(timeout, deadline))
+            sock.connect(sockaddr)
+            return sock
+        except Exception as exc:
+            errors.append("%s: %s" % (sockaddr[0], exc))
+            sock.close()
+    raise OSError("could not connect to any vetted address for %s: %s" %
+                  (target.host, "; ".join(errors) or "no addresses"))
+
+
+def _request_once(target, timeout, deadline):
+    """Issue one GET over a pinned socket; return ``(connection, response)``."""
+    wire = _connect_vetted(target, timeout, deadline)
+    conn = None
+    try:
+        if target.scheme == "https":
+            # create_default_context enables certificate-chain validation and
+            # hostname checks. The logical hostname, never the pinned IP, is
+            # supplied for SNI and certificate matching.
+            context = ssl.create_default_context()
+            wire.settimeout(_remaining_timeout(timeout, deadline))
+            wire = context.wrap_socket(wire, server_hostname=target.host)
+        wire.settimeout(_remaining_timeout(timeout, deadline))
+        conn = http.client.HTTPConnection(target.host, target.port,
+                                          timeout=timeout)
+        # Setting the connected socket makes HTTPConnection skip connect(), so
+        # it has no opportunity to resolve target.host a second time.
+        conn.sock = wire
+        conn.request("GET", target.request_target, headers={
+            "Host": target.host_header,
+            "User-Agent": UA,
+            "Accept-Encoding": "identity",
+            "Connection": "close",
+        })
+        wire.settimeout(_remaining_timeout(timeout, deadline))
+        return conn, conn.getresponse()
+    except Exception:
+        if conn is not None:
+            conn.close()
+        else:
+            wire.close()
+        raise
 
 
 def _stream_to_file(resp, tmp, max_bytes, deadline, declared=None):
@@ -599,7 +1666,39 @@ def _stream_to_file(resp, tmp, max_bytes, deadline, declared=None):
     return total
 
 
-def _fetch_data_uri(url, tmp, max_bytes=DEFAULT_MAX_BYTES):
+def _percent_decoded_chunks(text, start, deadline):
+    """Yield bounded percent-decoded pieces without copying the whole payload."""
+    pos = start
+    while pos < len(text):
+        if time.monotonic() > deadline:
+            raise TimeoutError("exceeded the wall-clock budget while decoding data: URI")
+        end = min(pos + CHUNK, len(text))
+        if end < len(text):
+            # Do not cut `%AB` across chunks. urllib intentionally leaves a
+            # malformed percent escape literal; carrying only a possible
+            # incomplete final triplet preserves that behavior.
+            if text[end - 1] == "%":
+                end -= 1
+            elif end - pos >= 2 and text[end - 2] == "%":
+                end -= 2
+        if end <= pos:  # CHUNK is much larger than 3; defensive only.
+            end = min(pos + 3, len(text))
+        yield urllib.parse.unquote_to_bytes(text[pos:end])
+        pos = end
+
+
+def _write_bounded(fh, chunk, total, max_bytes, deadline):
+    """Write one decoded data-URI chunk, enforcing byte and time limits."""
+    if time.monotonic() > deadline:
+        raise TimeoutError("exceeded the wall-clock budget while decoding data: URI")
+    total += len(chunk)
+    if total > max_bytes:
+        raise ValueError(f"data: URI decodes over the {max_bytes}-byte cap")
+    fh.write(chunk)
+    return total
+
+
+def _fetch_data_uri(url, tmp, max_bytes=DEFAULT_MAX_BYTES, deadline=None):
     # RFC 2397: `data:[<mediatype>][;<param>=<value>…][;base64],<data>` — the
     # mediatype may carry parameters, so the header is split at the FIRST
     # comma and read as `;`-tokens, with base64 mode decided by the LAST
@@ -607,29 +1706,215 @@ def _fetch_data_uri(url, tmp, max_bytes=DEFAULT_MAX_BYTES):
     # `data:image/png;charset=utf-8;base64,…` and the common inline-SVG form
     # `data:image/svg+xml;utf8,<svg…>` as malformed, so a legitimately
     # clipped image was reported failed.
-    if url[:5].lower() != "data:" or "," not in url:
+    if deadline is None:
+        deadline = time.monotonic() + DEFAULT_MAX_SECONDS
+    comma = url.find(",")
+    if url[:5].lower() != "data:" or comma < 0:
         raise ValueError("malformed data: URI")
-    header, payload = url[5:].split(",", 1)
+    if comma > 4096:
+        raise ValueError("data: URI media-type header is unreasonably large")
+    header = url[5:comma]
+    payload_start = comma + 1
     tokens = header.split(";")
     is_b64 = len(tokens) > 1 and tokens[-1].strip().lower() == "base64"
     mime = tokens[0].strip()
-    # The base64 payload is percent-DECODED first: RFC 2397's data production
-    # is URL characters, so `%3D` padding and `%2B` plus signs are legal and
-    # browsers unquote before decoding — refusing them failed a clipped image
-    # the browser renders fine.  `unquote_to_bytes` leaves literal `+` and `=`
-    # untouched (this is not form encoding), so an unescaped payload is
-    # decoded byte-identically to before.
-    raw = (base64.b64decode(urllib.parse.unquote_to_bytes(payload)) if is_b64
-           else urllib.parse.unquote_to_bytes(payload))
-    if len(raw) > max_bytes:
-        raise ValueError(f"data: URI decodes to {len(raw)} bytes, over the "
-                         f"{max_bytes}-byte cap")
+    payload_chars = len(url) - payload_start
+
+    # Cheap exact preflight for the common unescaped, whitespace-free base64
+    # form. Oversized input is rejected before base64 allocates its output.
+    if is_b64 and url.find("%", payload_start) < 0 \
+            and not any(url.find(ch, payload_start) >= 0 for ch in " \t\r\n\v\f") \
+            and payload_chars % 4 == 0:
+        padding = (2 if url.endswith("==") else 1 if url.endswith("=") else 0)
+        decoded_size = payload_chars // 4 * 3 - padding
+        if decoded_size > max_bytes:
+            raise ValueError(
+                f"data: URI decodes to {decoded_size} bytes, over the "
+                f"{max_bytes}-byte cap")
+    elif not is_b64 and payload_chars > max_bytes * 3:
+        # A percent triplet is the most compact representation: three source
+        # characters can produce no fewer than one decoded byte.
+        raise ValueError(f"data: URI necessarily exceeds the {max_bytes}-byte cap")
+
+    total = 0
     with open(tmp, "wb") as fh:
-        fh.write(raw)
+        if not is_b64:
+            for raw in _percent_decoded_chunks(url, payload_start, deadline):
+                total = _write_bounded(
+                    fh, raw, total, max_bytes, deadline)
+        else:
+            carry = b""
+            for raw in _percent_decoded_chunks(url, payload_start, deadline):
+                clean = raw.translate(None, b" \t\r\n\v\f")
+                data = carry + clean
+                complete = len(data) // 4 * 4
+                if complete >= 4:
+                    complete -= 4  # padding, if any, belongs to the final quartet
+                block, carry = data[:complete], data[complete:]
+                if b"=" in block:
+                    raise ValueError("invalid base64 data: padding before the end")
+                if block:
+                    try:
+                        decoded = base64.b64decode(block, validate=True)
+                    except binascii.Error as exc:
+                        raise ValueError(f"invalid base64 data: {exc}") from exc
+                    total = _write_bounded(
+                        fh, decoded, total, max_bytes, deadline)
+            try:
+                decoded = base64.b64decode(carry, validate=True)
+            except binascii.Error as exc:
+                raise ValueError(f"invalid base64 data: {exc}") from exc
+            total = _write_bounded(
+                fh, decoded, total, max_bytes, deadline)
     return mime or None
 
 
-def _refuse_existing(attachments, slug, index, overwrite, extension=None):
+def _lottie_json(raw, label):
+    """Parse and minimally identify a Lottie animation JSON object."""
+    try:
+        animation = json.loads(raw.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{label} is not valid UTF-8 Lottie JSON: {exc}") from exc
+    if not isinstance(animation, dict) or not isinstance(animation.get("layers"), list):
+        raise ValueError(f"{label} is not a Lottie animation object (missing layers)")
+    for field in ("w", "h", "fr"):
+        value = animation.get(field)
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or value <= 0):
+            raise ValueError(
+                f"{label} is not a Lottie animation object ({field} must be positive)")
+    start, end = animation.get("ip", 0), animation.get("op")
+    if (isinstance(start, bool) or isinstance(end, bool)
+            or not isinstance(start, (int, float))
+            or not isinstance(end, (int, float))
+            or not math.isfinite(start) or not math.isfinite(end) or end <= start):
+        raise ValueError(f"{label} is not a Lottie animation object (invalid frame range)")
+    return animation
+
+
+def _dotlottie_animation_path(manifest):
+    """Return the manifest-selected animation path for dotLottie v1 or v2."""
+    version = manifest.get("version") if isinstance(manifest, dict) else None
+    if not isinstance(version, str) or version.split(".", 1)[0] not in ("1", "2"):
+        raise ValueError("dotLottie manifest version must be 1 or 2")
+    major = version.split(".", 1)[0]
+    animations = manifest.get("animations")
+    if not isinstance(animations, list) or not animations:
+        raise ValueError(
+            "invalid dotLottie manifest: animations must be a non-empty list")
+
+    ids = []
+    for item in animations:
+        animation_id = item.get("id") if isinstance(item, dict) else None
+        if (not isinstance(animation_id, str)
+                or not re.fullmatch(r"[A-Za-z0-9._ -]+", animation_id)
+                or animation_id in (".", "..")):
+            raise ValueError("dotLottie animation id is missing or unsafe")
+        if animation_id in ids:
+            raise ValueError(f"duplicate dotLottie animation id {animation_id!r}")
+        ids.append(animation_id)
+
+    if major == "2":
+        initial = manifest.get("initial")
+        if initial is not None and not isinstance(initial, dict):
+            raise ValueError("dotLottie v2 initial must be an object")
+        selected = initial.get("animation") if initial else None
+        directory = "a"
+    else:
+        selected = manifest.get("activeAnimationId")
+        directory = "animations"
+    if selected is not None and not isinstance(selected, str):
+        raise ValueError("dotLottie initial animation id must be a string")
+    selected = selected or ids[0]
+    if selected not in ids:
+        raise ValueError(
+            f"dotLottie initial animation {selected!r} is not in the manifest")
+    return f"{directory}/{selected}.json"
+
+
+def _reject_duplicate_zip_members(archive):
+    """Refuse a ZIP whose exact member names are not unique.
+
+    ``ZipFile.getinfo(name)`` resolves through a one-entry-per-name mapping,
+    while callers iterating ``infolist()`` can select a different occurrence.
+    A duplicate manifest or selected animation would therefore let validation
+    inspect different bytes from the renderer.  dotLottie needs neither form
+    of ambiguity, so reject it before trusting any member.
+    """
+    seen = set()
+    duplicates = set()
+    for info in archive.infolist():
+        if info.filename in seen:
+            duplicates.add(info.filename)
+        seen.add(info.filename)
+    if duplicates:
+        raise ValueError(
+            "dotLottie ZIP contains duplicate member name(s): %s" %
+            ", ".join(repr(name) for name in sorted(duplicates)))
+
+
+def _validate_lottie_source(path, max_json_bytes):
+    """Accept only Lottie JSON or a dotLottie ZIP containing bounded JSON."""
+    if zipfile.is_zipfile(path):
+        try:
+            with zipfile.ZipFile(path) as archive:
+                _reject_duplicate_zip_members(archive)
+                manifest = next(
+                    (info for info in archive.infolist()
+                     if not info.is_dir() and info.filename == "manifest.json"),
+                    None)
+                if manifest is None:
+                    raise ValueError(
+                        "ZIP is not dotLottie: missing root manifest.json")
+                if manifest.flag_bits & 0x1:
+                    raise ValueError("dotLottie manifest is encrypted")
+                if manifest.file_size > max_json_bytes:
+                    raise ValueError("dotLottie manifest exceeds the size cap")
+                with archive.open(manifest) as source:
+                    manifest_raw = source.read(max_json_bytes + 1)
+                if len(manifest_raw) > max_json_bytes:
+                    raise ValueError("dotLottie manifest exceeds the size cap")
+                try:
+                    manifest_data = json.loads(manifest_raw.decode("utf-8-sig"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise ValueError(f"invalid dotLottie manifest: {exc}") from exc
+                animation_path = _dotlottie_animation_path(manifest_data)
+                try:
+                    chosen = archive.getinfo(animation_path)
+                except KeyError as exc:
+                    raise ValueError(
+                        f"dotLottie manifest references missing {animation_path!r}") from exc
+                if chosen.is_dir():
+                    raise ValueError(
+                        f"dotLottie animation path {animation_path!r} is a directory")
+                if chosen.flag_bits & 0x1:
+                    raise ValueError("dotLottie animation JSON is encrypted")
+                if chosen.file_size > max_json_bytes:
+                    raise ValueError(
+                        "expanded animation JSON exceeds the %d-byte cap" %
+                        max_json_bytes)
+                with archive.open(chosen) as source:
+                    raw = source.read(max_json_bytes + 1)
+                if len(raw) > max_json_bytes:
+                    raise ValueError(
+                        "expanded animation JSON exceeds the %d-byte cap" %
+                        max_json_bytes)
+        except (OSError, zipfile.BadZipFile, RuntimeError) as exc:
+            raise ValueError(f"invalid dotLottie archive: {exc}") from exc
+        _lottie_json(raw, chosen.filename)
+        return "dotlottie"
+
+    with open(path, "rb") as source:
+        raw = source.read(max_json_bytes + 1)
+    if len(raw) > max_json_bytes:
+        raise ValueError(
+            f"animation JSON exceeds the {max_json_bytes}-byte cap")
+    _lottie_json(raw, "source")
+    return "json"
+
+
+def _refuse_existing(attachments, slug, index, overwrite, extension=None,
+                     owner=None, _published=None):
     """Refuse a figure slot that is already occupied, unless asked to overwrite.
 
     `shutil.move` onto an existing path replaces it with no error and no way
@@ -644,22 +1929,33 @@ def _refuse_existing(attachments, slug, index, overwrite, extension=None):
     extension-twin this script exists to prevent, in reverse.
 
     The reprocess flow documented in references/images.md *does* want to
-    replace a figure in place, so the capability is kept -- behind an explicit
-    `--overwrite`, which is a thing someone has to type.
+    replace a figure in place, so the capability is kept behind both explicit
+    `--overwrite` and positive evidence from the exact clipping note that
+    embeds the occupied filename.
     """
     owned = read_manifest(os.path.join(attachments, MANIFEST_FILE))
-    prefix = unicodedata.normalize("NFC", f"{slug}_fig_{index}.").casefold()
+    prefix = _manifest_name_key(f"{slug}_fig_{index}.")
     for name in owned:
-        if unicodedata.normalize("NFC", name).casefold().startswith(prefix):
+        if _manifest_name_key(name).startswith(prefix):
             raise ValueError(f"{name} is recorded in the PDF figure manifest — "
                              "clipping-processor cannot replace that producer's figure")
     hit = _glob_slug(attachments, slug, f"_fig_{index}.*")
     if overwrite:
+        if owner is None and _published is None:
+            raise ValueError("--owner-note is required with --overwrite")
+        if owner is not None:
+            _validate_clipping_owner(owner)
+            for path in hit:
+                _require_owned_attachment(owner, os.path.basename(path))
         # Replacing a PNG with a WebP at the same number would leave both on
         # disk, and consumers could not choose which is current. Keep the old
         # figure intact and require a fresh number when the format changes.
         if extension is not None:
             final = os.path.join(attachments, f"{slug}_fig_{index}.{extension}")
+            if owner is not None:
+                _require_owned_attachment(owner, os.path.basename(final))
+            elif _published != os.path.basename(final):
+                raise ValueError("internal publication evidence names the wrong figure")
             if any(not _same_file(path, final) for path in hit):
                 raise ValueError(
                     "figure slot is occupied by a different filename or format: "
@@ -679,51 +1975,81 @@ def _fetch_to_path(url, tmp, timeout, max_bytes, max_seconds, allow_private,
                    record=None):
     """Fetch `url` into `tmp` under every transport guard. -> (content_type, size)
 
-    The scheme allowlist, the private-address refusal, the guarded redirect
-    handler, the `Content-Length` pre-check, the byte cap, the wall-clock
-    deadline and the truncation check, in one place. It is one place on
-    purpose: `download` and `fetch` are the same transport with different
-    destinations, and the way this skill's guards got bypassed before was a
-    second copy of the fetch — a bare `urlopen` in a heredoc — that had none of
-    them.
+    The scheme allowlist, single-resolution address pinning, redirect guard,
+    `Content-Length` pre-check, byte cap, wall-clock deadline and truncation
+    check live in one place. `download` and `fetch` are the same transport with
+    different destinations; a second fetch implementation is a guard bypass.
     """
-    check_url(url, allow_private)
+    _validate_transfer_limits(timeout, max_bytes, max_seconds)
     deadline = time.monotonic() + max_seconds
-    if url.lower().startswith("data:"):
-        return _fetch_data_uri(url, tmp, max_bytes), os.path.getsize(tmp)
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    # a per-socket timeout longer than the whole budget can't help
-    sock_timeout = min(timeout, max_seconds) if max_seconds else timeout
-    with _opener(allow_private).open(req, timeout=sock_timeout) as resp:
-        content_type = resp.headers.get("Content-Type")
-        # geturl() is the URL the bytes actually came from: a redirect
-        # target is otherwise invisible in the report.
-        if record is not None:
-            record["final_url"] = resp.geturl()
-        declared = resp.headers.get("Content-Length")
-        if declared and declared.isdigit() and int(declared) > max_bytes:
-            raise ValueError(f"Content-Length {declared} exceeds the "
-                             f"{max_bytes}-byte cap")
-        size = _stream_to_file(
-            resp, tmp, max_bytes, deadline,
-            int(declared) if declared and declared.isdigit() else None)
-    return content_type, size
+    target = _vetted_target(url, allow_private)
+    if target is None:
+        return (_fetch_data_uri(url, tmp, max_bytes, deadline),
+                os.path.getsize(tmp))
+    current_url = url
+    for redirect_count in range(MAX_REDIRECTS + 1):
+        conn, resp = _request_once(target, timeout, deadline)
+        next_url = None
+        try:
+            status = resp.status
+            if status in REDIRECT_STATUSES:
+                location = resp.headers.get("Location")
+                if not location:
+                    raise urllib.error.HTTPError(
+                        current_url, status, "redirect has no Location header",
+                        resp.headers, None)
+                if redirect_count >= MAX_REDIRECTS:
+                    raise ValueError(
+                        f"too many redirects (more than {MAX_REDIRECTS})")
+                next_url = urllib.parse.urljoin(current_url, location)
+            elif not 200 <= status < 300:
+                raise urllib.error.HTTPError(
+                    current_url, status,
+                    "HTTP status is neither success nor a supported redirect: "
+                    + str(resp.reason), resp.headers, None)
+            else:
+                content_type = resp.headers.get("Content-Type")
+                if record is not None:
+                    record["final_url"] = current_url
+                declared = resp.headers.get("Content-Length")
+                if declared and declared.isdigit() and int(declared) > max_bytes:
+                    raise ValueError(f"Content-Length {declared} exceeds the "
+                                     f"{max_bytes}-byte cap")
+                size = _stream_to_file(
+                    resp, tmp, max_bytes, deadline,
+                    int(declared) if declared and declared.isdigit() else None)
+                return content_type, size
+        finally:
+            resp.close()
+            conn.close()
+        # The redirect connection is closed before DNS can block. Vet and
+        # resolve its target before another request, without reading its body.
+        next_target = _vetted_target(next_url, allow_private)
+        if next_target is None:
+            raise ValueError("an HTTP(S) redirect cannot target a data: URI")
+        if target.scheme == "https" and next_target.scheme != "https":
+            raise ValueError("refusing an HTTPS-to-HTTP redirect downgrade")
+        current_url, target = next_url, next_target
+    raise AssertionError("redirect loop exhausted without returning")
 
 
 def download_one(url, attachments, slug, index, timeout=45,
                  max_bytes=DEFAULT_MAX_BYTES, max_seconds=DEFAULT_MAX_SECONDS,
-                 allow_private=False, overwrite=False):
+                 allow_private=False, overwrite=False, owner_note=None):
     """Fetch one image and move it to <attachments>/<slug>_fig_<index>.<ext>."""
     result = {"index": index, "url": url[:200] + ("…" if len(url) > 200 else ""),
               "final_url": None, "ok": False, "path": None, "filename": None,
               "ext": None, "bytes": 0, "error": None}
     tmp = _temp_path()
+    publication_handed_off = False
     try:
         validate_slug(slug)
         validate_index(index)
+        owner = (_load_clipping_owner(owner_note, slug, attachments)
+                 if overwrite else None)
         # Before the fetch: no reason to spend a download on a slot we are
         # going to refuse to write. Re-checked after, against the real path.
-        _refuse_existing(attachments, slug, index, overwrite)
+        _refuse_existing(attachments, slug, index, overwrite, owner=owner)
         content_type, size = _fetch_to_path(
             url, tmp, timeout, max_bytes, max_seconds, allow_private, result)
         if size == 0:
@@ -741,19 +2067,26 @@ def download_one(url, attachments, slug, index, timeout=45,
         os.makedirs(attachments, exist_ok=True)
         final = os.path.join(attachments, f"{slug}_fig_{index}.{ext}")
         _ensure_within(attachments, final)
-        _refuse_existing(attachments, slug, index, overwrite, ext)
+        _refuse_existing(attachments, slug, index, overwrite, ext, owner)
+        publication_handed_off = True
         warning = _publish_file(
             tmp, final, overwrite,
             staging_parent=os.path.dirname(os.path.realpath(attachments)),
-            before_publish=lambda: _refuse_existing(attachments, slug, index, overwrite, ext))
+            before_publish=lambda: _refuse_existing(
+                attachments, slug, index, overwrite, ext, owner),
+            after_publish=lambda: _refuse_existing(
+                attachments, slug, index, True, ext, owner,
+                None if overwrite else os.path.basename(final)))
         result.update(ok=True, path=final, filename=os.path.basename(final),
                       ext=ext, bytes=size, content_type=content_type)
         if warning:
             result["warning"] = warning
     except Exception as exc:             # 404, timeout, unsupported scheme, non-image
         result["error"] = f"{type(exc).__name__}: {exc}"
+        if publication_handed_off and os.path.lexists(tmp):
+            result["scratch"] = tmp
     finally:
-        if os.path.exists(tmp):
+        if not publication_handed_off and os.path.exists(tmp):
             os.remove(tmp)
     return result
 
@@ -761,7 +2094,7 @@ def download_one(url, attachments, slug, index, timeout=45,
 def fetch_source(url, out=None, timeout=45, max_bytes=DEFAULT_MAX_BYTES,
                  max_seconds=DEFAULT_MAX_SECONDS, allow_private=False,
                  overwrite=False):
-    """Download a NON-image source file, under the same transport guards.
+    """Download a Lottie JSON/dotLottie source under the transport guards.
 
     Step 12's Lottie conversion needs the animation's `.json`/`.lottie` on disk
     before anything can render it, and that is not an image, so `download`
@@ -770,17 +2103,21 @@ def fetch_source(url, out=None, timeout=45, max_bytes=DEFAULT_MAX_BYTES,
     this skill that runs on a URL lifted straight out of a hostile page was
     also the one fetch with no scheme allowlist, no private-address refusal, no
     redirect re-check, no size cap and no wall-clock cap. This is
-    `download_one`'s transport with the image sniff removed.
+    `download_one`'s transport with a Lottie payload check in place of the image
+    sniff. Arbitrary HTML, executables and unrelated archives are refused before
+    an explicit output path can be published.
 
-    **It never writes into the vault.** The destination is a temp file (or an
-    explicit `--out`), and getting the rendered result *into* `Sources/Images/`
-    is `place_file`'s job, which is where the slug, containment and
-    occupied-slot guards live.
+    The workflow must keep this source outside the vault. The default is a
+    system temp file; an explicit `--out` is caller-selected because this
+    helper has no vault path from which to infer containment. Getting the
+    rendered result *into* `Sources/Images/` is `place_file`'s job, which is
+    where the slug, containment and occupied-slot guards live.
     """
     result = {"url": url[:200] + ("…" if len(url) > 200 else ""),
               "final_url": None, "ok": False, "path": None, "bytes": 0,
-              "content_type": None, "error": None}
+              "content_type": None, "source_format": None, "error": None}
     tmp = _temp_path()
+    publication_handed_off = False
     try:
         if out is not None and os.path.lexists(out) and not overwrite:
             raise ValueError(f"{out!r} already exists — refusing to overwrite "
@@ -789,18 +2126,23 @@ def fetch_source(url, out=None, timeout=45, max_bytes=DEFAULT_MAX_BYTES,
             url, tmp, timeout, max_bytes, max_seconds, allow_private, result)
         if size == 0:
             raise ValueError("empty response")
+        source_format = _validate_lottie_source(tmp, max_bytes)
         if out is None:
             out, tmp = tmp, None
         else:
+            publication_handed_off = True
             warning = _publish_file(tmp, out, overwrite, mode=0o600)
             if warning:
                 result["warning"] = warning
         result.update(ok=True, path=os.path.abspath(out), bytes=size,
-                      content_type=content_type)
+                      content_type=content_type, source_format=source_format)
     except Exception as exc:             # 404, timeout, unsupported scheme, cap
         result["error"] = f"{type(exc).__name__}: {exc}"
+        if publication_handed_off and tmp is not None and os.path.lexists(tmp):
+            result["scratch"] = tmp
     finally:
-        if tmp is not None and os.path.exists(tmp):
+        if (not publication_handed_off and tmp is not None
+                and os.path.exists(tmp)):
             try:
                 os.remove(tmp)
             except OSError:
@@ -808,7 +2150,7 @@ def fetch_source(url, out=None, timeout=45, max_bytes=DEFAULT_MAX_BYTES,
     return result
 
 
-def place_file(src, attachments, slug, index, overwrite=False):
+def place_file(src, attachments, slug, index, overwrite=False, owner_note=None):
     """Move a locally produced image into <attachments>/<slug>_fig_<index>.<ext>.
 
     `download_one`'s placement half, for a file this script did not fetch — the
@@ -832,35 +2174,48 @@ def place_file(src, attachments, slug, index, overwrite=False):
     try:
         validate_slug(slug)
         validate_index(index)
+        owner = (_load_clipping_owner(owner_note, slug, attachments)
+                 if overwrite else None)
         if not os.path.isfile(src):
             raise ValueError(f"--from-file {src!r} is not a file")
-        root = os.path.realpath(attachments)
-        real_src = os.path.realpath(src)
-        if real_src == root or real_src.startswith(root + os.sep):
+        if _inside_existing_directory(src, attachments):
             raise ValueError(
                 f"--from-file {src!r} is inside the attachments folder — "
                 "render to a temp path outside the vault and place it from "
                 "there, so nothing half-written ever appears in Sources/Images")
-        size = os.path.getsize(src)
-        if size == 0:
-            raise ValueError("empty file")
-        _refuse_existing(attachments, slug, index, overwrite)
-        with open(src, "rb") as fh:
-            head = fh.read(4096)
-        # No Content-Type and no URL: a local file has only its bytes, which is
-        # the evidence this script trusts anyway.
-        ext = sniff_extension(head)
-        if ext is None:
-            raise ValueError("the file is not an image — the bytes look like "
-                             f"{describe_bytes(head)}")
-        os.makedirs(attachments, exist_ok=True)
-        final = os.path.join(attachments, f"{slug}_fig_{index}.{ext}")
-        _ensure_within(attachments, final)
-        _refuse_existing(attachments, slug, index, overwrite, ext)
-        warning = _publish_file(
-            src, final, overwrite,
-            staging_parent=os.path.dirname(os.path.realpath(attachments)),
-            before_publish=lambda: _refuse_existing(attachments, slug, index, overwrite, ext))
+        _refuse_existing(attachments, slug, index, overwrite, owner=owner)
+        # Sniff and size a stable private copy, then require publication to see
+        # the same source snapshot. Without this tie, a renderer or cleanup
+        # process could replace ``src`` after sniffing and a different byte
+        # format would be published under the stale extension.
+        with tempfile.TemporaryDirectory(prefix="clipping-place-check.") as check_dir:
+            inspected = os.path.join(check_dir, "source")
+            source_expected = _stable_regular_snapshot(
+                src, copy_to=inspected, copy_mode=0o600)
+            size = source_expected[3]
+            if size == 0:
+                raise ValueError("empty file")
+            with open(inspected, "rb") as fh:
+                head = fh.read(4096)
+            # No Content-Type and no URL: a local file has only its bytes,
+            # which is the evidence this script trusts anyway.
+            ext = sniff_extension(head)
+            if ext is None:
+                raise ValueError("the file is not an image — the bytes look like "
+                                 f"{describe_bytes(head)}")
+            os.makedirs(attachments, exist_ok=True)
+            final = os.path.join(attachments, f"{slug}_fig_{index}.{ext}")
+            _ensure_within(attachments, final)
+            _refuse_existing(attachments, slug, index, overwrite, ext, owner)
+            warning = _publish_file(
+                src, final, overwrite,
+                staging_parent=os.path.dirname(os.path.realpath(attachments)),
+                before_publish=lambda: _refuse_existing(
+                    attachments, slug, index, overwrite, ext, owner),
+                after_publish=lambda: _refuse_existing(
+                    attachments, slug, index, True, ext, owner,
+                    None if overwrite else os.path.basename(final)),
+                expected_source=source_expected)
         result.update(ok=True, path=final, filename=os.path.basename(final),
                       ext=ext, bytes=size)
         if warning:
@@ -904,6 +2259,34 @@ _PDF_ONLY_LABEL = re.compile(r"_fig_?(?:S\d|SI\d|ED\d|\d+[.-]\d)", re.I)
 #: write — and stays strict.
 _FIG_GLOB = "_fig*"
 
+# Consumer compatibility is a little wider than this producer's canonical
+# outputs: old notes can still embed `.jpeg` and `.tif` spellings. The rename
+# inventory must see those missing references even though a new download would
+# publish their canonical `.jpg` / `.tiff` spelling.
+_CONSUMER_IMAGE_EXTENSIONS = OUTPUT_EXTENSIONS | frozenset(("jpeg", "tif"))
+
+
+def _embedded_figure_tail(filename, slug):
+    """Return an old-slug image embed's loose ``_fig*`` tail, or ``None``.
+
+    No directory entry exists for a missing attachment, so this is the
+    string-only counterpart of ``_figure_stem_end``. Portable normalized name
+    identity is conservative here: overlooking a missing embed would report a
+    rename complete while the note still contains a broken old-stem reference.
+    """
+    _stem, extension = os.path.splitext(filename)
+    if extension[1:].lower() not in _CONSUMER_IMAGE_EXTENSIONS:
+        return None
+    for index, char in enumerate(filename):
+        if char != "_":
+            continue
+        tail = filename[index:]
+        if (fnmatch.fnmatchcase(_manifest_name_key(tail), "_fig*")
+                and _manifest_name_key(filename[:index])
+                == _manifest_name_key(slug)):
+            return tail
+    return None
+
 
 def _pdf_named(sources, slug):
     """Is there a `<slug>.pdf` under `sources`?  Cheap, read-only."""
@@ -911,11 +2294,25 @@ def _pdf_named(sources, slug):
         raise ValueError("cannot verify PDF ownership in %r: %s" %
                          (exc.filename or sources, exc)) from exc
 
-    key = unicodedata.normalize("NFC", slug).casefold()
-    for root, _dirs, files in os.walk(sources, onerror=failed):
+    key = _name_key(slug)
+    seen = set()
+    for root, dirs, files in os.walk(
+            sources, followlinks=True, onerror=failed):
+        try:
+            item = os.stat(root)
+        except OSError as exc:
+            failed(exc)
+        identity = (item.st_dev, item.st_ino)
+        if identity in seen:
+            dirs[:] = []
+            continue
+        seen.add(identity)
         for f in files:
-            if unicodedata.normalize("NFC", os.path.splitext(f)[0]).casefold() == key \
-                    and f.lower().endswith(".pdf"):
+            if not f.lower().endswith(".pdf"):
+                continue
+            stem, ext = os.path.splitext(f)
+            if _name_key(stem) == key or _same_file(
+                    os.path.join(root, f), os.path.join(root, slug + ext)):
                 return True
     return False
 
@@ -929,7 +2326,27 @@ _STRADDLE = ("refused: this set is renamed all or nothing, and %s blocked it. "
              "Nothing was renamed. Resolve that one and re-run.")
 
 
-def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources):
+def dependency_status(attachments, owner_note, old_slug):
+    """Report external references that prevent retiring an old clipping stem."""
+    validate_slug(old_slug, "--old-slug")
+    owner = _load_clipping_owner(owner_note, old_slug, attachments)
+    image_names = sorted(
+        (name for name in owner["embeds"]
+         if _embedded_figure_tail(name, old_slug) is not None),
+        key=lambda item: (_manifest_name_key(item), item))
+    if owner["vault"] is None:
+        raise ValueError("cannot infer a canonical vault from --owner-note and "
+                         "--attachments; a complete Markdown dependency scan "
+                         "cannot be certified")
+    blockers = _vault_dependency_blockers(owner, old_slug, image_names)
+    _validate_clipping_owner(owner)
+    return {"ok": not blockers, "vault": os.path.abspath(owner["vault"]),
+            "old_slug": old_slug, "images": image_names,
+            "blockers": blockers}
+
+
+def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources,
+                owner_note=None):
     """Rename every <old_slug>_fig_N.<ext> attachment to the new slug.
 
     **All or nothing.** The whole set is planned first, and if any member is
@@ -963,7 +2380,10 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources):
     a PDF of that stem settles ownership outright. A PDF-only label is a
     refusal for the WHOLE set, not just that file: it is evidence that the
     other producer owns this stem, and the plain-integer figures beside it are
-    then just as likely to be its.
+    then just as likely to be its. The remaining candidates still are not
+    inferred to be clipping figures: every basename must be an exact rendered
+    embed in the snapshotted ``Articles/<old_slug>.md`` passed as
+    ``owner_note``.
     """
     validate_slug(old_slug, "--old-slug")
     validate_slug(new_slug, "--new-slug")
@@ -983,7 +2403,8 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources):
                  "error": "refusing to rename: the destination stem %s belongs "
                           "to a PDF in %s; choose an unused clipping slug"
                           % (new_slug, sources)}]
-    owned = {unicodedata.normalize("NFC", name).casefold()
+    owner = _load_clipping_owner(owner_note, old_slug, attachments)
+    owned = {_manifest_name_key(name)
              for name in read_manifest(os.path.join(attachments, MANIFEST_FILE))}
     # --- plan: every member is judged before any of them is touched ---------
     # every Unicode spelling of the old slug: on macOS the on-disk files are
@@ -993,22 +2414,24 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources):
         base = os.path.basename(src)
         # the matched spelling's length, not the argument's — NFC and NFD
         # spellings of one slug differ in length.
-        stem_end = next(i for i, char in enumerate(base)
-                        if char == "_" and _name_key(base[:i]) == _name_key(old_slug))
+        stem_end = _figure_stem_end(attachments, base, old_slug, _FIG_GLOB)
+        if stem_end is None:  # `_glob_slug` established this; keep failure explicit.
+            raise ValueError("could not locate the matched figure stem in %r" % base)
         # Everything after the stem is carried across verbatim, separator
         # included, so a file written before the spellings converged keeps its
         # own label under the new stem and stays with its set, rather than
         # being re-spelled into the current convention by a rename.
         tail = base[stem_end:]
         dst = os.path.join(attachments, new_slug + tail)
-        destination_prefix = _name_key(os.path.splitext(os.path.basename(dst))[0]) + "."
+        destination_prefix = _manifest_name_key(
+            os.path.splitext(os.path.basename(dst))[0]) + "."
         destination_slot = _glob_slug(
             attachments, new_slug, glob.escape(os.path.splitext(tail)[0]) + ".*")
         entry = {"from": base, "to": os.path.basename(dst), "ok": False,
                  "error": None}
         if dry_run:
             entry["dry_run"] = True
-        if unicodedata.normalize("NFC", base).casefold() in owned:
+        if _manifest_name_key(base) in owned:
             entry["error"] = "recorded in the PDF figure manifest; not this skill's to rename"
         elif any(name.startswith(destination_prefix) for name in owned):
             entry["error"] = "destination is recorded in the PDF figure manifest"
@@ -1016,10 +2439,13 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources):
             entry["error"] = ("label spelling only pdf-figure-extractor "
                               "writes; this file is a PDF's figure, not this "
                               "note's")
+        elif base not in owner["embeds"]:
+            entry["error"] = ("not an exact rendered filename-only embed in "
+                              "%s; ownership is unproven" % owner["path"])
         elif not os.path.lexists(src):
             entry["error"] = "source missing"
-        elif not os.path.isfile(src):
-            entry["error"] = "source is not an image file"
+        elif os.path.islink(src) or not os.path.isfile(src):
+            entry["error"] = "source is not a regular image file"
         # lexists, not exists: a broken symlink at dst is still something there.
         elif any(not _same_file(src, path) for path in destination_slot) \
                 or (os.path.lexists(dst) and not _same_file(src, dst)):
@@ -1032,6 +2458,75 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources):
                 entry["error"] = f"{type(exc).__name__}: {exc}"
         plan.append((src, dst, entry))
 
+    # The folder walk above proves which files exist; the note supplies the
+    # inverse inventory. Without this pass a missing embedded attachment is
+    # silently omitted, and an empty folder misleadingly reports a successful
+    # empty rename even though the old note already has a broken figure.
+    existing = {os.path.basename(src) for src, _dst, _entry in plan}
+    for base in sorted(owner["embeds"], key=lambda item: (
+            _manifest_name_key(item), item)):
+        tail = _embedded_figure_tail(base, old_slug)
+        if tail is None or base in existing:
+            continue
+        entry = {
+            "from": base,
+            "to": new_slug + tail,
+            "ok": False,
+            "error": ("owner note embeds this old-slug image, but the exact "
+                      "attachment is missing; restore it or replace the note "
+                      "embed with the documented missing-attachment placeholder "
+                      "before renaming"),
+        }
+        if dry_run:
+            entry["dry_run"] = True
+        plan.append((os.path.join(attachments, base),
+                     os.path.join(attachments, new_slug + tail), entry))
+
+    # A changed stem retires both attachment names and, after publication, the
+    # old Articles path. Other vault notes can depend on either. Clipping
+    # processor does not have authority to rewrite unrelated Markdown, so a
+    # complete canonical-vault scan must refuse the image mutation before it
+    # makes those references dangle. The same scan is repeated around each
+    # move below so a reference added after planning triggers rollback.
+    dependency_images = sorted({
+        os.path.basename(src) for src, _dst, _entry in plan
+    } | {
+        name for name in owner["embeds"]
+        if _embedded_figure_tail(name, old_slug) is not None
+    }, key=lambda item: (_manifest_name_key(item), item))
+    # Path retirement is about the exact directory-entry spelling. NFD and NFC
+    # can coexist on a case-sensitive filesystem even though portable matching
+    # correctly treats them as one namespace for collision/ownership checks.
+    changed_slug = old_slug != new_slug
+    dependency_blockers = (_vault_dependency_blockers(
+        owner, old_slug, dependency_images) if changed_slug else [])
+    if dependency_blockers:
+        error = _dependency_error(dependency_blockers)
+        if not plan:
+            entry = {"from": old_slug + ".md", "to": new_slug + ".md",
+                     "ok": False, "error": error,
+                     "dependency_blockers": dependency_blockers}
+            if dry_run:
+                entry["dry_run"] = True
+            plan.append((None, None, entry))
+        else:
+            for _src, _dst, entry in plan:
+                entry["dependency_blockers"] = dependency_blockers
+                if not entry["error"]:
+                    entry["error"] = error
+
+    identities = {}
+    for src, _dst, entry in plan:
+        if entry["error"]:
+            continue
+        try:
+            identities[src] = file_identity(src)
+        except OSError as exc:
+            entry["error"] = ("source changed while the rename was being "
+                              "planned (%s: %s)" %
+                              (type(exc).__name__, exc))
+
+    _validate_clipping_owner(owner)
     blocked = [e for _s, _d, e in plan if e["error"]]
     if blocked:
         for _src, _dst, entry in plan:
@@ -1046,26 +2541,46 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources):
     done = []
     for src, dst, entry in plan:
         try:
-            os.rename(src, dst)
-        except OSError as exc:
+            _validate_clipping_owner(owner)
+            if changed_slug:
+                blockers = _vault_dependency_blockers(
+                    owner, old_slug, dependency_images)
+                if blockers:
+                    entry["dependency_blockers"] = blockers
+                    raise ValueError(_dependency_error(blockers))
+            move_noreplace(src, dst, expected=identities[src])
+            entry["ok"] = os.path.lexists(dst)
+            done.append((src, dst, entry))
+            _validate_clipping_owner(owner)
+            if changed_slug:
+                blockers = _vault_dependency_blockers(
+                    owner, old_slug, dependency_images)
+                if blockers:
+                    entry["dependency_blockers"] = blockers
+                    raise ValueError(_dependency_error(blockers))
+        except (OSError, ValueError) as exc:
             # Put back what has already moved, so the set is still whole under
             # one slug and the re-run after the fix is the same operation.
-            entry["error"] = f"{type(exc).__name__}: {exc}"
+            if isinstance(exc, MoveIncomplete):
+                entry["error"] = ("MOVE INCOMPLETE — both paths must be "
+                                  "inspected before retrying: %s" % exc)
+            else:
+                entry["error"] = f"{type(exc).__name__}: {exc}"
             for back_src, back_dst, back_entry in reversed(done):
                 try:
-                    os.rename(back_dst, back_src)
+                    move_noreplace(back_dst, back_src,
+                                   expected=identities[back_src])
                     back_entry["ok"] = False
-                    back_entry["error"] = _STRADDLE % os.path.basename(src)
+                    if back_entry is not entry:
+                        back_entry["error"] = _STRADDLE % os.path.basename(src)
                 except OSError as back:
-                    back_entry["error"] = ("rolled back and FAILED (%s) — this "
-                                           "file is at its new name while the "
-                                           "rest are at their old one" % back)
+                    back_entry["error"] = ("ROLLBACK INCOMPLETE (%s) — inspect "
+                                           "both its old and new paths; neither "
+                                           "was overwritten" % back)
             for _s2, _d2, other in plan:
                 if not other["ok"] and not other["error"]:
                     other["error"] = _STRADDLE % os.path.basename(src)
             return [e for _s, _d, e in plan]
-        entry["ok"] = os.path.lexists(dst)
-        done.append((src, dst, entry))
     return [e for _s, _d, e in plan]
 
 
@@ -1081,15 +2596,33 @@ class _FakeResponse:
     `read(CHUNK)`, so the deadline below it is never reached).
     """
 
-    def __init__(self, chunks, headers=None):
+    def __init__(self, chunks, headers=None, status=200, reason="OK"):
         self._chunks = list(chunks)
         self.headers = dict(headers or {})
+        self.status = status
+        self.reason = reason
+        self.read_count = 0
+        self.closed = False
 
     def read1(self, _n=None):
+        self.read_count += 1
         return self._chunks.pop(0) if self._chunks else b""
 
     def read(self, _n=None):
         raise AssertionError("_stream_to_file must read1(), not read()")
+
+    def close(self):
+        self.closed = True
+
+
+class _FakeConnection:
+    """Connection lifetime probe for offline redirect transport tests."""
+
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
 
 
 #: The smallest valid PNG, for the paths that need real image bytes.
@@ -1115,7 +2648,8 @@ def run_self_test():
         """A guard is only a guard if it refuses; record WHAT it refused with."""
         try:
             fn(*a, **kw)
-        except (ValueError, TypeError, TimeoutError) as exc:
+        except (ValueError, TypeError, TimeoutError, urllib.error.HTTPError,
+                argparse.ArgumentTypeError) as exc:
             cases.append((label, True, type(exc).__name__, "refused"))
             return str(exc)
         except Exception as exc:                       # noqa: BLE001
@@ -1279,7 +2813,19 @@ def run_self_test():
                        ("/etc/passwd", "an absolute path"),
                        ("dir/slug", "a separator"),
                        ("dir\\slug", "a backslash separator"),
+                       ("bad:name", "a Windows-forbidden colon"),
+                       ('bad"name', "a Windows-forbidden quote"),
+                       ("bad|name", "a Windows-forbidden pipe"),
+                       ("bad?name", "a Windows-forbidden question mark"),
+                       ("bad*name", "a Windows-forbidden asterisk"),
+                       ("bad<name", "a Windows-forbidden angle bracket"),
+                       ("bad\x1fname", "a control character"),
+                       ("bad\x7fname", "DEL"),
                        ("Teslo..Cancer_2026", "`..` with no separator at all"),
+                       ("trailing.", "a trailing dot"),
+                       ("trailing ", "a trailing space"),
+                       ("CON", "a Windows device basename"),
+                       ("com1.txt", "a Windows device basename before a dot"),
                        ("", "an empty slug"),
                        ("   ", "a whitespace-only slug"),
                        (None, "no slug at all"),
@@ -1300,6 +2846,41 @@ def run_self_test():
                validate_index, bad)
     check("validate_index accepts the first and later figure numbers",
           [validate_index(1), validate_index(20)], [1, 20])
+    rendered_fixture = """![[Visible_fig_1.png]]
+`![[Inline_code_fig_2.png]]`
+`multiline code
+![[Multiline_code_fig_2b.png]]
+continues here`
+```md
+![[Fence_fig_3.png]]
+```
+    ![[Indented_fig_4.png]]
+<!-- ![[Html_comment_fig_5.png]] -->
+%% ![[Obsidian_comment_fig_6.png]] %%
+<code>![[Html_code_fig_6b.png]]</code>
+<script>![[Script_fig_6c.png]]</script>
+\\![[Escaped_fig_7.png]]
+![[folder/Qualified_fig_8.png]]
+![[Aliased_fig_9.png|640]]
+"""
+    check("only rendered filename-only embeds establish clipping ownership",
+          _rendered_embed_basenames(rendered_fixture),
+          frozenset(("Visible_fig_1.png", "Aliased_fig_9.png")))
+    dependency_fixture = """[[Old_Slug_2025|old note]]
+![[Sources/Images/Old_Slug_2025_fig_1.png#crop|figure]]
+[note](../Articles/Old_Slug_2025.md)
+<img src="Sources/Images/Old_Slug_2025_fig_2.png">
+`![[Old_Slug_2025_fig_3.png]]`
+<!-- [[Old_Slug_2025]] -->
+[remote](https://example.com/Old_Slug_2025_fig_4.png)
+"""
+    check("dependency parsing sees local old-note/image targets but not inert or remote text",
+          _markdown_dependency_names(
+              dependency_fixture,
+              ["Old_Slug_2025_fig_%d.png" % n for n in range(1, 5)],
+              "Old_Slug_2025"),
+          ["Old_Slug_2025.md", "Old_Slug_2025_fig_1.png",
+           "Old_Slug_2025_fig_2.png"])
 
     import shutil
     tmp = tempfile.mkdtemp(prefix="fetch_images_selftest.")
@@ -1312,16 +2893,57 @@ def run_self_test():
         os.makedirs(att)
         sources = os.path.join(tmp, "Sources", "PDFs")
         os.makedirs(sources)
+        articles = os.path.join(tmp, "Articles")
+        os.makedirs(articles)
+        dst = os.path.join(tmp, "body")
+
+        def clipping_note(slug, embeds=(), source="https://example.com/article",
+                          body_prefix=""):
+            """Write one canonical clipping owner for a guarded self-test."""
+            expected = _manifest_name_key(slug + ".md")
+            for name in os.listdir(articles):
+                if _manifest_name_key(name) == expected:
+                    os.unlink(os.path.join(articles, name))
+            path = os.path.join(articles, slug + ".md")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write("---\nsources:\n  - %s\n---\n%s" %
+                         (source, body_prefix))
+                for name in embeds:
+                    fh.write("\n![[%s]]\n" % name)
+            return path
 
         def checked_rename(*args, **kwargs):
             """Every ordinary self-test call follows the required ownership path."""
             kwargs.setdefault("sources", sources)
+            if "owner_note" not in kwargs and len(args) >= 3:
+                matched = [os.path.basename(path)
+                           for path in _glob_slug(args[0], args[1], _FIG_GLOB)]
+                kwargs["owner_note"] = clipping_note(args[1], matched)
             return rename_slug(*args, **kwargs)
 
         def touch(path, data=b"x"):
             with open(path, "wb") as fh:
                 fh.write(data)
             return path
+
+        urls_file = touch(os.path.join(tmp, "urls.txt"),
+                          b"\xef\xbb\xbfhttps://example.com/a.png\n\n"
+                          b"https://example.com/b.png\n")
+        check("--urls-file is decoded as UTF-8-sig",
+              _read_urls_file(urls_file),
+              ["https://example.com/a.png", "https://example.com/b.png"])
+        os.unlink(urls_file)
+        check("--urls-file is closed after the complete read",
+              os.path.lexists(urls_file), False)
+        bad_urls = touch(os.path.join(tmp, "bad-urls.txt"), b"https://x/\xff.png\n")
+        raises("--urls-file refuses invalid UTF-8 instead of dropping bytes",
+               _read_urls_file, bad_urls)
+
+        def current_owner(folder, slug, extra=()):
+            embeds = [os.path.basename(path)
+                      for path in _glob_slug(folder, slug, _FIG_GLOB)]
+            embeds.extend(extra)
+            return clipping_note(slug, embeds)
 
         # --- _ensure_within -------------------------------------------------
         check("_ensure_within accepts a path inside",
@@ -1354,16 +2976,15 @@ def run_self_test():
                            ("ftp://example.com/a.png", "ftp:"),
                            ("/relative/a.png", "a scheme-less path")):
             raises("check_url refuses %s" % label, check_url, url)
-        # A host-less URL is refused HERE, by name, rather than falling into the
-        # resolver — where it becomes "cannot resolve host None", or nothing at
-        # all on a machine with a proxy configured for the scheme.
+        # A host-less URL is refused here, by name, rather than falling into the
+        # resolver as an opaque `getaddrinfo` failure.
         check("check_url refuses an http URL with no host, and says so",
               "no host" in raises("check_url refuses a host-less URL",
                                   check_url, "http:///a.png"), True)
         check("check_url allows a data: URI",
               check_url("data:image/png;base64,AAAA"), None)
-        check("check_url allows an ordinary https URL with --allow-private-hosts",
-              check_url("https://example.com/a.png", True), None)
+        check("the proxy policy is explicit and does not weaken address pinning",
+              PROXY_POLICY, "direct-only")
         # Loopback, link-local and private space, in the spellings that are
         # meant to slip past a string test. These resolve locally (a numeric
         # literal or /etc/hosts), so no DNS query leaves the machine.
@@ -1379,17 +3000,18 @@ def run_self_test():
                             ("0.0.0.0", "the unspecified address")):
             url = "http://%s/a.png" % host
             try:
-                socket.getaddrinfo(urllib.parse.urlsplit(url).hostname, None)
+                socket.getaddrinfo(host.strip("[]"), 80,
+                                   type=socket.SOCK_STREAM)
             except socket.gaierror:
-                # Unresolvable here: `_reject_non_public` documents that it lets
-                # those through (they may resolve at a proxy). Nothing to assert
-                # about the range check, so do not claim to have asserted it.
+                # Some platforms reject a legacy numeric spelling before this
+                # script can classify it. The mocked cases below cover those.
                 continue
             raises("check_url refuses %s (%s)" % (label, host), check_url, url)
             check("...unless --allow-private-hosts is passed (%s)" % host,
                   check_url(url, True), None)
-        # the redirect handler re-runs the same guard, so a redirect is not a
-        # way around it
+        # Resolve one target once, reject every returned address, then connect
+        # only to a vetted sockaddr. The second DNS answer below is the private
+        # rebinding answer an ordinary URL client would consume.
         from unittest.mock import patch
         _public = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("177.0.0.1", 0))]
         with patch.object(socket, "getaddrinfo", return_value=_public) as _dns:
@@ -1398,14 +3020,241 @@ def run_self_test():
                        + _host, check_url, "http://" + _host + "/a.png")
             check("numeric alias refusal does not consult the host resolver",
                   _dns.call_count, 0)
-        # Redirects apply the same host guard as the initial request.
+
+        _public4 = [(socket.AF_INET, socket.SOCK_STREAM, 6, "",
+                     ("198.51.100.20", 80))]
+        _private4 = [(socket.AF_INET, socket.SOCK_STREAM, 6, "",
+                      ("127.0.0.1", 80))]
+        # TEST-NET addresses are not is_global in modern Python, so use a
+        # genuinely global fixture for classifications below.
+        _public4[0] = (_public4[0][0], _public4[0][1], _public4[0][2], "",
+                       ("177.0.0.1", 80))
+
+        class _SocketProbe:
+            def __init__(self):
+                self.connected = None
+                self.timeouts = []
+                self.closed = False
+
+            def settimeout(self, value):
+                self.timeouts.append(value)
+
+            def connect(self, sockaddr):
+                self.connected = sockaddr
+
+            def close(self):
+                self.closed = True
+
+        with patch.object(socket, "getaddrinfo",
+                          side_effect=[_public4, _private4]) as _dns:
+            target = _vetted_target("http://media.example/a.png")
+            probe = _SocketProbe()
+            with patch.object(socket, "socket", return_value=probe):
+                connected = _connect_vetted(
+                    target, 5, time.monotonic() + 5)
+            check("a rebinding answer is never requested after target vetting",
+                  _dns.call_count, 1)
+            check("the actual socket is pinned to the vetted IPv4 sockaddr",
+                  (connected is probe, probe.connected),
+                  (True, ("177.0.0.1", 80)))
+
+        _public6 = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "",
+                     ("2606:4700:4700::1111", 8443, 0, 0))]
+        with patch.object(socket, "getaddrinfo", return_value=_public6):
+            ipv6 = _vetted_target(
+                "https://[2606:4700:4700::1111]:8443/a.png")
+        check("IPv6 stays bracketed in the logical Host header",
+              ipv6.host_header, "[2606:4700:4700::1111]:8443")
+        check("the IPv6 sockaddr is retained verbatim for the pinned socket",
+              ipv6.addresses[0][4], ("2606:4700:4700::1111", 8443, 0, 0))
+
+        with patch.object(socket, "getaddrinfo",
+                          return_value=_public4 + _private4):
+            raises("one private answer rejects a mixed public/private DNS set",
+                   _vetted_target, "http://mixed.example/a.png")
+        with patch.object(socket, "getaddrinfo", return_value=_private4):
+            check("--allow-private-hosts remains the explicit private escape hatch",
+                  _vetted_target("http://private.example/a.png", True).addresses,
+                  tuple(_private4))
+
+        # Python 3.9 classifies several IPv6 transition spellings as globally
+        # routable without classifying the IPv4 endpoint they carry. A NAT64,
+        # 6to4, compatible, or ISATAP address can otherwise tunnel this fetch
+        # to loopback/RFC1918 space while passing the nominal IPv6 check.
+        tunneled_private = (
+            ("IPv4-mapped", "::ffff:127.0.0.1"),
+            ("IPv4-compatible", "::127.0.0.1"),
+            ("well-known NAT64", "64:ff9b::7f00:1"),
+            ("local-use NAT64", "64:ff9b:1:a00:0:100::"),
+            ("6to4", "2002:7f00:1::"),
+            ("Teredo", "2001:0:808:808:0:ffff:80ff:fffe"),
+            ("ISATAP", "2606:4700::5efe:7f00:1"),
+        )
+        for label, literal in tunneled_private:
+            hidden = _embedded_ipv4_addresses(ipaddress.ip_address(literal))
+            check("%s exposes its embedded IPv4 endpoint" % label,
+                  bool(hidden), True)
+            check("%s with a private embedded endpoint is non-public" % label,
+                  _public_ip(ipaddress.ip_address(literal)), False)
+            tunneled = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "",
+                         (literal, 80, 0, 0))]
+            with patch.object(socket, "getaddrinfo", return_value=tunneled):
+                raises("the URL guard refuses private IPv4 through %s" % label,
+                       _vetted_target, "http://transition.example/a.png")
+
+        # Public embedded endpoints are not rejected merely because the outer
+        # form has one. Python 3.9 independently marks compatible/NAT64 space
+        # reserved, so those remain outside this script's open-web policy.
+        for label, literal in (
+                ("6to4", "2002:808:808::"),
+                ("ISATAP", "2606:4700::5efe:808:808")):
+            check("%s with a public IPv4 endpoint remains public" % label,
+                  _public_ip(ipaddress.ip_address(literal)), True)
+
+        request_probe = {}
+
+        class _WireProbe(_SocketProbe):
+            def __init__(self):
+                super().__init__()
+                self.sent = bytearray()
+
+            def sendall(self, data):
+                self.sent.extend(data)
+
+            def makefile(self, _mode, *args, **kwargs):
+                return io.BytesIO(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+
+        wire = _WireProbe()
+        default_tls = ssl.create_default_context()
+        check("the real default TLS context validates chains and hostnames",
+              (default_tls.check_hostname, default_tls.verify_mode),
+              (True, ssl.CERT_REQUIRED))
+
+        class _TLSProbe:
+            check_hostname = True
+            verify_mode = ssl.CERT_REQUIRED
+
+            def wrap_socket(self, sock, server_hostname=None):
+                request_probe["sni"] = server_hostname
+                request_probe["tls_input"] = sock
+                return sock
+
+        with patch.object(socket, "getaddrinfo", return_value=_public4):
+            https_target = _vetted_target(
+                "https://Media.Example:8443/a%2Fb?q=a%20b+plus#omit-me")
+            explicit_default = _vetted_target(
+                "https://Media.Example:443/empty-query?#omit-me")
+        check("Host preserves an explicitly written default port",
+              explicit_default.host_header, "media.example:443")
+        check("an empty query delimiter is preserved while its fragment is omitted",
+              explicit_default.request_target, "/empty-query?")
+        tls_probe = _TLSProbe()
+        with patch.dict(globals(), {"_connect_vetted": lambda *_a, **_kw: wire}), \
+                patch.object(ssl, "create_default_context", return_value=tls_probe):
+            https_conn, https_resp = _request_once(
+                https_target, 5, time.monotonic() + 5)
+        sent_request = wire.sent.decode("iso-8859-1")
+        check("HTTPS keeps the logical host for SNI and Host, never the pinned IP",
+              (request_probe["sni"], "Host: media.example:8443\r\n" in sent_request,
+               "177.0.0.1" in sent_request),
+              ("media.example", True, False))
+        check("the request target preserves percent/query spelling and omits fragments",
+              sent_request.split("\r\n", 1)[0],
+              "GET /a%2Fb?q=a%20b+plus HTTP/1.1")
+        check("the TLS wrapper receives the already-pinned socket",
+              request_probe["tls_input"] is wire, True)
+        check("the TLS context contract keeps certificate hostname validation on",
+              (tls_probe.check_hostname, tls_probe.verify_mode),
+              (True, ssl.CERT_REQUIRED))
+        https_resp.close()
+        https_conn.close()
+
+        # Redirects are followed manually. Each next URL is resolved/guarded
+        # before another request and before its redirect body can be consumed.
+        redir = _FakeResponse(
+            [b"untrusted redirect body"], {"Location": "http://private.example/x"},
+            status=302, reason="Found")
+        redir_conn = _FakeConnection()
+        with patch.object(socket, "getaddrinfo",
+                          side_effect=[_public4, _private4]) as _dns, \
+                patch.dict(globals(), {"_request_once": lambda *_a, **_kw:
+                           (redir_conn, redir)}):
+            raises("a redirect to a private address is refused before requesting it",
+                   _fetch_to_path, "http://media.example/a.png", dst, 5,
+                   1000, 30, False)
+        check("the redirect target is a separately guarded single resolution",
+              _dns.call_count, 2)
+        check("a rejected redirect body is never read",
+              (redir.read_count, redir.closed, redir_conn.closed),
+              (0, True, True))
+
+        downgrade = _FakeResponse(
+            [b"downgrade body"], {"Location": "http://media2.example/x"},
+            status=302, reason="Found")
+        with patch.object(socket, "getaddrinfo",
+                          side_effect=[_public4, _public4]), \
+                patch.dict(globals(), {"_request_once": lambda *_a, **_kw:
+                           (_FakeConnection(), downgrade)}):
+            raises("an HTTPS redirect cannot downgrade to HTTP",
+                   _fetch_to_path, "https://media.example/a.png", dst, 5,
+                   1000, 30, False)
+        check("the refused downgrade body is never read", downgrade.read_count, 0)
+
+        first = _FakeResponse([], {"Location": "/final?q=1%202"},
+                              status=302, reason="Found")
+        final = _FakeResponse([_PNG], {"Content-Type": "image/png",
+                                      "Content-Length": str(len(_PNG))})
+        calls = []
+
+        def fake_request(target, *_a, **_kw):
+            calls.append(target)
+            return (_FakeConnection(), first if len(calls) == 1 else final)
+
+        record = {}
+        with patch.object(socket, "getaddrinfo",
+                          side_effect=[_public4, _public4]) as _dns, \
+                patch.dict(globals(), {"_request_once": fake_request}):
+            content_type, fetched = _fetch_to_path(
+                "http://media.example/start", dst, 5, 1000, 30, False, record)
+        check("a safe redirect resolves exactly once per requested hop",
+              (_dns.call_count, len(calls)), (2, 2))
+        check("a safe redirect reaches the final body and reports its URL",
+              (content_type, fetched, record["final_url"],
+               open(dst, "rb").read()),
+              ("image/png", len(_PNG),
+               "http://media.example/final?q=1%202", _PNG))
+
+        for status in (300, 304, 305, 306, 399):
+            unexpected = _FakeResponse(
+                [_PNG], {"Content-Type": "image/png"}, status=status,
+                reason="Not a followed redirect")
+            with patch.object(socket, "getaddrinfo", return_value=_public4), \
+                    patch.dict(globals(), {"_request_once": lambda *_a, _r=unexpected,
+                               **_kw: (_FakeConnection(), _r)}):
+                raises("HTTP %d cannot be accepted as a successful payload" % status,
+                       _fetch_to_path, "http://media.example/a.png", dst, 5,
+                       1000, 30, False)
+            check("HTTP %d body is not read" % status, unexpected.read_count, 0)
+
         raises("a redirect to file: is refused at the hop",
-               _GuardedRedirectHandler(False).redirect_request,
-               None, None, 302, "Found", {}, "file:///etc/passwd")
+               _vetted_target, "file:///etc/passwd")
+
+        for field, values in (("timeout", (0, -1, True, None)),
+                              ("max_bytes", (0, -1, True, 1.5, None)),
+                              ("max_seconds", (0, -1, True, None))):
+            for bad in values:
+                limits = {"timeout": 5, "max_bytes": 1000, "max_seconds": 30}
+                limits[field] = bad
+                raises("programmatic %s refuses %r" % (field, bad),
+                       _validate_transfer_limits, limits["timeout"],
+                       limits["max_bytes"], limits["max_seconds"])
+        for bad in ("0", "-1", "1.5", "nope"):
+            raises("CLI transfer limits refuse %r" % bad,
+                   _positive_int_arg, bad)
 
         # --- _stream_to_file, driven by a fake response ---------------------
         far = time.monotonic() + 60
-        dst = os.path.join(tmp, "body")
         check("_stream_to_file returns the byte count",
               _stream_to_file(_FakeResponse([b"abc", b"de"]), dst, 1000, far), 5)
         check("...and writes exactly those bytes", open(dst, "rb").read(),
@@ -1450,6 +3299,20 @@ def run_self_test():
                "data:not-a-uri", dst)
         raises("a data: URI over the cap is refused", _fetch_data_uri,
                data_url, dst, 10)
+        oversized_b64 = ("data:application/octet-stream;base64,"
+                         + base64.b64encode(b"x" * 52).decode("ascii"))
+        with patch.object(base64, "b64decode",
+                          side_effect=AssertionError("must fail before decode")):
+            raises("an unescaped oversized base64 URI is rejected before allocation",
+                   _fetch_data_uri, oversized_b64, dst, 50)
+        percent_b64 = oversized_b64.replace("=", "%3D")
+        raises("a percent-escaped base64 URI is bounded while decoding",
+               _fetch_data_uri, percent_b64, dst, 50)
+        raises("data URI decoding observes the whole-transfer deadline",
+               _fetch_data_uri, "data:text/plain,abc", dst, 100,
+               time.monotonic() - 1)
+        raises("invalid base64 is refused rather than decoded permissively",
+               _fetch_data_uri, "data:text/plain;base64,@@@@", dst, 100)
         # RFC 2397 allows parameters on the mediatype, and real pages carry
         # them: `;charset=utf-8` before `;base64`, and the plain-text
         # inline-SVG `;utf8` form.  Both used to be refused as malformed, so
@@ -1515,22 +3378,108 @@ def run_self_test():
         check("...and the file that was there is untouched",
               open(os.path.join(att, "Teslo_Cancer_2026_fig_1.png"), "rb").read(),
               _PNG)
+        missing_owner = download_one(data_url, att, "Teslo_Cancer_2026", 1,
+                                     overwrite=True)
+        check("--overwrite without exact clipping-note evidence is refused",
+              (missing_owner["ok"], "--owner-note" in (missing_owner["error"] or ""),
+               open(os.path.join(att, "Teslo_Cancer_2026_fig_1.png"), "rb").read()),
+              (False, True, _PNG))
+        foreign_articles = os.path.join(tmp, "other-vault", "Articles")
+        os.makedirs(foreign_articles)
+        foreign_owner = os.path.join(foreign_articles, "Teslo_Cancer_2026.md")
+        with open(foreign_owner, "w", encoding="utf-8") as fh:
+            fh.write("---\nsources:\n  - https://example.com/other\n---\n"
+                     "![[Teslo_Cancer_2026_fig_1.png]]\n")
+        foreign = download_one(data_url, att, "Teslo_Cancer_2026", 1,
+                               overwrite=True, owner_note=foreign_owner)
+        check("a similarly named note in another vault cannot authorize overwrite",
+              (foreign["ok"], "this Sources/Images vault" in
+               (foreign["error"] or "")), (False, True))
+        image_alias = os.path.join(tmp, "images-alias")
+        try:
+            os.symlink(att, image_alias)
+        except (OSError, NotImplementedError):
+            pass
+        else:
+            before_alias_attempt = open(os.path.join(
+                att, "Teslo_Cancer_2026_fig_1.png"), "rb").read()
+            alias_foreign = download_one(
+                data_url, image_alias, "Teslo_Cancer_2026", 1,
+                overwrite=True, owner_note=foreign_owner)
+            check("a symlink alias cannot hide the canonical image vault from owner binding",
+                  (alias_foreign["ok"], "this Sources/Images vault" in
+                   (alias_foreign["error"] or ""),
+                   open(os.path.join(att, "Teslo_Cancer_2026_fig_1.png"),
+                        "rb").read()),
+                  (False, True, before_alias_attempt))
+
+        identity_owner = current_owner(att, "Teslo_Cancer_2026")
+        real_realpath = os.path.realpath
+
+        def parent_case_variant(path):
+            resolved = real_realpath(path)
+            if os.path.abspath(path) == os.path.abspath(articles):
+                return resolved.swapcase()
+            return resolved
+
+        with patch.object(os.path, "realpath", side_effect=parent_case_variant):
+            identity_evidence = _load_clipping_owner(
+                identity_owner, "Teslo_Cancer_2026", att)
+        check("owner binding compares Articles directory identity, not realpath spelling",
+              identity_evidence["path"], os.path.abspath(identity_owner))
+        inert_owner = clipping_note(
+            "Teslo_Cancer_2026", (), body_prefix=(
+                "\n```md\n![[Teslo_Cancer_2026_fig_1.png]]\n```\n"
+                "<!-- ![[Teslo_Cancer_2026_fig_1.png]] -->\n"))
+        inert = download_one(data_url, att, "Teslo_Cancer_2026", 1,
+                             overwrite=True, owner_note=inert_owner)
+        check("embed-shaped text in code or comments cannot claim an attachment",
+              (inert["ok"], "not an exact rendered" in (inert["error"] or "")),
+              (False, True))
+        wrong_source_owner = clipping_note(
+            "Teslo_Cancer_2026", ("Teslo_Cancer_2026_fig_1.png",),
+            source="[[Sources/PDFs/Teslo_Cancer_2026.pdf]]")
+        wrong_source = download_one(data_url, att, "Teslo_Cancer_2026", 1,
+                                    overwrite=True,
+                                    owner_note=wrong_source_owner)
+        check("a PDF wikilink cannot make a note a clipping-image owner",
+              (wrong_source["ok"], "HTTP(S) URL" in (wrong_source["error"] or "")),
+              (False, True))
+        legacy_owner = os.path.join(articles, "Teslo_Cancer_2026.md")
+        with open(legacy_owner, "w", encoding="utf-8") as fh:
+            fh.write("---\nsource: https://example.com/legacy\n---\n"
+                     "![[Teslo_Cancer_2026_fig_1.png]]\n")
+        legacy = download_one(data_url, att, "Teslo_Cancer_2026", 1,
+                              overwrite=True, owner_note=legacy_owner)
+        check("legacy source fallback alone cannot authorize a destructive image action",
+              (legacy["ok"], "first current sources item" in
+               (legacy["error"] or "")), (False, True))
         check("--overwrite is what replaces it",
               download_one(data_url, att, "Teslo_Cancer_2026", 1,
-                           overwrite=True)["ok"], True)
+                           overwrite=True,
+                           owner_note=current_owner(
+                               att, "Teslo_Cancer_2026"))["ok"], True)
         # A failed cross-device move used to remove the previous good image.
-        # Simulate an interrupted copy after it wrote bytes, not a successful
-        # transfer whose return value merely says it failed.
-        import errno
-        def interrupted_copy(src, dst, *args, **kwargs):
-            with open(dst, "wb") as fh:
+        # Simulate an interrupted stage copy after it wrote bytes. The complete
+        # private download is retained and named in the result; no public path
+        # is exposed and no previous image changes.
+        real_snapshot = _stable_regular_snapshot
+
+        def interrupted_snapshot(path, copy_to=None, copy_mode=None):
+            if copy_to is None:
+                return real_snapshot(path)
+            if path.endswith(".md"):
+                return real_snapshot(path, copy_to=copy_to, copy_mode=copy_mode)
+            with open(copy_to, "xb") as fh:
                 fh.write(b"incomplete")
             raise OSError(errno.ENOSPC, "injected disk-full copy")
+
         keep_image = os.path.join(att, "Teslo_Cancer_2026_fig_1.png")
-        with patch.object(os, "rename", side_effect=OSError(errno.EXDEV, "different filesystem")), \
-                patch.object(shutil, "copyfile", side_effect=interrupted_copy):
+        image_owner = current_owner(att, "Teslo_Cancer_2026")
+        with patch.dict(globals(), _stable_regular_snapshot=interrupted_snapshot):
             failed_replace = download_one(data_url, att, "Teslo_Cancer_2026", 1,
-                                          overwrite=True)
+                                          overwrite=True,
+                                          owner_note=image_owner)
             failed_new = download_one(data_url, att, "Teslo_Cancer_2026", 99)
         check("a failed overwrite preserves the previous complete download",
               (failed_replace["ok"], os.path.exists(keep_image)
@@ -1538,8 +3487,145 @@ def run_self_test():
         check("an interrupted new download exposes no final figure",
               (failed_new["ok"], _glob_slug(att, "Teslo_Cancer_2026", "_fig_99.*")),
               (False, []))
+        retained_scratch = [failed_replace.get("scratch"),
+                            failed_new.get("scratch")]
+        check("failed stage copies retain and report their complete downloads",
+              [(bool(path and os.path.isfile(path)),
+                open(path, "rb").read() if path and os.path.isfile(path) else None)
+               for path in retained_scratch],
+              [(True, _PNG), (True, _PNG)])
+        for path in retained_scratch:
+            os.remove(path)
         check("failed publications leave no staging directories",
               glob.glob(os.path.join(os.path.dirname(att), ".clipping-stage.*")), [])
+
+        # Publication authorization belongs to the exact source and target
+        # snapshots, not merely their pathnames. Exercise the gaps on both
+        # sides of the shared displacement protocol.
+        late_src = touch(os.path.join(tmp, "late-target-source.png"), _PNG)
+        late_target = touch(os.path.join(att, "Late_Target_2026_fig_1.png"),
+                            b"planned predecessor")
+
+        def replace_target_before_publish():
+            os.unlink(late_target)
+            touch(late_target, b"later editor save")
+
+        try:
+            _publish_file(late_src, late_target, True,
+                          os.path.dirname(att), 0o644,
+                          replace_target_before_publish)
+            late_error = None
+        except PublicationConflict as exc:
+            late_error = str(exc)
+        check("overwrite refuses a target replaced after its snapshot",
+              bool(late_error), True)
+        check("the late target and unpublished source both survive",
+              (open(late_target, "rb").read(), open(late_src, "rb").read(),
+               bool(late_error and ("changed" in late_error
+                                    or "predecessor" in late_error))),
+              (b"later editor save", _PNG, True))
+
+        mode_src = touch(os.path.join(tmp, "mode-source.png"), _PNG)
+        mode_target = touch(os.path.join(att, "Mode_Target_2026_fig_1.png"),
+                            b"old")
+        os.chmod(mode_target, 0o640)
+        _publish_file(mode_src, mode_target, True,
+                      staging_parent=os.path.dirname(att))
+        check("an overwrite preserves the predecessor's permission bits",
+              (open(mode_target, "rb").read(),
+               stat.S_IMODE(os.stat(mode_target).st_mode),
+               os.path.lexists(mode_src)),
+              (_PNG, 0o640, False))
+
+        readback_src = touch(os.path.join(tmp, "readback-source.png"), _PNG)
+        readback_target = touch(
+            os.path.join(att, "Readback_Target_2026_fig_1.png"), b"old bytes")
+        injected_readback = {"done": False}
+
+        def mutate_public_readback(path, copy_to=None, copy_mode=None):
+            if (copy_to is None and os.path.abspath(path) == readback_target
+                    and not injected_readback["done"]
+                    and os.path.isfile(path)
+                    and open(path, "rb").read() == _PNG):
+                injected_readback["done"] = True
+                with open(path, "wb") as fh:
+                    fh.write(b"later in-place edit")
+            return real_snapshot(path, copy_to=copy_to, copy_mode=copy_mode)
+
+        with patch.dict(globals(),
+                        _stable_regular_snapshot=mutate_public_readback):
+            try:
+                _publish_file(readback_src, readback_target, True,
+                              staging_parent=os.path.dirname(att))
+                readback_error = None
+            except PublicationConflict as exc:
+                readback_error = exc
+        recovered_old = (readback_error.recovery_path
+                         if readback_error is not None else None)
+        check("a post-link editor save is retained and the predecessor is recovered",
+              (bool(readback_error), open(readback_target, "rb").read(),
+               open(readback_src, "rb").read(),
+               open(recovered_old, "rb").read()
+               if recovered_old and os.path.isfile(recovered_old) else None),
+              (True, b"later in-place edit", _PNG, b"old bytes"))
+
+        slot_src = touch(os.path.join(tmp, "slot-source.png"), _PNG)
+        slot_target = os.path.join(att, "Late_Slot_2026_fig_1.png")
+        slot_twin = os.path.join(att, "Late_Slot_2026_fig_1.webp")
+
+        def create_slot_twin():
+            touch(slot_twin, b"late extension twin")
+            _refuse_existing(att, "Late_Slot_2026", 1, True, "png")
+
+        raises("a late extension twin rolls a new publication back",
+               _publish_file, slot_src, slot_target, False,
+               os.path.dirname(att), 0o644, None, create_slot_twin)
+        check("the late twin survives while our target and source return to pre-run state",
+              (os.path.lexists(slot_target), open(slot_twin, "rb").read(),
+               open(slot_src, "rb").read()),
+              (False, b"late extension twin", _PNG))
+
+        slot_replace_src = touch(os.path.join(tmp, "slot-replace-source.png"),
+                                 _PNG)
+        slot_replace_target = touch(
+            os.path.join(att, "Late_Replace_2026_fig_1.png"), b"old figure")
+        slot_replace_twin = os.path.join(
+            att, "Late_Replace_2026_fig_1.webp")
+
+        def create_replace_twin():
+            touch(slot_replace_twin, b"late twin")
+            _refuse_existing(att, "Late_Replace_2026", 1, True, "png")
+
+        raises("a late extension twin restores an overwritten predecessor",
+               _publish_file, slot_replace_src, slot_replace_target, True,
+               os.path.dirname(att), 0o644, None, create_replace_twin)
+        check("slot rollback preserves predecessor, twin, and source",
+              (open(slot_replace_target, "rb").read(),
+               open(slot_replace_twin, "rb").read(),
+               open(slot_replace_src, "rb").read()),
+              (b"old figure", b"late twin", _PNG))
+
+        changed_source = touch(os.path.join(tmp, "changed-source.png"), _PNG)
+        changed_target = os.path.join(att, "Changed_Source_2026_fig_1.png")
+        real_remove_expected = remove_expected
+        changed_once = {"done": False}
+
+        def replace_source_before_cleanup(target, *args, **kwargs):
+            if target == changed_source and not changed_once["done"]:
+                changed_once["done"] = True
+                os.unlink(changed_source)
+                touch(changed_source, b"later source occupant")
+            return real_remove_expected(target, *args, **kwargs)
+
+        with patch.dict(globals(), remove_expected=replace_source_before_cleanup):
+            cleanup_warning = _publish_file(
+                changed_source, changed_target,
+                staging_parent=os.path.dirname(att))
+        check("source cleanup removes only the copied snapshot",
+              (open(changed_target, "rb").read(),
+               open(changed_source, "rb").read(),
+               "retained" in (cleanup_warning or "")),
+              (_PNG, b"later source occupant", True))
         # An explicit overwrite grants replacement of this clipping's figure,
         # never a file another producer has recorded as its own.
         import hashlib
@@ -1549,11 +3635,12 @@ def run_self_test():
         owned_file = touch(os.path.join(pdf_owned, owned_name), _PNG)
         with open(os.path.join(pdf_owned, MANIFEST_FILE), "w") as fh:
             fh.write(owned_name + "\t" + hashlib.sha256(_PNG).hexdigest() + "\n")
+        pdf_owner = current_owner(pdf_owned, "Doe_Paper_2026")
         blocked_download = download_one(data_url, pdf_owned, "Doe_Paper_2026", 1,
-                                        overwrite=True)
+                                        overwrite=True, owner_note=pdf_owner)
         owned_render = touch(os.path.join(tmp, "owned-render.png"), _PNG)
         blocked_place = place_file(owned_render, pdf_owned, "Doe_Paper_2026", 1,
-                                   overwrite=True)
+                                   overwrite=True, owner_note=pdf_owner)
         check("overwrite never replaces a PDF-manifest-owned figure",
               (blocked_download["ok"], blocked_place["ok"],
                open(owned_file, "rb").read(), os.path.exists(owned_render)),
@@ -1573,8 +3660,11 @@ def run_self_test():
               download_one(data_url, att, "Teslo_Cancer_2026", 2)["ok"], False)
         old_webp = os.path.join(att, "Teslo_Cancer_2026_fig_2.webp")
         render_png = touch(os.path.join(tmp, "changed-format.png"), _PNG)
-        replaced = download_one(data_url, att, "Teslo_Cancer_2026", 2, overwrite=True)
-        placed = place_file(render_png, att, "Teslo_Cancer_2026", 2, overwrite=True)
+        format_owner = current_owner(att, "Teslo_Cancer_2026")
+        replaced = download_one(data_url, att, "Teslo_Cancer_2026", 2,
+                                overwrite=True, owner_note=format_owner)
+        placed = place_file(render_png, att, "Teslo_Cancer_2026", 2,
+                            overwrite=True, owner_note=format_owner)
         check("overwrite cannot create extension twins on either publication path",
               (replaced["ok"], placed["ok"], open(old_webp, "rb").read(),
                os.path.exists(render_png),
@@ -1636,8 +3726,9 @@ def run_self_test():
         anim = b'{"v":"5.7","w":100,"h":100,"fr":30,"ip":0,"op":60,"layers":[]}'
         got = fetch_source("data:application/json;base64,"
                            + base64.b64encode(anim).decode("ascii"))
-        check("fetch brings a NON-image source down (a Lottie is JSON)",
-              (got["ok"], open(got["path"], "rb").read()), (True, anim))
+        check("fetch accepts a Lottie JSON source and identifies its format",
+              (got["ok"], got["source_format"],
+               open(got["path"], "rb").read()), (True, "json", anim))
         check("...to a path outside the attachments folder",
               os.path.realpath(got["path"]).startswith(
                   os.path.realpath(att) + os.sep), False)
@@ -1646,6 +3737,116 @@ def run_self_test():
                            + base64.b64encode(anim).decode("ascii"),
                            max_bytes=10)["ok"], False)
         os.remove(got["path"])
+        for payload, label in ((b"<!doctype html><html>", "HTML"),
+                               (b"MZ\x90\x00", "an executable"),
+                               (b'{"message":"not an animation"}',
+                                "unrelated JSON")):
+            refused = fetch_source(
+                "data:application/octet-stream;base64,"
+                + base64.b64encode(payload).decode("ascii"))
+            check("fetch refuses %s rather than accepting arbitrary bytes" % label,
+                  (refused["ok"], refused["path"]), (False, None))
+
+        packed = os.path.join(tmp, "valid.lottie")
+        with zipfile.ZipFile(packed, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "manifest.json",
+                '{"version":"1","animations":[{"id":"a"}]}')
+            archive.writestr("animations/a.json", anim)
+        packed_bytes = open(packed, "rb").read()
+        dot = fetch_source(
+            "data:application/octet-stream;base64,"
+            + base64.b64encode(packed_bytes).decode("ascii"))
+        check("fetch accepts a dotLottie ZIP containing bounded animation JSON",
+              (dot["ok"], dot["source_format"]), (True, "dotlottie"))
+        os.remove(dot["path"])
+
+        duplicate_manifest = os.path.join(tmp, "duplicate-manifest.lottie")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with zipfile.ZipFile(
+                    duplicate_manifest, "w", zipfile.ZIP_DEFLATED) as archive:
+                # The old validator selected this first occurrence by iterating
+                # infolist(), while the renderer's getinfo() selected the last.
+                archive.writestr(
+                    "manifest.json",
+                    '{"version":"1","animations":[{"id":"a"}]}')
+                archive.writestr("animations/a.json", anim)
+                archive.writestr(
+                    "manifest.json",
+                    '{"version":"1","animations":[{"id":"b"}]}')
+                archive.writestr("animations/b.json", anim)
+        raises("dotLottie refuses duplicate manifest member names",
+               _validate_lottie_source, duplicate_manifest, DEFAULT_MAX_BYTES)
+
+        duplicate_animation = os.path.join(tmp, "duplicate-animation.lottie")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with zipfile.ZipFile(
+                    duplicate_animation, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr(
+                    "manifest.json",
+                    '{"version":"1","animations":[{"id":"a"}]}')
+                archive.writestr("animations/a.json", anim)
+                archive.writestr(
+                    "animations/a.json", anim.replace(b'"w":100', b'"w":1'))
+        raises("dotLottie refuses duplicate selected-animation member names",
+               _validate_lottie_source, duplicate_animation, DEFAULT_MAX_BYTES)
+
+        selected_pack = os.path.join(tmp, "selected-v2.lottie")
+        selected_manifest = {
+            "version": "2", "initial": {"animation": "chosen"},
+            "animations": [{"id": "decoy"}, {"id": "chosen"}],
+            "themes": [{"id": "first-in-zip"}],
+        }
+        with zipfile.ZipFile(selected_pack, "w", zipfile.ZIP_DEFLATED) as archive:
+            # Archive order is adversarial: theme/state metadata appears before
+            # two animations, while the manifest selects the second animation.
+            archive.writestr("t/first-in-zip.json", '{"rules":[]}')
+            archive.writestr("a/decoy.json", anim.replace(b'"w":100', b'"w":1'))
+            archive.writestr("a/chosen.json", anim)
+            archive.writestr("manifest.json", json.dumps(selected_manifest))
+        selected_bytes = open(selected_pack, "rb").read()
+        selected = fetch_source(
+            "data:application/zip;base64,"
+            + base64.b64encode(selected_bytes).decode("ascii"))
+        check("dotLottie selection follows v2 initial.animation, not ZIP order",
+              (selected["ok"], _dotlottie_animation_path(selected_manifest)),
+              (True, "a/chosen.json"))
+        os.remove(selected["path"])
+        check("dotLottie v1 activeAnimationId selects its manifest animation",
+              _dotlottie_animation_path({
+                  "version": "1.0", "activeAnimationId": "two",
+                  "animations": [{"id": "one"}, {"id": "two"}],
+              }), "animations/two.json")
+
+        missing_pack = os.path.join(tmp, "missing-selected.lottie")
+        with zipfile.ZipFile(missing_pack, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("a/decoy.json", anim)
+            archive.writestr("manifest.json", json.dumps({
+                "version": "2", "initial": {"animation": "real"},
+                "animations": [{"id": "real"}],
+            }))
+        missing_bytes = open(missing_pack, "rb").read()
+        missing = fetch_source(
+            "data:application/zip;base64,"
+            + base64.b64encode(missing_bytes).decode("ascii"))
+        check("an unrelated Lottie JSON cannot satisfy a missing manifest target",
+              (missing["ok"], missing["path"]), (False, None))
+        raises("a manifest animation id cannot escape its versioned directory",
+               _dotlottie_animation_path,
+               {"version": "2", "animations": [{"id": "../evil"}]})
+
+        arbitrary_zip = os.path.join(tmp, "arbitrary.zip")
+        with zipfile.ZipFile(arbitrary_zip, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("payload.txt", "not an animation")
+        arbitrary_zip_bytes = open(arbitrary_zip, "rb").read()
+        refused = fetch_source(
+            "data:application/zip;base64,"
+            + base64.b64encode(arbitrary_zip_bytes).decode("ascii"))
+        check("fetch refuses an arbitrary ZIP that is not dotLottie",
+              (refused["ok"], refused["path"]), (False, None))
+
         out_path = os.path.join(tmp, "anim.json")
         touch(out_path, b"mine")
         check("fetch refuses an --out that already exists",
@@ -1654,6 +3855,11 @@ def run_self_test():
         bad = fetch_source("file:///not-a-permitted-source", out_path,
                            overwrite=True)
         check("fetch validation failure never deletes an overwrite destination",
+              (bad["ok"], os.path.exists(out_path) and open(out_path, "rb").read()),
+              (False, b"mine"))
+        bad = fetch_source("data:text/html,%3Chtml%3E", out_path,
+                           overwrite=True)
+        check("a non-Lottie response never replaces an overwrite destination",
               (bad["ok"], os.path.exists(out_path) and open(out_path, "rb").read()),
               (False, b"mine"))
         def interrupted_fetch(url, destination, *args, **kwargs):
@@ -1670,7 +3876,9 @@ def run_self_test():
               (old_failed["ok"], os.path.exists(out_path)
                and open(out_path, "rb").read()), (False, b"mine"))
         check("retrying an interrupted fetch works without overwrite",
-              fetch_source("data:application/json,retry", new_out)["ok"], True)
+              fetch_source("data:application/json;base64,"
+                           + base64.b64encode(anim).decode("ascii"),
+                           new_out)["ok"], True)
 
         # `place` is the write half, and it is the SAME guards as `download`.
         gif = b"GIF89a\x01\x00\x01\x00\x00\xff\x00,"
@@ -1695,14 +3903,16 @@ def run_self_test():
                    "rb").read(), gif)
         check("...while --overwrite is what replaces it",
               place_file(render, att, "Teslo_Cancer_2026", 20,
-                         overwrite=True)["ok"], True)
+                         overwrite=True,
+                         owner_note=current_owner(
+                             att, "Teslo_Cancer_2026"))["ok"], True)
         replacement = touch(os.path.join(tmp, "replacement.gif"), gif)
         keep_gif = os.path.join(att, "Teslo_Cancer_2026_fig_20.gif")
         prior_gif = open(keep_gif, "rb").read()
-        with patch.object(os, "rename", side_effect=OSError(errno.EXDEV, "different filesystem")), \
-                patch.object(shutil, "copyfile", side_effect=interrupted_copy):
+        gif_owner = current_owner(att, "Teslo_Cancer_2026")
+        with patch.dict(globals(), _stable_regular_snapshot=interrupted_snapshot):
             failed_place = place_file(replacement, att, "Teslo_Cancer_2026", 20,
-                                      overwrite=True)
+                                      overwrite=True, owner_note=gif_owner)
         check("a failed rendered-image replacement preserves the previous GIF",
               (failed_place["ok"], os.path.exists(keep_gif)
                and open(keep_gif, "rb").read()), (False, prior_gif))
@@ -1721,6 +3931,21 @@ def run_self_test():
         check("...and a PNG named .gif is filed by its bytes",
               place_file(png, att, "Teslo_Cancer_2026", 22)["filename"],
               "Teslo_Cancer_2026_fig_22.png")
+        changing_render = touch(os.path.join(tmp, "changing-render.gif"), gif)
+        real_publish_file = _publish_file
+
+        def change_after_sniff(src, final, *args, **kwargs):
+            touch(src, b"late non-image replacement")
+            return real_publish_file(src, final, *args, **kwargs)
+
+        with patch.dict(globals(), {"_publish_file": change_after_sniff}):
+            changed = place_file(
+                changing_render, att, "Teslo_Cancer_2026", 25)
+        check("place refuses a source that changes after byte sniffing",
+              (changed["ok"], os.path.lexists(os.path.join(
+                  att, "Teslo_Cancer_2026_fig_25.gif"))), (False, False))
+        check("...and preserves the changed render for inspection or retry",
+              open(changing_render, "rb").read(), b"late non-image replacement")
         # slug validation and containment, on the placement path too
         render = touch(os.path.join(tmp, "render2.gif"), gif)
         check("place refuses a slug that is a path",
@@ -1737,6 +3962,29 @@ def run_self_test():
               (False, True))
         if os.path.exists(inside):       # a refusal leaves it where it was
             os.remove(inside)
+
+        case_alias_source = touch(os.path.join(att, "case-alias-scratch.gif"), gif)
+        real_realpath = os.path.realpath
+
+        def case_preserving_realpath(path):
+            resolved = real_realpath(path)
+            if os.path.abspath(path) == case_alias_source:
+                # Model the default-APFS behavior behind the regression:
+                # identity is shared, but realpath preserves a different path
+                # spelling than the one used for --attachments.
+                return os.path.join(os.path.dirname(resolved).swapcase(),
+                                    os.path.basename(resolved))
+            return resolved
+
+        with patch.object(os.path, "realpath", side_effect=case_preserving_realpath):
+            case_alias_result = place_file(
+                case_alias_source, att, "Teslo_Cancer_2026", 24)
+        check("place compares ancestor identity rather than case-sensitive realpaths",
+              (case_alias_result["ok"], os.path.isfile(case_alias_source),
+               "inside the attachments folder" in
+               (case_alias_result["error"] or "")),
+              (False, True, True))
+        os.remove(case_alias_source)
 
         res = download_one("file:///etc/passwd", att, "Teslo_Cancer_2026", 8)
         check("download_one refuses a file: URL", res["ok"], False)
@@ -1765,6 +4013,177 @@ def run_self_test():
         missing_guard = figures("Needs_Ownership_2025", ("_fig_1.png",))
         raises("rename refuses to run without the recursive PDF ownership inventory",
                rename_slug, missing_guard, "Needs_Ownership_2025", "New_Slug_2026")
+        raises("rename also requires the exact clipping owner note",
+               rename_slug, missing_guard, "Needs_Ownership_2025", "New_Slug_2026",
+               sources=sources)
+
+        def canonical_rename_fixture(label, old_slug, names=("_fig_1.png",)):
+            vault = tempfile.mkdtemp(prefix="dependency-%s." % label, dir=tmp)
+            image_dir = os.path.join(vault, "Sources", "Images")
+            pdf_dir = os.path.join(vault, "Sources", "PDFs")
+            note_dir = os.path.join(vault, "Articles")
+            os.makedirs(image_dir)
+            os.makedirs(pdf_dir)
+            os.makedirs(note_dir)
+            embeds = []
+            for tail in names:
+                name = old_slug + tail
+                touch(os.path.join(image_dir, name), _PNG)
+                embeds.append(name)
+            owner_path = os.path.join(note_dir, old_slug + ".md")
+            with open(owner_path, "w", encoding="utf-8") as fh:
+                fh.write("---\nsources:\n  - https://example.com/%s\n---\n" % label)
+                for name in embeds:
+                    fh.write("![[%s]]\n" % name)
+            return vault, image_dir, pdf_dir, owner_path, embeds
+
+        # A logical vault may symlink its whole Sources/ directory to storage
+        # outside the vault. Owner binding must use the logical Articles/
+        # identity in that layout, while an alias between two complete vaults
+        # remains ambiguous and cannot borrow ownership evidence.
+        linked_vault = tempfile.mkdtemp(prefix="linked-sources-vault.", dir=tmp)
+        linked_store = tempfile.mkdtemp(prefix="linked-sources-store.", dir=tmp)
+        linked_articles = os.path.join(linked_vault, "Articles")
+        linked_sources = os.path.join(linked_store, "Sources")
+        os.makedirs(linked_articles)
+        os.makedirs(os.path.join(linked_sources, "Images"))
+        os.makedirs(os.path.join(linked_sources, "PDFs"))
+        linked_supported = True
+        try:
+            os.symlink(linked_sources, os.path.join(linked_vault, "Sources"),
+                       target_is_directory=True)
+        except (OSError, NotImplementedError):
+            linked_supported = False
+        if linked_supported:
+            linked_slug = "Linked_Clipping_2025"
+            linked_image = linked_slug + "_fig_1.png"
+            touch(os.path.join(linked_vault, "Sources", "Images", linked_image),
+                  _PNG)
+            linked_owner = os.path.join(linked_articles, linked_slug + ".md")
+            with open(linked_owner, "w", encoding="utf-8") as fh:
+                fh.write("---\nsources:\n  - https://example.com/linked\n---\n"
+                         "![[%s]]\n" % linked_image)
+            bound = _load_clipping_owner(
+                linked_owner, linked_slug,
+                os.path.join(linked_vault, "Sources", "Images"))
+            check("a symlinked Sources directory binds to the logical vault owner",
+                  bound["vault"], os.path.realpath(linked_vault))
+
+            source_vault = tempfile.mkdtemp(prefix="source-complete-vault.", dir=tmp)
+            os.makedirs(os.path.join(source_vault, "Articles"))
+            os.makedirs(os.path.join(source_vault, "Sources", "Images"))
+            alias_vault = tempfile.mkdtemp(prefix="aliased-complete-vault.", dir=tmp)
+            os.makedirs(os.path.join(alias_vault, "Articles"))
+            try:
+                os.symlink(os.path.join(source_vault, "Sources"),
+                           os.path.join(alias_vault, "Sources"),
+                           target_is_directory=True)
+            except (OSError, NotImplementedError):
+                alias_supported = False
+            else:
+                alias_supported = True
+            if alias_supported:
+                alias_owner = os.path.join(
+                    alias_vault, "Articles", linked_slug + ".md")
+                with open(alias_owner, "w", encoding="utf-8") as fh:
+                    fh.write("---\nsources:\n  - https://example.com/alias\n---\n"
+                             "![[%s]]\n" % linked_image)
+                raises("an alias between two complete vaults cannot borrow owner evidence",
+                       _load_clipping_owner, alias_owner, linked_slug,
+                       os.path.join(alias_vault, "Sources", "Images"))
+
+        dep_vault, dep_images, dep_pdfs, dep_owner, dep_names = \
+            canonical_rename_fixture("external", "Old_Dependency_2025")
+        dep_wiki = os.path.join(dep_vault, "Wiki")
+        os.makedirs(dep_wiki)
+        dep_reference = os.path.join(dep_wiki, "reference.md")
+        with open(dep_reference, "w", encoding="utf-8") as fh:
+            fh.write("[[Old_Dependency_2025|old note]]\n"
+                     "![[Sources/Images/Old_Dependency_2025_fig_1.png]]\n")
+        dependency_report = dependency_status(
+            dep_images, dep_owner, "Old_Dependency_2025")
+        check("dependency re-probe names every external blocker path and target",
+              (dependency_report["ok"], dependency_report["blockers"]),
+              (False, [{"path": os.path.realpath(dep_reference),
+                        "references": ["Old_Dependency_2025.md",
+                                       "Old_Dependency_2025_fig_1.png"]}]))
+        blocked_dependency = rename_slug(
+            dep_images, "Old_Dependency_2025", "New_Dependency_2026",
+            sources=dep_pdfs, owner_note=dep_owner)
+        check("external Markdown dependencies refuse every image move",
+              ([row["ok"] for row in blocked_dependency],
+               os.path.isfile(os.path.join(dep_images, dep_names[0])),
+               os.path.realpath(dep_reference) in
+               (blocked_dependency[0]["error"] or "")),
+              ([False], True, True))
+        with open(dep_reference, "w", encoding="utf-8") as fh:
+            fh.write("`[[Old_Dependency_2025]]`\n"
+                     "<!-- ![[Old_Dependency_2025_fig_1.png]] -->\n")
+        check("code and comments do not manufacture dependency blockers",
+              dependency_status(dep_images, dep_owner,
+                                "Old_Dependency_2025")["blockers"], [])
+
+        nfd_old = unicodedata.normalize("NFD", "Müller_Dependency_2025")
+        nfc_new = unicodedata.normalize("NFC", "Müller_Dependency_2025")
+        nfd_vault, nfd_images, nfd_pdfs, nfd_owner, nfd_names = \
+            canonical_rename_fixture("normalization", nfd_old)
+        nfd_ref = os.path.join(nfd_vault, "reference.md")
+        with open(nfd_ref, "w", encoding="utf-8") as fh:
+            fh.write("![[%s]]\n" % nfd_names[0])
+        nfd_result = rename_slug(
+            nfd_images, nfd_old, nfc_new,
+            sources=nfd_pdfs, owner_note=nfd_owner)
+        check("an NFD-to-NFC pathname change still scans external dependencies",
+              ([row["ok"] for row in nfd_result],
+               os.path.isfile(os.path.join(nfd_images, nfd_names[0]))),
+              ([False], True))
+
+        race_vault, race_images, race_pdfs, race_owner, race_names = \
+            canonical_rename_fixture("late-reference", "Old_Race_2025")
+        race_reference = os.path.join(race_vault, "late.md")
+        with open(race_reference, "w", encoding="utf-8") as fh:
+            fh.write("No dependency yet.\n")
+        real_move = move_noreplace
+        inserted_dependency = {"done": False}
+
+        def add_dependency_after_move(src, dst, expected=None):
+            moved = real_move(src, dst, expected=expected)
+            if not inserted_dependency["done"]:
+                inserted_dependency["done"] = True
+                with open(race_reference, "w", encoding="utf-8") as fh:
+                    fh.write("[[Old_Race_2025]]\n")
+            return moved
+
+        with patch.dict(globals(), move_noreplace=add_dependency_after_move):
+            race_result = rename_slug(
+                race_images, "Old_Race_2025", "New_Race_2026",
+                sources=race_pdfs, owner_note=race_owner)
+        check("a dependency created during rename rolls the image move back",
+              ([row["ok"] for row in race_result],
+               os.path.isfile(os.path.join(race_images, race_names[0])),
+               os.path.lexists(os.path.join(
+                   race_images, "New_Race_2026_fig_1.png")),
+               os.path.realpath(race_reference) in
+               (race_result[0]["error"] or "")),
+              ([False], True, False, True))
+
+        pdf_vault, pdf_images, pdf_sources, pdf_owner, pdf_names = \
+            canonical_rename_fixture("linked-pdf", "Linked_PDF_2025")
+        outside_pdfs = os.path.join(tmp, "linked-pdf-target")
+        os.makedirs(outside_pdfs)
+        touch(os.path.join(outside_pdfs, "Linked_PDF_2025.pdf"), b"%PDF-1.7\n")
+        try:
+            os.symlink(outside_pdfs, os.path.join(pdf_sources, "linked"))
+        except (OSError, NotImplementedError):
+            pass
+        else:
+            linked_pdf_result = rename_slug(
+                pdf_images, "Linked_PDF_2025", "New_Linked_2026",
+                sources=pdf_sources, owner_note=pdf_owner)
+            check("PDF ownership inventory follows linked source subfolders",
+                  ([row["ok"] for row in linked_pdf_result],
+                   os.path.isfile(os.path.join(pdf_images, pdf_names[0]))),
+                  ([False], True))
 
         folder = figures("Old_Slug_2025")
         out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
@@ -1773,6 +4192,50 @@ def run_self_test():
               ([True, True, True],
                ["New_Slug_2026_fig_1.png", "New_Slug_2026_fig_2.png",
                 "New_Slug_2026_fig_3.png"]))
+        folder = figures("Old_Slug_2025", ("_fig_1.png", "_fig_2.png"))
+        one_file_owner = clipping_note(
+            "Old_Slug_2025", ("Old_Slug_2025_fig_1.png",))
+        out = rename_slug(folder, "Old_Slug_2025", "New_Slug_2026",
+                          sources=sources, owner_note=one_file_owner)
+        check("one unattributed same-stem file blocks the whole clipping rename",
+              ([entry["ok"] for entry in out], sorted(os.listdir(folder))),
+              ([False, False],
+               ["Old_Slug_2025_fig_1.png", "Old_Slug_2025_fig_2.png"]))
+        check("the unembedded basename is reported as unproven ownership",
+              sum("ownership is unproven" in (entry["error"] or "")
+                  for entry in out), 1)
+        folder = figures("Old_Slug_2025", ("_fig_1.png",))
+        # Construct the intentionally pre-convergence test name in two pieces;
+        # the convention harness treats literal full filenames as producer
+        # examples, while this one is explicitly a consumer migration fixture.
+        legacy_missing = "Old_Slug_2025_" + "fig3.jpeg"
+        legacy_new = "New_Slug_2026_" + "fig3.jpeg"
+        missing_owner = clipping_note(
+            "Old_Slug_2025",
+            ("Old_Slug_2025_fig_1.png", legacy_missing,
+             "Other_Slug_2025_fig_9.png", "Old_Slug_2025_fig_notes.md"))
+        out = rename_slug(folder, "Old_Slug_2025", "New_Slug_2026",
+                          sources=sources, owner_note=missing_owner)
+        check("a missing legacy loose old-slug image embed blocks the whole rename",
+              ([entry["ok"] for entry in out], sorted(os.listdir(folder))),
+              ([False, False], ["Old_Slug_2025_fig_1.png"]))
+        check("the missing embed is a deterministic plan row with its new name",
+              [(entry["from"], entry["to"])
+               for entry in out if "exact attachment is missing" in
+               (entry["error"] or "")],
+              [(legacy_missing, legacy_new)])
+        check("other-slug and non-image embeds are excluded from the rename inventory",
+              [entry["from"] for entry in out],
+              ["Old_Slug_2025_fig_1.png", legacy_missing])
+        empty_folder = figures("Empty_Slug_2025", ())
+        near_miss_missing = "Empty_Slug_2025_" + "figure_7.tif"
+        broken_owner = clipping_note(
+            "Empty_Slug_2025", (near_miss_missing,))
+        out = rename_slug(empty_folder, "Empty_Slug_2025", "New_Slug_2026",
+                          sources=sources, owner_note=broken_owner)
+        check("an empty folder with a missing embedded figure is reported as failed",
+              (len(out), out[0]["ok"], "exact attachment is missing" in
+               (out[0]["error"] or "")), (1, False, True))
         check("renaming a stem with no figures is empty, not an error",
               checked_rename(folder, "Nobody_Home_2020", "X_2021"), [])
         folder = figures("müLLER_Trial_2025", ("_fig_1.png",))
@@ -1782,10 +4245,20 @@ def run_self_test():
               ([entry["ok"] for entry in out], sorted(os.listdir(folder))),
               ([True], ["Muller_New_2026_fig_1.png"]))
         folder = figures("STRASSE_Trial_2025", ("_fig_1.png",))
+        expansion_is_same_name = os.path.exists(
+            os.path.join(folder, "Straße_Trial_2025_fig_1.png"))
         out = checked_rename(folder, "Straße_Trial_2025", "New_Trial_2026")
-        check("casefold expansion does not cut the figure suffix at the wrong character",
-              ([entry["to"] for entry in out], [entry["ok"] for entry in out]),
-              (["New_Trial_2026_fig_1.png"], [True]))
+        check("casefold expansion follows only when the filesystem says it is one name",
+              ([entry["to"] for entry in out], [entry["ok"] for entry in out],
+               sorted(os.listdir(folder))),
+              ((["New_Trial_2026_fig_1.png"], [True],
+                ["New_Trial_2026_fig_1.png"])
+               if expansion_is_same_name else
+               ([], [], ["STRASSE_Trial_2025_fig_1.png"])))
+        folder = figures("STRASSE_Trial_2025", ("_fig_1.png",))
+        with patch("os.path.samefile", return_value=False):
+            check("a case-sensitive filesystem does not select a casefold-expanded stem",
+                  _glob_slug(folder, "Straße_Trial_2025", _FIG_GLOB), [])
         folder = figures("Old_Slug_2025")
         touch(os.path.join(folder, "new_slug_2026_fig_2.webp"), b"other owner")
         before_set = sorted(os.listdir(folder))
@@ -1799,6 +4272,18 @@ def run_self_test():
         check("a matching directory refuses the rename instead of moving user content",
               all(not entry["ok"] for entry in checked_rename(
                   folder, "Old_Slug_2025", "New_Slug_2026")), True)
+        folder = figures("Old_Slug_2025", ())
+        backing = touch(os.path.join(folder, "backing.png"), _PNG)
+        linked = os.path.join(folder, "Old_Slug_2025_fig_1.png")
+        try:
+            os.symlink(backing, linked)
+        except (OSError, NotImplementedError):
+            pass
+        else:
+            out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
+            check("a matching symlink is not treated as a regular image move",
+                  ([entry["ok"] for entry in out], os.path.islink(linked),
+                   open(backing, "rb").read()), ([False], True, _PNG))
 
         # §8a: a CONSUMER matches `<stem>_fig`, never `<stem>_fig_`. This side
         # globbed the strict form, so a vault holding pre-convergence names
@@ -1870,25 +4355,142 @@ def run_self_test():
                sorted(os.listdir(folder))[0]),
               ([True, True, True], "Old_Slug_2025_fig_1.png"))
 
-        # A rename that fails PART-WAY — a full disk, a vault mount that drops
-        # out — is put back, for the same reason a refusal stops the set: half
-        # a set under each slug is the state no re-run can repair. os.rename is
-        # swapped for the length of this one call because there is no portable
-        # way to make the second rename of three fail on demand.
-        folder = figures("Old_Slug_2025")
-        real_rename, calls = os.rename, []
+        folder = figures("Old_Slug_2025", ("_fig_1.png",))
+        old_path = os.path.join(folder, "Old_Slug_2025_fig_1.png")
+        new_path = os.path.join(folder, "New_Slug_2026_fig_1.png")
+        changing_owner = clipping_note(
+            "Old_Slug_2025", ("Old_Slug_2025_fig_1.png",))
+        real_move = move_noreplace
 
-        def _flaky_rename(src, dst):
-            calls.append(src)
-            if len(calls) == 2:
-                raise OSError(28, "No space left on device")
-            return real_rename(src, dst)
+        def _change_note_after_move(src, dst, expected=None):
+            moved = real_move(src, dst, expected=expected)
+            with open(changing_owner, "a", encoding="utf-8") as fh:
+                fh.write("\nlate edit\n")
+            return moved
 
-        os.rename = _flaky_rename
+        globals()["move_noreplace"] = _change_note_after_move
+        try:
+            out = rename_slug(folder, "Old_Slug_2025", "New_Slug_2026",
+                              sources=sources, owner_note=changing_owner)
+        finally:
+            globals()["move_noreplace"] = real_move
+        check("a note changed during rename retracts the image move",
+              (open(old_path, "rb").read(), os.path.lexists(new_path)),
+              (_PNG, False))
+        check("the stale ownership snapshot is reported",
+              "owner-note changed" in (out[0]["error"] or ""), True)
+
+        # Preflight is only an inventory. A competing writer can claim the
+        # destination after it, so the write itself must be exclusive.
+        folder = figures("Old_Slug_2025", ("_fig_1.png",))
+        old_path = os.path.join(folder, "Old_Slug_2025_fig_1.png")
+        new_path = os.path.join(folder, "New_Slug_2026_fig_1.png")
+        real_move = move_noreplace
+
+        def _late_destination(src, dst, expected=None):
+            touch(dst, b"late destination")
+            return real_move(src, dst, expected=expected)
+
+        globals()["move_noreplace"] = _late_destination
         try:
             out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
         finally:
-            os.rename = real_rename
+            globals()["move_noreplace"] = real_move
+        check("a destination created after rename preflight is preserved",
+              (open(old_path, "rb").read(), open(new_path, "rb").read()),
+              (_PNG, b"late destination"))
+        check("...and the raced move is reported failed", [e["ok"] for e in out],
+              [False])
+
+        folder = figures("Old_Slug_2025", ("_fig_1.png",))
+        old_path = os.path.join(folder, "Old_Slug_2025_fig_1.png")
+        new_path = os.path.join(folder, "New_Slug_2026_fig_1.png")
+        real_move = move_noreplace
+
+        def _replace_source_after_plan(src, dst, expected=None):
+            os.unlink(src)
+            touch(src, b"late source identity")
+            return real_move(src, dst, expected=expected)
+
+        globals()["move_noreplace"] = _replace_source_after_plan
+        try:
+            out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
+        finally:
+            globals()["move_noreplace"] = real_move
+        check("a source replaced after planning is not silently renamed",
+              (open(old_path, "rb").read(), os.path.lexists(new_path)),
+              (b"late source identity", False))
+        check("...and the identity change is reported as a failure",
+              [entry["ok"] for entry in out], [False])
+
+        # On a host using the hard-link fallback, destination publication can
+        # succeed before unlinking the source fails. Both names are residue and
+        # must be retained and reported rather than mistaken for no mutation.
+        folder = figures("Old_Slug_2025", ("_fig_1.png",))
+        old_path = os.path.join(folder, "Old_Slug_2025_fig_1.png")
+        new_path = os.path.join(folder, "New_Slug_2026_fig_1.png")
+        real_move = move_noreplace
+
+        def _incomplete_move(src, dst, expected=None):
+            os.link(src, dst)
+            raise MoveIncomplete(src, dst, OSError("injected unlink failure"))
+
+        globals()["move_noreplace"] = _incomplete_move
+        try:
+            out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
+        finally:
+            globals()["move_noreplace"] = real_move
+        check("an incomplete fallback move retains both figure names",
+              (open(old_path, "rb").read(), open(new_path, "rb").read()),
+              (_PNG, _PNG))
+        check("...and reports the residue explicitly",
+              "MOVE INCOMPLETE" in (out[0]["error"] or ""), True)
+
+        # Rollback is another forward move and has the same race. If the old
+        # name is reclaimed after its file moved, retain both entries and name
+        # the incomplete rollback instead of overwriting either one.
+        folder = figures("Old_Slug_2025", ("_fig_1.png", "_fig_2.png"))
+        old_one = os.path.join(folder, "Old_Slug_2025_fig_1.png")
+        new_one = os.path.join(folder, "New_Slug_2026_fig_1.png")
+        real_move, calls = move_noreplace, []
+
+        def _late_rollback_source(src, dst, expected=None):
+            calls.append((src, dst))
+            if len(calls) == 2:
+                touch(old_one, b"late source")
+                raise OSError(28, "injected second move failure")
+            return real_move(src, dst, expected=expected)
+
+        globals()["move_noreplace"] = _late_rollback_source
+        try:
+            out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
+        finally:
+            globals()["move_noreplace"] = real_move
+        check("a source recreated before rollback is never overwritten",
+              (open(old_one, "rb").read(), open(new_one, "rb").read()),
+              (b"late source", _PNG))
+        check("...and the incomplete rollback is reported",
+              any("ROLLBACK INCOMPLETE" in (e["error"] or "") for e in out), True)
+
+        # A rename that fails PART-WAY — a full disk, a vault mount that drops
+        # out — is put back, for the same reason a refusal stops the set: half
+        # a set under each slug is the state no re-run can repair. The shared
+        # exclusive-move primitive is swapped for this call so the second move
+        # can fail on demand without depending on the host filesystem.
+        folder = figures("Old_Slug_2025")
+        real_move, calls = move_noreplace, []
+
+        def _flaky_move(src, dst, expected=None):
+            calls.append(src)
+            if len(calls) == 2:
+                raise OSError(28, "No space left on device")
+            return real_move(src, dst, expected=expected)
+
+        globals()["move_noreplace"] = _flaky_move
+        try:
+            out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
+        finally:
+            globals()["move_noreplace"] = real_move
         check("a rename that fails part-way is rolled back",
               sorted(os.listdir(folder)),
               ["Old_Slug_2025_fig_1.png", "Old_Slug_2025_fig_2.png",
@@ -1899,14 +4501,14 @@ def run_self_test():
               sum("No space left" in (e["error"] or "") for e in out), 1)
 
         # A case-only rename is not a collision: it is the documented
-        # old-convention reprocess, and on a case-insensitive volume src and
-        # dst are one file.
+        # old-convention reprocess, and on an insensitive filesystem src and
+        # dst may be one file.
         folder = figures("teslo_cancer_2026", ("_fig_1.png",))
         out = checked_rename(folder, "teslo_cancer_2026", "Teslo_Cancer_2026")
         check("a case-only rename is allowed", [e["ok"] for e in out], [True])
-        # ...which is decided by `_same_file`, not by the names. The vault's own
-        # volume is case-insensitive, where src and dst ARE one file and
-        # `lexists(dst)` is true; a hard link reproduces that here on any
+        # ...which is decided by `_same_file`, not by the names. On an
+        # insensitive filesystem src and dst are one file and `lexists(dst)` is
+        # true; a hard link reproduces that here on any
         # filesystem, and without `samefile` the documented reprocess is
         # refused as a collision forever.
         one = touch(os.path.join(tmp, "one"), b"x")
@@ -2051,10 +4653,26 @@ def run_self_test():
               (len(rename_calls) >= 1,
                [c for c in rename_calls if "--sources" not in c]),
               (True, []))
+        check("every documented `rename` invocation passes --owner-note",
+              (len(rename_calls) >= 1,
+               [c for c in rename_calls if "--owner-note" not in c]),
+              (True, []))
         check("the image procedure requires the recursive PDF ownership guard",
               bool(re.search(r"recursive PDF ownership.{0,100}both stems",
                              images_md, re.S)) and
-              "Never use bare `mv` or omit the PDF guard" in images_md, True)
+              "Never use bare `mv` or omit either ownership guard" in images_md,
+              True)
+        check("the image procedure explains exact positive clipping ownership",
+              "first current `sources:` item is a web URL" in images_md and
+              "exact rendered filename-only embed" in images_md and
+              "--owner-note" in images_md, True)
+        check("changed-slug docs require the vault-wide dependency probe",
+              ("every Markdown note outside the owner" in reprocess_md
+               and "fetch_images.py' dependencies" in reprocess_md
+               and "before removing the old note path" in images_md), True)
+        check("dependency refusal is reported before destructive old-path cleanup",
+              ("never delete first" in reprocess_md
+               and "exact blocker paths" in images_md), True)
 
         # `Sources/PDFs/` is recursive by contract (a split book lives in
         # `Sources/PDFs/<Work>/`), so the step-3 stem-owner probe has to
@@ -2156,10 +4774,41 @@ def run_self_test():
                        "http://127.0.0.1/image", "https://example.com/asset",
                        ns["LOTTIE_CDN"] + "?redirect=elsewhere")],
                       [True, False, False, False])
+            publish_scratch = ns.get("publish_scratch")
+            check("the renderer exposes exclusive scratch publication",
+                  callable(publish_scratch), True)
+            if callable(publish_scratch):
+                rendered = os.path.join(tmp, "lottie-rendered.gif")
+                published = os.path.join(tmp, "lottie-published.gif")
+                with open(rendered, "wb") as fh:
+                    fh.write(b"GIF89a-new")
+                publish_scratch(rendered, published)
+                check("scratch publication moves complete bytes to a new name",
+                      (os.path.lexists(rendered), open(published, "rb").read()),
+                      (False, b"GIF89a-new"))
+                retry = os.path.join(tmp, "lottie-retry.gif")
+                with open(retry, "wb") as fh:
+                    fh.write(b"GIF89a-retry")
+                try:
+                    publish_scratch(retry, published)
+                    output_refused = False
+                except FileExistsError:
+                    output_refused = True
+                check("scratch publication refuses an existing output",
+                      output_refused, True)
+                check("a refused scratch publication preserves both occupants",
+                      (open(retry, "rb").read(), open(published, "rb").read()),
+                      (b"GIF89a-retry", b"GIF89a-new"))
             if callable(ns.get("load_anim")):
-                import zipfile
+                raises("the renderer also refuses duplicate manifest names",
+                       ns["load_anim"], duplicate_manifest)
+                raises("the renderer also refuses duplicate animation names",
+                       ns["load_anim"], duplicate_animation)
                 packed = os.path.join(tmp, "oversized.lottie")
                 with zipfile.ZipFile(packed, "w", zipfile.ZIP_DEFLATED) as archive:
+                    archive.writestr(
+                        "manifest.json",
+                        '{"version":"1","animations":[{"id":"a"}]}')
                     archive.writestr("animations/a.json", b" " * 1024)
                 ns["MAX_JSON_BYTES"] = 64
                 raises("a small ZIP cannot expand past the animation JSON cap",
@@ -2177,8 +4826,25 @@ def run_self_test():
     return 1 if failed else 0
 
 
+def _read_urls_file(path):
+    """Read a URL list completely as strict UTF-8 and close owned handles."""
+    if path == "-":
+        binary = getattr(sys.stdin, "buffer", None)
+        if binary is not None:
+            text = binary.read().decode("utf-8-sig", "strict")
+        else:  # StringIO and other programmatic callers are already Unicode.
+            text = sys.stdin.read().lstrip("\ufeff")
+        return [line.strip() for line in text.splitlines() if line.strip()]
+    with open(path, "r", encoding="utf-8-sig", errors="strict") as stream:
+        return [line.strip() for line in stream if line.strip()]
+
+
 def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap = argparse.ArgumentParser(
+        description=__doc__.split("\n")[0],
+        epilog="Network policy: direct connections only; ambient HTTP(S) proxy "
+               "settings are not used because proxy-side DNS would defeat "
+               "address pinning.")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     d = sub.add_parser("download", help="download images into Sources/Images/")
@@ -2187,38 +4853,42 @@ def main(argv=None):
     d.add_argument("--slug", required=True)
     d.add_argument("--start", type=_positive_index_arg, default=1)
     d.add_argument("--urls-file", help="file with one URL per line; - for stdin")
-    d.add_argument("--timeout", type=int, default=45,
+    d.add_argument("--timeout", type=_positive_int_arg, default=45,
                    help="per-socket-operation timeout, seconds (default 45)")
-    d.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES,
+    d.add_argument("--max-bytes", type=_positive_int_arg, default=DEFAULT_MAX_BYTES,
                    help=f"per-image size cap (default {DEFAULT_MAX_BYTES})")
-    d.add_argument("--max-seconds", type=int, default=DEFAULT_MAX_SECONDS,
+    d.add_argument("--max-seconds", type=_positive_int_arg, default=DEFAULT_MAX_SECONDS,
                    help="wall-clock budget for one image, across the whole "
                         f"transfer (default {DEFAULT_MAX_SECONDS})")
     d.add_argument("--allow-private-hosts", action="store_true",
                    help="permit hosts resolving to loopback/link-local/private "
-                        "addresses (off by default)")
+                        "addresses (off by default; does not enable proxies)")
     d.add_argument("--overwrite", action="store_true",
                    help="replace an existing figure only at the same filename; "
                         "a format change needs a fresh index (reprocess only; off by "
                         "default, because a wrong --start otherwise destroys "
                         "the figures already filed under that name)")
+    d.add_argument("--owner-note",
+                   help="required with --overwrite: the unchanged "
+                        "Articles/<slug>.md whose rendered embed exactly names "
+                        "the existing attachment")
 
-    f = sub.add_parser("fetch", help="download a non-image source file (a "
-                       "Lottie's .json/.lottie) to a temp path OUTSIDE the vault")
+    f = sub.add_parser("fetch", help="download a validated Lottie JSON/dotLottie "
+                       "source; the default is a system temp path")
     f.add_argument("url")
-    f.add_argument("--out", help="where to write it (default: a temp file "
-                   "outside the vault); an existing path is refused unless "
-                   "--overwrite")
-    f.add_argument("--timeout", type=int, default=45,
+    f.add_argument("--out", help="scratch path outside the vault (default: a "
+                   "system temp file); this helper cannot infer the vault root; "
+                   "an existing path is refused unless --overwrite")
+    f.add_argument("--timeout", type=_positive_int_arg, default=45,
                    help="per-socket-operation timeout, seconds (default 45)")
-    f.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES,
+    f.add_argument("--max-bytes", type=_positive_int_arg, default=DEFAULT_MAX_BYTES,
                    help=f"size cap (default {DEFAULT_MAX_BYTES})")
-    f.add_argument("--max-seconds", type=int, default=DEFAULT_MAX_SECONDS,
+    f.add_argument("--max-seconds", type=_positive_int_arg, default=DEFAULT_MAX_SECONDS,
                    help="wall-clock budget across the whole transfer "
                         f"(default {DEFAULT_MAX_SECONDS})")
     f.add_argument("--allow-private-hosts", action="store_true",
                    help="permit hosts resolving to loopback/link-local/private "
-                        "addresses (off by default)")
+                        "addresses (off by default; does not enable proxies)")
     f.add_argument("--overwrite", action="store_true")
 
     p = sub.add_parser("place", help="move a locally rendered image into "
@@ -2233,6 +4903,10 @@ def main(argv=None):
     p.add_argument("--overwrite", action="store_true",
                    help="replace an existing figure only at the same filename; "
                         "a format change needs a fresh index (off by default)")
+    p.add_argument("--owner-note",
+                   help="required with --overwrite: the unchanged "
+                        "Articles/<slug>.md whose rendered embed exactly names "
+                        "the existing attachment")
 
     r = sub.add_parser("rename", help="rename attachments after a slug change")
     r.add_argument("--attachments", required=True)
@@ -2242,7 +4916,19 @@ def main(argv=None):
                    "PDF's and the rename is refused")
     r.add_argument("--old-slug", required=True)
     r.add_argument("--new-slug", required=True)
+    r.add_argument("--owner-note", required=True,
+                   help="the unchanged Articles/<old-slug>.md; every renamed "
+                        "attachment must be an exact rendered filename-only embed")
     r.add_argument("--dry-run", action="store_true")
+
+    q = sub.add_parser(
+        "dependencies", help="re-probe external Markdown links and embeds before "
+        "retiring an old clipping note or attachment stem")
+    q.add_argument("--attachments", required=True)
+    q.add_argument("--old-slug", required=True)
+    q.add_argument("--owner-note", required=True,
+                   help="the unchanged Articles/<old-slug>.md whose old image "
+                        "embeds define the dependency inventory")
 
     sub.add_parser("selftest", help="run the built-in cases (offline)")
 
@@ -2251,11 +4937,30 @@ def main(argv=None):
     if args.cmd == "selftest":
         return run_self_test()
 
+    if args.cmd == "dependencies":
+        try:
+            report = dependency_status(args.attachments, args.owner_note,
+                                       args.old_slug)
+        except ValueError as exc:
+            report = {"ok": False, "old_slug": args.old_slug,
+                      "error": str(exc), "blockers": []}
+        print(json.dumps(dict(report, mode="dependencies"), indent=2,
+                         ensure_ascii=False))
+        return 0 if report["ok"] else 1
+
     if args.cmd == "download":
         urls = list(args.urls)
         if args.urls_file:
-            stream = sys.stdin if args.urls_file == "-" else open(args.urls_file)
-            urls += [ln.strip() for ln in stream if ln.strip()]
+            try:
+                urls += _read_urls_file(args.urls_file)
+            except (OSError, UnicodeError) as exc:
+                print(json.dumps({"mode": "download", "slug": args.slug,
+                                  "error": "cannot read --urls-file as complete "
+                                           "UTF-8: %s" % exc,
+                                  "results": [], "downloaded": 0,
+                                  "failed": len(urls) or 1},
+                                 indent=2, ensure_ascii=False))
+                return 1
         if not urls:
             ap.error("no URLs given")
         try:
@@ -2271,7 +4976,7 @@ def main(argv=None):
                 url, args.attachments, args.slug, i, timeout=args.timeout,
                 max_bytes=args.max_bytes, max_seconds=args.max_seconds,
                 allow_private=args.allow_private_hosts,
-                overwrite=args.overwrite))
+                overwrite=args.overwrite, owner_note=args.owner_note))
         failed = [x for x in results if not x["ok"]]
         out = {"mode": "download", "slug": args.slug,
                "attachments": args.attachments, "results": results,
@@ -2292,7 +4997,8 @@ def main(argv=None):
 
     if args.cmd == "place":
         res = place_file(args.from_file, args.attachments, args.slug,
-                         args.index, overwrite=args.overwrite)
+                         args.index, overwrite=args.overwrite,
+                         owner_note=args.owner_note)
         print(json.dumps(dict(res, mode="place", slug=args.slug,
                               attachments=args.attachments), indent=2,
                          ensure_ascii=False))
@@ -2300,7 +5006,8 @@ def main(argv=None):
 
     try:
         results = rename_slug(args.attachments, args.old_slug, args.new_slug,
-                              args.dry_run, sources=args.sources)
+                              args.dry_run, sources=args.sources,
+                              owner_note=args.owner_note)
     except ValueError as exc:
         print(json.dumps({"mode": "rename", "old_slug": args.old_slug,
                           "new_slug": args.new_slug, "error": str(exc),

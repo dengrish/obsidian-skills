@@ -43,8 +43,9 @@ empty list.
 Follow the shared source-note schema rather than copying a second schema here.
 The clipping-specific choices are:
 
-- `title`: the verified full title, quoted/escaped as YAML; abbreviate only the
-  filename, never the title.
+- `title`: the verified full title, using the shared schema's YAML quoting rule
+  (plain unless YAML syntax requires quotes); abbreviate only the filename,
+  never the title.
 - `format`: `Article` for editorial/institutional articles, `Post` for personal
   posts/newsletters, or `Video` for a substantive transcript. Content wins over
   the host: a transcript on a blog is `Video`, and editorial work on Substack

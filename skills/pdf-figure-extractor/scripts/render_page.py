@@ -5,8 +5,9 @@ unusual layout — side-caption corners, raster-only figures with no detectable
 image rect, etc.), the fastest fallback is to look at the page and set the
 crop by eye. This script gets you that image in one call.
 
-Output goes to /tmp by default (it's a throwaway preview — no point cluttering
-the vault). Default DPI is 100, which is sharp enough to read panel letters
+Output goes to a unique OS temporary directory by default (it's a throwaway
+preview — no point cluttering the vault), and the written path is printed.
+Default DPI is 100, which is sharp enough to read panel letters
 and axis labels at typical screen scale, while being small enough to load
 quickly.
 
@@ -30,6 +31,7 @@ Usage:
 import argparse
 import os
 import sys
+import tempfile
 
 try:
     # `import pymupdf` is the modern spelling. The legacy `import fitz`
@@ -97,6 +99,17 @@ def px_to_pt(dpi):
     of the page.
     """
     return 72.0 / dpi
+
+
+def positive_int(value):
+    """An argparse integer strictly above zero."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError("must be an integer")
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return parsed
 
 
 def run_self_test():
@@ -214,6 +227,21 @@ def run_self_test():
            os.path.isdir(out))
         ok("a fresh preview prints no replacement notice",
            "replacing existing preview" not in se)
+
+        # The default is unique per invocation, so concurrent inspections of
+        # same-stem sources cannot overwrite each other's coordinate image.
+        default_dirs = []
+        for _ in range(2):
+            code, so, se = run([pdf, "1", "--dpi", "72"])
+            check("a default-directory render exits 0", code, 0)
+            written = so.split("Wrote ", 1)[1].split(": ", 1)[0]
+            default_dirs.append(os.path.dirname(written))
+            ok("the default preview is written outside the source tree",
+               os.path.isfile(written) and not written.startswith(tmp + os.sep))
+        ok("two default renders use distinct scratch directories",
+           default_dirs[0] != default_dirs[1])
+        for directory in default_dirs:
+            shutil.rmtree(directory, ignore_errors=True)
         # A preview name already on disk — a re-render, or another PDF that
         # merely shares the stem — is replaced WITH a notice, never silently:
         # coordinates read off a stale or wrong preview are a wrong crop.
@@ -227,6 +255,9 @@ def run_self_test():
         ok("a page past the end is refused", "out of range" in str(code))
         code, so, se = run([pdf, "x", "--out", out])
         ok("a non-numeric page is refused", "not an integer" in str(code))
+        code, so, se = run([pdf, "1", "--out", out, "--dpi", "0"])
+        check("a non-positive DPI exits 2", code, 2)
+        ok("...explains the positive bound", "greater than zero" in se)
 
         zero = os.path.join(tmp, "Doe_Empty_2025.pdf")
         with open(zero, "wb") as fh:
@@ -243,6 +274,12 @@ def run_self_test():
         code, so, se = run([junk, "1", "--out", out])
         ok("a file that is not a document is refused",
            "could not open" in str(code))
+
+        html = os.path.join(tmp, "Doe_Html_2025.pdf")
+        with open(html, "w", encoding="utf-8") as fh:
+            fh.write("<html><body>Not a PDF.</body></html>")
+        code, so, se = run([html, "1", "--out", out])
+        ok("an HTML document named .pdf is refused", "not a PDF" in str(code))
 
         code, so, se = run([pdf])
         check("a missing page list exits 2", code, 2)
@@ -265,10 +302,13 @@ def main(argv=None):
         "pages", nargs="?",
         help="Comma-separated 1-indexed page numbers, e.g. '16' or '16,17,18'.",
     )
-    p.add_argument("--out", default="/tmp", help="Output directory (default: /tmp).")
+    p.add_argument(
+        "--out",
+        help="Output directory (default: a unique OS temporary directory).",
+    )
     p.add_argument(
         "--dpi",
-        type=int,
+        type=positive_int,
         default=100,
         help="Resolution for the preview render (default: 100).",
     )
@@ -292,35 +332,46 @@ def main(argv=None):
         doc = fitz.open(pdf_path)
     except Exception as e:
         sys.exit(f"{pdf_path}: could not open as a PDF ({e})")
-    if len(doc) == 0:
-        sys.exit(f"{pdf_path}: PDF has zero pages — nothing to render")
-    out_dir = os.path.expanduser(args.out)
-    os.makedirs(out_dir, exist_ok=True)
+    try:
+        if not doc.is_pdf:
+            fmt = (doc.metadata or {}).get("format") or "an unknown format"
+            sys.exit(f"{pdf_path}: not a PDF — opened as {fmt}")
+        if getattr(doc, "needs_pass", False) or getattr(doc, "is_encrypted", False):
+            sys.exit(f"{pdf_path}: encrypted/password-protected PDF — decrypt "
+                     "a unique scratch copy before rendering pages")
+        if len(doc) == 0:
+            sys.exit(f"{pdf_path}: PDF has zero pages — nothing to render")
+        page_idxs = parse_pages(args.pages, len(doc))
+        out_dir = (os.path.expanduser(args.out) if args.out
+                   else tempfile.mkdtemp(prefix="obsidian-figure-preview-"))
+        os.makedirs(out_dir, exist_ok=True)
 
-    for idx in parse_pages(args.pages, len(doc)):
-        page = doc[idx]
-        pix = page.get_pixmap(dpi=args.dpi)
-        out_path = preview_path(out_dir, pdf_path, idx)
-        # Previews are named `<stem>_page<N>.png`, so a re-render — or another
-        # PDF that merely shares the stem, the exact collision batch_extract
-        # warns about — lands on the same name.  Replacing is what a preview
-        # wants, but doing it silently is how coordinates get read off the
-        # wrong document; every other writer in this plugin says so or skips.
-        if os.path.lexists(out_path):
-            print(f"note: replacing existing preview {out_path}",
-                  file=sys.stderr)
-        pix.save(out_path)
-        scale = px_to_pt(args.dpi)
-        print(
-            f"Wrote {out_path}: {pix.width}x{pix.height} px "
-            f"(page rect: {page.rect.width:.0f}x{page.rect.height:.0f} pts)"
-        )
-        print(
-            f"  px → pt: multiply by {scale:.3f} "
-            f"(x_pt = x_px * {scale:.3f}). --crop takes POINTS, and the "
-            f"caption's top edge is the hard limit for y1."
-        )
-    return 0
+        for idx in page_idxs:
+            page = doc[idx]
+            pix = page.get_pixmap(dpi=args.dpi)
+            out_path = preview_path(out_dir, pdf_path, idx)
+            # Previews are named `<stem>_page<N>.png`, so a re-render — or another
+            # PDF that merely shares the stem, the exact collision batch_extract
+            # warns about — lands on the same name. Replacing is what a preview
+            # wants, but doing it silently is how coordinates get read off the
+            # wrong document; every other writer in this plugin says so or skips.
+            if os.path.lexists(out_path):
+                print(f"note: replacing existing preview {out_path}",
+                      file=sys.stderr)
+            pix.save(out_path)
+            scale = px_to_pt(args.dpi)
+            print(
+                f"Wrote {out_path}: {pix.width}x{pix.height} px "
+                f"(page rect: {page.rect.width:.0f}x{page.rect.height:.0f} pts)"
+            )
+            print(
+                f"  px → pt: multiply by {scale:.3f} "
+                f"(x_pt = x_px * {scale:.3f}). --crop takes POINTS, and the "
+                f"caption's top edge is the hard limit for y1."
+            )
+        return 0
+    finally:
+        doc.close()
 
 
 if __name__ == "__main__":

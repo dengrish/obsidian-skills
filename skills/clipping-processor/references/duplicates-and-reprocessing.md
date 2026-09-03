@@ -49,7 +49,9 @@ item. Only if that key is absent may legacy scalar `source:` supply the origin.
 Keep quoted scalars and lists intact; do not extract a later URL or infer
 ownership from duplicate keys, an empty current list or malformed YAML. Report
 unindexable notes and existing URL collisions. A valid first PDF wikilink is a
-paper summary, not an unindexable clipping.
+paper summary, not an unindexable clipping. Decode the complete note strictly as
+UTF-8 (accepting a leading BOM) before trusting its frontmatter; invalid bytes
+anywhere make the note unindexable rather than an owner.
 
 Normalize URLs for comparison only; retain the original URL in the note:
 
@@ -60,9 +62,10 @@ Normalize URLs for comparison only; retain the original URL in the note:
   `mc_cid` and `mc_eid`; strip `r` and `showWelcome` only on `substack.com`
   and its subdomains. Preserve `ref`, `referrer`, `share`, generic-domain `r`
   and `showWelcome`, and unknown parameters, which can identify different pages.
-- Preserve the order of surviving query parameters. Origins may interpret
-  repeated keys, routing parameters or signed query strings in order; sorting
-  them can collapse distinct pages into one false duplicate.
+- Preserve the order and original spelling of surviving query fields. Origins
+  may distinguish `+` from `%20`, a bare flag from `flag=`, or signed query
+  bytes, as well as interpret repeated keys in order. Parsing/re-encoding or
+  sorting them can collapse distinct pages into one false duplicate.
 - Drop an empty trailing `?`. Preserve literal URL characters, including an
   unpaired apostrophe; quote decoding is a YAML operation, not URL trimming.
 
@@ -75,10 +78,15 @@ to silently merge them.
 
 ## Settle a slug before writing images
 
-Check lexical occupancy of `Articles/<slug>.md`, PDF stems throughout recursive
-`Sources/PDFs/`, and loose `Sources/Images/<slug>_fig*` files. A dangling symlink
-occupies a path too. If an inventory cannot be read, resolve that failure before
-choosing a supposedly free name.
+Check `Articles/<slug>.md` with `dedup_index.py --slug '<slug>'`; check
+PDF stems throughout recursive
+`Sources/PDFs/` and loose
+`Sources/Images/<slug>_fig*` files. The Articles check uses the flat direct-child
+namespace under NFC normalization and case folding; any `.md` directory entry,
+including a directory or dangling symlink, occupies the name. More than one
+equivalent spelling is ambiguous and cannot supply an arbitrary owner. If any
+inventory cannot be read, resolve that failure before choosing a supposedly
+free name.
 
 | Existing owner | Action |
 |---|---|
@@ -100,8 +108,18 @@ never moved, deleted or rewritten, including after a successful reprocess.
 1. Complete the replacement at a unique scratch path outside the vault, using
    planned new image names. Finish the completeness audit and review against
    that draft. Review any image rename with `fetch_images.py rename --dry-run`
-   and `--sources '<vault>/Sources/PDFs'`; that recursive PDF ownership guard
-   must not be omitted.
+   using both `--sources '<vault>/Sources/PDFs'` and
+   `--owner-note '<vault>/Articles/<old_slug>.md'`. The helper snapshots the
+   unchanged note, requires a web URL as its first current `sources:` item, and
+   requires every attachment basename in the plan to appear as an exact
+   rendered filename-only embed. Neither that positive clipping evidence nor
+   the recursive PDF ownership guard may be omitted. Migrate a legacy scalar
+   `source:` before this destructive attachment operation. In a canonical
+   vault the helper also reads every Markdown note outside the owner and refuses
+   inbound links to the old note, references to any old image name, unreadable
+   notes and incomplete folder walks. It reports the exact blocker paths. Do
+   not interpret a failed inventory as permission to proceed or rewrite those
+   notes incidentally as part of the clipping reprocess.
 2. Preflight both paths under the selected `Articles/`. The original must still
    be this clipping's regular, non-symlink file, with the identity and contents
    read at the start. Check destination occupancy with `os.path.lexists`, not
@@ -112,25 +130,44 @@ never moved, deleted or rewritten, including after a successful reprocess.
 3. Stage the finished bytes in a unique temporary directory beside `Articles/`,
    outside the note folder and on its filesystem. Preserve the original note's
    permissions. Recheck the destination before any attachment mutation. If the
-   slug changed, execute the exact reviewed image rename with `--sources`.
+   slug changed, execute the exact reviewed image rename with `--sources` and
+   the unchanged old `--owner-note`.
    A failed rename publishes no note: inspect per-file errors and verify its
    rollback restored the old figure names. Report any rollback failure and the
    actual paths left on disk.
-4. Publish the complete staged note atomically. At a free destination use
-   exclusive creation such as `os.link(staged_note, new_path)`. For an authorized
-   rewrite of the same existing note, use `os.replace` only after rechecking
-   ownership, identity and unchanged contents. Never substitute a preflight
-   followed by overwriting `mv`. If publication fails after image renames,
-   reverse them with the same helper before stopping; report any failed
-   restoration rather than claiming the original still resolves.
-5. Only after publication succeeds, remove the old pathname if it is a distinct
-   path to this owned original and its identity and contents still match
-   preflight. Do not remove it for the same-file spelling case or if it changed.
-   If cleanup is refused, retain both notes and report the old path/dedup
-   collision. Do not roll images back after publication: the new note uses
-   their new names.
+4. Publish the complete staged note through the shared
+   [safe-write protocol](../../../shared/SAFE_WRITES.md). At a free destination
+   use exclusive creation. For an authorized rewrite, displace and verify the
+   exact snapshotted note before linking the staged replacement into the empty
+   public name; a recheck followed by `os.replace` still has a race. If
+   publication fails after image renames, reverse them with the same helper
+   before stopping; report any failed restoration or named recovery path rather
+   than claiming the original still resolves.
+5. After publication, re-probe the whole Markdown dependency surface before
+   old-path cleanup:
+
+   ```bash
+   python3 '<skill>/scripts/fetch_images.py' dependencies \
+       --attachments '<vault>/Sources/Images' \
+       --owner-note '<vault>/Articles/<old_slug>.md' --old-slug '<old_slug>'
+   ```
+
+   An `ok: true` result means no other scanned note links the old note or
+   references one of its old image names. Only then conditionally remove a
+   distinct old pathname through the shared protocol: displace it, verify the
+   preflight identity and contents, then discard only the verified version. Do
+   not use a check followed by `unlink`, remove it for the same-file spelling
+   case, or remove it if it changed. If the re-probe or cleanup is refused,
+   retain the old note path and exact blocker report; never delete first and
+   tell the user about broken inbound references afterward. A dependency first
+   introduced after the image rename is a concurrent change, not permission to
+   rewrite another note. Stop without declaring completion and either obtain
+   authorization for one complete dependency rewrite or roll the replacement
+   back through the same guarded paths. If rollback cannot safely restore every
+   old note and image path, retain every recovery path and report the mixed
+   state rather than hiding it.
 
 If the filesystem cannot provide safe publication, stop and report the refusal.
 Read back the published note and verify its embeds. Report note and attachment
-renames so the user can update inbound wikilinks; do not modify unrelated notes
-or claim a failed rename completed.
+renames and the dependency re-probe result; do not modify unrelated notes or
+claim a failed rename completed.

@@ -31,7 +31,7 @@ The label selects the file but does not appear in the prose or caption. Place th
 
 ## Which ones to carry
 
-**Two or three. Four is the cap and it should feel like one.** A note with every figure is the paper again, and the reason to summarise was that the reader was not going to read the paper. **The cap counts embeds, not exhibits** — three panels of one figure are three of your four, not one, and a note that reaches the cap that way is showing one figure and calling it a summary.
+**Use only the figure embeds the explanation needs: usually zero to three, with four as a hard cap.** A note with every figure is the paper again, and the reason to summarise was that the reader was not going to read the paper. Zero is correct when prose fully carries the result or the available figures are irrelevant. **The cap counts embeds, not source figure identities** — three panels of one figure are three of your four, not one, and a note that reaches the cap that way is showing one figure and calling it a summary.
 
 Take the figures that **are** the finding:
 
@@ -47,7 +47,12 @@ Skip: study-flow and CONSORT diagrams, apparatus photographs, architecture schem
 python3 '<skill>/scripts/paper_text.py' '<pdf path>' --cites
 ```
 
-It counts every mention on every page, the figure's own caption included, so a figure with a long caption starts one ahead — read the counts as a ranking, not a measurement. **Pass the same `--ed-prefix` the extraction run used**: `Extended Data Figure 1` is filed as `S1` by default and as `ED1` under `--ed-prefix ED` (`CONVENTIONS.md` §8b), and a mismatch scores it under a label no file on disk carries, so it reads as never cited.
+It counts every mention on every page, expanding compact plural lists and
+ranges; the figure's own caption is included, so each figure starts one ahead —
+read the counts as a ranking, not a measurement. **Pass the same `--ed-prefix`
+the extraction run used**: `Extended Data Figure 1` is filed as `S1` by default
+and as `ED1` under `--ed-prefix ED` (`CONVENTIONS.md` §8b), and a mismatch
+scores it under a label no file on disk carries, so it reads as never cited.
 
 Use the counts only to break a tie between substantively relevant figures, not to replace reading them.
 
@@ -138,6 +143,9 @@ The shape, exactly, and it mirrors the figure shape:
 - **Values verbatim.** Copy the digits the paper printed. Do not round, rescale, convert units, or recompute an average from the subset of rows you kept: a recomputed number is one the [verification finder](review-checklist.md#locate-the-claims) cannot locate, and the paper never made that claim. Bolding the row or cell the claim is about is fine — that is emphasis, not arithmetic.
 - **Trim to what the claim needs, and say so in the caption.** A 28-row benchmark becomes its four group averages; a 12-column table becomes the three columns compared. **A trimmed table that does not announce the trim is the most misleading thing this note can contain**, because unlike a vague sentence it looks complete and precise. One clause fixes it: *"the four task groups; the 28 subtasks are in the paper"*.
 - **Keep the paper's orientation** — systems in columns if that is how the paper set them, rows if not. Transposing is a silent re-presentation, and two tables under two orientations read as two notes.
-- **Four at most, one or two preferred**, and figures plus tables together should stay around five. Past that the note is the paper with the prose removed.
+- **Four tables at most, one or two preferred.** Across both forms, aim for no
+  more than about five total figure embeds plus rebuilt tables. That combined
+  number is a brevity target rather than permission to exceed either form's
+  separate four-item cap; use fewer whenever prose carries the result clearly.
 
 **Where a trim would change the reading, do not trim — cut the table.** If the rows you would drop are the ones that disagree with the claim, keeping only the agreeing rows is not a summary, and no caption clause repairs it. Report the comparison in prose with both directions named, or rebuild the whole thing.

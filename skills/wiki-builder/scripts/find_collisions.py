@@ -65,9 +65,13 @@ import os
 import unicodedata
 import sys
 
+_OBSIDIAN_SHARED_MODULES = ('plurals', 'slugify', 'yaml_scalars')
+
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
 _here = _os.path.dirname(_os.path.abspath(__file__))
+_required = tuple(_m + ".py" for _m in (
+    globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
 if _env:                                   # explicit override: authoritative, no fallback
     _tried = [_os.path.abspath(_os.path.expanduser(_env))]
@@ -76,19 +80,27 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
-_shared = next((_p for _p in _tried if _os.path.isdir(_p)), None)
+_missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
+            for _p in _tried if _os.path.isdir(_p)}
+_shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
 if _shared is None:
     raise SystemExit("""obsidian: cannot find the plugin's shared/scripts/ folder, which holds
-the one canonical copy of the conventions this script depends on.
+the one canonical copy of the conventions this script depends on. A usable
+folder must contain these required module(s): %s
 Looked for:
   %s
 Fix: install the whole plugin tree, or set OBSIDIAN_VAULT_SHARED to the
 shared/scripts/ directory (unset it to use the plugin-relative walk-up).
 Do NOT paste a second copy of the algorithm into this skill -- a divergent
-copy is the bug the shared layer exists to prevent.""" % "\n  ".join(_tried))
+copy is the bug the shared layer exists to prevent.""" % (
+    ", ".join(_required), "\n  ".join(
+        _p + (" (not a directory)" if _p not in _missing else
+              " (missing: %s)" % ", ".join(_missing[_p]))
+        for _p in _tried)))
 _sys.path[:] = [_p for _p in _sys.path if _p not in (_shared, _here)]
 _sys.path.insert(0, _shared)               # shared/scripts/ FIRST
-_sys.path.append(_here)                    # own dir LAST: a local copy cannot shadow it
+if _here != _shared:
+    _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
 from slugify import SlugError, mu_variants, slug_stem  # noqa: E402
@@ -315,20 +327,17 @@ def _probe_pair(keys, other_slug, use_stem=True, use_superset=True):
     fired = []
     slug = keys["slug"]
 
-    # Case- and normalization-folded, not raw. The documented vault sits on a
-    # case-insensitive volume, so `roc-curve` and `ROC-curve` are ONE file: a
-    # raw comparison made the existing entry invisible, returned `create`, and
-    # step 4 then wrote `Wiki/roc-curve.md` -- which opens `ROC-curve.md` and
-    # replaces a full entry. `scan_vault` and `vault_index` both fold for this
-    # reason; the probe that decides whether to create a file did not.
+    # Case- and normalization-folded, not raw. The plugin treats
+    # `roc-curve` and `ROC-curve` as one portable ownership identity: on an
+    # insensitive filesystem a second write can replace the existing file, and
+    # on a sensitive one it creates a cross-host collision. `scan_vault` and
+    # `vault_index` fold for the same reason.
     if slug == other_slug or _fold(slug) == _fold(other_slug):
         fired.append("a-slug-equality")
         return fired                       # identity: no point reporting more
 
-    # Every probe below compares slug STRINGS, and on the documented
-    # case-insensitive volume a case variant is the same file -- so a probe
-    # that misses it hands back `create` for a name that will overwrite an
-    # existing entry. Fold once, here, rather than at nine call sites.
+    # Every probe below compares slug strings. Fold once here so case variants
+    # cannot receive filesystem-dependent create/merge decisions.
     other_slug = _fold(other_slug)
 
     if other_slug in keys["mu"]:
@@ -520,8 +529,8 @@ def check_candidates(titles, index, use_stem=True, use_superset=True,
 #
 # What this pins is the answer to "may step 4 write this file?".  A probe that
 # does not fire returns ``create``, and step 4 then writes
-# ``Wiki/<slug>.md`` -- which, on the documented case-insensitive volume,
-# opens and replaces whatever entry already answers to that name.  So every
+# ``Wiki/<slug>.md``. A variant can replace the existing entry on an
+# insensitive filesystem or create a cross-host collision on a sensitive one. So every
 # probe gets a firing case AND a not-firing case, and the case-fold half gets
 # its own, because that is the miss that ends in a truncated entry.
 #
@@ -566,9 +575,8 @@ def run_self_test():
             with open(os.path.join(wiki, name), "w", encoding="utf-8") as fh:
                 fh.write(text)
 
-        # `ROC-curve.md` is spelled with capitals ON PURPOSE: the probes compare
-        # slug strings, and the documented vault sits on a case-insensitive
-        # volume where `roc-curve.md` IS this file.
+        # `ROC-curve.md` is spelled with capitals on purpose: the probes use
+        # one portable identity for case variants on every filesystem.
         put("ROC-curve.md", _st_entry_text("ROC curve", aliases=["roc"]))
         put("mu-m.md", _st_entry_text("μm"))
         put("cross-validation.md", _st_entry_text("Cross-validation"))

@@ -4,6 +4,7 @@
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import shlex
 import socket
@@ -28,6 +29,34 @@ def load(name, path):
 
 
 class CompatibilityTests(unittest.TestCase):
+    def test_private_mode_and_wiki_slugs_are_native_windows_portable(self):
+        atomic = load("compat_atomic_move", ROOT / "shared/scripts/atomic_move.py")
+        slugger = load("compat_slugify", ROOT / "shared/scripts/slugify.py")
+        with tempfile.TemporaryDirectory(prefix="obsidian-mode-portability-") as tmp:
+            path = Path(tmp) / "staged"
+            with path.open("xb") as staged, patch.object(
+                    atomic.os, "fchmod", None, create=True):
+                atomic.set_private_mode(staged, str(path), 0o640)
+            self.assertTrue(path.is_file())
+            if os.name != "nt":
+                self.assertEqual(os.stat(path).st_mode & 0o777, 0o640)
+        for title in ("CON", "prn", "AUX", "nul", "COM1", "com9",
+                      "LPT1", "lpt9"):
+            with self.subTest(title=title), self.assertRaises(slugger.SlugError):
+                slugger.slugify(title)
+        self.assertEqual(slugger.slugify("Convolution"), "convolution.md")
+
+    def test_runtime_probe_accepts_both_supported_pymupdf_import_names(self):
+        runtime = (ROOT / "shared/RUNTIME.md").read_text(encoding="utf-8")
+        requirements = (
+            ROOT / "skills/pdf-figure-extractor/scripts/requirements.txt"
+        ).read_text(encoding="utf-8")
+        self.assertIn("PyMuPDF>=1.20", requirements)
+        self.assertRegex(
+            runtime,
+            r"try:\n\s+import pymupdf\nexcept ImportError:\n\s+import fitz",
+        )
+
     def test_skill_frontmatter_parses_as_yaml(self):
         for path in sorted((ROOT / "skills").glob("*/SKILL.md")):
             with self.subTest(skill=path.parent.name):
@@ -79,6 +108,15 @@ class CompatibilityTests(unittest.TestCase):
                 self.assertNotIn("..", Path(name).parts)
         self.assertEqual(content, build.archive_bytes(expected))
 
+    def test_packaging_derives_the_loose_and_archived_codex_manifest_once(self):
+        build = load("build_plugin_single_manifest", ROOT / "tools/build_plugin.py")
+        derived = b"one exact derived manifest\n"
+        with patch.object(build, "_codex_manifest_bytes",
+                          return_value=derived) as convert:
+            files = build.package_files(ROOT)
+        convert.assert_called_once_with(files[".claude-plugin/plugin.json"])
+        self.assertEqual(files[".codex-plugin/plugin.json"], derived)
+
     def test_packaging_does_not_read_through_source_symlinks(self):
         build = load("build_plugin", ROOT / "tools/build_plugin.py")
         with tempfile.TemporaryDirectory(prefix="obsidian-package-boundary-") as tmp:
@@ -108,12 +146,63 @@ class CompatibilityTests(unittest.TestCase):
                             path.write_bytes(original)
                     self.assertEqual(foreign.read_text(), "not repository content")
 
+    def test_packaging_rejects_a_source_swapped_during_the_read(self):
+        build = load("build_plugin_source_race", ROOT / "tools/build_plugin.py")
+        with tempfile.TemporaryDirectory(prefix="obsidian-package-race-") as tmp:
+            root = Path(tmp) / "plugin"
+            root.mkdir()
+            for name in ("AGENTS.md", "CLAUDE.md", "README.md",
+                         "requirements.txt", "requirements-dev.txt"):
+                (root / name).write_bytes((ROOT / name).read_bytes())
+            (root / ".claude-plugin").mkdir()
+            (root / ".claude-plugin/plugin.json").write_bytes(
+                (ROOT / ".claude-plugin/plugin.json").read_bytes())
+            victim = root / "README.md"
+            original = victim.read_bytes()
+            foreign = Path(tmp) / "outside.txt"
+            foreign.write_bytes(b"never package these bytes")
+            real_open = build.os.open
+            injected = {"done": False}
+
+            def swap_leaf(path, flags, *args, **kwargs):
+                if (os.path.abspath(path) == os.path.abspath(victim)
+                        and not injected["done"]):
+                    injected["done"] = True
+                    victim.unlink()
+                    victim.symlink_to(foreign)
+                return real_open(path, flags, *args, **kwargs)
+
+            with patch.object(build.os, "open", side_effect=swap_leaf):
+                with self.assertRaises((OSError, ValueError)):
+                    build.package_files(root)
+            self.assertTrue(victim.is_symlink())
+            self.assertEqual(foreign.read_bytes(), b"never package these bytes")
+
+            victim.unlink()
+            victim.write_bytes(original)
+            injected["done"] = False
+
+            def change_in_place(path, flags, *args, **kwargs):
+                if (os.path.abspath(path) == os.path.abspath(victim)
+                        and not injected["done"]):
+                    injected["done"] = True
+                    with victim.open("ab") as output:
+                        output.write(b"changed after lstat")
+                return real_open(path, flags, *args, **kwargs)
+
+            with patch.object(build.os, "open", side_effect=change_in_place):
+                with self.assertRaises(OSError):
+                    build.package_files(root)
+
     def test_build_does_not_write_through_output_symlinks(self):
         with tempfile.TemporaryDirectory(prefix="obsidian-build-boundary-") as tmp:
             root = Path(tmp) / "plugin"
             (root / "tools").mkdir(parents=True)
+            (root / "shared/scripts").mkdir(parents=True)
             script = root / "tools/build_plugin.py"
             script.write_bytes((ROOT / "tools/build_plugin.py").read_bytes())
+            (root / "shared/scripts/atomic_move.py").write_bytes(
+                (ROOT / "shared/scripts/atomic_move.py").read_bytes())
             foreign = Path(tmp) / "outside.txt"
             foreign.write_text("preserve external bytes", encoding="utf-8")
             (root / "obsidian.plugin").symlink_to(foreign)
@@ -123,6 +212,190 @@ class CompatibilityTests(unittest.TestCase):
             self.assertIn("symlink", result.stderr)
             self.assertEqual(foreign.read_text(), "preserve external bytes")
             self.assertTrue((root / "obsidian.plugin").is_symlink())
+
+    def test_generated_publication_preserves_late_occupants_and_changes(self):
+        build = load("build_plugin_publication", ROOT / "tools/build_plugin.py")
+        with tempfile.TemporaryDirectory(prefix="obsidian-build-races-") as tmp:
+            root = Path(tmp) / "plugin"
+            root.mkdir()
+            output = root / "generated/output.bin"
+            output.parent.mkdir()
+            real_link = build.atomic_move.link_noreplace
+
+            foreign = root.parent / "foreign.bin"
+            foreign.write_bytes(b"foreign bytes")
+
+            def inject_symlink(source, target):
+                if (Path(target).name == output.name
+                        and not os.path.lexists(output)):
+                    output.symlink_to(foreign)
+                return real_link(source, target)
+
+            with patch.object(build.atomic_move, "link_noreplace",
+                              side_effect=inject_symlink):
+                with self.assertRaises(OSError):
+                    build._publish_generated(root, output, b"generated", None)
+            self.assertTrue(output.is_symlink())
+            self.assertEqual(foreign.read_bytes(), b"foreign bytes")
+            output.unlink()
+
+            late = b"another builder arrived first"
+
+            def inject_occupant(source, target):
+                if (Path(target).name == output.name
+                        and not os.path.lexists(output)):
+                    output.write_bytes(late)
+                return real_link(source, target)
+
+            with patch.object(build.atomic_move, "link_noreplace",
+                              side_effect=inject_occupant):
+                with self.assertRaises(OSError):
+                    build._publish_generated(root, output, b"generated", None)
+            self.assertEqual(output.read_bytes(), late)
+
+            expected = build._observe_output(output)
+            changed = b"edited during the build"
+            injected = {"done": False}
+
+            def inject_change(source, target):
+                if (Path(source).name == output.name
+                        and Path(target).name == ".atomic-observed"
+                        and not injected["done"]):
+                    injected["done"] = True
+                    output.write_bytes(changed)
+                return real_link(source, target)
+
+            with patch.object(build.atomic_move, "link_noreplace",
+                              side_effect=inject_change):
+                with self.assertRaises(OSError):
+                    build._publish_generated(
+                        root, output, b"new generated bytes", expected)
+            self.assertEqual(output.read_bytes(), changed)
+
+    def test_generated_publication_uses_a_portable_bound_output_parent(self):
+        build = load("build_plugin_output_parent", ROOT / "tools/build_plugin.py")
+        with tempfile.TemporaryDirectory(prefix="obsidian-build-parent-") as tmp:
+            root = Path(tmp) / "plugin"
+            root.mkdir()
+            output = root / "new/nested/generated.bin"
+            output.parent.mkdir(parents=True)
+            parent = build._directory_identity(output.parent)
+            build._publish_generated(
+                root, output, b"complete bytes", None, parent)
+            self.assertEqual(output.read_bytes(), b"complete bytes")
+            self.assertFalse(any(output.parent.glob(".plugin-build-stage-*")))
+
+            fallback = output.parent / "fallback.bin"
+            cwd = os.getcwd()
+            with patch.object(build.os, "fchdir", None, create=True):
+                build._publish_generated(
+                    root, fallback, b"fallback bytes", None, parent)
+            self.assertEqual(fallback.read_bytes(), b"fallback bytes")
+            self.assertEqual(os.getcwd(), cwd)
+
+    def test_generated_publication_rejects_a_late_parent_symlink(self):
+        build = load("build_plugin_parent_race", ROOT / "tools/build_plugin.py")
+        with tempfile.TemporaryDirectory(prefix="obsidian-build-parent-race-") as tmp:
+            root = Path(tmp) / "plugin"
+            parent = root / "generated"
+            foreign = Path(tmp) / "foreign"
+            parent.mkdir(parents=True)
+            foreign.mkdir()
+            output = parent / "output.bin"
+            expected_parent = build._directory_identity(parent)
+            original_parent = root / "original-parent"
+            real_link = build.atomic_move.link_noreplace
+            injected = {"done": False}
+
+            def inject_parent(source, target):
+                result = real_link(source, target)
+                if (Path(target).name == output.name
+                        and not injected["done"]):
+                    injected["done"] = True
+                    parent.rename(original_parent)
+                    parent.symlink_to(foreign, target_is_directory=True)
+                return result
+
+            with patch.object(build.atomic_move, "link_noreplace",
+                              side_effect=inject_parent):
+                with self.assertRaises(OSError):
+                    build._publish_generated(
+                        root, output, b"generated", None, expected_parent)
+            self.assertFalse((foreign / output.name).exists())
+            self.assertFalse((original_parent / output.name).exists())
+            self.assertFalse(any(
+                original_parent.glob(".plugin-build-*")
+            ))
+
+    def test_generated_pair_rolls_back_when_the_second_output_changes(self):
+        build = load("build_plugin_group_rollback", ROOT / "tools/build_plugin.py")
+        with tempfile.TemporaryDirectory(prefix="obsidian-build-group-") as tmp:
+            root = Path(tmp) / "plugin"
+            root.mkdir()
+            first = root / "first.generated"
+            second = root / "second.generated"
+            first.write_bytes(b"old first")
+            second.write_bytes(b"old second")
+            os.chmod(first, 0o640)
+            observed = {
+                first: build._observe_output(first),
+                second: build._observe_output(second),
+            }
+            parent = build._directory_identity(root)
+            parents = {first: parent, second: parent}
+            outputs = {first: b"new first", second: b"new second"}
+            real_publish = build._publish_generated
+            injected = {"done": False}
+
+            def inject_second(*args, **kwargs):
+                path = Path(args[1])
+                if path == second and not injected["done"]:
+                    injected["done"] = True
+                    second.write_bytes(b"late second edit")
+                return real_publish(*args, **kwargs)
+
+            with patch.object(build, "_publish_generated",
+                              side_effect=inject_second):
+                with self.assertRaises(OSError):
+                    build._publish_outputs(root, outputs, observed, parents)
+            self.assertEqual(first.read_bytes(), b"old first")
+            self.assertEqual(second.read_bytes(), b"late second edit")
+            if os.name != "nt":
+                self.assertEqual(os.stat(first).st_mode & 0o777, 0o640)
+
+    def test_generated_pair_accepts_a_concurrent_builder_converging(self):
+        build = load("build_plugin_group_converge", ROOT / "tools/build_plugin.py")
+        with tempfile.TemporaryDirectory(prefix="obsidian-build-converge-") as tmp:
+            root = Path(tmp) / "plugin"
+            root.mkdir()
+            first = root / "first.generated"
+            second = root / "second.generated"
+            first.write_bytes(b"old first")
+            second.write_bytes(b"old second")
+            observed = {
+                first: build._observe_output(first),
+                second: build._observe_output(second),
+            }
+            parent = build._directory_identity(root)
+            parents = {first: parent, second: parent}
+            outputs = {first: b"new first", second: b"new second"}
+            real_publish = build._publish_generated
+            injected = {"done": False}
+
+            def converge_second(*args, **kwargs):
+                path = Path(args[1])
+                if path == second and not injected["done"]:
+                    injected["done"] = True
+                    second.write_bytes(outputs[second])
+                return real_publish(*args, **kwargs)
+
+            with patch.object(build, "_publish_generated",
+                              side_effect=converge_second):
+                stale = build._publish_outputs(
+                    root, outputs, observed, parents)
+            self.assertEqual(stale, [first, second])
+            self.assertEqual(first.read_bytes(), outputs[first])
+            self.assertEqual(second.read_bytes(), outputs[second])
 
     def test_convention_probe_separates_text_parsers_from_slug_writers(self):
         conventions = load("convention_probe", ROOT / "tests/test_conventions.py")

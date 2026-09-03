@@ -135,7 +135,7 @@ Always distinguish source verification from lint:
   a count of retained/corrected/cut claims with each change identified. Give
   exact/loose/missing token counts separately where used; a token match alone
   does not establish a checked claim.
-- `Verification: manual page check — <text-search limitation>` when direct page
+- `Verification: direct page check — <text-search limitation>` when direct page
   reading established the claims without the finder.
 - `Verification: incomplete — <reason>; draft not published` when the source
   could not be checked. A slow or difficult paper is not a reason to skip it.

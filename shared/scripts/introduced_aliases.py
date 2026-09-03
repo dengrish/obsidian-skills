@@ -22,6 +22,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
+from entry_structure import math_title_plain_text
 from plurals import singular_keys
 from slugify import SlugError, base_term, has_parenthetical, slug_stem
 
@@ -76,19 +77,6 @@ def _fold_name(value):
     return unicodedata.normalize("NFC", value or "").casefold()
 
 
-def _math_skeleton(text):
-    """Strip LaTeX wrappers down to the plain-text skeleton of a title."""
-    value = text.replace("$", "")
-    for _ in range(4):
-        new = re.sub(r"\\[A-Za-z]+\s*\{([^{}]*)\}", r"\1", value)
-        if new == value:
-            break
-        value = new
-    value = re.sub(r"\\[A-Za-z]+", "", value)
-    value = value.replace("{", "").replace("}", "")
-    return re.sub(r"\s+", " ", value).strip()
-
-
 def _bold_parts(match):
     """Return visible text and style details for an outer-bold match."""
     raw = match.group(1)
@@ -138,7 +126,7 @@ def _surface_keys(value):
     """Return singular/plural comparison keys for a subject surface."""
     value = re.sub(r"\[\[[^\]|]+\|([^\]]+)\]\]", r"\1", value or "")
     value = re.sub(r"\[\[([^\]]+)\]\]", r"\1", value)
-    value = _math_skeleton(value.replace("*", "").replace("_", "")).strip()
+    value = math_title_plain_text(value).strip()
     value = re.sub(r"^(?:the|a|an)\s+", "", value, flags=re.IGNORECASE)
     if not value:
         return set()
@@ -220,8 +208,8 @@ def introduced_alias_candidates(prose_lines, subject_forms=None):
             out.append((candidate, where))
 
     for match in _BOLD_PAREN_RE.finditer(_opening_block(prose_lines)):
-        visible = _math_skeleton(
-            match.group("bold").replace("*", "").replace("_", ""))
+        visible, _style, _italic = _bold_parts(match)
+        visible = math_title_plain_text(visible)
         if subject_forms is not None:
             wanted = set().union(*(_surface_keys(form) for form in subject_forms))
             if not (_surface_keys(visible) & wanted):
@@ -284,6 +272,16 @@ def run_self_test(verbose=False):
         introduced_alias_candidates(["A **ROC curve** (RC) plots rates."],
                                     ["ROC curve"]),
         [("RC", "opener parenthetical")])
+    add("superscript-star math keeps its subject identity",
+        introduced_alias_candidates(
+            [r"**$\boldsymbol{A}^{*}$ search** (A-star) explores a graph."],
+            ["$A^{*}$ search"]),
+        [("A-star", "opener parenthetical")])
+    add("LaTeX and Unicode chi-squared identify the same subject",
+        introduced_alias_candidates(
+            [r"**$\chi^2$ test** (chi-square test) compares counts."],
+            ["χ² test"]),
+        [("chi-square test", "opener parenthetical")])
     add("short-for marker is stripped",
         introduced_alias_candidates(
             ["**AdaBoost** (short for *adaptive boosting*) reweights errors."],
@@ -369,6 +367,11 @@ def run_self_test(verbose=False):
         missing_introduced_aliases(
             ["A **feature** is an input. Features are also called *predictors*."],
             "Feature", ["predictor"], "feature"),
+        [])
+    add("irregular singular of a canonical plural is not a missing alias",
+        missing_introduced_aliases(
+            ["**Archaea** (singular, *archaeon*) are prokaryotes."],
+            "Archaea", [], "archaea"),
         [])
 
     failed = 0

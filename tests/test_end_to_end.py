@@ -212,8 +212,9 @@ class WorkflowTests(unittest.TestCase):
     def test_escaped_source_identity_survives_scan_and_pdf_rename(self):
         source = self.pdfs / "Doe_Study_2025.pdf"
         self.make_pdf(source)
+        self.run_script("skills/pdf-figure-extractor/scripts/batch_extract.py",
+                        "--src", source, "--out", self.images, "--dpi", 72)
         figure = self.images / "Doe_Study_2025_fig_1.png"
-        Image.new("RGB", (64, 48), (20, 100, 180)).save(figure)
         note = self.notes / "Doe_Study_2025.md"
         body = summary_note(source.stem).replace(
             'sources:\n  - "[[Doe_Study_2025.pdf]]"',
@@ -312,7 +313,32 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(verdict()["status"], "duplicate")
         self.assertEqual(verdict(note)["status"], "new")
         rename = ["rename", "--attachments", self.images, "--sources", self.pdfs,
+                  "--owner-note", note,
                   "--old-slug", old, "--new-slug", new]
+        external = self.vault / "Wiki/clipping-reference.md"
+        external.write_text(
+            f'[[{old}|the clipping]]\n![[Sources/Images/{old}_fig_1.png]]\n',
+            encoding="utf-8")
+        blocked = json.loads(self.run_script(
+            fetch, *rename, "--dry-run", expected=1).stdout)
+        self.assertEqual(blocked["renamed"], 0)
+        self.assertEqual(blocked["failed"], 1)
+        self.assertEqual(blocked["results"][0]["dependency_blockers"], [{
+            "path": str(external.resolve()),
+            "references": [old + ".md", old + "_fig_1.png"],
+        }])
+        dependency = json.loads(self.run_script(
+            fetch, "dependencies", "--attachments", self.images,
+            "--owner-note", note, "--old-slug", old, expected=1).stdout)
+        self.assertFalse(dependency["ok"])
+        self.assertEqual(dependency["blockers"],
+                         blocked["results"][0]["dependency_blockers"])
+        self.assertEqual(digest(image), original)
+        # An external dependency rewrite is a separate authorized operation;
+        # once the fixture supplies it, the clipping rename may proceed.
+        external.write_text(
+            f'[[{new}|the clipping]]\n![[Sources/Images/{new}_fig_1.png]]\n',
+            encoding="utf-8")
         self.run_script(fetch, *rename, "--dry-run")
         self.assertEqual(digest(image), original)
         self.run_script(fetch, *rename)
@@ -323,6 +349,38 @@ class WorkflowTests(unittest.TestCase):
         current = verdict()
         self.assertEqual(current["status"], "duplicate")
         self.assertEqual(current["matches"], [str(self.notes / (new + ".md"))])
+
+    def test_fresh_vault_bootstrap_supports_both_article_producers(self):
+        fresh = Path(self.scratch.name) / "fresh vault"
+        inbox = fresh / "Inbox"
+        pdfs = fresh / "Sources/PDFs"
+        inbox.mkdir(parents=True)
+        pdfs.mkdir(parents=True)
+        raw = inbox / "capture.md"
+        raw.write_text(
+            '---\nsources:\n  - "https://example.org/fresh"\n---\nBody.\n',
+            encoding="utf-8")
+        pdf = pdfs / "Doe_Fresh_2025.pdf"
+        self.make_pdf(pdf)
+        articles = fresh / "Articles"
+        images = fresh / "Sources/Images"
+        self.assertFalse(articles.exists())
+        self.assertFalse(images.exists())
+
+        # This mirrors both skills' documented fresh-vault bootstrap: input
+        # roots already exist, and only the canonical output roots are added.
+        articles.mkdir()
+        images.mkdir()
+        dedup = json.loads(self.run_script(
+            "skills/clipping-processor/scripts/dedup_index.py", articles,
+            "--raw", raw, "--slug", "Doe_Fresh_Article_2025").stdout)
+        self.assertEqual(dedup["checked"][0]["status"], "new")
+        self.assertEqual(dedup["slug_checks"][0]["status"], "free")
+        papers = json.loads(self.run_script(
+            "skills/paper-summarizer/scripts/paper_scan.py", "--src", pdfs,
+            "--notes", articles, "--images", images, "--json").stdout)
+        self.assertEqual(papers["counts"]["new"], 1)
+        self.assertFalse((fresh / "Wiki").exists())
 
     def test_source_to_wiki_entry_index_collision_checks_and_vault_scan(self):
         source = self.pdfs / "Doe_Study_2025.pdf"
@@ -449,9 +507,32 @@ A compact definition used only to exercise the shared contract.
             aliases=("knn",), card="k-nearest neighbors (KNN)",
             description="k-nearest neighbors predicts from nearby observations.")
         write_entry(
+            "ell-1-norm", "$\\\\ell_1$ norm",
+            "**$\\ell_1$ norm** measures vector magnitude using absolute values.",
+            card="ell-one norm",
+            description=(
+                "ell-one norm measures vector magnitude using absolute values."))
+        write_entry(
+            "l-1-regularization", "$L^{-1}$ regularization",
+            "**$L^{-1}$ regularization** is a worked mathematical example.",
+            card="L-inverse regularization",
+            description=(
+                "L-inverse regularization is a worked mathematical example."))
+        write_entry(
+            "x-1-2-transform", "$x^{1/2}$ transform",
+            "**$x^{1/2}$ transform** is a worked mathematical example.",
+            card="x-to-the-one-half transform",
+            description=(
+                "x-to-the-one-half transform is a worked mathematical example."))
+        write_entry(
+            "r-plus", "$R^{+}$",
+            "**$R^{+}$** is a worked mathematical example.",
+            card="R-plus",
+            description="R-plus is a worked mathematical example.")
+        write_entry(
             "archaea", "Archaea",
             "**Archaea** (singular, *archaeon*) is a domain of organisms.",
-            aliases=("archaeon",), card="Archaea")
+            card="Archaea")
         write_entry(
             "hard-wrap-acronym", "Hard wrap acronym",
             "**Hard wrap acronym**\n(HWA) binds its counterpart across a hard wrap.",
@@ -574,6 +655,8 @@ A compact definition used only to exercise the shared contract.
                         lint_items["alignment-sample"])
         for slug in ("arxiv", "feature-machine-learning",
                      "principal-component-analysis", "k-nearest-neighbors",
+                     "ell-1-norm", "l-1-regularization",
+                     "x-1-2-transform", "r-plus",
                      "archaea", "hard-wrap-acronym", "adaboost",
                      "saccharomyces-cerevisiae", "historical-synonym",
                      "canonical-code-shapes"):
@@ -602,6 +685,8 @@ A compact definition used only to exercise the shared contract.
                         scan_items["alignment-sample"])
         for slug in ("arxiv", "feature-machine-learning",
                      "principal-component-analysis", "k-nearest-neighbors",
+                     "ell-1-norm", "l-1-regularization",
+                     "x-1-2-transform", "r-plus",
                      "archaea", "hard-wrap-acronym", "adaboost",
                      "saccharomyces-cerevisiae", "historical-synonym",
                      "canonical-code-shapes"):
@@ -711,6 +796,45 @@ Synthetic deviation
             "$\\operatorname{Var}(X)$.\n",
             "$\\operatorname{Var}(X)$:\n\n$$\n"
             "\\sigma = \\sqrt{\\operatorname{Var}(X)}\n$$\n"),
+            encoding="utf-8")
+        builder = json.loads(self.run_script(
+            "skills/wiki-builder/scripts/lint_entry.py", entry,
+            "--compact").stdout)
+        self.assertNotIn(
+            "12-equation-coverage-candidate",
+            {finding["item"] for finding in builder["entries"][0]["findings"]})
+        scanner = json.loads(self.run_script(
+            "skills/wiki-linter/scripts/scan_vault.py", self.vault / "Wiki",
+            "--indent", "0").stdout)
+        self.assertNotIn(
+            "item12/equation-coverage-candidate",
+            {problem["item"] for problem in scanner["problems"]
+             if problem["slug"] == "synthetic-deviation"})
+
+        entry.write_text(equationless.replace(
+            "$\\operatorname{Var}(X)$.\n",
+            "$\\operatorname{Var}(X)$:\n\n$$\n"
+            "f(x) = \\sqrt{x} + \\operatorname{Var}(Y)\n$$\n"),
+            encoding="utf-8")
+        builder = json.loads(self.run_script(
+            "skills/wiki-builder/scripts/lint_entry.py", entry,
+            "--compact").stdout)
+        self.assertIn(
+            "12-equation-coverage-candidate",
+            {finding["item"] for finding in builder["entries"][0]["findings"]})
+        scanner = json.loads(self.run_script(
+            "skills/wiki-linter/scripts/scan_vault.py", self.vault / "Wiki",
+            "--indent", "0").stdout)
+        self.assertIn(
+            "item12/equation-coverage-candidate",
+            {problem["item"] for problem in scanner["problems"]
+             if problem["slug"] == "synthetic-deviation"})
+
+        entry.write_text(equationless.replace(
+            "$\\operatorname{Var}(X)$.\n",
+            "$\\operatorname{Var}(X)$:\n\n$$\n"
+            "\\sigma = \\sqrt{\\frac{1}{N}"
+            "\\sum_i (x_i - \\mu)^2}\n$$\n"),
             encoding="utf-8")
         builder = json.loads(self.run_script(
             "skills/wiki-builder/scripts/lint_entry.py", entry,

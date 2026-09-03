@@ -16,7 +16,7 @@ the candidate lists are worklists, not auto-fixes. See
 references/scanner.md for the field-by-field output contract and for what the
 scanner deliberately does not check.
 
-Stdlib only, Python 3.8+.
+Stdlib only, Python 3.9+ (the plugin runtime floor).
 
     python3 scripts/scan_vault.py /path/to/vault/Wiki \
         --images /path/to/vault/Sources/Images \
@@ -24,9 +24,10 @@ Stdlib only, Python 3.8+.
 
 `--images` is optional. It checks that every local image embed names a file in
 `Sources/Images/` and emits report-only `image_folder_findings` for nested
-paths or recognizable temporary/staging residue. CONVENTIONS.md §§1 and 8 make
-this skill the folder's read-only validator; neither class of finding
-authorizes moving or deleting a file.
+paths, recognizable temporary/staging residue, unreadable scope, and grouped
+portable-basename collisions. CONVENTIONS.md §§1 and 8 make this skill the
+folder's read-only validator; no folder finding authorizes moving, renaming or
+deleting a file.
 """
 
 import argparse
@@ -34,20 +35,18 @@ import datetime
 import json
 import os
 import re
+import stat
 import sys
 import unicodedata
 
 
 def fold_name(s):
-    """Case- and Unicode-normalization-folded key for a slug or link target.
+    """Portable case/Unicode identity for a slug or link target.
 
-    This is how the documented vault actually resolves two names to one file:
-    Obsidian matches wikilinks case-insensitively, and the vault lives on APFS,
-    which is case-insensitive AND normalization-insensitive (an NFC name and
-    its NFD spelling open the same file).  Every comparison that answers "do
-    these two names denote one file?" goes through this; comparing the raw
-    strings instead is only correct on the case-sensitive Linux filesystems
-    the plugin is tested on, which is exactly why the bug never showed there.
+    The plugin treats case and normalization variants as one ownership class,
+    then canonicalizes references to the exact on-disk spelling. This yields
+    the same collision decision on filesystems that alias those spellings and
+    ones that can store both; raw strings would make safety host-dependent.
     """
     return unicodedata.normalize("NFC", s or "").casefold()
 
@@ -70,9 +69,23 @@ def fold_name(s):
 # `python3 shared/scripts/slugify.py --test` is the conformance suite.
 # ===========================================================================
 
+_OBSIDIAN_SHARED_MODULES = (
+    'code_typography',
+    'entry_structure',
+    'equation_coverage',
+    'introduced_aliases',
+    'markdown_tables',
+    'organism_names',
+    'plurals',
+    'slugify',
+    'yaml_scalars',
+)
+
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
 _here = _os.path.dirname(_os.path.abspath(__file__))
+_required = tuple(_m + ".py" for _m in (
+    globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
 if _env:                                   # explicit override: authoritative, no fallback
     _tried = [_os.path.abspath(_os.path.expanduser(_env))]
@@ -81,19 +94,27 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
-_shared = next((_p for _p in _tried if _os.path.isdir(_p)), None)
+_missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
+            for _p in _tried if _os.path.isdir(_p)}
+_shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
 if _shared is None:
     raise SystemExit("""obsidian: cannot find the plugin's shared/scripts/ folder, which holds
-the one canonical copy of the conventions this script depends on.
+the one canonical copy of the conventions this script depends on. A usable
+folder must contain these required module(s): %s
 Looked for:
   %s
 Fix: install the whole plugin tree, or set OBSIDIAN_VAULT_SHARED to the
 shared/scripts/ directory (unset it to use the plugin-relative walk-up).
 Do NOT paste a second copy of the algorithm into this skill -- a divergent
-copy is the bug the shared layer exists to prevent.""" % "\n  ".join(_tried))
+copy is the bug the shared layer exists to prevent.""" % (
+    ", ".join(_required), "\n  ".join(
+        _p + (" (not a directory)" if _p not in _missing else
+              " (missing: %s)" % ", ".join(_missing[_p]))
+        for _p in _tried)))
 _sys.path[:] = [_p for _p in _sys.path if _p not in (_shared, _here)]
 _sys.path.insert(0, _shared)               # shared/scripts/ FIRST
-_sys.path.append(_here)                    # own dir LAST: a local copy cannot shadow it
+if _here != _shared:
+    _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
 from slugify import (  # noqa: E402
@@ -132,7 +153,20 @@ from code_typography import find_bare_code_shapes  # noqa: E402
 from equation_coverage import (  # noqa: E402
     find_missing_display_equation_candidates,
 )
-from entry_structure import opener_subject_date_status  # noqa: E402
+from entry_structure import (  # noqa: E402
+    answer_surface_match,
+    body_opens_with_prose,
+    count_sentences,
+    ends_with_sentence_period,
+    flashcard_line1_markup,
+    flashcard_line1_faults,
+    math_title_plain_text,
+    normalized_answer_surface,
+    opening_paragraph,
+    opener_subject_date_status,
+    parse_flashcard_blocks,
+    split_sentences,
+)
 from introduced_aliases import missing_introduced_aliases  # noqa: E402
 from markdown_tables import (  # noqa: E402
     caption_faults,
@@ -176,25 +210,6 @@ LIBS = ["PyTorch","TensorFlow","JAX","NumPy","Pandas","scikit-learn","sklearn","
         "SciPy","Matplotlib","Hugging Face","XGBoost","LightGBM","CatBoost"]
 
 
-def math_skeleton(text):
-    """Plain-text title form used by the flashcard answer contract.
-
-    Line 3 cannot carry LaTeX, so a symbol-bearing title such as
-    ``$\\mathbf{k}$-nearest neighbors`` is represented there as
-    ``k-nearest neighbors``.  This intentionally mirrors wiki-builder's
-    single-entry lint check.
-    """
-    s = (text or "").replace("$", "")
-    for _ in range(4):
-        new = re.sub(r"\\[A-Za-z]+\s*\{([^{}]*)\}", r"\1", s)
-        if new == s:
-            break
-        s = new
-    s = re.sub(r"\\[A-Za-z]+", "", s)
-    s = s.replace("{", "").replace("}", "")
-    return re.sub(r"\s+", " ", s).strip()
-
-
 _LEADING_ARTICLE_RE = re.compile(r"^(?:a|an|the)\s+", re.IGNORECASE)
 _SUBJECT_BOUNDARY_RE = re.compile(r"^(?:$|[\s,(:;\u2013\u2014])")
 
@@ -209,11 +224,13 @@ def _first_letter_ci_equal(a, b):
 
 
 def description_subject_forms(title):
-    """Canonical title/base/math-skeleton forms accepted as item-7 subjects."""
+    """Canonical title/base/math-plain forms accepted as item-7 subjects."""
     forms = []
     subjects = (base_term(title),) if has_parenthetical(title) else (title,)
     for subject in subjects:
-        for form in (subject, math_skeleton(subject) if subject else None):
+        for form in (
+                subject,
+                math_title_plain_text(subject) if subject else None):
             form = (form or "").strip()
             if form and form not in forms:
                 forms.append(form)
@@ -407,14 +424,14 @@ def _clean_card_counterpart(raw, term, entry_type):
 def flashcard_primary_answer(title, aliases, opener, entry_type=""):
     """Return the exact plain-text term and any opener-bound counterpart."""
     term = base_term(title) if has_parenthetical(title) else (title or "")
-    term = math_skeleton(term).strip()
+    term = math_title_plain_text(term).strip()
     alias_keys = {fold_name(a) for a in aliases if a}
     counterpart = None
     opening_block = " ".join(
         line.strip() for line in (opener or "").splitlines())
     for match in _BOLD_PAREN_RE.finditer(opening_block):
-        visible = math_skeleton(
-            match.group("bold").replace("*", "").replace("_", "")).strip()
+        visible, _style, _italic = _bold_parts(match)
+        visible = math_title_plain_text(visible).strip()
         if not _first_letter_ci_equal(visible, term):
             continue
         candidate = _clean_card_counterpart(
@@ -452,39 +469,6 @@ def flashcard_line3_fault(line3, title, aliases, opener, entry_type=""):
         return "the established counterpart must appear exactly as (%s)" % required_counterpart
     return None
 
-
-# The conservative sentence counter intentionally mirrors
-# lint_entry.count_sentences. It serves description item 7, flashcard line 1,
-# and the legacy stub structure check; initials, decimals/version dots, common
-# abbreviations, and taxonomic rank abbreviations do not create phantom
-# sentences.
-_ABBREVS = [
-    "e.g.", "i.e.", "cf.", "et al.", "approx.", "vs.", "ca.", "c.", "fl.",
-    "Dr.", "Prof.", "Mr.", "Mrs.", "Ms.", "St.", "Jr.", "Sr.", "Fig.",
-    "No.", "b.", "d.", "r.", "U.S.", "U.K.", "var.", "subsp.", "ssp.",
-    "sp.", "spp.", "aff.", "cv.", "fo.",
-]
-_ABBREV_RE = re.compile(
-    r"(?:^|[^0-9A-Za-z])(?:%s)$"
-    % "|".join(re.escape(a) for a in sorted(_ABBREVS, key=len, reverse=True)),
-    re.IGNORECASE)
-_INITIAL_RE = re.compile(r"(?:^|[^0-9A-Za-z'’])[A-Za-z]\.$")
-
-
-def count_sentences(text):
-    """Conservative sentence-boundary count for legacy stub structure."""
-    compact = " ".join((text or "").split())
-    count = 0
-    for match in re.finditer(r"[.!?]+", compact):
-        following = compact[match.end():match.end() + 1]
-        if following and not following.isspace():
-            continue
-        if match.group(0) == ".":
-            head = compact[max(0, match.end() - 16):match.end()]
-            if _INITIAL_RE.search(head) or _ABBREV_RE.search(head):
-                continue
-        count += 1
-    return count
 
 def leftover_dollars(body):
     # `strip_fenced`, not a backtick-only regex: markdown fences a block with
@@ -599,6 +583,176 @@ def markdown_image_spans(text):
             i += 1
         if i < n and text[i] == ")":
             yield image_start, i + 1, destination
+
+
+def markdown_link_spans(text):
+    """Yield valid one-line inline/reference Markdown-link spans.
+
+    The image parser already handles balanced labels, destinations, and
+    optional titles. Prefixing a candidate ordinary link with ``!`` lets that
+    same parser establish the full inline-link boundary without maintaining a
+    second destination grammar. Full and collapsed reference links have no
+    destination grammar; their second bracket is scanned directly. Shortcut
+    references are deliberately left alone because ``[term]`` is ordinary
+    prose unless a matching definition is resolved elsewhere.
+    """
+    value = text or ""
+    consumed_to = 0
+    for opener in re.finditer(r"\[", value):
+        start = opener.start()
+        if start < consumed_to:
+            continue
+        backslashes, index = 0, start - 1
+        while index >= 0 and value[index] == "\\":
+            backslashes += 1
+            index -= 1
+        if backslashes % 2:
+            continue
+        span_start = start
+        if start > 0 and value[start - 1] == "!":
+            bangs_backslashes, before_bang = 0, start - 2
+            while before_bang >= 0 and value[before_bang] == "\\":
+                bangs_backslashes += 1
+                before_bang -= 1
+            if bangs_backslashes % 2:
+                continue
+            span_start = start - 1
+
+        depth, index, escaped = 1, start + 1, False
+        while index < len(value) and value[index] != "\n":
+            char = value[index]
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == "[":
+                depth += 1
+            elif char == "]":
+                depth -= 1
+                if depth == 0:
+                    break
+            index += 1
+        if depth:
+            continue
+        after_label = index + 1
+
+        if after_label < len(value) and value[after_label] == "(":
+            synthetic = "!" + value[start:]
+            span = next(markdown_image_spans(synthetic), None)
+            if span is not None and span[0] == 0:
+                end = start + span[1] - 1
+                consumed_to = end
+                yield span_start, end
+            continue
+
+        if after_label < len(value) and value[after_label] == "[":
+            index, escaped = after_label + 1, False
+            while index < len(value) and value[index] != "\n":
+                char = value[index]
+                if char == "]" and not escaped:
+                    end = index + 1
+                    consumed_to = end
+                    yield span_start, end
+                    break
+                escaped = char == "\\" and not escaped
+                if char != "\\":
+                    escaped = False
+                index += 1
+
+
+_MARKDOWN_REFERENCE_DEFINITION_LINE_RE = re.compile(
+    r"^ {0,3}\[([^\]\n]+)\]:", re.MULTILINE)
+
+
+def _reference_label_key(label):
+    """CommonMark-like case/space identity for a reference-link label."""
+    return " ".join(unicodedata.normalize("NFC", label or "").split()).casefold()
+
+
+def markdown_reference_definition_labels(text):
+    """Labels declared by link-reference-definition-shaped body lines."""
+    return {
+        _reference_label_key(match.group(1))
+        for match in _MARKDOWN_REFERENCE_DEFINITION_LINE_RE.finditer(text or "")
+        if _reference_label_key(match.group(1))
+    }
+
+
+def markdown_shortcut_reference_spans(text, labels):
+    """Yield shortcut-reference link/image spans resolved in this document.
+
+    A bare ``[term]`` is ordinary prose until the same document declares a
+    matching ``[term]: destination``. Once resolved, neither its label nor an
+    image alt label is a writable wiki-backfill surface.
+    """
+    value = text or ""
+    if not labels:
+        return
+    consumed_to = 0
+    for opener in re.finditer(r"\[", value):
+        start = opener.start()
+        if start < consumed_to or (start > 0 and value[start - 1] == "["):
+            continue
+        backslashes, before = 0, start - 1
+        while before >= 0 and value[before] == "\\":
+            backslashes += 1
+            before -= 1
+        if backslashes % 2:
+            continue
+        span_start = start
+        if start > 0 and value[start - 1] == "!":
+            bangs_backslashes, before_bang = 0, start - 2
+            while before_bang >= 0 and value[before_bang] == "\\":
+                bangs_backslashes += 1
+                before_bang -= 1
+            if bangs_backslashes % 2:
+                continue
+            span_start = start - 1
+
+        depth, index, escaped = 1, start + 1, False
+        while index < len(value) and value[index] != "\n":
+            char = value[index]
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == "[":
+                depth += 1
+            elif char == "]":
+                depth -= 1
+                if depth == 0:
+                    break
+            index += 1
+        if depth:
+            continue
+        end = index + 1
+        if end < len(value) and value[end] in "[(":
+            continue
+        label = value[start + 1:index]
+        if _reference_label_key(label) in labels:
+            consumed_to = end
+            yield span_start, end
+
+
+_MARKDOWN_URL_RE = re.compile(
+    r"<https?://[^>\s]+>|(?<![A-Za-z0-9_])https?://[^\s<>]+",
+    re.IGNORECASE)
+
+
+def markdown_url_spans(text):
+    """Yield bare URL/autolink spans that cannot contain a wikilink."""
+    for match in _MARKDOWN_URL_RE.finditer(text or ""):
+        yield match.span()
+
+
+def mask_character_spans(text, spans):
+    """Blank character spans while preserving offsets and line breaks."""
+    chars = list(text or "")
+    for start, end in spans:
+        for index in range(max(0, start), min(end, len(chars))):
+            if chars[index] != "\n":
+                chars[index] = " "
+    return "".join(chars)
 
 
 def markdown_image_line(line):
@@ -869,10 +1023,9 @@ def source_stem(item):
     The pair is the identity of the DOCUMENT the item names, so everything that
     can vary without changing which document that is gets dropped: the `[[ ]]`
     wrapper, a `#page=N` anchor, a display pipe, and any folder qualification
-    (`Sources/PDFs/X.pdf` and `X.pdf` are one file). Case AND Unicode
-    normalization are folded because the documented vault lives on a filesystem
-    that is insensitive to both, where `X.md`, `x.md` and the NFD spelling of
-    either are all the same name.
+    (`Sources/PDFs/X.pdf` and `X.pdf` are one file). Case and Unicode
+    normalization are folded so document identity stays stable across
+    filesystems that alias those spellings and ones that can store both.
 
     `("", "")` when the item carries no extension at all — the "stub" marker, or
     a malformed item whose missing extension is the form check's finding.
@@ -884,11 +1037,10 @@ def source_stem(item):
     inner = inner.replace("\\","/").rsplit("/",1)[-1]   # folder qualification
     stem, dot, ext = inner.rpartition(".")
     if not dot: return "", ""
-    # NFC as well as case, for the reason fold_name() gives: a `.pdf` item read
-    # off an APFS disk is NFD and the `.md` twin typed into a note is NFC — one
-    # document to the filesystem and to Obsidian, two unequal strings here, so
-    # the item4 pair went unreported. §7 requires this to agree exactly with
-    # wiki-builder's lint_entry.source_stem(); keep the two lines identical.
+    # NFC as well as case: one document may be spelled NFD on disk and NFC in a
+    # note. Raw strings would miss the item4 pair and make results host-dependent.
+    # §7 requires this to agree exactly with wiki-builder's
+    # lint_entry.source_stem(); keep the two lines identical.
     return (unicodedata.normalize("NFC", stem.strip()).lower(),
             unicodedata.normalize("NFC", ext.strip()).lower())
 
@@ -1295,17 +1447,47 @@ def build_backfill(entries, surf_map):
             if owner is not None:
                 linked.add(owner)
         masked = ANYLINK.sub(lambda m: " "*len(m.group(0)), prose)
+        # A target name used as an image's alt text or as an existing
+        # Markdown-link label is already presentation/navigation syntax. A
+        # proposed wikilink cannot be nested there, so mask the complete spans
+        # before looking for the first writable occurrence.
+        masked = mask_character_spans(
+            masked,
+            [(start, end) for start, end, _destination
+             in markdown_image_spans(masked)])
+        masked = mask_character_spans(masked, markdown_link_spans(masked))
+        reference_labels = markdown_reference_definition_labels(prose)
+        masked = mask_character_spans(
+            masked, markdown_shortcut_reference_spans(masked, reference_labels))
+        masked = mask_character_spans(masked, markdown_url_spans(masked))
+        reference_definition_lines = {
+            line_i for line_i, line in enumerate(prose.split("\n"))
+            if _MARKDOWN_REFERENCE_DEFINITION_LINE_RE.match(line)
+        }
         # Blank every line a link may not be written on, for the same reason in
         # each case: the backfill worklist proposes linking the FIRST occurrence,
         # so a first occurrence sitting somewhere unlinkable is an un-actionable
         # item that also HIDES the linkable occurrence further down.
         #   * whole-line italic captions — item 12 forbids wikilinks in captions;
         #   * markdown TABLE ROWS — item 10 forbids wikilinks in table cells;
+        #   * body headings — headings are plain text by item 9;
+        #   * Setext heading text — the underline is itself an item-9 defect;
         #   * fenced code blocks — a listing is shown, not asserted, and a link
         #     written inside one renders as literal `[[...]]` text.
-        masked = "\n".join(
-            ("" if re.match(r"^\s*\*(?!\*).*\*\s*$", ln) else ln)
-            for ln in masked.split("\n"))
+        masked_lines = masked.split("\n")
+        for line_i, line in enumerate(masked_lines):
+            if (re.match(r"^\s*\*(?!\*).*\*\s*$", line)
+                    or re.match(r"^ {0,3}#{1,6}(?:[ \t]+|$)", line)
+                    # A link-reference definition is Markdown metadata. Its
+                    # label is not writable body prose, so it must not become
+                    # an un-actionable backfill target.
+                    or line_i in reference_definition_lines):
+                masked_lines[line_i] = ""
+            if (line_i > 0 and masked_lines[line_i - 1].strip()
+                    and re.fullmatch(r" {0,3}(?:=+|-+)[ \t]*", line)):
+                masked_lines[line_i - 1] = ""
+                masked_lines[line_i] = ""
+        masked = "\n".join(masked_lines)
         proposed = set()
         for surface, matched in _scan_surfaces(masked, by_tokens, maxwords):
             tgt = surf_map.get(surface)
@@ -1370,12 +1552,10 @@ def _looks_temporary_image_path(relative):
 def image_index(images):
     """Return folded image basenames and report-only folder-layout findings.
 
-    Folded, not `os.path.isfile`, for the reason `fold_name` gives: the
-    documented vault sits on a case- and normalization-insensitive volume, so
-    an entry embedding `![[Doe_X_2025_Fig_2.png]]` against a file written
-    `doe_x_2025_fig_2.png` displays the image. An `isfile` probe on the
-    case-SENSITIVE Linux filesystem the plugin is tested on says it is missing,
-    and the finding tells the user to fix an embed that already works.
+    Folded, not a literal `os.path.isfile` probe, for the reason `fold_name`
+    gives: a case/normalization variant belongs to the same portable ownership
+    class. A literal probe would make missing-image results depend on the host
+    filesystem; producers and references still use the exact stored spelling.
 
     Walked recursively although CONVENTIONS §1 makes `Sources/Images/` flat:
     Obsidian resolves an embed by basename wherever the file sits, so a user
@@ -1388,8 +1568,30 @@ def image_index(images):
     if images is None:
         return None, []
     names, findings = set(), []
+    paths_by_name = {}
     root = os.path.abspath(images)
-    for dirpath, dirnames, filenames in os.walk(root):
+    walk_failed = False
+
+    def record_walk_error(exc):
+        nonlocal walk_failed
+        walk_failed = True
+        error_path = getattr(exc, "filename", None) or root
+        try:
+            relative = os.path.relpath(error_path, root)
+        except (TypeError, ValueError):
+            relative = str(error_path)
+        relative = relative.replace(os.sep, "/")
+        findings.append({
+            "path": relative,
+            "kind": "unreadable",
+            "message": (
+                "image folder could not be read completely: %s: %s; report "
+                "only — missing-image checks are suppressed because a "
+                "partial inventory cannot prove absence"
+                % (type(exc).__name__, exc)),
+        })
+
+    for dirpath, dirnames, filenames in os.walk(root, onerror=record_walk_error):
         dirnames.sort()
         filenames.sort()
         rel_dir = os.path.relpath(dirpath, root)
@@ -1413,10 +1615,16 @@ def image_index(images):
         for name in filenames:
             relative = (name if rel_dir == "." else os.path.join(rel_dir, name))
             relative = relative.replace(os.sep, "/")
-            # Keep recursively discovered visible basenames in the resolver so
-            # the layout finding never creates a false missing-image finding.
-            if not name.startswith("."):
-                names.add(fold_name(name))
+            path = os.path.join(dirpath, name)
+            usable = os.path.isfile(path)
+            # Keep recursively discovered visible, resolvable files in the
+            # resolver so the layout finding never creates a false missing-
+            # image result. A dangling symlink, FIFO or other non-file
+            # directory entry does not render merely because os.walk listed it.
+            if usable and not name.startswith("."):
+                folded = fold_name(name)
+                names.add(folded)
+                paths_by_name.setdefault(folded, []).append(relative)
             if rel_dir == "." and name in _IMAGE_ALLOWED_HIDDEN:
                 continue
             temporary = _looks_temporary_image_path(relative)
@@ -1428,11 +1636,38 @@ def image_index(images):
                 kind = "nested-file"
                 message = ("file is nested under the flat Sources/Images folder; report only — "
                            "do not move or delete without user approval and provenance")
+            elif not usable and os.path.lexists(path):
+                kind = "unusable-file"
+                message = ("image name is a dangling symlink or non-regular file and cannot "
+                           "resolve as an embed; report only — do not replace or delete it "
+                           "without user approval and provenance")
             else:
                 continue
             findings.append({"path": relative, "kind": kind, "message": message})
+    # One folded set member is enough for missing-image semantics, but not for
+    # namespace safety: two actual paths with a case/NFC-equivalent basename
+    # make a bare embed ambiguous. Preserve every path in a report-only group
+    # while keeping the name present, so this finding does not manufacture a
+    # contradictory item12/missing-image result.
+    for paths in paths_by_name.values():
+        paths = sorted(set(paths), key=lambda value: (fold_name(value), value))
+        if len(paths) < 2:
+            continue
+        findings.append({
+            "path": paths[0],
+            "paths": paths,
+            "kind": "portable-name-collision",
+            "message": (
+                "case/normalization-equivalent image basenames resolve from "
+                "multiple paths: %s; report only — do not rename or delete "
+                "without user approval and provenance" % ", ".join(paths)),
+        })
     findings.sort(key=lambda finding: (finding["path"], finding["kind"]))
-    return names, findings
+    # One inaccessible subtree makes the inventory incomplete. Returning the
+    # names found so far would turn every embed in that subtree into a false
+    # missing-image repair cue; None has the same established meaning as an
+    # intentionally omitted --images inventory and suppresses those findings.
+    return (None if walk_failed else names), findings
 
 
 MOC_TREE_START = "<!-- wiki-linter:moc-tree:start -->"
@@ -1455,15 +1690,51 @@ def moc_marker_state(path):
         "start_markers": 0,
         "end_markers": 0,
     }
-    if not os.path.exists(path):
-        return result
     try:
-        with open(path, encoding="utf-8-sig") as fh:
+        before = os.stat(path, follow_symlinks=False)
+    except FileNotFoundError:
+        return result
+    except OSError as exc:
+        result["state"] = "unreadable"
+        result["error"] = "%s: %s" % (type(exc).__name__, exc)
+        return result
+    if stat.S_ISLNK(before.st_mode):
+        result["state"] = "unreadable"
+        result["error"] = (
+            "SymlinkError: MOC pathname is a symlink occupant; do not follow "
+            "it for initialization or managed-tree replacement")
+        return result
+    if not stat.S_ISREG(before.st_mode):
+        result["state"] = "unreadable"
+        result["error"] = (
+            "FileTypeError: MOC pathname is occupied by a non-regular file")
+        return result
+    descriptor = None
+    try:
+        descriptor = os.open(
+            path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        opened = os.fstat(descriptor)
+        if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            raise OSError("MOC pathname changed while it was opened")
+        with os.fdopen(descriptor, "r", encoding="utf-8-sig") as fh:
+            descriptor = None
             text = fh.read()
+        after = os.stat(path, follow_symlinks=False)
+        stable = lambda item: (
+            item.st_dev, item.st_ino, item.st_size,
+            getattr(item, "st_mtime_ns", int(item.st_mtime * 1e9)),
+            getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)),
+            stat.S_IFMT(item.st_mode),
+        )
+        if not (stable(before) == stable(opened) == stable(after)):
+            raise OSError("MOC pathname changed while it was read")
     except (OSError, UnicodeDecodeError) as exc:
         result["state"] = "unreadable"
         result["error"] = "%s: %s" % (type(exc).__name__, exc)
         return result
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
 
     result["start_markers"] = text.count(MOC_TREE_START)
     result["end_markers"] = text.count(MOC_TREE_END)
@@ -1484,6 +1755,104 @@ def moc_marker_state(path):
     else:
         result["state"] = "malformed-marker"
     return result
+
+
+_DUPLICATE_DISPLAY_RE = re.compile(
+    r"(?ms)^ {0,3}\$\$[ \t]*\n.*?\n {0,3}\$\$[ \t]*$")
+_DUPLICATE_MARKDOWN_LINK_RE = re.compile(
+    r"!?\[([^\]\n]*)\]\([^\n)]*\)")
+_DUPLICATE_MARKDOWN_IMAGE_RE = re.compile(
+    r"!\[[^\]\n]*\]\([^\n)]*\)")
+_DUPLICATE_INLINE_MATH_RE = re.compile(
+    r"(?<![\\$])\$(?!\$)((?:\\.|[^$\n])+?)(?<!\\)\$(?!\$)")
+def duplicate_sentence_surfaces(prose, table_spans=()):
+    """Return long normalized prose sentences eligible for ownership review.
+
+    Exact copied prose is a useful cross-entry signal only after presentation
+    syntax is removed. Listings, displays, tables, images, and captions are not
+    assertions to deduplicate, so they are blanked. Wikilinks normalize to
+    their rendered label, making a linked and an unlinked copy comparable.
+    Short sentences stay out: ordinary connective or definitional phrases are
+    expected to recur and offer no ownership evidence.
+    """
+    visible = strip_indented(strip_fenced(prose or ""))
+    visible = _DUPLICATE_DISPLAY_RE.sub(
+        lambda match: "".join(
+            "\n" if char == "\n" else " " for char in match.group(0)),
+        visible)
+    visible = mask_line_spans(visible, table_spans)
+    kept_lines = []
+    for line in visible.split("\n"):
+        stripped = line.strip()
+        if (not stripped or stripped.startswith("#")
+                or re.match(r"^!\[\[.*\]\]$", stripped)
+                or re.match(r"^!\[[^\]]*\]\([^)]*\)$", stripped)
+                or re.match(r"^\*(?!\*)\S(?:.*\S)?\*$", stripped)):
+            kept_lines.append("")
+        else:
+            kept_lines.append(line)
+    visible = "\n".join(kept_lines)
+
+    def render_wikilink(match):
+        target = match.group(1).split("#", 1)[0].split("^", 1)[0]
+        target = target.replace("\\", "/").rsplit("/", 1)[-1]
+        if target.lower().endswith(".md"):
+            target = target[:-3]
+        return match.group(2) or target.replace("-", " ")
+
+    def protected_payload(prefix, payload):
+        """Keep code/math semantics through punctuation normalization."""
+        parts = [prefix]
+        for char in unicodedata.normalize("NFKC", payload or ""):
+            if char.isalnum():
+                parts.append(char.casefold())
+            elif char.isspace():
+                parts.append(" ")
+            else:
+                parts.append(" u%04x " % ord(char))
+        return "".join(parts)
+
+    payloads = []
+
+    def protect(match, prefix, payload):
+        token = "dupsentinel%06dtoken" % len(payloads)
+        payloads.append((token, protected_payload(prefix, payload),
+                         match.group(0)))
+        return token
+
+    # Inline code and inline math carry semantic payload. Protect them while
+    # presentation syntax is normalized, then expand each placeholder in two
+    # ways: an operator-preserving comparison key and the original readable
+    # evidence shown in the finding.
+    visible = _INLINE_CODE.sub(
+        lambda match: protect(
+            match, " dupcode ",
+            match.group(0)[len(match.group(1)):-len(match.group(1))]),
+        visible)
+    visible = _DUPLICATE_INLINE_MATH_RE.sub(
+        lambda match: protect(match, " dupmath ", match.group(1)),
+        visible)
+    visible = re.sub(r"!\[\[[^\]\n]+\]\]", "", visible)
+    visible = _DUPLICATE_MARKDOWN_IMAGE_RE.sub("", visible)
+    visible = WIKILINK.sub(render_wikilink, visible)
+    visible = _DUPLICATE_MARKDOWN_LINK_RE.sub(r"\1", visible)
+    visible = re.sub(r"[*_~]+", "", visible)
+    compact = " ".join(visible.split())
+
+    out = []
+    for sentence in split_sentences(compact):
+        comparison = sentence.strip()
+        surface = comparison
+        for token, comparison_payload, evidence_payload in payloads:
+            comparison = comparison.replace(token, comparison_payload)
+            surface = surface.replace(token, evidence_payload)
+        normalized = unicodedata.normalize("NFKC", comparison).casefold()
+        normalized = re.sub(r"[^\w]+", " ", normalized)
+        normalized = " ".join(normalized.split())
+        if len(normalized) < 80 or len(normalized.split()) < 12:
+            continue
+        out.append((normalized, surface))
+    return out
 
 
 def scan(wiki, images=None):
@@ -1520,24 +1889,35 @@ def scan(wiki, images=None):
         path_key = entry_link_path_key(rel)
         paths_by_basename.setdefault(fold_name(sl), set()).add(path_key)
         path_records[path_key] = None
-        # Obsidian resolves a wikilink by basename, case-insensitively, so two
-        # files with the same stem in different folders — INCLUDING two stems
-        # that differ only in case or Unicode normalization, which are one name
-        # to Obsidian and to the vault's own APFS volume — are one slug with
-        # two bodies. Report, keep the first.
+        # Bare links use basename ownership. Two equal basenames in different
+        # folders, including case/normalization variants under the plugin's
+        # portable identity, create one ambiguous slug with two bodies.
         keep_entry = fold_name(sl) not in seen_paths
         if not keep_entry:
             ambiguous_files.add(fold_name(sl))
             prev_sl, prev_rel = seen_paths[fold_name(sl)]
             problems.append((sl,"item5",f'slug "{sl}" occurs in two files ({prev_rel} and {rel}'
                                         f'{"" if prev_sl == sl else ", stems differing only in case/normalization"}) — '
-                                        f'Obsidian resolves [[{sl}]] to only one of them; rename or merge'))
+                                        f'the portable link identity has multiple owners; rename or merge'))
         else:
             seen_paths[fold_name(sl)] = (sl, rel)
-        # One unreadable file must not take the scan down with it: an unguarded
-        # read() on a binary .md / dangling symlink / unreadable file raised, and
-        # the traceback left stdout EMPTY, so the caller got no scan at all.
+        # Leaf symlinks are not editable Wiki entries. Directory symlinks are
+        # supported by the cycle-safe walker, but following a leaf can read and
+        # later write a target outside the selected vault. Read one stable
+        # regular inode through O_NOFOLLOW where available.
+        descriptor = None
         try:
+            before = os.stat(path, follow_symlinks=False)
+            if stat.S_ISLNK(before.st_mode):
+                raise OSError("leaf Markdown path is a symlink; its target is "
+                              "outside this scan's editable ownership")
+            if not stat.S_ISREG(before.st_mode):
+                raise OSError("leaf Markdown path is not a regular file")
+            descriptor = os.open(
+                path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            opened = os.fstat(descriptor)
+            if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+                raise OSError("leaf Markdown path changed while it was opened")
             # utf-8-SIG strips a BOM, which would otherwise sit in front of
             # the opening `---` and report a valid entry as having no
             # frontmatter.  Universal newlines are load-bearing too and are why
@@ -1546,12 +1926,24 @@ def scan(wiki, images=None):
             # Reading with `newline=""` would leave a \r on every parsed value
             # AND blind the blank-line-after-frontmatter probe, which counts
             # leading "\n" and would see "\r\n\r\n".
-            with open(path, encoding="utf-8-sig") as fh:
+            with os.fdopen(descriptor, "r", encoding="utf-8-sig") as fh:
+                descriptor = None
                 text = fh.read()
+            after = os.stat(path, follow_symlinks=False)
+            stable = lambda item: (
+                item.st_dev, item.st_ino, item.st_size,
+                getattr(item, "st_mtime_ns", int(item.st_mtime * 1e9)),
+                getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)),
+            )
+            if not (stable(before) == stable(opened) == stable(after)):
+                raise OSError("leaf Markdown path changed while it was read")
         except (OSError, UnicodeDecodeError) as exc:
             problems.append((sl,"item0",f"unreadable: {type(exc).__name__}: {exc}"))
             on_disk.add(sl)
             continue
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
         fm_raw, body, blank_after = split_frontmatter(text)
         if fm_raw is None:
             problems.append((sl,"item1","no YAML frontmatter"))
@@ -1616,10 +2008,9 @@ def scan(wiki, images=None):
         if keep_entry:
             entries[sl] = record
 
-    # fold_name(slug) -> on-disk slug, for every comparison that asks "is this
-    # the same FILE?" — Obsidian and the vault's APFS volume both resolve
-    # case- and normalization-insensitively, so [[ROC-curve]] against
-    # roc-curve.md is a resolving link with a cosmetic defect, not a dangler.
+    # fold_name(slug) -> exact on-disk slug. A unique case/normalization match
+    # is an existing owner needing canonical spelling, not a missing target;
+    # this decision stays the same across supported filesystems.
     fold_of = {}
     for _sl in entries:
         fold_of.setdefault(fold_name(_sl), _sl)
@@ -2061,8 +2452,8 @@ def scan(wiki, images=None):
         # values. A same-stem clipping may instead be an independent source, so the match
         # needs the markdown note's provenance before any source may be removed.
         # Only a stem collision ACROSS the two extensions counts — an entry may
-        # legitimately cite several distinct PDFs and several distinct clippings — and stems compare case- and NFC-insensitively (the documented
-        # vault lives on a filesystem that is insensitive to both; see fold_name).
+        # legitimately cite several distinct PDFs and several distinct clippings —
+        # and stems use the portable case/NFC identity from fold_name.
         pdf_by_stem, md_items = {}, []
         for src in e["sources"]:
             if src == "stub": continue
@@ -2123,10 +2514,14 @@ def scan(wiki, images=None):
         if not e["desc"]: problems.append((sl,"item7","missing description"))
         elif len(e["desc"]) > 110: problems.append((sl,"item7",f'description {len(e["desc"])} chars > 110'))
         marks = []
-        if "$" in e["desc"]: marks.append("$ (LaTeX/currency)")
-        if "`" in e["desc"]: marks.append("backtick")
-        if "[[" in e["desc"]: marks.append("wikilink")
-        if re.search(r"\*\*|\*\w[^*]*\*", e["desc"]): marks.append("* (bold/italic)")
+        if "$" in e["desc"]:
+            marks.append("$ (LaTeX/currency)")
+        # Description values are stricter than flashcard definitions: they
+        # permit no presentation markup at all, while card line 1 permits
+        # inline LaTeX. Reuse the shared Markdown/HTML classifier so the two
+        # wiki validators do not silently disagree about links, underscore
+        # emphasis, HTML, comments, highlights, footnotes, or block markup.
+        marks.extend(flashcard_line1_markup(e["desc"]))
         if marks:
             problems.append((sl,"item7",f'description has non-plain-text markup ({", ".join(marks)}) — renders literally in Obsidian Properties'))
         if e["desc"]:
@@ -2147,7 +2542,10 @@ def scan(wiki, images=None):
             if e["desc"][0].isalpha() and not e["desc"][0].isupper():
                 subjects = []
                 for subject in (title, base_term(title) if title else None):
-                    for form in (subject, math_skeleton(subject) if subject else None):
+                    for form in (
+                            subject,
+                            math_title_plain_text(subject)
+                            if subject else None):
                         if form and form not in subjects:
                             subjects.append(form)
                 lowercase_title_subject = any(
@@ -2155,7 +2553,7 @@ def scan(wiki, images=None):
                 if not lowercase_title_subject:
                     problems.append((sl,"item7",
                                      "description does not start with a capitalized word"))
-            if not e["desc"].rstrip().endswith("."):
+            if not ends_with_sentence_period(e["desc"]):
                 problems.append((sl,"item7","description does not end with a period"))
         # ---- item 8: tags validity (#-prefixed discipline slugs from the 27-enum; NOT wikilinks) ----
         e_tags_raw, e_tag_slugs = e["tags_raw"], e["tag_slugs"]
@@ -2212,11 +2610,10 @@ def scan(wiki, images=None):
         # `if not is_stub:`, which dropped rules the stub format requires.
         if e["blank_after"]:
             problems.append((sl,"item9","blank line immediately after frontmatter"))
-        bstrip = e["body"].lstrip()
-        if bstrip[:2] in ("##","- ","* ","> ") or bstrip[:1] == "#":
+        if not body_opens_with_prose(e["prose"]):
             problems.append((sl,"item9","body does not open with a prose sentence"))
         if e["type"] in ("Person","Event"):
-            opener = e["prose"].split("\n\n",1)[0]
+            opener = opening_paragraph(e["prose"])
             date_status = opener_subject_date_status(opener, e["type"])
             if date_status == "missing":
                 problems.append((sl,"item9",f'{e["type"]} opener needs a date '
@@ -2231,31 +2628,46 @@ def scan(wiki, images=None):
             problems.append((
                 sl, "item9/imperative-link",
                 f'navigation-only cross-reference on prose line {line_no}: '
-                f'"{cue_line[:100]}" — PROPOSAL ONLY for legacy text; integrate '
-                f'the link into the sentence claim during an authorized prose edit'))
-        for line_no, heading_line in enumerate(
-                strip_code(e["prose"]).split("\n"), 1):
-            heading = re.match(r"^ {0,3}(#{1,6})[ \t]+(.+?)\s*$", heading_line)
-            if not heading:
+                f'"{cue_line[:100]}" — integrate it only when adjacent prose '
+                f'already states the relationship without adding a claim; '
+                f'otherwise preserve it and propose a source-backed correction'))
+        # Listings are presentation samples and must not be parsed as
+        # headings, but inline code is itself forbidden heading markup.
+        heading_lines = strip_indented(strip_fenced(e["prose"])).split("\n")
+        heading_table_rows = {
+            line_i
+            for header_i, end_i in e.get("table_spans", ())
+            for line_i in range(header_i, end_i + 1)
+        }
+        for line_i, heading_line in enumerate(heading_lines):
+            if line_i in heading_table_rows:
                 continue
-            faults = []
-            if heading.group(1) != "##":
-                faults.append("level must be exactly ##")
-            heading_text = heading.group(2).rstrip("#").rstrip()
-            heading_markup = []
-            if "[[" in heading_text: heading_markup.append("wikilink")
-            if "$" in heading_text: heading_markup.append("LaTeX")
-            if "`" in heading_text: heading_markup.append("backtick")
-            if "*" in heading_text or "_" in heading_text:
-                heading_markup.append("emphasis")
-            if heading_markup:
-                faults.append("plain text only (found %s)"
-                              % ", ".join(heading_markup))
-            if faults:
+            line_no = line_i + 1
+            heading = re.match(r"^ {0,3}(#{1,6})[ \t]+(.+?)\s*$", heading_line)
+            if heading:
+                faults = []
+                if heading.group(1) != "##":
+                    faults.append("level must be exactly ##")
+                heading_text = heading.group(2).rstrip("#").rstrip()
+                heading_markup = []
+                if "$" in heading_text: heading_markup.append("LaTeX")
+                heading_markup.extend(flashcard_line1_markup(heading_text))
+                if heading_markup:
+                    faults.append("plain text only (found %s)"
+                                  % ", ".join(heading_markup))
+                if faults:
+                    problems.append((
+                        sl, "item9",
+                        "body heading on prose line %d is noncanonical: %s — %s"
+                        % (line_no, heading_line.strip()[:80], "; ".join(faults))))
+
+            if (line_i > 0 and heading_lines[line_i - 1].strip()
+                    and re.fullmatch(r" {0,3}(?:=+|-+)[ \t]*", heading_line)):
                 problems.append((
                     sl, "item9",
-                    "body heading on prose line %d is noncanonical: %s — %s"
-                    % (line_no, heading_line.strip()[:80], "; ".join(faults))))
+                    "Setext body heading ending on prose line %d is "
+                    "noncanonical; use a plain-text `##` heading"
+                    % line_no))
         if is_stub:
             stub_prose = e["prose"].strip()
             paragraphs = [p for p in re.split(r"\n\s*\n", stub_prose) if p.strip()]
@@ -2274,6 +2686,7 @@ def scan(wiki, images=None):
                     or any(markdown_image_spans(_stub_masked))):
                 problems.append((sl,"stub-no-images","stubs never carry images"))
         # ---- item 12 (format): unescaped literal $ and remote image embeds ----
+        _pure_math_opener_markup = None
         if not is_stub:
             nd = leftover_dollars(e["body"])
             if nd:
@@ -2285,14 +2698,17 @@ def scan(wiki, images=None):
             if _equation_candidates:
                 _lines = ", ".join(str(candidate["line"])
                                    for candidate in _equation_candidates)
+                _kinds = ", ".join(sorted({candidate["kind"]
+                                            for candidate in _equation_candidates}))
                 problems.append((
                     sl, "item12/equation-coverage-candidate",
-                    "prose explicitly says a quantity is the square root of "
-                    "variance, but the entry has no display equation "
-                    f"(prose line(s) {_lines}) — executing agent: verify the "
-                    "definition in context, bind every symbol nearby, and "
-                    "typeset only the stated relationship under "
-                    "wiki-builder/references/equations.md; do not infer a "
+                    "prose or inline math appears to define a calculation "
+                    "without canonical nearby display form "
+                    f"(kind(s): {_kinds}; prose line(s) {_lines}) — executing "
+                    "agent: verify the definition in context, bind every "
+                    "symbol nearby, and typeset only the stated relationship "
+                    "under wiki-builder/references/equations.md; a "
+                    "square-root-of-variance cue never authorizes inferring a "
                     "population or sample denominator"))
             # Remote ![](http…) embeds are REPORT-ONLY, not a violation. wiki-builder MANDATES this exact
             # form for an external URL coming from a markdown source's clipping ("use standard markdown
@@ -2378,7 +2794,7 @@ def scan(wiki, images=None):
                                  f'of which figure belongs here'))
         # ---- item 16: opener title text plus type-specific emphasis ----------
         if not is_stub:
-            opener = e["prose"].split("\n\n",1)[0]
+            opener = opening_paragraph(e["prose"])
             mo = _BOLD_OUTER_RE.search(opener)
             # The PRESENCE half: an opener with no bold span at all used to be
             # silent (the coherence check below is gated on a bold to compare),
@@ -2391,10 +2807,6 @@ def scan(wiki, images=None):
             if mo and title:
                 b, bold_style, italic_prefix = _bold_parts(mo)
                 b = b.strip()
-                def _dex(s):                                  # strip LaTeX wrappers to a comparable text skeleton
-                    s = re.sub(r"\\(?:boldsymbol|mathbf|mathrm|mathit|text)\s*\{([^}]*)\}", r"\1", s)
-                    s = s.replace("$","").replace("\\","").replace("{","").replace("}","")
-                    return re.sub(r"\s+"," ", s).strip()
                 t_norm = re.sub(r"\s*\([^)]*\)\s*$", "", title).strip()   # drop a trailing disambiguation parenthetical
                 taxon_status, taxon = (
                     organism_title_classification(
@@ -2402,10 +2814,23 @@ def scan(wiki, images=None):
                     if e["type"] == "Organism" else ("common", None))
                 compared_b = (b.replace("*", "").replace("_", "")
                               if taxon_status == "ambiguous" else b)
-                bb, tt = _dex(compared_b), _dex(t_norm)
+                bb = math_title_plain_text(compared_b)
+                tt = math_title_plain_text(t_norm)
                 if bb and tt and (bb[:1].lower()+bb[1:] != tt[:1].lower()+tt[1:]):
-                    problems.append((sl,"item16",f'body opener "**{b}**" ≠ title "{title}" (after dropping LaTeX wrappers and a disambiguation parenthetical)'))
+                    problems.append((
+                        sl, "item16",
+                        f'body opener "**{b}**" ≠ title "{title}" '
+                        "(after applying the shared mathematical-title "
+                        "plain form and dropping a disambiguation "
+                        "parenthetical)"))
                 else:
+                    if re.fullmatch(r"\$[^$\n]+\$", t_norm):
+                        # A title made entirely from one inline-math span has
+                        # no surrounding prose text to carry the required
+                        # first-title bold. Its exact opener span is the one
+                        # narrow exception to the general ban on wrapping
+                        # LaTeX itself in Markdown emphasis.
+                        _pure_math_opener_markup = mo.group(0)
                     if taxon_status == "ambiguous":
                         # The semantic item-16 pass still checks the source, but
                         # there is no stored resolution bit with which a scanner
@@ -2460,10 +2885,17 @@ def scan(wiki, images=None):
         emphasis_zones = mask_line_spans(
             strip_indented(strip_fenced(e["prose"])),
             e.get("table_spans", ())) + "\n" + e["rel"]
+        opener_break = re.search(r"\n[ \t]*\n", emphasis_zones)
+        opener_limit = (opener_break.start() if opener_break
+                        else len(e["prose"]))
         for m in re.finditer(r"(\*\*|\*)(\[\[[^\]\n]*\]\]|\$[^$\n]+\$|`[^`\n]+`)(\*\*|\*)", emphasis_zones):
             if m.group(1) != m.group(3): continue              # require balanced ** ** or * *
             inner = m.group(2)
             kind, fix = ("wikilink","the link") if inner.startswith("[[") else (("math","LaTeX") if inner.startswith("$") else ("code","backticks"))
+            if (_pure_math_opener_markup == m.group(0)
+                    and m.start() < opener_limit):
+                _pure_math_opener_markup = None
+                continue
             problems.append((sl,"item16",f'{"bold" if m.group(1)=="**" else "italic"} around a {kind} ({inner[:30]}) — remove the emphasis; {fix} already provides the styling'))
         # ---- item 16: two literal prose shapes that require backticks ----
         # The shared helper is intentionally conservative for extensions and
@@ -2560,52 +2992,40 @@ def scan(wiki, images=None):
                         "before card line 1"))
             # split the section (after the heading) into card blocks on blank-line boundaries
             after_head = e["fcsec"].split("\n",1)[1] if "\n" in e["fcsec"] else ""
-            # Line-4+ HTML comments belong to the review plugin. A blank line
-            # inside or between its comments is not another card whose removal
-            # may be proposed. Mask comments only in this read-only check.
-            after_head = re.sub(r"<!--.*?(?:-->|\Z)", "", after_head, flags=re.S)
-            cards = [b for b in re.split(r"\n[ \t]*\n", after_head.strip("\n")) if b.strip()]
+            # Inline, next-line, and callout scheduling state plus block IDs
+            # belong to the review plugin/user. None is another card whose
+            # removal may be proposed. Mask it only in this read-only check.
+            cards = parse_flashcard_blocks(after_head)
             if not cards:
                 problems.append((sl,"item19","## Flashcards section has no card"))
             elif len(cards) > 1:
-                problems.append((sl,"item19",f'{len(cards)} cards in ## Flashcards — exactly one card per entry; keep the primary card whose line 3 uses the exact canonical title/base/math-skeleton term and includes any required opener-established, alias-bound counterpart, then split or drop the rest'))
-            alias_forms = [x for a in e["aliases"] for x in (a, a.replace("-"," "))]
-            for ci, block in enumerate(cards, 1):
-                cl = block.split("\n")
+                problems.append((sl,"item19",f'{len(cards)} cards in ## Flashcards — exactly one card per entry; keep the primary card whose line 3 uses the exact canonical title/base/math-plain term and includes any required opener-established, alias-bound counterpart, then split or drop the rest'))
+            alias_forms = list(e["aliases"])
+            for ci, cl in enumerate(cards, 1):
                 tag = (f"card {ci}" if len(cards) > 1 else "flashcard")
                 if len(cl) < 3:
                     problems.append((sl,"item19",f'{tag} malformed — needs 3 contiguous lines (definition / ?? / term), found {len(cl)} (a blank line between lines 1–3 breaks the card)'))
                     continue
+                if len(cl) > 3:
+                    problems.append((
+                        sl, "item19",
+                        f'{tag} has {len(cl)} visible lines — only the first '
+                        'three may be card content; recognized Spaced '
+                        'Repetition state may be attached to line 3, follow it '
+                        'as `<!--SR:` metadata, or use the exact '
+                        '`sr|card-metadata` callout, so other content '
+                        'after the term is malformed'))
                 line1, line2, line3 = cl[0], cl[1].strip(), cl[2]
                 if line2 not in ("??","!!"):
                     problems.append((sl,"item19",f'{tag} line 2 is "{line2[:20]}", must be exactly ?? (or !! if the user disabled the card)'))
-                l1 = []                              # line 1 takes LaTeX only
-                if "[[" in line1: l1.append("wikilink")
-                if "`" in line1: l1.append("backtick")
-                if "**" in line1: l1.append("bold")
-                elif re.search(r"\*\w[^*]*\*", line1): l1.append("italic")
-                if l1:
-                    problems.append((sl,"item19",f'{tag} line 1 has {", ".join(l1)} — line 1 takes LaTeX only (no wikilinks/bold/italic/backticks)'))
-                _sentence_faults = []
-                _sentence_start = line1.lstrip(" \t\"'“‘([{")
-                # A symbol or equation may legitimately begin the sentence;
-                # leave its capitalization to semantic review rather than
-                # treating the first LaTeX command letter as prose.
-                if (_sentence_start and not _sentence_start.startswith("$")
-                        and _sentence_start[0].isalpha()
-                        and not _sentence_start[0].isupper()):
-                    _sentence_faults.append("does not start with a capitalized word")
-                if not line1.rstrip().endswith("."):
-                    _sentence_faults.append("does not end with a period")
-                sentence_count = count_sentences(line1)
-                if sentence_count > 1:
-                    _sentence_faults.append(
-                        "contains roughly %d sentences" % sentence_count)
+                _sentence_faults = flashcard_line1_faults(line1)
                 if _sentence_faults:
                     problems.append((
                         sl, "item19",
                         f'{tag} line 1 {" and ".join(_sentence_faults)} — '
-                        "the definition is one grammatically self-contained sentence"))
+                        "the definition must be one capitalized, "
+                        "period-terminated sentence and takes inline LaTeX "
+                        "only (no Markdown or HTML)"))
                 # leak check: line 1 must not contain THIS card's answer — its own line-3 term (+ parenthetical
                 # expansion); add the entry's aliases only when this card's term is the entry title (the primary
                 # card). A secondary card legitimately names the primary entity, so don't test it against the title.
@@ -2622,24 +3042,28 @@ def scan(wiki, images=None):
                 # ("Feature", not "Feature (machine learning)"), so an exact
                 # compare skipped the alias needles for exactly the entries that
                 # carry them — every disambiguated entry sat in the blind spot.
-                _t_full = title.strip().lower() if title else ""
-                _t_base = re.sub(r"\s*\([^)]*\)\s*$", "", title).strip().lower() if title else ""
-                if title and term_main.lower() in (_t_full, _t_base):
+                opener = opening_paragraph(e["prose"])
+                _expected_term, _expected_counterpart = flashcard_primary_answer(
+                    title, e["aliases"], opener, e["type"])
+                if _expected_term and term_main == _expected_term:
                     cands += alias_forms
-                # Both spellings of every candidate: a hyphenated term leaks in
-                # its natural spaced spelling too ("fine tuning" for
-                # "Fine-tuning").  lint_entry tests both; the two tools must
-                # agree (item 19's de-hyphenated substring check).
-                _seen_cf = set()
-                cands = [c for c in
-                         (x for c0 in cands if c0 for x in (c0, c0.replace("-", " ")))
-                         if not (c.lower() in _seen_cf or _seen_cf.add(c.lower()))]
-                hit = None                           # word-boundary for ≤4-char tokens; substring otherwise
+                # Unicode punctuation, slash/dash variants, and whitespace are
+                # normalized by the shared leak matcher. lint_entry uses the
+                # same matcher, so the two tools agree.
+                _seen_surfaces = set()
+                _deduped_cands = []
+                for _candidate in cands:
+                    _surface = normalized_answer_surface(_candidate)
+                    if not _surface or _surface in _seen_surfaces:
+                        continue
+                    _seen_surfaces.add(_surface)
+                    _deduped_cands.append(_candidate)
+                cands = _deduped_cands
+                hit = None
                 for c in cands:
-                    if not c: continue
-                    if len(c) <= 4:
-                        if re.search(r"(?<![A-Za-z0-9])"+re.escape(c)+r"(?![A-Za-z0-9])", line1, re.I): hit = c; break
-                    elif c.lower() in line1.lower(): hit = c; break
+                    if answer_surface_match(line1, c):
+                        hit = c
+                        break
                 if hit:
                     problems.append((sl,"item19",f'{tag} line 1 leaks the answer ("{hit}")'))
                 l3 = []                              # line 3 (term) is plain text — no markup at all, including LaTeX
@@ -2649,8 +3073,7 @@ def scan(wiki, images=None):
                 if "**" in line3: l3.append("bold")
                 elif re.search(r"\*\w[^*]*\*", line3): l3.append("italic")
                 if l3:
-                    problems.append((sl,"item19",f'{tag} line 3 (term) has {", ".join(l3)} — the term is plain text matching the title verbatim (no markup, including LaTeX)'))
-                opener = e["prose"].split("\n\n", 1)[0]
+                    problems.append((sl,"item19",f'{tag} line 3 (term) has {", ".join(l3)} — the term is the plain-text primary answer derived from the title (no markup, including LaTeX)'))
                 line3_fault = flashcard_line3_fault(
                     line3, title, e["aliases"], opener, e["type"])
                 if line3_fault:
@@ -2779,12 +3202,10 @@ def scan(wiki, images=None):
                 f'"{_candidate_slug}" — review same-entity and cross-domain '
                 f'safety before adding it'))
         # ---- item 10: dangling targets; first-occurrence dup within PROSE ----
-        # A target that misses every entry exactly but hits one case- or
-        # normalization-insensitively is NOT dangling: Obsidian resolves it to
-        # that entry on the vault's APFS volume. It gets its own key, because
-        # the repairs are opposites — a genuine dangler is dropped to display
-        # text, while this resolving link is canonicalized in place.  Treating
-        # the case variant as missing would destroy a working reference.
+        # A target that misses every entry exactly but has one portable
+        # case/normalization owner is not a genuine missing target. It gets its
+        # own key because the repairs are opposites: a genuine dangler is
+        # dropped to display text, while this variant is canonicalized in place.
         # Read the entry with its LISTINGS removed -- fenced blocks and inline
         # code spans -- for the reason item 13's own comment gives about the
         # sibling scar check: a fenced block is shown, not asserted. A
@@ -2850,12 +3271,12 @@ def scan(wiki, images=None):
                 continue
             if actual:
                 problems.append((sl,"item10/case",
-                                 f'wikilink target "{tgt}" matches the entry "{actual}" only case-/'
-                                 f'normalization-insensitively — the link resolves in Obsidian, so this '
-                                 f'is a FIX IN PLACE (correct the basename spelling to "{actual}", '
-                                 f'preserving any path, anchor and display label), '
-                                 f'NEVER a stub: on the vault\'s case-insensitive volume a stub written '
-                                 f'to "{tgt}.md" opens and overwrites "{actual}.md"'))
+                                 f'wikilink target "{tgt}" matches the entry "{actual}" only under '
+                                 f'the portable case/normalization identity — this is a FIX IN PLACE '
+                                 f'(correct the basename spelling to "{actual}", preserving any path, '
+                                 f'anchor and display label), NEVER a stub: a variant file may overwrite '
+                                 f'"{actual}.md" on an insensitive filesystem or create a competing owner '
+                                 f'on a sensitive one'))
             elif file_status == "unparsed":
                 # The file EXISTS but did not parse (item0/item1), or lives in a
                 # symlinked subfolder the walk did not enter. Reporting it as a
@@ -3043,10 +3464,8 @@ def scan(wiki, images=None):
             _alias_families.append((a, expected, _family))
         # Keyed on fold_name, like every other "is this the same name?"
         # comparison in this file (see fold_name's docstring). Two aliases that
-        # differ only in case or Unicode normalization are ONE name to Obsidian
-        # and one file on the vault's APFS volume, so [[Lambda-Rank]] resolves
-        # to whichever entry Obsidian picks and the other becomes unreachable
-        # under its own alias. Comparing raw strings reported nothing, and
+        # differ only in case or Unicode normalization share one portable owner
+        # identity, making lookup ambiguous across supported hosts. Comparing raw strings reported nothing, and
         # CONVENTIONS §9 gives whole-vault dedup to this skill alone, so on a
         # vault-wide run the pair was seen by nobody. The raw spelling is kept
         # for the message: the fix is to change one of the two spellings, and
@@ -3059,8 +3478,7 @@ def scan(wiki, images=None):
                                  f'alias "{a}" also on "{own_sl}"'
                                  + ("" if own_raw == a else
                                     f' (spelled "{own_raw}" there — the two differ only in '
-                                    f'case/normalization, which is one name to Obsidian and '
-                                    f"one file on the vault's volume)")))
+                                    f'case/normalization and share one portable alias identity)')))
             elif k not in alias_owner:
                 alias_owner[k] = (sl, a)
     def _toks(s):                                    # tokens: lowercased, hyphens→spaces, a disambiguation parenthetical dropped
@@ -3289,6 +3707,36 @@ def scan(wiki, images=None):
                        if re.fullmatch(r"[a-z]+", s)}
     backfill = build_backfill(entries, surf_map)
 
+    # Exact normalized sentence overlap is a cross-entry ownership candidate,
+    # not an automatic deletion. It caught a full optimization sentence copied
+    # verbatim into both Logistic regression and Log loss: each entry was clean
+    # in isolation, while only one was the appropriate conceptual owner.
+    sentence_owners = {}
+    for _slug, _entry in sorted(entries.items()):
+        if _entry["is_stub"]:
+            continue
+        for _normalized, _surface in duplicate_sentence_surfaces(
+                _entry.get("prose", ""), _entry.get("table_spans", ())):
+            sentence_owners.setdefault(_normalized, {}) \
+                .setdefault(_slug, _surface)
+    for _normalized, _owners in sorted(sentence_owners.items()):
+        if len(_owners) < 2:
+            continue
+        _all_slugs = sorted(_owners)
+        for _slug in _all_slugs:
+            _peers = [peer for peer in _all_slugs if peer != _slug]
+            _snippet = _owners[_slug]
+            if len(_snippet) > 180:
+                _snippet = _snippet[:177].rstrip() + "..."
+            problems.append((
+                _slug, "item9/duplicate-sentence",
+                "a long prose sentence has the same normalized word sequence "
+                "in %s: %r — preserve both until source evidence and conceptual "
+                "ownership support consolidation; an existing request to lint "
+                "and fix these notes or refactor them authorizes the repair "
+                "without a second approval"
+                % (", ".join(_peers), _snippet)))
+
     stubs = [sl for sl,e in entries.items() if e["is_stub"]]
     fulls = [sl for sl,e in entries.items() if not e["is_stub"]]
 
@@ -3345,10 +3793,10 @@ def scan(wiki, images=None):
         renames.append([_sl, _new, inbound.get(_e["path_key"], 0)])
     for _r in renames:
         # target_exists ⇒ likely duplicate/disambiguation; do NOT rename into it, flag both.
-        # Compared FOLDED, because the destination is "taken" whenever a file the
-        # vault's case-insensitive volume resolves to that name exists — except the
-        # entry being renamed itself, whose case-only rename is one file changing
-        # its own spelling and is safe. Two candidates aiming at ONE destination
+        # Compared folded because a destination is taken whenever a file shares
+        # its portable case/normalization identity. The entry being renamed is
+        # excluded; a case-only rename still changes that same file's spelling.
+        # Two candidates aiming at one destination
         # counts too: applying both in sequence would have the second silently
         # overwrite the first.
         #
@@ -3951,7 +4399,8 @@ def _st_entry(title, prose, tags=('"#statistics"',), type_="Concept",
     text += _block("sources", sources)
     text += "created: 2026-01-01\nupdated: 2026-01-02\n"
     if description is None:
-        subject = math_skeleton(base_term(title)) or math_skeleton(title) or title
+        subject = (math_title_plain_text(base_term(title))
+                   or math_title_plain_text(title) or title)
         description = "%s is a worked example used by the self-test." % subject
     text += "description: %s\n" % json.dumps(description)
     text += _block("tags", tags)
@@ -4060,6 +4509,14 @@ def run_self_test():
             os.symlink(linked, os.path.join(v, "linkdir"))
         except (OSError, NotImplementedError, AttributeError):
             have_symlink = False
+        outside_leaf = os.path.join(tmp, "outside-leaf.md")
+        _st_write(tmp, "outside-leaf.md",
+                  _st_entry("Outside leaf", "**Outside leaf** is external."))
+        have_leaf_symlink = True
+        try:
+            os.symlink(outside_leaf, os.path.join(v, "leaf-link.md"))
+        except (OSError, NotImplementedError, AttributeError):
+            have_leaf_symlink = False
         res = scan(v)
         check("flow lists with leading, middle, or trailing empty elements are item 1",
               ["item1" in _st_keys(res, slug_) for slug_ in
@@ -4094,6 +4551,12 @@ def run_self_test():
         if have_symlink:
             check("an entry in a SYMLINKED subfolder is scanned",
                   "symlinked" in res["inventory"]["full_slugs"], True)
+        check("a leaf Markdown symlink is item0 and never an editable entry "
+              "(skipped where symlink creation is unavailable)",
+              (not have_leaf_symlink or
+               (_st_keys(res, "leaf-link") == ["item0"]
+                and "leaf-link" not in res["inventory"]["full_slugs"])),
+              True)
         check("valid-frontmatter records remain inventoried while the four "
               "unreadable or non-frontmatter files are excluded",
               res["inventory"]["entries"], 10 + (1 if have_symlink else 0))
@@ -4238,12 +4701,77 @@ def run_self_test():
             "Twocards", "**Twocards** is a worked example.",
             tags=('"#physics"',)).replace(
             "??\nTwocards\n",
-            "??\nTwocards\n\nAnother notion, stated briefly.\n??\nSecond idea\n"))
+            "??\nTwocards\n\nA Twocards example illustrates another notion.\n"
+            "??\nSecond idea\n"))
+        _st_write(v, "joined-cards.md", _st_entry(
+            "Joined cards", "**Joined cards** is a worked example.",
+            tags=()).replace(
+            "??\nJoined cards\n",
+            "??\nJoined cards\nA second definition.\n??\nSecond term\n"))
+        _st_write(v, "ordinary-line4-comment.md", _st_entry(
+            "Ordinary line4 comment",
+            "**Ordinary line4 comment** is a worked example.",
+            tags=()).replace(
+            "??\nOrdinary line4 comment\n",
+            "??\nOrdinary line4 comment\n<!--ordinary comment-->\n"))
+        _st_write(v, "space-padded-card.md", _st_entry(
+            "Space padded card", "**Space padded card** is a worked example.",
+            tags=()).replace("## Flashcards\n\n", "## Flashcards\n   \n"))
         _st_write(v, "two-sentence-card.md", _st_entry(
             "Two sentence card", "**Two sentence card** is a worked example.",
             tags=())
             .replace("The idea this entry is about, stated once.",
                      "One identifying statement. Another statement."))
+        _st_write(v, "quoted-period-card.md", _st_entry(
+            "Quoted period card", "**Quoted period card** is a worked example.",
+            tags=()).replace(
+                "The idea this entry is about, stated once.",
+                'The label Hooke called "cells."'))
+        _st_write(v, "markdown-card.md", _st_entry(
+            "Markdown card", "**Markdown card** is a worked example.",
+            tags=()).replace(
+                "The idea this entry is about, stated once.",
+                "A [linked](target) definition."))
+        _st_write(v, "reference-card.md", _st_entry(
+            "Reference card", "**Reference card** is a worked example.",
+            tags=()).replace(
+                "The idea this entry is about, stated once.",
+                "A [linked][target] definition."))
+        _st_write(v, "comment-card.md", _st_entry(
+            "Comment card", "**Comment card** is a worked example.",
+            tags=()).replace(
+                "The idea this entry is about, stated once.",
+                "An <!-- hidden --> definition."))
+        _st_write(v, "obsidian-comment-card.md", _st_entry(
+            "Obsidian comment card",
+            "**Obsidian comment card** is a worked example.", tags=()).replace(
+                "The idea this entry is about, stated once.",
+                "An %%50% hidden%% definition."))
+        _st_write(v, "reference-definition-card.md", _st_entry(
+            "Reference definition card",
+            "**Reference definition card** is a worked example.", tags=()).replace(
+                "The idea this entry is about, stated once.",
+                "[Source]:https://example.com."))
+        _st_write(v, "leading-comment-card.md", _st_entry(
+            "Leading comment card",
+            "**Leading comment card** is a worked example.", tags=()).replace(
+                "The idea this entry is about, stated once.",
+                "<!--SR:misplaced-->\nA complete definition."))
+        _st_write(v, "display-math-card.md", _st_entry(
+            "Display math card", "**Display math card** is a worked example.",
+            tags=()).replace(
+                "The idea this entry is about, stated once.",
+                "A $$x=1$$ definition."))
+        _st_write(v, "block-markdown-card.md", _st_entry(
+            "Block Markdown card",
+            "**Block Markdown card** is a worked example.", tags=()).replace(
+                "The idea this entry is about, stated once.",
+                "# A heading definition."))
+        _st_write(v, "unmatched-math-card.md", _st_entry(
+            "Unmatched math card",
+            "**Unmatched math card** is a worked example.", tags=()).replace(
+                "The idea this entry is about, stated once.",
+                "A quantity uses $x."))
         res = scan(v)
         check("#ml is reported as an abbreviation with its expansion named",
               'rewrite as "#machine-learning"' in _st_msg(res, "abbrev", "item8"), True)
@@ -4286,9 +4814,45 @@ def run_self_test():
               res["discipline_tags"].get("statistics", {}).get("full"), 3)
         check("a second flashcard trips the one-card cap",
               "exactly one card per entry" in _st_msg(res, "twocards", "item19"), True)
+        check("a second card joined without a blank line is malformed visible content",
+              "visible lines" in _st_msg(res, "joined-cards", "item19"), True)
+        check("a non-SR line-four HTML comment is malformed visible content",
+              "visible lines" in _st_msg(
+                  res, "ordinary-line4-comment", "item19"), True)
+        check("whitespace-only padding after the heading parses like a blank line",
+              "item19" in _st_keys(res, "space-padded-card"), False)
+        check("a legacy secondary card may name the primary without an answer leak",
+              "leaks the answer" in _st_msg(res, "twocards", "item19"), False)
         check("flashcard line 1 must be one sentence",
               "roughly 2 sentences" in _st_msg(
                   res, "two-sentence-card", "item19"), True)
+        check("a period inside closing quotation marks terminates a card sentence",
+              _st_msg(res, "quoted-period-card", "item19"), "")
+        check("Markdown link syntax is rejected on card line 1",
+              "Markdown link/image" in _st_msg(
+                  res, "markdown-card", "item19"), True)
+        check("Markdown reference-link syntax is rejected on card line 1",
+              "Markdown reference link/image" in _st_msg(
+                  res, "reference-card", "item19"), True)
+        check("an inline HTML comment is rejected on card line 1",
+              "HTML" in _st_msg(res, "comment-card", "item19"), True)
+        check("an Obsidian comment is rejected on card line 1",
+              "Obsidian comment" in _st_msg(
+                  res, "obsidian-comment-card", "item19"), True)
+        check("a Markdown reference definition is rejected on card line 1",
+              "Markdown reference definition" in _st_msg(
+                  res, "reference-definition-card", "item19"), True)
+        check("a review comment before card line 1 remains visible and invalid",
+              "item19" in _st_keys(res, "leading-comment-card"), True)
+        check("display LaTeX is rejected on card line 1",
+              "display LaTeX" in _st_msg(
+                  res, "display-math-card", "item19"), True)
+        check("block Markdown is rejected on card line 1",
+              "block Markdown" in _st_msg(
+                  res, "block-markdown-card", "item19"), True)
+        check("unmatched inline LaTeX is rejected on card line 1",
+              "unmatched LaTeX delimiter" in _st_msg(
+                  res, "unmatched-math-card", "item19"), True)
 
         # ------------------------------------------------------------------
         # 4. near-duplicate surfaces + the backfill worklist
@@ -4319,6 +4883,21 @@ def run_self_test():
             "**Already** is a worked example that already links "
             "[[confusion-matrix|Confusion matrix]] once, and names confusion "
             "matrices again in bare text afterwards."))
+        _st_write(v, "presentation-only.md", _st_entry(
+            "Presentation only",
+            "**Presentation only** is a worked example with no prose mention.\n\n"
+            "## Confusion matrix\n\n"
+            "![Confusion matrix](https://example.test/plot.png)\n"
+            "*A diagnostic plot.*\n\n"
+            "[Confusion matrix](https://example.test/definition) and "
+            "[Confusion matrix][cm] are existing Markdown links.\n\n"
+            "[cm]: https://example.test/reference"))
+        _st_write(v, "presentation-before-prose.md", _st_entry(
+            "Presentation before prose",
+            "**Presentation before prose** introduces an exhibit.\n\n"
+            "![Confusion matrix](https://example.test/plot.png)\n"
+            "*A diagnostic plot.*\n\n"
+            "A confusion matrix then supports the prose claim."))
         res = scan(v)
         pairs = sorted((b["slug"], b["target"]) for b in res["backfill_candidates"])
         check("an irregular plural in prose is a backfill candidate",
@@ -4334,6 +4913,16 @@ def run_self_test():
               [b for b in res["backfill_candidates"] if b["slug"] == "unlinkable"], [])
         check("an entry that already links the target is not proposed",
               ("already", "confusion-matrix") in pairs, False)
+        check("headings, image alt text, and existing Markdown-link labels "
+              "are not new wikilink surfaces",
+              [b for b in res["backfill_candidates"]
+               if b["slug"] == "presentation-only"], [])
+        check("an unlinkable image-alt occurrence cannot hide a later prose "
+              "backfill candidate",
+              [(b["target"], b["surface"])
+               for b in res["backfill_candidates"]
+               if b["slug"] == "presentation-before-prose"],
+              [("confusion-matrix", "confusion matrix")])
         check("nothing in this vault is a collision candidate",
               res["collision_candidates"], [])
         # ...but a real plural pair sitting in the vault still fires probe (c),
@@ -4363,6 +4952,70 @@ def run_self_test():
                for c in res4c["collision_candidates"]],
               [("masked-language-model", "masked-language-modeling",
                 "stem-morphology")])
+
+        v = os.path.join(tmp, "v4-duplicate-sentence")
+        repeated = ("With a suitable learning rate, gradient descent approaches "
+                    "the minimum cost whenever a finite minimizer exists.")
+        _st_write(v, "optimization-a.md", _st_entry(
+            "Optimization A", "**Optimization A** is a worked example. " + repeated,
+            card="Optimization A"))
+        _st_write(v, "optimization-b.md", _st_entry(
+            "Optimization B", "**Optimization B** is another worked example. "
+            + repeated.replace("minimum cost", "*minimum cost*"),
+            card="Optimization B"))
+        abbreviated = (
+            "B. F. Skinner described a long U.S. laboratory procedure, e.g. "
+            "presenting a signal before reinforcement, to compare behavior "
+            "across carefully controlled experimental sessions.")
+        _st_write(v, "abbreviation-a.md", _st_entry(
+            "Abbreviation A", "**Abbreviation A** is a worked example. "
+            + abbreviated, card="Abbreviation A"))
+        _st_write(v, "abbreviation-b.md", _st_entry(
+            "Abbreviation B", "**Abbreviation B** is another worked example. "
+            + abbreviated, card="Abbreviation B"))
+        res4d = scan(v)
+        check("a long exact sentence copied across entries is an ownership candidate",
+              [(slug, "item9/duplicate-sentence" in _st_keys(res4d, slug))
+               for slug in ("optimization-a", "optimization-b")],
+              [("optimization-a", True), ("optimization-b", True)])
+        check("presentation markup is ignored by duplicate-sentence normalization",
+              "optimization-b" in _st_msg(
+                  res4d, "optimization-a", "item9/duplicate-sentence"), True)
+        check("abbreviations and initials do not break duplicate sentences",
+              [(slug, "item9/duplicate-sentence" in _st_keys(res4d, slug))
+               for slug in ("abbreviation-a", "abbreviation-b")],
+              [("abbreviation-a", True), ("abbreviation-b", True)])
+        table_after_display = (
+            "A short introduction.\n\n$$\nx = 1\ny = 2\n$$\n\n"
+            "Claim | Explanation\n--- | ---\nvalue | This deliberately long table "
+            "sentence has more than twelve words and must remain excluded from "
+            "duplicate prose ownership review.\n*Values in the fixture.*")
+        check("display masking preserves table-span line offsets",
+              duplicate_sentence_surfaces(
+                  table_after_display, markdown_tables(table_after_display)[1]),
+              [])
+        code_a = ("This deliberately long sentence explains that the pipeline "
+                  "calls `fit()` before it records the resulting model for "
+                  "later evaluation and comparison.")
+        code_b = code_a.replace("`fit()`", "`transform()`")
+        check("different inline-code payloads do not collapse",
+              [surface for surface, _ in duplicate_sentence_surfaces(code_a)]
+              == [surface for surface, _ in duplicate_sentence_surfaces(code_b)],
+              False)
+        check("duplicate evidence keeps readable inline code",
+              duplicate_sentence_surfaces(code_a)[0][1].find("`fit()`") >= 0,
+              True)
+        math_a = ("This deliberately long sentence says the resulting score is "
+                  "$x+y$ before the system records it for later evaluation "
+                  "and comparison.")
+        math_b = math_a.replace("$x+y$", "$x-y$")
+        check("different inline-math operators do not collapse",
+              [surface for surface, _ in duplicate_sentence_surfaces(math_a)]
+              == [surface for surface, _ in duplicate_sentence_surfaces(math_b)],
+              False)
+        check("duplicate evidence keeps readable inline math",
+              duplicate_sentence_surfaces(math_a)[0][1].find("$x+y$") >= 0,
+              True)
 
         # writing.md's named corpus is the scanner's mechanical minimum.  A
         # single fixture over every term prevents additions to one copied list
@@ -4601,6 +5254,44 @@ def run_self_test():
               [(x["start_markers"], x["end_markers"])
                for x in h["moc_marker_states"] if x["discipline"] == "biology"],
               [(1, 1)])
+
+        _fake_moc = os.path.join(vr, "dangling-moc.md")
+        try:
+            os.symlink(os.path.join(vr, "missing-moc-target.md"), _fake_moc)
+            _have_moc_symlink = True
+            _symlink_state = moc_marker_state(_fake_moc)
+        except (OSError, NotImplementedError):
+            _have_moc_symlink = False
+            _symlink_state = {"state": "unreadable", "error": "symlink"}
+        check("a dangling or live MOC symlink is occupied and never `missing`",
+              (_symlink_state["state"], "symlink" in _symlink_state["error"].lower()),
+              ("unreadable", True))
+
+        # A regular file can be swapped to a link between the initial lstat
+        # and open. The no-follow/opened-inode guard must classify that race as
+        # unreadable instead of importing an outside marked tree.
+        _race_moc = os.path.join(vr, "race-moc.md")
+        _race_target = os.path.join(vr, "race-target.md")
+        _st_write(vr, "race-moc.md", MOC_TREE_START + "\n" + MOC_TREE_END + "\n")
+        _st_write(vr, "race-target.md", MOC_TREE_START + "\n- outside\n" + MOC_TREE_END + "\n")
+        if _have_moc_symlink:
+            _real_open = os.open
+            _swapped = []
+
+            def _swap_moc_before_open(path, flags, *args, **kwargs):
+                if os.path.abspath(path) == os.path.abspath(_race_moc) and not _swapped:
+                    os.unlink(_race_moc)
+                    os.symlink(_race_target, _race_moc)
+                    _swapped.append(True)
+                return _real_open(path, flags, *args, **kwargs)
+
+            from unittest import mock
+            with mock.patch.object(os, "open", side_effect=_swap_moc_before_open):
+                _race_state = moc_marker_state(_race_moc)
+            check("a MOC swapped to a leaf symlink before open is unreadable",
+                  _race_state["state"], "unreadable")
+        else:
+            check("MOC open-race regression skipped without symlinks", True, True)
 
         malformed = os.path.join(vr, "marker-shapes")
         _st_write(malformed, "partial.md", MOC_TREE_START + "\n")
@@ -5013,6 +5704,17 @@ def run_self_test():
         _st_write(v, "unbolded.md", _st_entry(
             "Unbolded", "Unbolded is a worked example with no bold opener.",
             card="Unbolded"))
+        _st_write(v, "unbolded-whitespace.md", _st_entry(
+            "Unbolded whitespace",
+            "Unbolded whitespace starts without emphasis.\n   \n"
+            "Later, **Unbolded whitespace** is named in another paragraph.",
+            card="Unbolded whitespace"))
+        _st_write(v, "counterpart-whitespace.md", _st_entry(
+            "Principal component analysis",
+            "**Principal component analysis** reduces dimensionality.\n   \n"
+            "Later, **Principal component analysis** (PCA) appears as an "
+            "abbreviation example.",
+            aliases=('"pca"',), card="Principal component analysis"))
         _st_write(v, "whole.md", _clean)
         res = scan(v)
         check("a missing title: key is an item2 — without it item 5, item 16 "
@@ -5028,6 +5730,11 @@ def run_self_test():
               (_st_keys(res, "unbolded"),
                "no bold span" in _st_msg(res, "unbolded", "item16")),
               (["item16"], True))
+        check("a whitespace-only blank line ends the opener for item 16",
+              "no bold span" in _st_msg(
+                  res, "unbolded-whitespace", "item16"), True)
+        check("a later paragraph cannot establish the flashcard counterpart",
+              "item19" in _st_keys(res, "counterpart-whitespace"), False)
         check("a missing type: key is an item2 too",
               "missing type: key" in _st_msg(res, "no-type", "item2"), True)
         check("...and a missing sources: key",
@@ -5083,6 +5790,8 @@ def run_self_test():
             open(os.path.join(_imgdir, _f), "w").close()
         os.makedirs(os.path.join(_imgdir, "nested"))
         open(os.path.join(_imgdir, "nested", "nested-only.png"), "w").close()
+        open(os.path.join(_imgdir, "Collision.png"), "w").close()
+        open(os.path.join(_imgdir, "nested", "collision.PNG"), "w").close()
         os.makedirs(os.path.join(_imgdir, ".tmp"))
         open(os.path.join(_imgdir, ".tmp", "dl_1"), "w").close()
         open(os.path.join(_imgdir, ".trash_run.dltmp_1"), "w").close()
@@ -5093,6 +5802,7 @@ def run_self_test():
             "![[Sources/Images/Doe_X_2025_fig_2.png]]\n*The same file, path-qualified.*\n\n"
             "![[Doe_X_2025_FIG_3.png]]\n*The same file in another case.*\n\n"
             "![[nested-only.png]]\n*A nested file that still resolves.*\n\n"
+            "![[COLLISION.PNG]]\n*A portable-colliding basename that remains present.*\n\n"
             "![[Doe_X_2025_fig_4.ico]]\n*An ICO that resolves.*\n\n"
             "![[Doe_X_2025_fig_100.ico]]\n*An ICO that is not on disk.*\n\n"
             "```\n![[Doe_X_2025_fig_98.png]]\n```")
@@ -5113,8 +5823,8 @@ def run_self_test():
         check("an .ico emitted by clipping-processor uses the same existence "
               "check as every other supported image extension",
               "fig_100.ico" in _st_msg(res, "figured", "item12/missing-image"), True)
-        check("NEAR MISS: an embed that resolves — bare, path-qualified, or in "
-              "another case on the vault's case-insensitive volume, or from a "
+        check("NEAR MISS: an embed present under the portable identity — bare, "
+              "path-qualified, in another case, or from a "
               "nested legacy folder — is clean, and a fenced sample of embed "
               "syntax is not an embed; the existing ICO is clean",
               _st_msg(res, "figured", "item12/missing-image").count(
@@ -5129,8 +5839,19 @@ def run_self_test():
               {(".tmp", "temporary-artifact"),
                (".tmp/dl_1", "temporary-artifact"),
                (".trash_run.dltmp_1", "temporary-artifact"),
+               ("Collision.png", "portable-name-collision"),
                ("nested", "nested-directory"),
+               ("nested/collision.PNG", "nested-file"),
                ("nested/nested-only.png", "nested-file")})
+        _portable_collision = [
+            finding for finding in res["image_folder_findings"]
+            if finding["kind"] == "portable-name-collision"]
+        check("portable image collision preserves every resolving path",
+              [finding.get("paths") for finding in _portable_collision],
+              [["Collision.png", "nested/collision.PNG"]])
+        check("a portable image collision stays present for missing-image checks",
+              "COLLISION.PNG" in _st_msg(
+                  res, "figured", "item12/missing-image"), False)
         check("intentional PDF sidecars and .DS_Store stay out of image-folder "
               "findings",
               any(finding["path"] in _IMAGE_ALLOWED_HIDDEN
@@ -5139,6 +5860,45 @@ def run_self_test():
               all("report only" in finding["message"]
                   and "do not" in finding["message"]
                   for finding in res["image_folder_findings"]), True)
+
+        # An unreadable subtree is not evidence that its files are absent.
+        # Simulate os.walk's documented onerror callback so this remains
+        # deterministic even when the self-test runs as a privileged user.
+        def _failed_image_walk(root, onerror=None):
+            if onerror is not None:
+                onerror(PermissionError(
+                    13, "Permission denied", os.path.join(root, "closed")))
+            yield root, [], ["visible.png"]
+
+        with mock.patch.object(os, "walk", _failed_image_walk):
+            _partial_names, _partial_findings = image_index(_imgdir)
+        check("an unreadable image subtree suppresses missing-image evidence",
+              _partial_names, None)
+        check("an unreadable image subtree remains visible as a report-only "
+              "folder finding",
+              [(finding["path"], finding["kind"])
+               for finding in _partial_findings],
+              [("closed", "unreadable")])
+
+        _unusable_dir = os.path.join(tmp, "unusable-images")
+        os.makedirs(_unusable_dir)
+        _unusable_path = os.path.join(_unusable_dir, "dangling.png")
+        open(_unusable_path, "w").close()
+        _real_isfile = os.path.isfile
+
+        def _unusable_file(path):
+            if os.path.abspath(path) == os.path.abspath(_unusable_path):
+                return False
+            return _real_isfile(path)
+
+        with mock.patch.object(os.path, "isfile", side_effect=_unusable_file):
+            _unusable_names, _unusable_findings = image_index(_unusable_dir)
+        check("a dangling symlink or non-regular image name cannot satisfy an embed",
+              _unusable_names, set())
+        check("an unusable image occupant is reported without authorizing cleanup",
+              [(finding["path"], finding["kind"])
+               for finding in _unusable_findings],
+              [("dangling.png", "unusable-file")])
 
         # ------------------------------------------------------------------
         # 11. item 19 -- the ## Flashcards heading is a LINE, not a substring
@@ -5216,11 +5976,32 @@ def run_self_test():
             "**Feature (machine learning)** is a worked example.",
             aliases=('"attribute"',), card=False)
             + "\n---\n\n## Flashcards\n\nAn input attribute a model consumes.\n??\nFeature\n")
+        _st_write(v, "punctuation-leak.md", _st_entry(
+            "Punctuation leak", "**Punctuation leak** is a worked example.",
+            aliases=('"bias-variance-trade-off"',), card=False)
+            + "\n---\n\n## Flashcards\n\n"
+              "The bias/variance trade–off balances two error sources.\n"
+              "??\nPunctuation leak\n")
         # (g) two alias spellings that fold to one name are reported within
         #     the entry, not only across entries.
         _st_write(v, "fold-dup.md", _st_entry(
             "Fold dup", "**Fold dup** is a worked example.",
             aliases=('"TPR"', '"tpr"')))
+        _st_write(v, "math-primary-alias.md", _st_entry(
+            "$k$-nearest neighbors",
+            "**$\\boldsymbol{k}$-nearest neighbors** predicts from nearby "
+            "observations.", aliases=('"knn"',), card=False)
+            + "\n---\n\n## Flashcards\n\nA KNN method using nearby "
+              "observations.\n??\nk-nearest neighbors\n")
+        for test_slug, rendered in (
+                ("math-delimited-answer", "$k$"),
+                ("math-command-answer", "$\\boldsymbol{k}$")):
+            _st_write(v, test_slug + ".md", _st_entry(
+                "$k$-nearest neighbors",
+                "**$\\boldsymbol{k}$-nearest neighbors** predicts from nearby "
+                "observations.", card=False)
+                + "\n---\n\n## Flashcards\n\nA " + rendered
+                  + "-nearest neighbors method.\n??\nk-nearest neighbors\n")
         res = scan(v)
         check("a `----` closing fence is item1, not a clean entry",
               _st_keys(res, "four-dash"), ["item1"])
@@ -5246,10 +6027,13 @@ def run_self_test():
               (False, True))
         check("a stray `read:` line in the body is an item13 scar",
               "item13" in _st_keys(res, "read-scar"), True)
-        check("a hyphenated title leaking in its SPACED spelling is caught",
-              "fine tuning" in _st_msg(res, "fine-tuning", "item19").lower()
-              and "leaks the answer" in _st_msg(res, "fine-tuning", "item19"),
+        check("a hyphenated title leaking in its spaced spelling is caught",
+              'leaks the answer ("Fine-tuning")'
+              in _st_msg(res, "fine-tuning", "item19"),
               True)
+        check("slash and Unicode-dash variants cannot hide an alias leak",
+              'leaks the answer ("bias-variance-trade-off")'
+              in _st_msg(res, "punctuation-leak", "item19"), True)
         check("a disambiguated title's primary card (line 3 = base term) "
               "gets the alias needles — the alias leak is caught",
               'leaks the answer ("attribute")'
@@ -5258,6 +6042,14 @@ def run_self_test():
               "within the entry",
               "differ only in case/normalization"
               in _st_msg(res, "fold-dup", "item18"), True)
+        check("a math-title primary card gets alias leak needles",
+              'leaks the answer ("knn")'
+              in _st_msg(res, "math-primary-alias", "item19"), True)
+        check("math markup cannot hide a primary answer leak",
+              ['leaks the answer ("k-nearest neighbors")' in _st_msg(
+                   res, test_slug, "item19") for test_slug in
+               ("math-delimited-answer", "math-command-answer")],
+              [True, True])
 
         # (h) backfill: a candidate reached only through a single lowercase
         #     alias word is tagged bare_noun_alias; a title-surface candidate
@@ -5338,24 +6130,84 @@ def run_self_test():
             "case": "**Case** links [[RECALL|Recall]]. Recall measures sensitivity.",
             "alias": "**Alias** links [[true-positive-rate|Sensitivity]]. Recall measures sensitivity.",
             "plain": "**Plain** explains why Recall measures sensitivity.",
+            "reference-definition": (
+                "**Reference definition** documents a Markdown target.\n\n"
+                "[Recall]: https://example.test/recall"),
+            "reference-definition-then-prose": (
+                "**Reference definition then prose** documents a Markdown target.\n\n"
+                "[Recall]: https://example.test/recall\n\n"
+                "Recall measures sensitivity."),
+            "shortcut-reference": (
+                "**Shortcut reference** uses [Recall] as a citation label.\n\n"
+                "[recall]: https://example.test/recall"),
+            "shortcut-reference-then-prose": (
+                "**Shortcut reference then prose** uses [Recall] as a citation label.\n\n"
+                "[RECALL]: https://example.test/recall\n\n"
+                "Recall measures sensitivity."),
+            "shortcut-image": (
+                "**Shortcut image** displays ![Recall] as alternative text.\n\n"
+                "[Recall]: https://example.test/recall.png"),
+            "full-reference-image": (
+                "**Full reference image** displays ![Recall][figure] as "
+                "alternative text.\n\n[figure]: https://example.test/image.png"),
+            "collapsed-reference-image": (
+                "**Collapsed reference image** displays ![Recall][] as "
+                "alternative text.\n\n[Recall]: https://example.test/image.png"),
+            "bare-url": (
+                "**Bare URL** records https://example.test/Recall as its source."),
+            "autolink": (
+                "**Autolink** records <https://example.test/Recall> as its source."),
+            "bare-url-then-prose": (
+                "**Bare URL then prose** records https://example.test/Recall.\n\n"
+                "Recall measures sensitivity."),
         }
         for name, prose in texts.items():
             _st_write(v, name + ".md", _st_entry(name.title(), prose, type_="Software"))
         res = scan(v)
         check("backfill ignores listings and already-linked destinations, but a shown link cannot hide real prose",
               sorted(b["slug"] for b in res["backfill_candidates"] if b["target"] == "recall"),
-              ["plain", "sample"])
+              ["bare-url-then-prose", "plain",
+               "reference-definition-then-prose", "sample",
+               "shortcut-reference-then-prose"])
 
         v = os.path.join(tmp, "v15-preserved-content")
         for name, tail in (
-                ('studied', '<!--SR:!2026-09-20,30,250!2026-09-21,31,250-->\n\n<!-- preserved state -->\n'),
+                ('studied', '<!--SR:!2026-09-20,30,250!2026-09-21,31,250-->\n<!--SR:preserved-state-->\n'),
                 ('multiline', '<!--SR:\n!2026-09-20,30,250\n\n!2026-09-21,31,250\n-->\n')):
             text = _st_entry(name.title(), '**%s** is a worked example.' % name.title())
-            text = text.replace('read: false', 'read: true').replace('\n??\n', '\n!!\n') + tail
+            text = text.replace('read: false', 'read: true').replace(
+                '\n??\n', '\n!!\n').rstrip('\n') + '\n' + tail
             _st_write(v, name + '.md', text)
-        _st_write(v, 'extra.md', _st_entry('Extra', '**Extra** is a worked example.')
-                  + '<!--SR:!2026-09-20,30,250-->\n\n<!-- preserved state -->\n\n'
-                  + 'A different main claim.\n??\nAnother term\n')
+        inline = _st_entry('Inline', '**Inline** is a worked example.')
+        inline = inline.replace('read: false', 'read: true').replace(
+            '\n??\nInline\n',
+            '\n!!\nInline <!--SR:!2026-09-20,30,250--> ^inline-card\n')
+        _st_write(v, 'inline.md', inline)
+        separate_block = _st_entry(
+            'Separate block', '**Separate block** is a worked example.')
+        separate_block = separate_block.replace(
+            '\nSeparate block\n', '\nSeparate block ^separate-card\n')
+        separate_block = (separate_block.rstrip('\n')
+                          + '\n<!--SR:!2026-09-20,30,250-->\n')
+        _st_write(v, 'separate-block.md', separate_block)
+        callout = _st_entry('Callout', '**Callout** is a worked example.')
+        callout = (callout.rstrip('\n')
+                   + '\n> [!sr|card-metadata] \n'
+                     '>  <!--SR:!2026-09-20,30,250--> ^callout-card\n')
+        _st_write(v, 'callout.md', callout)
+        extra = _st_entry('Extra', '**Extra** is a worked example.').rstrip('\n')
+        _st_write(v, 'extra.md', extra
+                  + '\n> [!sr|card-metadata]\n'
+                    '> <!--SR:!2026-09-20,30,250--> ^extra-card\n\n'
+                    'A different main claim.\n??\nAnother term\n')
+        detached = _st_entry(
+            'Detached', '**Detached** is a worked example.')
+        _st_write(v, 'detached.md', detached
+                  + '\n<!--SR:detached-after-blank-->\n')
+        unterminated = _st_entry(
+            'Unterminated', '**Unterminated** is a worked example.').rstrip('\n')
+        _st_write(v, 'unterminated.md', unterminated
+                  + '\n<!--SR:unterminated-state\n')
         for name, fence in (('backticks', '```'), ('tildes', '~~~')):
             _st_write(v, name + '.md', _st_entry(
                 name.title(), '**%s** is a worked example.\n\n' % name.title()
@@ -5373,11 +6225,16 @@ def run_self_test():
                   '[[sub/UNPARSED]], [[sub/parsed.MD]] and [[sub/unparsed.md]].'))
         before = {p: open(p, 'rb').read() for p in iter_entry_files(v)}
         res = scan(v)
-        check("studied cards keep their multiline or separated review comments",
-              [k for name in ('studied', 'multiline') for k in _st_keys(res, name)
+        check("all note-backed scheduling forms and block IDs stay outside card content",
+              [k for name in ('studied', 'multiline', 'inline',
+                              'separate-block', 'callout')
+               for k in _st_keys(res, name)
                if k == 'item19'], [])
-        check("metadata is not counted, but a genuine second card still is",
+        check("callout metadata is not counted, but a genuine second card still is",
               '2 cards' in _st_msg(res, 'extra', 'item19'), True)
+        check("detached or unterminated SR comments remain reportable content",
+              ['item19' in _st_keys(res, name)
+               for name in ('detached', 'unterminated')], [True, True])
         check("a fence with trailing text cannot end the listing or hide the real flashcard",
               [k for name in ('backticks', 'tildes', 'indented-closer', 'nested-fence') for k in _st_keys(res, name)
                if k in ('item10/dangling', 'item19')], [])
@@ -5385,7 +6242,7 @@ def run_self_test():
               'item10/dangling' in _st_keys(res, 'linked'), False)
         check("qualified unparsed destinations still route to the file's own repair",
               _st_keys(res, 'linked').count('item10/unparsed'), 2)
-        check("the scanner leaves review histories and all input bytes untouched",
+        check("the scanner leaves every scheduling form, block ID, and input byte untouched",
               all(open(p, 'rb').read() == content for p, content in before.items()), True)
 
         v = os.path.join(tmp, "v16-scalar-provenance")
@@ -5502,6 +6359,22 @@ def run_self_test():
         _st_write(v, "marked-up-heading.md", _st_entry(
             "Marked up heading", "**Marked up heading** is a worked example.\n\n"
             "## [[canonical-target|A linked aspect]]\n\nThe aspect remains part of the entry."))
+        _st_write(v, "markdown-link-heading.md", _st_entry(
+            "Markdown link heading",
+            "**Markdown link heading** is a worked example.\n\n"
+            "## [A linked aspect](target)\n\nThe aspect remains part of the entry."))
+        _st_write(v, "html-heading.md", _st_entry(
+            "Html heading", "**Html heading** is a worked example.\n\n"
+            "## <em>An aspect</em>\n\nThe aspect remains part of the entry."))
+        _st_write(v, "code-heading.md", _st_entry(
+            "Code heading", "**Code heading** is a worked example.\n\n"
+            "## `An aspect`\n\nThe aspect remains part of the entry."))
+        _st_write(v, "no-prose-opener.md", _st_entry(
+            "No prose opener", ""))
+        _st_write(v, "setext-heading.md", _st_entry(
+            "Setext heading", "**Setext heading** is a worked example.\n\n"
+            "A narrower aspect\n-----------------\n\n"
+            "The aspect remains part of the entry."))
         _st_write(v, "two-sentence-description.md", _st_entry(
             "Two sentence description",
             "**Two sentence description** is a worked example.",
@@ -5509,6 +6382,21 @@ def run_self_test():
         _st_write(v, "question-description.md", _st_entry(
             "Question description", "**Question description** is a worked example.",
             description="Question description asks why? It supplies an answer."))
+        for _slug, _suffix in (
+                ("markdown-link-description",
+                 "contains a [link](https://example.test)."),
+                ("reference-link-description", "contains a [link][target]."),
+                ("underscore-description", "contains _emphasis_."),
+                ("html-description", "contains <em>HTML</em>."),
+                ("strikethrough-description", "contains ~~strikethrough~~."),
+                ("footnote-description", "contains a footnote[^1]."),
+                ("tag-description", "contains an #inline-tag."),
+                ("highlight-description", "contains ==highlighting==."),
+                ("comment-description", "contains %%hidden text%%.")):
+            _title = _slug.replace("-", " ").capitalize()
+            _st_write(v, _slug + ".md", _st_entry(
+                _title, "**%s** is a worked example." % _title,
+                description="%s %s" % (_title, _suffix)))
         for _slug, _description in (
                 ("decimal-description", "Decimal description reports 3.5 percent error."),
                 ("version-description", "Version description covers GPT-4.5 behavior."),
@@ -5701,7 +6589,45 @@ def run_self_test():
         _st_write(v, "a-star-search.md", _st_entry(
             "$A^{*}$ search",
             "**$\\boldsymbol{A}^{*}$ search** explores a graph.",
-            card="A search"))
+            card="A-star search"))
+        _st_write(v, "b-star-search.md", _st_entry(
+            "$B^{*}$ search",
+            "**$\\boldsymbol{B}^{*}$ search** explores a graph.",
+            card="B search"))
+        _st_write(v, "chi-2-test.md", _st_entry(
+            "$\\\\chi^2$ test",
+            "**$\\chi^2$ test** compares observed and expected counts.",
+            card="chi-squared test",
+            description=(
+                "chi-squared test compares observed and expected counts.")))
+        _st_write(v, "ell-1-norm.md", _st_entry(
+            "$\\\\ell_1$ norm",
+            "**$\\ell_1$ norm** measures vector magnitude using absolute values.",
+            card="ell-one norm",
+            description=(
+                "ell-one norm measures vector magnitude using absolute values.")))
+        _st_write(v, "l-1-regularization.md", _st_entry(
+            "$L^{-1}$ regularization",
+            "**$L^{-1}$ regularization** is a worked mathematical example.",
+            card="L-inverse regularization",
+            description=(
+                "L-inverse regularization is a worked mathematical example.")))
+        _st_write(v, "x-1-2-transform.md", _st_entry(
+            "$x^{1/2}$ transform",
+            "**$x^{1/2}$ transform** is a worked mathematical example.",
+            card="x-to-the-one-half transform",
+            description=(
+                "x-to-the-one-half transform is a worked mathematical example.")))
+        _st_write(v, "r-plus.md", _st_entry(
+            "$R^{+}$", "**$R^{+}$** is a worked mathematical example.",
+            card="R-plus",
+            description="R-plus is a worked mathematical example."))
+        _st_write(v, "c-star-search.md", _st_entry(
+            "$C^{*}$ search",
+            "**$\\boldsymbol{C}^{*}$ search** explores a graph.",
+            card=False)
+            + "\n---\n\n## Flashcards\n\n"
+              "A $C^{*}$ search explores a graph.\n??\nC-star search\n")
         res = scan(v)
         check("invalid and list-valued type fields both fail the canonical enum",
               ["item2/type-enum" in _st_keys(res, name)
@@ -5712,8 +6638,22 @@ def run_self_test():
               (True, True))
         check("body headings use exactly ## and plain text",
               ["item9" in _st_keys(res, slug_) for slug_ in
-               ("wrong-level-heading", "marked-up-heading")],
-              [True, True])
+               ("wrong-level-heading", "marked-up-heading",
+                "markdown-link-heading", "html-heading", "code-heading")],
+              [True] * 5)
+        check("a Related footer cannot stand in for the required prose opener",
+              "item9" in _st_keys(res, "no-prose-opener"), True)
+        check("Setext body headings cannot evade the exactly-## rule",
+              "item9" in _st_keys(res, "setext-heading"), True)
+        check("the complete Markdown/HTML surface is non-plain description "
+              "markup",
+              ["non-plain-text markup" in _st_msg(res, slug_, "item7") for slug_ in
+               ("markdown-link-description", "reference-link-description",
+                "underscore-description", "html-description",
+                "strikethrough-description", "footnote-description",
+                "tag-description", "highlight-description",
+                "comment-description")],
+              [True] * 9)
         check("two declarative or question-ended description sentences are item 7",
               ["item7" in _st_keys(res, slug_) for slug_ in
                ("two-sentence-description", "question-description")],
@@ -5752,8 +6692,22 @@ def run_self_test():
               "must be a list" in _st_msg(res, "blank-alias", "item18"), True)
         check("an explicitly empty flow aliases list has list shape",
               "item18" in _st_keys(res, "empty-flow-alias"), False)
-        check("a symbol title's plain-text skeleton may be the description subject",
+        check("a mathematical title's plain form may be the description subject",
               "item7" in _st_keys(res, "k-nearest-neighbors"), False)
+        check("A-star and chi-squared retain their meaning across title fields",
+              [_st_keys(res, slug_)
+               for slug_ in ("a-star-search", "chi-2-test")],
+              [[], []])
+        check("subscript, inverse, half-power, and positive titles retain their meaning",
+              [_st_keys(res, slug_) for slug_ in (
+                  "ell-1-norm", "l-1-regularization",
+                  "x-1-2-transform", "r-plus")],
+              [[], [], [], []])
+        check("the former lossy B-search card spelling is rejected",
+              "item19" in _st_keys(res, "b-star-search"), True)
+        check("LaTeX star notation cannot hide a flashcard answer leak",
+              'leaks the answer ("C-star search")'
+              in _st_msg(res, "c-star-search", "item19"), True)
         check("Work, scientific taxon, mixed-strain, and common-name opener styles pass",
               ["item16" in _st_keys(res, name) for name in
                ("hamlet", "mus-musculus", "mus-musculus-biology",
@@ -6057,6 +7011,15 @@ def run_self_test():
             "Equation present", "**Equation present** is a measure. It is the "
             "square root of the variance:\n\n$$\n"
             "\\sigma = \\sqrt{\\operatorname{Var}(X)}\n$$"))
+        _st_write(v, "equation-expanded.md", _st_entry(
+            "Equation expanded", "**Equation expanded** is a measure. It is the "
+            "square root of the variance:\n\n$$\n"
+            "\\sigma = \\sqrt{\\frac{1}{N}"
+            "\\sum_i (x_i - \\mu)^2}\n$$"))
+        _st_write(v, "equation-unrelated.md", _st_entry(
+            "Equation unrelated", "**Equation unrelated** is a measure. It is the "
+            "square root of the variance:\n\n$$\n"
+            "f(x) = \\sqrt{x} + \\operatorname{Var}(Y)\n$$"))
         _st_write(v, "negated-equation.md", _st_entry(
             "Negated equation", "**Negated equation** is a measure. It is not "
             "the square root of variance."))
@@ -6085,6 +7048,13 @@ def run_self_test():
         check("a canonical display equation clears the narrow coverage candidate",
               "item12/equation-coverage-candidate" in
               _st_keys(res, "equation-present"), False)
+        check("an expanded squared-deviation display clears the coverage candidate",
+              "item12/equation-coverage-candidate" in
+              _st_keys(res, "equation-expanded"), False)
+        check("unrelated root and variance terms in one display do not clear the "
+              "coverage candidate",
+              "item12/equation-coverage-candidate" in
+              _st_keys(res, "equation-unrelated"), True)
         check("negated wording does not become an equation-coverage candidate",
               "item12/equation-coverage-candidate" in
               _st_keys(res, "negated-equation"), False)

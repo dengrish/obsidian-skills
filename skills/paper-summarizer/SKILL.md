@@ -18,35 +18,53 @@ below, not the whole shared manual at startup.
 
 ## 1. Select and inventory the work
 
-A named PDF selects that file, chapters included. A folder request scans the
-whole `Sources/PDFs/` tree so books can be recognized beside their chapters,
-then processes selected files in path order. Organization precedes summaries:
+A named PDF selects that file, chapters included. A folder request selects that
+folder recursively. Keep this **processing scope** separate from the read-only
+inventory: scan the whole configured `Sources/PDFs/` tree so basename conflicts
+and books beside their chapter folders remain visible, then process only rows
+inside the requested scope, in path order. An inventory row outside that scope
+is never authorization to summarize it. The shared walker follows directory
+symlinks under their logical vault paths, but an unreadable subtree, changed
+directory, or ancestor cycle makes the inventory incomplete and blocks the run.
+Organization precedes summaries:
 notes, source links and figures all depend on the
 [PDF's canonical, vault-unique stem](../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organizer-runs-first).
 
+Before scanning a fresh vault, confirm that the resolved vault anchor, the
+configured `Sources/PDFs/` inventory root and the selected PDF(s) already exist.
+Then create only this skill's canonical output folders, `Articles/` and
+`Sources/Images/`, if absent. Do not create a missing source root or a guessed
+vault path: either means the anchor or input is wrong, not that the inventory is
+empty.
+
 ```bash
 python3 '<skill>/scripts/paper_scan.py' \
-    --src '<vault>/Sources/PDFs' --notes '<vault>/Articles' --images '<vault>/Sources/Images'
+    --src '<vault>/Sources/PDFs' \
+    --notes '<vault>/Articles' --images '<vault>/Sources/Images'
 ```
 
-Use a single PDF path for a named-file request. `Articles/` also holds cleaned
-clippings: **the first current `sources:` item establishes origin**, not the
-filename alone. A quoted PDF wikilink identifies this skill's note; a URL
-identifies a clipping. Legacy `source:` is read only if `sources:` is absent.
-Empty, malformed or duplicate current keys cannot establish ownership.
+For a named chapter, add `--include-chapters`; for a named split-book PDF, add
+`--include-split-books`, but still ignore every other row. `Articles/` also
+holds cleaned clippings. Its flat basename namespace is compared with NFC
+normalization and case folding, so a differently cased or decomposed spelling
+still occupies the intended note identity. **The first current `sources:` item
+establishes origin**, not the filename alone. A quoted PDF wikilink identifies
+this skill's note; a URL identifies a clipping. Legacy `source:` is read only if
+`sources:` is absent. Empty, malformed or duplicate current keys cannot
+establish ownership, and multiple portable-equivalent basenames are a collision.
 
 | Scan result | Action |
 |---|---|
 | `new` | Continue. |
 | `done` | Batch: skip. Named file: obtain overwrite-or-skip authorization before replacing it, honoring authorization already given. |
 | `legacy` | Leave the older embed note untouched; report that its occupied path must be resolved. |
-| `collision` | Write nothing. Report the existing origin or `source_conflicts`; resolve PDF names through `pdf-organizer`, never append `_2` to the summary or hand-rename another producer's note. |
+| `collision` | Write nothing. Report the existing origin, `source_conflicts`, or `note_conflicts`; resolve PDF names through `pdf-organizer`, never append `_2` to the summary or hand-rename another producer's note. Multiple portable-equivalent article names require ownership cleanup rather than choosing one by directory order. |
 | `unorganized` | Stop for that PDF and route naming to `pdf-organizer`. Use `--allow-unorganized` only for a deliberate, reported override. |
 | `book` | Skip a whole split book and name the chapter folder; include it only when requested with `--include-split-books`. |
-| `chapter` | Skip during an ordinary folder sweep. A named chapter is included automatically; `--include-chapters` selects chapters for a requested sweep. |
+| `chapter` | Skip during an ordinary folder sweep. Include a named chapter with `--include-chapters`, then ignore every other row; the flag also selects chapters for a requested sweep. |
 
 Non-zero scan failures and unreadable directories are not empty inventories or
-zero figure counts. If the scan helper is unavailable, a manual read-only
+zero figure counts. If the scan helper is unavailable, an equivalent read-only
 inventory must establish the same full source/note/image scope and ownership
 before proceeding. Otherwise stop. Never pick one of two same-basename PDFs by
 directory order.
@@ -160,7 +178,7 @@ or cut an unsupported claim; never soften it into a vaguer assertion. Inspect
 or show it is this paper's result: open the cited page and distinguish results
 from quoted prior work. Check physical page bounds and correct citations with
 any corrected claim. Verify image identity, table digits and caption meaning.
-Manual page verification remains necessary even after a clean token search.
+Direct page verification remains necessary even after a clean token search.
 
 ## 5. Lint the complete draft
 
@@ -175,24 +193,31 @@ The linter checks format and file references, not factual accuracy, image
 contents or page upper bounds; it does not replace the source verification above.
 
 If `note_lint.py` cannot run, fix the permitted runtime or leave the draft
-unpublished and report the blocker. A manual checklist is not a clean lint
+unpublished and report the blocker. A checklist-only review is not a clean lint
 result. A missing required format/verification reference also blocks publication
 rather than licensing a reconstructed rule set.
 
 ## 6. Publish the verified, linted note
 
 The destination is `Articles/<pdf stem>.md`, without a disambiguating suffix.
-Recheck it before publication. Stage the final bytes in a unique temporary
-directory beside `Articles/`, outside the note folder, on the same filesystem.
+Re-inventory `Articles/` under the same NFC/case-folded basename identity before
+publication; an equivalent spelling that arrived after intake is an occupied
+destination. Stage the final bytes in a unique private temporary directory
+outside the note folder and beside the **resolved real `Articles/` directory**,
+on the same filesystem. Continue publishing through the selected logical path;
+a symlinked `Articles/` directory must not send staging to a different volume.
 For a new note, use exclusive creation such as `os.link(staged_path, final_path)`;
 any occupied destination, including a dangling symlink, must fail unchanged.
 
 For an authorized rewrite, confirm the destination is the same regular,
 non-symlink note inspected at the start, with unchanged contents and the expected
-PDF origin. Preserve its permissions and review state, then atomically replace
-it with `os.replace`. A failed publication leaves the original intact. If safe
-publication is unavailable, retain the draft and report the limitation rather
-than using an ordinary overwrite. Read the published note back before reporting
+PDF origin. Preserve its permissions and review state, then follow the shared
+[safe-write protocol](../../shared/SAFE_WRITES.md): displace and verify that
+snapshotted version before linking the staged replacement exclusively into the
+empty public name. A recheck followed by `os.replace` can still clobber a later
+editor save. If safe publication or restoration is unavailable, retain the
+draft and report the original, current, and any recovery paths rather than using
+an ordinary overwrite. Read the published note back before reporting
 completion. Do not move/delete the PDF, rename images or write wiki entries.
 
 ## 7. Report

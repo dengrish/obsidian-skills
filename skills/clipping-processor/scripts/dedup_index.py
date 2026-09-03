@@ -13,11 +13,13 @@ ask in explicit-single-file mode) is in references/duplicates-and-reprocessing.m
 
 CLI
     python3 dedup_index.py '<cleaned_dir>' [--raw PATH ...] [--url URL ...]
-                           [--exclude PATH ...] [--dump-index]
+                           [--slug STEM ...] [--exclude PATH ...] [--dump-index]
 
     <cleaned_dir>   the vault's Articles/ folder
     --raw           a raw .md file, or a folder of them (Inbox/); repeatable
     --url           a bare URL to check, instead of / as well as --raw
+    --slug          a proposed clipping-note stem to check against the portable
+                    direct-child Articles/ namespace; repeatable
     --exclude       a note to leave out of the index — use it when reprocessing a
                     file that itself lives in Articles/, so it can't match itself
     --dump-index    include the whole {normalized_url: path} map in the output
@@ -29,6 +31,8 @@ Importable
     read_source(path)  -> str | None
     build_index(cleaned_dir, exclude=()) -> (index, unindexable, non_url)
     check(entries, index) -> list[dict]
+    article_name_index(cleaned_dir) -> {portable_name: [paths]}
+    check_slugs(slugs, name_index) -> list[dict]
     run_self_test() -> int
 
 Output: one JSON object on stdout. Exit status is 0 whenever the scan ran.
@@ -41,11 +45,15 @@ import os
 import re
 import sys
 import unicodedata
-from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+from urllib.parse import unquote_plus, urlsplit, urlunsplit
+
+_OBSIDIAN_SHARED_MODULES = ('slugify', 'yaml_scalars')
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
 _here = _os.path.dirname(_os.path.abspath(__file__))
+_required = tuple(_m + ".py" for _m in (
+    globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
 if _env:                                   # explicit override: authoritative, no fallback
     _tried = [_os.path.abspath(_os.path.expanduser(_env))]
@@ -54,35 +62,42 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
-_shared = next((_p for _p in _tried if _os.path.isdir(_p)), None)
+_missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
+            for _p in _tried if _os.path.isdir(_p)}
+_shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
 if _shared is None:
     raise SystemExit("""obsidian: cannot find the plugin's shared/scripts/ folder, which holds
-the one canonical copy of the conventions this script depends on.
+the one canonical copy of the conventions this script depends on. A usable
+folder must contain these required module(s): %s
 Looked for:
   %s
 Fix: install the whole plugin tree, or set OBSIDIAN_VAULT_SHARED to the
 shared/scripts/ directory (unset it to use the plugin-relative walk-up).
 Do NOT paste a second copy of the algorithm into this skill -- a divergent
-copy is the bug the shared layer exists to prevent.""" % "\n  ".join(_tried))
+copy is the bug the shared layer exists to prevent.""" % (
+    ", ".join(_required), "\n  ".join(
+        _p + (" (not a directory)" if _p not in _missing else
+              " (missing: %s)" % ", ".join(_missing[_p]))
+        for _p in _tried)))
 _sys.path[:] = [_p for _p in _sys.path if _p not in (_shared, _here)]
 _sys.path.insert(0, _shared)               # shared/scripts/ FIRST
-_sys.path.append(_here)                    # own dir LAST: a local copy cannot shadow it
+if _here != _shared:
+    _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
+from slugify import is_windows_device_stem
 from yaml_scalars import parse_scalar, strip_comment
 
 
 def _path_keys(path):
     """Comparable spellings of one file path, for the --exclude match.
 
-    ``os.path.realpath`` resolves symlinks but preserves the *string* it was
-    given, and on macOS the same filename is NFD when read off the disk and
-    NFC when typed on a command line — plus the volume is case-insensitive.
-    Comparing raw realpaths therefore fails to exclude the note being
-    reprocessed exactly on the platform the vault lives on, and the note then
-    matches its own ``source:`` and reports itself as a duplicate.  Keys are
-    NFC-normalized and casefolded; two genuinely distinct files that differ
-    only this way cannot coexist on that volume anyway.
+    ``os.path.realpath`` resolves symlinks but preserves the spelling it was
+    given. A filename may be NFD when read from disk and NFC when typed, and
+    case variants may alias or coexist depending on the filesystem. Comparing
+    raw realpaths can therefore fail to exclude the note being reprocessed,
+    making it match its own ``source:``. Keys use the plugin's portable
+    NFC-normalized, case-folded path identity.
     """
     real = os.path.realpath(path)
     return {real, unicodedata.normalize("NFC", real).casefold()}
@@ -143,19 +158,29 @@ def normalize_url(url):
     path = parts.path.rstrip("/")
     host_name = parts.hostname.lower().rstrip(".")
     is_substack = host_name == "substack.com" or host_name.endswith(".substack.com")
-    query_pairs = [
-        (k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
-        if k.lower() not in TRACKING_PARAMS
-        and not any(k.lower().startswith(p) for p in TRACKING_PREFIXES)
-        and not (is_substack and k.lower() in SUBSTACK_TRACKING_PARAMS)
-    ]
-    # Preserve the order of surviving parameters. An HTTP query is opaque to
-    # the origin: some applications interpret repeated keys in order, and some
-    # route or sign even unique parameters in their original order. Sorting can
-    # therefore collapse two distinct pages onto one dedup key, whose second raw
-    # is silently skipped. A false negative here is caught by the later slug
-    # ownership check; a false duplicate has no downstream recovery.
-    query = urlencode(query_pairs)
+    query_fields = []
+    for field in parts.query.split("&") if parts.query else ():
+        # Decode only a COPY of the key to recognize percent-encoded tracking
+        # spellings. Keep every surviving field byte-for-byte. parse_qsl plus
+        # urlencode used to turn `+` and `%20` into one spelling, add `=` to a
+        # bare flag, replace malformed percent escapes, and re-encode Unicode.
+        # Any of those can change a signed/routing query or collapse two pages
+        # onto one key — the expensive failure direction for a dedup guard.
+        raw_key = field.split("=", 1)[0]
+        try:
+            key = unquote_plus(raw_key, errors="strict").lower()
+        except (UnicodeDecodeError, ValueError):
+            key = raw_key.lower()
+        if key in TRACKING_PARAMS \
+                or any(key.startswith(p) for p in TRACKING_PREFIXES) \
+                or (is_substack and key in SUBSTACK_TRACKING_PARAMS):
+            continue
+        query_fields.append(field)
+    # Preserve order AND spelling. An HTTP query is opaque to the origin: some
+    # applications interpret repeated keys in order, distinguish encodings, or
+    # sign the original query bytes. A false negative here is caught by the
+    # later slug ownership check; a false duplicate has no downstream recovery.
+    query = "&".join(query_fields)
     # An anchor fragment is dropped; a routing fragment is the page and stays.
     # An emptied query drops its trailing "?" too.
     fragment = parts.fragment
@@ -196,7 +221,9 @@ def read_source(path):
       writes one) doesn't turn the opening `---` into `\\ufeff---`;
     * leading blank lines are skipped before the opening fence is tested.
 
-    Both are still valid YAML frontmatter as far as Obsidian is concerned.
+    Both are still valid YAML frontmatter as far as Obsidian is concerned. The
+    entire note is nevertheless decoded strictly before this metadata can
+    establish ownership; invalid UTF-8 anywhere returns no origin.
 
     The tolerance stops at the CLOSING fence, which is required. A value is
     returned only once the frontmatter has been shown to end: an unterminated
@@ -208,42 +235,47 @@ def read_source(path):
     answers somebody else's.
     """
     try:
-        with open(path, "r", encoding="utf-8-sig", errors="replace") as fh:
-            for first in fh:                   # skip leading blank lines
-                if first.strip():
-                    break
-            else:
-                return None
-            if first.strip() != "---":
-                return None
-            found = {}
-            pending = False
-            for line in fh:
-                if line.strip() == "---":
-                    return found.get("sources", found.get("source")) or None
-                raw = line.rstrip("\n")
-                if not raw.strip() or raw.lstrip().startswith("#"):
+        # Decode the whole note before trusting its frontmatter. Reading only
+        # through the closing fence lets invalid bytes in the body hide behind
+        # a valid-looking origin and claim a publication identity.
+        with open(path, "r", encoding="utf-8-sig", errors="strict") as fh:
+            lines = iter(fh.read().splitlines())
+        for first in lines:                    # skip leading blank lines
+            if first.strip():
+                break
+        else:
+            return None
+        if first.strip() != "---":
+            return None
+        found = {}
+        pending = False
+        for raw in lines:
+            if raw.strip() == "---":
+                return found.get("sources", found.get("source")) or None
+            if not raw.strip() or raw.lstrip().startswith("#"):
+                continue
+            if pending:
+                pending = False
+                mi = _ITEM_RE.match(raw)
+                if mi:
+                    found["sources"] = _yaml_scalar(mi.group(1))
                     continue
-                if pending:
-                    pending = False
-                    mi = _ITEM_RE.match(raw)
-                    if mi:
-                        found["sources"] = _yaml_scalar(mi.group(1))
-                        continue
-                m = SOURCES_RE.match(raw)
-                if m:
-                    if "sources" in found:
-                        return None            # duplicate origin keys are ambiguous
-                    found["sources"] = None
-                    # A present but unsupported/empty current field must not
-                    # manufacture ownership from a stale legacy value.
-                    pending = not strip_comment(m.group(1)).strip()
-                    continue
-                m = SOURCE_RE.match(raw)
-                if m:
-                    if "source" in found:
-                        return None
-                    found["source"] = _yaml_scalar(m.group(1))
+            m = SOURCES_RE.match(raw)
+            if m:
+                if "sources" in found:
+                    return None                # duplicate origin keys are ambiguous
+                found["sources"] = None
+                # A present but unsupported/empty current field must not
+                # manufacture ownership from a stale legacy value.
+                pending = not strip_comment(m.group(1)).strip()
+                continue
+            m = SOURCE_RE.match(raw)
+            if m:
+                if "source" in found:
+                    return None
+                found["source"] = _yaml_scalar(m.group(1))
+    except UnicodeError:
+        return None
     except (OSError, ValueError):
         return None
     return None
@@ -300,6 +332,67 @@ def build_index(cleaned_dir, exclude=()):
     return index, unindexable, non_url
 
 
+def _portable_name(name):
+    """One filename identity across supported case and Unicode semantics."""
+    return unicodedata.normalize("NFC", name).casefold()
+
+
+def article_name_index(cleaned_dir):
+    """Map each portable direct-child Markdown name to every occupant.
+
+    `Articles/` is flat. An entry whose name ends in `.md` occupies that output
+    identity regardless of its filesystem type, so directories and symlinks
+    (including dangling ones) remain visible to the publication preflight.
+    """
+    try:
+        names = os.listdir(cleaned_dir)
+    except OSError as exc:
+        raise ValueError("cannot inspect Articles names in %r: %s" %
+                         (cleaned_dir, exc)) from exc
+    index = {}
+    for name in names:
+        if not _portable_name(name).endswith(".md"):
+            continue
+        index.setdefault(_portable_name(name), []).append(
+            os.path.join(cleaned_dir, name))
+    for paths in index.values():
+        paths.sort(key=lambda path: (_portable_name(os.path.basename(path)),
+                                     os.path.basename(path)))
+    return index
+
+
+def _slug_filename(slug):
+    """Validate one slug stem and return its Markdown filename."""
+    invalid = [ch for ch in slug
+               if ord(ch) < 0x20 or ord(ch) == 0x7f
+               or ch in '<>:"/\\|?*'] if isinstance(slug, str) else []
+    if not isinstance(slug, str) or not slug or invalid or ".." in slug \
+            or not slug.strip(". ") or slug.endswith((".", " ")) \
+            or os.path.basename(slug) != slug \
+            or "/" in slug or "\\" in slug or slug.casefold().endswith(".md"):
+        raise ValueError("--slug takes a non-empty filename stem, without a path "
+                         "or .md extension, using portable filename characters: "
+                         "%r" % slug)
+    if is_windows_device_stem(slug):
+        raise ValueError(
+            "--slug %r is a reserved Windows device basename even with .md "
+            "appended; choose a more specific portable stem" % slug)
+    return slug + ".md"
+
+
+def check_slugs(slugs, name_index):
+    """Classify proposed stems as free, occupied, or ambiguous."""
+    results = []
+    for slug in slugs:
+        filename = _slug_filename(slug)
+        matches = list(name_index.get(_portable_name(filename), ()))
+        status = "free" if not matches else "occupied" if len(matches) == 1 \
+            else "ambiguous"
+        results.append({"slug": slug, "filename": filename, "status": status,
+                        "matches": matches})
+    return results
+
+
 def check(entries, index):
     """Check each {id, source} entry against the index.
 
@@ -347,6 +440,7 @@ def run_self_test():
     """
     import shutil
     import tempfile
+    from unittest.mock import patch
 
     cases = []
 
@@ -384,6 +478,18 @@ def run_self_test():
     case("query order is preserved",
           normalize_url("https://example.com/a?b=2&a=1"),
           "https://example.com/a?b=2&a=1")
+    case("surviving query spelling is preserved while tracking is removed",
+          normalize_url("https://example.com/a?utm_source=x&q=a%20b&flag"),
+          "https://example.com/a?q=a%20b&flag")
+    differ("literal plus and percent-encoded space can be different routes",
+           "https://example.com/a?q=a+b",
+           "https://example.com/a?q=a%20b")
+    differ("a bare flag and an explicitly empty value retain their spelling",
+           "https://example.com/a?preview",
+           "https://example.com/a?preview=")
+    same("a percent-encoded tracking key is still tracking",
+         "https://example.com/a?utm%5Fsource=x",
+         "https://example.com/a")
     differ("origins may route unique query keys in order",
            "https://example.com/a?a=1&b=2",
            "https://example.com/a?b=2&a=1")
@@ -450,6 +556,12 @@ def run_self_test():
             p = os.path.join(tmp, name)
             with open(p, "wb") as fh:
                 fh.write(body.encode(encoding))
+            return p
+
+        def note_bytes(name, body):
+            p = os.path.join(tmp, name)
+            with open(p, "wb") as fh:
+                fh.write(body)
             return p
 
         URL = "https://example.com/a"
@@ -563,6 +675,16 @@ def run_self_test():
         case("a missing file is not a source", read_source(
             os.path.join(tmp, "nope.md")), None)
         case("a directory is not a source", read_source(tmp), None)
+        case("invalid UTF-8 in frontmatter cannot establish ownership",
+             read_source(note_bytes(
+                 "invalid-frontmatter.md",
+                 b'---\ntitle: \xff\nsources:\n  - "https://example.com/a"\n---\n')),
+             None)
+        case("invalid UTF-8 in the body cannot hide behind valid frontmatter",
+             read_source(note_bytes(
+                 "invalid-body.md",
+                 b'---\nsources:\n  - "https://example.com/a"\n---\nbody \xff\n')),
+             None)
 
         # Extension dispatch is case-insensitive everywhere else in the plugin.
         # On a case-sensitive Linux vault, the old lowercase-only scan silently
@@ -615,6 +737,42 @@ def run_self_test():
              (after_bad, sorted(unreadable)),
              (index, sorted([c, malformed])))
 
+        # Slug occupancy is a direct-child namespace check, separate from URL
+        # ownership. Every `.md` directory entry occupies a publish name,
+        # including types a provenance reader cannot open.
+        os.makedirs(os.path.join(vault, "Held.md"))
+        os.symlink(os.path.join(tmp, "missing-target"),
+                   os.path.join(vault, "Broken.md"))
+        link_target = article("link-target.txt", "not a note")
+        os.symlink(link_target, os.path.join(vault, "Linked.md"))
+        name_index = article_name_index(vault)
+        slug_results = check_slugs(
+            ["Held", "Broken", "Linked", "a", "Free"], name_index)
+        case("slug checks include directories, broken links, links and case aliases",
+             [(row["slug"], row["status"]) for row in slug_results],
+             [("Held", "occupied"), ("Broken", "occupied"),
+              ("Linked", "occupied"), ("a", "occupied"),
+              ("Free", "free")])
+        with patch.object(os, "listdir", return_value=[
+                    "Caf\u00e9.md", "Cafe\u0301.MD", "ignored.txt"]):
+            ambiguous_index = article_name_index(vault)
+        case("NFC/case-equivalent direct names are ambiguous",
+             check_slugs(["CAF\u00c9"], ambiguous_index)[0]["status"],
+             "ambiguous")
+        case("an ambiguous slug reports every occupying spelling",
+             len(check_slugs(["caf\u00e9"], ambiguous_index)[0]["matches"]), 2)
+        for invalid_slug in ("", "\0", ".", "..", "path/name", "path\\name",
+                             "x.md", "CON", "prn", "COM1", "lpt9",
+                             "AUX.extra", "bad:name", "bad?name", "trail.",
+                             "trail ", "two..dots", "line\nbreak", 7):
+            try:
+                check_slugs([invalid_slug], name_index)
+            except ValueError:
+                rejected = True
+            else:
+                rejected = False
+            case("invalid slug is rejected: %r" % invalid_slug, rejected, True)
+
         # --- case(): verdicts, including within one batch ------------------
         res = check([{"id": "raw1", "source": URL},
                      {"id": "raw2", "source": "https://example.com/new"},
@@ -652,7 +810,6 @@ def run_self_test():
         # platforms where chmod does not restrict the test user's access.
         import contextlib
         import io
-        from unittest.mock import patch
         hidden = os.path.join(vault, "restricted")
         os.makedirs(hidden)
         with open(os.path.join(hidden, "Reviewed.md"), "w") as fh:
@@ -677,6 +834,14 @@ def run_self_test():
             result = json.loads(output.getvalue())
             case(label, (code, bool(result.get("error")), "checked" in result),
                  (1, True, False))
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = main([vault, "--slug", "Held", "--slug", "Free"])
+        public_slugs = json.loads(output.getvalue()).get("slug_checks", [])
+        case("the public CLI returns repeatable slug checks",
+             (code, [(row["slug"], row["status"]) for row in public_slugs]),
+             (0, [("Held", "occupied"), ("Free", "free")]))
 
         # Naming must precede image writes, and a late collision must return
         # to that decision. Check the linked action gates without requiring
@@ -737,6 +902,8 @@ def main(argv=None):
                     help="raw .md file or folder of them; repeatable")
     ap.add_argument("--url", action="append", default=[],
                     help="bare URL to check; repeatable")
+    ap.add_argument("--slug", action="append", default=[],
+                    help="proposed clipping-note stem to check; repeatable")
     ap.add_argument("--exclude", action="append", default=[],
                     help="note to leave out of the index (reprocessing a Articles/ file)")
     ap.add_argument("--dump-index", action="store_true")
@@ -754,6 +921,8 @@ def main(argv=None):
 
     try:
         index, unindexable, non_url = build_index(args.cleaned_dir, args.exclude)
+        slug_checks = (check_slugs(args.slug, article_name_index(args.cleaned_dir))
+                       if args.slug else [])
     except ValueError as exc:
         print(json.dumps({"error": str(exc)}))
         return 1
@@ -794,6 +963,7 @@ def main(argv=None):
         "collisions": {k: v for k, v in index.items() if len(v) > 1},
         "checked": results,
         "counts": counts,
+        "slug_checks": slug_checks,
     }
     if args.dump_index:
         out["index"] = index

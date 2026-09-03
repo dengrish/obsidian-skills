@@ -23,12 +23,17 @@ import argparse
 import datetime
 import os
 import re
+import stat
 import sys
 import unicodedata
+
+_OBSIDIAN_SHARED_MODULES = ('vault_artifacts', 'yaml_scalars')
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
 _here = _os.path.dirname(_os.path.abspath(__file__))
+_required = tuple(_m + ".py" for _m in (
+    globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
 if _env:                                   # explicit override: authoritative, no fallback
     _tried = [_os.path.abspath(_os.path.expanduser(_env))]
@@ -37,21 +42,30 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
-_shared = next((_p for _p in _tried if _os.path.isdir(_p)), None)
+_missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
+            for _p in _tried if _os.path.isdir(_p)}
+_shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
 if _shared is None:
     raise SystemExit("""obsidian: cannot find the plugin's shared/scripts/ folder, which holds
-the one canonical copy of the conventions this script depends on.
+the one canonical copy of the conventions this script depends on. A usable
+folder must contain these required module(s): %s
 Looked for:
   %s
 Fix: install the whole plugin tree, or set OBSIDIAN_VAULT_SHARED to the
 shared/scripts/ directory (unset it to use the plugin-relative walk-up).
 Do NOT paste a second copy of the algorithm into this skill -- a divergent
-copy is the bug the shared layer exists to prevent.""" % "\n  ".join(_tried))
+copy is the bug the shared layer exists to prevent.""" % (
+    ", ".join(_required), "\n  ".join(
+        _p + (" (not a directory)" if _p not in _missing else
+              " (missing: %s)" % ", ".join(_missing[_p]))
+        for _p in _tried)))
 _sys.path[:] = [_p for _p in _sys.path if _p not in (_shared, _here)]
 _sys.path.insert(0, _shared)               # shared/scripts/ FIRST
-_sys.path.append(_here)                    # own dir LAST: a local copy cannot shadow it
+if _here != _shared:
+    _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
+from vault_artifacts import inventory_source_figures
 from yaml_scalars import parse_scalar, strip_comment
 
 # --- the format, as data -----------------------------------------------------
@@ -206,6 +220,11 @@ _EXHIBIT_NUM = re.compile(
 # A bare URL, stripped before the exhibit sweep: `.../figures/fig2` is a path
 # segment, not a pointer out of the note.
 _URLS = re.compile(r"(?:https?://|www\.)\S+|\b[\w.-]+\.(?:com|org|net|io|ai)/\S*")
+# The only second source item a local-document note may carry. Provenance
+# (whether the identifier is actually printed in the PDF) remains a source
+# review; this enforces the normalized shapes the schema can check.
+_PRINTED_ORIGIN_URL = re.compile(
+    r"\Ahttps://(?:doi\.org/\S+|arxiv\.org/abs/\S+)\Z")
 # A markdown table row: a leading pipe and at least two cells.  Prose that
 # happens to open with a pipe -- `|d| > 0.8 marked a large effect` -- is not a
 # table, and treating it as one produced two findings on a correct sentence.
@@ -396,19 +415,20 @@ def _check_front_matter(note, keys, kv):
                              "e.g. \"[[Doe_X_2025.pdf]]\"")
             elif not first[2:-2].lower().endswith(".pdf"):
                 note.fail(2, "`sources` item 1 must name a .pdf")
-            elif re.search(r"[\[\]#|\r\n]", first[2:-2]):
+            elif re.search(r"[\[\]#|/\\\r\n]", first[2:-2]):
                 note.fail(2, "`sources` item 1 must be one PDF wikilink without "
-                             "an alias or page anchor")
+                             "an alias, page anchor or path qualification")
             else:
-                note.source = first[2:-2].split("/")[-1]
+                note.source = first[2:-2]
         for n, it in enumerate(inner[1:], 2):
             if it.startswith("[["):
                 note.fail(2, "`sources` item %d is a wikilink; only item 1 "
                              "names the PDF -- later items are the document's "
                              "printed URL(s)" % n)
-            elif not (it.startswith("https://") or it.startswith("http://")):
-                note.fail(2, "`sources` item %d is neither the PDF wikilink "
-                             "nor a URL" % n)
+            elif not _PRINTED_ORIGIN_URL.fullmatch(it):
+                note.fail(2, "`sources` item %d must be a printed DOI or arXiv "
+                             "identifier normalized to https://doi.org/... or "
+                             "https://arxiv.org/abs/..." % n)
         if len(inner) > 2:
             note.fail(2, "`sources` holds %d items -- two is the maximum "
                          "(the PDF, then its printed URL)" % len(inner))
@@ -850,6 +870,47 @@ def _prose_blocks(note, body_start, captions, fenced):
         yield first, " ".join(pending), is_step
 
 
+def _source_figure_inventory(images, source):
+    """Return portable candidate names, or an error that blocks embedding.
+
+    The source-scoped shared inventory rejects leaf symlinks, non-regular
+    occupants, nested matches, staging residue and portable-name ambiguity.
+    Looking up each embed with ``isfile`` follows symlinks and can therefore
+    certify a file outside ``Sources/Images`` as a usable figure.
+    """
+    if not source or os.path.basename(source) != source \
+            or not source.casefold().endswith(".pdf"):
+        return None, None
+    stem = os.path.splitext(source)[0]
+    try:
+        inventory = inventory_source_figures(images, stem)
+    except ValueError as exc:
+        return None, "cannot establish the source figure inventory: %s" % exc
+    if inventory.safe:
+        return {_name_key(os.path.basename(path))
+                for path in inventory.candidates}, None
+
+    details = []
+    if inventory.blocked_matches:
+        details.append("blocked source-keyed occupant(s): " + ", ".join(
+            inventory.blocked_matches[:4]))
+    details.extend("%s (%s)" % (finding.path, finding.message)
+                   for finding in inventory.findings
+                   if finding.severity == "error")
+    return None, ("source figure inventory is unsafe: "
+                  + "; ".join(details[:5] or [
+                      "the image-folder inventory did not complete safely"]))
+
+
+def _direct_regular_image(images, name):
+    """No-follow fallback when invalid frontmatter provides no source stem."""
+    try:
+        item = os.lstat(os.path.join(images, name))
+    except OSError:
+        return False
+    return stat.S_ISREG(item.st_mode)
+
+
 def _check_figures(note, bounds, images, fenced, source=None):
     """Returns the set of line numbers that are captions, for later checks.
 
@@ -859,6 +920,9 @@ def _check_figures(note, bounds, images, fenced, source=None):
     off that guess then fires on ordinary prose.
     """
     lines = note.raw_lines
+    available, inventory_error = ((None, None) if images is None else
+                                  _source_figure_inventory(images, source))
+    inventory_error_reported = False
     found_span = next(((s, e) for name, s, e in bounds
                        if name == "Results"), None)
     embeds, captions = 0, set()
@@ -870,7 +934,18 @@ def _check_figures(note, bounds, images, fenced, source=None):
             continue
         embeds += 1
         name = m.group(1).split("|")[0].strip()
-        if source and not _name_key(name).startswith(
+        filename_only = bool(
+            name and name not in (".", "..")
+            and "/" not in name and "\\" not in name
+            and os.path.basename(name) == name)
+        if not filename_only:
+            note.fail(
+                n + 1,
+                "figure embed target %r must be one filename only, without "
+                "path separators or dot segments; path qualification can "
+                "escape the selected Sources/Images inventory" % name,
+            )
+        if filename_only and source and not _name_key(name).startswith(
                 _name_key(os.path.splitext(source)[0]) + "_fig"):
             note.fail(n + 1, "figure embed %r is not filed under this note's "
                              "`sources:` PDF %r; select from its figure inventory"
@@ -894,10 +969,20 @@ def _check_figures(note, bounds, images, fenced, source=None):
             if _CAP_NUM.match(nxt.strip()):
                 note.fail(n + 2, "caption opens with an exhibit number, which this "
                                  "note never carries: %r" % nxt.strip()[:60])
-        if images is not None and not os.path.isfile(os.path.join(images, name)):
-            note.fail(n + 1, "embed names a file that is not in the image folder: "
-                             "%s (Obsidian renders this as plain text, silently)"
-                             % name)
+        if filename_only and images is not None:
+            if inventory_error:
+                if not inventory_error_reported:
+                    note.fail(n + 1, inventory_error)
+                    inventory_error_reported = True
+            elif available is not None:
+                if _name_key(name) not in available:
+                    note.fail(n + 1, "embed names a file that is not in the safe "
+                                     "source figure inventory: %s (Obsidian renders "
+                                     "this as plain text, silently)" % name)
+            elif not _direct_regular_image(images, name):
+                note.fail(n + 1, "embed names a file that is not a direct regular "
+                                 "file in the image folder: %s (Obsidian renders "
+                                 "this as plain text, silently)" % name)
     if embeds > MAX_FIGURES:
         note.fail(0, "%d figure embeds; the cap is %d" % (embeds, MAX_FIGURES))
     return captions
@@ -1539,12 +1624,31 @@ def _cases():
                                     "  - [[Doe_X_2025.pdf]]"), "double-quoted"),
         ("sources item 1 not a pdf", _mutate('"[[Doe_X_2025.pdf]]"', '"[[Doe_X_2025.md]]"'),
          "must name a .pdf"),
+        ("path-qualified PDF source is not a bare wikilink",
+         _mutate('"[[Doe_X_2025.pdf]]"', '"[[Sources/PDFs/Doe_X_2025.pdf]]"'),
+         "path qualification"),
+        ("path-qualified figure cannot escape the image inventory",
+         _mutate("![[Doe_X_2025_fig_2.png]]",
+                 "![[Doe_X_2025_fig/../../outside.png]]"),
+         "one filename only"),
+        ("backslash-qualified figure is not a portable bare target",
+         _mutate("![[Doe_X_2025_fig_2.png]]",
+                 "![[Doe_X_2025_fig_2\\outside.png]]"),
+         "one filename only"),
         ("empty sources list",
          _mutate('sources:\n  - "[[Doe_X_2025.pdf]]"\n  - "https://arxiv.org/abs/2501.02045"',
                  "sources:"), "is empty"),
         ("sources item 2 a wikilink",
          _mutate('  - "https://arxiv.org/abs/2501.02045"', '  - "[[Other_Y_2020.pdf]]"'),
          "only item 1 names the PDF"),
+        ("sources item 2 is not an arbitrary web URL",
+         _mutate('  - "https://arxiv.org/abs/2501.02045"',
+                 '  - "https://publisher.example/paper"'),
+         "printed DOI or arXiv"),
+        ("sources item 2 uses canonical HTTPS DOI form",
+         _mutate('  - "https://arxiv.org/abs/2501.02045"',
+                 '  - "http://doi.org/10.1000/example"'),
+         "normalized to https://doi.org"),
         ("url item on a Book", _mutate("format: Paper", "format: Book"),
          "never written on `format: Book`"),
         ("a retired url: key", _mutate('  - "https://arxiv.org/abs/2501.02045"\nauthor:',
@@ -1771,8 +1875,9 @@ def _selftest():
                      "; ".join(m for _, m in advisories) or "(none)"))
 
     # Exercise both the original list-returning API and the command's status:
-    # an advisory must not block publication or hide a real violation. Images
-    # are only checked for existence here; their contents need visual review.
+    # an advisory must not block publication or hide a real violation. Image
+    # bytes still need visual review, but the inventory itself must be direct,
+    # regular and source-scoped before an embed can pass.
     import contextlib
     import io
     import tempfile
@@ -1787,6 +1892,28 @@ def _selftest():
         image_path = os.path.join(scratch, "Doe_X_2025_fig_2.png")
         with open(image_path, "wb") as fh:
             fh.write(b"")
+        with tempfile.TemporaryDirectory() as outside:
+            outside_image = os.path.join(outside, "outside.png")
+            with open(outside_image, "wb") as fh:
+                fh.write(b"outside")
+            linked_image = os.path.join(scratch, "Doe_X_2025_fig_7.png")
+            try:
+                os.symlink(outside_image, linked_image)
+            except (OSError, NotImplementedError):
+                linked_image = None
+            if linked_image is not None:
+                linked_note = GOOD.replace(
+                    "Doe_X_2025_fig_2.png", "Doe_X_2025_fig_7.png")
+                linked_findings = lint(linked_note, images=scratch)
+                if any("source figure inventory is unsafe" in message
+                       and linked_image in message
+                       for _line, message in linked_findings):
+                    ok += 1
+                else:
+                    fail += 1
+                    print("FAIL  a source-keyed symlink outside Images passed "
+                          "the figure inventory: %r" % linked_findings)
+                os.unlink(linked_image)
         invalid_note = (long_note.replace("read: false", 'read: "false"')
                         .replace("#page=5|5", "#page=0|0")
                         .replace("Doe_X_2025_fig_2.png", "Doe_X_2025_fig_9.png"))

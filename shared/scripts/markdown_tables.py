@@ -10,7 +10,8 @@ line numbering.  Stdlib only, Python 3.8+.
 import argparse
 import re
 
-__all__ = ["caption_faults", "markdown_table_spans", "mask_line_spans"]
+__all__ = ["caption_faults", "markdown_block_start", "markdown_table_spans",
+           "mask_line_spans"]
 
 
 _TABLE_DELIM_RE = re.compile(
@@ -28,7 +29,7 @@ _BLOCK_HTML_TAGS = (
 _TABLE_BLOCK_START_RE = re.compile(
     r"^ {0,3}(?:"
     r"#{1,6}(?:[ \t]+|$)|>|(?:[-+*]|[0-9]{1,9}[.)])(?:[ \t]+|$)|"
-    r"(?:`{3,}|~{3,})(?:[ \t]|$)|\[[^\]\n]+\]:[ \t]*(?=\S)|"
+    r"(?:`{3,}|~{3,})|\[[^\]\n]+\]:[ \t]*(?=\S)|"
     r"<!--|<\?|<![A-Z]|<!\[CDATA\[|"
     r"</?(?:script|pre|style)(?:[ \t]|>|$)|"
     r"</?(?:" + _BLOCK_HTML_TAGS + r")(?:[ \t]|/?>|$)|"
@@ -98,6 +99,18 @@ def _is_table_body_row(line):
     if _THEMATIC_BREAK_RE.fullmatch(line):
         return False
     return True
+
+
+def markdown_block_start(line):
+    """Whether one raw line starts a structural Markdown block.
+
+    This shares the parser's CommonMark/GFM floor with callers that must tell
+    a prose paragraph from a heading, list, quote, fence, reference definition,
+    HTML block, or thematic break. Tables still require the following
+    delimiter line and are therefore handled by ``markdown_table_spans``.
+    """
+    return bool(_TABLE_BLOCK_START_RE.match(line or "")
+                or _THEMATIC_BREAK_RE.fullmatch(line or ""))
 
 
 def markdown_table_spans(masked_body):
@@ -187,6 +200,11 @@ def caption_faults(caption):
 
 def _self_test():
     cases = [
+        ("block-start helper recognizes structural Markdown",
+         [markdown_block_start(value) for value in (
+             "A prose sentence.", "+ item", "1) item", ">quoted",
+             "```python", "[ref]: https://example.test", "<div>", "---")],
+         [False] + [True] * 7),
         ("ordinary table",
          markdown_table_spans(
              "Method | Score\n--- | ---\nA | 0.8\n*Scores.*"),

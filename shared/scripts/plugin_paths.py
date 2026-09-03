@@ -4,13 +4,13 @@
 
 WHY THIS EXISTS
 ---------------
-Several skills need the same helper (today: ``slugify.py``).  The plugin
+Several skills need the same canonical helpers.  The plugin
 installs as one tree, so a skill script can reach ``shared/scripts/`` by
 walking up from its own ``__file__``.  But a skill can also be *extracted
 alone* -- copied out of the plugin, vendored into another package, run from a
 tarball of one skill directory -- and then there is no ``shared/`` above it.
 
-The two failure modes we are avoiding:
+The three failure modes we are avoiding:
 
   1. **Vendoring a second copy of the algorithm** into each skill.  That is the
      duplication that produced the data-loss bug this shared layer exists to
@@ -19,10 +19,14 @@ The two failure modes we are avoiding:
      approved rename rewrites links vault-wide.
   2. **Dying with ``ModuleNotFoundError: No module named 'slugify'``**, which
      tells the user nothing about what is wrong or how to fix it.
+  3. **Letting ``PYTHONPATH`` or site-packages shadow a skill's sibling
+     module.**  Shared modules must win over a stray local copy, but the
+     skill's own ``scripts/`` directory must still win over unrelated import
+     locations.
 
-So: resolve the plugin-relative path first, fall back to a co-located copy,
-and otherwise fail with an error that names the searched locations and the
-one-line fix.
+So: honor a valid override, resolve the plugin-relative path, fall back to a
+co-located copy where that richer API supports one, and otherwise fail with an
+error that names the searched locations and the one-line fix.
 
 THE BOOTSTRAP
 -------------
@@ -35,46 +39,47 @@ byte-identical to :data:`BOOTSTRAP`.  Paste it verbatim, then ``import
 slugify`` (and, if you want the richer helpers, ``import plugin_paths``)
 normally.
 
-Three properties of the snippet are load-bearing, and each one is a bug that
+Four properties of the snippet are load-bearing, and each one is a bug that
 was actually shipped:
 
   * ``$OBSIDIAN_VAULT_SHARED`` is consulted FIRST, by the snippet itself.  The
     override used to be readable only through this module, i.e. only *after*
     the bootstrap had already succeeded -- so it could never rescue the case
     it exists for.
-  * The script's own directory is **appended**, never inserted at the front,
-    and ``shared/scripts/`` is inserted at position 0.  The snippet used to
-    re-insert the script's directory at 0 *after* the shared path, giving the
-    skill's own ``scripts/`` precedence: a ``slugify.py`` dropped in there
-    shadowed this tree's canonical module silently, and ``C++`` slugged to
-    ``c``.  Co-located modules (``vault_index``) still import, because the
-    directory is still on ``sys.path`` -- just last.
+  * ``shared/scripts/`` is inserted at position 0 and the script's own
+    directory immediately after it.  The shared path must outrank a stray
+    local ``slugify.py``; the own directory must outrank an unrelated
+    ``vault_index`` on ``PYTHONPATH`` or in site-packages.
+  * Every script declares the shared modules it imports.  A candidate is
+    usable only when it contains those ``.py`` files, so an empty or wrong
+    ``$OBSIDIAN_VAULT_SHARED`` fails here with the resolution message rather
+    than at the next import with a bare ``ModuleNotFoundError``.  A pasted
+    bootstrap without a declaration probes for :data:`PROBE_MODULE`.
   * Failing to resolve is a :class:`SystemExit` carrying the searched
     locations and the fix, not a fall-through to ``ModuleNotFoundError: No
     module named 'slugify'``.
 
-That last one is why the snippet is deliberately STRICTER than
-:func:`find_shared_scripts`: it has no step-3 co-located fallback.  It cannot
+The lack of a co-located fallback is why the snippet is deliberately stricter
+than :func:`find_shared_scripts`.  It cannot
 have one, because it does not know which module the script is about to import
 -- and "a slug module sitting next to the script wins when ``shared/`` is
 absent" is one typo in a walk-up away from being the shadowing bug again.  A
 skill genuinely extracted alone points ``$OBSIDIAN_VAULT_SHARED`` at the
-directory holding the copy; the error message says so.  The richer,
-fallback-bearing search below is still available to anything that has already
-imported this module.
+directory holding every shared module that script declares; the error message
+says so.  The richer, fallback-bearing search below is still available to
+anything that has already imported this module.
 
 SEARCH ORDER (:func:`find_shared_scripts`)
 ------------------------------------------
   1. ``$OBSIDIAN_VAULT_SHARED`` if set -- the explicit escape hatch for an
-     unusual install; must be a directory, and (when the caller names the
-     module it is about to import) must actually hold that module, or it is
-     an error, never a silent skip.  An override that resolves to a directory
-     without the modules in it is failure mode 2 wearing a hat: the caller
-     puts it on ``sys.path`` and the next line dies with the bare
-     ``ModuleNotFoundError``.
+     unusual install; must be a directory and must hold the named module (or
+     :data:`PROBE_MODULE` when none is named), or it is an error, never a
+     silent skip.  An override that resolves to a directory without the
+     module in it is failure mode 2 wearing a hat: the caller puts it on
+     ``sys.path`` and the next line dies with the bare ``ModuleNotFoundError``.
   2. Plugin-relative: walk up from the starting path (default: the caller's
      directory) at most :data:`MAX_WALK_UP` levels, taking the first
-     ancestor that contains ``shared/scripts/``.  From
+     ancestor whose ``shared/scripts/`` contains the requested module.  From
      ``skills/<skill>/scripts/x.py`` the plugin root is three levels up, so
      the default bound of 5 has slack for a deeper layout without wandering
      into ``$HOME``.
@@ -84,7 +89,7 @@ SEARCH ORDER (:func:`find_shared_scripts`)
      and reported by :func:`describe` so the copy is visible rather than
      silently authoritative.
 
-Stdlib only, Python 3.8+.  Usable as a module and as a CLI:
+Stdlib only, Python 3.9+.  Usable as a module and as a CLI:
 
     python3 shared/scripts/plugin_paths.py            # human-readable report
     python3 shared/scripts/plugin_paths.py --json     # same, machine-readable
@@ -144,6 +149,8 @@ BOOTSTRAP = '''\
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
 _here = _os.path.dirname(_os.path.abspath(__file__))
+_required = tuple(_m + ".py" for _m in (
+    globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
 if _env:                                   # explicit override: authoritative, no fallback
     _tried = [_os.path.abspath(_os.path.expanduser(_env))]
@@ -152,19 +159,27 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
-_shared = next((_p for _p in _tried if _os.path.isdir(_p)), None)
+_missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
+            for _p in _tried if _os.path.isdir(_p)}
+_shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
 if _shared is None:
     raise SystemExit("""obsidian: cannot find the plugin's shared/scripts/ folder, which holds
-the one canonical copy of the conventions this script depends on.
+the one canonical copy of the conventions this script depends on. A usable
+folder must contain these required module(s): %s
 Looked for:
   %s
 Fix: install the whole plugin tree, or set OBSIDIAN_VAULT_SHARED to the
 shared/scripts/ directory (unset it to use the plugin-relative walk-up).
 Do NOT paste a second copy of the algorithm into this skill -- a divergent
-copy is the bug the shared layer exists to prevent.""" % "\\n  ".join(_tried))
+copy is the bug the shared layer exists to prevent.""" % (
+    ", ".join(_required), "\\n  ".join(
+        _p + (" (not a directory)" if _p not in _missing else
+              " (missing: %s)" % ", ".join(_missing[_p]))
+        for _p in _tried)))
 _sys.path[:] = [_p for _p in _sys.path if _p not in (_shared, _here)]
 _sys.path.insert(0, _shared)               # shared/scripts/ FIRST
-_sys.path.append(_here)                    # own dir LAST: a local copy cannot shadow it
+if _here != _shared:
+    _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 '''
 
@@ -193,20 +208,25 @@ def find_shared_scripts(start=None, module=None, _trace=None):
 
     ``start`` is a file or directory to search up from (default: this file's
     directory).  ``module`` is an optional bare module name (``"slugify"``)
-    used by the co-located fallback: without it, step 3 cannot tell a stray
-    directory from a usable one, so it is skipped.
+    that a candidate must contain; :data:`PROBE_MODULE` is used when it is
+    omitted.  The co-located fallback still requires an explicitly named
+    module, because otherwise it cannot tell a stray directory from a usable
+    one.
 
     Raises :class:`SharedLayerNotFound` with a message naming every location
     tried and the fix.
     """
     trace = _trace if _trace is not None else []
     base = _caller_dir(start)
+    probe = module or PROBE_MODULE
 
     # 1. explicit override
     env = os.environ.get(ENV_VAR)
     if env:
         cand = os.path.abspath(os.path.expanduser(env))
-        trace.append(("env", cand, os.path.isdir(cand)))
+        usable = (os.path.isdir(cand) and
+                  os.path.isfile(os.path.join(cand, probe + ".py")))
+        trace.append(("env", cand, usable))
         if not os.path.isdir(cand):
             raise SharedLayerNotFound(
                 "%s is set to %r, which is not a directory. Unset it, or point it "
@@ -219,14 +239,14 @@ def find_shared_scripts(start=None, module=None, _trace=None):
         # error this module exists to replace (failure mode 2 above).  The
         # override is authoritative, so there is nothing to fall back to; the
         # only useful thing left is to say exactly what is wrong.
-        if module and not os.path.isfile(os.path.join(cand, module + ".py")):
+        if not usable:
             try:
                 present = sorted(n for n in os.listdir(cand) if n.endswith(".py"))
             except OSError as exc:
                 present = ["(cannot list the directory: %s)" % exc]
             raise SharedLayerNotFound(
                 "%s is set to %r, which is a directory but does not contain "
-                "%s.py.\n"
+                "the required module %s.py.\n"
                 "The override is authoritative -- nothing falls back to the "
                 "plugin-relative walk-up -- so importing %s from it would fail "
                 "with a bare \"ModuleNotFoundError: No module named '%s'\", "
@@ -234,8 +254,8 @@ def find_shared_scripts(start=None, module=None, _trace=None):
                 "Python modules found there: %s\n"
                 "Fix: point %s at the plugin's shared/scripts/ folder (the one "
                 "holding %s.py), or unset it to use the plugin-relative "
-                "walk-up." % (ENV_VAR, env, module, module, module,
-                              ", ".join(present) or "(none)", ENV_VAR, module)
+                "walk-up." % (ENV_VAR, env, probe, probe, probe,
+                              ", ".join(present) or "(none)", ENV_VAR, probe)
             )
         return cand
 
@@ -243,7 +263,8 @@ def find_shared_scripts(start=None, module=None, _trace=None):
     d = base
     for _ in range(MAX_WALK_UP):
         cand = os.path.join(d, *SHARED_REL)
-        hit = os.path.isdir(cand)
+        hit = (os.path.isdir(cand) and
+               os.path.isfile(os.path.join(cand, probe + ".py")))
         trace.append(("walk-up", cand, hit))
         if hit:
             return cand
@@ -260,7 +281,8 @@ def find_shared_scripts(start=None, module=None, _trace=None):
         if hit:
             return base
 
-    tried = "\n".join("  %-11s %s%s" % (kind, path, "" if ok else "  (absent)")
+    tried = "\n".join("  %-11s %s%s" % (
+        kind, path, "" if ok else "  (missing directory or %s.py)" % probe)
                       for kind, path, ok in trace) or "  (nothing tried)"
     raise SharedLayerNotFound(
         "obsidian: could not find the plugin's shared/scripts/ folder.\n"
@@ -277,12 +299,10 @@ def find_shared_scripts(start=None, module=None, _trace=None):
 def ensure_shared_on_path(start=None, module=PROBE_MODULE):
     """Put ``shared/scripts/`` on ``sys.path`` (idempotent); return its path.
 
-    ``module`` defaults to :data:`PROBE_MODULE` rather than to ``None``: this
-    function's whole job is to make the caller's next line -- ``import
-    slugify`` -- work, and with no module to probe for, a hollow override went
-    onto ``sys.path[0]`` and that next line died with the bare
-    ``ModuleNotFoundError`` this module exists to replace.  Pass ``None``
-    explicitly to put a directory on the path without vetting it.
+    ``module`` defaults to :data:`PROBE_MODULE`: this function's whole job is
+    to make the caller's next import work, and a hollow override must never go
+    onto ``sys.path[0]``.  Passing ``None`` uses the same safe default rather
+    than disabling candidate validation.
     """
     path = find_shared_scripts(start=start, module=module)
     # An existing entry later in sys.path can still be shadowed by a local
@@ -384,7 +404,7 @@ def _capture(fn, *args):
     return sink.getvalue()
 
 
-def _run_bootstrap(script_path):
+def _run_bootstrap(script_path, modules=None):
     """Execute :data:`BOOTSTRAP` as the script at ``script_path`` would.
 
     Returns ``(sys.path after, None)``, or ``(None, message)`` when the
@@ -394,6 +414,8 @@ def _run_bootstrap(script_path):
     """
     saved = list(sys.path)
     namespace = {"__file__": script_path}
+    if modules is not None:
+        namespace["_OBSIDIAN_SHARED_MODULES"] = tuple(modules)
     try:
         exec(compile(BOOTSTRAP, "<BOOTSTRAP>", "exec"), namespace)  # noqa: S102
         return list(sys.path), None
@@ -428,6 +450,11 @@ def run_self_test():
     def says(name, message, needle):
         cases.append((name, needle in (message or ""),
                       "%r is not in the message: %r" % (needle, message)))
+
+    def omits(name, message, needle):
+        cases.append((name, needle not in (message or ""),
+                      "%r unexpectedly appears in the message: %r"
+                      % (needle, message)))
 
     def refuses(name, fn, *args, **kwargs):
         """Assert ``fn`` raises SharedLayerNotFound; return its message."""
@@ -607,6 +634,8 @@ def run_self_test():
         hollow = os.path.join(tmp, "hollow", "lib", "py")
         os.makedirs(hollow)
         set_env(hollow)
+        refuses("env override without modules: default probe also refuses",
+                find_shared_scripts, start=script)
         msg = refuses("env override without the modules: refuses",
                       find_shared_scripts, start=script, module="slugify")
         says("env override without the modules: the error names the variable",
@@ -687,6 +716,8 @@ def run_self_test():
             compiles, why = False, str(exc)
         yes("BOOTSTRAP compiles", compiles, why)
         says("BOOTSTRAP reads the documented variable", BOOTSTRAP, '"%s"' % ENV_VAR)
+        says("BOOTSTRAP reads each script's required-module declaration",
+             BOOTSTRAP, '"_OBSIDIAN_SHARED_MODULES"')
         says("BOOTSTRAP inlines MAX_WALK_UP", BOOTSTRAP, "range(%d)" % MAX_WALK_UP)
         says("BOOTSTRAP inlines SHARED_REL", BOOTSTRAP,
              ", ".join('"%s"' % part for part in SHARED_REL))
@@ -710,8 +741,8 @@ def run_self_test():
                 says("BOOTSTRAP %s: forbids a second copy" % label,
                      err, "Do NOT paste a second copy")
             else:
-                eq("BOOTSTRAP %s: the script's own directory goes last" % label,
-                   path[-1], os.path.dirname(os.path.abspath(start)))
+                eq("BOOTSTRAP %s: the script's own directory is second" % label,
+                   path[1], os.path.dirname(os.path.abspath(start)))
 
         # The snippet is deliberately STRICTER than find_shared_scripts: it
         # has no co-located step, because it cannot know which module the
@@ -727,10 +758,23 @@ def run_self_test():
         path, _ = _run_bootstrap(script)
         eq("BOOTSTRAP: shared/scripts/ is first even with a local copy present",
            path[0] if path else None, shared)
-        eq("BOOTSTRAP: the script's own directory is last",
-           path[-1] if path else None, here)
+        eq("BOOTSTRAP: the script's own directory is immediately second",
+           path[1] if path else None, here)
         yes("BOOTSTRAP: shared/scripts/ outranks the local copy",
             path is not None and path.index(shared) < path.index(here))
+
+        # A sibling import has to outrank unrelated PYTHONPATH/site-packages.
+        # Putting `_here` at the absolute end protected shared modules but let
+        # an unrelated module with a sibling's name win first.
+        unrelated = os.path.join(tmp, "unrelated-pythonpath")
+        os.makedirs(unrelated)
+        _touch(os.path.join(here, "vault_index.py"), "ORIGIN = 'sibling'\n")
+        _touch(os.path.join(unrelated, "vault_index.py"), "ORIGIN = 'unrelated'\n")
+        sys.path[:] = [unrelated] + list(saved_path)
+        path, _ = _run_bootstrap(script)
+        eq("BOOTSTRAP: sibling modules outrank unrelated import paths",
+           path[:3], [shared, here, unrelated])
+        sys.path[:] = list(saved_path)
 
         set_env(nested_shared)
         path, _ = _run_bootstrap(script)
@@ -741,6 +785,40 @@ def run_self_test():
         eq("BOOTSTRAP: an override that is not a directory does not resolve",
            path, None)
         says("BOOTSTRAP: and the SystemExit says where it looked", err, afile)
+
+        # The regression that the resolver's own tests did not cover: every
+        # skill carries BOOTSTRAP, not a call to find_shared_scripts().  A
+        # hollow override therefore used to pass this isdir-only check and
+        # die at the first shared import with a bare ModuleNotFoundError.
+        empty_override = os.path.join(tmp, "bootstrap-empty-override")
+        os.makedirs(empty_override)
+        set_env(empty_override)
+        required = ("slugify", "yaml_scalars")
+        path, err = _run_bootstrap(script, modules=required)
+        eq("BOOTSTRAP: an empty override does not resolve", path, None)
+        says("BOOTSTRAP: empty override names the missing required module",
+             err, "yaml_scalars.py")
+        says("BOOTSTRAP: empty override names the actionable fix",
+             err, "unset it to use the plugin-relative walk-up")
+        omits("BOOTSTRAP: empty override is not a bare import failure",
+              err, "ModuleNotFoundError")
+
+        wrong_override = os.path.join(tmp, "bootstrap-wrong-override")
+        os.makedirs(wrong_override)
+        _touch(os.path.join(wrong_override, "slugify.py"))
+        set_env(wrong_override)
+        path, err = _run_bootstrap(script, modules=required)
+        eq("BOOTSTRAP: an override holding the wrong module does not resolve",
+           path, None)
+        says("BOOTSTRAP: wrong override names the required module",
+             err, "yaml_scalars.py")
+        omits("BOOTSTRAP: wrong override is not a bare import failure",
+              err, "ModuleNotFoundError")
+        _touch(os.path.join(wrong_override, "yaml_scalars.py"))
+        path, err = _run_bootstrap(script, modules=required)
+        eq("BOOTSTRAP: a declared-module override resolves",
+           path[0] if path else None, wrong_override)
+        eq("BOOTSTRAP: a declared-module override emits no error", err, None)
         set_env(None)
     finally:
         os.environ.pop(ENV_VAR, None)

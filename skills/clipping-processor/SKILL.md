@@ -18,8 +18,8 @@ Read other convention sections only where linked by the workflow.
 
 ## 1. Select the captures and check ownership
 
-- A named `.md` selects that file. A request to process clippings selects
-  `Inbox/*.md`, in alphabetical order, one at a time.
+- A named `.md` selects that file. A request to process clippings selects every
+  `.md` under `Inbox/`, recursively, in alphabetical order, one at a time.
 - `Inbox/` is read-only. Do not move, delete or rewrite raws. For a mixed inbox,
   take only `.md` captures; PDFs needing a name and home go to `pdf-organizer`.
   Route other PDF requests by deliverable: findings to `paper-summarizer`,
@@ -28,6 +28,13 @@ Read other convention sections only where linked by the workflow.
   `sources:` item is a web URL. A PDF wikilink belongs to `paper-summarizer`;
   leave that note alone. Read [reprocessing](references/duplicates-and-reprocessing.md#reprocessing-an-existing-note)
   before preparing an approved rewrite.
+
+Before scanning a fresh vault, confirm that the resolved vault anchor and the
+selected `Inbox/` or named input already exist. Then create the two canonical
+output folders this skill may need, `Articles/` and `Sources/Images/`, if they
+are absent; creating `Sources/` as the structural parent is allowed. Do not
+create a missing input path or any guessed vault directory, because that turns
+a path error into an apparently empty inventory.
 
 `Articles/` is the complete URL dedup index, shared with paper summaries.
 Ownership comes from **the first current `sources:` item**; use legacy
@@ -41,8 +48,10 @@ python3 '<skill>/scripts/dedup_index.py' '<vault>/Articles' --raw '<vault>/Inbox
 ```
 
 For one capture, pass its path to `--raw`. For an owned `Articles/` reprocess,
-use `--exclude '<existing note>'` so it cannot match itself. Build the index once
-per batch and keep it current as notes are published.
+use `--exclude '<existing note>'` so it cannot match itself. For a batch, retain
+this complete ownership baseline and update its decisions as notes are
+published. The naming gate below rechecks the current URL and physical note
+name immediately before attachment work.
 
 | Verdict | Action |
 |---|---|
@@ -90,6 +99,23 @@ image prefix. Never rename another owner's figures to free a stem. The
 [collision procedure](references/duplicates-and-reprocessing.md#settle-a-slug-before-writing-images)
 keeps these checks separate from the final publication check.
 
+Re-inventory the direct `Articles/` namespace mechanically for every proposed
+stem, after choosing it and before writing an image:
+
+```bash
+python3 '<skill>/scripts/dedup_index.py' '<vault>/Articles' \
+    --url '<source URL>' --slug '<slug>'
+```
+
+The URL verdict must still permit the work; a new duplicate returns to the
+ownership table. For an approved rewrite, also pass `--exclude '<existing note>'`.
+In `slug_checks`, `free` permits the remaining PDF/image-prefix checks.
+`occupied` names the one existing directory entry whose NFC-normalized,
+case-folded name conflicts; apply the ownership table rather than overwriting
+it. `ambiguous` reports every equivalent spelling and blocks the stem until
+that pre-existing conflict is resolved. Files, directories, symlinks and
+dangling symlinks ending in `.md` all occupy the flat namespace.
+
 ## 3. Clean the body and prepare images
 
 Read [body cleaning](references/body-cleaning.md) before changing the capture.
@@ -118,7 +144,13 @@ missing image; do not substitute `curl` plus `mv` or bypass its ownership checks
 On reprocessing, retain existing embeds and their figure numbers. New downloads
 start after the highest occupied number. If the slug changes, prepare
 `fetch_images.py rename --dry-run` with `--sources '<vault>/Sources/PDFs'` and
-update the **draft** embeds; defer live image renames until publication.
+`--owner-note '<vault>/Articles/<old_slug>.md'`, then update the **draft**
+embeds; defer live image renames until publication. The owner note must still
+be the unchanged clipping note and exactly embed every image in the plan. In a
+canonical vault the helper also scans every Markdown note for inbound links to
+the old note and references to its old image names. Any hit, unreadable note or
+incomplete directory scan blocks the whole image rename and reports the exact
+path; this skill does not silently rewrite unrelated notes.
 
 ## 4. Assemble the complete draft
 
@@ -186,7 +218,10 @@ reference blocks finalization; do not reconstruct its rules from memory.
 Publish only the completed, audited and reviewed bytes to `Articles/<slug>.md`.
 Recheck the destination immediately before publication. A collision discovered
 now returns to the naming decision; it is not permission to overwrite or rename
-foreign figures.
+foreign figures. Follow [the shared safe-write protocol](../../shared/SAFE_WRITES.md)
+for the note and for any old-path cleanup; a final check followed by
+`os.replace` or `unlink` is still overwrite-capable if another edit lands in
+between.
 
 For a new note, stage bytes in a unique temporary directory beside `Articles/`,
 outside the note folder, and use exclusive creation such as
@@ -198,9 +233,25 @@ For an authorized rewrite or renamed clipping, follow
 Retain the original note until publication succeeds, recheck its ownership and
 unchanged contents, and preserve its permissions and user metadata. Stage the
 complete note and preflight the destination **before** applying the image plan.
-Use `--sources` on every image rename. If note publication fails, restore the
-old image names and report any rollback failure and actual remaining paths.
-Read back the published note and check its final embeds before declaring success.
+Use both `--sources` and the unchanged old `--owner-note` on every image rename.
+If note publication fails, restore the old image names and report any rollback
+failure and actual remaining paths.
+Read back the published note and check its final embeds. Before conditionally
+removing a distinct old note path, run the complete dependency re-probe:
+
+```bash
+python3 '<skill>/scripts/fetch_images.py' dependencies \
+    --attachments '<vault>/Sources/Images' \
+    --owner-note '<vault>/Articles/<old_slug>.md' --old-slug '<old_slug>'
+```
+
+Only an `ok: true` result permits old-path cleanup. If it reports an inbound
+old-note link, old-image reference, unreadable Markdown file or incomplete
+vault inventory, retain the old path and the exact blocker report. Do not
+remove first and announce the broken references afterward. A complete rewrite
+of those dependencies is a separate authorized operation; without one, stop
+the changed-slug replacement or roll it back through the same guarded paths.
+Do not declare success before this re-probe.
 Raw captures and foreign notes/images are never removed.
 
 ## 7. Report

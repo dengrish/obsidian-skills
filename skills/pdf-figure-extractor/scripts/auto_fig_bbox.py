@@ -162,6 +162,14 @@ CAP_RE = re.compile(
     r'(?=\.\s|\s+[^\sa-z]|\s*$|\s*:|\s*[–—])',              # caption-shape lookahead
     re.MULTILINE,
 )
+# A narrative reference can inherit CAP_RE's line-start shape when a caption is
+# wrapped immediately after "shown in" (or an equivalent phrase). Apply this
+# only to a SECOND match inside one already-recognized caption block: the first
+# match remains the caption, while the later phrase is part of its prose. This
+# keeps the general finditer behavior that recovers a real caption merged below
+# an axis label or body block.
+CONTINUED_FIGURE_REFERENCE_RE = re.compile(
+    r'\b(?:shown|illustrated|depicted|presented|summarized)\s+in\s*$', re.I)
 # The final lookahead distinguishes captions from prose references that
 # happen to start with the same phrase. Real captions look like:
 #   "Figure 1-23. Overfitting the training data"        (Géron — period+space)
@@ -267,6 +275,31 @@ MIN_REGION_COVERAGE = 0.62
 # page does not join the cluster and drag the figure region over the prose
 # between them.
 CONTENT_CLUSTER_GAP = 72
+
+# A side figure anchored in the top band needs a tighter vertical component
+# than the ordinary bottom-caption search. The next illustrated box on a book
+# page can begin only 50--60pt below the top figure; using the general 72pt
+# bridge joined both and let the lower component define the crop. Text labels
+# are added separately below, so 36pt still leaves generous room for fragmented
+# drawing parts without swallowing the next figure or sidebar.
+TOP_SIDE_CLUSTER_GAP = 36
+
+# A caption whose first line begins in the nominal header strip can still be a
+# real side caption in textbook layouts. This small allowance covers the
+# measured Alberts pages (caption y0 ~= 41pt, header bound 50pt) without making
+# ordinary mid-page captions eligible for the conservative top-band rescue.
+TOP_SIDE_CAPTION_SLOP = 12
+
+# Diagram labels just outside the drawing union are figure content: axis tick
+# rows, scale labels, and text inside a fragmented reaction schematic. Search
+# only this far from the anchor-selected drawing component, and reject prose-
+# width lines separately in `_side_figure_text_rects`.
+TOP_SIDE_TEXT_GAP = 20
+
+# Figure labels above a compact vector row can extend slightly farther than
+# the general 8pt crop pad (Alberts 3-1 needs about 9pt for “molecule”). Keep
+# the exception local to top-band side crops rather than widening every crop.
+TOP_SIDE_PAD_EXTRA = 2
 
 # How far outside the figure's own drawings a text block may sit and still
 # count as part of the figure rather than prose above it. These mirror the
@@ -648,16 +681,29 @@ def find_caption_blocks(page):
     """
     out = []
     for rect, text, lines in collect_text_blocks(page):
-        matches = list(CAP_RE.finditer(text))
-        if not matches:
+        raw_matches = list(CAP_RE.finditer(text))
+        if not raw_matches:
             continue
         # Offset at which each line starts inside `text` ("\n"-joined).
         line_start, pos = [], 0
         for _, ltxt in lines:
             line_start.append(pos)
             pos += len(ltxt) + 1
+        # Remove wrapped narrative references before using the next match to
+        # delimit a caption. Skipping one only inside the loop still let that
+        # false match truncate the real caption rectangle above it, weakening
+        # the later caption-overlap guard even though no false label survived.
+        matches = []
+        for raw_index, match in enumerate(raw_matches):
+            first = _line_index(line_start, match.start())
+            if (raw_index > 0 and first > 0
+                    and CONTINUED_FIGURE_REFERENCE_RE.search(
+                        lines[first - 1][1])):
+                continue
+            matches.append(match)
         seen = set()
         for k, m in enumerate(matches):
+            first = _line_index(line_start, m.start())
             supp_marker = m.group(1)
             fig_num = normalize_label(m.group(2))
             # Reconstruct the source caption label (everything matched up
@@ -673,7 +719,6 @@ def find_caption_blocks(page):
             if fig_num in seen:
                 continue          # same label twice in one block — one figure
             seen.add(fig_num)
-            first = _line_index(line_start, m.start())
             last = len(lines) - 1
             if k + 1 < len(matches):
                 nxt = _line_index(line_start, matches[k + 1].start())
@@ -768,8 +813,8 @@ SIDE_MARGIN = 0.4
 #: silently-wrong crops in that corpus became flagged ones, no figure anywhere
 #: else in it gained a flag, no crop moved by a pixel, and the real paper was
 #: unchanged. The number is low because the question it asks is "is there ANY
-#: case for the other reading?", and the answer being yes is exactly when a
-#: human should look.
+#: case for the other reading?", and the answer being yes is exactly when the
+#: executor should inspect the page.
 PLACEMENT_CONTESTED = 0.02
 
 #: A side reading taken on evidence weaker than this is reported as ambiguous
@@ -777,6 +822,24 @@ PLACEMENT_CONTESTED = 0.02
 #: no confidence to be taken; the side reading is the deviation, and a weak one
 #: is exactly the case that has gone wrong four times.
 PLACEMENT_CONFIDENT = 0.6
+
+# Top-band captions need a separate, conservative aggregate. The figures in
+# this layout are often built from small molecular nodes, narrow chromosome
+# strokes, or several separated panels, so neither one >=30x30 rectangle nor
+# one horizontally connected run represents the figure. Aggregate only content
+# strictly in the opposite column and crossing the caption's vertical band,
+# then require all of these measured signals before overturning the safe bottom
+# default. The weakest real example covers 49% of its caption band and the
+# farthest is separated by 32% of the page width; coverage is measured against
+# the shorter of the caption and anchor bands so a short figure beside a tall
+# caption is not rejected by construction. The limits leave a small margin
+# without admitting arbitrary content elsewhere on the sheet.
+TOP_SIDE_RESCUE_STRENGTH = 0.45
+TOP_SIDE_MAX_GAP_SHARE = 0.36
+TOP_SIDE_MIN_INK_AREA = 700
+TOP_SIDE_MIN_WIDTH = 18
+TOP_SIDE_MIN_HEIGHT = 8
+TOP_SIDE_MIN_EXTENT = 50
 
 
 class _Placement(object):
@@ -844,6 +907,66 @@ def _side_evidence(cap_rect, content, side, other_captions):
     return anchor, strength
 
 
+def _top_side_evidence(cap_rect, content, side, other_captions, page_width):
+    """Aggregate substantial opposite-column evidence for a top-band caption.
+
+    The caller limits this to the top band and to pages with no conventional
+    figure-above-caption evidence. Candidate parts must lie wholly on the
+    inferred figure side and cross the caption's vertical band. Multiple
+    separated groups are retained because a real figure can be a row of panels;
+    page-relative separation, actual drawn area and merged vertical coverage
+    keep a stray mark from becoming an anchor.
+    """
+    parts, intervals = [], []
+    for rect in content:
+        if side == "left" and rect.x0 <= cap_rect.x1:
+            continue
+        if side == "right" and rect.x1 >= cap_rect.x0:
+            continue
+        overlap = min(rect.y1, cap_rect.y1) - max(rect.y0, cap_rect.y0)
+        line_in_band = (rect.height == 0
+                        and cap_rect.y0 <= rect.y0 <= cap_rect.y1)
+        if overlap <= 0 and not line_in_band:
+            continue
+        parts.append(rect)
+        if overlap > 0:
+            intervals.append((max(rect.y0, cap_rect.y0),
+                              min(rect.y1, cap_rect.y1)))
+    if not parts:
+        return None, 0.0
+
+    anchor = None
+    ink_area = 0.0
+    for rect in parts:
+        anchor = union(anchor, rect)
+        ink_area += _area(rect)
+    near_gap = (anchor.x0 - cap_rect.x1 if side == "left"
+                else cap_rect.x0 - anchor.x1)
+
+    merged = []
+    for low, high in sorted(intervals):
+        if merged and low <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], high))
+        else:
+            merged.append((low, high))
+    strength = sum(high - low for low, high in merged) / max(
+        1.0, min(cap_rect.height, anchor.height))
+    substantial = (
+        ink_area >= TOP_SIDE_MIN_INK_AREA
+        and anchor.width >= TOP_SIDE_MIN_WIDTH
+        and anchor.height >= TOP_SIDE_MIN_HEIGHT
+        and max(anchor.width, anchor.height) >= TOP_SIDE_MIN_EXTENT
+    )
+    if (not substantial
+            or near_gap > page_width * TOP_SIDE_MAX_GAP_SHARE
+            or strength < TOP_SIDE_RESCUE_STRENGTH):
+        return None, 0.0
+    for other in other_captions:
+        if other is not cap_rect and _caption_owns(other, anchor):
+            return None, 0.0
+    return anchor, min(1.0, strength)
+
+
 def _bottom_evidence(cap_rect, content):
     """(candidate, strength) for "the figure is above this caption".
 
@@ -889,9 +1012,12 @@ def caption_placement(page, cap_rect, other_captions=()):
     makes the scores comparable at all — the geometry alone is not.
     """
     pr = content_rect(page)
-    if cap_rect.width >= pr.width * 0.5:
-        # A caption spanning half the page is under its figure, full stop.
-        # No content is consulted, so there is no anchor to check either.
+    wide = cap_rect.width >= pr.width * 0.5
+    top_band = cap_rect.y0 <= header_y(page) + TOP_SIDE_CAPTION_SLOP
+    if wide and not top_band:
+        # Paragraph-width captions are normally under their figures. The sole
+        # exception considered below is the measured top-band textbook layout,
+        # where strong content occupies the otherwise separate side column.
         return _Placement()
     cap_mid = (cap_rect.x0 + cap_rect.x1) / 2
     side = "right" if cap_mid > pr.width / 2 else "left"
@@ -900,6 +1026,37 @@ def caption_placement(page, cap_rect, other_captions=()):
     anchor, side_strength = _side_evidence(cap_rect, content, side,
                                            other_captions)
     cand, bottom_strength = _bottom_evidence(cap_rect, content)
+
+    ordinary_biggest = max(_area(anchor), _area(cand), 1.0)
+    ordinary_side_score = side_strength * (_area(anchor) / ordinary_biggest)
+    ordinary_bottom_score = bottom_strength * (_area(cand) / ordinary_biggest)
+    # Preserve the established paragraph-width veto: a wide top caption may
+    # become a side caption only through the stricter aggregate rescue below.
+    ordinary_takes_side = (
+        not wide
+        and ordinary_side_score > ordinary_bottom_score + SIDE_MARGIN)
+
+    top_rescue = False
+    if (top_band and bottom_strength == 0 and not ordinary_takes_side):
+        top_anchor, top_strength = _top_side_evidence(
+            cap_rect, content, side, other_captions, pr.width)
+        if top_anchor is not None:
+            # The aggregate is also the crop's anchor: keeping all separated
+            # panels prevents `column_interval` from selecting only one of them.
+            anchor, side_strength = top_anchor, top_strength
+            top_rescue = True
+
+    # Width can overturn the safe bottom default only in the page's top band,
+    # with substantial opposite-side evidence and no drawing at all supporting
+    # the ordinary caption-under-figure interpretation.
+    # Location alone never selects the side path: the continued-caption
+    # fixture has no anchor and remains a reported degenerate crop.
+    if (wide and not (top_rescue or ordinary_takes_side)):
+        return _Placement(
+            side_score=side_strength,
+            bottom_score=bottom_strength,
+            anchor=cand,
+        )
 
     biggest = max(_area(anchor), _area(cand), 1.0)
     side_score = side_strength * (_area(anchor) / biggest)
@@ -915,9 +1072,15 @@ def caption_placement(page, cap_rect, other_captions=()):
     contested = (min(side_score, bottom_score) >= PLACEMENT_CONTESTED
                  and abs(side_score - bottom_score) < SIDE_MARGIN)
     thin = takes_side and side_score < PLACEMENT_CONFIDENT
+    ambiguity = (
+        "top-band" if takes_side and top_rescue
+        else "contested" if contested
+        else "thin" if thin
+        else ""
+    )
     return _Placement(
         side=side if takes_side else None,
-        ambiguous="contested" if contested else ("thin" if thin else ""),
+        ambiguous=ambiguity,
         side_score=side_score,
         bottom_score=bottom_score,
         anchor=anchor if takes_side else cand,
@@ -947,17 +1110,16 @@ def clip_content(content, top, bottom, left, right):
     return out
 
 
-def figure_content_span(content):
-    """Union of the content rects contiguous with the bottom-most one.
+def figure_content_span(content, anchor=None, cluster_gap=None):
+    """Union one vertically contiguous content cluster.
 
-    "The figure this caption belongs to" is the lowest cluster of drawings
-    in the search region — the one nearest the caption. Rects are swept in
-    y order and split into clusters wherever the vertical gap exceeds
-    `CONTENT_CLUSTER_GAP`; the last cluster is returned. Taking the plain
-    union instead would let one stray stroke — a running-header rule, a
-    table's rules several inches up — define a region stretching over the
-    prose in between, and every paragraph inside it would then read as part
-    of the figure.
+    For a bottom caption, "the figure this caption belongs to" is the lowest
+    cluster in the search region — the one nearest the caption. For a side
+    caption, placement already identified an opposite-side ``anchor``; choose
+    the cluster nearest that anchor instead. Always taking the bottom-most
+    cluster made a top-of-page side caption jump to a different figure lower
+    on the page. Rects are swept once and split wherever the vertical gap
+    exceeds ``cluster_gap`` (the general `CONTENT_CLUSTER_GAP` by default).
 
     Returns None when there is no content at all (raster-only figures whose
     image rects PyMuPDF does not report), which callers treat as "no
@@ -968,20 +1130,39 @@ def figure_content_span(content):
     """
     if not content:
         return None
+    if cluster_gap is None:
+        cluster_gap = CONTENT_CLUSTER_GAP
     rects = sorted(content, key=lambda r: (r.y0, r.y1))
+    clusters = []
     cluster = [rects[0]]
     bottom = rects[0].y1
     for r in rects[1:]:
-        if r.y0 <= bottom + CONTENT_CLUSTER_GAP:
+        if r.y0 <= bottom + cluster_gap:
             cluster.append(r)
             bottom = max(bottom, r.y1)
         else:
+            clusters.append(cluster)
             cluster = [r]              # a gap this big starts a new figure
             bottom = r.y1
-    span = None
-    for r in cluster:
-        span = union(span, r)
-    return span
+    clusters.append(cluster)
+
+    spans = []
+    for members in clusters:
+        span = None
+        for rect in members:
+            span = union(span, rect)
+        spans.append(span)
+    if anchor is None:
+        return spans[-1]
+
+    def anchor_distance(span):
+        gap = max(anchor.y0 - span.y1, span.y0 - anchor.y1, 0.0)
+        overlap = max(0.0, min(anchor.y1, span.y1)
+                      - max(anchor.y0, span.y0))
+        return gap, -overlap, abs((span.y0 + span.y1)
+                                  - (anchor.y0 + anchor.y1))
+
+    return min(spans, key=anchor_distance)
 
 
 #: Horizontal gap at which two content rects stop counting as one column, used
@@ -1049,6 +1230,130 @@ def text_block_inside_figure(rect, span):
             and rect.x1 <= span.x1 + INNER_SLOP_RIGHT)
 
 
+def _side_figure_text_rects(page, region, captions, left=None, right=None):
+    """Line rects that belong to an anchor-selected side figure.
+
+    Side-caption figures often carry labels that PyMuPDF exposes as text, not
+    drawings: chart ticks, a scale value, or the words inside a reaction
+    schematic. Block geometry is too coarse here because a publisher can merge
+    diagram labels and the caption into one text block. Work line by line,
+    exclude every caption rectangle, require containment in the drawing
+    column, stay close to the selected vertical component, and reject
+    paragraph-width lines.
+    """
+    if region is None:
+        return []
+    out = []
+    # Ordinary side crops use the drawing union as their horizontal yardstick.
+    # Top-band textbook figures can instead contain explanatory sentences as
+    # wide as the whole figure column (Alberts 3-18 is the measured example),
+    # so their caller supplies the already anchor-selected column bounds.
+    explicit_column = left is not None and right is not None
+    if left is None:
+        left = region.x0 - INNER_SLOP_LEFT
+    if right is None:
+        right = region.x1 + INNER_SLOP_RIGHT
+    max_width = max(
+        120.0,
+        (right - left) * 0.9 if explicit_column else region.width * 0.75,
+    )
+    for _block, _text, lines in collect_text_blocks(page):
+        for rect, line_text in lines:
+            if not line_text.strip() or rect.width > max_width:
+                continue
+            if (rect.y1 < region.y0 - TOP_SIDE_TEXT_GAP
+                    or rect.y0 > region.y1 + TOP_SIDE_TEXT_GAP):
+                continue
+            if (rect.x0 < left - 1 or rect.x1 > right + 1):
+                continue
+            if any(
+                    min(rect.x1, cap.x1) - max(rect.x0, cap.x0) > 1
+                    and min(rect.y1, cap.y1) - max(rect.y0, cap.y0) > 1
+                    for _label, cap in captions):
+                continue
+            out.append(rect)
+    return out
+
+
+def _rect_gap(a, b):
+    """Shortest axis-aligned gap between rectangles (0 when they overlap)."""
+    x = max(a.x0 - b.x1, b.x0 - a.x1, 0.0)
+    y = max(a.y0 - b.y1, b.y0 - a.y1, 0.0)
+    return x, y
+
+
+def _grow_top_side_region(page, region, content, captions, left, right, bottom,
+                          side):
+    """Grow a top-side component through nearby labels and drawing stages.
+
+    Some textbook figures are vertical stories rather than one connected
+    drawing. Alberts 3-18, for example, has three drawing clusters separated by
+    more than the safe inter-figure drawing gap, but explanatory text bridges
+    each stage. Grow iteratively through text wholly inside the anchor-selected
+    column and through drawing parts close to the enlarged region. This keeps
+    the deliberately separate lower drawing in the self-test separate: its
+    46pt gap after the last axis label exceeds ``TOP_SIDE_TEXT_GAP``.
+    """
+    if region is None:
+        return region, []
+    available = clip_content(content, region.y0, bottom, left, right)
+    # The near edge borders the caption/prose column and stays hard. The far
+    # edge faces the page margin and may hold callout text just beyond the
+    # drawing interval (the longest Alberts 7-41 label extends 17pt past it).
+    text_left = (max(0, left - INNER_SLOP_LEFT)
+                 if side == "right" else left)
+    text_right = (min(content_rect(page).width, right + TOP_SIDE_TEXT_GAP)
+                  if side == "left" else right)
+    nearby_text = [
+        rect for rect in _side_figure_text_rects(
+            page, fitz.Rect(text_left, region.y0, text_right, bottom), captions,
+            text_left, text_right)
+        if rect.y0 <= bottom
+    ]
+    accepted = []
+    accepted_ids = set()
+    while True:
+        before = tuple(region)
+        for rect in available:
+            x_gap, y_gap = _rect_gap(rect, region)
+            if (x_gap <= SIDE_COLUMN_GUTTER
+                    and y_gap <= TOP_SIDE_TEXT_GAP):
+                region = union(region, rect)
+        for index, rect in enumerate(nearby_text):
+            if index in accepted_ids:
+                continue
+            x_gap, y_gap = _rect_gap(rect, region)
+            if (x_gap <= SIDE_COLUMN_GUTTER
+                    and y_gap <= TOP_SIDE_TEXT_GAP):
+                region = union(region, rect)
+                accepted.append(rect)
+                accepted_ids.add(index)
+        if tuple(region) == before:
+            break
+    return region, accepted
+
+
+def _next_side_text_y(page, region, captions, left, right, inner_text):
+    """Top of the nearest non-figure text line below a side component."""
+    boundary = None
+    for _block, _text, lines in collect_text_blocks(page):
+        for rect, line_text in lines:
+            if not line_text.strip() or rect.y0 <= region.y1 + 1:
+                continue
+            if any(rect == kept for kept in inner_text):
+                continue
+            if any(
+                    min(rect.x1, cap.x1) - max(rect.x0, cap.x0) > 1
+                    and min(rect.y1, cap.y1) - max(rect.y0, cap.y0) > 1
+                    for _label, cap in captions):
+                continue
+            overlap = min(rect.x1, right) - max(rect.x0, left)
+            if overlap <= 0.5 * min(rect.width, max(1.0, region.width)):
+                continue
+            boundary = rect.y0 if boundary is None else min(boundary, rect.y0)
+    return boundary
+
+
 def bbox_for_figure(page, caption_rect, all_captions, all_text_blocks, diag=None):
     """Compute figure bbox for the figure that goes with `caption_rect`.
 
@@ -1086,6 +1391,17 @@ def bbox_for_figure(page, caption_rect, all_captions, all_text_blocks, diag=None
                 bottom = min(bottom, r.y0 - 0.5)
             elif r.y1 < caption_rect.y0:          # ...and one above it
                 top = max(top, r.y1 + 4)
+        top_side = caption_rect.y0 <= page_top + TOP_SIDE_CAPTION_SLOP
+        rescued_top_side = top_side and placement.ambiguous == "top-band"
+        if rescued_top_side and placement.anchor is not None:
+            # The nominal header strip overlaps real top-of-page figures in
+            # this layout. A strong side anchor is safer than the generic 50pt
+            # margin guess; keep its top plus normal padding while the running-
+            # header sanity check remains available as a backstop.
+            top = min(
+                top,
+                max(0, placement.anchor.y0 - PAD - TOP_SIDE_PAD_EXTRA),
+            )
         if side == "right":
             # Figure occupies the column to the LEFT of the caption.
             left_limit = 0
@@ -1115,7 +1431,51 @@ def bbox_for_figure(page, caption_rect, all_captions, all_text_blocks, diag=None
             else:
                 right_limit = min(right_limit, col_x1)
         region = figure_content_span(
-            clip_content(content, top, bottom, left_limit, right_limit))
+            clip_content(content, top, bottom, left_limit, right_limit),
+            anchor=anchor,
+            cluster_gap=(TOP_SIDE_CLUSTER_GAP if rescued_top_side
+                         else CONTENT_CLUSTER_GAP),
+        )
+        if region is not None:
+            caption_pairs = [(label, rect) for label, rect in all_captions]
+            if rescued_top_side:
+                # A top-side figure may be a sequence of drawing stages with
+                # explanatory text between them. A one-shot drawing cluster
+                # kept only the first stage of Alberts 3-18 and nevertheless
+                # passed every sanity check. Grow through those same-column
+                # bridges before fixing the crop's bottom edge.
+                region, inner_text = _grow_top_side_region(
+                    page, region, content, caption_pairs, left_limit,
+                    right_limit, bottom, side)
+                # The grown region is the evidence the completed crop must
+                # contain, rather than only the first top-band fragment.
+                placement.anchor = region
+            else:
+                inner_text = _side_figure_text_rects(
+                    page, region, caption_pairs)
+                for rect in inner_text:
+                    region = union(region, rect)
+            # Grow only the far edge for labels that sit just outside the
+            # drawing union. The near edge remains the caption boundary.
+            if inner_text and side == "right":
+                left_limit = max(0, min(
+                    left_limit, min(rect.x0 for rect in inner_text)))
+            elif inner_text and side == "left":
+                right_limit = min(pr.width, max(
+                    right_limit, max(rect.x1 for rect in inner_text)))
+            if rescued_top_side:
+                top = min(
+                    top,
+                    max(0, region.y0 - PAD - TOP_SIDE_PAD_EXTRA),
+                )
+            else:
+                top = max(top, region.y0 - PAD)
+            bottom = min(bottom, region.y1 + PAD + BOTTOM_PAD_EXTRA)
+            next_text = _next_side_text_y(
+                page, region, caption_pairs, left_limit, right_limit,
+                inner_text)
+            if next_text is not None:
+                bottom = min(bottom, next_text - 0.5)
         # The region-coverage guard needs a region on THIS path too. It only
         # ever got one in the bottom-caption branch below, so `region` came
         # back None for every side caption and the whole guard was skipped —
@@ -1287,8 +1647,19 @@ def bbox_for_figure(page, caption_rect, all_captions, all_text_blocks, diag=None
 
     # Asymmetric padding: more on left for rotated y-axis labels, more on
     # bottom for x-axis labels.
-    x0 = max(0, bbox.x0 - PAD - LEFT_PAD_EXTRA)
-    y0 = max(0, bbox.y0 - PAD)
+    # On a top-band LEFT-caption layout, physical left is the gutter beside
+    # the prose/caption column. The generic 24pt y-axis allowance crossed that
+    # gutter on Alberts 7-41 and put a sliver of body prose into an otherwise
+    # correct crop. Figure-internal text is already unioned above, so ordinary
+    # padding is sufficient on this one near-column edge.
+    left_extra = (0 if side == "left"
+                  and placement.ambiguous == "top-band"
+                  else LEFT_PAD_EXTRA)
+    x0 = max(0, bbox.x0 - PAD - left_extra)
+    top_side_pad = (TOP_SIDE_PAD_EXTRA
+                    if side in ("left", "right")
+                    and placement.ambiguous == "top-band" else 0)
+    y0 = max(0, bbox.y0 - PAD - top_side_pad)
     x1 = min(pr.width, bbox.x1 + PAD)
     y1 = min(pr.height, bbox.y1 + PAD + BOTTOM_PAD_EXTRA)
 
@@ -1550,6 +1921,11 @@ def suspicious(bbox, region=None, page=None, caption_rect=None, headers=None,
             return (f"{CAPTION_AMBIGUOUS_TAG}read as {read_as} ({scores}), "
                     f"but the content {other} has nearly as good a claim — "
                     f"check this crop is the right part of the page")
+        if kind == "top-band":
+            return (f"{CAPTION_AMBIGUOUS_TAG}a top-page caption was rescued as "
+                    f"{read_as} ({scores}) — inspect it against the page and "
+                    f"set an explicit crop if any separated panel or stage is "
+                    f"missing")
         return (f"{CAPTION_AMBIGUOUS_TAG}read as {read_as} on thin evidence "
                 f"({scores}; nothing else on the page contests it) — check "
                 f"this crop is the right part of the page")
@@ -2030,6 +2406,8 @@ def _st_bleed_doc():
 
 def run_self_test():
     """Run the built-in cases; print `N/M self-test cases pass`, return 0/1."""
+    import contextlib
+    import io
     import shutil
     import tempfile
 
@@ -2251,6 +2629,22 @@ def run_self_test():
           ["4", "5"])
     doc.close()
 
+    # A real caption can mention an earlier figure in its narrative. When the
+    # reference wraps after "shown in", CAP_RE sees a second line-start
+    # caption shape inside the same text block. It is still prose belonging to
+    # the first caption, not another figure to crop.
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 300), "Figure 32. The actual caption.", fontsize=8)
+    page.insert_text((72, 312), "The same species is shown in", fontsize=8)
+    page.insert_text((72, 324), "Figure 16. (Courtesy of the author.)", fontsize=8)
+    found = find_caption_blocks(page)
+    check("a wrapped narrative reference inside a caption is not a second "
+          "caption", [f[0] for f in found], ["32"])
+    ok("...and does not truncate the real caption rectangle",
+       found[0][2].y1 >= 325)
+    doc.close()
+
     check("_line_index picks the containing line",
           [_line_index([0, 10, 25], off) for off in (0, 9, 10, 24, 25, 99)],
           [0, 0, 1, 1, 2, 2])
@@ -2446,6 +2840,213 @@ def run_self_test():
     caps = find_caption_blocks(doc[0])
     check("a page-width caption is a bottom caption",
           side_caption_position(doc[0], caps[0][2]), None)
+    doc.close()
+
+    # A normal narrow side caption does not become a rescue merely because it
+    # happens to sit in the top band. Its established strong rectangular anchor
+    # should keep the ordinary crop path and should not gain a new advisory.
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.draw_rect(fitz.Rect(300, 42, 560, 210), fill=(0.5, 0.5, 0.5))
+    page.draw_rect(fitz.Rect(300, 300, 560, 460), fill=(0.2, 0.2, 0.2))
+    for y in (220, 238, 256, 274, 292):
+        page.insert_text((300, y), "text that would bridge a rescue", fontsize=8)
+    page.insert_text((60, 50), "Figure 23. Narrow side caption.", fontsize=8)
+    caps = find_caption_blocks(page)
+    ordinary_top = caption_placement(page, caps[0][2])
+    ok("a strong narrow top-band side caption stays on the ordinary path",
+       ordinary_top.side == "left" and ordinary_top.ambiguous == "")
+    ordinary_got = list(detect_figures(doc))[0]
+    ok("...and keeps ordinary bounds instead of growing through rescue-only "
+       "text into the lower drawing",
+       ordinary_got[3].y0 >= 49 and ordinary_got[3].y1 < 300)
+    check("...and gains no aggregate-rescue advisory", ordinary_got[5], "")
+    doc.close()
+
+    # A continuation caption at the top of a new page has no figure on that
+    # page. Its location alone must never trigger the top-band side rescue:
+    # batch_extract has this exact fixture and relies on a reported degenerate
+    # crop instead of a made-up image from the body prose below.
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((100, 58),
+                     "Figure 3. Continued from the previous page.",
+                     fontsize=9)
+    page.insert_text((100, 400), "Body prose lower down the page.",
+                     fontsize=9)
+    caps = find_caption_blocks(page)
+    top_cont = caps[0][2]
+    check("a top-page continued caption without opposite-side content is not "
+          "rescued as a side caption",
+          side_caption_position(page, top_cont), None)
+    got = list(detect_figures(doc))
+    ok("...and preserves the batch fixture's degenerate failure",
+       got[0][3].is_empty and "degenerate rect" in got[0][5])
+    doc.close()
+
+    # Alberts Figures 2-4 and 20-1 put a paragraph-width caption beside a
+    # top-of-page figure. Width used to be an unconditional bottom-caption
+    # veto, producing an inverted crop above y=50. The exception is narrow:
+    # strong, isolated opposite-side content in the top band, and no drawing
+    # at all supporting the ordinary caption-under-figure interpretation.
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.draw_rect(fitz.Rect(60, 42, 210, 240), fill=(0.5, 0.5, 0.5))
+    page.insert_text((65, 252), "0    20    40    60", fontsize=8)
+    page.draw_rect(fitz.Rect(60, 300, 210, 520), fill=(0.2, 0.2, 0.2))
+    page.insert_text(
+        (230, 49),
+        "Figure 24. A paragraph-width caption beside a top figure with "
+        "enough text to fill this whole right column.",
+        fontsize=8,
+    )
+    caps = find_caption_blocks(page)
+    wide_top = caps[0][2]
+    ok("the top-band side-caption fixture is genuinely wider than half the "
+       "page", wide_top.width > content_rect(page).width * 0.5)
+    place = caption_placement(page, wide_top)
+    check("a wide top caption with strong isolated content opposite it is a "
+          "right-side caption", place.side, "right")
+    got = list(detect_figures(doc))[0]
+    ok("...and its crop includes the top figure and nearby axis text",
+       got[3].x0 <= 60 and got[3].y0 <= 42 and got[3].y1 >= 254)
+    ok("...while the anchor-selected cluster excludes the lower figure",
+       got[3].y1 < 300)
+    check("...without swallowing its caption", caption_in_crop(got[3], caps),
+          None)
+    ok("...and the rescued top-band crop remains explicitly reviewable",
+       got[5].startswith(CAPTION_AMBIGUOUS_TAG)
+       and "separated panel or stage" in got[5])
+    doc.close()
+
+    # The same wide top shape is not safe when the caption also has content
+    # immediately above it in its own column. That supplies the conventional
+    # bottom-caption reading, so the top-band exception must stay closed even
+    # though the opposite-side anchor is strong.
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.draw_rect(fitz.Rect(60, 42, 210, 240), fill=(0.5, 0.5, 0.5))
+    page.draw_rect(fitz.Rect(300, 5, 550, 38), fill=(0.2, 0.2, 0.2))
+    page.insert_text(
+        (230, 49),
+        "Figure 25. A paragraph-width caption beside a top figure with "
+        "enough text to fill this whole right column.",
+        fontsize=8,
+    )
+    caps = find_caption_blocks(page)
+    place = caption_placement(page, caps[0][2])
+    ok("wide top-caption rescue sees the strong opposite-side candidate",
+       place.side_score >= TOP_SIDE_RESCUE_STRENGTH)
+    ok("...but stays closed when there is also bottom-caption evidence",
+       place.side is None and place.bottom_score > 0)
+    doc.close()
+
+    # Alberts Figure 3-1 has no 30x30 drawing at all: six small molecular
+    # nodes connected by zero-height vector lines. Treat the one isolated row
+    # as a single anchor, select its vertical cluster instead of the unrelated
+    # lower figure, and keep nearby diagram labels emitted as PDF text.
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    for x in (235, 285, 335, 385, 435, 485):
+        page.draw_rect(fitz.Rect(x, 54, x + 12, 66),
+                       fill=(0.3, 0.3, 0.7))
+    for x in (247, 297, 347, 397, 447):
+        page.draw_line(fitz.Point(x, 60), fitz.Point(x + 38, 60), width=1)
+    page.insert_text((228, 48), "molecule", fontsize=7)
+    page.insert_text((265, 77), "enzyme catalysis", fontsize=7)
+    page.draw_rect(fitz.Rect(250, 500, 550, 650), fill=(0.5, 0.2, 0.2))
+    for k, text in enumerate((
+            "Figure 31. A caption beside a fragmented",
+            "diagram at the top of the page.",
+            "Its explanatory sentence continues.",
+            "And one final line establishes the band.",
+    )):
+        page.insert_text((40, 49 + 10 * k), text, fontsize=8)
+    caps = find_caption_blocks(page)
+    fragmented_cap = caps[0][2]
+    content = collect_content_rects(page)
+    check("no individual part of the fragmented diagram clears the ordinary "
+          "side-anchor floor", _side_evidence(
+              fragmented_cap, content, "left", [])[0], None)
+    place = caption_placement(page, fragmented_cap)
+    ok("the isolated fragmented row supplies strong side evidence",
+       place.side == "left"
+       and place.side_score >= TOP_SIDE_RESCUE_STRENGTH)
+    got = list(detect_figures(doc))[0]
+    ok("...and its crop includes nearby figure-internal text",
+       got[3].y0 <= 40 and got[3].y1 >= 78)
+    ok("...while staying on the anchor's cluster instead of the lower figure",
+       got[3].y1 < 500)
+    ok("...and the rescued fragmented crop remains explicitly reviewable",
+       got[5].startswith(CAPTION_AMBIGUOUS_TAG)
+       and "separated panel or stage" in got[5])
+    doc.close()
+
+    # The top figure can itself contain separated panels. Requiring one
+    # horizontally connected group rejected both panels, even though their
+    # combined ink crosses the caption band and there is no possible figure
+    # above a caption already inside the page's header strip.
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    for x in (50, 72, 94, 190, 212, 234):
+        page.draw_rect(fitz.Rect(x, 42, x + 18, 60),
+                       fill=(0.3, 0.3, 0.7))
+    page.draw_rect(fitz.Rect(50, 78, 112, 160), fill=(0.4, 0.5, 0.7))
+    page.draw_rect(fitz.Rect(190, 78, 252, 160), fill=(0.4, 0.5, 0.7))
+    page.insert_text((300, 50),
+                     "Figure 32. A caption beside separated top panels.",
+                     fontsize=8)
+    caps = find_caption_blocks(page)
+    multi_cap = caps[0][2]
+    content = collect_content_rects(page)
+    check("separated small panels do not create an ordinary side anchor",
+          _side_evidence(multi_cap, content, "right", [])[0], None)
+    top_anchor, top_strength = _top_side_evidence(
+        multi_cap, content, "right", [], content_rect(page).width)
+    ok("their aggregate is substantial top-band side evidence",
+       top_anchor is not None and top_strength >= TOP_SIDE_RESCUE_STRENGTH)
+    check("the aggregate selects the mirror-image side placement",
+          side_caption_position(page, multi_cap), "right")
+    got = list(detect_figures(doc))[0]
+    ok("...and the crop retains both separated panels without its caption",
+       got[3].x0 <= 50 and got[3].x1 >= 252
+       and caption_in_crop(got[3], caps) is None)
+    ok("...while the rescued multi-panel crop remains explicitly reviewable",
+       got[5].startswith(CAPTION_AMBIGUOUS_TAG)
+       and "separated panel or stage" in got[5])
+    doc.close()
+
+    # Alberts 3-18 is one figure made from three vertically separated drawing
+    # stages. The descriptive text between them is the only continuity signal:
+    # a drawing-only top cluster used to stop after stage one and passed clean.
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    for y in (184, 360):
+        page.draw_rect(fitz.Rect(60, y, 210, y + 80),
+                       fill=(0.3, 0.3, 0.7))
+    for x in (60, 84, 108, 132, 156, 180):
+        page.draw_rect(fitz.Rect(x, 42, x + 18, 122),
+                       fill=(0.3, 0.3, 0.7))
+    for y, text in (
+            (132, "Explanation bridging stage one to stage two."),
+            (150, "The explanation continues."),
+            (168, "Then stage two follows."),
+            (274, "Explanation bridging stage two to stage three."),
+            (292, "The explanation continues again."),
+            (310, "One more linked observation."),
+            (328, "The process is still continuous."),
+            (346, "Then the final stage follows."),
+    ):
+        page.insert_text((60, y), text, fontsize=8)
+    page.insert_text((300, 49),
+                     "Figure 33. A side caption for a multi-stage process.",
+                     fontsize=8)
+    caps = find_caption_blocks(page)
+    got = list(detect_figures(doc))[0]
+    ok("a top-side crop grows through same-column explanatory text to every "
+       "vertical drawing stage", got[3].y0 <= 42 and got[3].y1 >= 440)
+    ok("...and a regression in that growth cannot pass silently",
+       bool(got[5]))
     doc.close()
 
     # --- two-column pages are not side captions ----------------------------
@@ -3183,6 +3784,28 @@ def run_self_test():
             state["bad"] += 1
             print("FAIL open_pdf refused a good PDF: %s" % exc)
 
+        def run(argv):
+            so, se = io.StringIO(), io.StringIO()
+            code = 0
+            with contextlib.redirect_stdout(so), contextlib.redirect_stderr(se):
+                try:
+                    code = main(argv)
+                except SystemExit as exc:
+                    code = exc.code
+            return code, so.getvalue(), se.getvalue()
+
+        code, so, se = run([good, "--emit", "extract"])
+        check("--emit extract derives the exact PDF stem", code, 0)
+        ok("...and includes that stem in the emitted command",
+           "--stem Doe_Foo_2025" in so)
+        code, so, se = run([good, "--emit", "extract", "--stem", "Other"])
+        ok("--emit extract refuses a mismatched explicit stem",
+           code != 0 and "exact" in str(code))
+        code, so, se = run([good, "--pages", ","])
+        ok("an empty page selection is refused", code != 0 and "names no page" in str(code))
+        code, so, se = run([good, "--ed-prefix", "X"])
+        check("an unsupported Extended Data namespace exits 2", code, 2)
+
         html = os.path.join(tmp, "Doe_Bar_2025.pdf")
         with open(html, "w", encoding="utf-8") as fh:
             fh.write("<html><body><h1>404</h1><p>Not found.</p></body></html>")
@@ -3233,7 +3856,7 @@ def run_self_test():
     return 1 if state["bad"] else 0
 
 
-def main():
+def main(argv=None):
     p = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__,
@@ -3241,7 +3864,10 @@ def main():
     p.add_argument("pdf", nargs="?")
     p.add_argument("--pages")
     p.add_argument("--emit", choices=["table", "extract"], default="table")
-    p.add_argument("--stem", default="STEM")
+    p.add_argument(
+        "--stem",
+        help="Source PDF stem for --emit extract (default: derive from PDF path).",
+    )
     p.add_argument(
         "--keep-frame", action="store_true",
         help=(
@@ -3253,7 +3879,7 @@ def main():
         ),
     )
     p.add_argument(
-        "--ed-prefix", default="S",
+        "--ed-prefix", choices=("S", "ED"), default="S",
         help=(
             "Filename prefix for 'Extended Data Figure N' captions "
             "(default 'S' — collapses into supplementary). Pass 'ED' to "
@@ -3269,7 +3895,7 @@ def main():
         ),
     )
     p.add_argument("--test", action="store_true", help="run the self-test")
-    args = p.parse_args()
+    args = p.parse_args(argv)
 
     if args.test:
         return run_self_test()
@@ -3282,6 +3908,11 @@ def main():
     configure_strip_frame(not args.keep_frame)
 
     pdf_path = os.path.expanduser(args.pdf)
+    source_stem = os.path.splitext(os.path.basename(pdf_path))[0]
+    stem = args.stem or source_stem
+    if stem != source_stem:
+        sys.exit(f"--stem {stem!r} does not equal the source PDF's exact "
+                 f"on-disk stem {source_stem!r}")
     doc = open_pdf(pdf_path)
     if args.pages:
         page_idxs = []
@@ -3299,6 +3930,8 @@ def main():
                     f"(PDF has {len(doc)} pages)"
                 )
             page_idxs.append(idx)
+        if not page_idxs:
+            sys.exit(f"--pages: {args.pages!r} names no page")
     else:
         page_idxs = None
     n_warn = 0
@@ -3312,14 +3945,14 @@ def main():
             print(
                 f"# WARN page {i+1} Fig {fig_num} ({raw_label!r}): bbox looks wrong "
                 f"({reason}) — likely auto-detect failure, please render "
-                f"this page and set the crop manually.",
+                f"this page visually and set an explicit crop.",
                 file=sys.stderr,
             )
         if args.emit == "extract":
             # A degenerate rect would abort extract_figures.py on its
             # "degenerate rect" guard and take the whole pasted batch with
             # it, so leave it out of the command entirely. The WARN line
-            # above already names the page and label to fix by hand.
+            # above already names the page and label that needs an explicit crop.
             if degenerate(bbox):
                 n_skipped += 1
                 continue
@@ -3329,7 +3962,7 @@ def main():
             )
         else:
             # Table mode also prints the caption rect — useful when
-            # constructing a manual fallback crop, since the caption's
+            # constructing an explicit fallback crop, since the caption's
             # edges anchor the figure on the opposite side.
             print(
                 f"page {i+1:>3}  Fig {fig_num:>6}  "
@@ -3362,14 +3995,14 @@ def main():
             lines = [
                 f"{shlex.quote(sys.executable)} {shlex.quote(extract_py)} {shlex.quote(pdf_path)}",
                 f"    --out {shlex.quote(OUT_PLACEHOLDER)} "
-                f"--stem {shlex.quote(args.stem)}",
+                f"--stem {shlex.quote(stem)}",
             ] + crop_lines
             print(" \\\n".join(lines))
 
     if n_skipped:
         print(
             f"# {n_skipped} figure(s) omitted from the command (degenerate "
-            f"bbox) — set those crops by hand.",
+            f"bbox) — set explicit crops for them.",
             file=sys.stderr,
         )
     if n_warn:
@@ -3397,6 +4030,10 @@ def main():
                   "you have checked which.",
                 file=sys.stderr,
             )
+    doc.close()
+    if args.emit == "extract" and not crop_lines:
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

@@ -1,107 +1,464 @@
-# QC items — enforcement detail (Task 1)
+# QC items — source-independent enforcement (Task 1)
 
-**Read this when Task 1 runs, before fixing any entry** — it is the per-item enforcement detail behind the scanner's `problems` array, plus what is deliberately out of scope and how far a fix may reach. `SKILL.md` carries only the decision path.
+**Read this before Task 1 fixes any entry.** The numbered acceptance rules
+come from wiki-builder's [Quality Checklist](../../wiki-builder/SKILL.md#quality-checklist)
+and the canonical guides it links. This file does not duplicate those guides in full. It
+owns wiki-linter's finding-to-action rules, source-independent review, and
+repair boundaries.
 
-The numbered acceptance rules are wiki-builder's [Quality Checklist](../../wiki-builder/SKILL.md#quality-checklist), with full definitions in its [writing](../../wiki-builder/references/writing.md), [equation](../../wiki-builder/references/equations.md), and [card/emphasis](../../wiki-builder/references/flashcards-and-emphasis.md) guides. This file owns the source-independent enforcement and finding-to-action rules. Related procedures are [flashcard definition review](flashcards.md#flashcard-definition-review-item-19), [dangling links](link-hygiene.md#dangling-links-target-missing), [date/review ownership](../SKILL.md#dates), and [reports/backlogs](backlogs.md).
+All semantic-review instructions here are carried out autonomously by the executing agent.
+They do not require the user or another human to inspect every
+note or approve an ordinary correction. When the note and vault do not establish
+a safe answer, preserve the content and report an optional source-backed or
+separately scoped follow-up; that follow-up does not block the current run.
 
-All semantic-review instructions here are carried out autonomously by the executing agent during the lint run. They never require the user or another human to inspect every note or approve an ordinary correction. When the note and vault do not establish a safe answer, preserve the content and report an optional source-backed or approval-dependent follow-up; unresolved follow-ups do not block completion of the current run.
+Related procedures:
 
-Contents:
-- [Finding actions](#finding-actions) — route scanner findings before editing
-- **Source-independent review (fix or route per Finding actions)** — items 1–19, including proposal-only observations under item 15
-- **Proposal-only or source-dependent review**
-- **Fix discipline** — how far a fix may reach; renames are proposed, never applied
-- **Coding content in non-Software entries (item 6)** — the cap, the strip-vs-reclassify call
+- [Scanner keys and coverage](scanner.md#item-keys-in-problems)
+- [Flashcard definition review](flashcards.md#flashcard-definition-review-item-19)
+- [Dangling-link protocol](link-hygiene.md#dangling-links-target-missing)
+- [Date and review-state ownership](../SKILL.md#dates)
+- [Reports and backlogs](backlogs.md)
 
 ## Finding actions
 
-Use this table before applying the per-item rules below. A finding identifies a condition; it does not authorize an edit outside the requested task or beyond this skill's ownership. The [scanner contract](scanner.md#item-keys-in-problems) describes what each key detects.
+Route a finding before editing. A finding identifies a condition; it never
+expands the requested scope or authorizes a change beyond this skill's
+ownership.
 
 | Finding or worklist | Action |
 | --- | --- |
-| Ordinary `itemN` | Apply only the determinate, source-independent correction allowed by item N below. A semantic or ownership uncertainty is reported, not guessed. |
-| `item0` | Report the unreadable path/error. There is no parsed entry to repair. |
-| `item1` | Repair only what the file evidences; never invent its title, dates, or review state. Preserve links to the real file. |
-| `item2/read-type` | Normalize a recognizable answer to its equivalent bare boolean; preserve the meaning. |
-| `item2/type-enum` | If the body makes the intended semantic type unambiguous, write its exact canonical enum spelling. Otherwise report and preserve; a blank or unknown value does not authorize guessing. |
-| `item2/read-missing`, `item2/read-null`, `item2/read-unknown` | Report and preserve. Do not supply or infer an answer. |
-| `item2/parents-null` | Write `parents: []`; this skill owns the empty parents list. |
-| `item2/parents-form` | Preserve every usable target while normalizing scalar/populated-flow/duplicate spelling and unambiguous case/alias variants to the canonical block list. A non-wikilink, missing, stub, unparsed, or ambiguous target is re-derived only in Task 3's authorized closure; otherwise report it. |
-| `item2/obsidian-key` | Report, never delete/reorder: this is valid user configuration. |
-| `item3`, `item3/report-only` | Report date problems; the linter does not rewrite either date. |
-| `item4/source-identity` | Review provenance under item 4. The finding alone never authorizes removing a citation; preserve independent or uncertain sources. |
-| `item9/imperative-link` | Integrate the link into a relationship sentence only when adjacent prose already states that relationship and the edit adds no claim; otherwise record the exact cue and a source-backed proposal. |
-| `item10/case`, `item10/alias` | Task 1: canonicalize the unambiguous existing target, preserving anchors and explicit display labels. Never create a file at a variant or alias spelling. |
-| `item10/self` | Task 2: remove a self-link from Related; render an ordinary body subject mention as plain text. If it points to a section/block for real local navigation, rewrite it as a local anchor rather than discarding that navigation, preserving an explicit display label as `[[#Heading|Display]]` or `[[^block|Display]]`. |
-| `item10/ambiguous` | Report and preserve the whole link until its owner is resolved. |
-| `item10/unparsed` | Preserve the link. Its real target file's own `item0`/`item1` finding governs any repair. |
-| `item10/dangling`, `item10/dup` | Task 2's [link protocol](link-hygiene.md), never an ordinary Task 1 repair. |
-| `item10/table` | Replace the rendered table-cell wikilink markup with its visible plain-text label. Do not move or retarget the link as part of this format fix. |
-| `item12/equation-coverage-candidate` | Inspect the matched prose autonomously. If context states the complete relationship, insert the display equation and bind its symbols under item 12; otherwise preserve the entry and report why the cue was not a definition. Never infer a population/sample denominator. |
-| `item12/remote-image`, `item12/missing-image` | Report; preserve the URL or missing embed and caption. Repair requires work outside this entry. |
-| `image_folder_findings` | Report the nested/staging path; preserve it. This folder-level observation is not an entry repair and never authorizes moving or deleting a file. |
-| `item19` | Apply the format floor; read [flashcard maintenance](flashcards.md) before any change or definition review. |
-| `item17/alias-candidate` | Judge same-entity, cross-domain, collision, and Organism common-name safety under item 17. Add only a safe missing alias; otherwise preserve and report the candidate. |
-| `stub` | Remove the forbidden Related footer from a legacy stub; do not promote it without a source. |
-| `stub-one-sentence-body`, `stub-no-images` | Report and preserve. Extra prose or an image may be substantive/user content; do not delete it, compress it, or promote the stub without a source-backed editing request. |
-| `rename_candidates` | Propose with inbound count and collision warning; apply only with explicit approval and a complete reference rewrite. |
-| `collision_candidates` | Report candidates; do not merge existing entries during routine lint. |
-| `hierarchy_diagnostic.parent_state_findings`, `moc_consistency_findings` | Task 3 report-only inputs. Re-derive both renderings from one tree only inside an authorized connected closure; never patch a reported edge or MOC line in isolation. |
-| Semantic-invalid alias (item 17/18 judgment) | Propose the canonical owner and inbound rewrite; remove only after explicit approval and the complete alias-refactor protocol below. |
+| Ordinary `itemN` | Apply only the determinate, source-independent correction allowed by item N below. Report semantic or ownership uncertainty. |
+| `item0` | Report the unreadable path and error; there is no parsed entry to repair. |
+| `item1` | Repair only what the file itself establishes. Never invent title, dates, or review state, and preserve links to the real file. |
+| `item2/read-type` | Normalize a recognizable answer to the equivalent bare boolean. |
+| `item2/type-enum` | Write the exact enum spelling only when the body makes the intended type unambiguous; otherwise preserve and report. |
+| `item2/read-missing`, `item2/read-null`, `item2/read-unknown` | Preserve and report; supplying a boolean would invent user-owned state. |
+| `item2/parents-null` | Write `parents: []`; this changes only the spelling of an already empty value. |
+| `item2/parents-form` | Preserve usable targets while normalizing representation and unambiguous target spelling. Re-derive invalid relationships only in Task 3's authorized closure. |
+| `item2/obsidian-key` | Report and preserve exactly; it is valid user configuration. |
+| `item3`, `item3/report-only` | Report date problems; wiki-linter writes neither date. |
+| `item4/source-identity` | Establish provenance under item 4 before removing anything; preserve independent or uncertain citations. |
+| `item9/imperative-link` | Integrate the link only when adjacent prose already states the relationship and the edit adds no claim; otherwise report a source-backed proposal. |
+| `item9/duplicate-sentence` | This is a cross-entry ownership candidate. Preserve both copies and report the pair and likely owner unless the requested scope already authorizes a clear refactor. Normalized similarity alone never authorizes deletion. |
+| `item10/case`, `item10/alias` | In Task 1, canonicalize the unambiguous existing target while preserving anchor and explicit display label. Never create a variant file. |
+| `item10/self` | In Task 2, unlink an ordinary self-mention. Preserve real section/block navigation as a local `[[#Heading|Display]]` or `[[^block|Display]]` anchor. |
+| `item10/ambiguous` | Preserve the whole link and report its competing owners. |
+| `item10/unparsed` | Preserve the link; the target file's `item0` or `item1` governs repair. |
+| `item10/dangling`, `item10/dup` | Use Task 2's [link protocol](link-hygiene.md), not an ordinary Task 1 repair. |
+| `item10/table` | Replace only the table-cell link markup with its visible plain-text label. |
+| `item12/equation-coverage-candidate` | Inspect the local prose or inline formula. Insert or promote an equation only when the note completely states the quantity or calculation; otherwise preserve and report the non-defining cue. |
+| `item12/remote-image`, `item12/missing-image` | Report and preserve the embed and caption; repair requires work outside this entry. |
+| `image_folder_findings` | Report and preserve nested, staging, unreadable, or portable-name-collision paths. Collision records retain all owner paths; an unreadable inventory also suppresses missing-image claims. |
+| `item17/alias-candidate` | Apply the same-entity, collision, cross-domain, and Organism-common-name gates before adding anything. |
+| `item19` | Apply the format floor only after reading [flashcard maintenance](flashcards.md). |
+| `stub` | Remove a forbidden Related footer; never promote without a source. |
+| `stub-one-sentence-body`, `stub-no-images` | Preserve and report; extra prose or media may be substantive user content. |
+| `rename_candidates` | Propose with inbound count and collision warning; apply only with explicit authorization in the request and a complete reference rewrite. |
+| `collision_candidates` | Report; routine lint never merges existing entries. |
+| `hierarchy_diagnostic.parent_state_findings`, `moc_consistency_findings` | Use as report-only Task 3 inputs. Re-derive both hierarchy renderings from one authorized connected closure, never patch one edge in isolation. |
+| Semantic-invalid alias | Propose the canonical owner and inbound rewrite; remove only through the approved alias-refactor protocol. |
 
-### Source-independent review (fix or route per Finding actions)
+## Source-independent item guide
 
-Restated assertions; full rule at wiki-builder *Quality Checklist* item N (`wiki-builder/SKILL.md`) and the reference file that item points at.
+For every item, first apply the canonical builder rule at the linked location,
+then use only the linter-specific action stated here. The scanner's
+[`problems` contract](scanner.md#item-keys-in-problems) is the source of truth
+for its mechanical coverage; do not infer permission from a scanner message.
 
-1. **Valid YAML** (item 1) — frontmatter fenced by `---`, the opening fence on the file's **first line** (a BOM is tolerated; a leading blank line is an `item1`, because Obsidian reads properties only when `---` is line 1), parses. A frontmatter line that parses as neither a `key:` nor a `- item` is its own `item1` (`unparseable frontmatter line: …`) while the rest of the entry still scans. Flow lists may be empty only as `[]`; leading, middle, or trailing comma-delimited empty elements such as `[,]`, `["a",]`, or `["a",, "b"]` are invalid YAML and are scanner-flagged as item 1.
-2. **Field order + quoting** (item 2) — schema order `title, type, aliases, sources, created, updated, description, tags, parents, read`; `type:` exactly one of the 15 canonical values; quoting per *Quoting policy* (`wiki-builder/references/writing.md`); `tags:` and `parents:` keys present (mandatory even when empty), `read:` present carrying a bare boolean, and `description:` present *with* a value (never omittable, on a stub either). A blank, non-scalar, or unknown type is `item2/type-enum`: normalize it only when the body makes the semantic type unambiguous, otherwise report it rather than guessing. *(Scanner checks field order, required keys — **all nine of them**: `title`, `type`, `sources`, `created`, `updated`, `description`, `tags`, `parents`, `read`, the same list wiki-builder's `lint_entry` enforces on one file, with `tags:` and `read:` carrying their own messages (`item2/read-missing` for a missing `read:`, `item2/read-null` for a present-but-null one) and the rest reported as `missing <key>: key`. A missing — or **valueless** (bare, `null`, or list-form) — **`title:`** is the one worth naming, and the scanner reports both spellings under the same message: every check that starts from the title is a silent no-op without a value — the item-5 slug↔filename comparison, the item-16 opener check, the entry's rename candidate, its surface forms for backfill, and the item-18 display-label test on every link aimed at it — so before this was checked such an entry came back from a whole-vault pass with **no findings at all**. Recover a title only from one unambiguous canonical name evidenced by the entry; otherwise preserve the file, report the missing title as unresolved, and continue the run. Also duplicate keys, and the quoting policy, including the unquoted-`#` trap, since an unquoted `- #machine-learning` reads as a YAML comment and is flagged as not-double-quoted. A key that is **Obsidian's own** — `cssclasses`, `cssclass`, `publish`, `permalink`, `cover`, `image`, `banner`, `icon` — is NOT an unexpected-key violation: it routes to the report-only `item2/obsidian-key` instead, because item 2 is a fix in place and the only determinate reading of "fix an unexpected key" is deletion, which destroys the user's own appearance/publish configuration. It also detects a leftover **`roots:` key** from the old schema: with no `tags:`, it's flagged as a roots→tags migration; with `tags:` already present, as a stale key to remove.)* **An empty `parents:` is written `parents: []`, never as a bare `parents:`** — the vault pins the property as `multitext`, and a bare key is YAML null rather than an empty list, so it renders as an empty *text* field and the type the vault declares disagrees with the value on disk. A populated value is a block list of double-quoted, bare canonical wikilinks; scalar, populated flow form, path/anchor/display/`.md` targets, plain text, and duplicate targets are `item2/parents-form`. The scanner reports the bare empty form as `item2/parents-null`, and since `parents:` is the field wiki-linter owns (Task 3), writing the `[]` is an ordinary **fix in place** — a one-line normalization that changes no value, only its spelling. **`read:` is the user's review checkbox, and the four ways it can be wrong route in two opposite directions — the line between them is whether the fix would have to *invent* the value.** A **missing** `read:` key (`item2/read-missing`) is **reported, never fixed**: wiki-linter never supplies a missing review value — it creates no entries of any kind (see [Dates](../SKILL.md#dates)) — and filling `read: false` into a note the user had already marked read would silently destroy exactly the state the field exists to hold — the same class as `item3/report-only` below, and it goes the same way, to the run report under *Notes for the user* with the slug named, as unresolved user-owned state; the lint run still completes. A **valueless** `read:` (`item2/read-null`) — a bare `read:`, `read: null`, or `read: ~`, all of which are YAML null — is **the same class and reported the same way**: the key is there, but a null holds no answer, so there is nothing to preserve and `false` would supply the user's review state rather than correct its spelling. Report it with the spelling found; **never fix it in place.** (Note the near-twin `item2/parents-null` above routes the *other* way, and legitimately: writing `[]` re-spells an empty value that is already empty, while writing `read: false` is a value the field does not have.) An **unrecognizable** value (`item2/read-unknown`), such as `read: banana` or a list, is likewise report-only: do not infer either boolean. A **wrongly-typed** `read:` (`item2/read-type`) — `"false"` quoted, `yes`/`no`, `0`/`1` — is the only one of the four that **is** an ordinary format fix in place: the key carries a real answer, its meaning is unambiguous and only its spelling is wrong, so rewrite it to the bare YAML boolean it already means, preserving which one that is. The spelling is not cosmetic: `.obsidian/types.json` pins the property as a `checkbox`, and a quoted `"false"` is a non-empty string, which that checkbox renders as permanently ticked. **`importance:` is a retired key, not a required one.** It was removed from wiki-builder's schema (measured 97 `high` / 7 `medium` / 1 `low` across 123 generated entries — a field carrying no information), so new entries simply omit it. **Legacy entries still carry it, populated, and nothing here strips it, rewrites it, or flags it — at any severity.** It is still listed in the scanner's `CANON` so a legacy entry carrying it in its historical slot (between `tags:` and `parents:`) is not reported as an unexpected key or as out of schema order; it is absent from the required-key checks and from the never-quoted list. Treat a populated `importance:` exactly the way a populated `parents:` is treated: expected, and left alone.
-3. **Date format** (item 3) — `YYYY-MM-DD`, a valid calendar date, `created ≤ updated`. *(All three are scanned.)* *(Correctness of "updated = merge date" is not checkable without history and is not the linter's to set — see Dates.)* **`created > updated` is report-only, never fixed here.** The ordering is genuinely impossible (`updated:` is the date of the last source merge, so it cannot precede creation) and worth surfacing — but wiki-linter never writes `created:` or `updated:` (see *Dates*), so it has no way to resolve it, and filing it as an ordinary QC violation would re-report the same entries on every run with no path to closure. The scanner therefore tags it `item3/report-only`: it goes to the run report with both dates quoted as unresolved metadata (or wiki-builder can correct it on its next merge, which bumps `updated:` to today). The lint run still completes. **Do not "fix" it** by rewriting either date.
-4. **Sources format** (item 4) — PDFs `[[Name.pdf#page=N]]`, with `N` a positive decimal written without leading zeros, markdown no anchor, extension present; stub marker is exactly `["stub"]` and must be the sole source item. An exact repeated `sources:` value is a determinate duplicate: keep one citation. **Do not record a confirmed PDF/summary pair as two sources.** The scanner compares PDF/Markdown filename stems, stripping folders and page anchors and folding case and Unicode normalization, but a same-stem match alone does not prove identity: an independent URL-origin clipping can have the same filename as a PDF summary. `item4/source-identity` is therefore **report-only**. Inspect the markdown note's decoded `sources:` (or legacy `source:`) to establish whether it points to this PDF, and preserve both references when provenance is unavailable, ambiguous or identifies a different source. Only a confirmed PDF/summary pair permits removing the duplicate `.md` reference in favor of the page-anchored PDF; report that evidence and correction. `wiki-builder/scripts/lint_entry.py` reports the same candidate as the warning `4-duplicate-source`, without a deletion payload. Both scripts also check source-list shape and complete wikilink form with a canonical positive PDF page anchor. Anchor-number correctness needs the source and remains out of scope.
-5. **Filename/slug/disambiguation** (item 5) — re-derive slug from `title`; must equal filename. No bare-slug common nouns. Collision probes (slug-equality, µ-variant, singular/plural, hyphenation-collapse, word-order-permutation, and light stem-morphology) across the vault. *(Scanner mirrors the builder's whole-key probes through (f), using the shared plural and stem keys, and reports cross-entry matches as **collision candidates**; an earlier, more specific match such as `plural` takes precedence over `stem-morphology`. Detecting near-duplicates is in scope, but merging them is wiki-refactoring and out of scope — surface them as unresolved candidates. Create-time probe (g), token-superset, is deliberately absent because it would flood a whole-vault scan with legitimate qualified/base pairs.)* **Synonym/near-synonym duplicates** — two entries for the same concept under different names (e.g. *batch learning* vs *offline learning*), or a stub that merely restates a full entry — are a **blind spot the probes cannot catch**; they compare slug *shape* only. While reading entries, if two appear to describe the same thing (a body introducing another entry with "also called"/"also known as", or a stub whose definition matches a full entry's), surface them as **synonym-duplicate candidates** in the report — do not merge (out of scope).
-6. **Type + API surface** (item 6) — no code-identifier entries; named models/systems are `Concept` not `Software`; **zero** API identifiers in non-`Software` entries (the one-signpost allowance was retired 2026-08-16); no Python literals in code form; no fenced code blocks. A `Software` entry may retain identifiers that explain an artifact-wide interface or design convention, but it is not a class/function catalog, parameter/default inventory, version log, or how-to guide; pure usage detail is a prose-scope proposal even though its backticks are permitted mechanically. Review every `Software` entry for this drift by asking what each passage explains, not by counting identifiers, bullets, paragraphs, or words; substantive trimming remains source-backed. The scanner runs the mechanical failure-string scan on non-`Software` entries (In-`<library>` framing; `<lib> provides`; `built/constructed/created with \`…\``; `use \`…\` to`; `` `…` or `…` `` signposts; kwarg/flag docs; Python literals in code form), **flags every backticked identifier (the cap is zero)**, flags **fenced code blocks**, and flags code-identifier titles; the **type-assignment and selective-Software-scope judgments** stay with the executing agent. **See *Coding content in non-Software entries* below for the zero cap and strip-vs-reclassify call; see [wiki-builder's API-surface guide](../../wiki-builder/references/api-surface.md) for the Software selection rule.**
-7. **Description discipline** (item 7) — one concise sentence, ≤110 chars (count it); entity-as-subject in the canonical running form; plain text only — no LaTeX/markdown/wikilinks/backticks (scanner-flagged, since they render literally in Obsidian's Properties panel); starts with a capitalized word unless the running form itself starts lowercase; ends with a period; tense matches the entity's status (deceased/defunct → past). The running form is `title:` in the ordinary case and **only the base term** for a parenthetical-disambiguated title ("A feature is …" is correct under `Feature (machine learning)`; "Feature (machine learning) is …" is not running prose). **Item 7 is not on the stub exemption list and runs on legacy stubs exactly as on full entries** — the stub format carries a real `description:` (wiki-builder's SKILL.md, *Stubs (legacy)*), so an over-long or marked-up stub description is a violation like any other. *(Scanner checks presence, a conservative one-sentence count, the 110-char cap, plain text, initial capitalization, and terminal period on stubs and full entries alike. The sentence counter ignores decimals, versions, initials, common abbreviations, and taxonomic rank abbreviations; a real boundary immediately after one of those may be under-counted and remains part of the autonomous agent review. Its conservative subject check accepts the title/math skeleton in the ordinary case, or only the parenthetical base/math skeleton for a qualified title; an optional leading article and a first-letter-only case difference are permitted. Clear placeholder or different subjects such as "This method" and "Machine learning fairness" under `Fairness` are flagged. More complex grammatical-head and tense judgments remain agent-detected; a stub whose `description:` **key** is missing outright is caught by item 2's required-key check.)*
-8. **Tags validity** (item 8) — key present; when populated, **one or more** values, each a discipline slug from the fixed **27-enum**, `#`-prefixed and double-quoted, in a block-form list; **never a scalar, flow-form list, `[[wikilink]]`, or unquoted `#`** (an unquoted `- #machine-learning` parses as a YAML comment, silently dropping the discipline). The 27 valid slugs are: `mathematics`, `statistics`, `physics`, `chemistry`, `biology`, `earth-science`, `medicine`, `engineering`, `computer-science`, `psychology`, `sociology`, `anthropology`, `economics`, `finance`, `political-science`, `linguistics`, `history`, `philosophy`, `literature`, `law`, `business`, `entrepreneurship`, `education`, `architecture`, `art`, `music`, `machine-learning`. **Tags are not wikilinks** — they reference no note, need no target file in `Wiki/`, and never trigger stub creation (this is the load-bearing change from the old `roots:`, which *was* a wikilink to a self-rooted discipline note; self-rooted discipline notes no longer exist). **Blank `tags:` on a full entry is valid** (no discipline genuinely applies — e.g. an `Event` or `Place` whose disciplinary content is incidental); not a violation, leave it. **A tag written in the wrong case is reported too** (`#Machine-Learning`): the 27 slugs are lowercase, and the case variant folds onto the right discipline everywhere downstream, so nothing broke and nothing reported it — rewrite it to the enum spelling. **Duplicates are counted on the canonical slug, after alias expansion and case folding**, not on the raw one: `#ml` beside `#machine-learning` is one discipline written twice, and counting raw slugs reported no duplicate while the mandated rewrite above went on to create one. **A stub must carry ≥1 tag — blank tags on a stub is a violation** (the disciplinary tie that `roots:` used to carry on stubs now lives in `tags:`). The valid set of disciplines is **hardcoded** — the 27 slugs listed above are the whole of it, not derived from the vault (the scanner holds the same list in its `VALID_TAGS` constant, and its safe abbreviation expansions in `TAG_ALIASES`; both are in `scripts/scan_vault.py`, which Step 0 runs rather than reads). **What the scanner fixes vs flags.** The scanner mechanically flags: scalar or flow-form `tags:`, a wikilink-form tag, a missing-`#` or unquoted tag, an off-enum slug, a known abbreviation/synonym (`#ml`/`#ai`/`#artificial-intelligence` → `#machine-learning`, `#cs` → `#computer-science`, etc.), a duplicated discipline, and a blank-tagged stub. **Apply the unambiguous *format* fixes automatically:** add the `#`, add the quotes, drop a duplicate, expand a safe abbreviation to its enum slug, and convert a wikilink-form tag whose inner slug is a valid enum member to the `#`-tag form. **But the *disciplinary-home* judgment stays with the executing agent and is reported when unresolved, not silently rewritten** — whether the set of tags is *correct* (the "uses" trap: `#mathematics`/`#statistics`/`#computer-science` over-tagged onto an ML method whose home is `#machine-learning`; `#medicine` on a biology entry; a missing genuine second home on a cross-disciplinary entity) is a content call wiki-builder makes from the source and its own knowledge. The linter reads the entry and applies wiki-builder's published calibration where it's clear-cut (ML-adjacent losses/metrics/info-theoretic quantities/statistical algorithms/named RL formalisms → `#machine-learning`, not `#mathematics`/`#statistics`; named historical instances of laws/treaties/regimes → `#history`; markets/trading/investing entities → `#finance`, not `#economics`/`#business`; startup-building material → `#entrepreneurship`, not `#business`), but **surfaces borderline disciplinary calls in the report** (e.g. `Markov chain` → math or ML?) rather than re-homing an entity on a guess. The enum's home is [CONVENTIONS §3](../../../shared/CONVENTIONS.md#3-the-discipline-tag-enum); the "uses" trap is under the `tags` field definition in `wiki-builder/references/writing.md`; the full calibration list is `wiki-builder/references/calibration.md`. **A legacy stub with blank tags is fixed only when existing vault evidence makes one discipline unambiguous** — for example, its definition and the canonical homes of substantive wikilinkers all support the same enum value. A mere majority, one weak wikilinker, or unsupported agent judgment does not authorize a write. When the evidence conflicts or supports several homes, preserve the blank, report the stub violation, and report the supported candidate tags without blocking the run; never invent a disciplinary home merely to satisfy the stub schema.
-9. **Body structure, semantic coherence, paragraph flow, atomic scope, and cross-entry ownership** (item 9) — opens with a prose sentence that states the entity's main claim rather than a lead-in, with no blank line after frontmatter; flat prose by default; body headings are exactly `##`, Sentence case, plain text, and reserved for genuine inherent sub-aspects. The scanner flags a wrong heading level or heading markup; Sentence case and whether the heading earns a section are checked by the executing agent. A `Person`/`Event` opening sentence carries a parenthetical date in the exact form prescribed by `wiki-builder/references/rare-types.md`; the scanner distinguishes a missing parenthetical from a present but malformed one and checks the complete enumerated grammar, including calendar validity for a full date, qualifiers, en dashes, spacing, partial dates, and BCE/CE markers. It does not check whether the dates are factually correct. Normalize a malformed spelling only when the existing parenthetical already makes every value and qualifier unambiguous—for example, replace `1947 to 2020` with `1947–2020`; otherwise preserve it and report the exact source-backed question. A missing date parenthetical is a narrow localized fix: copy it into the opener only when that exact date is already stated elsewhere in the entry; otherwise report the gap for a source-aware wiki-builder pass. On a legacy stub, omit a genuinely unrecoverable date rather than guessing one. There is **no body sentence, paragraph, word, or heading-count target**.
+### 1. Valid YAML
 
-   **Coherence review.** Compare the title and any parenthetical qualifier with the description, opener, equations, and flashcard; then compare those claims with closely linked neighbors. They must refer to the same entity and sense without incompatible scope, conditions, direction, or notation. Do not settle a disagreement by majority or memory. When resolving it would choose or change a fact, record the exact conflicting surfaces and require a source-backed correction. A neighbor conflict may instead expose a wrong link, duplicate, or split candidate, but never authorizes cross-entry redistribution.
+Apply builder [item 1](../../wiki-builder/SKILL.md#quality-checklist) and the
+[frontmatter guide](../../wiki-builder/references/writing.md#1-frontmatter-fields).
+The opening fence is on file line 1; a BOM is tolerated, a leading blank is not.
+Flow lists may be empty only as `[]`; leading, middle, or trailing empty
+elements are invalid. Repair only values the file unambiguously establishes.
 
-   **Flow and scope review.** Give each paragraph a short purpose label, verify that every sentence advances it, and read the openings in sequence. Inspect an ending that introduces a new reader question after the preceding text already forms a complete paragraph. A real causal or contrastive relationship can stay together; a stock connector does not repair an unrelated jump. Bullets must be parallel; sequential steps or dependent items belong in prose. Body links must sit in sentences that state their relationship. Also identify source pedagogy—motivational setup, recap, tutorial sequences, or extended worked walkthroughs—and application catalogs that do not help define, explain, qualify, or distinguish this entity. Judge purpose, not length or list shape. Across closely related entries, look for duplicated worked examples, mechanism walkthroughs, or multi-sentence explanations of a neighbor; lexical similarity alone proves nothing.
+### 2. Field order and quoting
 
-   **Local apply boundary.** These five operations govern **item 9 flow and organization only**: split or merge adjacent prose paragraphs without changing their sentences; move unchanged sentences only between adjacent paragraphs under the same heading; convert an already explicit sequence from bullets to prose; integrate a navigation-only link when adjacent prose already states the relationship; or remove one occurrence of an exact duplicate sentence serving the same local semantic role. Preserve qualifier/antecedent scope, introductions before uses, logical and chronological order, citations, equations, and image/table-plus-caption units. Report each repair. If the operation would change a fact, delete substantive content, choose among conflicting claims, cross a section boundary, redistribute material across entries, or split/merge entries, record a proposal for a separate source-backed request; the cross-entry and entry-refactor cases also need explicit approval. Pure renames follow their separate approval rule. Other determinate body repairs remain governed by their own numbered item. Inherent facets stay with their entity, and thin mentions do not become micro-notes. A legacy stub still opens directly after frontmatter, and a `Person`/`Event` stub still includes the date parenthetical after the bolded subject. *(Scanner checks no-blank-line-after-frontmatter, the prose opener, navigation-only link cues, and the `Person`/`Event` parenthetical-date rule on stubs and full entries. For legacy stubs, it also enforces the one-sentence body and no-image rules. It has no full-entry body-length, semantic-coherence, paragraph-flow, atomicity, pedagogy/catalog, or redundancy check.)*
-10. **Wikilinks** (item 10) — piped `[[slug|Display]]` when display ≠ slug, bare otherwise; first body occurrence only; plain-text labels; no links in captions/table cells; every target resolves; and **no self-links** through the canonical slug, path/`.md`/case variant, or an own alias. The first-occurrence rule is keyed by the **resolved entry**, so path/`.md`/case/Unicode spellings and an unambiguous alias beside the canonical slug count as one destination when the inventory identifies one owner; a file outranks an alias. Several files sharing a basename remain distinct when path-qualified, and repeated bare or ambiguous-alias occurrences receive no removal finding until ownership is resolved. The scanner reports every rendered table-cell link as `item10/table`, including links in GFM rows with fewer cells than the header and therefore no pipe; replace the link markup with its rendered plain text, then treat the row as excluded from ordinary target and duplicate checks. *(Backfilling missing links and pruning is Task 2; item 10 here is the format/resolution check.)* Image embeds and note transclusions (`![[…]]`) are **not** entry links — they target `Sources/Images/`, not `Wiki/`, and are excluded from resolution (their own existence check is item 12's `item12/missing-image`, and it runs only when Step 0 was given `--images`). Wikilink `#section`/`^block` anchors are stripped before resolving. **A link is read out of the entry's prose with every LISTING blanked** — fenced blocks in both spellings (``` and `~~~`; a fence closes only on a run of the **same character at least as long** as its opener, per CommonMark, so a ``` sample shown inside a ```` block stays masked), indented code blocks (4 spaces or a tab), and inline code spans of any backtick-run length (`` `x` ``, ``` ``x`` ```): a `[[…]]` inside one renders as literal text and links nothing, so treating it as a target would prescribe creating a file for a sample of link syntax — and the duplicate count reads the same masked text, since a target shown in a listing and linked once in prose is linked once. Parsed table spans are likewise blanked after their dedicated prohibition check, so cell content never becomes a second item-10 repair. **A list item's indented continuation content is not a listing** and stays checked; so does an indented line with no blank line above it, which continues a paragraph rather than starting a code block. **Four resolving variants have their own keys**: `item10/self` (the target resolves to the current entry), `item10/case` (matches an entry only case- or normalization-insensitively), `item10/unparsed` (names a real file that did not parse), and `item10/alias` (names another entry's unambiguous alias). None is a dangler and none may create a stub. An `item10/ambiguous` destination is report-only: preserve the whole link until the multiple file or alias owners are resolved.
-11. **Related footer** (item 11) — single ` · `-separated line; **every link is piped to the target's canonical title, with no slug-equal exception**, including an all-lowercase canonical title (`[[arxiv|arxiv]]`, never `[[arxiv]]`). Display labels use Sentence case for common nouns and canonical case for proper nouns/acronyms. Convert every bare footer link to the piped canonical-title form.
-12. **Equations/tables format** (item 12 — format, plus the prose-warranted equation clauses) — LaTeX in body not frontmatter; plain numerics unwrapped; literal `$` escaped; image embeds well-formed with italic captions. A composite figure and any lowercase-suffixed panel of it are one exhibit and never coexist in one entry; `item12/panel-composite` reports the pair, but choosing which existing embed to remove requires a source-backed review of whether the entry needs the default composite or the subject-specific panel. *(Scanner flags unescaped literal `$` — a lone `$` or a `$` inside an image URL renders as math — an Obsidian or Markdown image embed with **no italic `*caption*` on the next line**, and a caption containing wikilinks, nested italic, bold, or backticks (captions are plain text — only LaTeX `$…$` is allowed), and the same immediate-caption and plain-text faults on Markdown tables. Fenced and indented code samples are masked before image or table detection, so a listing that demonstrates embed syntax is not prescribed a caption. With `--images`, it also checks that every `![[…]]` image embed **resolves** to a file in `Sources/Images/`, reported as the report-only `item12/missing-image`; that is neither format nor coverage — it asks whether the file an entry already points at exists, not whether every file that exists is pointed at — and `CONVENTIONS.md` §1 assigns it to this skill. **Never delete an embed or its caption for it**: the repair is that the figure was never extracted, or that an approved source rename renamed it (§1a). Auditing source figure selection and justified omissions needs the source — out of scope.)* **Two embed forms are both correct, and neither is converted into the other.** wiki-builder embeds a vault-local image as an Obsidian wikilink with a **bare basename** — `![[Burges_LearningToRank_2010_fig_3.png]]`, *not* an `Sources/Images/`-prefixed path, since Obsidian resolves the basename across the vault (this is also clipping-processor's rule: "no path prefix — Obsidian resolves `Sources/Images/` from the vault root"). For an **external URL from a markdown source's clipping** it mandates standard markdown syntax — `![alt](https://...)` — "since wikilinks don't handle remote URLs" (`wiki-builder/references/media.md`). So a remote `![](http…)` embed is **valid, and rewriting it to `![[…]]` breaks the image and destroys the URL**. The scanner reports it under its own key, `item12/remote-image`, which is **report-only** (class 2 in `SKILL.md`): note it as an image that *could* be localized by re-running clipping-processor on the source clipping, and leave the entry alone. The italic-caption rule below applies to both forms. **Tables and placement have a source-independent review layer too.** Every existing Markdown table has a brief italic caption on the immediately following line, with no intervening blank; the caption follows the same standalone, no-source-number, no-source-attribution, and plain-text-with-LaTeX-only rules as an image caption. Existing images and tables sit inline beside the prose they clarify, never before the opening prose or detached at the end, and multiple exhibits are not grouped as a gallery; one motivating paragraph supports at most one image or table. Record a misplaced exhibit or malformed/missing table caption as an item-12 finding. Moving an exhibit beside its already-identifiable motivating paragraph and repairing a caption's format are localized fixes; when the intended placement or caption content is ambiguous, propose the move instead of guessing. Whether the source warranted a table or image, whether table values and surviving rows/columns are source-faithful, and which source exhibits should have been selected still require the source and remain out of scope. **Three equation clauses extend item 12. They remain agent-reviewed and are owned by `wiki-builder/references/equations.md`, which carries the full rules; the scanner only adds the narrow `item12/equation-coverage-candidate` safety net for an affirmative square-root-of-variance definition in an entry with no display block.** *Coverage:* a body that **states a calculation in words** — every operand and operation present in the note's own prose — and typesets no equation for it gets the equation **inserted as a `$$…$$` display block**, built strictly from what that prose states, in vault notation, placed immediately after the prose that states it (the corpus cases: `Standardization (machine learning)` walking through "subtract the mean, then divide by the standard deviation" → $x' = (x - \mu)/\sigma$, written as `\frac` in the block; and `Standard deviation` saying it "is the square root of variance" → $\sigma = \sqrt{\operatorname{Var}(X)}$ after binding $X$ and its variance). The latter relationship does not choose a population or sample denominator, so never expand $\operatorname{Var}(X)$ unless the prose supplies that choice. The note's own prose is the whole warrant: **never insert math the prose does not state** — a body that only gestures ("a correction factor is applied") is not a coverage violation, and a gap that looks like a real omission is a note improvement for `wiki-notes-suggestions.md`, not a fix. *Form:* a **defining equation carried inline** (`$…$` mid-sentence — the corpus case: `Min-max scaling` carrying `$(x - \min)/(\max - \min)$` in its opening paragraph) is converted to a `$$…$$` display block with blank lines around it, `\frac` replacing inline slashes; inline math that is *reference* rather than definition ($\sigma$, $p \ge 1$, $O(n \log n)$) is correct and stays. *Notation:* symbols deviating from the canonical table (`equations.md` §3) — or from the symbol a linked entry already uses for the same quantity — are renamed to conform, **and every prose reference to a renamed symbol updates in the same edit** (never leave prose defining $N$ above an equation that says $m$); the field-over-table carve-out (`equations.md` §4) applies, so a non-ML discipline's own standard notation is not a violation, and a genuinely ambiguous call is left unchanged and reported with the missing evidence rather than guessed. Per *Dates*, none of these edits touches `created:`, `updated:`, or `read:` — the inserted equation included; and because an inserted equation is body content the user has not seen, every insertion into an entry whose `read:` is `true` is also named under *Notes for the user* (slug plus the equation) so the user may clear their own checkbox later — leaving the field untouched is the Dates policy, not a claim the note is still fully read (`CONVENTIONS.md` §2d). The run report (Task 1, grouped under item 12) itemizes every insertion, conversion, and renaming. These are targeted fixes within the *Fix discipline*: the equation block and the sentences that bind its symbols, nothing else.
-13. **Body integrity** (item 13, structure only) — no stacked-body artifacts: one bold-title marker, no duplicated opening sentences, no stray YAML keys, `---` fences, or standalone bare-digit lines in explanatory prose. *(Outside fenced code, the scanner flags any schema key — `title:`, `sources:`, `tags:`, … — stranded in the body, every stray `---` except the one canonical Flashcards separator, and standalone digit lines. A `Software` entry legitimately shows `type:`/`tags:` in a listing, and "remove it" applied to a line of the entry's own example is the one destructive fix in this scan and was always a false positive. The one-title-marker and no-duplicated-opening checks stay judgment. Source-merge integrity itself is N/A.)*
-14. **Self-containment** (item 14) — none of the source-meta blacklist (*the paper / chapter / book / article / author(s) / source*, *as mentioned/shown above/below*, …); no author-or-book framing. Re-subject the sentence on the entity or name people directly only when the sentence itself makes that replacement unambiguous and the claim, attribution, and certainty stay unchanged. Otherwise preserve it and propose a source-backed correction. *(The named-work exception is two-sided: "the GPT-3 paper" and "the authors of SGDR" are both allowed — the attribution lands on an entity the reader can look up — while bare "the paper" / "the authors" are not. The scanner masks listings, excludes the named-work `authors of …` shape and `source code`, and matches the complete exact blacklist without treating bare words such as “later” or “above” as violations.)*
-16. **Bold/italic discipline** (item 16) — only the three bold patterns (title-on-first-appearance, bullet term-anchor, Related label); no bolded paragraph-leads, no vocabulary-introduction bold (→ italic or wikilink); and no emphasis wrapped around a standalone math span, code span, or wikilink. Literal file extensions and the known bracket special tokens `[CLS]`, `[MASK]`, `[SEP]`, and `[IMG]` use backticks in prose. The scanner and builder lint share the exact bracket-token detector and a conservative common-extension list; code/listings, math, link/embed syntax, tables, headings, captions, URLs, domains, decimals, and extensions attached to filenames are excluded. An uncommon literal extension outside the shared list remains part of the autonomous agent review. Four title-format combinations are required rather than stripped: a title containing a symbol keeps the symbol inside the bold title and uses math-mode bold (`**$\boldsymbol{k}$-nearest neighbors**`); a `Work` entry's own title uses bold+italic on first appearance (`***Hamlet***`); an `Organism` entry whose title is an evidence-backed scientific binomial or unranked lowercase trinomial likewise uses bold+italic (`***Mus musculus***`, `***Canis lupus familiaris***`); and a suffix-bearing Organism title bolds the whole title while italicizing only the scientific taxon (`***E. coli* K-12**`, later `*E. coli* K-12`). Strain/isolate/serovar/subtype suffixes stay plain. Later Work self-references are plain, whereas later scientific-taxon mentions remain italic. A common-name Organism title stays bold-only, and capitalization/two-word shape alone does not establish a scientific name. *(The scanner enforces evidence-backed binomial/trinomial cores and plain suffixes. For taxon-shaped titles without independent evidence, rank-marked names, and genus-only titles, the choice is source-dependent. In a routine source-independent lint, record the exact source-backed verification proposal and leave the typography unchanged; once the visible title text matches, the scanner accepts either plausible emphasis and intentionally emits no recurring problem key.)* The body opener matches `title` under those roles. *(Scanner parses ordinary, triple-emphasis, and mixed taxon/suffix title spans and flags **every** other bold span in the body — not just the opener — so inline vocabulary bolds like `**weight sharing**` are caught; the fix choice (italic vs wikilink) stays with the executing agent. The **bullet term-anchor** pattern admits a short parenthetical or bracketed qualifier between the bolded anchor and the delimiter — `- **True positives** (TP) — …` is wiki-builder's own canonical definition bullet and must not be flagged; a bullet whose bold is followed by ordinary prose with no delimiter still is. The opener-vs-title check compares **skeletons**: it strips LaTeX wrappers from the bold (`$…$`, `\boldsymbol{}`, `\mathbf{}`, `\text{}`) and a trailing disambiguation parenthetical from the title, so the prescribed math opener `**$\boldsymbol{k}$-nearest neighbors**` and the base-term opener `**Feature**` under title `Feature (machine learning)` both pass — case-insensitive on the first letter. The full qualified form `**Feature (machine learning)**` does not pass in running prose. A full entry whose opener carries **no bold span at all** is flagged too. It also flags emphasis — bold *or* italic — wrapping a wikilink, math span, or inline code, e.g. `*[[x]]*` or `**$k$**`: drop the emphasis because the inner syntax already supplies the styling. Caption lines are skipped here — item 12 owns their content — and every parsed Markdown table row is skipped because cell emphasis is permitted; the shared table spans include outer-pipe-free headers and pipe-less short rows.)*
-17. **Aliases: same entity, complete against the body** (item 17) — every alias is an alternate surface form of *this* subject, not a related/broader/narrower/successor entity; **and every alternative name the entry's own body introduces for its subject is present in `aliases:`** — the italicized *also called X* synonym, the acronym or expansion bound in the opener's parenthetical, and a direct italic scientific abbreviation bound to an `Organism` title (`***Escherichia coli*** (*E. coli*)`) — in slug form, minus wiki-builder's three standing exclusions: a form that slugs identically to the filename; a cross-domain bare term; and an organism's ordinary common name explicitly bound to that Organism's canonical title in the description or opening sentence when unsafe as a global alias. The common-name form remains a valid display label under item 18. The missing-alias half is otherwise a **fix in place**: the body itself is the evidence, so add the slugged alias — after the same-entity judgment and the item-18 cross-entry collision check. A semantic-invalid existing alias is the opposite direction and is **proposal-only** during routine lint: identify its likely canonical owner and inbound alias-target links, then follow the approved refactor under *Fix discipline* rather than deleting it as list cleanup. *(The scanner and wiki-builder's single-entry linter use the same shared introduced-alias detector and emit candidates under `item17/alias-candidate` / `17-alias-completeness`; semantic ownership remains judgment.)*
-18. **Alias form, collisions + claims** (item 18) — every alias is a nonempty canonical slug form and none slugs to the entry's filename; no alias string shared across two entries; no same alias listed twice within one entry; no alias that differs from the filename or another alias only by singular/plural normalization; no abbreviation an established different concept owns; no broader-concept slug as an alias; wikilink display-label sanity (the label genuinely names the target); display labels are **plain text** — markup renders literally. *(Scanner checks empty items, own-slug aliases, singular/plural-redundant aliases, slug form, within/cross-entry collisions, display-label markup outside listings/tables, exact competing ownership, and a deliberately loose display-label↔target token floor. A real file outranks an alias and ambiguous ownership stays silent. The competing-owner result is review-only; never auto-retarget. The token floor accepts subset/superset forms to preserve qualified bare-term links, inflections, and qualifier-prefixed displays, so semantic near-misses still require reading. An Organism common name is accepted only when the target description or opener explicitly binds it. Do not tighten this to exact matching or add bare cross-domain terms as aliases merely to silence it.)*
-19. **Flashcards** (item 19) — `## Flashcards` present on every full entry (none on stubs), under a `---` separator line on its own, with a blank line after the separator and another after the heading. The heading is matched as a **whole line**, tolerantly — ≤3 leading spaces, `##` or `###`, any run of spaces/tabs before the word, i.e. every spelling Obsidian renders as a heading: a tolerated variant is a **present** section with its own fix-the-heading finding (rewrite it to exactly `## Flashcards` in place; never add a second section beside the one Obsidian already shows), and a mid-line mention in prose neither starts nor satisfies it. Section markers — this heading and the `**Related:**` line — are located on **fenced-stripped** text, so a listing that *shows* one is a sample, not the section. The scanner now parses the section into individual cards (split on blank lines) and checks **each** card mechanically: it is **three contiguous lines** (definition / `??` / term — a blank line between them breaks the card); **line 2 is exactly `??`** (or the user's `!!`, preserved, never written or converted); **line 1 is one grammatically self-contained sentence, starts with a capitalized word unless it begins with a symbol/equation, ends with a period, and carries no wikilinks, bold, italic, or backticks** (LaTeX `$…$` is the only inline markup allowed); **line 1 is answer-leak-free** — a case-insensitive substring scan (inside and outside math) for **that card's own answer**: its line-3 term plus any parenthetical expansion, and — only when the card's term *is* the entry title, compared with a trailing discipline-disambiguation parenthetical stripped so a disambiguated entry's base-term primary card qualifies (the primary card) — the entry's aliases too, so a *secondary* card may name the primary entity without a false leak; every candidate is tested in both its hyphenated and de-hyphenated spellings (a "Fine-tuning" answer leaks as "fine tuning" too); a **discipline-disambiguation parenthetical** (`Model (machine learning)` → `machine learning`) is **not** treated as a leakable token (it tags the domain, not the recall answer, so "a machine learning system" in line 1 is context, not a giveaway), while an established-counterpart parenthetical still is; for ≤4-char tokens the scan uses a word boundary (so "ion" in "region" isn't a false leak); the **LHS-strip convention** keeps an answer-leaking equation LHS out of line 1; and **line 3 (the term) is plain text** — no markup at all, including LaTeX. For primary line 3, the scanner enforces the exact canonical title/base/math-skeleton term and any qualifying counterpart explicitly established by the opener and present in `aliases:`; it rejects an unestablished parenthetical. The three qualifying classes are an acronym/full-form pair, a direct `(short for *…*)` expansion, and a direct italic scientific abbreviation such as `*E. coli*`. It does **not** infer that a qualifying alias should have been bound in the opener, so the executing agent checks that omission. Line 4+ (review-skill metadata) is preserved verbatim, never audited. **Beyond this mechanical floor, every definition also gets a bidirectional-clarity review — see *Flashcard definition review* in `references/flashcards.md`.** **And the section holds exactly one card** — the entry's own definition card. The canonical writing rule remains: line 3 is `title:` verbatim, or the base term for a parenthetical-disambiguated title, plus that opener-established, alias-bound counterpart in parentheses when one exists. A synonym's abbreviation is not the title's counterpart and never appears there (`Precision` stays `Precision` even if `ppv` aliases *positive predictive value*). More than one card is flagged mechanically; after the semantic opener/alias check, the **determinate fix** is to keep the card whose line 3 matches that complete primary-answer contract, delete the rest, and preserve the kept card's line 4+ verbatim. Every removed card is quoted **verbatim in the run report**, and when a removed card's term is a real entity a cited source supports, the report proposes a **split** — a new entry for that term — rather than silent discard (the corpus case: a *concept drift* card merged onto *Data drift* with no source support in either cited chapter; deleted, not split). The secondary-card leak accommodation above survives only for scanning legacy multi-card files before this fix lands.
+Apply the canonical [fields and quoting](../../wiki-builder/references/writing.md#1-frontmatter-fields).
+Schema order is `title`, `type`, `aliases`, `sources`, `created`, `updated`, `description`, `tags`, `parents`, `read`.
+Only `aliases` is optional; the other nine keys are required. Recover a
+missing or valueless title only from one unambiguous canonical name evidenced
+by the entry, because title-dependent checks otherwise cannot run.
 
-**The checklist ends at 19.** There is no item 20 — the old *Importance present + calibrated* item went away with the `importance:` field itself, and because it was the **last** item on wiki-builder's checklist its removal leaves **no gap to mirror**: wiki-builder's items are now 1–19, and so are these. Nothing was renumbered. A populated `importance:` on a legacy entry is not a finding of any item (see item 2).
+Linter-specific routing:
 
-### Proposal-only or source-dependent review
+- Normalize a type to one of the 15 enum values only when the body makes the
+  semantic type clear. Otherwise preserve and report.
+- Normalize empty `parents:` to `parents: []`. For a populated scalar, flow
+  list, duplicate, or path/anchor/display/`.md` spelling, preserve every usable
+  target and write the canonical block list. Re-derive a missing, ambiguous,
+  stub, or unparsed relationship only in Task 3.
+- A missing, null, or unrecognizable `read:` has no recoverable answer: report
+  it and do not write one. A quoted boolean, YAML `yes`/`no`, or `0`/`1`
+  carries a recognizable answer, so normalize only its representation to the
+  equivalent bare boolean.
+- Obsidian-owned appearance and publish properties are valid user state:
+  report and preserve them. Preserve a populated legacy `importance:` without
+  treating it as required or unexpected.
+- A retired `roots:` with no `tags:` is an evidence-preserving roots-to-tags
+  migration: convert only recognizable discipline-root targets to enum tags,
+  and report any unresolved target. When `tags:` already exists, remove only
+  the stale key. Never use either case to invent a discipline.
 
-- **Item 12 figure-selection audit** — deciding which source figures materially clarify an entry, and accounting for the rest, requires the source's `Sources/Images/` listing and source text (wiki-builder's `references/media.md#selection`). The linter checks figure *format*, not source figure *selection*. An unused file alone is not a missing-content finding. (It does check that each embed **resolves**, given `--images` — `item12/missing-image`. That is the opposite direction: entry → file, not file → entry, and it needs no source.) Equation *coverage* is the contrasting case and **is** in scope: the calculation lives in the note's own prose, so item 12's equation clauses run without the source — see item 12 above.
-- **Item 12 source fidelity for existing media and tables** — whether the source warranted an exhibit, whether a table's values and retained rows/columns match it, and whether a caption accurately characterizes source content require the source. The linter still checks the visible caption form and source-independent placement rules above; it reports fidelity questions rather than changing content from memory.
-- **Item 15 example discipline** — identify an unnecessary, tangential, repetitive, or overly long example while reading, but never infer it from sentence or note length. Verifying source support or values and trimming substantive example content need a separate source-backed request, so record a specific proposal in `wiki-notes-suggestions.md`. Source pedagogy, tutorial walkthroughs, and application catalogs belong to item 9; `Software` API catalogs belong to item 6.
-- **Item 4 page-anchor correctness** — the format is checked; whether `#page=N` points at the right page is not.
-- **Item 3 `updated = merge date`** — not the linter's to set (see Dates).
+The `parents:` and `read:` empty cases intentionally differ: `[]` re-spells an
+already empty list, while `false` would supply an answer the review field does
+not contain.
 
-### Fix discipline
+### 3. Dates
 
-- **Targeted, localized fixes only.** Most format and schema fixes have a single determinate output: unbold a span, repair a tag's format, normalize an empty `parents:` or known `read:` boolean, or apply item 12's warranted equation clauses. A few semantic metadata calls, such as tag re-homing or `Software` reclassification, are applied only when unambiguous and otherwise reported. Item 9 flow/organization uses only its five guarded operations; other determinate body repairs follow their own item-specific rule. Item 6 may delete material whose whole function is a forbidden implementation signpost, recipe, identifier catalog, or code listing from a non-`Software` entry, while preserving any conceptual claim around it. None grants general rewriting permission. Fact changes, conflict resolution, and content selection beyond an enumerated repair need a separate source-backed request. Splits, merges, deletion of an existing entry, and cross-entry redistribution need that request plus explicit approval. A pure rename or semantic-invalid-alias removal needs explicit approval and a complete reference rewrite, but no new factual source when identity is already established. Flashcard definitions follow their separate review-state procedure.
-- **A retitle/re-slug is a rename — propose it, never apply it automatically.** A rename has **vault-wide reach**: the file is renamed *and* every wikilink pointing at the old slug must be rewritten across the vault — entry bodies, entry frontmatter (`parents:`), and the discipline MOC files. Because a wrong call or an unnoticed collision is a vault-wide edit to undo, the linter does **not** perform renames as part of the QC pass — not even ones that look unambiguous. Instead it **surfaces every rename candidate for approval** (Step 0's scanner lists them: `old-slug → new-slug`, the **count of inbound wikilinks** that would be rewritten, and a **collision flag** if the target file already exists), with the reason (a stale/variant filename vs. a title correction). The rest of the run proceeds using the **current** filenames as slugs (correct until a rename is approved). Apply a rename **only after the user explicitly approves it**, and then do it **fully and completely**: rename the file and rewrite every `[[old-slug...]]` → `[[new-slug...]]` reference **everywhere it occurs — entry bodies, entry frontmatter (`parents:`), and the discipline MOC files in the vault root** — then update the surface map. Because the run proceeded on the old slug, any MOC and `parents:` generated earlier this run still carry it, so this rewrite must reach the **vault-root MOCs** (not just `Wiki/`) — that is what brings them current. A candidate whose target file already exists is **never** renamed into — flag both entries as a likely duplicate or disambiguation instead (see *Edge cases*).
-- **A semantic-invalid alias removal is an approved refactor, not list cleanup.** First identify the canonical owner and search every entry-link surface that can resolve through the alias: Wiki body prose and Related footers, entry frontmatter such as `parents:`, and root MOCs. Rewrite those inbound links to the owner's canonical slug while preserving display labels, headings, and block anchors. Do not rewrite `sources:`, image embeds, or suggestion-log examples on a text match. Re-scan to verify that no ambiguous owner or inbound alias-target link remains; only then delete the alias. Report the proposal and any approved application separately.
-- **Valid blanks are not violations.** Blank `tags:` on a full entry is an intended state; never "fill it in" as a QC fix. (Blank `tags:` on a *stub*, however, **is** a violation — stubs need ≥1 tag; see item 8. And the hierarchy step *may* populate `parents:`, which is a Task 3 action, not a QC fix.) An **empty `parents:`** is an intended state too — `[]` is simply how it is spelled, so normalizing a bare `parents:` corrects the spelling and leaves the value empty. A **missing, valueless, or unrecognizable `read:`** is the opposite shape: a real violation the linter deliberately leaves standing, because the only value it could write is one that overwrites the user's own (item 2). The two look alike and are not: `parents: []` says nothing new, `read: false` says something the entry never said.
+Require valid `YYYY-MM-DD` dates with `created <= updated`, as builder
+[item 3](../../wiki-builder/SKILL.md#quality-checklist) defines. The linter
+writes neither field. Report invalid values, impossible ordering, and any
+history-dependent question; do not guess which date is wrong or try to make
+`updated:` equal a presumed merge date.
 
-### Coding content in non-Software entries (item 6)
+### 4. Sources
 
-wiki-builder's rule is **type-based**: API surface — class/method/kwarg/attribute/module names, command syntax, code listings — is mechanically permitted only in `Software` entries, then retained selectively when it explains the artifact's stable, cross-cutting interface or design. Every other type gets **none — the cap is zero**: no signposts (the pre-2026-08-16 one-name-only allowance is retired), **no backticked identifiers at all**, no kwarg/default/calling-convention documentation, no standalone API paragraph, no fenced code blocks, and no language literals in code form (`True`/`False`/`None`). A plain library name in prose, or a `[[library]]` wikilink, stays fine — names are not identifiers. The scanner flags the how-to framing strings, **every backticked identifier**, and **fenced code blocks** in non-Software entries. It deliberately exempts Software mechanically. In a source-free maintenance run, review `Software` prose for per-algorithm catalogs, parameter/default inventories, version logs, and recipes; retain material that explains an artifact-wide contract or design even when several identifiers are needed, and flag lookup or usage material even when it is short. Trimming a `Software` entry's permitted but over-selective content is a source-backed prose-scope proposal.
+Use the canonical [source format](../../wiki-builder/references/writing.md#sources).
+Remove an exact repeated list item. A same-stem PDF/Markdown pair remains
+`item4/source-identity` until decoded `sources:` or legacy `source:` in the
+Markdown note proves that it summarizes that PDF. Only then keep the anchored
+PDF citation, remove the duplicate Markdown citation, and report the evidence.
+Preserve an independent clipping and every uncertain pair. The linter checks
+page-anchor form; the physical page's factual correctness needs the source.
 
-**Two fixes, by why the code is there** — this is the type-assignment judgment item 6 leaves to the executing agent:
+### 5. Filename, collision, and disambiguation
 
-- **Genuinely conceptual entry, stray implementation detail** → remove a parenthetical or sentence whose entire function is to name an API path; delete an implementation-only recipe, identifier catalog, or fenced code block; remove backticks only from an otherwise permitted plain library name or non-identifier token; remove or replace an API identifier under the zero-cap rule rather than leaving it as bare prose; prose-ify a language literal (`True` → `true`); or replace an API name with an already-stated plain concept/software relationship. Preserve any conceptual claim that shares the sentence, and do not reflow surrounding prose. If separating the implementation detail would require deciding which factual content to keep, report a source-backed proposal instead.
-- **Actually a software artifact, mistyped** → **reclassify `type:` to `Software`** when the artifact identity is unambiguous; that determinate metadata correction removes the non-Software mechanical cap. Then review the body against the Software selection gate. A code-as-product artifact the user installs or runs (`PyTorch`, `scikit-learn`, `Jupyter`) is `Software`; an algorithmic or architectural contribution other entries cite (`BERT`, `AlphaGo`, `ResNet`) is `Concept` — *even when* its prose is code-heavy, so a named model or research system gets the item 6 cleanup, not the reclassification. Existing `Software` catalogs, defaults, and recipes are reported as selective-scope proposals and trimmed only during a source-backed editing pass.
+Apply the canonical [naming rules](../../wiki-builder/references/writing.md#3-wikilinks-and-naming).
+A title/filename mismatch is a rename proposal, never an automatic rewrite.
+Report collision-probe matches as candidates; do not merge them. Whole-vault
+maintenance uses slug equality, micro-sign normalization, singular/plural,
+hyphen-collapse, word-order, and light stem morphology. When several probes
+flag the same pair, report only the most specific probe label; no probe chooses
+an entry owner. The linter deliberately omits the noisy create-time
+token-superset probe. While reading, also report semantic synonym duplicates
+that shape probes cannot find, including a stub that merely restates a full
+entry.
 
-When it's genuinely unclear which case applies, **flag the entry** rather than guess — gutting an entry or flipping its type are both consequential. A title that is itself a code identifier (`SGDClassifier`, `cross_val_predict`) is the separate, more drastic case: the entry should be the underlying concept (`Stochastic gradient descent`, `Cross-validation`), which is a rename/restructure — propose it for approval even when unambiguous, and leave the existing file and references intact until approved (the same rule as every rename).
+### 6. Type and API surface
+
+Apply [API surface](../../wiki-builder/references/api-surface.md) in full.
+Non-`Software` entries permit no API identifiers, fenced code, Python literals
+in code form, implementation signposts, recipes, or identifier catalogs.
+`Software` may retain identifiers only when they explain an artifact-wide
+interface or design convention; counting tokens cannot establish that scope.
+Use [the strip-or-reclassify procedure](#coding-content-in-non-software-entries-item-6)
+for determinate non-`Software` findings. Source-backed selection is required to
+trim substantive prose from an existing `Software` entry.
+
+### 7. Description
+
+Apply the canonical [description rule](../../wiki-builder/references/writing.md#description)
+to full entries and legacy stubs. Besides the scanner's form checks, review the
+grammatical subject, current-status tense, and mathematical completeness. A
+plain-language mathematical definition must retain every operation that
+determines the quantity. Fix only when the note establishes the corrected
+wording; otherwise report a source-backed proposal.
+
+### 8. Tags
+
+Use the shared discipline enum plus the canonical [tag rule](../../wiki-builder/references/writing.md#tags)
+and [calibration](../../wiki-builder/references/calibration.md). Apply
+unambiguous format fixes: block-list form, `#`, double quotes, exact enum case,
+safe abbreviation expansion, wikilink-to-tag conversion for a known enum
+member, and duplicate removal after canonicalization.
+
+Semantic disciplinary ownership remains a judgment. Re-home or add a tag only
+when the entry and vault make the canonical home unambiguous; otherwise report
+the competing candidates. Blank `tags:` is valid on a full entry with no home.
+A legacy stub must have at least one tag, but fill a blank only from strong,
+consistent existing-vault evidence, never a mere majority or weak neighbor.
+
+### 9. Body structure, coherence, flow, and scope
+
+Apply builder [item 9](../../wiki-builder/SKILL.md#quality-checklist), the
+[body guide](../../wiki-builder/references/writing.md#2-the-body), and the
+[Person/Event date forms](../../wiki-builder/references/rare-types.md#dates-in-the-opener-person-and-event).
+There is no body sentence, paragraph, word, or heading-count target.
+
+**Coherence review.** Compare the title and qualifier with the description,
+opener, equations, flashcard, and close neighbors. They must identify the same
+entity and sense without incompatible scope, conditions, direction, or
+notation. A conflict that requires choosing or changing a fact is a
+source-backed proposal. A neighbor conflict may expose a wrong link, duplicate,
+or split candidate; it does not authorize cross-entry redistribution.
+
+**Flow and ownership review.** Give each paragraph a short purpose label,
+check that every sentence advances it, and read the openings in sequence.
+Inspect endings that open a new reader question after the paragraph has
+finished its job. Keep real causal and contrastive bridges; a stock connector
+does not repair a jump. Bullets are parallel, not sequential. Body links sit in
+sentences that state their relationships. Report source/tutorial scaffolding
+and application catalogs only when they do not serve the entry, and report
+duplicated explanatory treatments by conceptual owner; length, list shape, or
+lexical similarity alone proves nothing.
+
+**Local apply boundary.** Item 9 permits exactly five organizational repairs:
+
+1. Split or merge adjacent prose paragraphs without changing their sentences.
+2. Move unchanged sentences only between adjacent paragraphs under one heading.
+3. Convert an already explicit sequence from bullets to prose.
+4. Integrate a navigation-only link when adjacent prose already states the
+   relationship.
+5. Within one entry, remove one exact duplicate sentence serving the same local
+   semantic role.
+
+Preserve qualifier and antecedent scope, introductions before uses, logical and
+chronological order, citations, equations, and image/table-plus-caption units.
+Report every repair. If the change crosses a section, changes a fact, removes
+substantive content, chooses between claims, or redistributes material across
+entries, preserve it and propose a source-backed follow-up. Entry splits,
+merges, and redistribution also require authorization unless the user's current
+request already supplies it. Pure renames keep their separate approval rule.
+
+For a missing `Person`/`Event` opener date, copy the exact date only when it is
+already present elsewhere in the entry. Normalize an existing malformed date
+only when all values and qualifiers are unambiguous. Otherwise report it. A
+stub's one-sentence and no-image violations are report-only because deleting
+content could destroy substantive work.
+
+### 10. Wikilinks
+
+Apply the canonical [link rules](../../wiki-builder/references/writing.md#link-form).
+Judge first occurrence by resolved entry, not raw spelling; a real file outranks
+an alias, while ambiguous basename or alias ownership stays unresolved. In
+Task 1, canonicalize unambiguous case, Unicode, path, `.md`, or alias variants
+without changing display text or anchors. Replace table-cell links with visible
+plain text. Preserve unparsed and ambiguous targets.
+
+Self-links, duplicate resolving links, and dangling targets use Task 2's
+[link protocol](link-hygiene.md). Preserve genuine local section/block
+navigation. The scanner masks listings and parsed tables and excludes embeds;
+consult its [coverage contract](scanner.md#deterministic-scanner-and-autonomous-semantic-pass)
+before disputing a finding or treating literal sample syntax as a link.
+
+### 11. Related footer
+
+Use the canonical [Related footer](../../wiki-builder/references/writing.md#the-related-footer).
+Keep one ` · `-separated line and pipe every target to its canonical title,
+with no slug-equal exception, including all-lowercase titles. Converting a bare
+footer link to that form is determinate; inherited excess is reported rather
+than pruned.
+
+### 12. Equations, images, and tables
+
+The equation clauses are owned by `wiki-builder/references/equations.md`; apply
+that [canonical policy](../../wiki-builder/references/equations.md) rather than
+reconstructing it from scanner output. Apply the separate canonical
+[media rules](../../wiki-builder/references/media.md) to existing exhibits.
+The adjacent [body math typography](../../wiki-builder/references/writing.md#prose-principles)
+still governs plain quantities and escaped literal dollars.
+
+**Media and table format.** Preserve both valid embed classes: a local image is
+an Obsidian embed by bare basename, while an external clipping image may remain
+standard Markdown with its URL. A remote embed is report-only; converting its
+syntax would break it. Report that reprocessing the source clipping with
+`clipping-processor` can localize it. Every existing image or Markdown table has a brief
+plain-text italic caption immediately below it; inline LaTeX is the only
+caption markup. Keep exhibits beside the prose they clarify, never before the
+opener, detached at the end, or grouped as a gallery; one motivating paragraph
+supports at most one image or table. A clear local placement or format repair
+is allowed. Ambiguous caption content or placement is proposed.
+
+Never delete a missing embed or caption: repair belongs to extraction or an
+approved source rename. Preserve a composite and lowercase-suffixed panel until
+source-backed review decides whether the entry needs the default composite or
+the panel-specific view. Figure selection, source fidelity, table values, and
+retained rows or columns remain source-dependent.
+
+**Equation coverage.** The scanner emits a conservative
+`item12/equation-coverage-candidate`; inspect it autonomously. When the note's
+own prose completely states every operand and operation of a local named
+quantity or calculation, insert the canonical `$$...$$` equation immediately
+after that prose. Never infer a population/sample denominator or any operation
+the note does not supply. Keep restricted-case conditions in prose, and do not
+turn a case-specific formula into the general concept's definition.
+
+Every display preserves its mathematical domain and operational conditions:
+positive sample/node/ensemble counts behind averages, nonzero denominators,
+valid logarithm/root domains, integer and hyperparameter ranges, probability
+normalization and zero-support conventions, training-fitted statistics and
+their reuse, threshold equality, and tie or undefined-boundary handling.
+Exact definitions remain distinct from numerical approximations such as clipping or
+tolerance rules. If the note lacks an operational convention, state the
+mathematical limitation and leave the implementation choice explicit.
+
+**Equation form and notation.** Promote a defining inline equation to its own
+display block; keep inline symbol references, bounds, complexity, and worked
+parameter choices inline. Bind every symbol nearby. Normalize symbols to the
+canonical table or a linked entry's notation for the same quantity, updating
+every prose reference in the same edit. Preserve field-specific standard
+notation and report genuinely ambiguous choices.
+
+Per [Dates](../SKILL.md#dates), equation fixes write neither `created:`,
+`updated:`, nor `read:`. An insertion into an entry whose `read:` is `true` is
+named under *Notes for the user* with the slug and equation, so the user may
+decide whether to clear their checkbox. Group every insertion, promotion, and
+notation change under item 12 in the run report.
+
+### 13. Merge integrity
+
+In a source-independent run, apply only the structural floor of builder
+[item 13](../../wiki-builder/SKILL.md#quality-checklist): one opener and no
+stacked-body scars such as duplicated openings, stray frontmatter keys,
+unexpected `---` fences, or standalone digit lines. Listings are excluded; a
+schema-shaped line inside a `Software` example is not a repair target. Actual
+source-merge integrity is not applicable without a merge.
+
+### 14. Self-containment
+
+Apply [prose principle 5](../../wiki-builder/references/writing.md#prose-principles).
+Re-subject source-meta prose on the entity, or name people directly, only when
+the surrounding sentence makes the replacement unambiguous without changing
+claim, attribution, or certainty. Otherwise preserve and propose a
+source-backed correction. Preserve the named-work exception: “the GPT-3 paper”
+and “the authors of SGDR” identify wiki entities; bare “the paper” and “the
+authors” do not.
+
+### 15. Example discipline
+
+Apply builder [item 15](../../wiki-builder/SKILL.md#quality-checklist) during
+semantic review. Identify an unnecessary, tangential, repetitive, or overly
+long example by purpose, never by sentence or note length. Trimming substantive
+example content or verifying its values needs the source, so record a specific
+proposal in `wiki-notes-suggestions.md`. Source/tutorial scaffolding and
+application catalogs that do not serve the entry belong to item 9; `Software`
+API catalogs belong to item 6.
+
+### 16. Bold, italic, and code typography
+
+Apply the canonical [emphasis rules](../../wiki-builder/references/flashcards-and-emphasis.md#5-bold-and-italic).
+Fix unenumerated bold, emphasis wrapped around links/math/code, and missing
+backticks on literal extensions or `[CLS]`/`[MASK]`/`[SEP]`/`[IMG]` tokens.
+The scanner recognizes a conservative extension list; review uncommon literal
+extensions too. A pure inline-math title may use outer bold in its exact first
+opener slot (`**$R^{+}$**`); the same wrapping anywhere else remains misuse.
+Preserve the exact special opener forms for symbols, `Work` titles, and
+evidence-backed scientific `Organism` names, including plain strain/isolate/
+serovar/subtype suffixes.
+
+An ambiguous taxon-shaped, rank-marked, or genus-only title needs the source.
+Record that verification proposal and leave plausible typography unchanged.
+Once visible title text matches, either plausible emphasis may remain without
+creating a recurring finding.
+
+### 17. Alias identity and completeness
+
+Use the canonical [alias rule](../../wiki-builder/references/writing.md#aliases).
+The note body itself can establish a missing alternate name for its subject;
+add its slug only after the same-entity, own-slug, cross-domain, Organism
+common-name, and whole-vault collision gates. A semantic-invalid existing alias
+is not list cleanup: preserve it during routine lint and propose the canonical
+owner plus complete inbound rewrite.
+
+### 18. Alias form, collisions, and display labels
+
+Apply builder [item 18](../../wiki-builder/SKILL.md#quality-checklist) and the
+canonical [display-label rule](../../wiki-builder/references/writing.md#display-label-casing).
+Normalize determinate alias form and duplicates; report cross-entry ownership
+conflicts. Never auto-retarget a display whose exact surface belongs to another
+entry. Preserve the three deliberate display-label carve-outs: a
+context-resolved cross-domain bare term, a natural plural or verb inflection,
+and an explicitly bound Organism common name. Do not create an ambiguous alias
+merely to silence a display-label finding.
+
+### 19. Flashcards
+
+Apply the canonical [card format](../../wiki-builder/references/flashcards-and-emphasis.md#4-flashcards)
+and the linter's [bidirectional definition review](flashcards.md). Every full
+entry has one card after the Related footer and separator; stubs have none. A
+variant Flashcards heading is repaired in place rather than duplicated.
+A missing section or empty section is repaired by writing the one primary card
+from the entry's already-established main claim, with `??` and the canonical
+primary answer. This restores the required card without selecting a different
+tested facet; itemize the addition in the run report.
+
+The scanner checks each card's contiguous definition / cue / answer content.
+Line 1 is a self-contained, capitalized, period-ended sentence with inline
+LaTeX as its only markup; it must neither expose nor semantically reconstruct
+the answer and must retain defining mathematical operations. Line 2 is `??` or
+the user's preserved `!!`. Line 3's content, before any protected attachment,
+is the plain-text canonical title or qualified title's base/mathematical plain
+form, plus
+only a qualifying opener-established, alias-bound counterpart. The qualifying
+classes are the canonical acronym/full-form pair, direct “short for” expansion,
+and direct scientific abbreviation. The executing agent still checks whether a
+qualifying pair was omitted from the opener.
+
+The canonical card-format rule defines the protected same-line, immediately
+following-line, metadata-callout, and block-ID attachments. A blank line closes
+the attachment position. Preserve each recognized attachment byte-for-byte and
+in place; line-3 plainness never authorizes removing a block ID. Other visible
+or comment content is malformed. When legacy content has
+multiple cards, keep the one satisfying the complete primary-answer contract,
+preserve its attachments, quote each removed card verbatim in the report, and
+propose a split only when a cited source supports the removed term as a real
+entity. Visible metadata absence does not establish a fresh card; apply the
+[history-aware rewrite bar](flashcards.md) before changing a definition.
+
+**The checklist ends at 19.** The retired `importance:` item was last, so its
+removal created no numbering gap. Legacy populated `importance:` remains valid
+and preserved under item 2.
+
+## Source-dependent and proposal-only limits
+
+- **Item 3:** ordinary source-independent QC never chooses or rewrites a merge
+  date; explicit source-backed refactor mode follows its separate date rules.
+- **Item 4:** page-anchor syntax is checked; whether the physical page is
+  factually correct needs the source.
+- **Item 12:** entry-to-file resolution is source-independent, but figure
+  selection, source fidelity, caption facts, and table contents need the
+  source. An unused image file is not itself a missing-content finding.
+- **Item 15:** example purpose can be assessed now, but substantive trimming
+  and value verification are source-backed proposals.
+
+## Fix discipline
+
+- Make targeted, localized corrections. A format or schema finding usually has
+  one determinate output. Semantic metadata changes apply only when
+  unambiguous. Item 9 uses only its five listed operations; item 6 may remove a
+  sentence whose entire function is a forbidden implementation signpost,
+  recipe, identifier catalog, or listing while preserving conceptual claims.
+  None grants general rewriting permission.
+- Fact changes, conflict resolution, source-content selection, and substantive
+  trimming need a source-backed request. Cross-entry splits, merges, deletion,
+  and redistribution also need authorization; an existing request covering the
+  refactor supplies it, so do not ask twice.
+- A retitle or re-slug is a rename. Propose it during routine lint, with inbound
+  count and collision risk. Apply only when the request explicitly authorizes
+  it, using the full
+  [entry-retitle protocol](../../../shared/CONVENTIONS.md#retitling-an-existing-wiki-entry).
+- Semantic-invalid alias removal follows the same approved refactor: establish
+  identity and owner, inventory inbound alias-target entry links, rewrite every
+  resolving surface, verify, then remove the alias. Text matches in sources,
+  embeds, and logs are not entry links.
+- Valid blanks remain valid. Blank `tags:` may be correct on a full entry;
+  `parents: []` is a valid empty hierarchy. Missing or unrecognizable `read:`
+  is different because supplying a boolean would invent user-owned state.
+
+## Coding content in non-Software entries (item 6)
+
+The rule is type-based: a non-`Software` entry permits zero API identifiers or
+code listings, even as a supposedly helpful signpost. The scanner's mechanical
+floor does not decide why the code is present. Choose between two actions:
+
+- **Conceptual entry with stray implementation detail:** remove only the
+  parenthetical or sentence whose whole function is to name the API, recipe,
+  default, or listing. Keep the surrounding conceptual claim and plain library
+  name when it still matters. Do not create an entry for the identifier.
+- **Software artifact with the wrong type:** when artifact identity is
+  unambiguous, reclassify it to `Software`, then review the whole body under the
+  selective Software rule. Installable or runnable artifacts such as PyTorch,
+  scikit-learn, and Jupyter are `Software`; algorithmic or architectural
+  contributions such as BERT, AlphaGo, and ResNet remain `Concept` even when
+  their prose contains code.
+
+A title that is itself an API identifier, such as `SGDClassifier` or
+`cross_val_predict`, needs a rename and conceptual restructure around the
+underlying entity. Propose that approved refactor and leave the file and inbound
+references intact until it runs.
+
+When the distinction is unclear, preserve and report. Do not gut an entry or
+flip its type merely to silence a mechanical finding.

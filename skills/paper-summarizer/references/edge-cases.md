@@ -71,7 +71,7 @@ damage, not proof that the source lacks the claim. Correct from the page or cut
 an unsupported claim, never soften it into vague prose.
 
 If source-page reading is impossible, leave the summary unpublished. If only the
-finder is unavailable but the pages are readable, record manual page
+finder is unavailable but the pages are readable, record direct page
 verification explicitly. Lint remains a separate required gate; its absence is
 not waived by a readable PDF or an available checklist.
 

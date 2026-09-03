@@ -1,20 +1,45 @@
 """Strict, standard-library readers for the figure extractor's sidecars.
 
-The batch extractor, manual cropper and source renamer share these formats.
-Malformed or conflicting records are errors, never an empty ownership map.
+The batch extractor, explicit-coordinate cropper and source renamer share these
+formats. Malformed or conflicting records are errors, never an empty ownership
+map. Writers carry the exact version they parsed into guarded publication, so
+concurrent manifest/review updates are conflicts rather than lost updates.
 Run ``python3 figure_state.py --test`` for the format/rename regressions.
 """
 import argparse
 import hashlib
+import errno
 import os
 import re
+import shutil
 import stat
+import sys
 import tempfile
 import unicodedata
+
+# Keep the sibling publication helper available when a harness imports this
+# file directly by path instead of executing it as a script.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+import atomic_move
 
 
 MANIFEST_FILE = ".figure-manifest.tsv"
 REVIEW_FILE = ".figure-review.txt"
+
+
+class SidecarConflict(FileExistsError):
+    """A sidecar no longer matches the version a caller read and edited."""
+
+    def __init__(self, *args, recovery_path=None, keep_stage=False):
+        super().__init__(*args)
+        self.recovery_path = recovery_path
+        self.keep_stage = keep_stage
+
+
+_ABSENT_SNAPSHOT = (False, None, None, None, None)
 
 
 def figure_identity(name):
@@ -90,15 +115,63 @@ def parse_reviewed(text):
     return {(key, label) for _i, key, label, _span in _records(text, "review")}
 
 
-def read_manifest(path):
-    """Read a manifest strictly; only a missing file means no prior record."""
+def _snapshot_identity(item):
+    return item.st_dev, item.st_ino
+
+
+def _stable_sidecar_bytes(path):
+    """Return exact bytes plus identity/mode, rejecting a moving read target."""
     try:
-        with open(path, encoding="utf-8") as fh:
-            return parse_manifest(fh.read())
+        before = os.stat(path, follow_symlinks=False)
     except FileNotFoundError:
         if os.path.lexists(path):
             raise ValueError("%s is a dangling sidecar symlink" % path)
-        return {}
+        return b"", _ABSENT_SNAPSHOT
+    if not stat.S_ISREG(before.st_mode):
+        raise ValueError("%s is not a regular sidecar file" % path)
+    with open(path, "rb") as fh:
+        opened_before = os.fstat(fh.fileno())
+        body = fh.read()
+        opened_after = os.fstat(fh.fileno())
+    try:
+        after = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise SidecarConflict(
+            errno.EEXIST, "%s changed while it was read" % path, path) from exc
+    stable = lambda item: (
+        item.st_dev, item.st_ino, item.st_size,
+        getattr(item, "st_mtime_ns", int(item.st_mtime * 1e9)),
+        getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)),
+    )
+    if not (stable(before) == stable(opened_before) == stable(opened_after)
+            == stable(after)):
+        raise SidecarConflict(
+            errno.EEXIST, "%s changed while it was read" % path, path)
+    snapshot = (
+        True,
+        _snapshot_identity(after),
+        hashlib.sha256(body).hexdigest(),
+        stat.S_IMODE(after.st_mode),
+        len(body),
+    )
+    return body, snapshot
+
+
+def read_sidecar(path):
+    """Return exact UTF-8 text and a snapshot suitable for conditional write."""
+    body, snapshot = _stable_sidecar_bytes(path)
+    return body.decode("utf-8"), snapshot
+
+
+def read_manifest_snapshot(path):
+    """Read strict ownership records and return the exact version consumed."""
+    text, snapshot = read_sidecar(path)
+    return parse_manifest(text), snapshot
+
+
+def read_manifest(path):
+    """Read a manifest strictly; only a missing file means no prior record."""
+    return read_manifest_snapshot(path)[0]
 
 
 def rewrite_sidecar(text, replacements, kind):
@@ -141,15 +214,53 @@ def check_manifest_writable(path):
             raise ValueError("%s is a read-only sidecar; refusing to replace it" % path)
 
 
-def _write_sidecar(path, body):
-    """Atomically replace one validated sidecar, preserving its mode.
+def _publication_snapshot(path):
+    """Adapt sidecar validation failures to the shared publisher's contract."""
+    try:
+        return _stable_sidecar_bytes(path)[1]
+    except ValueError as exc:
+        raise OSError(errno.EINVAL, str(exc), path) from exc
+
+
+def _publish_sidecar(staged, path, expected):
+    """Publish with the shared exact-snapshot and recovery protocol."""
+    stage_dir = os.path.dirname(staged)
+    stage_parent = os.path.dirname(stage_dir)
+    try:
+        if expected[0]:
+            return atomic_move.replace_expected(
+                staged, path, expected, _publication_snapshot,
+                stage_dir, stage_parent=stage_parent,
+                recovery_prefix=".figure-state-recovery-",
+            )
+        return atomic_move.publish_new(
+            staged, path, _publication_snapshot,
+            stage_parent, recovery_prefix=".figure-state-recovery-",
+        )
+    except OSError as exc:
+        recovery_path = getattr(exc, "recovery_path", None)
+        keep_stage = bool(getattr(exc, "keep_stage", False))
+        detail = getattr(exc, "strerror", None) or str(exc)
+        raise SidecarConflict(
+            errno.EEXIST, detail, path,
+            recovery_path=recovery_path,
+            keep_stage=keep_stage,
+        ) from exc
+
+
+def _write_sidecar(path, body, expected=None):
+    """Conditionally publish one validated sidecar, preserving its mode.
 
     Stage beside the destination directory, not inside the flat image folder.
-    The final ``os.replace`` remains same-filesystem atomic, while a killed
-    process cannot leave unfinished metadata among the files consumers list.
+    Missing files are created exclusively. Existing files are displaced and
+    revalidated against the exact snapshot their caller parsed; no operation
+    blindly replaces the public pathname. A killed process cannot leave
+    unfinished metadata among the files consumers list.
     """
     check_manifest_writable(path)
-    mode = stat.S_IMODE(os.stat(path).st_mode) if os.path.exists(path) else None
+    if expected is None:
+        _current, expected = read_sidecar(path)
+    mode = expected[3] if expected[0] else None
     directory = os.path.dirname(path) or "."
     os.makedirs(directory, exist_ok=True)
     # Resolve the directory for staging only. A symlinked Images folder can
@@ -157,27 +268,36 @@ def _write_sidecar(path, body):
     # final replace cross-device and therefore non-atomic.
     directory = os.path.realpath(directory)
     stage_parent = os.path.dirname(directory)
-    with tempfile.TemporaryDirectory(prefix=".figure-state-stage-",
-                                     dir=stage_parent) as stage_dir:
+    stage_dir = tempfile.mkdtemp(prefix=".figure-state-stage-",
+                                 dir=stage_parent)
+    keep_stage = False
+    try:
         temporary = os.path.join(stage_dir, os.path.basename(path))
         with open(temporary, "w", encoding="utf-8", newline="") as fh:
             fh.write(body)
             if mode is not None:
-                os.fchmod(fh.fileno(), mode)
-        os.replace(temporary, path)
+                atomic_move.set_private_mode(fh, temporary, mode)
+        try:
+            return _publish_sidecar(temporary, path, expected)
+        except SidecarConflict as exc:
+            keep_stage = exc.keep_stage
+            raise
+    finally:
+        if not keep_stage:
+            shutil.rmtree(stage_dir, ignore_errors=True)
 
 
-def write_manifest(path, manifest, header=""):
+def write_manifest(path, manifest, header="", expected=None):
     """Atomically write valid ownership records, preserving existing modes."""
     body = header + "".join("%s\t%s\n" % (key, manifest[key]) for key in sorted(manifest))
     parse_manifest(body)
-    _write_sidecar(path, body)
+    return _write_sidecar(path, body, expected=expected)
 
 
-def write_review(path, body):
+def write_review(path, body, expected=None):
     """Atomically write a complete, valid review ledger."""
     parse_reviewed(body)
-    _write_sidecar(path, body)
+    return _write_sidecar(path, body, expected=expected)
 
 
 def self_test():
@@ -202,8 +322,9 @@ def self_test():
                 path = os.path.join(images, REVIEW_FILE)
                 write_review(path, text)
                 before = open(path, "rb").read()
-                with mock.patch.object(os, "replace",
-                                       side_effect=OSError("interrupted")):
+                with mock.patch.dict(globals(), {
+                        "_publish_sidecar": mock.Mock(
+                            side_effect=OSError("interrupted"))}):
                     with self.assertRaises(OSError):
                         write_review(path, text + "New\t4\n")
                 self.assertEqual(open(path, "rb").read(), before)
@@ -241,14 +362,15 @@ def self_test():
                 os.makedirs(real_images)
                 path = os.path.join(real_images, MANIFEST_FILE)
                 stage_parents = []
-                real_tempdir = tempfile.TemporaryDirectory
+                real_mkdtemp = tempfile.mkdtemp
 
-                def tracked_tempdir(*args, **kwargs):
-                    stage_parents.append(kwargs.get("dir"))
-                    return real_tempdir(*args, **kwargs)
+                def tracked_mkdtemp(*args, **kwargs):
+                    if kwargs.get("prefix") == ".figure-state-stage-":
+                        stage_parents.append(kwargs.get("dir"))
+                    return real_mkdtemp(*args, **kwargs)
 
-                with mock.patch.object(tempfile, "TemporaryDirectory",
-                                       side_effect=tracked_tempdir):
+                with mock.patch.object(tempfile, "mkdtemp",
+                                       side_effect=tracked_mkdtemp):
                     write_manifest(path, {"A_fig_1.png": "a" * 64})
                 self.assertEqual(stage_parents, [os.path.realpath(real_root)])
                 self.assertFalse(any(name.startswith(".figure-state-stage-")
@@ -256,8 +378,9 @@ def self_test():
                 self.assertTrue(os.path.isfile(os.path.join(real_images,
                                                             MANIFEST_FILE)))
                 before = open(path, "rb").read()
-                with mock.patch.object(os, "replace",
-                                       side_effect=OSError("blocked publication")):
+                with mock.patch.dict(globals(), {
+                        "_publish_sidecar": mock.Mock(
+                            side_effect=OSError("blocked publication"))}):
                     with self.assertRaises(OSError):
                         write_manifest(path, {"B_fig_1.png": "b" * 64})
                 self.assertEqual(open(path, "rb").read(), before)
@@ -285,12 +408,172 @@ def self_test():
                 if logical_images is not None:
                     stage_parents[:] = []
                     linked_path = os.path.join(logical_images, MANIFEST_FILE)
-                    with mock.patch.object(tempfile, "TemporaryDirectory",
-                                           side_effect=tracked_tempdir):
+                    with mock.patch.object(tempfile, "mkdtemp",
+                                           side_effect=tracked_mkdtemp):
                         write_manifest(linked_path, {"A_fig_1.png": "a" * 64})
                     self.assertEqual(stage_parents, [os.path.realpath(real_root)])
                     self.assertTrue(os.path.isfile(os.path.join(
                         real_images, MANIFEST_FILE)))
+
+        def test_stale_snapshot_and_late_new_occupant_are_preserved(self):
+            with tempfile.TemporaryDirectory() as directory:
+                path = os.path.join(directory, MANIFEST_FILE)
+                write_manifest(path, {"A_fig_1.png": "a" * 64})
+                _manifest, expected = read_manifest_snapshot(path)
+                late = b"B_fig_1.png\t" + b"b" * 64 + b"\n"
+                with open(path, "wb") as fh:
+                    fh.write(late)
+                with self.assertRaises(SidecarConflict):
+                    write_manifest(path, {"C_fig_1.png": "c" * 64},
+                                   expected=expected)
+                self.assertEqual(open(path, "rb").read(), late)
+
+                new_path = os.path.join(directory, "new.tsv")
+                _empty, absent = read_sidecar(new_path)
+                with open(new_path, "wb") as fh:
+                    fh.write(late)
+                with self.assertRaises(SidecarConflict):
+                    write_manifest(new_path, {"C_fig_1.png": "c" * 64},
+                                   expected=absent)
+                self.assertEqual(open(new_path, "rb").read(), late)
+
+        def test_publish_races_restore_or_recover_every_occupant(self):
+            with tempfile.TemporaryDirectory() as directory:
+                images = os.path.join(directory, "Images")
+                os.makedirs(images)
+                path = os.path.join(images, MANIFEST_FILE)
+                write_manifest(path, {"A_fig_1.png": "a" * 64})
+                _manifest, expected = read_manifest_snapshot(path)
+                foreign = b"B_fig_1.png\t" + b"b" * 64 + b"\n"
+                real_move = atomic_move.move_noreplace
+                injected = []
+
+                def replace_before_displacement(src, dst, expected=None,
+                                                **kwargs):
+                    if src == path and not injected:
+                        intruder = path + ".intruder"
+                        with open(intruder, "wb") as fh:
+                            fh.write(foreign)
+                        os.replace(intruder, path)
+                        injected.append(True)
+                    return real_move(src, dst, expected=expected, **kwargs)
+
+                with mock.patch.object(atomic_move, "move_noreplace",
+                                       side_effect=replace_before_displacement):
+                    with self.assertRaisesRegex(
+                            SidecarConflict, "different occupant"):
+                        write_manifest(path, {"C_fig_1.png": "c" * 64},
+                                       expected=expected)
+                self.assertEqual(open(path, "rb").read(), foreign)
+
+                # A writer arriving after the verified predecessor was moved
+                # keeps the public name. The predecessor is retained outside
+                # Images and its recovery path is named by the exception.
+                _manifest, expected = read_manifest_snapshot(path)
+                competing = b"D_fig_1.png\t" + b"d" * 64 + b"\n"
+                real_link = os.link
+                injected[:] = []
+
+                def occupy_before_publish(src, dst, *args, **kwargs):
+                    if (dst == path and os.path.basename(src) == MANIFEST_FILE
+                            and not injected):
+                        with open(path, "wb") as fh:
+                            fh.write(competing)
+                        injected.append(True)
+                    return real_link(src, dst, *args, **kwargs)
+
+                with mock.patch.object(os, "link",
+                                       side_effect=occupy_before_publish):
+                    with self.assertRaisesRegex(
+                            SidecarConflict, "preserved at") as caught:
+                        write_manifest(path, {"E_fig_1.png": "e" * 64},
+                                       expected=expected)
+                self.assertEqual(open(path, "rb").read(), competing)
+                recovery_path = caught.exception.recovery_path
+                self.assertEqual(open(recovery_path, "rb").read(), foreign)
+
+                post_path = os.path.join(images, "post-publication.tsv")
+                write_manifest(post_path, {"Old_fig_1.png": "a" * 64})
+                original = open(post_path, "rb").read()
+                _manifest, post_expected = read_manifest_snapshot(post_path)
+                after = b"Late_fig_1.png\t" + b"f" * 64 + b"\n"
+                injected[:] = []
+
+                def replace_after_publish(src, dst, *args, **kwargs):
+                    answer = real_link(src, dst, *args, **kwargs)
+                    if (dst == post_path
+                            and os.path.basename(src) == os.path.basename(post_path)
+                            and not injected):
+                        intruder = post_path + ".intruder"
+                        with open(intruder, "wb") as fh:
+                            fh.write(after)
+                        os.replace(intruder, post_path)
+                        injected.append(True)
+                    return answer
+
+                with mock.patch.object(os, "link",
+                                       side_effect=replace_after_publish):
+                    with self.assertRaisesRegex(
+                            SidecarConflict, "differs from the staged snapshot") as caught:
+                        write_manifest(post_path,
+                                       {"New_fig_1.png": "e" * 64},
+                                       expected=post_expected)
+                self.assertEqual(open(post_path, "rb").read(), after)
+                recovery_path = caught.exception.recovery_path
+                self.assertEqual(open(recovery_path, "rb").read(), original)
+
+                # A new sidecar has no predecessor to restore. If its public
+                # hard link is changed before readback, withdraw only the
+                # version staged here and retain the later bytes.
+                new_path = os.path.join(images, "post-new.tsv")
+                _text, absent = read_sidecar(new_path)
+                late_new = b"LateNew_fig_1.png\t" + b"9" * 64 + b"\n"
+                injected[:] = []
+                real_link_noreplace = atomic_move.link_noreplace
+
+                def mutate_new_after_link(src, dst):
+                    answer = real_link_noreplace(src, dst)
+                    if dst == new_path and not injected:
+                        with open(dst, "wb") as fh:
+                            fh.write(late_new)
+                        injected.append(True)
+                    return answer
+
+                with mock.patch.object(
+                        atomic_move, "link_noreplace",
+                        side_effect=mutate_new_after_link):
+                    with self.assertRaisesRegex(
+                            SidecarConflict, "differs from its staged snapshot"):
+                        write_manifest(new_path,
+                                       {"New_fig_1.png": "e" * 64},
+                                       expected=absent)
+                self.assertEqual(open(new_path, "rb").read(), late_new)
+
+                link_path = os.path.join(images, "post-new-link.tsv")
+                link_target = os.path.join(directory, "late-link-target.tsv")
+                with open(link_target, "wb") as fh:
+                    fh.write(late_new)
+                _text, absent = read_sidecar(link_path)
+                injected[:] = []
+
+                def replace_new_with_symlink(src, dst):
+                    answer = real_link_noreplace(src, dst)
+                    if dst == link_path and not injected:
+                        os.unlink(dst)
+                        os.symlink(link_target, dst)
+                        injected.append(True)
+                    return answer
+
+                with mock.patch.object(
+                        atomic_move, "link_noreplace",
+                        side_effect=replace_new_with_symlink):
+                    with self.assertRaisesRegex(
+                            SidecarConflict, "could not be read back"):
+                        write_manifest(link_path,
+                                       {"New_fig_1.png": "e" * 64},
+                                       expected=absent)
+                self.assertTrue(os.path.islink(link_path))
+                self.assertEqual(open(link_path, "rb").read(), late_new)
 
         def test_read_only_and_linked_sidecars_remain_untouched(self):
             with tempfile.TemporaryDirectory() as directory:
@@ -305,7 +588,8 @@ def self_test():
                     self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o444)
                 finally:
                     os.chmod(path, 0o640)
-                write_manifest(path, {"B_fig_1.png": "b" * 64})
+                with mock.patch.object(os, "fchmod", None):
+                    write_manifest(path, {"B_fig_1.png": "b" * 64})
                 self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o640)
                 link = os.path.join(directory, "linked.tsv")
                 os.symlink(path, link)

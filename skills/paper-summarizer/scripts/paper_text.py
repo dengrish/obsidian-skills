@@ -68,8 +68,8 @@ _TRANSLATE = {
 }
 
 #: A reference to a figure in body text or in a caption.  Panel letters are
-#: tolerated and dropped (`Fig. 3b` counts toward figure 3), plurals are not
-#: matched beyond their first number, and the label is normalised to the
+#: tolerated and dropped (`Fig. 3b` counts toward figure 3), and the label is
+#: normalised to the
 #: on-disk form: dots become dashes, and a marker word *before* the keyword
 #: folds into the namespace prefix the extractor writes — §8b, whose default
 #: is that `Supplementary`, `Suppl.`, `Supp.` and `Extended Data` all land in
@@ -82,8 +82,20 @@ _FIG_REF = re.compile(
     # Reading "Figures 1-3" as one label `1-3` scores a figure no run can write
     # and costs figures 1, 2 and 3 a citation each -- and the en dash papers
     # actually use folds to `-` before this ever runs, so it is the common case.
-    r"(?P<label>(?:si|ed|s)?\d+(?:\.\d+)*(?P<tail>-\d+(?:\.\d+)*)?)"
+    r"(?P<label>(?:si|ed|s)?\d+(?:\.\d+)*"
+    r"(?P<tail>-(?:si|ed|s)?\d+(?:\.\d+)*)?)"
     r"[a-z]?\b", re.I)
+
+#: Further labels after a plural reference: ``Figures 1, 2 and 3``. The
+#: figure keyword establishes the namespace once; later labels inherit its
+#: Supplementary / Extended Data marker.
+_FIG_MORE = re.compile(
+    r"\s*(?:,\s*(?:and\s+)?|and\s+|&\s*)"
+    r"(?P<label>(?:si|ed|s)?\d+(?:\.\d+)*"
+    r"(?:-(?:si|ed|s)?\d+(?:\.\d+)*)?)"
+    r"[a-z]?\b", re.I)
+
+_MAX_FIG_RANGE = 20
 
 #: The marker set is exactly `pdf-figure-extractor`'s, and deliberately so:
 #: a marker this counts but the extractor cannot match scores a figure under a
@@ -154,6 +166,14 @@ def read_pages(path):
             continue
     if doc_mod is not None:
         with doc_mod.open(path) as doc:
+            # PyMuPDF deliberately opens several document formats. An HTML
+            # error page merely named `.pdf` therefore used to pass `--find`
+            # and falsely verify any claim whose text appeared in that page.
+            if not getattr(doc, "is_pdf", False):
+                fmt = (getattr(doc, "metadata", None) or {}).get("format")
+                raise ValueError(
+                    "%s is not a PDF (PyMuPDF opened it as %s)" %
+                    (path, fmt or "another document format"))
             # A user-password PDF OPENS fine and then raises on the first
             # get_text(), landing in the generic could-not-be-opened handler —
             # whose advice ("the file needs replacing") is wrong here:
@@ -166,6 +186,8 @@ def read_pages(path):
                     "re-downloading it changes nothing. Decrypt it first "
                     "(`qpdf --decrypt --password='<pw>' 'in.pdf' 'out.pdf'`) "
                     "and run this script on the result." % path)
+            if len(doc) == 0:
+                return []
             return [page.get_text() or "" for page in doc]
     try:
         import pypdf
@@ -213,25 +235,68 @@ def find(pages, needle, fold_case=True):
     return {"needle": needle, "pages": hits, "loose_pages": loose}
 
 
+def _range_labels(label, plural):
+    """Expand an unambiguous plural range, otherwise return ``[label]``.
+
+    ``Figures 1-3`` and ``Figures 1.2-1.4`` are ranges. A singular
+    ``Figure 1-3`` remains one chapter-style label, and a descending or very
+    wide span remains literal because books use the same spelling.
+    """
+    if not plural or label.count("-") != 1:
+        return [label]
+    low, high = label.split("-", 1)
+    endpoint = re.compile(
+        r"(?P<prefix>si|ed|s)?(?P<number>\d+(?:\.\d+)*)\Z", re.I)
+    lo_match, hi_match = endpoint.fullmatch(low), endpoint.fullmatch(high)
+    if not lo_match or not hi_match:
+        return [label]
+    lo_prefix = (lo_match.group("prefix") or "").upper()
+    hi_prefix = (hi_match.group("prefix") or "").upper()
+    # The namespace may be written once (S1-3) or at both endpoints
+    # (S1-S3). A prefix that appears only on the upper endpoint, or two
+    # different prefixes, does not unambiguously describe one range.
+    if (hi_prefix and not lo_prefix) or (hi_prefix and hi_prefix != lo_prefix):
+        return [label]
+    lo_parts = lo_match.group("number").split(".")
+    hi_parts = hi_match.group("number").split(".")
+    if (len(lo_parts) != len(hi_parts)
+            or lo_parts[:-1] != hi_parts[:-1]
+            or not lo_parts[-1].isdigit() or not hi_parts[-1].isdigit()):
+        return [label]
+    lo, hi = int(lo_parts[-1]), int(hi_parts[-1])
+    if not 0 < hi - lo <= _MAX_FIG_RANGE:
+        return [label]
+    hierarchy = ".".join(lo_parts[:-1])
+    return [lo_prefix + (hierarchy + "." if hierarchy else "") + str(n)
+            for n in range(lo, hi + 1)]
+
+
 def cites(pages, ed_prefix="S"):
     """{normalised figure label: times referred to}, over the whole document."""
+    if ed_prefix not in ("S", "ED"):
+        raise ValueError("ed_prefix must be 'S' or 'ED'")
     counts = {}
     for raw in pages:
-        for m in _FIG_REF.finditer(normalize(raw, fold_case=False)):
-            label = m.group("label")
-            if m.group("plural") and m.group("tail"):
-                # "Figures 1-3" is a range over three figures, not a label.
-                # Count the first; the rest are unreachable from a bare range
-                # and the tiebreak is a ranking, not a measurement.
-                label = label[: -len(m.group("tail"))]
-            label = label.replace(".", "-")
-            label = re.sub(r"\A(si|ed|s)", lambda x: x.group(1).upper(),
-                           label, flags=re.I)
+        text = normalize(raw, fold_case=False)
+        for m in _FIG_REF.finditer(text):
             marker = m.group("marker")
-            if marker and not label[0].isalpha():
-                marker = re.sub(r"\s+", " ", marker).lower().rstrip(".")
-                label = (ed_prefix if marker == _ED_MARKER else "S") + label
-            counts[label] = counts.get(label, 0) + 1
+            labels = _range_labels(m.group("label"), bool(m.group("plural")))
+            pos = m.end()
+            if m.group("plural"):
+                while True:
+                    more = _FIG_MORE.match(text, pos)
+                    if not more:
+                        break
+                    labels.extend(_range_labels(more.group("label"), True))
+                    pos = more.end()
+            for label in labels:
+                label = label.replace(".", "-")
+                label = re.sub(r"\A(si|ed|s)", lambda x: x.group(1).upper(),
+                               label, flags=re.I)
+                if marker and not label[0].isalpha():
+                    clean_marker = re.sub(r"\s+", " ", marker).lower().rstrip(".")
+                    label = (ed_prefix if clean_marker == _ED_MARKER else "S") + label
+                counts[label] = counts.get(label, 0) + 1
     return counts
 
 
@@ -327,7 +392,7 @@ def _build_parser():
                    help="make --find case-sensitive")
     p.add_argument("--cites", action="store_true",
                    help="how often each figure number is referred to")
-    p.add_argument("--ed-prefix", default="S", metavar="PREFIX",
+    p.add_argument("--ed-prefix", choices=("S", "ED"), default="S",
                    help="namespace for `Extended Data Figure N` in --cites; "
                         "must match the --ed-prefix the extraction run used "
                         "(default: S, which is that run's default too)")
@@ -428,11 +493,34 @@ def run_self_test():
          sections(["Funding: This research was supported by the Example Research "
                    "Council through its investigator grant programme."]),
          {"funding": [1]})
-    # A range after a plural is a range, not a hierarchical label.
-    case("figure range counts the first, not a phantom label",
-         cites(["See Figures 1-3 for the traces."]), {"1": 1})
+    # A range after a plural is a range, not a hierarchical label. Every
+    # implied member and every label in a compact list contributes to the
+    # tiebreak; otherwise a figure mentioned only in a list reads as uncited.
+    case("figure range counts every member, not a phantom label",
+         cites(["See Figures 1-3 for the traces."]),
+         {"1": 1, "2": 1, "3": 1})
     case("en-dash figure range likewise",
-         cites(["See Figures 1\u20133 for the traces."]), {"1": 1})
+         cites(["See Figures 1\u20133 for the traces."]),
+         {"1": 1, "2": 1, "3": 1})
+    case("hierarchical range counts each peer",
+         cites(["See Figures 1.2-1.4 for the traces."]),
+         {"1-2": 1, "1-3": 1, "1-4": 1})
+    case("a plural comma-and list counts every label",
+         cites(["See Figs. 1, 2, and 4 for the traces."]),
+         {"1": 1, "2": 1, "4": 1})
+    case("a prefixed plural range repeats its namespace",
+         cites(["See Figures S1\u2013S3 for the traces."]),
+         {"S1": 1, "S2": 1, "S3": 1})
+    case("an ED plural range repeats its namespace",
+         cites(["See Figures ED1\u2013ED3 for the traces."], "ED"),
+         {"ED1": 1, "ED2": 1, "ED3": 1})
+    case("a prefixed plural list counts every label",
+         cites(["See Figures S1, S2, and S4 for the traces."]),
+         {"S1": 1, "S2": 1, "S4": 1})
+    case("a singular prefixed dashed label remains hierarchical",
+         cites(["Figure S1-3 shows the loss curve."]), {"S1-3": 1})
+    case("a singular dashed label remains hierarchical",
+         cites(["Figure 4-6 shows the loss curve."]), {"4-6": 1})
     case("a hierarchical label survives",
          cites(["As shown in Figure 1.2, the loss falls."]), {"1-2": 1})
     # A loose match is reported as loose and is not counted as found.
@@ -477,6 +565,23 @@ def run_self_test():
                 _got = "generic %s" % type(exc).__name__
             case("a password-protected PDF raises _Encrypted with the "
                  "decrypt advice, not the corrupt-file advice", _got, "encrypted")
+
+            _html = os.path.join(_td, "error-page.pdf")
+            with open(_html, "w", encoding="utf-8") as _fh:
+                _fh.write("<html><body>hazard ratio 0.62</body></html>")
+            try:
+                read_pages(_html)
+                _got = "accepted"
+            except Exception as exc:
+                _got = "not a PDF" in str(exc)
+            case("HTML named .pdf cannot verify a claim", _got, True)
+
+            _empty = os.path.join(_td, "zero-pages.pdf")
+            import pypdf as _pypdf
+            with open(_empty, "wb") as _fh:
+                _pypdf.PdfWriter().write(_fh)
+            case("a zero-page PDF returns no pages for the caller's distinct verdict",
+                 read_pages(_empty), [])
 
     print("%d/%d self-test cases pass" % (n - bad, n))
     return 1 if bad else 0

@@ -16,26 +16,56 @@ Turn one source into full entries for the substantive entities it teaches. Creat
 - This run edits only entries it creates or integrates from its source. Whole-vault backfill, weak-link pruning, `parents:`, and MOCs belong to `wiki-linter`. A source merge is not authorization to rename, delete, split, or merge two pre-existing entries.
 - Write **full entries or nothing**. Neither skill creates stubs; a thin mention stays plain text and is reported as deferred. Existing legacy stubs may be promoted from substantive source coverage.
 - For a preview, plan-only, or no-apply request, inspect and prepare the proposal without writing vault files. Report proposed work as proposed, and claim edits or validation only when actually performed.
+- Keep every create, merge, and interlink draft private through step 7. The
+  public `Wiki/` tree must contain either the prior reviewed version or the
+  final reviewed version, never an intermediate draft.
 
 ## Workflow
 
-For a folder, process sources in deterministic filename order: steps 1–6 per source, then step 7 once across the run. Read [batch and hand-edited-entry cases](references/edge-cases.md) when either applies. Do not combine thin coverage across sources to bypass the per-source extraction filters; report such a candidate as a deferred cross-source follow-up; do not block the source run.
+For a folder, process sources in deterministic filename order: steps 1–6 per source, accumulating one private working set, then step 7 once across the run. A later source that touches the same entry builds on that staged draft while retaining the original public snapshot as its publication precondition. Read [batch and hand-edited-entry cases](references/edge-cases.md) when either applies. Do not combine thin coverage across sources to bypass the per-source extraction filters; report such a candidate as a deferred cross-source follow-up; do not block the source run.
 
 ### 1. Read the source
 
-**Resolve the real source and prior coverage before reading or writing entries.** A source must be a file in the vault; a URL or pasted excerpt must first be saved there. Never invent or rename a source filename.
+**Resolve the real source and prior coverage before reading or writing entries.** A source must be a durable file in the vault. A bare URL is not a source file: request its Web Clipper capture and route that capture through `clipping-processor` first. For pasted text, use an existing user-named vault file or obtain the exact destination before saving it; never invent a persistent source filename or publish wiki entries with an unresolvable citation.
 
 For a Markdown source, read [source intake](references/source-intake.md#resolve-a-markdown-source) and use its validated frontmatter parser. A decoded first origin pointing to a local PDF identifies a PDF/summary pair: resolve the actual PDF and consume it, reporting the substitution. A URL-origin clipping is independent, even if its stem matches a PDF. Inspect legacy `source:` when appropriate. Missing PDFs, unpaired notes, malformed metadata, and ambiguous targets have distinct outcomes; **a shared stem or incomplete lookup never authorizes claiming or skipping a source**.
 
-When `Wiki/` exists, check decoded frontmatter membership with the index:
+For every resolved PDF, verify the shared canonical filename contract before
+deriving citations, figure stems, or prior-coverage keys. Then prove that its
+portable basename has exactly one owner across the selected vault; the bare
+page links this skill writes cannot disambiguate two paths:
 
 ```bash
-IDX=$(mktemp -t vault-index-XXXXXX.json)
-python3 '<skill>/scripts/vault_index.py' '<wiki-folder>' \
+python3 '<skill>/../../shared/scripts/naming.py' canonical '<pdf path>'
+python3 '<skill>/../../shared/scripts/vault_artifacts.py' pdfs \
+    --vault '<vault>' --selected '<resolved pdf path>'
+```
+
+A non-canonical PDF is not an override opportunity. Route it through
+`pdf-organizer`, then restart source resolution with its final name. Markdown
+sources keep their literal on-disk names. Read the inventory JSON even when
+the second command exits nonzero. An incomplete walk or zero/multiple portable
+basename owners blocks PDF processing; run `pdf-organizer` to establish a
+unique final name, then rerun both checks.
+
+When `Wiki/` exists, check decoded frontmatter membership with the index. For
+a later source in the same run, use the current private resolution tree from
+step 3 so prior staged sources participate in this check:
+
+```bash
+IDX=$(mktemp -t vault-index.XXXXXX)
+python3 '<skill>/scripts/vault_index.py' '<coverage-tree>' \
   --source 'Foo.pdf' --source 'Foo.md' -o "$IDX"
 ```
 
-Use one actual filename for an unpaired source and both actual filenames for a confirmed PDF/note pair; the names need not share a stem. Inspect `source_matches` and `problems`. Body mentions are not prior coverage. For uncertain or incomplete results, read [the coverage protocol](references/source-intake.md#check-prior-coverage) and resolve/report the uncertainty before deciding. If no wiki exists, omit the check and create the folder only when accepted candidates need it.
+Use the real Wiki as `<coverage-tree>` before any draft exists, otherwise the
+private overlaid tree. Use one actual filename for an unpaired source and both
+actual filenames for a confirmed PDF/note pair; the names need not share a
+stem. Inspect `source_matches` and `problems`. Body mentions are not prior
+coverage. For uncertain or incomplete results, read [the coverage
+protocol](references/source-intake.md#check-prior-coverage) and resolve/report
+the uncertainty before deciding. If no public Wiki or staged entry exists,
+omit the check; create the public folder only at authorized publication.
 
 **A confirmed prior source match defaults to skip.** Proceed only with explicit rerun or resume intent in the user's request—“reprocess,” “resume the interrupted run,” “finish the incomplete run,” “apply the new rules,” or equivalent; a plain “process Foo.pdf” is not rerun intent. Resume is handled here, not by wiki-linter: re-read the source and run the normal extraction, collision, source-no-op-merge, and audit gates so missing source-dependent work can be completed safely. Rerun/resume intent applies to the batch. An all-skipped run is a run-level no-op: report the skips and stop, without audits or writes to unrelated entries.
 
@@ -45,7 +75,7 @@ Classify by primary purpose: **primary** sources teach durable knowledge; **seco
 
 ### 2. Extract entities
 
-Accept a named entity or technical concept only when the source explains, defines, motivates, contrasts, or analyzes it enough for several substantive sentences. Coverage may sit inside a dense paragraph rather than a section of its own. Pure use, attribution, status, parameter listing, bibliographic mention, or one thin sentence is insufficient.
+Accept a named entity or technical concept only when the source explains, defines, motivates, contrasts, or analyzes it with enough source-grounded substance for a self-contained atomic entry. Coverage may be compact—a definition plus a load-bearing equation, condition, or limitation can suffice—and may sit inside a dense paragraph rather than a section of its own. Pure use, attribution, status, parameter listing, bibliographic mention, or one thin sentence is insufficient.
 
 Apply these filters to **both creates and merges**:
 
@@ -64,10 +94,9 @@ Record each accepted entity's canonical qualified name, same-entity aliases, typ
 Refresh the index, then probe **every** candidate against filenames, aliases, and the other candidates:
 
 ```bash
-IDX=$(mktemp -t vault-index-XXXXXX.json)
-CAND=$(mktemp -t candidates-XXXXXX.json)
-mkdir -p '<wiki-folder>'
-python3 '<skill>/scripts/vault_index.py' '<wiki-folder>' -o "$IDX"
+IDX=$(mktemp -t vault-index.XXXXXX)
+CAND=$(mktemp -t candidates.XXXXXX)
+python3 '<skill>/scripts/vault_index.py' '<resolution-tree>' -o "$IDX"
 cat > "$CAND" <<'JSON'
 ["LambdaRank", "NDCG", "Pairwise ranking"]
 JSON
@@ -76,7 +105,23 @@ python3 '<skill>/scripts/find_collisions.py' --index "$IDX" --titles "$CAND"
 
 Replace the sample titles with the accepted candidates. Keep report paths unique per run; a shared fixed `/tmp` filename can supply another vault's results. `ls` cannot inspect aliases or replace the probes.
 
+Use the real Wiki folder as `<resolution-tree>` only while the run has no staged changes. Once an
+earlier source has produced a draft, rebuild a unique private resolution tree
+from the current regular-file snapshots and overlay every staged path, then
+index that proposed state so later sources merge with, rather than collide
+with or ignore, earlier work. For an absent Wiki, use a unique empty scratch
+directory. Do not create the public folder during collision planning,
+especially in a preview/no-apply run. Candidate-to-candidate probes still run
+against the same complete candidate list.
+
 **A decisive exact/µ match permits a merge only when it has one existing owner.** Multiple owners and all broader probe matches require adjudication; never choose an owner by index order. A malformed/unreadable index keeps “no match” uncertain. Resolve that uncertainty before creating a file. On any match, read [collision decisions and merging](references/merge.md#collision-decisions); similar names can denote different entities. An empty wiki still requires candidate-to-candidate checks.
+
+A leaf `.md` symlink is an occupied slug, not merge input. `vault_index.py`
+keeps its path in collision ownership, emits a problem, and suppresses the
+target's title, aliases, sources, and links so outside bytes cannot claim vault
+metadata. Do not create over it or follow it for a source-match/merge decision;
+repairing or replacing that filesystem occupant is separate, explicitly scoped
+work under the safe-write rules.
 
 ### 4. Create new entries
 
@@ -84,13 +129,18 @@ Before drafting the first entry, read [writing](references/writing.md) and [flas
 
 **Count every drafted description before its file is written.** The cap is 110 characters, measured without YAML quotes. Batch the count, shorten every over-limit description under the [description rule](references/writing.md#description), and count again. This applies equally to later audit-created entries and descriptions rewritten by a merge. Final lint is a backstop, not the first count.
 
-Write `<wiki-folder>/<slug>.md` using [the entry shape](#the-entry). New entries have bare `read: false`, `parents: []`, and no `importance:` key. Only the user sets review state to true.
+Draft the complete bytes for `<wiki-folder>/<slug>.md` in the run's unique
+private working area, using [the entry shape](#the-entry). Do not publish it in
+this step. Record the intended public path and its expected-absent state; the
+earlier index does not reserve the name, and an occupant that arrives later
+must survive unchanged. New entries have bare `read: false`, `parents: []`,
+and no `importance:` key. Only the user sets review state to true.
 
-Read [equations](references/equations.md) before typesetting when the source states or describes a calculation, or an existing merged body already contains equations. Check source images with `find '<images-folder>' -name '<source_stem>_fig*'` (keep the pattern quoted); read [media](references/media.md) when it finds files or the source refers to figures, including references whose image files are unavailable. Preserve actual source/figure identity; do not fabricate images, use comprehension screenshots as extracts, or drop an existing exhibit merely because a new source lacks it.
+Read [equations](references/equations.md) before typesetting when the source states or describes a calculation, or an existing merged body already contains equations. Inventory source images with `python3 '<skill>/../../shared/scripts/vault_artifacts.py' figures --images '<images-folder>' --stem '<resolved_source_stem>'`; read [media](references/media.md) when `candidates` is nonempty, the report has findings, or the source refers to figures, including references whose image files are unavailable. The resolved source stem is the actual PDF chosen after any summary substitution, or the actual Markdown source—not the path first handed to the skill. Read the complete JSON and resolve/report an unsafe or incomplete inventory before embedding anything; never consume `blocked_matches`. Preserve actual source/figure identity; do not fabricate images, use comprehension screenshots as extracts, or drop an existing exhibit merely because a new source lacks it.
 
 ### 5. Merge into existing entries
 
-Follow [merge logic](references/merge.md#merge-logic): integrate substantive new information into one coherent entry, preserving earlier contributions rather than stacking paragraphs. Existing images/tables, populated `parents:`, legacy `importance:`, user-disabled cards and scheduling metadata have preservation rules; they are not fields to regenerate from a blank template. Preserve Obsidian-owned appearance/publish properties (`cssclasses`, `cssclass`, `publish`, `permalink`, `cover`, `image`, `banner`, `icon`) exactly and report them under item 2 rather than treating them as schema debris. Read the [hand-edit case](references/edge-cases.md) when the user has edited an entry; there is no protected-region mechanism.
+Follow [merge logic](references/merge.md#merge-logic): integrate substantive new information into one coherent staged entry, preserving earlier contributions rather than stacking paragraphs. Snapshot the existing note's exact bytes, identity, and permissions when reading it; keep that original snapshot as the final publication precondition. If a later source in this run touches the same entry, merge into the staged draft without replacing that original precondition. If the public file changes at any point, preserve the newer file, re-read it, and rebuild/re-review the complete merge instead of applying the stale draft. Existing images/tables, populated `parents:`, legacy `importance:`, user-disabled cards and scheduling metadata have preservation rules; they are not fields to regenerate from a blank template. Preserve Obsidian-owned appearance/publish properties (`cssclasses`, `cssclass`, `publish`, `permalink`, `cover`, `image`, `banner`, `icon`) exactly and report them under item 2 rather than treating them as schema debris. Read the [hand-edit case](references/edge-cases.md) when the user has edited an entry; there is no protected-region mechanism.
 
 Append only a substantive source contribution, with decoded source identity and confirmed PDF/summary pairing. A thin mention never earns a citation. For `Software`, using the artifact to teach another concept, enumerating its classes, or listing parameters and defaults is not a contribution about the artifact; another object that merely instantiates an interface convention the entry already explains is a source no-op. A source-no-op merge skips source-driven body rewriting, but step 7 still applies targeted independent QC. Update `updated:` whenever anything actually changes; preserve the old date only when the final entry is byte-unchanged.
 
@@ -98,7 +148,7 @@ Append only a substantive source contribution, with decoded source identity and 
 
 ### 6. Interlink
 
-Sweep all entries this run wrote, including mentions of entities created later in the pass. Link the first eligible body occurrence per target, with the entry's wording as display text; Related is a separate slot. Follow [link form and display casing](references/writing.md#link-form) and the substance bar: passing mentions do not earn links merely because the target exists.
+Sweep all entries in the run's staged working set, including mentions of entities drafted later in the pass. Link the first eligible body occurrence per target, with the entry's wording as display text; Related is a separate slot. Follow [link form and display casing](references/writing.md#link-form) and the substance bar: passing mentions do not earn links merely because the target exists.
 
 **On a merge, link only targets or relationships the active source introduces.** Sentence authorship is not provenance: rephrasing or reorganizing a carried-over claim does not make its bare targets new and does not restore a link wiki-linter may have pruned. A later source that genuinely adds a substantive relationship to a previously pruned target may support a new link; report that evidence so the next retrospective pass can judge it under wiki-linter's closeness bar. Do not grow Related from a pre-existing bare mention alone, backfill other entries, or prune their links. Every new target must already be a real entry; no target means plain text, never a placeholder file. `sources:` and `parents:` are outside this body-link sweep.
 
@@ -106,13 +156,64 @@ Finish with a frequency-inverted check: take accepted entities from most-mention
 
 ### 7. Review and report
 
-Review and lint every created, promoted, or merged entry with `python3 '<skill>/scripts/lint_entry.py' '<file>'`, then lint the wiki once for cross-entry alias collisions. **Fix within-scope findings and re-lint until nothing fixable remains.** Re-read the body for atomic scope, paragraph unity and progression, and sentence clarity. Give each paragraph a short phrase naming its purpose, verify that every sentence advances its controlling idea, and read the paragraph openings in sequence; none of these judgments can be established by word count. Across every entry this run created, promoted, or merged, also check whether the same worked example or multi-sentence explanation is doing the same work in more than one note. Give the full treatment to the most specific canonical owner; other current-run prose keeps only the concise relationship needed for orientation and a wikilink. A reciprocal contrast may remain when each subject needs it. If resolving an overlap would move or delete pre-existing content not contributed by the active source, propose that legacy refactor instead of performing it. Scripts report; they do not authorize edits or replace judgment. A prose/script disagreement is reported and resolved using the governing rule.
+Build a unique private **combined review tree** before linting: copy each
+readable regular entry from the current Wiki snapshots into scratch, using
+ordinary byte copies rather than hard links, then overlay the run's staged
+creates and replacements at their intended relative paths. Preserve the real
+index's occupied-slug and unreadable/symlink findings alongside that mirror;
+never follow a leaf symlink into the review tree. This gives cross-entry checks
+the final proposed state without exposing a draft in the vault.
+
+Review and lint every staged created, promoted, or merged entry with
+`python3 '<skill>/scripts/lint_entry.py' '<file>'`, then lint the combined review
+tree once for cross-entry alias collisions. **Fix within-scope findings in the
+private working set and rebuild/re-lint the combined view until nothing fixable
+remains.** Re-read the body for atomic scope, paragraph unity and progression,
+and sentence clarity. Give each paragraph a short phrase naming its purpose,
+verify that every sentence advances its controlling idea, and read the
+paragraph openings in sequence; none of these judgments can be established by
+word count. Across every entry this run created, promoted, or merged, also
+check whether the same worked example or multi-sentence explanation is doing
+the same work in more than one note. Give the full treatment to the most
+specific canonical owner; other current-run prose keeps only the concise
+relationship needed for orientation and a wikilink. A reciprocal contrast may
+remain when each subject needs it. If resolving an overlap would move or
+delete pre-existing content not contributed by the active source, propose that
+legacy refactor instead of performing it. Scripts report; they do not
+authorize edits or replace judgment. A prose/script disagreement is reported
+and resolved using the governing rule.
 
 **Do not rename or delete a pre-existing entry as a review fix.** Propose it with the reason and intended slug; inbound links, parents, MOCs, and earlier content extend beyond this run's edit scope. A filename correction on an entry created this run must still leave every reference written during the run resolving.
 
-**Do not remove a semantic-invalid alias as a review fix.** Report the alias, the source evidence that shows it names another entity, and the likely canonical owner when known. Alias removal is an approval-dependent vault-wide refactor because inbound links may resolve through that alias; the approved pass follows the complete alias-refactor protocol in [shared conventions](../../shared/CONVENTIONS.md#4b-aliases-use-the-same-slug-rule), rewriting resolving entry-link surfaces before deletion without changing sources, embeds, or logs on a text match. Ordinary duplicate spellings within one alias list remain format fixes.
+**Do not remove a semantic-invalid alias as a review fix.** Report the alias, the source evidence that shows it names another entity, and the likely canonical owner when known. Alias removal is a separately scoped vault-wide refactor because inbound links may resolve through that alias. Route a request that directly authorizes the refactor to `wiki-linter`'s explicit refactor mode; it follows the complete alias protocol in [shared conventions](../../shared/CONVENTIONS.md#4b-aliases-use-the-same-slug-rule), rewriting resolving entry-link surfaces before deletion without changing sources, embeds, or logs on a text match. It needs no second human review. Ordinary duplicate spellings within one alias list remain format fixes.
 
 Read [audits and report](references/review.md) now. Run missed-entity recovery first, re-check every recovered entry, perform the run-level overlap/ownership sweep, **refresh the index**, then audit body/Related links in all this run's entries. Case/normalization matches are resolving links to canonicalize, not missing files to overwrite. Drop genuinely missing targets to display text unless this source supports creating the full missed entry through the normal gates; never create stubs. Inherited vault-wide orphans belong to wiki-linter.
+
+After all content and link audits pass, refresh the **real** Wiki index and
+revalidate every collision decision and original replacement snapshot. Any
+new occupant, alias owner, changed file, or newly unreadable path invalidates
+the affected draft: preserve it, re-read current state, rebuild the combined
+view, and repeat review. A preview/no-apply run stops here and reports the
+reviewed proposal; it never creates `Wiki/` or a publication stage inside the
+vault.
+
+An ordinary request to build or update the wiki authorizes this apply; do not
+ask for a second human review. An explicit preview/plan-only/no-apply request
+does not. For an authorized apply, follow the shared
+[safe-write protocol](../../shared/SAFE_WRITES.md). Copy each final reviewed
+file into a unique private stage on the destination filesystem, outside the
+recursive Wiki tree; resolve a symlinked Wiki directory before choosing that
+stage parent. Preserve the inspected permissions for replacements. If Wiki is
+absent, create that exact directory exclusively immediately before publication
+and verify it is the selected vault child. Publish new slugs with exclusive
+creation and replacements only against their original snapshots, using
+`shared/scripts/atomic_move.py`; never copy or move a working draft straight to
+the public name. Record every completed publication. If a later member fails,
+conditionally roll back only unchanged publications and retain/report any
+recovery or mixed state as the multi-file protocol requires. Finally refresh
+the public index and re-lint the published entries and whole Wiki collision
+surface. Claim completion only when this public postcondition is clean and the
+published bytes equal the reviewed bytes.
 
 Report actual creates/regular merges/source-no-op merges, skipped/deferred entities and reasons, review-state decisions, every audit count (including zero), unresolved findings, and unused source figures with the media rule's permitted reasons. Use the complete [report specification](references/review.md#run-report); do not describe proposals as applied. An all-skipped run only reports the skips.
 
@@ -132,28 +233,115 @@ Types: `Concept`, `Person`, `Organization`, `Dataset`, `Software`, `Device`, `Ev
 
 Tags use the [shared discipline enum](../../shared/CONVENTIONS.md#3-the-discipline-tag-enum), not abbreviations or wikilinks.
 
-Open with prose immediately after YAML. Follow with the body, one `**Related:**` line, `---`, and exactly one `## Flashcards` card. Preserve an existing card's `!!` disabled cue and line 4+ metadata. Existing `parents:` and legacy `importance:` stay as found on merge; missing or unknown review state is reported rather than invented.
+Open with prose immediately after YAML. Follow with the body, one `**Related:**` line, `---`, and exactly one `## Flashcards` card. Preserve an existing card's `!!` disabled cue and every scheduling or block-ID attachment recognized by the canonical [card format](references/flashcards-and-emphasis.md#4-flashcards), byte-for-byte and in place. Existing `parents:` and legacy `importance:` stay as found on merge; missing or unknown review state is reported rather than invented.
 
 ## Quality Checklist
 
 Apply these numbered checks in step 7, including to audit-created entries. The helper covers mechanical assertions only; source-dependent and semantic checks still require reading. Preserve the item numbers: wiki-linter's maintenance subset refers to them. Renames/deletions of existing entries and other report-only findings stay proposals, not “fixes.”
 
-1. ★ **Valid YAML** — fenced by `---`, parses.
-2. ★ **Field order and quoting** — schema order, `read:` last; `type:` is exactly one of the 15 canonical values listed above; `parents:` present, `[]` on creation and **preserved exactly as found on merge** (a populated value belongs to another skill and is never a violation); `tags:` present; `read:` present and an unquoted `false` on creation — a quoted `read: "false"` is a string, and Obsidian's checkbox renders it permanently checked. **An existing entry with no `read:` key is reported, not filled in**: writing `false` into an entry the user had already marked read destroys the one piece of vault state that is theirs, and nothing can recover it. A legacy `importance:` key is preserved as found and is likewise never a violation; new entries don't write it. Obsidian-owned appearance/publish properties (`cssclasses`, `cssclass`, `publish`, `permalink`, `cover`, `image`, `banner`, `icon`) are report-only and preserved exactly on merge. → `references/writing.md`
-3. ★ **Dates** — `YYYY-MM-DD`; equal on creation; `updated` is today whenever this merge pass **changed anything**, including independent QC or metadata work on a source-no-op. A byte-unchanged source-no-op keeps its prior date. **`updated:` and `read:` are independent tests and must not be read off each other**: the bump fires on any change at all, while the reset fires only when the pass added or rewrote unread explanatory body content. Every reset therefore comes with a bump, while a bump on its own settles nothing. → `references/merge.md`
-4. ★ **Sources format** — PDFs `[[Name.pdf#page=N]]` with a *physical* page anchor, where `N` is a positive decimal with no leading zeros; markdown no anchor; extension included; stubs `["stub"]`, replaced on promotion, not appended. **Do not record a confirmed PDF/summary pair as two sources.** A same-stem `.md`/`.pdf` pair is only a review candidate: inspect the markdown note's decoded `sources:` (or legacy `source:`) and establish whether it points to that PDF. A URL-origin clipping can be independent even with the same stem. Preserve both references unless the pairing is confirmed; then keep the `.pdf` item, remove the duplicate `.md` reference and report the change. Both `lint_entry.py` (`4-duplicate-source`, warning) and `wiki-linter` (`item4/source-identity`, report-only) surface candidates without authorizing deletion.
-5. ★ **Filename, collision, disambiguation** — slug per the algorithm; no collision under any probe; bare ambiguous common nouns titled in qualified form. Re-run `slugify.py` on `title:` — it must equal the filename. → `references/writing.md` §3
-6. **Type and API surface** — no code-identifier entries; named models and landmark systems are `Concept`, not `Software`; zero API identifiers in non-`Software` entries (plain library names and `[[library]]` wikilinks are fine). A `Software` entry may name cross-cutting interfaces and conventions that explain the artifact, but is not a class catalog, parameter/default inventory, version log, or how-to guide; the active source must teach the software itself rather than merely use it. → `references/api-surface.md`
-7. ★ **Description** — one concise sentence, ≤110 chars, entity-as-subject in canonical title form (base term for a parenthetical title), plain text, tense matching current status. It starts with a capitalized word unless the canonical title itself starts lowercase, and ends with a period. After an optional leading article, the subject noun phrase begins with the canonical title/base/math-skeleton form; complex grammatical heads and tense still require judgment. **The count happened at step 4's description gate, before the file was written**; a hit here means a description was edited after the gate, so fix it and re-run the gate on it rather than treating this item as where counting normally happens.
-8. ★ **Tags** — key present; when populated, one or more enum slugs in a block-form list, each `#`-prefixed and double-quoted, never a scalar, flow-form list, or wikilink. A full entry with no genuine disciplinary home uses a blank `tags:` key; a legacy stub never does. The calibration is three-way, not two: entities a practitioner meets as a primary topic in **ML** courses and papers (losses, metrics, named RL formalisms) take `#machine-learning`; **classical inference and methodology** (hypothesis testing, ANOVA, confidence intervals) take `#statistics`; and **universal mathematical objects** taught across many fields, where ML is one application among many (`Probability`, `Random variable`, `Variance`, `Central limit theorem`, `Markov chain`, `Gaussian distribution`), take `#mathematics`. Reading an ML source makes everything look ML-adjacent — judge by where the entity is a primary topic, not by where you met it. → `references/calibration.md`
-9. ★ **Body structure, paragraph flow, atomic scope, sentence clarity** — opens with prose, no blank line after frontmatter; flat prose by default, `##` only for named sub-aspects. There is no body-level sentence, paragraph, or word target: include what a correct understanding of this one entity requires. Every passage stays on that entity; a distinct source-supported concept gets its own linked entry, while inherent facets and thin mentions do not. Each paragraph has one discernible controlling idea, every sentence advances it, and paragraph openings progress in a useful order. When focus changes, use a real conceptual bridge, a new paragraph, a heading for a sustained inherent facet, a separate linked note for an independent concept, or omission for a tangent. Inspect final sentences that may introduce a new idea after the paragraph is otherwise complete; do not disguise a jump with a stock connector or fragment one continuous explanation into tiny paragraphs. Cut tangents, repetition, long walkthroughs, and cross-entry duplication rather than load-bearing explanation (prose principles 4, 6–7): within this run, the most specific entry owns the full example or explanation and related entries retain a concise relationship plus link. Body links are grammatical parts of those relationship sentences, never navigation-only `see [[…]]` or `refer to [[…]]` directions. Prefer sentences with one clear main idea; split or restructure only when syntax obscures the relationship among claims. Length or lexical similarity alone is not a finding. `Person`/`Event` entries carry parenthetical dates after the bolded title in one of the exact forms in `references/rare-types.md`. → `references/writing.md` §2, `references/rare-types.md`
-10. ★ **Wikilinks** — piped when display ≠ slug, bare otherwise; **first eligible body occurrence only, enforced by resolved entry rather than raw target/display spelling** (`[[label-machine-learning|labels]]` then `[[label-machine-learning|target]]` is one entry twice, as are path/`.md`/case variants or its unambiguous alias beside the canonical slug — **keep the first eligible link and unlink the rest to bare text**. Collapse path spellings only when the vault inventory identifies one owner: if several files share a basename, keep distinct qualified paths distinct and preserve repeated bare or ambiguous-alias links until ownership is resolved. On a merged entry eligibility follows active-source provenance, so the link belongs on the first occurrence in a target or relationship the active source introduces. An earlier carried-over bare mention is not made eligible by its position, and rewording a carried-over claim is not new evidence (step 6); the Related footer is a separate slot and is exempt); none in captions or table cells; every target resolves to a real file.
-11. **Related footer** — one ` · `-separated line, additive on merge, every link piped with the target's canonical title. Soft cap ~8 fresh, ~12 through merges; past that, report rather than prune.
-12. **Equations, images, tables** — LaTeX in the body, never in frontmatter; plain numbers not `$`-wrapped. **Equations cover and conform**: every calculation the source states — typeset *or described in words* — is rendered as LaTeX; the defining equation of the entry's subject or of a named quantity sits in a `$$…$$` display block on its own line, with inline `$…$` reserved for symbol references and short expressions; symbols follow the vault notation standard, each bound in nearby prose; an off-standard source equation is normalized, its prose references updated with it. → `references/equations.md`. **Images are selected for explanatory value**: inventory every `[source_stem]_fig*` in `Sources/Images/` (any extension, both naming conventions), then apply [figure selection](references/media.md#selection). An available figure does not warrant a new paragraph or a wider topic; account for skipped figures in the run report. A panel — a label ending in a lowercase letter — is part of its figure, not a figure of its own: use the composite for a selected figure, taking a panel only when the entry's subject is that panel's alone. → `references/media.md`
-13. **Merge integrity** — one unified body, never two stacked; `updated:` today for every actual change, including QC or metadata changes on a source-no-op (item 3); `read: false` if and only if the pass added or rewrote unread explanatory body content, never for a `sources:` append, removal, link/card/description repair, or format-only fix (item 3); list fields extended not replaced; existing images and tables preserved; `parents:` preserved exactly as found.
-14. **Self-containment** — no source-meta phrasing (*the paper / chapter / author(s) / source*, *as shown above*), no author-framing attributions, no source-internal back-references. Narrow exception: the phrase names a specific work the wiki treats as an entity (*"the authors of SGDR"*, *"the GPT-3 paper"*); bare *"the paper"* is not. → `references/writing.md` §2
-15. **Example discipline** — no example by default. Include one only when it directly clarifies the entity and a shorter explanation would not do as well; usually one example in one or two sentences, woven into prose. Justify any modest expansion by the specific misunderstanding it prevents; never add a multi-paragraph walkthrough, tangent, or redundant example. Omit incidental source data; retain only values needed for the explanation, without changing the facts. **A recreated Markdown table is not a worked example** and keeps its numbers — the table is recreated per `references/media.md` and the Body Structure tables rule, which prune columns and rows rather than values. → `references/writing.md` §2, prose principle 7's table carve-out
-16. ★ **Bold, italic, and code typography** — enumerated emphasis patterns only; no vocabulary-introduction bolding. Literal file extensions and `[CLS]`/`[MASK]`/`[SEP]`/`[IMG]` special tokens use backticks in running prose. A `Work` title and an `Organism` title that is an evidence-backed scientific binomial or unranked lowercase trinomial combine the first-self-title bold role with italics (`***Hamlet***`, `***Mus musculus***`, `***Canis lupus familiaris***`). When an Organism title includes a strain/isolate/serovar/subtype suffix, the outer bold covers the whole title while italics cover only the taxon (`***E. coli* K-12**`); later mentions are `*E. coli* K-12`. A common-name Organism title stays bold-only; capitalization and a two-word shape alone do not prove a scientific name. **Resolve ambiguous taxon-shaped, rank-marked, and genus-only Organism titles from the source; this semantic review is mandatory even when `lint_entry.py` is silent.** First bolded span of the opener must equal `title:`, compared **case-insensitively on the first letter only** (which catches acronym/full-form, compound-qualifier and noun-vs-gerund drift), with two comparison carve-outs: a parenthetical-disambiguated title compares against its base term, and a symbol or variable title compares against the math-stripped skeleton (`k-nearest neighbors`). → `references/flashcards-and-emphasis.md` §5
-17. ★ **Aliases: same entity, complete against the body** — never a related, contrasting, narrower, broader or successor entity; and **every alternative name the body introduces for the entry's own subject is in `aliases:`** — the italicized *also called X* synonym (Italic Pattern 8), the acronym or expansion bound in the opener's parenthetical (prose principle 5(e)/(f)), and a direct italic scientific abbreviation bound to an `Organism` title (`***Escherichia coli*** (*E. coli*)`) — slug-form, minus three standing exclusions: a form that slugs identically to the filename; a cross-domain bare term; and an organism's ordinary common name explicitly bound to that Organism's canonical title in the description or opening sentence when unsafe as a global alias. `lint_entry.py` flags introduced-but-missing candidates; judge each against these exclusions and the same-entity test before adding. → `references/writing.md` §1
-18. ★ **Alias form, collision, and display-label sanity** — every alias is a nonempty canonical slug form, none slugs to the entry's own filename, no two entries in `Wiki/` share an alias string (check the whole vault), and no alias is listed twice within one entry — `lint_entry.py` flags duplicates as `18-alias-duplicate`; a claimed abbreviation must not be one the literature gives to a different concept (`DDQN` → Double DQN); a claimed phrase must not be a broader concept's natural slug (don't let `cloze-task` or `generative-pre-training` get claimed by a narrower entry — leave the slug free for the broader concept). **Every `[[slug|display]]` label must be a surface form the target's `title:`/`aliases:` actually claims** — with three deliberate carve-outs that must *not* be "fixed": a context-resolved cross-domain bare term (`[[information-entropy|entropy]]`), a natural plural or verb inflection, and an organism's ordinary common name explicitly bound to that Organism's canonical title by the target's description or opening sentence (`[[mus-musculus|mouse]]`). Do not add a globally ambiguous common-name alias merely to permit that link. Every other invented, subset, or superset label requires semantic review: reword it or add a genuine unambiguous alias. If the label exactly names another existing entry's title or unambiguous alias, treat that as a target conflict and review the sentence rather than accepting token overlap or retargeting automatically. Successor versions (`DeBERTaV3`) are distinct entities, not aliases.
-19. ★ **Flashcards** — present on every full entry, after the Related footer, preceded by `---`; **exactly one card** — a second term that warrants a card is a split into its own source-supported entry, never a second card here. Line 1 defines without containing the title or any alias (de-hyphenated substring check, including inside `$…$`; also watch the *also-called* and *X — a Y* apposition patterns, which smuggle the answer in without a literal substring match); line 2 is `??` — **or the user's `!!`, which marks a card they deliberately disabled and is preserved verbatim, never converted back**; line 3 is the canonical title plus its own opener-established, alias-bound counterpart when present — never a synonym's — **or, for a parenthetical-disambiguated title, the base term** (`Feature`, not `Feature (machine learning)`), which is also what the line-1 leak check searches for; line 4+ preserved verbatim. The three qualifying counterpart classes are defined once in `references/flashcards-and-emphasis.md` §4.
+The canonical rule for each check lives in the linked guide. Read that guide
+when the item applies; this list is the final gate and preserves the stable
+item numbers used by `lint_entry.py` and `wiki-linter`.
+
+1. ★ **Valid YAML** — frontmatter starts on line 1, is fenced by `---`, and
+   parses. See [frontmatter fields](references/writing.md#1-frontmatter-fields).
+2. ★ **Field order and quoting** — use the canonical schema, types, required
+   fields, and quoting policy. On creation write `parents: []` and bare
+   `read: false`; on merge preserve populated `parents:`, legacy
+   `importance:`, Obsidian-owned properties, and unknown user review state.
+   See [fields and quoting](references/writing.md#1-frontmatter-fields) and
+   [merge frontmatter](references/merge.md#frontmatter-and-related-footer).
+3. ★ **Dates** — dates are valid `YYYY-MM-DD`; creation dates match, and a
+   merge bumps `updated:` for every actual change. Apply the canonical
+   [date fields](references/writing.md#created--updated) and the independent
+   `updated:` and `read:` tests in [merge logic](references/merge.md#the-read-reset).
+4. ★ **Sources format** — cite PDF introductions with a physical
+   `#page=N` anchor, cite Markdown without an anchor, and preserve unresolved
+   PDF/summary pairs until decoded provenance confirms one document. A legacy
+   `"stub"` marker is sole and is replaced on promotion. See
+   [sources](references/writing.md#sources) and
+   [source intake](references/source-intake.md#resolve-a-markdown-source).
+5. ★ **Filename, collision, disambiguation** — derive the filename from
+   `title:` with `slugify.py`, resolve every collision probe, and qualify
+   cross-domain common nouns. See
+   [wikilinks and naming](references/writing.md#3-wikilinks-and-naming) and
+   [collision decisions](references/merge.md#collision-decisions).
+6. **Type and API surface** — reject code-identifier entries, classify named
+   models and landmark research systems as `Concept`, and apply the zero-API
+   rule to non-`Software` entries and the selective artifact-level rule to
+   `Software`. See [API surface](references/api-surface.md).
+7. ★ **Description** — write one plain-text sentence of at most 110
+   characters, with the entity in canonical running form as subject and tense
+   matching its status. Count before writing and after every later edit. See
+   [description](references/writing.md#description).
+8. ★ **Tags** — keep the key; when populated, use one or more quoted,
+   `#`-prefixed discipline-enum values in block form. Blank is valid on a full
+   entry with no disciplinary home, never on a legacy stub. Judge canonical
+   ownership rather than source context. See [tags](references/writing.md#tags)
+   and [tag calibration](references/calibration.md).
+9. ★ **Body structure, flow, sentence clarity, and atomic scope** — open
+   immediately with the main claim in prose; use plain `##` headings only for
+   sustained inherent facets. Keep one controlling idea per paragraph, useful
+   progression across paragraphs, clear relationships and qualifications within
+   sentences, and one durable subject per note. Cut tangents, source/tutorial
+   scaffolding that does not serve the entry, repetition, and duplicated
+   explanatory work; do not use length alone as a finding. A body link belongs
+   in a sentence that states the relationship.
+   Apply the exact `Person`/`Event` opener dates. See
+   [body and prose](references/writing.md#2-the-body) and
+   [rare types](references/rare-types.md).
+10. ★ **Wikilinks** — link the first eligible body occurrence of each resolved
+    entry, pipe only when display differs from slug, keep captions and table
+    cells link-free, and require a real target. Preserve ambiguous ownership.
+    On merge, eligibility remains limited to active-source contributions as
+    defined in step 6. See
+    [link form](references/writing.md#link-form).
+11. **Related footer** — keep one ` · `-separated line; every link is piped to
+    the target's canonical title. Add on merge, with the guide's soft bounds;
+    report an inherited excess rather than pruning it. See
+    [Related footer](references/writing.md#the-related-footer).
+12. **Equations, images, tables** — keep LaTeX in body prose, ordinary
+    quantities plain, and literal dollars escaped. Render every stated or fully
+    described calculation in conforming LaTeX, display defining equations, bind
+    symbols, and normalize notation. Inventory source figures, select only
+    exhibits that clarify this entry, keep composite/panel identity intact, and
+    recreate warranted source tables. See
+    [body math typography](references/writing.md#prose-principles),
+    [equations](references/equations.md), and [media](references/media.md).
+13. **Merge integrity** — produce one integrated body; preserve existing
+    contributions and user-owned fields; extend and deduplicate `sources:`,
+    `aliases:`, `tags:`, and Related only as the merge guide permits; preserve
+    `parents:` exactly; and use only the documented exhibit replacements. Apply
+    the independent date and review-state rules. See
+    [merge logic](references/merge.md#merge-logic).
+14. **Self-containment** — remove source-meta framing and source-internal
+    back-references. The named-work exception applies only when the phrase
+    identifies a work the wiki treats as an entity. See
+    [prose principle 5](references/writing.md#prose-principles).
+15. **Example discipline** — default to no example; usually keep one compact
+    illustration only when it prevents a specific misunderstanding that shorter
+    explanation cannot. A rare justified expansion follows the guide. Do not
+    treat a recreated source table as a worked example. See
+    [prose principle 7](references/writing.md#prose-principles).
+16. ★ **Bold, italic, and code typography** — use only the enumerated emphasis
+    roles, preserve required `Work`, scientific-`Organism`, and symbol-title
+    forms, and make the opener match the canonical running form. Resolve
+    ambiguous taxon typography from the source. See
+    [bold and italic](references/flashcards-and-emphasis.md#5-bold-and-italic).
+17. ★ **Aliases: identity and completeness** — aliases name this entity only,
+    and every qualifying alternate name introduced for the subject appears in
+    slug form after the documented exclusions and collision check. See
+    [aliases](references/writing.md#aliases).
+18. ★ **Alias form, collision, and display labels** — aliases are nonempty,
+    canonical, useful, and unique within and across entries. Display labels
+    must genuinely name the resolved target, subject to the documented
+    cross-domain, inflection, and Organism-common-name carve-outs. See
+    [aliases](references/writing.md#aliases) and
+    [display-label casing](references/writing.md#display-label-casing).
+19. ★ **Flashcards** — every full entry has exactly one three-content-line
+    definition card after the footer and separator. Keep line 1 self-contained,
+    leak-free, and complete; line 2 is `??` or preserved user `!!`; line 3's
+    content is the canonical primary answer. Preserve every recognized schedule
+    and block-ID attachment on the retained primary card byte-for-byte and in
+    place. See
+    [flashcards](references/flashcards-and-emphasis.md#4-flashcards).

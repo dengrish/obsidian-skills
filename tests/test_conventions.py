@@ -109,6 +109,8 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import unicodedata
+from urllib.parse import unquote
 
 # The slug checks import skill scripts to compare their output.  Without this,
 # running the test litters `__pycache__/` into skill directories it has no
@@ -798,7 +800,7 @@ SLUG_FINGERPRINTS = [
     ("charges", re.compile(r"[\"']-?plus[\"']|[\"']-?minus[\"']")),
     ("non-slug-re", re.compile(r"\[\^a-z0-9[^\]\n]{0,6}\]")),
     ("hyphen-run", re.compile(r"-\{2,\}|--\+")),
-    ("ascii-fold", re.compile(r"encode\(\s*[\"']ascii[\"']|unicodedata")),
+    ("ascii-fold", re.compile(r"encode\(\s*[\"']ascii[\"']")),
 ]
 
 #: The public names CONVENTIONS.md §4a publishes for the canonical module,
@@ -950,9 +952,9 @@ def _load_module(path, name, screen=False):
     Two changes landed together and did not see each other: the slug check
     started *importing and executing* the skill scripts, and the CONVENTIONS
     §5 bootstrap those scripts carry started rewriting ``sys.path`` in place
-    (``_sys.path[:] = ...``, then insert ``shared/scripts`` at 0 and append
-    the script's own directory).  In the script's own process that is exactly
-    right.  Inside the harness it escapes: importing the twelve modules under
+    (``_sys.path[:] = ...``, then insert ``shared/scripts`` at 0 and the
+    script's own directory at 1).  In the script's own process that is exactly
+    right.  Inside the harness it escapes: importing the modules under
     ``skills/`` left four directories permanently on the harness's path --
     ``shared/scripts`` at position 0, plus three skill ``scripts/`` dirs --
     so every later bare ``import`` in this file resolved against the tree
@@ -1685,7 +1687,7 @@ def _check_slug_claims(rep, check, canon):
 #: cheapest way to keep the suite green was to leave the gaps alone -- and
 #: CONVENTIONS.md §4a named three real ones (Greek capitals, final sigma, CJK)
 #: that stayed open for exactly that reason.  A shrink is still a failure.
-SLUG_SELFTEST_MIN = 61          # the 2026-08-31 tally; shrink = FAIL
+SLUG_SELFTEST_MIN = 71          # the 2026-09-02 tally; shrink = FAIL
 
 
 def _check_slug_exports(rep, check, canon):
@@ -2135,7 +2137,7 @@ FIG_EMBED_RE = re.compile(r"^!\[\[([^\]\n]+)\]\][ \t]*$", re.M)
 #: Floor, not a pin -- exactly like SLUG_SELFTEST_MIN.  Coverage may grow
 #: freely; only a shrink fails, which is what stops a case being quietly
 #: deleted to make a regression go away.
-NAMING_SELFTEST_MIN = 161       # the 2026-08-31 tally; shrink = FAIL
+NAMING_SELFTEST_MIN = 191       # the 2026-09-02 tally; shrink = FAIL
 
 #: Corpus floor for figure-naming (c), separately from behavioral case counts.
 #: Rebased after the 2026-08-31 documentation consolidation: 352 occurrences
@@ -5109,6 +5111,80 @@ PLUGIN_PATH_REF = re.compile(
     r"`((?:skills|shared|tests)/[A-Za-z0-9_./-]+\.(?:md|py)|"
     r"[a-z0-9-]+/[A-Za-z][A-Za-z0-9_.-]*\.(?:md|py))`")
 
+#: Markdown links with a local fragment. Path existence alone does not make
+#: ``guide.md#missing-heading`` useful: both Codex and Claude surface these
+#: references as navigation, and a stale fragment quietly lands at the top of
+#: a potentially long file. Code examples are masked before this is applied.
+LOCAL_FRAGMENT_LINK = re.compile(
+    r"\]\(\s*<?([^\s)>]*#[^\s)>]+)>?(?:\s+[^)]*)?\)")
+ATX_HEADING = re.compile(r"^ {0,3}#{1,6}(?:[ \t]+|$)(.*)$", re.M)
+
+
+def _mask_markdown_code(text, inline=True):
+    """Blank fenced code, and optionally inline code, without moving offsets."""
+    chars = list(text)
+    offset = 0
+    fence_char = None
+    fence_len = 0
+    for line in text.splitlines(True):
+        visible = line.rstrip("\r\n")
+        marker = re.match(r"^ {0,3}((?:%s){3,}|~{3,})" % chr(96), visible)
+        if fence_char is None and marker:
+            token = marker.group(1)
+            fence_char, fence_len = token[0], len(token)
+            for index in range(offset, offset + len(visible)):
+                chars[index] = " "
+        elif fence_char is not None:
+            for index in range(offset, offset + len(visible)):
+                chars[index] = " "
+            closing = re.match(
+                r"^ {0,3}%s{%d,}[ \t]*$" %
+                (re.escape(fence_char), fence_len), visible)
+            if closing:
+                fence_char = None
+                fence_len = 0
+        offset += len(line)
+    masked = "".join(chars)
+    if not inline:
+        return masked
+    tick = re.escape(chr(96))
+    return re.sub(
+        r"(%s+).*?\1" % tick,
+        lambda match: " " * len(match.group(0)),
+        masked,
+    )
+
+
+def _github_heading_slug(value):
+    """Return the GitHub-style fragment used by this Markdown documentation."""
+    value = value.replace(chr(96), "")
+    value = re.sub(r"<[^>]+>", "", value)
+    value = re.sub(r"\[([^]]+)\]\([^)]+\)", r"\1", value)
+    value = value.replace("*", "").replace("~", "").strip().lower()
+    # GitHub removes punctuation before replacing each remaining space. The
+    # order matters around an em dash: ``Step 0 — Inventory`` has two spaces
+    # after punctuation removal and therefore a double hyphen in its anchor.
+    value = "".join(
+        char for char in value
+        if not unicodedata.category(char).startswith("P") or char in "-_"
+    )
+    return value.replace("\t", " ").replace(" ", "-")
+
+
+def _markdown_heading_anchors(text):
+    """Return rendered ATX heading fragments, including duplicate suffixes."""
+    anchors, seen = set(), {}
+    visible = _mask_markdown_code(text, inline=False)
+    for match in ATX_HEADING.finditer(visible):
+        heading = re.sub(r"[ \t]+#+[ \t]*$", "", match.group(1))
+        base = _github_heading_slug(heading)
+        if not base:
+            continue
+        number = seen.get(base, 0)
+        seen[base] = number + 1
+        anchors.add(base if number == 0 else "%s-%d" % (base, number))
+    return anchors
+
 #: Boundaries of the sentence a token sits in.
 SENT_BOUND = re.compile(r"[.!?;]\s|\n\s*\n")
 
@@ -5254,7 +5330,57 @@ def check_reference_paths(rep, conv):
     if n_tokens:
         rep.ok(check, "%d bundled-path reference(s) resolve on disk" % n_tokens)
 
-    # (b) every reference file is reachable from its own SKILL.md.
+    # (b) local Markdown fragments name a real rendered heading. The path
+    # probe above deliberately ignores ``#fragment`` and therefore used to
+    # accept a contents link that named a heading removed months earlier.
+    # Ignore examples in code, and let the ordinary path checks own missing
+    # files; this pass answers only whether navigation inside an existing
+    # Markdown document lands where its label promises.
+    fragment_links = 0
+    bad_fragments = 0
+    heading_cache = {}
+    for path, text in walk_plugin_files():
+        if not path.endswith(".md"):
+            continue
+        visible = _mask_markdown_code(text)
+        for match in LOCAL_FRAGMENT_LINK.finditer(visible):
+            raw = match.group(1)
+            target, fragment = raw.split("#", 1)
+            target = unquote(target)
+            fragment = unquote(fragment)
+            if not fragment or "://" in target or target.startswith("mailto:"):
+                continue
+            if target:
+                target = target.split("?", 1)[0]
+                if not target.lower().endswith(".md"):
+                    continue
+                destination = os.path.normpath(
+                    os.path.join(os.path.dirname(path), target))
+            else:
+                destination = path
+            if not os.path.isfile(destination):
+                continue
+            fragment_links += 1
+            if destination not in heading_cache:
+                heading_cache[destination] = _markdown_heading_anchors(
+                    read(destination))
+            if fragment not in heading_cache[destination]:
+                bad_fragments += 1
+                rep.fail(
+                    check,
+                    "%s links to `#%s` in %s, but that rendered heading does "
+                    "not exist. Update the fragment when a heading is renamed; "
+                    "a valid file path with a stale anchor silently lands at "
+                    "the top of the document."
+                    % (rel(path), fragment, rel(destination)),
+                    at(path, match.start(), text),
+                )
+    rep.saw(check, "local Markdown heading fragments", fragment_links)
+    if fragment_links and not bad_fragments:
+        rep.ok(check, "%d local Markdown fragment link(s) resolve to headings"
+               % fragment_links)
+
+    # (c) every reference file is reachable from its own SKILL.md.
     for skill in skill_names():
         refdir = os.path.join(SKILLS_DIR, skill, "references")
         skillmd = os.path.join(SKILLS_DIR, skill, "SKILL.md")
@@ -5277,7 +5403,7 @@ def check_reference_paths(rep, conv):
                          "read, so its rules are done from memory instead."
                          % (skill, name), rel(skillmd))
 
-    # (c) the shared layer's own files exist.
+    # (d) the shared layer's own files exist.
     for p in (CONVENTIONS, SLUGIFY, PLUGIN_PATHS):
         if os.path.isfile(p):
             rep.ok(check, "%s present" % rel(p))
@@ -5536,36 +5662,38 @@ SELFTEST_TALLY = re.compile(
 #: fails.  Lowering a number here is a deliberate, reviewable statement that
 #: cases went away; a script with no line is checked for a clean tally only.
 SELFTEST_MIN_CASES = {
-    # Re-tuned to the exact tallies of 2026-09-01. Raising after growth is the
+    # Re-tuned to the exact tallies of 2026-09-02. Raising after growth is the
     # mirror duty of the "lowering is a deliberate, reviewable statement" rule
     # below: new regression cases must not disappear with the harness green.
+    "shared/scripts/atomic_move.py": 21,
     "shared/scripts/code_typography.py": 16,
-    "shared/scripts/equation_coverage.py": 19,
-    "shared/scripts/figure_state.py": 6,
-    "shared/scripts/introduced_aliases.py": 18,
-    "shared/scripts/markdown_tables.py": 35,
+    "shared/scripts/equation_coverage.py": 152,
+    "shared/scripts/figure_state.py": 8,
+    "shared/scripts/introduced_aliases.py": 21,
+    "shared/scripts/markdown_tables.py": 36,
     "shared/scripts/naming.py": 191,
     "shared/scripts/organism_names.py": 26,
-    "shared/scripts/entry_structure.py": 21,
-    "shared/scripts/plugin_paths.py": 95,
-    "shared/scripts/plurals.py": 200,
-    "shared/scripts/slugify.py": 61,
+    "shared/scripts/entry_structure.py": 103,
+    "shared/scripts/plugin_paths.py": 107,
+    "shared/scripts/plurals.py": 212,
+    "shared/scripts/slugify.py": 71,
+    "shared/scripts/vault_artifacts.py": 37,
     "shared/scripts/yaml_scalars.py": 8,
-    "skills/clipping-processor/scripts/dedup_index.py": 113,
-    "skills/clipping-processor/scripts/fetch_images.py": 293,
-    "skills/clipping-processor/scripts/slug.py": 120,
-    "skills/paper-summarizer/scripts/note_lint.py": 190,
-    "skills/paper-summarizer/scripts/paper_scan.py": 118,
-    "skills/paper-summarizer/scripts/paper_text.py": 39,
-    "skills/pdf-figure-extractor/scripts/auto_fig_bbox.py": 296,
-    "skills/pdf-figure-extractor/scripts/batch_extract.py": 235,
-    "skills/pdf-figure-extractor/scripts/extract_figures.py": 108,
-    "skills/pdf-figure-extractor/scripts/render_page.py": 38,
-    "skills/pdf-organizer/scripts/organize.py": 212,
+    "skills/clipping-processor/scripts/dedup_index.py": 135,
+    "skills/clipping-processor/scripts/fetch_images.py": 451,
+    "skills/clipping-processor/scripts/slug.py": 130,
+    "skills/paper-summarizer/scripts/note_lint.py": 196,
+    "skills/paper-summarizer/scripts/paper_scan.py": 131,
+    "skills/paper-summarizer/scripts/paper_text.py": 48,
+    "skills/pdf-figure-extractor/scripts/auto_fig_bbox.py": 328,
+    "skills/pdf-figure-extractor/scripts/batch_extract.py": 318,
+    "skills/pdf-figure-extractor/scripts/extract_figures.py": 161,
+    "skills/pdf-figure-extractor/scripts/render_page.py": 46,
+    "skills/pdf-organizer/scripts/organize.py": 245,
     "skills/wiki-builder/scripts/find_collisions.py": 62,
-    "skills/wiki-builder/scripts/lint_entry.py": 245,
-    "skills/wiki-builder/scripts/vault_index.py": 63,
-    "skills/wiki-linter/scripts/scan_vault.py": 307,
+    "skills/wiki-builder/scripts/lint_entry.py": 290,
+    "skills/wiki-builder/scripts/vault_index.py": 70,
+    "skills/wiki-linter/scripts/scan_vault.py": 355,
 }
 
 
@@ -5899,19 +6027,84 @@ def check_bootstrap(rep, conv):
     # that imports a module living in shared/scripts/ depends on the snippet
     # having put that directory on sys.path.  Without this the check was
     # vacuous in the worst way -- delete the two marker comments from all
-    # three scripts and it reported "no skill script has adopted the
+    # copies and it reported "no skill script has adopted the
     # bootstrap yet" and passed, while CONVENTIONS.md §10a records that these
     # exact scripts once died at import for exactly this reason.
-    shared_modules = {os.path.basename(n)[:-3]
-                      for n in os.listdir(os.path.join(SHARED_DIR, "scripts"))
-                      if n.endswith(".py")}
+    shared_paths = {
+        os.path.basename(n)[:-3]: os.path.join(SHARED_DIR, "scripts", n)
+        for n in os.listdir(os.path.join(SHARED_DIR, "scripts"))
+        if n.endswith(".py")
+    }
+
+    def imported_module_names(source):
+        """Bare module names imported anywhere in one Python source."""
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            return set()
+        names = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names.update(alias.name.split(".", 1)[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                names.add(node.module.split(".", 1)[0])
+        return names
+
+    def required_shared_modules(entry_path):
+        """Shared imports reachable through the script's sibling modules."""
+        needed = set()
+        visited = set()
+
+        def visit(path):
+            path = os.path.abspath(path)
+            if path in visited or not os.path.isfile(path):
+                return
+            visited.add(path)
+            source = read(path)
+            for name in imported_module_names(source):
+                if name in shared_paths:
+                    needed.add(name)
+                    visit(shared_paths[name])
+                    continue
+                sibling = os.path.join(os.path.dirname(path), name + ".py")
+                if os.path.isfile(sibling):
+                    visit(sibling)
+
+        visit(entry_path)
+        return sorted(needed)
+
+    def declared_shared_modules(path, text):
+        """Return the literal module tuple paired with the canonical snippet."""
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            return None, None
+        found = []
+        for node in tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            if not any(isinstance(target, ast.Name) and
+                       target.id == "_OBSIDIAN_SHARED_MODULES"
+                       for target in node.targets):
+                continue
+            try:
+                value = ast.literal_eval(node.value)
+            except (TypeError, ValueError):
+                value = None
+            found.append((node, value))
+        if len(found) != 1:
+            return None, found[0][0] if found else None
+        node, value = found[0]
+        if (not isinstance(value, tuple) or not value or
+                any(not isinstance(item, str) or not item for item in value)):
+            return None, node
+        return list(value), node
+
     n_importers = 0
     for path, text in walk_python_sources():
         if not path.startswith(SKILLS_DIR):
             continue
-        needs = sorted(m for m in shared_modules
-                       if re.search(r"^\s*(?:import %s\b|from %s import)"
-                                    % (re.escape(m), re.escape(m)), text, re.M))
+        needs = required_shared_modules(path)
         if not needs:
             continue
         n_importers += 1
@@ -5926,6 +6119,45 @@ def check_bootstrap(rep, conv):
                      "import with ModuleNotFoundError. CONVENTIONS.md §10a "
                      "records two scripts that failed exactly this way."
                      % (rel(path), needs[0]), rel(path))
+            continue
+
+        declared, node = declared_shared_modules(path, text)
+        if declared is None:
+            rep.fail(
+                check,
+                "%s must assign one nonempty literal tuple to "
+                "`_OBSIDIAN_SHARED_MODULES` immediately before using the "
+                "bootstrap. The bootstrap cannot reject a partial override "
+                "unless it knows which shared imports this script and its "
+                "sibling dependencies need." % rel(path),
+                at(path, text.find("_OBSIDIAN_SHARED_MODULES"), text)
+                if node else rel(path),
+            )
+        elif (getattr(node, "end_lineno", node.lineno) >=
+              text[:text.index("# --- " + marker)].count("\n") + 1):
+            rep.fail(
+                check,
+                "%s assigns `_OBSIDIAN_SHARED_MODULES` after its bootstrap. "
+                "Move the declaration immediately above the canonical block; "
+                "otherwise the block has already fallen back to its default "
+                "before it can read this script's requirements." % rel(path),
+                at(path, text.find("_OBSIDIAN_SHARED_MODULES"), text),
+            )
+        elif declared != needs:
+            rep.fail(
+                check,
+                "%s declares shared modules %r, but its import closure needs "
+                "%r. Keep the declaration sorted and exact so a hollow or "
+                "partial `$OBSIDIAN_VAULT_SHARED` fails with the bootstrap's "
+                "actionable error instead of a later ModuleNotFoundError."
+                % (rel(path), declared, needs), rel(path),
+            )
+        else:
+            rep.ok(
+                check,
+                "%s declares its complete shared-module import closure (%s)"
+                % (rel(path), ", ".join(needs)), rel(path),
+            )
     rep.saw(check, "skill scripts importing a shared module", n_importers)
 
     # And the resolver itself must work from a skill-script vantage point.
@@ -6355,6 +6587,18 @@ def check_equation_policy(rep, conv):
         (eq_path, eq, r"equation_coverage\.py",
          "equations.md no longer identifies the conservative shared "
          "equation-coverage candidate floor"),
+        (eq_path, eq, r"counts behind averages and empirical ratios must be positive",
+         "equations.md no longer requires positive counts behind averages "
+         "and empirical ratios"),
+        (qc_path, qc, r"positive sample/node/ensemble counts behind averages",
+         "qc-items.md item 12 no longer mirrors the positive-count equation "
+         "condition"),
+        (eq_path, eq, r"exact mathematical definition distinct from a numerical approximation",
+         "equations.md no longer separates exact definitions from numerical "
+         "tolerance or clipping rules"),
+        (qc_path, qc, r"Exact definitions remain distinct from numerical approximations",
+         "qc-items.md item 12 no longer mirrors the exact-versus-numerical "
+         "equation distinction"),
         (eq_path, eq,
          r"\| \$\\operatorname\{Var\}\(X\)\$ \| variance operator",
          "equations.md no longer distinguishes the variance operator from "
@@ -6580,6 +6824,56 @@ def check_autonomous_wiki_lint(rep, conv):
                rel(os.path.join(SKILLS_DIR, "wiki-linter")))
 
 
+def check_review_before_publication(rep, conv):
+    """wiki-builder reviews a proposed state before any public Wiki write."""
+    check = "review-before-publish"
+    safe_path = os.path.join(SHARED_DIR, "SAFE_WRITES.md")
+    builder_path = os.path.join(SKILLS_DIR, "wiki-builder", "SKILL.md")
+    review_path = os.path.join(
+        SKILLS_DIR, "wiki-builder", "references", "review.md")
+    pins = [
+        (CONVENTIONS, conv,
+         "Content workflows keep working drafts private through their final lint"),
+        (safe_path, None,
+         "A working draft may live in any approved scratch location."),
+        (builder_path, None,
+         "public `Wiki/` tree must contain either the prior reviewed version"),
+        (builder_path, None, "private **combined review tree**"),
+        (builder_path, None,
+         "it never creates `Wiki/` or a publication stage inside the"),
+        (review_path, None, "private combined-view index"),
+    ]
+    scanned = 0
+    texts = {}
+    for path, supplied, marker in pins:
+        try:
+            text = supplied if supplied is not None else read(path)
+        except OSError as exc:
+            rep.fail(check, "cannot read review/publication contract: %s" % exc,
+                     rel(path))
+            continue
+        texts[path] = text
+        scanned += 1
+        if marker not in text:
+            rep.fail(check, "missing review-before-publication statement %r"
+                     % marker, rel(path))
+    builder = texts.get(builder_path, "")
+    if "mkdir -p '<wiki-folder>'" in builder:
+        rep.fail(check, "wiki-builder still creates Wiki during collision "
+                 "planning/no-apply", rel(builder_path))
+    review_at = builder.find("### 7. Review and report")
+    publish_at = builder.find("Publish new slugs with exclusive")
+    if review_at < 0 or publish_at < 0 or publish_at <= review_at:
+        rep.fail(check, "final public publication is not confined to step 7 "
+                 "after review", rel(builder_path))
+    rep.saw(check, "review/publication contract statements", scanned)
+    if scanned == len(pins) and not any(
+            status == "FAIL" and name == check
+            for name, status, _where, _message in rep.results):
+        rep.ok(check, "wiki-builder stages, reviews, and audits the proposed "
+               "state before guarded public publication", rel(builder_path))
+
+
 CHECKS = [
     check_readability,
     check_note_headings,
@@ -6604,6 +6898,7 @@ CHECKS = [
     check_link_rules,
     check_physical_page,
     check_autonomous_wiki_lint,
+    check_review_before_publication,
 ]
 
 

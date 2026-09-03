@@ -21,9 +21,10 @@ is not permission to overwrite or delete it.
 
 Keep chapters in the shared source tree so recursive consumers meet them.
 `pdf-figure-extractor` extracts from chapters rather than the whole book when
-both are in its run; `paper-summarizer` excludes recognized books and chapters
-from its scientific-paper workflow. Scoping a figure run to the book file
-itself deliberately selects that book. See
+both are in its run. An ordinary `paper-summarizer` folder sweep skips recognized
+books and chapters; a named chapter, or the skill's explicit chapter/book
+override, can still select one. Scoping a figure run to the book file itself
+deliberately selects that book. See
 [source identity conventions §1a](../../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organizer-runs-first)
 for the common naming functions.
 

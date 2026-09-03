@@ -72,6 +72,46 @@ import re
 import sys
 import unicodedata
 
+_OBSIDIAN_SHARED_MODULES = ('slugify',)
+
+# --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
+import os as _os, sys as _sys
+_here = _os.path.dirname(_os.path.abspath(__file__))
+_required = tuple(_m + ".py" for _m in (
+    globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
+_env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
+if _env:                                   # explicit override: authoritative, no fallback
+    _tried = [_os.path.abspath(_os.path.expanduser(_env))]
+else:                                      # plugin-relative walk-up, at most 5 levels
+    _tried, _d = [], _here
+    for _ in range(5):
+        _tried.append(_os.path.join(_d, "shared", "scripts"))
+        _d = _os.path.dirname(_d)
+_missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
+            for _p in _tried if _os.path.isdir(_p)}
+_shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
+if _shared is None:
+    raise SystemExit("""obsidian: cannot find the plugin's shared/scripts/ folder, which holds
+the one canonical copy of the conventions this script depends on. A usable
+folder must contain these required module(s): %s
+Looked for:
+  %s
+Fix: install the whole plugin tree, or set OBSIDIAN_VAULT_SHARED to the
+shared/scripts/ directory (unset it to use the plugin-relative walk-up).
+Do NOT paste a second copy of the algorithm into this skill -- a divergent
+copy is the bug the shared layer exists to prevent.""" % (
+    ", ".join(_required), "\n  ".join(
+        _p + (" (not a directory)" if _p not in _missing else
+              " (missing: %s)" % ", ".join(_missing[_p]))
+        for _p in _tried)))
+_sys.path[:] = [_p for _p in _sys.path if _p not in (_shared, _here)]
+_sys.path.insert(0, _shared)               # shared/scripts/ FIRST
+if _here != _shared:
+    _sys.path.insert(1, _here)              # sibling modules before unrelated paths
+# --- end bootstrap ---
+
+from slugify import is_windows_device_stem
+
 # Generational and credential suffixes that are essentially never an ordinary
 # surname, so a trailing one can be dropped on sight.
 SUFFIXES = {"jr", "jr.", "sr", "sr.", "iii", "iv",
@@ -642,6 +682,12 @@ def build_slug(author=None, topic=None, title=None, year=None, no_author=False,
             "nothing survived punctuation removal. Choose the topic words "
             "yourself with --topic (and a --year) rather than writing a file "
             "named '.md'." % (author, topic, title, year))
+    if is_windows_device_stem(slug):
+        raise SlugError(
+            "author=%r topic=%r title=%r year=%r reduce to reserved Windows "
+            "device name %r. Add a real author/year or choose a more specific "
+            "topic so the note and its images remain portable across hosts."
+            % (author, topic, title, year, slug))
     return {
         "author_segment": author_seg,
         "topic_segment": topic_seg,
@@ -962,6 +1008,18 @@ def run_self_test():
     check("an unparseable year is dropped and reported",
           (_r["slug"], any("year" in n for n in _r["notes"])),
           ("Deep_Dive", True))
+
+    # Windows reserves these device basenames even with `.md` appended.  The
+    # clipping slug is also every attachment's prefix, so producing one on
+    # Unix makes both the note and its images unusable when the vault moves.
+    for device in ("CON", "prn", "Aux", "NUL", "COM1", "com9", "LPT1", "lpt9"):
+        check("a Windows device stem is refused everywhere (%r)" % device,
+              slug_of(no_author=True, topic=device), "SlugError")
+    check("a device prefix is harmless when the complete stem is distinct",
+          slug_of(no_author=True, topic="CON Model"), "CON_Model")
+    check("an author or year can make a device topic portable",
+          slug_of(author="Smith", topic="CON", year=2026),
+          "Smith_CON_2026")
 
     # --- the reference's own examples have to be reproducible from it --------
     # references/filename-slug.md said "a one-author, plain-English title needs
