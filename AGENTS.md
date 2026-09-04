@@ -19,6 +19,9 @@ Skill sources live in `skills/`; shared conventions and helpers live in
 Codex presentation metadata, and rebuilds `obsidian.plugin`. The marketplace
 definition is in `.claude-plugin/marketplace.json`, which both hosts support.
 Keep one shared skill tree and preserve relative paths inside the package.
+Add every intentional file under the shipped trees to
+`tools/package-files.txt`; the build refuses unlisted or missing files rather
+than silently omitting an asset or packaging local residue.
 
 When editing skills, follow `shared/CONVENTIONS.md` and the validation guidance
 in `README.md`, including `python3 tests/test_conventions.py` and any relevant

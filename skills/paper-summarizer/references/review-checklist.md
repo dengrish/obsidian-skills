@@ -15,7 +15,7 @@ This checklist verifies their application without repeating their procedures.
 
 Collect numbers, proper nouns and scope/comparator terms from the callout,
 headings, prose, captions and rebuilt tables. Search in one command using short
-tokens from the **paper's own wording**:
+tokens from the **source's own wording**:
 
 ```bash
 python3 '<skill>/scripts/paper_text.py' '<pdf path>' \
@@ -31,15 +31,16 @@ from the documented spacing/hyphen fallback and still requires opening the page.
 
 | Result | Required action |
 |---|---|
-| `FOUND` | Record the physical page and read it before citing. A match can be quoted prior work or a reference-list entry, not this study's finding. |
+| `FOUND` | Record the physical page and read it before citing. A match can be quoted prior work or a reference-list entry, not this document's claim or finding. |
 | `loose` | Open the page: removed spacing/hyphens can recover a broken word or accidentally join unrelated text. It is not a verified claim yet. |
 | `MISSING` | Retry once using the source's actual short tokens. A phrase assembled as “hazard ratio 0.62” will miss “hazard ratio of 0.62”; try `0.62`. Correct or cut an unsupported claim, never make it vaguer. |
 
 Every number, named drug/gene/organism/model/instrument/cohort, sample size,
 comparator and scope clause needs source evidence. A found number does not
 verify its scope: verify the population or setting separately. Reopen pages
-for every load-bearing citation, including Methods, Limitations and Availability,
-and check physical page bounds. A heading-search result is only a reading aid.
+for every load-bearing citation, including the basis/approach, limitations and
+Availability, and check physical page bounds. A heading-search result is only a
+reading aid.
 
 For OCR or unavailable text search, use the [page-reading fallback](edge-cases.md#unreadable-text-and-helper-failures)
 and record that method explicitly. OCR misses are checked against page images;
@@ -54,6 +55,11 @@ Walk the callout, headings, body and captions with their supporting pages open:
   they bound it. No plural or definite article widens a subgroup, strain or
   site to a general result. Cell, animal and simulation results stay about those
   systems.
+- [ ] Each non-empirical claim retains its declared scope, assumptions,
+  jurisdiction, version and applicability conditions where relevant. The note
+  distinguishes the document's own claims from prior work it quotes, preserves
+  normative strength such as “must” versus “should”, and identifies a notice's
+  issuer, affected work, action and stated grounds.
 - [ ] Every comparison names its comparator and carries reported absolute
   quantities beside relative measures, or states that the absolute values are
   absent. Denominators, intervals and statistic meanings are correct; missing
@@ -70,37 +76,50 @@ Walk the callout, headings, body and captions with their supporting pages open:
 - [ ] Terms are glossed once for a scientist from another field. Quantities are
   explained once without turning a hazard ratio into absolute risk or a
   correlation into causal explained variance.
-- [ ] Methods identifies the design and walks the actual procedure where one
-  exists. Results develops the main finding rather than cataloguing secondary
-  experiments. Active voice and simple tenses make the actions clear.
+- [ ] The selected [body mode](note-format.md#choose-the-body-mode) matches the
+  document's main contribution. Empirical notes identify the design and walk an
+  actual procedure where one exists. Argument/synthesis notes state the real
+  scope, evidence base, premises or reasoning without inventing a method. Notice
+  notes identify the issuer's stated grounds and exact action. The third section
+  develops the main contribution instead of cataloguing secondary material.
 - [ ] Sentences follow the [brevity targets](note-format.md#prose-and-key-messages).
   Split or shorten first without losing meaning or necessary qualifications;
   any longer sentence retained for clarity has a reason in the run report.
-- [ ] Harms, failed secondary outcomes and negative results accompany benefits.
-  Interpretation attributes the authors' conclusions and labels another reading
-  as such; no unsupported clinical or practical inference is smuggled in.
-- [ ] The limitations sweep considered the design-relevant categories and kept
-  only material paper-level constraints. Row-level caveats remain beside their
-  rows, related limitations are merged, and missing methodological disclosures
-  are stated plainly.
+- [ ] Empirical benefits retain harms, failed secondary outcomes and negative
+  results. Arguments retain material contrary evidence, exceptions and
+  conditions the document discusses. Notices separate what changed from what remains unresolved. The
+  fourth section attributes the authors' or issuer's conclusions and labels
+  another reading as such; it adds no unsupported practical inference.
+- [ ] The limitations sweep used the selected mode's relevant categories and
+  kept only material document-level constraints. Local caveats remain beside
+  their claims, related limitations are merged, and verified missing evidence or
+  methodological disclosures are stated plainly without inventing empirical
+  shortcomings for a non-empirical source.
 
 ## Check provenance and exhibits
 
 - [ ] The title, author order, format and date components come from this PDF.
   Only unstated month/day components are padded. Any second `sources:` URL is
-  grounded in a printed DOI/arXiv identifier, not inferred; Book has none.
+  grounded in a printed DOI/arXiv identifier, not inferred; Book has none. An
+  undated PDF pairs its canonical `_nd` stem with `published: null`.
 - [ ] The first `sources:` PDF exists with the selected unique stem, and the
   final note uses that exact stem. Citations target this PDF and lie within its
   physical page count.
 - [ ] Creation date follows the paper-note rule. A rewrite preserves the user's
   review state and unrelated metadata; a strict-format conflict is reported with
   the original retained, never solved by discarding properties.
-- [ ] The description is factual, and the six headings alone tell this paper's
-  story without overclaiming. Sentence case preserves technical names such as
-  `p53` and `mRNA`; generic labels or Title Case are not accepted merely because
-  length checks pass.
+- [ ] The description is factual, and the six headings alone tell this
+  document's story in the selected mode without overclaiming. Sentence case
+  preserves technical names such as `p53` and `mRNA`; generic labels or Title
+  Case are not accepted merely because length checks pass.
 - [ ] Funding, conflicts, review status and ethics approval are absent from the
-  note. Methodological preregistration remains eligible in Methods/Limitations.
+  note. Methodological preregistration remains eligible in the second/fifth
+  positions.
+- [ ] Availability uses the selected mode's relevant labels. Empirical notes
+  name Data and add Code or Materials when relevant; argument/synthesis notes use Sources,
+  Materials, Data or Code as applicable; notices use Record, Evidence or
+  Materials. “Not stated” means a relevant category could apply but lacks a
+  disclosure. Inapplicable labels are omitted rather than filled with boilerplate.
 - [ ] Every embed is an inventoried file under this PDF's stem and has been
   opened to confirm identity and readability. A valid filename is not proof of
   the image contents. No duplicate composite/panel illustrates the same claim.
@@ -114,16 +133,25 @@ Walk the callout, headings, body and captions with their supporting pages open:
 ## Run lint after source verification
 
 ```bash
-python3 '<skill>/scripts/note_lint.py' '<drafted note>' --images '<vault>/Sources/Images'
+python3 '<skill>/scripts/note_lint.py' '<drafted note>' \
+    --mode '<empirical|argument|notice>' --images '<vault>/Sources/Images'
 ```
 
-Use `--images` for embeds; omit it only for a figureless note when the directory
+Replace the mode placeholder with the selected body mode. If source inventory
+used its deliberate `--allow-unorganized` exception, add the same flag here;
+the exception otherwise remains a lint failure. Use `--images` for
+embeds; omit it only for a figureless note when the directory
 does not exist. Exit 1 lists violations to fix and rerun. Exit 0 means no
 blocking violations of schema, role/heading mechanics, callout/separator shape,
 citation syntax, required length/count limits, exhibit placement/captions or
-referenced image paths. Sentence-length advisories do not change the exit code:
-review them using the brevity targets and report any justified exceptions.
-It does not verify provenance, page upper bounds, source facts or image content.
+referenced image paths, including the selected mode's Limitations and
+Availability rules. Advisories do not change the exit code: review sentence
+and step length using the brevity targets, and retain a one-item empirical
+Limitations section only when another item would be filler. Report every
+justified exception.
+It does not verify whether that body mode was chosen correctly, semantic fit, provenance, page upper bounds,
+source facts or image content. Its `Methods` and `Results` names are positional
+aliases for non-empirical notes.
 
 Do not repeat every machine check by eye or treat clean lint as factual proof.
 If lint or a required reference is unavailable, leave the draft unpublished and
@@ -144,8 +172,8 @@ Always distinguish source verification from lint:
   could not be checked. A slow or difficult paper is not a reason to skip it.
 - `Lint: clean`, or `Lint: N violations fixed; rerun clean`. If it could not run,
   report `Lint: SKIPPED — <reason>; draft not published`.
-- When sentence-length advisories remain, report `Lint: no violations;
-  N sentence-length advisories reviewed` and identify each retained exception
+- When advisories remain, report `Lint: no violations; N advisories reviewed`
+  and identify each retained exception
   with its clarity reason. Do not report an unreviewed advisory as clean lint.
 
 Only a source-verified draft with no lint violations and reviewed advisories

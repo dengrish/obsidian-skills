@@ -4420,6 +4420,12 @@ def run_self_test():
 
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = main([os.path.join(tmp, "missing")])
+        check("an unreadable lint scope exits nonzero with its problem report",
+              (rc, "no such file or folder" in buf.getvalue()), (1, True))
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             rc = main([])
         check("a run with no target exits 2 and says so",
               (rc, "target" in buf.getvalue()), (2, True))
@@ -4478,21 +4484,30 @@ def main(argv=None):
                          indent=2))
         return 2
     report = lint_path(args.target, severity_floor=args.severity)
+    report_complete = not report["problems"]
     dumped = json.dumps(report, ensure_ascii=False,
                         **({} if args.compact else {"indent": 2}))
     if args.output:
         try:
             with open(args.output, "w", encoding="utf-8") as fh:
                 fh.write(dumped + "\n")
-            print(json.dumps({"ok": True, "output": os.path.abspath(args.output),
-                              "summary": report["summary"]}, indent=2))
+            status = {"ok": report_complete,
+                      "output": os.path.abspath(args.output),
+                      "summary": report["summary"]}
+            if not report_complete:
+                status["error"] = "lint scope could not be read completely"
+                status["problems"] = report["problems"]
+            print(json.dumps(status, indent=2))
         except Exception as exc:
             print(json.dumps({"ok": False, "error": str(exc),
                               "summary": report["summary"]}, indent=2))
             return 1
     else:
         print(dumped)
-    return 0  # findings are a report; failure to deliver that report is not
+    # Entry findings are a delivered report and therefore exit 0. Scope-level
+    # read problems make the inventory incomplete, so callers must not treat
+    # the report as a clean lint result.
+    return 0 if report_complete else 1
 
 
 if __name__ == "__main__":

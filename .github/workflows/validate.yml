@@ -1,0 +1,132 @@
+name: Validate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "17 8 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-contract:
+    name: Release contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the tested revision and its history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+      - name: Test the CI contract helper
+        run: python -m unittest discover -s .github/scripts -p "test_*.py" -v
+      - name: Fetch the comparison revision if needed
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        shell: bash
+        env:
+          BASE_REVISION: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [[ -z "$BASE_REVISION" ]]; then
+            echo "Missing event base revision." >&2
+            exit 1
+          fi
+          if [[ "$BASE_REVISION" =~ ^0+$ ]]; then
+            exit 0
+          fi
+          if ! git cat-file -e "$BASE_REVISION^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "$BASE_REVISION"
+          fi
+      - name: Require a version advance for packaged changes
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        env:
+          BASE_REVISION: ${{ github.event.pull_request.base.sha || github.event.before }}
+          COMPARISON_MODE: ${{ github.event_name == 'pull_request' && 'pull-request' || 'push' }}
+        run: python .github/scripts/ci_contract.py version --base "$BASE_REVISION" --comparison "$COMPARISON_MODE"
+
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Python 3.10, dependency floors, Linux
+            os: ubuntu-latest
+            python: "3.10"
+            dependencies: floors
+            python_utf8: "1"
+          - name: Current Python and dependencies, Linux
+            os: ubuntu-latest
+            python: "3.x"
+            dependencies: current
+            python_utf8: "1"
+          - name: Current Python and dependencies, macOS
+            os: macos-latest
+            python: "3.x"
+            dependencies: current
+            python_utf8: "1"
+          - name: Current Python and dependencies, Windows
+            os: windows-latest
+            python: "3.x"
+            dependencies: current
+            python_utf8: "1"
+    env:
+      LANG: C
+      LC_ALL: C
+      PYTHONCOERCECLOCALE: "0"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUTF8: ${{ matrix.python_utf8 }}
+    steps:
+      - name: Check out the tested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+          check-latest: true
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            skills/pdf-figure-extractor/scripts/requirements.txt
+      - name: Update the package installer
+        run: python -m pip install --upgrade pip
+      - name: Generate exact dependency-floor constraints
+        if: matrix.dependencies == 'floors'
+        shell: bash
+        run: python .github/scripts/ci_contract.py floors requirements-dev.txt --output "$RUNNER_TEMP/dependency-floors.txt"
+      - name: Install exact declared dependency floors
+        if: matrix.dependencies == 'floors'
+        shell: bash
+        run: python -m pip install --constraint "$RUNNER_TEMP/dependency-floors.txt" --requirement requirements-dev.txt
+      - name: Install current dependencies
+        if: matrix.dependencies == 'current'
+        run: python -m pip install --requirement requirements-dev.txt
+      - name: Check the installed dependency set
+        run: python -m pip check
+      - name: Check reproducible generated files
+        run: python tools/build_plugin.py --check
+      - name: Run convention and script checks
+        run: python tests/test_conventions.py
+      - name: Run compatibility checks
+        run: python tests/test_compatibility.py
+      - name: Run end-to-end workflows
+        run: python tests/test_end_to_end.py

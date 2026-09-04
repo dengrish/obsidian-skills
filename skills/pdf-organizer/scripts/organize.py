@@ -54,6 +54,7 @@ Usage:
     python3 organize.py selftest
 """
 import argparse
+import datetime
 import errno
 import hashlib
 import json
@@ -194,6 +195,10 @@ class Edits(dict):
         # after planning can be moved under a new stem while sidecar ownership
         # is rewritten for the older bytes.
         self.move_expected = {}
+        # {owned note path: (old scalar, new scalar)} for the publication-date
+        # changes included in this note rewrite. Kept out of the public dict so
+        # every mapping entry remains a path/body pair, just like `sidecars`.
+        self.published_updates = {}
 
 
 class RenameFailed(OSError):
@@ -588,6 +593,150 @@ def _unquoted_source_claim(path, stem):
         if _nfc_low(os.path.splitext(base)[0]) == wanted:
             return True
     return False
+
+
+_PUBLISHED_DATE = re.compile(r"\A([0-9]{4})-([0-9]{2})-([0-9]{2})\Z")
+_TOP_LEVEL_KEY = re.compile(
+    r"\A([A-Za-z_][A-Za-z0-9_-]*)([ \t]*):(.*)\Z")
+
+
+def _canonical_year(stem):
+    """Canonical source year (`YYYY` or `nd`), or None for an old junk stem."""
+    if not looks_canonical(stem, is_stem=True):
+        return None
+    parts = core_stem(stem, is_stem=True).split("_")
+    return parts[2] if len(parts) >= 3 else None
+
+
+def _is_paper_summary_metadata(text):
+    """Whether an owned note claims paper-summarizer publication metadata.
+
+    Older source notes may consist only of a PDF embed or a legacy `source:`
+    field. They still follow a source rename, but inventing a `published` field
+    for them would silently convert a user note into a paper summary. A current
+    summary is identifiable by its `published` key, even when that key is
+    malformed, or by paper-summarizer's format enum when `published` is the
+    missing field that must block the year repair.
+    """
+    lines = text.splitlines()
+    if not lines or lines[0] != "---":
+        return False
+    end = next((i for i in range(1, len(lines)) if lines[i] == "---"), None)
+    if end is None:
+        return False
+    for line in lines[1:end]:
+        if line.startswith((" ", "\t", "-")):
+            continue
+        match = _TOP_LEVEL_KEY.match(line)
+        if not match:
+            continue
+        key = match.group(1)
+        if key.casefold() == "published":
+            return True
+        if key == "format" and not match.group(2):
+            try:
+                value, style = parse_scalar(match.group(3))
+            except ValueError:
+                continue
+            if style == "bare" and value in ("Paper", "Book", "Report"):
+                return True
+    return False
+
+
+def _reconcile_published_year(text, target_year):
+    """Rewrite one owned summary note's publication date for ``target_year``.
+
+    Returns ``(text, old_surface, new_surface)``. The caller already proved
+    that this note is owned by the renamed PDF and that its canonical year
+    segment changes. This parser deliberately handles only the one top-level,
+    single-line scalar accepted by paper-summarizer. Missing, duplicate,
+    quoted, multiline, or invalid values raise ``ValueError`` so the rename
+    transaction remains read-only.
+
+    A dated target retains a valid existing month/day. A null value has no
+    components to retain and becomes January 1, the summary schema's explicit
+    padding rule. If carrying a month/day into the target year would make an
+    impossible date (notably February 29 in a non-leap year), the source
+    metadata is contradictory and requires another source-backed metadata
+    decision rather than silently discarding those components.
+    """
+    if target_year != "nd" and not re.fullmatch(r"(?!0000)[0-9]{4}", target_year):
+        raise ValueError("the target filename has no usable canonical year segment")
+
+    lines = text.splitlines(keepends=True)
+
+    def without_eol(line):
+        return line.rstrip("\r\n")
+
+    if not lines or without_eol(lines[0]) != "---":
+        raise ValueError("frontmatter must open with `---` on line 1")
+    end = next((i for i in range(1, len(lines))
+                if without_eol(lines[i]) == "---"), None)
+    if end is None:
+        raise ValueError("frontmatter is not closed by a `---` line")
+
+    candidates = []
+    for index in range(1, end):
+        line = without_eol(lines[index])
+        if line.startswith((" ", "\t", "-")):
+            continue
+        match = _TOP_LEVEL_KEY.match(line)
+        if match and match.group(1).casefold() == "published":
+            candidates.append((index, match))
+    if len(candidates) != 1:
+        detail = "missing" if not candidates else "duplicated"
+        raise ValueError("top-level `published` metadata is %s" % detail)
+
+    index, match = candidates[0]
+    if match.group(1) != "published" or match.group(2):
+        raise ValueError("the publication key must use the exact `published:` schema")
+
+    # Anything nested beneath this scalar makes its shape ambiguous. Comments
+    # and blank separators are harmless; the next top-level key ends its value.
+    for following in range(index + 1, end):
+        candidate = without_eol(lines[following])
+        if _TOP_LEVEL_KEY.match(candidate) and not candidate.startswith((" ", "\t", "-")):
+            break
+        if candidate.strip() and not candidate.lstrip().startswith("#"):
+            raise ValueError("`published` has unsupported continuation content")
+
+    raw = match.group(3)
+    try:
+        value, style = parse_scalar(raw)
+    except ValueError as exc:
+        raise ValueError("`published` is not a single valid YAML scalar (%s)" % exc) from exc
+    if style != "bare":
+        raise ValueError("`published` must be an unquoted date or YAML null")
+
+    old_surface = strip_comment(raw).strip(" \t")
+    if value is None:
+        desired = "null" if target_year == "nd" else target_year + "-01-01"
+    else:
+        date_match = _PUBLISHED_DATE.fullmatch(value)
+        if not date_match:
+            raise ValueError("`published` must be a real YYYY-MM-DD date or YAML null")
+        try:
+            datetime.date(*(int(part) for part in date_match.groups()))
+        except ValueError as exc:
+            raise ValueError("`published: %s` is not a real date" % value) from exc
+        if target_year == "nd":
+            desired = "null"
+        else:
+            desired = target_year + "-" + date_match.group(2) + "-" + date_match.group(3)
+            try:
+                datetime.date(*(int(part) for part in desired.split("-")))
+            except ValueError as exc:
+                raise ValueError(
+                    "the existing month/day %s cannot be preserved in target year %s"
+                    % (value[5:], target_year)) from exc
+
+    clean = strip_comment(raw)
+    leading = clean[:len(clean) - len(clean.lstrip(" \t"))]
+    suffix = raw[len(clean):]
+    line = without_eol(lines[index])
+    eol = lines[index][len(line):]
+    lines[index] = "published:" + leading + desired + suffix + eol
+    return "".join(lines), old_surface, desired
 
 
 def keyed_files(vault, path, _seen=None):
@@ -1692,6 +1841,25 @@ def plan_rename(vault, path, new_basename, dest=None):
     except InventoryFailed as exc:
         blockers = ["%s Image ownership cannot be established from an "
                     "incomplete inventory." % exc]
+    # A paper-summary note is part of the owned source family, so a change to
+    # the filename's canonical year must carry its `published` value in the
+    # same guarded note rewrite. Ordinary citing notes are deliberately absent
+    # from this map: their own publication metadata describes themselves, not
+    # the PDF they happen to cite.
+    published_year_targets = {}
+    for owned_path, basename in keyed.items():
+        if not basename.lower().endswith(".md"):
+            continue
+        old_note_stem = os.path.splitext(basename)[0]
+        new_note_stem = os.path.splitext(ren[basename])[0]
+        old_year = _canonical_year(old_note_stem)
+        target_year = _canonical_year(new_note_stem)
+        if target_year is None:
+            blockers.append(
+                "%s would not retain a canonical year segment after the rename; "
+                "its publication metadata cannot be planned safely" % owned_path)
+        elif target_year != old_year:
+            published_year_targets[owned_path] = target_year
     mine = {os.path.realpath(p) for p in keyed}
     if have_vault and _nfc_low(new_stem) != _nfc_low(old_stem):
         blockers.extend(_target_stem_blockers(vault, new_stem, mine))
@@ -1931,6 +2099,22 @@ def plan_rename(vault, path, new_basename, dest=None):
                 os.path.relpath(os.path.dirname(md), vault), directory_ren)
             if moved_names:
                 new = debase_links(new, moved_names)
+            if (md in published_year_targets
+                    and _is_paper_summary_metadata(new)):
+                try:
+                    reconciled, old_published, new_published = \
+                        _reconcile_published_year(new, published_year_targets[md])
+                except ValueError as exc:
+                    blockers.append(
+                        "%s is the owned paper-summary note, but its `published` "
+                        "metadata cannot follow the source year rename (%s). "
+                        "Correct that one field from the source, then re-plan."
+                        % (md, exc))
+                else:
+                    if reconciled != new:
+                        edits.published_updates[md] = (
+                            old_published, new_published)
+                    new = reconciled
             if new != body:
                 edits[md] = new
                 edits.expected[md] = (body, identity)
@@ -2688,6 +2872,11 @@ def _report_plan(moves, edits, blockers, apply_done):
     print("Note rewrites (%d):" % len(edits))
     for md in sorted(edits):
         print("  %s" % md)
+    if edits.published_updates:
+        print("Publication-date updates (%d):" % len(edits.published_updates))
+        for md in sorted(edits.published_updates):
+            old, new = edits.published_updates[md]
+            print("  %s: %s -> %s" % (md, old, new))
     if edits.sidecars:
         print("Figure sidecar updates (%d):" % len(edits.sidecars))
         for path in sorted(edits.sidecars):
@@ -2735,6 +2924,10 @@ def _cmd_check(args):
         print(str(exc), file=sys.stderr)
         return 1
     path = os.path.expanduser(args.path)
+    problem = _source_problem(path)
+    if problem:
+        print(problem, file=sys.stderr)
+        return 1
     if not vault:
         print("No vault to scan (--vault not given). The vault-wide reference check "
               "did NOT run; say so in the report rather than reporting the "
@@ -2744,10 +2937,6 @@ def _cmd_check(args):
         print("The source is outside --vault. Omit --vault for an independent "
               "download; matching its basename cannot establish ownership of "
               "the vault's notes or images.", file=sys.stderr)
-        return 1
-    problem = _source_problem(path)
-    if problem:
-        print(problem, file=sys.stderr)
         return 1
     try:
         keyed = keyed_files(vault, path)
@@ -3433,6 +3622,108 @@ def _selftest():
     check("unreadable source metadata cannot claim a foreign note",
           _note_is_about(_note, "Doe_Foo_2025"), False)
 
+    # 16h. The organized filename and a paper summary's `published` value are
+    #      one invariant. A source-year correction must not carry the owned
+    #      note under a new stem while leaving contradictory metadata behind.
+    _published_note = (
+        "---\n"
+        "title: Example\n"
+        "sources:\n"
+        "  - \"[[Doe_Foo_2024.pdf]]\"\n"
+        "published: 2024-03-14   # document date\n"
+        "created: 2026-09-04\n"
+        "---\n"
+        "See [[Doe_Foo_2024.pdf]].\n")
+    _reconciled, _old_published, _new_published = \
+        _reconcile_published_year(_published_note, "2026")
+    check("a source-year correction preserves a valid month/day and comment",
+          (_old_published, _new_published,
+           "published: 2026-03-14   # document date" in _reconciled),
+          ("2024-03-14", "2026-03-14", True))
+    _null_note = _published_note.replace(
+        "published: 2024-03-14   # document date", "published: null")
+    check("a null publication date gains the target year with explicit padding",
+          _reconcile_published_year(_null_note, "2026")[1:],
+          ("null", "2026-01-01"))
+    check("an undated target gets the canonical explicit null",
+          _reconcile_published_year(_published_note, "nd")[1:],
+          ("2024-03-14", "null"))
+    check("a current summary with missing published metadata is recognized",
+          _is_paper_summary_metadata(
+              "---\nformat: Paper\nsources:\n  - \"[[Doe_Foo_2024.pdf]]\"\n---\n"),
+          True)
+    check("an embed-only legacy source note is not converted into a summary",
+          _is_paper_summary_metadata("![[Doe_Foo_2024.pdf]]\n"), False)
+
+    for _label, _bad_published, _target, _reason in (
+            ("missing", "", "2026", "missing"),
+            ("duplicate", "published: 2024-03-14\n"
+             "published: 2024-03-15\n", "2026", "duplicated"),
+            ("quoted", 'published: "2024-03-14"\n', "2026", "unquoted"),
+            ("impossible", "published: 2024-02-30\n", "2026", "not a real date"),
+            ("leap-day conflict", "published: 2024-02-29\n", "2025",
+             "cannot be preserved")):
+        _bad_note = "---\n" + _bad_published + "created: 2026-09-04\n---\n"
+        try:
+            _reconcile_published_year(_bad_note, _target)
+            _error = ""
+        except ValueError as _exc:
+            _error = str(_exc)
+        check("malformed or ambiguous publication metadata blocks: " + _label,
+              _reason in _error, True)
+
+    _yv = _make_fixture_dir()
+
+    def _yw(rel, body):
+        p = os.path.join(_yv, *rel.split("/"))
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write(body)
+        return p
+
+    _ypdf = _yw("Sources/PDFs/Doe_Foo_2024.pdf", "%PDF")
+    _ynote = _yw("Articles/Doe_Foo_2024.md", _published_note)
+    _yother = _yw(
+        "Wiki/context.md",
+        "---\npublished: 1999-12-31\n---\n[[Doe_Foo_2024.pdf]]\n")
+    _ymoves, _yedits, _yblock = plan_rename(
+        _yv, _ypdf, "Doe_Foo_2026.pdf")
+    check("the dry-run plans the owned note's publication-date update",
+          (_yblock, _yedits.published_updates.get(_ynote),
+           "published: 2026-03-14" in _yedits.get(_ynote, "")),
+          ([], ("2024-03-14", "2026-03-14"), True))
+    check("a citing note keeps its own publication date",
+          ("published: 1999-12-31" in _yedits.get(_yother, ""),
+           "published: 2026-12-31" not in _yedits.get(_yother, "")),
+          (True, True))
+    check("the dry-run leaves the source family unchanged",
+          (os.path.isfile(_ypdf),
+           "published: 2024-03-14" in open(
+               _ynote, encoding="utf-8").read()),
+          (True, True))
+    rename_all(_yv, _ypdf, "Doe_Foo_2026.pdf", apply=True)
+    _ypdf = os.path.join(_yv, "Sources/PDFs/Doe_Foo_2026.pdf")
+    _ynote = os.path.join(_yv, "Articles/Doe_Foo_2026.md")
+    check("the source, link, and publication date change in one transaction",
+          (os.path.isfile(_ypdf),
+           "published: 2026-03-14" in open(
+               _ynote, encoding="utf-8").read(),
+           "[[Doe_Foo_2026.pdf]]" in open(
+               _ynote, encoding="utf-8").read()),
+          (True, True, True))
+    _ambiguous = open(_ynote, encoding="utf-8").read().replace(
+        "published: 2026-03-14   # document date",
+        "published: 2026-03-14\npublished: 2026-03-15")
+    with open(_ynote, "w", encoding="utf-8") as _fh:
+        _fh.write(_ambiguous)
+    _ymoves, _yedits, _yblock = rename_all(
+        _yv, _ypdf, "Doe_Foo_2027.pdf", apply=True)
+    check("ambiguous owned metadata blocks the whole applied rename",
+          (any("duplicated" in item for item in _yblock),
+           os.path.isfile(_ypdf),
+           open(_ynote, encoding="utf-8").read()),
+          (True, True, _ambiguous))
+
     # NFC/NFD twin figure files derive to ONE new name (`_derive` writes NFC)
     # and must be a BLOCKER, exactly like the case-twin pair: grouped under
     # `b.lower()` the twins landed in two groups, sailed past the guard, and
@@ -3446,7 +3737,8 @@ def _selftest():
     _twins = ("Müller_Uber_2001_fig_1.png",         # NFC
               "Müller_Uber_2001_fig_1.png")         # NFD
     for _twin in _twins:
-        with open(os.path.join(_uv, "Sources", "Images", _twin), "w") as fh:
+        with open(os.path.join(_uv, "Sources", "Images", _twin), "w",
+                  encoding="utf-8") as fh:
             fh.write(_twin)
     # Model a normalization-sensitive directory listing so the collision guard
     # is exercised on every test host without depending on its filesystem.
@@ -3549,7 +3841,8 @@ def _selftest():
         p_ = os.path.join(v, rel)
         os.makedirs(os.path.dirname(p_), exist_ok=True)
         mode = "wb" if isinstance(data, bytes) else "w"
-        with open(p_, mode) as fh:
+        kwargs = {} if mode == "wb" else {"encoding": "utf-8"}
+        with open(p_, mode, **kwargs) as fh:
             fh.write(data)
         return p_
 
@@ -3575,7 +3868,7 @@ def _selftest():
     _put(_v, "Articles/c.md", _url)
     rename_all(_v, os.path.join(_v, "Inbox/download.pdf"), "Smith_X_1776.pdf",
                apply=True, dest=os.path.join(_v, "Sources/PDFs"))
-    with open(os.path.join(_v, "Articles/c.md")) as _fh:
+    with open(os.path.join(_v, "Articles/c.md"), encoding="utf-8") as _fh:
         check("a URL ending in the new basename is left alone", _fh.read(), _url)
 
     # A symlinked source is refused, not moved as a link.
@@ -3601,7 +3894,7 @@ def _selftest():
           any("symlink" in blocker for blocker in _b), True)
     check("the blocked plan leaves the symlink and its external target unchanged",
           (os.path.islink(_leaf_link),
-           open(os.path.join(_v, "Outside/n.md")).read(),
+           open(os.path.join(_v, "Outside/n.md"), encoding="utf-8").read(),
            os.path.exists(os.path.join(_v, "Inbox/download.pdf"))),
           (True, "![[download.pdf]]\n", True))
     try:
@@ -3681,7 +3974,7 @@ def _selftest():
     _put(_v, "Wiki/concept.md", _body)
     rename_all(_v, os.path.join(_v, "Inbox/download.pdf"), "Smith_X_1776.pdf",
                apply=True, dest=os.path.join(_v, "Sources/PDFs"))
-    with open(os.path.join(_v, "Wiki/concept.md")) as _fh:
+    with open(os.path.join(_v, "Wiki/concept.md"), encoding="utf-8") as _fh:
         check("a qualified link to another file of that basename survives "
               "the rename it does not name", _fh.read(), _body)
     for _label, _text, _want in (
@@ -3809,7 +4102,7 @@ def _selftest():
     _note_now = os.path.join(_v, "Articles/Muller_Uber_2001.md")
     _got = "(the note was left behind under its old stem)"
     if os.path.isfile(_note_now):                 # absent IS the failure
-        with open(_note_now) as _fh:
+        with open(_note_now, encoding="utf-8") as _fh:
             _got = _fh.read()
     check("...and its own NFD `source:` link points at the new name",
           _got, '---\nsource: "[[Muller_Uber_2001.pdf]]"\n---\n')
@@ -3928,7 +4221,7 @@ def _selftest():
         _moves, _edits, _blockers = plan_rename(_v, _pdf, "Doe_New_2025.pdf")
         check("sidecar changes appear separately in a rename plan",
               (len(_edits), len(_edits.sidecars), _blockers), (0, 2, []))
-        with open(_manifest) as _fh:
+        with open(_manifest, encoding="utf-8") as _fh:
             check("a sidecar dry run writes nothing", _fh.read(), _manifest_body)
         # Force a move failure after the state updates to exercise rollback.
         def _fail_move(_src, _dst, expected=None):
@@ -3941,17 +4234,17 @@ def _selftest():
             except RenameFailed as _exc:
                 _rolled_back = _exc.rolled_back
         check("a failed rename rolls sidecars back too", _rolled_back, True)
-        with open(_manifest) as _fh:
+        with open(_manifest, encoding="utf-8") as _fh:
             check("manifest restored after failed move", _fh.read(), _manifest_body)
-        with open(_review) as _fh:
+        with open(_review, encoding="utf-8") as _fh:
             check("review ledger restored after failed move", _fh.read(), _review_body)
         rename_all(_v, _pdf, "Doe_New_2025.pdf", apply=True)
-        with open(_manifest) as _fh:
+        with open(_manifest, encoding="utf-8") as _fh:
             check("successful rename carries ownership and unrelated records",
                   parse_manifest(_fh.read()),
                   {"Doe_New_2025_fig_1.png": _owned_digest,
                    "Other_fig_2.png": "b" * 64})
-        with open(_review) as _fh:
+        with open(_review, encoding="utf-8") as _fh:
             _body = _fh.read()
             check("successful rename carries reviewed figure labels",
                   parse_reviewed(_body), {("Doe_New_2025", "1"), ("Other", "2")})
@@ -4015,6 +4308,10 @@ def _selftest():
         check("a missing rename source is refused during planning",
               (bool(_moves), any("does not exist" in b for b in _blockers)),
               (False, True))
+        _code, _stdout, _stderr = _run_cli([
+            "check", os.path.join(_v, "missing.pdf")])
+        check("an external reference check rejects a missing source",
+              (_code, "does not exist" in _stderr), (1, True))
 
     # Destination checks are diagnostic only. The write must still refuse a
     # name claimed after the plan and preserve both files byte-for-byte.
@@ -4267,7 +4564,7 @@ def _selftest():
             except RenameFailed as _exc:
                 _stale_sidecar_failure = _exc
         check("a byte-identical sidecar replacement is still a stale plan",
-              (open(_manifest).read(), os.path.exists(_pdf),
+              (open(_manifest, encoding="utf-8").read(), os.path.exists(_pdf),
                bool(_stale_sidecar_failure
                     and _stale_sidecar_failure.rolled_back)),
               (_manifest_body, True, True))
@@ -4304,7 +4601,7 @@ def _selftest():
         _recovered = (open(os.path.join(_recoveries[0], "topic.md"),
                            encoding="utf-8").read() if _recoveries else None)
         check("the final text-publication CAS gap preserves both writers",
-              (open(_note).read(), _recovered,
+              (open(_note, encoding="utf-8").read(), _recovered,
                bool(_cas_failure and not _cas_failure.rolled_back),
                bool(_recoveries and _recoveries[0] in str(_cas_failure))),
               ("late editor save\n", _old_note, True, True))
@@ -4342,7 +4639,7 @@ def _selftest():
         _recovered = (open(os.path.join(_recoveries[0], "topic.md"),
                            encoding="utf-8").read() if _recoveries else None)
         check("text readback preserves an editor save and the predecessor",
-              (open(_note).read(), _recovered,
+              (open(_note, encoding="utf-8").read(), _recovered,
                bool(_readback_failure and not _readback_failure.rolled_back),
                bool(_recoveries
                     and _recoveries[0] in str(_readback_failure))),
@@ -4883,7 +5180,7 @@ def _selftest():
                "Sources/PDFs/Doe_Renamed_2025_src/Doe_Renamed_2025_01_Intro.pdf")),
                os.path.isfile(os.path.join(_v, "Sources/Images/Doe_Renamed_2025_01_Intro_fig_1.png"))),
               ([], True, True))
-        with open(os.path.join(_v, "Wiki/topic.md")) as _fh:
+        with open(os.path.join(_v, "Wiki/topic.md"), encoding="utf-8") as _fh:
             check("chapter references follow a `_src` book rename too", _fh.read(),
                   "[[Doe_Renamed_2025_01_Intro.pdf#page=1]]\n"
                   "![[Doe_Renamed_2025_01_Intro_fig_1.png]]\n")

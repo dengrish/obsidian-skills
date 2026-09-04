@@ -23,7 +23,8 @@ raises.  See CONVENTIONS.md §1a and §8b.
                                         [_src][_2|_3…]  optional tail, in
                                                         THAT order
 
-`Year` is four digits or the literal `nd`.  `NN` is a zero-padded two-digit
+`Year` is a real four-digit year from `0001` through `9999`, or the literal
+`nd`. `NN` is a zero-padded two-digit
 chapter number.  The tail is optional on either form: `_src` is the user's own
 marker for a source file that has a same-stemmed note beside it, and `_2`, `_3`
 … disambiguate two documents that would otherwise share a name. A numeric
@@ -94,7 +95,8 @@ DISAMBIGUATOR = r"(?:[2-9]|[1-9][0-9]+)"
 TAIL = r"(?:_src)?(?:_%s)?" % DISAMBIGUATOR
 
 #: `<Author>_<AbbrevTitle>_<Year>`, no tail.
-STANDALONE_CORE = r"[A-Za-z0-9][A-Za-z0-9-]*_[A-Za-z0-9-]+_(?:[0-9]{4}|nd)"
+STANDALONE_CORE = (r"[A-Za-z0-9][A-Za-z0-9-]*_[A-Za-z0-9-]+_"
+                   r"(?:(?!0000)[0-9]{4}|nd)")
 
 #: `<standalone core>_<NN>_<ChapterName>`, no tail.  The chapter name admits
 #: no underscore: that is what keeps `_NN_` unambiguous as the boundary
@@ -246,6 +248,9 @@ TEST_CASES = [
     ("AcmeCorp_StrategyMemo_nd",             True,  None),
     ("Cormen_CLRS_2022",                     True,  None),
     ("Geron_ML_2025",                        True,  None),
+    ("Doe_Study_0001",                       True,  None),
+    ("Doe_Study_9999",                       True,  None),
+    ("Doe_Study_0000",                       False, None),
     # --- standalone with a tail ---
     ("Smith_WealthNations_1776_2",           True,  None),
     ("Smith_WealthNations_1776_10",          True,  None),

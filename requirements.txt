@@ -1,3 +1,5 @@
 # Full plugin runtime and convention-test dependencies.
 -r skills/pdf-figure-extractor/scripts/requirements.txt
-pypdf>=4.0
+# Security floor for parsing and rewriting untrusted PDFs. Keep this synchronized
+# with the installed-version probe in shared/RUNTIME.md.
+pypdf>=6.16.1

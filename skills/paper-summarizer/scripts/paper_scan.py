@@ -681,7 +681,7 @@ def render(result):
                          "figure number; they are alternatives, not extra "
                          "figures" % variants)
         if row.get("figure_inventory_error"):
-            lines.append("      FIGURE INVENTORY BLOCKED: %s. Skip this paper "
+            lines.append("      FIGURE INVENTORY BLOCKED: %s. Skip this PDF "
                          "until the unsafe occupant is resolved; other rows "
                          "remain valid." %
                          shown_text(row["figure_inventory_error"]))
@@ -1112,7 +1112,7 @@ def run_self_test():
               "Doe_Foo_2025_fig_S1.png", "Doe_Foo_2025_2_fig_1.png",
               "Doe_Foo_2025_fig_1a.png", "Doe_Foo_2025_fig_1b.png",
               "Other_Paper_2020_fig_1.png"):
-        open(os.path.join(_img, f), "w").close()
+        open(os.path.join(_img, f), "w", encoding="utf-8").close()
     n += 1
     got = [f["label"] for f in figures_for(_img, "Doe_Foo_2025")]
     # Case-folded portable matching, labels sliced off the raw name, and a stem that merely has this one as a
@@ -1166,13 +1166,14 @@ def run_self_test():
         bad += 1
         print("FAIL figures_for flagged a duplicate label among distinct labels")
     unicode_name = "Mu\u0308ller_Trial_2025_fig_1.png"
-    open(os.path.join(_img, unicode_name), "w").close()
+    open(os.path.join(_img, unicode_name), "w", encoding="utf-8").close()
     n += 1
     unicode_figures = figures_for(_img, "Müller_Trial_2025")
     if [(f["file"], f["label"]) for f in unicode_figures] != [(unicode_name, "1")]:
         bad += 1
         print("FAIL figures_for lost a canonically equivalent Unicode filename")
-    open(os.path.join(_img, "STRASSE_Trial_2025_fig_2.png"), "w").close()
+    open(os.path.join(_img, "STRASSE_Trial_2025_fig_2.png"), "w",
+         encoding="utf-8").close()
     n += 1
     if [f["label"] for f in figures_for(_img, "Straße_Trial_2025")] != ["2"]:
         bad += 1
@@ -1181,7 +1182,7 @@ def run_self_test():
     os.makedirs(variant_dir)
     for name in ("Doe_Variant_2025_fig_1-38.png",
                  "Doe_Variant_2025_fig_1-38-transparent.png"):
-        open(os.path.join(variant_dir, name), "w").close()
+        open(os.path.join(variant_dir, name), "w", encoding="utf-8").close()
     variant_figures = figures_for(variant_dir, "Doe_Variant_2025")
     n += 1
     got = [(f["label"], f["variant_of"]) for f in variant_figures]
@@ -1206,7 +1207,7 @@ def run_self_test():
     for f in ("Dup_Paper_2025_fig_2.png", "Dup_Paper_2025_fig_2.webp",
               "Dup_Paper_2025_fig_S1.png", "Dup_Paper_2025_fig_s1.webp",
               "Dup_Paper_2025_fig_3.png"):
-        open(os.path.join(_img2, f), "w").close()
+        open(os.path.join(_img2, f), "w", encoding="utf-8").close()
     _dupfigs = figures_for(_img2, "Dup_Paper_2025")
     n += 1
     got = sorted(f["file"] for f in _dupfigs if f["duplicate_label"])

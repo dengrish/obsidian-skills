@@ -1,4 +1,4 @@
-# Worked example: one paper
+# Worked example: one PDF document
 
 - [The input](#the-input)
 - [The output note](#the-output-note)
@@ -8,7 +8,9 @@
 Read when the assembled output is unclear. The paper is fictional; it is not an
 external source or a completed live-vault run. [Note format](note-format.md),
 [summary standards](summary-standards.md) and [figures](figures.md) own the rules.
-The note fence below is lintable as a scratch fixture; re-lint it after editing.
+This randomized trial uses empirical body mode; its section meanings are not a
+template for an argument, book, standard or notice. The note fence below is
+lintable as a scratch fixture; re-lint it after editing.
 
 ## The input
 
@@ -145,7 +147,8 @@ included PDF.
 Save only the output note fence to a unique scratch `.md`, then run:
 
 ```bash
-python3 '<skill>/scripts/note_lint.py' '<scratch>/Doe_GutMicrobiome_2025.md'
+python3 '<skill>/scripts/note_lint.py' '<scratch>/Doe_GutMicrobiome_2025.md' \
+    --mode empirical
 ```
 
 The fixture passes mechanical lint. For a real note with these embeds, also pass

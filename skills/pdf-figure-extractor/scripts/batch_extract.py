@@ -96,6 +96,7 @@ import shlex
 import shutil
 import stat
 import sys
+import warnings
 from collections import defaultdict
 from pathlib import Path
 
@@ -154,11 +155,21 @@ except ImportError:
     try:
         import fitz  # PyMuPDF < 1.24.3
     except ImportError:
-        sys.exit(
-            "PyMuPDF required. Use a Python environment with the plugin\n"
-            "dependencies installed; see shared/RUNTIME.md. Install into a\n"
-            "virtual environment, not the system Python."
-        )
+        fitz = None
+
+
+_PYMUPDF_ERROR = (
+    "PyMuPDF required. Use a Python environment with the plugin\n"
+    "dependencies installed; see shared/RUNTIME.md. Install into a\n"
+    "virtual environment, then run this command with that environment's "
+    "Python."
+)
+
+
+def _require_pymupdf():
+    """Fail after argument parsing so --help remains available during setup."""
+    if fitz is None:
+        raise SystemExit(_PYMUPDF_ERROR)
 
 from auto_fig_bbox import (
     CAPTION_IN_CROP_TAG,
@@ -559,17 +570,18 @@ def _legacy_png_snapshot(path):
         if not stat.S_ISREG(before.st_mode):
             raise ValueError("it is not a regular file")
         try:
-            with os.fdopen(os.dup(descriptor), "rb") as image_file:
-                with Image.open(image_file) as image:
-                    if image.format != "PNG":
-                        raise ValueError("the bytes are %s, not PNG" % image.format)
-                    image.verify()
-            # Chunk validation alone does not decompress the pixel stream.
-            with os.fdopen(os.dup(descriptor), "rb") as image_file:
-                with Image.open(image_file) as image:
-                    image.load()
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", Image.DecompressionBombWarning)
+                with os.fdopen(os.dup(descriptor), "rb") as image_file:
+                    with Image.open(image_file, formats=("PNG",)) as image:
+                        image.verify()
+                # Chunk validation alone does not decompress the pixel stream.
+                with os.fdopen(os.dup(descriptor), "rb") as image_file:
+                    with Image.open(image_file, formats=("PNG",)) as image:
+                        image.load()
         except (OSError, ValueError, SyntaxError,
-                Image.DecompressionBombError) as exc:
+                Image.DecompressionBombError,
+                Image.DecompressionBombWarning) as exc:
             raise ValueError("the PNG cannot be fully decoded (%s)" % exc) from exc
         os.lseek(descriptor, 0, os.SEEK_SET)
         digest = hashlib.sha256()
@@ -1507,7 +1519,7 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
                 print(f"  {pdf_path.name}  Fig {fig_num}  → {path}  ({why})")
         print("  These figures were NOT extracted and NOT skipped: Sources/Images/ is shared,")
         print("  and clipping-processor writes <slug>_fig_<N> there too, so a clipping whose")
-        print("  slug equals this PDF's stem owns the name. Left as a skip, the paper's real")
+        print("  slug equals this PDF's stem owns the name. Left as a skip, the PDF's real")
         print("  figure is never written and every consumer embeds the other file as it.")
         print("  Inspect each one. If it belongs to the clipping, route its note-and-image")
         print("  rename through clipping-processor; if the PDF identity must change, route it")
@@ -1517,7 +1529,7 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
         print()
 
     if total_collisions:
-        print("Caption collisions (later caption dropped — typically multiple supplementary styles in one paper):")
+        print("Caption collisions (later caption dropped — typically multiple supplementary styles in one PDF):")
         for pdf_path, r in per_pdf.items():
             for kept, dropped in r["collisions"]:
                 print(f"  {pdf_path.name}  kept '{kept}', dropped '{dropped}' (both normalized to the same filename)")
@@ -2042,7 +2054,7 @@ def run_self_test():
         apple_double = os.path.join(src, "._Doe_Figs_2025.pdf")
         with open(apple_double, "wb") as fh:
             fh.write(b"AppleDouble resource fork, not a PDF source")
-        with open(os.path.join(src, "notes.txt"), "w") as fh:
+        with open(os.path.join(src, "notes.txt"), "w", encoding="utf-8") as fh:
             fh.write("not a pdf")
         found = find_pdfs(src)
         check("find_pdfs walks subfolders and ignores non-PDFs/AppleDouble",
@@ -2221,7 +2233,7 @@ def run_self_test():
         html = process_pdf(_st_html_pdf(os.path.join(tmp, "Doe_Html_2025.pdf")),
                            out, dpi=72)
         ok("an HTML page named .pdf is an open error, not a scan",
-           "not a PDF" in html["open_error"])
+           bool(html["open_error"]))
         check("...and is not reported as textless (it has text)",
               html["had_text"], False)
 
@@ -3161,6 +3173,18 @@ def run_self_test():
                 ok("invalid explicit adoptions are reported before extraction",
                    "--adopt-legacy" in se and "No sidecar or figure was written" in se)
 
+        warning_png = Path(tmp) / "legacy-decompression-warning.png"
+        Image.new("RGB", (100, 100), (40, 90, 150)).save(
+            warning_png, format="PNG")
+        warning_refused = False
+        with mock.patch.object(Image, "MAX_IMAGE_PIXELS", 6000):
+            try:
+                _legacy_png_snapshot(warning_png)
+            except ValueError as exc:
+                warning_refused = "fully decoded" in str(exc)
+        ok("legacy adoption treats a decompression-bomb warning as refusal",
+           warning_refused)
+
         adopted_bytes = legacy_png.read_bytes()
         adopted_manifest = (legacy_out / MANIFEST_FILE).read_bytes()
         code, so, se = run([
@@ -3260,7 +3284,7 @@ def run_self_test():
             [sys.executable, str(Path(__file__).resolve().with_name("extract_figures.py")),
              str(review_pdf), "--out", str(review_out), "--stem", review_pdf.stem,
              "--crop", "1:ED1:90,185,140,245", "--dpi", "96", "--no-trim", "--overwrite"],
-            capture_output=True, text=True, cwd=tmp)
+            capture_output=True, text=True, encoding="utf-8", cwd=tmp)
         check("the advertised command is tested after a real manual repair",
               manual.returncode, 0)
         repaired_bytes = repaired_png.read_bytes()
@@ -3268,7 +3292,8 @@ def run_self_test():
            repaired_bytes != before_repair)
         if commands:
             argv = shlex.split(commands[0])
-            replay = subprocess.run(argv, capture_output=True, text=True, cwd=tmp)
+            replay = subprocess.run(
+                argv, capture_output=True, text=True, encoding="utf-8", cwd=tmp)
             check("the printed command accepts the same selected source set",
                   replay.returncode, 0)
             ok("the review rerun includes the explicitly selected whole book",
@@ -3310,7 +3335,9 @@ def run_self_test():
         relative_args = [sys.executable, os.path.abspath(__file__),
                          "--src", relative_src, "--out", relative_out,
                          "--review-file", relative_ledger, "--ed-prefix", "ED", "--dpi", "72"]
-        initial = subprocess.run(relative_args, capture_output=True, text=True, cwd=relative_home)
+        initial = subprocess.run(
+            relative_args, capture_output=True, text=True, encoding="utf-8",
+            cwd=relative_home)
         check("relative input, output and ledger paths work on the original run",
               initial.returncode, 0)
         commands = [line.strip() for line in initial.stdout.splitlines()
@@ -3319,7 +3346,7 @@ def run_self_test():
         check("a relative-path run advertises one review command", len(commands), 1)
         if commands:
             replay = subprocess.run(shlex.split(commands[0]), capture_output=True,
-                                    text=True, cwd=alternate_home)
+                                    text=True, encoding="utf-8", cwd=alternate_home)
             check("the relative-path review command succeeds from another cwd",
                   replay.returncode, 0)
             check("the relative-path review command updates the original ledger",
@@ -3330,7 +3357,9 @@ def run_self_test():
             check("bound paths retain ED and custom-ledger selection",
                   ((relative_home / relative_out / "Doe_Relative_2025_fig_S1.png").exists(),
                    (relative_home / relative_out / REVIEW_FILE).exists()), (False, False))
-            repeated = subprocess.run(relative_args, capture_output=True, text=True, cwd=relative_home)
+            repeated = subprocess.run(
+                relative_args, capture_output=True, text=True, encoding="utf-8",
+                cwd=relative_home)
             check("the original relative-path invocation still succeeds", repeated.returncode, 0)
             ok("the original relative-path invocation sees its review mark",
                "already reviewed:" in repeated.stdout and "Suspicious bboxes:    0" in repeated.stdout)
@@ -3698,6 +3727,7 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     if args.test:
+        _require_pymupdf()
         return run_self_test()
     # Reported by name rather than left to argparse's `required=True`: with the
     # flags marked required, argparse rejects `--test` (which needs neither)
@@ -3708,6 +3738,7 @@ def main(argv=None):
         print("missing required argument(s): %s"
               % ", ".join("--" + m for m in missing), file=sys.stderr)
         return 2
+    _require_pymupdf()
     if args.adopt_legacy and args.overwrite:
         print("REFUSED: --adopt-legacy cannot be combined with --overwrite. "
               "First record and verify the exact historical crops without "

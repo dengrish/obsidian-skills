@@ -8,9 +8,9 @@
 - [When the figure you need is not there](#when-the-figure-you-need-is-not-there)
 - [Rebuilt tables](#rebuilt-tables)
 
-Read when the inventory contains figures or a result merits a rebuilt table.
+Read when the inventory contains figures or a contribution merits a rebuilt table.
 This reference owns exhibit selection, captions and table fidelity. [Note
-format](note-format.md) owns the complete note shape.
+format](note-format.md) owns the complete note shape and body modes.
 
 ## What is eligible
 
@@ -31,15 +31,15 @@ The label selects the file but does not appear in the prose or caption. Place th
 
 ## Which ones to carry
 
-**Use only the figure embeds the explanation needs: usually zero to three, with four as a hard cap.** A note with every figure is the paper again, and the reason to summarise was that the reader was not going to read the paper. Zero is correct when prose fully carries the result or the available figures are irrelevant. **The cap counts embeds, not source figure identities** — three panels of one figure are three of your four, not one, and a note that reaches the cap that way is showing one figure and calling it a summary.
+**Use only the figure embeds the explanation needs: usually zero to three, with four as a hard cap.** A note with every figure is the document again, and the reason to summarise was that the reader was not going to read the document. Zero is correct when prose fully carries the contribution or the available figures are irrelevant. **The cap counts embeds, not source figure identities** — three panels of one figure are three of your four, not one, and a note that reaches the cap that way is showing one figure and calling it a summary.
 
-Take the figures that **are** the finding:
+Take the figures that **are** the main contribution:
 
-- the main result — the effect the abstract is about;
-- the comparison that makes the result mean something;
+- the main finding, argument, recommendation or notice change;
+- the comparison that makes the contribution mean something;
 - the one image a specialist would point at if asked "what did you actually see?".
 
-Skip: study-flow and CONSORT diagrams, apparatus photographs, architecture schematics, maps of where the samples came from, and any figure whose content is a table. **Unless the method is itself the contribution** — for a paper whose result is a technique, the schematic *is* the finding, and it goes in *Results* under the claim about what the technique does. Even a method schematic belongs in *Results* under the contribution it illustrates; `note_lint.py` checks this placement.
+Skip: study-flow and CONSORT diagrams, apparatus photographs, architecture schematics, maps of where the samples came from, and any figure whose content is a table. **Unless the method is itself the contribution** — for a paper whose result is a technique, the schematic *is* the finding, and it goes in the third section under the claim about what the technique does. Even a method schematic belongs in that contribution section; `note_lint.py` calls this positional slot `Results` and checks its placement.
 
 **The tiebreak, when several look equally central**, is how often the body text refers to each one:
 
@@ -61,7 +61,11 @@ Use the counts only to break a tie between substantively relevant figures, not t
 
 ## Where they go
 
-Each figure sits in *Results*, **directly under the claim it supports** — not collected in a gallery at the end, and not before the sentence that gives the reader a reason to look at it. A figure the surrounding text does not refer to is decoration.
+Each figure sits in the **third, contribution section**, directly under the
+claim it supports. This is Results in empirical mode and the main
+argument/action in the other modes. Do not collect figures in a gallery at the
+end or place one before the sentence that gives the reader a reason to look at
+it. A figure the surrounding text does not refer to is decoration.
 
 The shape, exactly:
 
@@ -84,11 +88,11 @@ The shape, exactly:
 - **Fails:** *Figure 2 — The two arms separated inside the first fortnight…* (right message, but the number is banned — see below)
 - **Holds:** the example above leads with the difference and then identifies population, comparator and display.
 
-**The caption must stand alone.** A reader who scrolls the note reading only figures and captions should come away with the paper's argument. That means the caption carries its own scope clause and its own numbers, even where the paragraph above already has them.
+**The caption must stand alone.** A reader who scrolls the note reading only figures and captions should come away with the document's argument. That means the caption carries its own scope clause and its own numbers, even where the paragraph above already has them.
 
 **The four claim rules apply inside a caption too** ([summary standards](summary-standards.md#the-four-claim-rules-in-full)). A caption is where a hedge most often goes missing, because captions are written last and read as neutral description. "Treatment worked" under a figure is the same overstatement it would be in a sentence.
 
-**Write it from the figure, not from the paper's caption.** The published caption is written for someone who has read the methods; it names panels and variables and assumes the design. Read what the figure actually shows, then say that. Where the published caption defines something you need — units, what an error bar is, what n is — take that and put it in the second sentence.
+**Write it from the figure, not from the source's caption.** The published caption is written for someone who has read the surrounding document; it names panels and variables and assumes that context. Read what the figure actually shows, then say that. Where the published caption defines something you need — units, what an error bar is, what n is — take that and put it in the second sentence.
 
 **Say what the error bars are.** Standard deviation, standard error and a 95% confidence interval are three different pictures, and a reader cannot tell them apart by eye. If the paper does not say, the caption says it does not.
 
@@ -108,7 +112,7 @@ The extractor writes whole figures. Existing vaults can also contain legacy pane
 
 ## When the figure you need is not there
 
-If intake never prepared an inventory for a paper with figures, return to
+If intake never prepared an inventory for a source with figures, return to
 [intake](../SKILL.md#1-select-and-inventory-the-work). Do not make a new
 extraction path inside drafting. If extraction already ran, inspect its actual
 diagnostics and report a missing caption/output, scan limitation or failed
@@ -123,9 +127,9 @@ clean lint; missing media does not waive those gates.
 
 ## Rebuilt tables
 
-Rebuild a table from the PDF when the comparison is part of the note's argument. The figure extractor does not produce tables; pointing at an unseen table is not a substitute for including its result.
+Rebuild a table from the PDF when its comparison, classification or requirement is part of the note's argument. The figure extractor does not produce tables; pointing at an unseen table is not a substitute for including its contribution.
 
-**Rebuild when the table *is* a claim the note makes.** The primary outcome, the head-to-head comparison, the harms. Not when two numbers and a comparator fit in a sentence — a two-row table is a sentence wearing a border.
+**Rebuild when the table *is* a claim the note makes.** The primary outcome, the head-to-head comparison, the harms, or a compact decision rule in a standard. Not when two values and their relationship fit in a sentence — a two-row table is a sentence wearing a border.
 
 The shape, exactly, and it mirrors the figure shape:
 
@@ -137,10 +141,10 @@ The shape, exactly, and it mirrors the figure shape:
 *No-till plots held about 6 t/ha more soil carbon after twelve years on this Iowa farm. Final means cover two of four regimes. The other regimes and per-depth rows are omitted.*
 ```
 
-- **In *Results*, under the claim it supports.** Same rule as a figure, and `note_lint.py` enforces it.
+- **In the third, contribution section, under the claim it supports.** Same rule as a figure; `note_lint.py` calls this slot `Results` and enforces it.
 - **Italic caption on the very next line**, no blank line between — again as for a figure, and for the same rendering reason.
 - **No table number**, in the caption or anywhere else.
-- **Values verbatim.** Copy the digits the paper printed. Do not round, rescale, convert units, or recompute an average from the subset of rows you kept: a recomputed number is one the [verification finder](review-checklist.md#locate-the-claims) cannot locate, and the paper never made that claim. Bolding the row or cell the claim is about is fine — that is emphasis, not arithmetic.
+- **Values verbatim.** Copy the digits the source printed. Do not round, rescale, convert units, or recompute an average from the subset of rows you kept: a recomputed number is one the [verification finder](review-checklist.md#locate-the-claims) cannot locate, and the source never made that claim. Bolding the row or cell the claim is about is fine — that is emphasis, not arithmetic.
 - **Trim to what the claim needs, and say so in the caption.** A 28-row benchmark becomes its four group averages; a 12-column table becomes the three columns compared. **A trimmed table that does not announce the trim is the most misleading thing this note can contain**, because unlike a vague sentence it looks complete and precise. One clause fixes it: *"the four task groups; the 28 subtasks are in the paper"*.
 - **Keep the paper's orientation** — systems in columns if that is how the paper set them, rows if not. Transposing is a silent re-presentation, and two tables under two orientations read as two notes.
 - **Four tables at most, one or two preferred.** Across both forms, aim for no

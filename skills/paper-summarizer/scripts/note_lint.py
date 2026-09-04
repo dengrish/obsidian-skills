@@ -6,13 +6,14 @@ below is one the shape has already drifted on -- an extra heading, a blank line
 above the callout, a quoted `read`, a caption pushed one line down -- and each
 drift is invisible from inside the note that has it.
 
-    python3 note_lint.py '<note.md>'
-    python3 note_lint.py '<note.md>' --images '<vault>/Sources/Images'
+    python3 note_lint.py '<note.md>' --mode empirical [--allow-unorganized]
+    python3 note_lint.py '<note.md>' --mode argument --images '<vault>/Sources/Images'
     python3 note_lint.py --test
 
 Exit 0 with no violations, 1 with one line per violation, 2 for a bad invocation.
-Sentence-length advisories are reported separately and do not affect the exit
-code. Review them before publication; word counts cannot judge clarity.
+Advisories are reported separately and do not affect the exit code. Review
+them before publication; they cover judgment calls that a mechanical check
+must not turn into hard failures.
 
 Stdlib only. The nine-key schema and list shapes are checked here; scalar
 decoding is shared with the source-ownership readers so valid YAML escapes do
@@ -27,7 +28,7 @@ import stat
 import sys
 import unicodedata
 
-_OBSIDIAN_SHARED_MODULES = ('vault_artifacts', 'yaml_scalars')
+_OBSIDIAN_SHARED_MODULES = ('naming', 'vault_artifacts', 'yaml_scalars')
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
@@ -66,6 +67,7 @@ if _here != _shared:
     _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
+from naming import core_stem, looks_canonical
 from vault_artifacts import inventory_source_figures
 from yaml_scalars import parse_scalar, strip_comment
 
@@ -104,6 +106,26 @@ GENERIC_HEADINGS = frozenset({
     "data and code", "provenance", "materials and methods", "key messages",
     "overview", "analysis", "implications", "caveats", "the question",
     "the study", "the findings", "data", "code", "references",
+    # The body-mode table describes section roles. Copying one of its cells is
+    # still a generic label, even when it happens to meet the length checks.
+    "research question and why it remained open",
+    "design, population/system and procedure",
+    "main findings, including harms and nulls",
+    "implications licensed by the design",
+    "design and reporting constraints",
+    "data, code and relevant materials",
+    "problem, thesis or organizing question",
+    "stated scope, evidence base, premises and reasoning or selection approach",
+    "main argument, framework, conclusions, requirements or recommendations",
+    "what follows from the argument and how its contribution can be used",
+    "evidence gaps, assumptions, counterarguments and applicability bounds",
+    "supplied sources, code or supporting materials that matter to the argument",
+    "affected work and the issue that prompted the notice",
+    "issuer, stated grounds, evidence and process behind the action",
+    "exact correction, withdrawal, warning or other change to the record",
+    "consequences for the affected claims, versions or uses",
+    "what the notice does not decide, change or supply evidence about",
+    "affected record, supporting evidence or accompanying material named by the notice",
 })
 
 # references/note-format.md: this note's enum, not a clipping's Article/Post/Video.
@@ -122,10 +144,23 @@ TAG_ENUM = (
 
 # references/note-format.md: Limitations is the one section with a cap, because a list
 # nobody reads to the end of buries the item that mattered.
-MIN_LIMITATIONS, MAX_LIMITATIONS = 2, 4
-# Step 9: data, code, and materials only.
+MIN_LIMITATIONS, MAX_LIMITATIONS = 1, 4
+PREFERRED_MIN_EMPIRICAL_LIMITATIONS = 2
+# The sixth section uses document-mode-specific availability/record labels.
 MIN_AVAILABILITY, MAX_AVAILABILITY = 1, 3
 MAX_LIMITATION_CHARS = 420
+
+MODES = ("empirical", "argument", "notice")
+AVAILABILITY_LABELS_BY_MODE = {
+    "empirical": frozenset({"data", "code", "materials"}),
+    "argument": frozenset({"sources", "materials", "data", "code"}),
+    "notice": frozenset({"record", "evidence", "materials"}),
+}
+REQUIRED_AVAILABILITY_LABELS_BY_MODE = {
+    "empirical": frozenset({"data"}),
+    "argument": frozenset(),
+    "notice": frozenset(),
+}
 
 #: Strong brevity targets, reviewed for justified clarity exceptions under
 #: references/note-format.md. Keep the existing constant names for callers;
@@ -181,7 +216,8 @@ _NUMBER = re.compile(r"[-+]?(?:[0-9][0-9_]*(?:\.[0-9_]*)?"
 _EMBED = re.compile(r"\A!\[\[([^\]]+)\]\]\Z")
 _ANY_EMBED = re.compile(r"!\[\[[^\]\n]+\]\]")
 _AVAILABILITY_BULLET = re.compile(
-    r"\A-\s+\*\*(Data|Code|Materials)\.\*\*\s+", re.I)
+    r"\A-\s+\*\*(Data|Code|Materials|Sources|Record|Evidence)\.\*\*\s+",
+    re.I)
 # `[[Stem.pdf#page=5|5]]` -- group 1 the target, group 2 the display text if any.
 _PAGE_LINK = re.compile(r"\[\[([^\]|]*#page=[^\]|]*)(?:\|([^\]]*))?\]\]")
 # The whole citation: the link wrapped in <sup>, which is how Obsidian renders a
@@ -339,7 +375,7 @@ def _split_front_matter(note):
     return keys, kv, end + 1
 
 
-def _check_front_matter(note, keys, kv):
+def _check_front_matter(note, keys, kv, allow_unorganized=False):
     seen = [k for k in keys]
     if len(set(seen)) != len(seen):
         dupes = sorted({k for k in seen if seen.count(k) > 1})
@@ -440,19 +476,45 @@ def _check_front_matter(note, keys, kv):
         if len(inner) > 1 and fmt == "Book":
             note.fail(2, "a `sources` URL item is never written on `format: Book`")
 
+    source_is_canonical = bool(note.source and looks_canonical(note.source))
+    source_core = core_stem(note.source) if source_is_canonical else ""
+    source_parts = source_core.split("_")
+    source_year = source_parts[2] if len(source_parts) >= 3 else None
+    source_is_undated = source_year == "nd"
+    if note.source and not source_is_canonical and not allow_unorganized:
+        note.fail(2, "`sources` item 1 must use pdf-organizer's canonical PDF "
+                     "filename before this summary can be published; pass "
+                     "--allow-unorganized only with the deliberate scan override")
     for key in ("published", "created"):
         val = scalar(key)
         if val is None:
+            continue
+        if key == "published" and val == "null":
+            if not source_is_undated and not allow_unorganized:
+                note.fail(2, "`published: null` is reserved for a source PDF "
+                             "whose canonical stem carries the `nd` year segment")
             continue
         if not _DATE.match(val):
             note.fail(2, "`%s: %s` must be a full YYYY-MM-DD date%s"
                          % (key, val, " (pad an unstated month or day with 01)"
                             if key == "published" else ""))
             continue
+        valid_date = True
         try:
             datetime.date(*(int(p) for p in val.split("-")))
         except ValueError:
+            valid_date = False
             note.fail(2, "`%s: %s` is not a real date" % (key, val))
+        if key == "published" and source_is_undated:
+            note.fail(2, "a dated `published` value conflicts with the source "
+                         "PDF's canonical `nd` year segment; rename the source "
+                         "through pdf-organizer first")
+        elif (key == "published" and valid_date and source_year
+              and source_year != val[:4]):
+            note.fail(2, "the `published` year %s conflicts with the source PDF's "
+                         "canonical %s year segment; rename the source through "
+                         "pdf-organizer or correct the metadata"
+                      % (val[:4], source_year))
 
     desc = scalar("description")
     if desc is not None:
@@ -580,7 +642,7 @@ def _check_rule(note, i):
     return i
 
 
-def _check_structure(note, body_start, fenced):
+def _check_structure(note, body_start, fenced, mode):
     lines = note.raw_lines
     rules = [n for n, l in enumerate(lines[body_start:], body_start)
              if l.strip() == "___" and n not in fenced]
@@ -600,7 +662,7 @@ def _check_structure(note, body_start, fenced):
     if len(heads) != len(ROLES):
         note.fail(heads[0][0] + 1 if heads else 0,
                   "the note has %d `##` sections; it has exactly %d, in this order: "
-                  "%s -- each headed by a short sentence about this paper, not by "
+                  "%s -- each headed by a short sentence about this document, not by "
                   "the role name. (Every other section check is skipped until the "
                   "count is right: with the sections misaligned they would report "
                   "the wrong role for correct text.)"
@@ -613,12 +675,12 @@ def _check_structure(note, body_start, fenced):
         bare = text.strip().rstrip(":").strip()
         if bare.casefold() in GENERIC_HEADINGS:
             note.fail(n + 1, "heading %d (%s) is the label %r, not a sentence about "
-                             "this paper -- say what this section actually found"
+                             "this document -- say what this section actually found"
                       % (idx + 1, role, text))
             continue
         if len(bare) < MIN_HEADING:
             note.fail(n + 1, "heading %d (%s) is %d characters; a heading is a short "
-                             "sentence about this paper, at least %d"
+                             "sentence about this document, at least %d"
                       % (idx + 1, role, len(bare), MIN_HEADING))
         elif len(bare) > MAX_HEADING:
             note.fail(n + 1, "heading %d (%s) is %d characters; keep it under %d so "
@@ -672,31 +734,62 @@ def _check_structure(note, body_start, fenced):
                 bullets = [l for l in content if l.startswith("- ")]
                 if not MIN_AVAILABILITY <= len(bullets) <= MAX_AVAILABILITY:
                     note.fail(start + 1, "Availability has %d bullets; it holds %d "
-                                         "to %d -- data, code, and materials only, "
-                                         "with no reference list after them"
+                                         "to %d mode-appropriate disclosure or "
+                                         "record items, with no reference list "
+                                         "after them"
                               % (len(bullets), MIN_AVAILABILITY, MAX_AVAILABILITY))
                 labels = []
                 for bullet in bullets:
                     match = _AVAILABILITY_BULLET.match(bullet)
                     if not match:
                         note.fail(start + 1, "Availability bullets begin with "
-                                             "`**Data.**`, `**Code.**`, or "
-                                             "`**Materials.**`")
+                                             "a documented label: `**Data.**`, "
+                                             "`**Code.**`, `**Materials.**`, "
+                                             "`**Sources.**`, `**Record.**`, or "
+                                             "`**Evidence.**`")
                         continue
                     labels.append(match.group(1).casefold())
-                for required in ("data", "code"):
-                    if required not in labels:
-                        note.fail(start + 1, "Availability must state %s, using "
-                                             "`not stated` when the paper gives "
-                                             "no disclosure" % required.title())
+                duplicates = sorted({label for label in labels
+                                     if labels.count(label) > 1})
+                if duplicates:
+                    note.fail(start + 1, "Availability repeats label(s): %s"
+                              % ", ".join(duplicates))
+                allowed = AVAILABILITY_LABELS_BY_MODE[mode]
+                wrong = sorted(set(labels) - allowed)
+                if wrong:
+                    note.fail(start + 1, "Availability label(s) %s do not apply in "
+                                         "%s mode; use only %s"
+                              % (", ".join(wrong), mode, ", ".join(sorted(allowed))))
+                required = REQUIRED_AVAILABILITY_LABELS_BY_MODE[mode]
+                missing = sorted(required - set(labels))
+                if missing:
+                    note.fail(start + 1, "%s mode requires separate Availability "
+                                         "label(s): %s"
+                              % (mode.capitalize(), ", ".join(missing)))
+                for bullet, match in zip(bullets, [
+                        _AVAILABILITY_BULLET.match(item) for item in bullets]):
+                    if match and not bullet[match.end():].strip():
+                        note.fail(start + 1, "an Availability bullet has a label but "
+                                             "no disclosure or record text")
+                        break
             if name == "Limitations":
                 bullets = [l for l in content if l.startswith("- ")]
                 if not MIN_LIMITATIONS <= len(bullets) <= MAX_LIMITATIONS:
                     note.fail(start + 1, "Limitations has %d bullets; it holds %d to "
-                                         "%d -- only what would change how a reader "
-                                         "acts on the finding (references/note-format.md)"
+                                         "%d in every mode -- only what would change how "
+                                         "a reader acts on the document "
+                                         "(references/note-format.md)"
                               % (len(bullets), MIN_LIMITATIONS, MAX_LIMITATIONS))
+                elif (mode == "empirical"
+                      and len(bullets) < PREFERRED_MIN_EMPIRICAL_LIMITATIONS):
+                    note.advise(start + 1, "an empirical note normally carries at least "
+                                "%d material limitations; keep one only when a second "
+                                "would be filler, and explain the exception in the run report"
+                                % PREFERRED_MIN_EMPIRICAL_LIMITATIONS)
                 for b in bullets:
+                    if not b[2:].strip():
+                        note.fail(start + 1, "a Limitations bullet has no content")
+                        break
                     if len(b) > MAX_LIMITATION_CHARS:
                         note.fail(start + 1, "a Limitations bullet is %d characters, "
                                              "over %d -- state the caveat, or move "
@@ -797,7 +890,7 @@ def _prose_lines(note, start, end, captions, fenced):
     return out
 
 
-def _check_prose(note, bounds, captions, fenced, body_start):
+def _check_prose(note, bounds, captions, fenced, body_start, mode):
     """Flag sentence-length targets; enforce paragraph, procedure and Results caps.
 
     Counts cannot decide whether a longer sentence is needed for clarity.
@@ -823,22 +916,30 @@ def _check_prose(note, bounds, captions, fenced, body_start):
                              "(references/note-format.md)"
                       % (len(counted), MAX_PARAGRAPH_SENTENCES))
 
-    # Methods carries the experiment as numbered steps.  The list is not
-    # required -- a theory paper has no procedure to walk through -- but a list
-    # that is there has a shape, and a two-step or twelve-step one is either
-    # not a procedure or the paper's methods section copied across.
+    # In empirical mode, Methods carries a walked-through procedure as 3--8
+    # numbered steps. A non-empirical source may still report a real procedure
+    # (for example, a standards-development process or a notice review), but it
+    # must not inherit the empirical minimum. Every numbered procedure remains
+    # contiguous and capped so a source section is not copied wholesale.
     span = next(((s, e) for name, s, e in bounds if name == "Methods"), None)
     if span is not None:
         steps = [note.raw_lines[n].strip() for n in range(*span)
                  if n not in fenced and _STEP.match(note.raw_lines[n].strip())]
-        if steps and not MIN_STEPS <= len(steps) <= MAX_STEPS:
-            note.fail(span[0] + 1, "Methods lists %d numbered steps; a walked-"
-                                   "through experiment has %d to %d (references/note-format.md)"
+        if steps and mode == "empirical" \
+                and not MIN_STEPS <= len(steps) <= MAX_STEPS:
+            note.fail(span[0] + 1, "the empirical procedure lists %d numbered "
+                                   "steps; it has %d to %d "
+                                   "(references/note-format.md)"
                       % (len(steps), MIN_STEPS, MAX_STEPS))
+        elif steps and mode != "empirical" and len(steps) > MAX_STEPS:
+            note.fail(span[0] + 1, "the reported procedure lists %d numbered "
+                                   "steps; keep at most %d in a concise reading "
+                                   "note (references/note-format.md)"
+                      % (len(steps), MAX_STEPS))
         numbers = [int(_STEP.match(s).group(1)) for s in steps]
         if numbers and numbers != list(range(1, len(numbers) + 1)):
-            note.fail(span[0] + 1, "the Methods steps are numbered %s; they run "
-                                   "1..%d in the order the researchers worked"
+            note.fail(span[0] + 1, "the procedure steps are numbered %s; they "
+                                   "must run 1..%d in their reported order"
                       % (", ".join(str(x) for x in numbers), len(numbers)))
 
     span = next(((s, e) for name, s, e in bounds if name == "Results"), None)
@@ -848,7 +949,7 @@ def _check_prose(note, bounds, captions, fenced, body_start):
     chars = sum(len(t) for _n, t in prose)
     if chars > MAX_RESULTS_CHARS:
         note.fail(span[0] + 1, "Results holds %d characters of prose, over %d -- "
-                               "it carries the paper's main result developed "
+                               "it carries the document's main result developed "
                                "properly, with any secondary finding at a "
                                "sentence each (references/note-format.md). Exhibits and "
                                "their captions are not counted."
@@ -1163,13 +1264,16 @@ def _name_key(name):
     return unicodedata.normalize("NFC", name).casefold()
 
 
-def lint(text, path="<note>", images=None, *, advisories=None):
+def lint(text, path="<note>", images=None, *, mode,
+         allow_unorganized=False, advisories=None):
     """Return sorted blocking (line, message) pairs, preserving the list API.
 
     An empty result means no format violations. If supplied, append sorted
-    sentence-length advisories to the caller's list; they need writing review
-    but never suppress a violation or change the returned list's shape.
+    advisories to the caller's list; they need review but never suppress a
+    violation or change the returned list's shape.
     """
+    if mode not in MODES:
+        raise ValueError("mode must be one of: %s" % ", ".join(MODES))
     note = Note(text, path)
     # CRLF first, and normalise before anything else looks at a line.  Left in
     # place it makes every `---` fence read as `---\r`, so the note reports as
@@ -1186,15 +1290,15 @@ def lint(text, path="<note>", images=None, *, advisories=None):
     note.raw_lines = text[:-1].split("\n") if text.endswith("\n") else text.split("\n")
     keys, kv, body_start = _split_front_matter(note)
     fenced = _fenced(note.raw_lines)
-    _check_front_matter(note, keys, kv)
+    _check_front_matter(note, keys, kv, allow_unorganized)
     after = _check_callout(note, body_start, fenced)
     _check_rule(note, after)
-    bounds = _check_structure(note, body_start, fenced)
+    bounds = _check_structure(note, body_start, fenced, mode)
     src = note.source
     captions = _check_figures(note, bounds, images, fenced, src)
     captions |= _check_tables(note, bounds, fenced)
     _check_exhibit_numbers(note, body_start, captions, fenced)
-    _check_prose(note, bounds, captions, fenced, body_start)
+    _check_prose(note, bounds, captions, fenced, body_start, mode)
     _check_citations(note, body_start, captions, fenced, src)
     if advisories is not None:
         advisories.extend(sorted(note.advisories))
@@ -1327,9 +1431,10 @@ def _cases():
          GOOD.replace('read: false', 'read: false # unread')
              .replace('format: Paper', 'format: Paper # local document')
              .replace('  - "#medicine"', '  - "#\\x6dedicine" # discipline'), CLEAN),
-        ("Unicode-equivalent source spelling is the same paper",
+        ("noncanonical Unicode source spelling is rejected before identity matching",
          GOOD.replace("Doe_X_2025", "Müller_X_2025").replace(
-             '"[[Müller_X_2025.pdf]]"', '"[[Mu\u0308ller_X_2025.pdf]]"'), CLEAN),
+             '"[[Müller_X_2025.pdf]]"', '"[[Mu\u0308ller_X_2025.pdf]]"'),
+         "canonical PDF filename"),
         ("quote escapes count as decoded description characters",
          _mutate('description: Doe cut recurrence from 45% to 8% in a 219-patient trial.',
                  'description: "' + '\\u00e9' * 110 + '"'), CLEAN),
@@ -1399,6 +1504,22 @@ def _cases():
         ("quoted read", _mutate("read: false", 'read: "false"'), "bare boolean"),
         ("bare year", _mutate("published: 2025-01-03", "published: 2025"),
          "full YYYY-MM-DD"),
+        ("undated source uses an explicit null",
+         GOOD.replace("Doe_X_2025", "Doe_X_nd")
+         .replace("published: 2025-01-03", "published: null", 1), CLEAN),
+        ("junk after an nd year does not create a canonical undated source",
+         GOOD.replace("Doe_X_2025", "Doe_X_nd_junk")
+         .replace("published: 2025-01-03", "published: null", 1),
+         "canonical PDF filename"),
+        ("null publication date requires an nd source stem",
+         _mutate("published: 2025-01-03", "published: null"),
+         "reserved for a source PDF"),
+        ("dated publication conflicts with an nd source stem",
+         _mutate("[[Doe_X_2025.pdf]]", "[[Doe_X_nd.pdf]]"),
+         "conflicts with the source PDF"),
+        ("publication year matches the canonical source year",
+         _mutate("published: 2025-01-03", "published: 2024-01-03"),
+         "published` year 2024 conflicts"),
         ("blank tags when no discipline applies",
          _mutate('tags:\n  - "#medicine"', 'tags:'), CLEAN),
         ("commented blank tags retain the no-discipline meaning",
@@ -1557,13 +1678,16 @@ def _cases():
         ("sup with a gap inside the tag",
          _mutate("<sup>[[Doe_X_2025.pdf#page=6|6]]</sup>",
                  "<sup> [[Doe_X_2025.pdf#page=6|6]] </sup>"), "not wrapped in `<sup>"),
-        ("one limitation is too few",
+        ("one source-backed limitation is enough for a compact argument",
          _mutate("- **One.** Prose.\n- **Two.** Prose.", "- **One.** Prose."),
-         "it holds 2 to 4"),
+         CLEAN, "argument"),
+        ("one empirical limitation asks for an anti-filler review",
+         _mutate("- **One.** Prose.\n- **Two.** Prose.", "- **One.** Prose."),
+         "__ADVISORY__a second would be filler"),
         ("five limitations",
          _mutate("- **One.** Prose.\n- **Two.** Prose.",
                  "\n".join("- **Item %d.** Prose here." % i for i in range(1, 6))),
-         "it holds 2 to 4"),
+         "it holds 1 to 4 in every mode"),
         ("four limitations is fine",
          _mutate("- **One.** Prose.\n- **Two.** Prose.",
                  "\n".join("- **Item %d.** Prose here." % i for i in range(1, 5))),
@@ -1606,12 +1730,32 @@ def _cases():
                  "- **Code.** github.example/x\n- Doe, P. (2025). Nature 600, 1-9."
                  "\n- Smith, J. (2024). NEJM 390, 22-30."),
          "Availability has 4 bullets"),
-        ("Availability cannot omit Data",
+        ("empirical Availability requires Data",
          _mutate("- **Data.** Not stated.\n", ""),
-         "must state Data"),
-        ("Availability cannot omit Code",
-         _mutate("- **Code.** github.example/x\n", ""),
-         "must state Code"),
+         "requires separate Availability label(s): data"),
+        ("empirical Availability omits inapplicable Code without boilerplate",
+         _mutate("- **Code.** github.example/x\n", ""), CLEAN),
+        ("Availability can use one mode-specific record item",
+         _mutate("- **Data.** Not stated.\n- **Code.** github.example/x",
+                 "- **Record.** The correction identifies the affected version."),
+         CLEAN, "notice"),
+        ("argument Availability accepts a supplied source",
+         _mutate("- **Data.** Not stated.\n- **Code.** github.example/x",
+                 "- **Sources.** The normative specification is supplied."),
+         CLEAN, "argument"),
+        ("notice mode rejects empirical availability labels",
+         GOOD, "do not apply in notice mode", "notice"),
+        ("Availability disclosure text cannot be empty",
+         _mutate("- **Data.** Not stated.", "- **Data.** "),
+         "no disclosure or record text"),
+        ("a Limitations bullet cannot be empty",
+         _mutate("- **One.** Prose.\n- **Two.** Prose.",
+                 "- \n- **Two.** Prose."),
+         "has no content"),
+        ("Availability labels cannot repeat",
+         _mutate("- **Code.** github.example/x",
+                 "- **Data.** The supplement is public."),
+         "repeats label"),
         ("Availability uses named disclosure bullets",
          _mutate("- **Code.** github.example/x",
                  "- **Software.** github.example/x"),
@@ -1634,6 +1778,10 @@ def _cases():
         ("heading in capitals",
          _mutate("## Recurrence fell from 45% to 8% within eight weeks",
                  "## RECURRENCE FELL FROM 45 TO 8 PERCENT IN EIGHT"), "in capitals"),
+        ("body-mode role prose is not a document-specific heading",
+         _mutate("## Worth offering after a second recurrence in adults",
+                 "## What follows from the argument and how its contribution can be used"),
+         "is the label"),
         ("caption may end on an emphasised term",
          _mutate("curves for the two arms.*", "curves for the two **arms**.*"),
          CLEAN),
@@ -1858,7 +2006,7 @@ def _cases():
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  + "\n".join("%d. The team did a thing." % i
                               for i in range(1, MAX_STEPS + 2))),
-         "numbered steps; a walked-"),
+         "empirical procedure lists"),
         ("NEAR MISS: a list at the cap is clean",
          _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
@@ -1869,13 +2017,36 @@ def _cases():
          _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  "1. The team did a thing.\n2. The team did another thing."),
-         "numbered steps; a walked-"),
+         "empirical procedure lists"),
+        ("one reported procedure step is valid outside empirical mode",
+         _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
+                 "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
+                 "1. The standards committee recorded its final decision."),
+         CLEAN, "argument"),
+        ("two reported procedure steps are valid outside empirical mode",
+         _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
+                 "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
+                 "1. The committee reviewed the proposal.\n"
+                 "2. The committee published its decision."),
+         CLEAN, "argument"),
+        ("a non-empirical reported procedure retains the concise cap",
+         _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
+                 "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
+                 + "\n".join("%d. The committee completed one stage." % i
+                              for i in range(1, MAX_STEPS + 2))),
+         "keep at most", "argument"),
         ("steps out of order",
          _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  "1. The team did a thing.\n3. The team did another.\n"
                  "4. The team did a third."),
-         "they run 1.."),
+         "must run 1.."),
+        ("non-empirical procedure numbering remains contiguous",
+         _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
+                 "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
+                 "1. The committee reviewed the proposal.\n"
+                 "3. The committee published its decision."),
+         "must run 1..", "argument"),
         ("a step over the 20-word target is advisory only",
          _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
@@ -1898,9 +2069,11 @@ def _selftest():
     `__ONLY__x` must produce one violation containing x and nothing else --
     which is how a check that reports one fault as seven gets caught."""
     ok = fail = 0
-    for name, text, needle in _cases():
+    for case in _cases():
+        name, note_text, needle = case[:3]
+        mode = case[3] if len(case) == 4 else "empirical"
         advisories = []
-        got = lint(text, advisories=advisories)
+        got = lint(note_text, mode=mode, advisories=advisories)
         if needle is CLEAN:
             good = not got and not advisories
         elif needle is None:
@@ -1930,11 +2103,24 @@ def _selftest():
     import tempfile
     long_note = _mutate("More prose.",
                         " ".join(["Recurrence"] * (MAX_SENTENCE_WORDS + 1)) + ".")
-    if lint(long_note) == []:
+    if lint(long_note, mode="empirical") == []:
         ok += 1
     else:
         fail += 1
         print("FAIL  the original lint API returns only blocking violations")
+    unorganized = GOOD.replace("Doe_X_2025", "Müller_X_2025")
+    if lint(unorganized, mode="empirical", allow_unorganized=True) == []:
+        ok += 1
+    else:
+        fail += 1
+        print("FAIL  the deliberate unorganized-source lint override was ignored")
+    unorganized_undated = unorganized.replace("published: 2025-01-03",
+                                               "published: null")
+    if lint(unorganized_undated, mode="empirical", allow_unorganized=True) == []:
+        ok += 1
+    else:
+        fail += 1
+        print("FAIL  the unorganized-source override rejected an explicit null date")
     with tempfile.TemporaryDirectory() as scratch:
         image_path = os.path.join(scratch, "Doe_X_2025_fig_2.png")
         with open(image_path, "wb") as fh:
@@ -1951,7 +2137,8 @@ def _selftest():
             if linked_image is not None:
                 linked_note = GOOD.replace(
                     "Doe_X_2025_fig_2.png", "Doe_X_2025_fig_7.png")
-                linked_findings = lint(linked_note, images=scratch)
+                linked_findings = lint(linked_note, images=scratch,
+                                       mode="empirical")
                 if any("source figure inventory is unsafe" in message
                        and linked_image in message
                        for _line, message in linked_findings):
@@ -1967,7 +2154,7 @@ def _selftest():
         for name, text, status, required in [
                 ("CLI clean note with existing image", GOOD, 0, [": clean"]),
                 ("CLI sentence advisory does not fail", long_note, 0,
-                 [": advisory:", "no violations", "1 sentence-length advisory"]),
+                 [": advisory:", "no violations", "1 advisory(s)"]),
                 ("CLI advisory preserves schema, citation and image failures",
                  invalid_note, 1,
                  [": advisory:", "bare boolean", "physical pages starting at 1",
@@ -1977,7 +2164,8 @@ def _selftest():
                 fh.write(text)
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
-                result = main([note_path, "--images", scratch])
+                result = main([note_path, "--mode", "empirical",
+                               "--images", scratch])
             if result == status and all(part in output.getvalue() for part in required):
                 ok += 1
             else:
@@ -1989,7 +2177,7 @@ def _selftest():
             fh.write(GOOD)
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            result = main([note_path])
+            result = main([note_path, "--mode", "empirical"])
         if result == 1 and "--images is required" in output.getvalue():
             ok += 1
         else:
@@ -2021,12 +2209,20 @@ def main(argv=None):
         description="Check a summary note against paper-summarizer's format.")
     p.add_argument("note", nargs="?", help="the .md note to check")
     p.add_argument("--images", help="image folder; also verify every embed resolves")
+    p.add_argument("--mode", choices=MODES,
+                   help="selected body mode (required when checking a note)")
+    p.add_argument("--allow-unorganized", action="store_true",
+                   help="accept a deliberately unorganized PDF source name; its "
+                        "year segment cannot be cross-checked")
     p.add_argument("--test", action="store_true", help="run the self-tests")
     a = p.parse_args(argv)
     if a.test:
         return _selftest()
     if not a.note:
         p.error("give a note path, or --test")
+    if not a.mode:
+        p.error("--mode is required when checking a note because the body mode "
+                "is not stored in the note")
     if not os.path.isfile(a.note):
         sys.stderr.write("not a file: %s\n" % a.note)
         return 2
@@ -2036,7 +2232,9 @@ def main(argv=None):
     with open(a.note, encoding="utf-8") as fh:
         text = fh.read()
     advisories = []
-    findings = lint(text, a.note, a.images, advisories=advisories)
+    findings = lint(text, a.note, a.images, mode=a.mode,
+                    allow_unorganized=a.allow_unorganized,
+                    advisories=advisories)
     if a.images is None:
         fenced = _fenced(text.splitlines())
         for index, line in enumerate(text.splitlines()):
@@ -2059,7 +2257,7 @@ def main(argv=None):
     else:
         print("%s: clean" % a.note)
     if advisories:
-        print("%d sentence-length advisory(s); review before publication" % len(advisories))
+        print("%d advisory(s); review before publication" % len(advisories))
     return 1 if findings else 0
 
 

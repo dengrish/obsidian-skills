@@ -20,9 +20,9 @@ PDF reading and splitting use `pypdf`; the rename helper needs only Python's
 standard library.
 
 This skill changes PDF names and locations and creates chapter PDFs. For
-figure images use `pdf-figure-extractor`; for a paper explanation use
-`paper-summarizer`; for new wiki entries use `wiki-builder`; for existing wiki
-maintenance use `wiki-linter`. A bare PDF with no stated deliverable needs
+figure images use `pdf-figure-extractor`; for a document explanation or reading
+note use `paper-summarizer`; for new wiki entries use `wiki-builder`; for
+existing wiki maintenance use `wiki-linter`. A bare PDF with no stated deliverable needs
 routing clarification, not an automatic chain of all these skills.
 
 - For a vault-wide request, enumerate only `Inbox/` and `Sources/PDFs/`,
@@ -90,7 +90,9 @@ Read the first two or three pages for author, title, and year. Use
 - For non-English sources, use an English title provided by the document;
   otherwise transliterate the original rather than inventing a translation.
 
-Examples: `Vaswani_AttnAllYouNeed_2017.pdf`,
+The year segment is `0001`–`9999`, or `nd` when no publication year can be
+verified; `0000` is never a canonical year. Examples:
+`Vaswani_AttnAllYouNeed_2017.pdf`,
 `Cormen_CLRS_2022.pdf`, `GoldmanSachs_Q4Earnings_2024.pdf`, and
 `AcmeCorp_StrategyMemo_nd.pdf`.
 
@@ -137,6 +139,17 @@ Without `--apply`, this only reports moves, note rewrites, sidecar changes,
 unreadable notes, and blockers. Omit `--dest` for a source already under
 `Sources/PDFs/`; omit both `--dest` and `--vault` outside the vault. A supplied
 vault destination must be absolute and inside that vault.
+
+When the canonical year segment changes, the plan also reconciles the owned
+paper-summary note's top-level `published` field in that same atomic rewrite.
+A target `nd` writes `published: null`. A numeric target preserves a valid
+existing month and day; an existing null becomes `YYYY-01-01` under the
+summary schema's padding rule. Missing, duplicate, quoted, invalid, or
+otherwise ambiguous publication metadata blocks the whole rename so it can be
+corrected from the document before re-planning. A date whose month/day is not
+valid in the target year also blocks rather than losing those components.
+Never change `published` in an ordinary citing note: that date describes the
+note's own source, not the PDF it happens to mention.
 
 Read [rename repair](references/rename-repair.md) **before applying a plan
 that moves derived files, rewrites notes, or updates figure sidecars**, and
@@ -200,7 +213,9 @@ must be resolved before proceeding with a dependent split.
 
 Name the old and new paths, explain uncertain metadata choices, and list
 chapters with their page ranges. Include note/sidecar repairs and any notes
-that could not be read; report omitted custom review ledgers as a limitation.
+that could not be read. When the year changed, include the planned old and new
+`published` values for each owned summary note; report omitted custom review
+ledgers as a limitation.
 Separate already-canonical files, already-split books, pending authorization,
 and failures. List untouched Markdown captures and other non-PDF files in
 their own groups so an inbox-wide request does not falsely read as empty.

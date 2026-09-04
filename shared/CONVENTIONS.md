@@ -55,7 +55,7 @@ override paths per-request, for that run only.
 | Path | Holds | Written by | Read by |
 |---|---|---|---|
 | `Inbox/` | **everything new, unsorted** — Web Clipper `.md` captures and dropped-in documents alike. The **file extension is the dispatch**, and it is the whole of it: `.md` to one skill, `.pdf` to the other, **anything else to neither** | the user, the user's clipper | clipping-processor (`.md` only), pdf-organizer (`.pdf` only) |
-| `Articles/` | **flat**; notes *about* a document — cleaned clippings and paper summaries, one schema (§2b), told apart by `sources:` item 1 | clipping-processor, paper-summarizer; pdf-organizer repairs source references during an authorized PDF rename | wiki-builder, clipping-processor (dedup index), paper-summarizer (dedup and collision check), pdf-organizer (authorized rename preflight) |
+| `Articles/` | **flat**; notes *about* a document — cleaned clippings and PDF reading notes, one schema (§2b), told apart by `sources:` item 1 | clipping-processor, paper-summarizer; pdf-organizer repairs source references during an authorized PDF rename | wiki-builder, clipping-processor (dedup index), paper-summarizer (dedup and collision check), pdf-organizer (authorized rename preflight), wiki-linter (exact producer-mapped dependency repair only) |
 | `Sources/PDFs/` | organized source documents, recursive. Everything pdf-organizer produces lands here — but the user may also drop a file in directly, which is why all three derived-content consumers still check the stem and refuse a name pdf-organizer did not produce | pdf-organizer (renames an `Inbox/` file **and moves it here**), the user | pdf-figure-extractor, paper-summarizer, wiki-builder |
 | `Sources/PDFs/<Work>/` | book-chapter PDFs, e.g. `Sources/PDFs/Prince_UDL_2026/`. The folder is what pdf-organizer creates when it splits a book. paper-summarizer's batch **scans** it — a book is only recognisable as one when a chapter turns up beside it — and then **skips** every chapter it finds, so a sweep never becomes a book's worth of summaries | pdf-organizer, the user | pdf-figure-extractor, paper-summarizer (scans, skips), wiki-builder |
 | `Sources/Images/` | **flat**; every figure and downloaded image, all extensions, whatever it came from | pdf-figure-extractor, clipping-processor; **pdf-organizer** renames in place only within an approved source rename (§1a) | wiki-builder, paper-summarizer, clipping-processor (its `rename` path re-reads the folder — §8a), wiki-linter (with `--images`, validates embeds and reports nested/staging residue without opening or deleting files) |
@@ -68,8 +68,11 @@ files (§1a). Figure extraction supplies images to either paper-summarizer or
 wiki-builder. Those two skills independently read the PDF: the summary is a
 finished reading note, never an intermediate source for wiki-builder. A web
 capture follows clipping-processor into `Articles/`, and that cleaned note
-can become a wiki-builder source. wiki-linter maintains existing entries
-without needing a new source or an earlier stage in the same run.
+can become a wiki-builder source. A new source contribution, including an
+explicit candidate-specific synthesis from several sources, belongs to
+wiki-builder. A correction confined to one entry and supported only by sources
+it already cites belongs to wiki-linter's source-backed correction mode;
+ordinary wiki-linter maintenance needs no source.
 An interrupted or partial wiki-builder run is resumed by **wiki-builder** with
 explicit resume/re-run intent; wiki-linter can repair only the
 source-independent residue it owns and cannot finish extraction or a source
@@ -132,9 +135,12 @@ because the user selected the vault root.
 **Depended on by:** all six skills. `Sources/Images/` is the only folder all six
 reach — five in the normal course, and pdf-organizer only on the rename path
 above, where it is the one skill that moves a file another skill wrote.
-`Articles/` is outside wiki-linter's scope. Its producers enforce their own
-notes' schema and quality; paper-summarizer also runs `note_lint.py` before
-publication.
+`Articles/` is outside wiki-linter's ordinary scan and maintenance scope. Its
+producers enforce their own notes' schema and quality; paper-summarizer also
+runs `note_lint.py` before publication. The sole exception is an exact
+producer-mapped dependency repair: wiki-linter may inspect the reported old and
+new clipping-note paths as ownership evidence, but it neither edits nor lints
+those notes.
 
 ### 1a. Source-file names, and why pdf-organizer runs first
 
@@ -164,7 +170,8 @@ accept the unorganized PDF or merge its identity with another source.
 ```
 <!-- /canonical -->
 
-`Year` is four digits or the literal `nd`; `NN` is a zero-padded two-digit
+`Year` is a real four-digit year from `0001` through `9999`, or the literal
+`nd`; `NN` is a zero-padded two-digit
 chapter number. Either form may end with an optional `_src` marker and an
 optional `_2`, `_3`, … disambiguator, in that order — and **that tail always
 comes last, after the chapter segment**: `Prince_UDL_2026_02_SupLearn_src`,
@@ -504,9 +511,10 @@ read: false
   to today whenever a wiki-builder run changes the entry, including a
   source-no-op merge whose independent QC or metadata work changes the file. A
   byte-unchanged source-no-op keeps the old date. wiki-linter's ordinary lint
-  tasks preserve both dates; an explicitly requested source-backed split or
-  merge follows wiki-builder's creation and body-change rules for the entries
-  that refactor creates or substantively rewrites.
+  tasks and producer-mapped dependency repairs preserve both dates; an
+  explicitly requested source-backed correction, split, or merge follows
+  wiki-builder's creation and body-change rules for entries it substantively
+  rewrites or creates.
 - **`read` is a boolean, written `read: false` on creation.** It is the user's
   review checkbox (`.obsidian/types.json` pins it as `checkbox`), and §2d is
   the whole rule for who may write it.
@@ -626,14 +634,18 @@ read: false
   corrected — **on a clipping note**. A note about a local document has no raw
   to preserve anything from, so it is the date the note was written (today);
   the [paper-summary frontmatter procedure](../skills/paper-summarizer/references/note-format.md#frontmatter)
-  defines those dates. `published` is the
-  corrected publication date, and it is **always a full `YYYY-MM-DD`** on both
-  note kinds — a clipping normally prints one, and on a note about a local
-  document every component the document does not state is **padded with `01`**
+  defines those dates. `published` is the corrected publication date: a full
+  `YYYY-MM-DD` when the source supplies a year, or the explicit YAML null
+  `published: null` when it is genuinely undated. A cleaned clipping still
+  requires a usable title; an absent year uses the filename suffix `nd`, never
+  the capture's `created` year. On a note about a local document whose filename
+  carries a year, every date component the document does not state is **padded
+  with `01`**
   (`2025` → `2025-01-01`, `March 2025` → `2025-03-01`). The padding is a
   placeholder and is reported as one; the full-date shape is what makes the
-  field sort and filter as a date in Obsidian, which a bare year does not. A
-  padded component is never filled in from anywhere but the document itself.
+  field sort and filter as a date in Obsidian, which a bare year does not. An
+  undated local document uses the organizer's `_nd` stem and `published: null`.
+  A padded component is never filled in from anywhere but the document itself.
 - `description` is ≤ 110 characters, same bar as a wiki entry's.
 - `tags` follows §3 exactly — block-form, `#`-prefixed, double-quoted, never a
   wikilink, or blank when no discipline applies.
@@ -760,9 +772,9 @@ naming every entry whose `read: true` now predates the added date or equation,
 and the checkbox stays the user's to clear. wiki-builder's own merge pass is
 the contrast: any newly added unread body content resets `read: false`, whether
 it came from the active source or from the builder's independent QC. An
-explicit source-backed linter refactor uses that same creation/body-change
-rule, including `read: false` on a new split entry and a reset when retained
-body content becomes newly unread.
+explicit source-backed linter correction or refactor uses that same
+creation/body-change rule, including `read: false` on a new split entry and a
+reset when retained body content becomes newly unread.
 
 The reset rule requires judgment about body substance. Scripts check the
 field's presence, type and position, but cannot decide whether new reading
@@ -772,9 +784,10 @@ has been added.
 (creates), paper-summarizer (creates, and carries the existing value across on a
 rewrite — regenerating a summary is not new reading for the user to do),
 wiki-linter (ordinary lint validates presence, type and position and only
-re-spells a recognizable wrongly typed value; explicit source-backed refactor
-may create a split entry or reset a substantively rewritten retained entry
-under the builder rule above, but never guesses a null or unrecognizable answer).
+re-spells a recognizable wrongly typed value; explicit source-backed
+correction or refactor may reset a substantively rewritten retained entry,
+and refactor may create a split entry, under the builder rule above; neither
+guesses a null or unrecognizable answer).
 
 ---
 
@@ -996,8 +1009,8 @@ point — the rule it would have had is pdf-organizer's, already applied.
 
 **A clipping note is derived, because there is no file to inherit from.** Its
 filename is
-`<Author>_<short_topic>_<year>.md` — first author's surname in original case, a
-Title-Cased 2–4-word topic, a 4-digit year, joined by underscores
+`<Author>_<short_topic>_<year-or-nd>.md` — first author's surname in original
+case, a Title-Cased 2–4-word topic, and either a 4-digit year or `nd`, joined by underscores
 (`Teslo_Pancreatic_Cancer_2026.md`). The mechanics live in
 `clipping-processor/scripts/slug.py`; the judgment calls (which words identify
 the topic, multi-author strings, suffixes, acronym and brand casing) are in
@@ -1256,11 +1269,17 @@ NFC. Only matches **across PDF and Markdown extensions** enter this review;
 several distinct PDFs or clippings remain separate sources. Filename matching
 does not replace the origin check.
 
-**A `sources:` item is a name, not a link wiki-linter maintains.** wiki-linter
-checks its *format* and never rewrites the filename inside it, and the orphan
-audits of §9 skip `sources:` entirely — so an item naming a file that has since
-been renamed or removed is outside those audits. §1a's ordering and the
-approved pdf-organizer rename workflow keep the references aligned.
+**A `sources:` item is a name, not a link maintained by ordinary lint.** The
+wiki-linter checks its *format*, and the orphan audits of §9 skip `sources:`
+entirely. It rewrites a filename there only in the narrow producer-mapped
+dependency mode: the producer must supply an exact old → new `Articles/` note
+mapping, a complete dependency report and its unchanged re-probe command, and
+the rewrite may touch only a reported reference proven to resolve to that note.
+Outside that mode, an item naming a file that has since been renamed or removed
+is outside wiki-linter's audits. §1a's ordering and the approved pdf-organizer
+rename workflow keep PDF references aligned; clipping-processor's guarded
+changed-slug workflow uses the producer-mapped exception before retiring an old
+clipping note path.
 
 **Depended on by:** wiki-builder (writes them; checks decoded frontmatter
 sources through `scripts/vault_index.py` to decide whether a source was already
@@ -1284,7 +1303,8 @@ and ambiguous ownership before deciding to skip; an incomplete index cannot
 establish that a source was fully processed.
 
 Also depended on by
-wiki-linter (checks the format, never rewrites the file names),
+wiki-linter (checks the format; only its exact producer-mapped dependency mode
+rewrites a reported clipping-note filename),
 clipping-processor (its cleaned notes are markdown sources), paper-summarizer
 (its notes put the same wikilink form in `sources:` item 1, and are the `.md` half of
 the pair above), pdf-organizer (§1a).
@@ -1583,10 +1603,14 @@ make the current lint run incomplete.
   a time and cannot know about entries that do not exist yet.
 
 It **proposes renames, splits, and duplicate merges during routine lint; it
-never applies them unasked**. An explicitly requested source-backed refactor is
-executed by wiki-linter under its refactor protocol, closing every affected
-reference and hierarchy surface. An approved rename rewrites every reference
-everywhere, including the MOCs.
+never applies them unasked**. A named entry may be corrected from sources it
+already cites under the source-backed correction protocol; a new source routes
+to wiki-builder. An explicitly requested structural refactor is executed under
+the refactor protocol, closing every affected reference and hierarchy surface.
+An approved rename rewrites every reference everywhere, including the MOCs. A
+producer-mapped external-artifact repair is narrower: it rewrites only exact
+reported Wiki/MOC dependencies, re-runs the producer's probe, and leaves final
+artifact cleanup to that producer.
 Routine lint preserves `created:` and `updated:` and never changes the meaning
 of `read:`. The only permitted review-field edit is §2d's spelling normalization;
 unknown or absent review state is reported, not supplied. The run report is

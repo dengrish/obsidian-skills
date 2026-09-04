@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compute a polished note's filename slug: <Author>_<short_topic>_<year>.
+"""Compute a polished note's filename slug: <Author>_<short_topic>_<year-or-nd>.
 
 Which 2-4 content words identify the topic is a judgment call and stays with
 you — pass them in with --topic. What this script owns is the mechanical part
@@ -15,6 +15,7 @@ CLI
     python3 slug.py --author "Buck, Carlsmith, and Greenblatt" --topic "AI Takeover" --year 2024
     python3 slug.py --author Smith --author Jones --topic "Synbio Bullish" --year 2024
     python3 slug.py --no-author --topic "LLMs Deep Dive" --year 2025
+    python3 slug.py --no-author --topic "Evergreen Reference" --undated
     python3 slug.py --author "Ruxandra Teslo" --title "Pancreatic cancer just met its match" --year 2026
     python3 slug.py --test          # the reference's own cases, run
 
@@ -27,7 +28,8 @@ CLI
                 convenience for the easy cases; it marks topic_auto=true in the
                 output and you should check the result reads as a topic. Read
                 `notes` — it lists exactly which words were kept and dropped.
-    --year      4-digit year from the corrected `published` (or `created`)
+    --year      4-digit year from the corrected `published`
+    --undated   use the explicit `nd` segment when no publication year exists
     --acronym   an extra acronym to uppercase (repeatable, or comma-separated):
                 --acronym CRISPR --acronym "EGFR,SNP"
 
@@ -57,13 +59,13 @@ Importable
     author_kind(name) -> (kind, why)             # person / publication / unsure
     surname(name) -> str
     topic_segment(words) -> str
-    build_slug(author=..., topic=..., year=..., no_author=False) -> dict
+    build_slug(author=..., topic=..., year=..., no_author=False,
+               undated=False) -> dict
     run_self_test() -> int                       # also `--test`
     SlugError                                    # degenerate (empty) slug
 
-Output: one JSON object on stdout. Exit 0 normally; 1 when the inputs reduce to
-an empty slug (there is no safe filename to return, and a caller joining "" onto
-Articles/ would write to the directory itself). Stdlib only.
+Output: one JSON object on stdout. Exit 0 normally; 1 when the inputs do not
+establish a safe, dated-or-explicitly-undated filename. Stdlib only.
 """
 
 import argparse
@@ -651,7 +653,7 @@ def _fit(author_seg, topic_seg, year_seg, notes=None):
 
 
 def build_slug(author=None, topic=None, title=None, year=None, no_author=False,
-               topic_limit=4, acronyms=None):
+               topic_limit=4, acronyms=None, undated=False):
     notes = []
     author_seg = ""
     topic_auto = False
@@ -690,15 +692,22 @@ def build_slug(author=None, topic=None, title=None, year=None, no_author=False,
                 "topic is necessary" %
                 (len(topic_words), "" if len(topic_words) == 1 else "s"))
     if not topic_seg:
-        notes.append("no usable topic words survived — the slug has no topic segment")
+        raise SlugError(
+            "no usable topic words survived; choose 2–4 identifying words "
+            "from the verified title")
 
-    year_seg = ""
+    if undated and year:
+        raise SlugError("year and undated are mutually exclusive")
+    if not undated and not year:
+        raise SlugError("give a publication year or mark the source undated")
+    year_seg = "nd" if undated else ""
     if year:
-        m = re.search(r"\d{4}", str(year))
-        if m:
-            year_seg = m.group(0)
-        else:
-            notes.append(f"no 4-digit year in {year!r} — year segment dropped")
+        m = re.fullmatch(r"([0-9]{4})(?:-[0-9]{2}-[0-9]{2})?", str(year))
+        if not m or m.group(1) == "0000":
+            raise SlugError(
+                "publication year must be four digits from 0001 to 9999; got %r"
+                % (year,))
+        year_seg = m.group(1)
 
     author_seg, topic_seg = _fit(author_seg, topic_seg, year_seg, notes)
     slug = _join_segments(author_seg, topic_seg, year_seg)
@@ -994,19 +1003,19 @@ def run_self_test():
     # Returning "" is worse than failing: os.path.join(cleaned, "") writes to
     # the directory itself and image_prefix "" hands fetch_images an empty slug.
     for label, kw in (
-            ("all-punctuation topic", dict(topic="--- *** ???", no_author=True)),
+            ("all-punctuation topic",
+             dict(topic="--- *** ???", no_author=True, undated=True)),
             ("all-punctuation topic and author",
-             dict(author="!!!", topic="???")),
-            ("nothing at all", dict(no_author=True))):
+             dict(author="!!!", topic="???", undated=True)),
+            ("nothing at all", dict(no_author=True, undated=True))):
         try:
             got = build_slug(**kw)["slug"]
         except SlugError:
             got = "SlugError"
         check("%s raises rather than returning an empty slug" % label,
               got, "SlugError")
-    # ...but a year alone is a filename, so it is not degenerate
-    check("a year survives an emptied topic",
-          slug_of(topic="***", no_author=True, year=2026), "2026")
+    check("a year cannot stand in for the missing topic identity",
+          slug_of(topic="***", no_author=True, year=2026), "SlugError")
 
     # --- the length cap -----------------------------------------------------
     long_word = "Supercalifragilistic" * 15                  # 300 chars
@@ -1046,19 +1055,29 @@ def run_self_test():
     check("a year is found inside a date",
           slug_of(no_author=True, topic="Deep Dive", year="2025-03-04"),
           "Deep_Dive_2025")
-    _r = build_slug(no_author=True, topic="Deep Dive", year="undated")
-    check("an unparseable year is dropped and reported",
-          (_r["slug"], any("year" in n for n in _r["notes"])),
-          ("Deep_Dive", True))
+    check("the public API requires a date decision",
+          slug_of(no_author=True, topic="Deep Dive"), "SlugError")
+    check("an unparseable year is refused rather than silently dropped",
+          slug_of(no_author=True, topic="Deep Dive", year="undated"),
+          "SlugError")
+    check("an explicitly undated source gets the canonical nd segment",
+          slug_of(no_author=True, topic="Deep Dive", undated=True),
+          "Deep_Dive_nd")
+    check("year and undated cannot both name one source",
+          slug_of(no_author=True, topic="Deep Dive", year=2025,
+                  undated=True), "SlugError")
 
     # Windows reserves these device basenames even with `.md` appended.  The
     # clipping slug is also every attachment's prefix, so producing one on
     # Unix makes both the note and its images unusable when the vault moves.
     for device in ("CON", "prn", "Aux", "NUL", "COM1", "com9", "LPT1", "lpt9"):
-        check("a Windows device stem is refused everywhere (%r)" % device,
-              slug_of(no_author=True, topic=device), "SlugError")
+        check("the shared portability guard recognizes device stem %r" % device,
+              is_windows_device_stem(device), True)
+    check("the required undated suffix makes a device-like topic distinct",
+          slug_of(no_author=True, topic="CON", undated=True), "CON_nd")
     check("a device prefix is harmless when the complete stem is distinct",
-          slug_of(no_author=True, topic="CON Model"), "CON_Model")
+          slug_of(no_author=True, topic="CON Model", undated=True),
+          "CON_Model_nd")
     check("an author or year can make a device topic portable",
           slug_of(author="Smith", topic="CON", year=2026),
           "Smith_CON_2026")
@@ -1137,12 +1156,22 @@ def main(argv=None):
         except (OSError, ValueError):
             pass
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--author", action="append", default=[])
-    ap.add_argument("--no-author", action="store_true")
-    ap.add_argument("--topic")
-    ap.add_argument("--title")
-    ap.add_argument("--year")
-    ap.add_argument("--topic-limit", type=int, default=4)
+    ap.add_argument("--author", action="append", default=[],
+                    help="verified author name; repeat for additional authors")
+    ap.add_argument("--no-author", action="store_true",
+                    help="use the documented unknown-author filename form")
+    ap.add_argument("--topic",
+                    help="reviewed 2–4 word topic phrase (preferred)")
+    ap.add_argument("--title",
+                    help="verified title used only to suggest a topic")
+    date = ap.add_mutually_exclusive_group()
+    date.add_argument("--year",
+                      help="verified four-digit publication year")
+    date.add_argument("--undated", action="store_true",
+                      help="use the canonical nd suffix for a source with no "
+                           "evidence-backed publication year")
+    ap.add_argument("--topic-limit", type=int, default=4,
+                    help="maximum topic words when --title suggests it (default: 4)")
     ap.add_argument("--acronym", action="append", default=[],
                     help="extra acronym to uppercase; repeatable or comma-separated")
     ap.add_argument("--test", action="store_true", help="run the self-test")
@@ -1153,13 +1182,20 @@ def main(argv=None):
 
     if not args.topic and not args.title:
         ap.error("give --topic (preferred) or --title")
+    if args.year is None and not args.undated:
+        ap.error("give --year YYYY or --undated")
+    if (args.year is not None
+            and (not re.fullmatch(r"[0-9]{4}", args.year)
+                 or args.year == "0000")):
+        ap.error("--year must be four digits from 0001 to 9999")
 
     try:
         result = build_slug(author=args.author, topic=args.topic,
                             title=args.title, year=args.year,
                             no_author=args.no_author,
                             topic_limit=args.topic_limit,
-                            acronyms=parse_acronyms(args.acronym))
+                            acronyms=parse_acronyms(args.acronym),
+                            undated=args.undated)
     except SlugError as exc:
         print(json.dumps({"slug": None, "filename": None, "image_prefix": None,
                           "ok": False, "error": str(exc)},

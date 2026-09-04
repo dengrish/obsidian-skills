@@ -73,6 +73,7 @@ import stat
 import sys
 import tempfile
 import unicodedata
+import warnings
 
 _OBSIDIAN_SHARED_MODULES = ('atomic_move', 'figure_state', 'naming',
                             'vault_artifacts')
@@ -118,6 +119,7 @@ from figure_state import (MANIFEST_FILE, file_digest, read_manifest,
                           read_manifest_snapshot, write_manifest, manifest_key)
 import atomic_move
 from naming import looks_canonical
+from render_page import MAX_RENDER_PIXELS, checked_render_dimensions
 from vault_artifacts import (inventory_source_figures, output_vault_root,
                              verify_selected_pdf)
 
@@ -133,11 +135,21 @@ except ImportError:
     try:
         import fitz  # PyMuPDF < 1.24.3
     except ImportError:
-        sys.exit(
-            "PyMuPDF required. Use a Python environment with the plugin\n"
-            "dependencies installed; see shared/RUNTIME.md. Install into a\n"
-            "virtual environment, not the system Python."
-        )
+        fitz = None
+
+
+_PYMUPDF_ERROR = (
+    "PyMuPDF required. Use a Python environment with the plugin\n"
+    "dependencies installed; see shared/RUNTIME.md. Install into a\n"
+    "virtual environment, then run this command with that environment's "
+    "Python."
+)
+
+
+def _require_pymupdf():
+    """Fail after argument parsing so --help remains available during setup."""
+    if fitz is None:
+        raise SystemExit(_PYMUPDF_ERROR)
 
 
 _FIG_LABEL = re.compile(
@@ -264,7 +276,17 @@ def trim_white_margins(img_path, pad=4, tolerance=10):
             "(shared/RUNTIME.md), or pass --no-trim to skip cleanup."
         )
 
-    img = Image.open(img_path)
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(img_path, formats=("PNG",)) as source:
+                source.load()
+                img = source.copy()
+    except (Image.DecompressionBombWarning,
+            Image.DecompressionBombError) as exc:
+        raise ValueError(
+            "refusing PNG whose dimensions exceed Pillow's safety limit"
+        ) from exc
     rgb = img.convert("RGB")
     orig_size = rgb.size  # (w, h)
 
@@ -339,9 +361,14 @@ def render_is_blank(img_path, tolerance=10):
         Image = None
     if Image is not None:
         try:
-            with Image.open(img_path) as im:
-                bands = im.convert("RGB").getextrema()
-            return all(lo >= 255 - tolerance for lo, _hi in bands)
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", Image.DecompressionBombWarning)
+                with Image.open(img_path, formats=("PNG",)) as im:
+                    bands = im.convert("RGB").getextrema()
+                return all(lo >= 255 - tolerance for lo, _hi in bands)
+        except (Image.DecompressionBombWarning,
+                Image.DecompressionBombError):
+            return None
         except (OSError, ValueError):
             pass
     try:
@@ -388,6 +415,16 @@ def _stable_output_snapshot(path):
         )
     return ((after.st_dev, after.st_ino), digest,
             stat.S_IMODE(after.st_mode), after.st_size)
+
+
+def _checked_visible_crop(page, rect, dpi, label="crop"):
+    """Preflight the page-visible portion of a crop before rasterization."""
+    visible = fitz.Rect(rect)
+    visible.intersect(page.rect)
+    if visible.width <= 0 or visible.height <= 0:
+        raise ValueError(f"{label} does not intersect the PDF page")
+    checked_render_dimensions(visible, dpi, label)
+    return visible
 
 
 def _stable_output_digest(path):
@@ -607,6 +644,8 @@ def extract_one_figure(doc, page_idx, bbox, out_path, dpi=250,
             f"degenerate crop rect {tuple(round(v, 1) for v in rect)} "
             f"({rect.width:.1f}x{rect.height:.1f}) — nothing to render"
         )
+    page = doc[page_idx]
+    _checked_visible_crop(page, rect, dpi, f"crop on page {page_idx + 1}")
     replace_snapshot = None
     if replace_digest is not None:
         replace_snapshot = _stable_output_snapshot(out_path)
@@ -616,7 +655,6 @@ def extract_one_figure(doc, page_idx, bbox, out_path, dpi=250,
                 "verified output changed after preflight; refusing overwrite",
                 out_path,
             )
-    page = doc[page_idx]
     pix = page.get_pixmap(dpi=dpi, clip=rect)
     # Render and trim in a unique sibling directory outside the flat output
     # folder, then publish a complete inode with the guarded helper above.
@@ -837,7 +875,7 @@ def run_self_test():
             from PIL import Image
 
             def size_on_disk(path):
-                with Image.open(path) as im:
+                with Image.open(path, formats=("PNG",)) as im:
                     return im.size
 
             # (1) the ordinary case: white margins around a dark figure.
@@ -881,6 +919,20 @@ def run_self_test():
                   trim_white_margins(p, pad=4), ((80, 60), (80, 60)))
             check("trim: the white file is untouched on disk",
                   size_on_disk(p), (80, 60))
+
+            p = _st_png(os.path.join(tmp, "trim_bomb_warning.png"),
+                        (100, 100), (255, 255, 255))
+            trim_bomb_error = None
+            with mock.patch.object(Image, "MAX_IMAGE_PIXELS", 6000):
+                try:
+                    trim_white_margins(p, pad=4)
+                except ValueError as exc:
+                    trim_bomb_error = str(exc)
+            ok("trim: a decompression-bomb warning is a clear refusal",
+               bool(trim_bomb_error and "Pillow's safety limit"
+                    in trim_bomb_error))
+            check("trim: a refused oversized PNG remains unchanged",
+                  size_on_disk(p), (100, 100))
 
             # (5) already tight: content runs to every edge.
             p = _st_png(os.path.join(tmp, "trim_tight.png"), (100, 70),
@@ -996,6 +1048,21 @@ def run_self_test():
                 print("FAIL extract_one_figure accepted %s" % label)
             except ValueError:
                 pass
+        oversized = os.path.join(render_images, "oversized-render.png")
+        oversized_error = None
+        try:
+            extract_one_figure(
+                doc, 0, (100, 150, 500, 350), oversized,
+                dpi=100_000, trim=False)
+        except ValueError as exc:
+            oversized_error = str(exc)
+        ok("extract_one_figure refuses an oversized raster before allocation",
+           bool(oversized_error and "pre-render safety cap"
+                in oversized_error))
+        ok("an oversized raster creates no output or staging directory",
+           not os.path.lexists(oversized)
+           and not [f for f in os.listdir(render_root)
+                    if f.startswith(".figure-stage-")])
         # A failure AFTER the render, which is the case the temp file exists
         # for: an interrupted run must not leave a half-written PNG under the
         # real figure name, where every later run's "already exists" skip
@@ -1042,6 +1109,12 @@ def run_self_test():
                              (255, 255, 255), [((5, 5, 9, 9), (0, 0, 0))])
             check("render_is_blank on a PNG with one dark mark",
                   render_is_blank(marked), False)
+            bomb_warning = _st_png(
+                os.path.join(tmp, "decompression_warning.png"), (100, 100),
+                (255, 255, 255))
+            with mock.patch.object(Image, "MAX_IMAGE_PIXELS", 6000):
+                check("a decompression-bomb warning fails closed",
+                      render_is_blank(bomb_warning), None)
             real_import = __import__
 
             def import_without_pillow(name, *args, **kwargs):
@@ -1741,6 +1814,28 @@ def run_self_test():
         ok("a bad later crop is refused before any output-side effect",
            code != 0 and not os.path.lexists(preflight_out))
 
+        cap_out = os.path.join(tmp, "RenderCapFailure")
+        code, so, se = run([
+            pdf, "--out", cap_out, "--stem", "Doe_Figs_2025",
+            "--crop", "1:1:100,150,500,350",
+            "--crop", "1:2:100,150,500,350",
+            "--dpi", "100000", "--no-trim",
+        ])
+        ok("oversized explicit crops are refused in whole-command preflight",
+           code != 0 and "pre-render safety cap" in str(code))
+        ok("the render cap is checked before creating the output directory",
+           not os.path.lexists(cap_out))
+
+        outside_out = os.path.join(tmp, "OutsidePageFailure")
+        code, so, se = run([
+            pdf, "--out", outside_out, "--stem", "Doe_Figs_2025",
+            "--crop", "1:1:700,900,800,1000", "--dpi", "72",
+        ])
+        ok("a crop wholly outside its page is refused before rendering",
+           code != 0 and "does not intersect" in str(code))
+        ok("an off-page crop leaves no output directory",
+           not os.path.lexists(outside_out))
+
         # `--stem` goes straight into a filename, so a path in it writes
         # outside `--out` entirely.
         code, so, se = run([pdf, "--out", outdir, "--stem", "../../escape",
@@ -1847,7 +1942,8 @@ def run_self_test():
         html_out = os.path.join(tmp, "HtmlFailure")
         code, so, se = run([html, "--out", html_out, "--stem", "Doe_NotAPdf_2025",
                             "--crop", "1:1:10,10,100,100"])
-        ok("an HTML page named .pdf is refused", "not a PDF" in str(code))
+        ok("an HTML page named .pdf is refused",
+           "not a PDF" in str(code) or "could not open as a PDF" in str(code))
         ok("...before creating an output directory",
            not os.path.lexists(html_out))
 
@@ -1901,7 +1997,7 @@ def run_self_test():
         check("the next batch accepts and preserves the manual repair",
               (rerun["skipped"], rerun["occupied"], open(owned_png, "rb").read()),
               (1, [], repaired))
-        with open(tracked_path, "w") as fh:
+        with open(tracked_path, "w", encoding="utf-8") as fh:
             fh.write("malformed ownership\n")
         code, so, se = run([pdf, "--out", owned, "--stem", "Doe_Figs_2025",
                            "--crop", "1:1:100,150,500,350", "--overwrite"])
@@ -1943,7 +2039,11 @@ def main(argv=None):
         action="append",
         help='Figure spec: "PAGE:FIG_NUM:x0,y0,x1,y1"',
     )
-    p.add_argument("--dpi", type=positive_int, default=250)
+    p.add_argument(
+        "--dpi", type=positive_int, default=250,
+        help=("Render resolution (default: 250); each crop is limited to "
+              f"{MAX_RENDER_PIXELS:,} pixels."),
+    )
     p.add_argument(
         "--overwrite",
         action="store_true",
@@ -1986,6 +2086,7 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     if args.test:
+        _require_pymupdf()
         return run_self_test()
     # Reported by name rather than left to argparse's `required=True`, because
     # `--test` takes no PDF and no crops: with the flags marked required,
@@ -1998,6 +2099,7 @@ def main(argv=None):
               % ", ".join("pdf" if m == "pdf" else "--" + m for m in missing),
               file=sys.stderr)
         return 2
+    _require_pymupdf()
 
     out_dir = os.path.expanduser(args.out)
     # `--stem` is free text on the command line: the model types it, and it is
@@ -2109,6 +2211,13 @@ def main(argv=None):
         if x0 >= x1 or y0 >= y1:
             die(f"--crop {spec!r}: degenerate rect — need x0 < x1 and "
                 f"y0 < y1, got x={x0},{x1} y={y0},{y1}")
+        try:
+            _checked_visible_crop(
+                doc[page_idx], fitz.Rect(x0, y0, x1, y1), args.dpi,
+                f"crop on page {page_idx + 1}",
+            )
+        except ValueError as exc:
+            die(f"--crop {spec!r}: {exc}")
 
     # An explicit repair is this extractor's own output too. Without updating
     # its digest, the next batch called a repaired crop another skill's file

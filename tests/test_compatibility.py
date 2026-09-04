@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Host-independent checks for installation layout and portable execution."""
 
+import ast
 import importlib.util
 import io
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import socket
@@ -46,7 +48,89 @@ def load(name, path):
     return module
 
 
+def copy_package_source(destination):
+    """Copy the authored package boundary without Git state or generated output."""
+    destination.mkdir()
+    for name in (".gitattributes", "AGENTS.md", "CLAUDE.md", "README.md",
+                 "requirements.txt", "requirements-dev.txt"):
+        shutil.copy2(ROOT / name, destination / name)
+    for name in (".claude-plugin", "skills", "shared", "tests", "tools"):
+        shutil.copytree(
+            ROOT / name, destination / name,
+            ignore=shutil.ignore_patterns(".DS_Store", "__pycache__", "*.pyc", "*.pyo"))
+
+
 class CompatibilityTests(unittest.TestCase):
+    def test_repository_normalizes_text_and_preserves_plugin_bytes(self):
+        attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+        self.assertEqual(attributes, "* text=auto eol=lf\n*.plugin binary\n")
+
+    def test_python_text_boundaries_are_explicitly_utf8(self):
+        problems = []
+        roots = (ROOT / ".github", ROOT / "shared", ROOT / "skills",
+                 ROOT / "tools", ROOT / "tests")
+        for path in sorted(p for root in roots for p in root.rglob("*.py")):
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                keywords = {item.arg: item.value for item in node.keywords
+                            if item.arg is not None}
+                expansion = any(item.arg is None for item in node.keywords)
+                if (isinstance(node.func, ast.Attribute)
+                        and node.func.attr in ("read_text", "write_text")):
+                    if "encoding" not in keywords:
+                        problems.append(
+                            "%s:%d %s() has no encoding" %
+                            (path.relative_to(ROOT), node.lineno, node.func.attr))
+                    continue
+                if (isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "open"):
+                    # Path.open() takes its mode as argument 1. Restrict this
+                    # static check to literal mode strings so APIs such as
+                    # ZipFile.open(member) and fitz.open(path) are not mistaken
+                    # for text-file boundaries.
+                    mode = keywords.get("mode")
+                    if mode is None and node.args:
+                        mode = node.args[0]
+                    if (isinstance(mode, ast.Constant)
+                            and isinstance(mode.value, str)
+                            and re.fullmatch(r"[rwaxbt+]+", mode.value)
+                            and "b" not in mode.value
+                            and "encoding" not in keywords and not expansion):
+                        problems.append(
+                            "%s:%d Path.open(%r) has no encoding" %
+                            (path.relative_to(ROOT), node.lineno, mode.value))
+                    continue
+                if isinstance(node.func, ast.Name) and node.func.id == "open":
+                    mode = "r"
+                    if len(node.args) > 1 and isinstance(node.args[1], ast.Constant):
+                        mode = node.args[1].value
+                    if ("mode" in keywords
+                            and isinstance(keywords["mode"], ast.Constant)):
+                        mode = keywords["mode"].value
+                    if (isinstance(mode, str) and "b" not in mode
+                            and "encoding" not in keywords and not expansion):
+                        problems.append(
+                            "%s:%d open(%r) has no encoding" %
+                            (path.relative_to(ROOT), node.lineno, mode))
+                    continue
+                if (isinstance(node.func, ast.Attribute)
+                        and node.func.attr in
+                        ("run", "Popen", "check_output", "check_call")):
+                    text_mode = False
+                    for key in ("text", "universal_newlines"):
+                        value = keywords.get(key)
+                        if value is not None and (
+                                not isinstance(value, ast.Constant) or value.value):
+                            text_mode = True
+                    if text_mode and "encoding" not in keywords:
+                        problems.append(
+                            "%s:%d subprocess text mode has no encoding" %
+                            (path.relative_to(ROOT), node.lineno))
+        self.assertEqual(problems, [])
+
     def test_private_mode_and_wiki_slugs_are_native_windows_portable(self):
         atomic = load("compat_atomic_move", ROOT / "shared/scripts/atomic_move.py")
         slugger = load("compat_slugify", ROOT / "shared/scripts/slugify.py")
@@ -64,16 +148,43 @@ class CompatibilityTests(unittest.TestCase):
                 slugger.slugify(title)
         self.assertEqual(slugger.slugify("Convolution"), "convolution.md")
 
-    def test_runtime_probe_accepts_both_supported_pymupdf_import_names(self):
+    def test_runtime_probe_enforces_supported_dependency_floors(self):
         runtime = (ROOT / "shared/RUNTIME.md").read_text(encoding="utf-8")
-        requirements = (
+        figure_requirements = (
             ROOT / "skills/pdf-figure-extractor/scripts/requirements.txt"
         ).read_text(encoding="utf-8")
-        self.assertIn("PyMuPDF>=1.20", requirements)
+        root_requirements = (ROOT / "requirements.txt").read_text(
+            encoding="utf-8")
+        self.assertIn("PyMuPDF>=1.28.0", figure_requirements)
+        self.assertIn("Pillow>=12.3.0", figure_requirements)
+        self.assertIn("pypdf>=6.16.1", root_requirements)
+        self.assertIn("Python 3.10+", runtime)
+        for probe in (
+                '"pypdf": (6, 16, 1)',
+                '"PyMuPDF": (1, 28, 0)',
+                '"Pillow": (12, 3, 0)'):
+            self.assertIn(probe, runtime)
         self.assertRegex(
             runtime,
             r"try:\n\s+import pymupdf\nexcept ImportError:\n\s+import fitz",
         )
+
+    def test_shared_helper_docs_use_the_plugin_python_floor(self):
+        helpers = (
+            "code_typography.py",
+            "entry_structure.py",
+            "equation_coverage.py",
+            "introduced_aliases.py",
+            "markdown_tables.py",
+            "organism_names.py",
+        )
+        for name in helpers:
+            with self.subTest(helper=name):
+                source = (ROOT / "shared/scripts" / name).read_text(
+                    encoding="utf-8")
+                self.assertIn("Python 3.10+", source)
+                self.assertNotIn("Python 3.8+", source)
+                self.assertNotIn("Python 3.9+", source)
 
     def test_skill_frontmatter_parses_as_yaml(self):
         for path in sorted((ROOT / "skills").glob("*/SKILL.md")):
@@ -87,8 +198,10 @@ class CompatibilityTests(unittest.TestCase):
                 self.assertLessEqual(len(metadata["description"]), 1024)
 
     def test_manifests_share_metadata_and_skill_tree(self):
-        claude = json.loads((ROOT / ".claude-plugin/plugin.json").read_text())
-        codex = json.loads((ROOT / ".codex-plugin/plugin.json").read_text())
+        claude = json.loads(
+            (ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+        codex = json.loads(
+            (ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
         for key, value in claude.items():
             self.assertEqual(codex[key], value, key)
         claude_skills = ROOT / claude.get("skills", "skills")
@@ -100,9 +213,11 @@ class CompatibilityTests(unittest.TestCase):
             self.assertTrue((path.parent / "../../shared/RUNTIME.md").resolve().is_file())
 
     def test_marketplace_metadata_identifies_the_authored_plugin(self):
-        manifest = json.loads((ROOT / ".claude-plugin/plugin.json").read_text())
+        manifest = json.loads(
+            (ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
         marketplace = json.loads(
-            (ROOT / ".claude-plugin/marketplace.json").read_text())
+            (ROOT / ".claude-plugin/marketplace.json").read_text(
+                encoding="utf-8"))
         self.assertEqual(marketplace["name"], "obsidian-skills")
         self.assertIsInstance(marketplace["description"], str)
         self.assertTrue(marketplace["description"].strip())
@@ -138,26 +253,70 @@ class CompatibilityTests(unittest.TestCase):
         convert.assert_called_once_with(files[".claude-plugin/plugin.json"])
         self.assertEqual(files[".codex-plugin/plugin.json"], derived)
 
+    def test_package_inventory_includes_declared_assets_and_rejects_unknown_files(self):
+        build = load("build_plugin_inventory", ROOT / "tools/build_plugin.py")
+        with tempfile.TemporaryDirectory(prefix="obsidian-package-inventory-") as tmp:
+            root = Path(tmp) / "plugin"
+            copy_package_source(root)
+            asset = root / "skills/example/assets/diagram.svg"
+            asset.parent.mkdir(parents=True)
+            asset.write_bytes(b"<svg/>\n")
+            with self.assertRaisesRegex(ValueError, "unlisted files"):
+                build.package_files(root)
+
+            inventory = root / build.PACKAGE_INVENTORY
+            names = inventory.read_text(encoding="utf-8").splitlines()
+            names.append(asset.relative_to(root).as_posix())
+            inventory.write_text(
+                "\n".join(sorted(names)) + "\n", encoding="utf-8")
+            packaged = build.package_files(root)
+            self.assertEqual(packaged["skills/example/assets/diagram.svg"],
+                             b"<svg/>\n")
+
+            (root / "skills/.DS_Store").write_bytes(b"finder metadata")
+            cache = root / "skills/example/__pycache__"
+            cache.mkdir()
+            (cache / "helper.pyc").write_bytes(b"bytecode")
+            self.assertEqual(build.package_files(root)[
+                "skills/example/assets/diagram.svg"], b"<svg/>\n")
+
+    def test_archive_rejects_nonportable_or_colliding_names(self):
+        build = load("build_plugin_names", ROOT / "tools/build_plugin.py")
+        cases = (
+            {"../escape.md": b"x"},
+            {"skills\\entry.md": b"x"},
+            {"skills/CON.txt": b"x"},
+            {"skills/CONIN$.txt": b"x"},
+            {"skills/CONOUT$": b"x"},
+            {"skills/COM\N{SUPERSCRIPT ONE}.txt": b"x"},
+            {"skills/LPT\N{SUPERSCRIPT THREE}.txt": b"x"},
+            {"skills/trailing.": b"x"},
+            {"skills/Entry.md": b"a", "skills/entry.md": b"b"},
+            {"skills/Cafe\N{COMBINING ACUTE ACCENT}.md": b"x"},
+            {"skills/Caf\N{LATIN SMALL LETTER E WITH ACUTE}.md": b"a",
+             "skills/Cafe\N{COMBINING ACUTE ACCENT}.md": b"b"},
+        )
+        for files in cases:
+            with self.subTest(paths=tuple(files)), self.assertRaises(ValueError):
+                build.archive_bytes(files)
+
     @unittest.skipUnless(CAN_CREATE_SYMLINK,
                          "host does not grant symlink privileges")
     def test_packaging_does_not_read_through_source_symlinks(self):
         build = load("build_plugin", ROOT / "tools/build_plugin.py")
         with tempfile.TemporaryDirectory(prefix="obsidian-package-boundary-") as tmp:
             root = Path(tmp) / "plugin"
-            root.mkdir()
-            for name in ("AGENTS.md", "CLAUDE.md", "README.md", "requirements.txt", "requirements-dev.txt"):
-                (root / name).write_bytes((ROOT / name).read_bytes())
-            (root / ".claude-plugin").mkdir()
-            (root / ".claude-plugin/plugin.json").write_bytes(
-                (ROOT / ".claude-plugin/plugin.json").read_bytes())
-            (root / "skills").mkdir()
+            copy_package_source(root)
             foreign = Path(tmp) / "outside.txt"
             foreign.write_text("not repository content", encoding="utf-8")
             for name in ("skills/linked.md", "README.md", ".claude-plugin/plugin.json", "shared"):
                 with self.subTest(path=name):
                     path = root / name
                     original = path.read_bytes() if path.is_file() else None
-                    if path.exists():
+                    backup = root / (".package-test-saved-" + path.name)
+                    if path.is_dir():
+                        path.rename(backup)
+                    elif path.exists():
                         path.unlink()
                     path.symlink_to(foreign)
                     try:
@@ -165,9 +324,13 @@ class CompatibilityTests(unittest.TestCase):
                             build.package_files(root)
                     finally:
                         path.unlink()
-                        if original is not None:
+                        if backup.exists():
+                            backup.rename(path)
+                        elif original is not None:
                             path.write_bytes(original)
-                    self.assertEqual(foreign.read_text(), "not repository content")
+                    self.assertEqual(
+                        foreign.read_text(encoding="utf-8"),
+                        "not repository content")
 
     @unittest.skipUnless(CAN_CREATE_SYMLINK,
                          "host does not grant symlink privileges")
@@ -175,13 +338,7 @@ class CompatibilityTests(unittest.TestCase):
         build = load("build_plugin_source_race", ROOT / "tools/build_plugin.py")
         with tempfile.TemporaryDirectory(prefix="obsidian-package-race-") as tmp:
             root = Path(tmp) / "plugin"
-            root.mkdir()
-            for name in ("AGENTS.md", "CLAUDE.md", "README.md",
-                         "requirements.txt", "requirements-dev.txt"):
-                (root / name).write_bytes((ROOT / name).read_bytes())
-            (root / ".claude-plugin").mkdir()
-            (root / ".claude-plugin/plugin.json").write_bytes(
-                (ROOT / ".claude-plugin/plugin.json").read_bytes())
+            copy_package_source(root)
             victim = root / "README.md"
             original = victim.read_bytes()
             foreign = Path(tmp) / "outside.txt"
@@ -234,10 +391,13 @@ class CompatibilityTests(unittest.TestCase):
             foreign.write_text("preserve external bytes", encoding="utf-8")
             (root / "obsidian.plugin").symlink_to(foreign)
             result = subprocess.run([sys.executable, str(script)], cwd=tmp,
-                                    capture_output=True, text=True, timeout=30)
+                                    capture_output=True, text=True,
+                                    encoding="utf-8", timeout=30)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("symlink", result.stderr)
-            self.assertEqual(foreign.read_text(), "preserve external bytes")
+            self.assertEqual(
+                foreign.read_text(encoding="utf-8"),
+                "preserve external bytes")
             self.assertTrue((root / "obsidian.plugin").is_symlink())
 
     @unittest.skipUnless(CAN_CREATE_SYMLINK,
@@ -649,7 +809,9 @@ read: false
         self.assertEqual(sys.path, before)
         report = conventions.Report()
         with patch.object(conventions, "mod_generic", return_value=None):
-            conventions.check_note_headings(report, (ROOT / "shared/CONVENTIONS.md").read_text())
+            conventions.check_note_headings(
+                report,
+                (ROOT / "shared/CONVENTIONS.md").read_text(encoding="utf-8"))
         self.assertEqual(report.exit_code(), 1)
         self.assertTrue(any("GENERIC_HEADINGS" in row[3] for row in report.by_status("FAIL")))
 
@@ -676,7 +838,7 @@ read: false
     def test_heading_contract_requires_its_reference_and_ordered_examples(self):
         conventions = load("convention_heading_contract", ROOT / "tests/test_conventions.py")
         format_path = ROOT / "skills/paper-summarizer/references/note-format.md"
-        conv = (ROOT / "shared/CONVENTIONS.md").read_text()
+        conv = (ROOT / "shared/CONVENTIONS.md").read_text(encoding="utf-8")
         isfile = conventions.os.path.isfile
         report = conventions.Report()
         with patch.object(conventions.os.path, "isfile", side_effect=lambda path:
@@ -719,7 +881,7 @@ read: false
 
     def test_figure_caption_checks_follow_the_writers_scope(self):
         conventions = load("convention_caption_scope", ROOT / "tests/test_conventions.py")
-        conv = (ROOT / "shared/CONVENTIONS.md").read_text()
+        conv = (ROOT / "shared/CONVENTIONS.md").read_text(encoding="utf-8")
         for skill, caption, expected in (
             ("clipping-processor", "", 0),
             ("paper-summarizer", "", 1),
@@ -737,6 +899,34 @@ read: false
                     self.assertTrue(any("no italic caption" in row[3]
                                         for row in report.by_status("FAIL")))
 
+    def test_figure_helper_help_works_before_dependencies_are_installed(self):
+        scripts = ROOT / "skills/pdf-figure-extractor/scripts"
+        invocations = {
+            "auto_fig_bbox.py": ["missing.pdf"],
+            "batch_extract.py": ["--src", "missing.pdf", "--out", "images"],
+            "extract_figures.py": ["missing.pdf", "--out", "images",
+                                   "--stem", "missing", "--crop",
+                                   "1:1:0,0,10,10"],
+            "render_page.py": ["missing.pdf", "1"],
+        }
+        for name, invocation in invocations.items():
+            with self.subTest(script=name):
+                result = subprocess.run(
+                    [sys.executable, "-I", "-S", str(scripts / name), "--help"],
+                    cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
+                    timeout=30)
+                self.assertEqual(result.returncode, 0,
+                                 result.stdout + result.stderr)
+                self.assertIn("usage:", result.stdout)
+                self.assertNotIn("PyMuPDF required", result.stderr)
+                blocked = subprocess.run(
+                    [sys.executable, "-I", "-S", str(scripts / name),
+                     *invocation], cwd=ROOT, capture_output=True, text=True,
+                    encoding="utf-8", timeout=30)
+                self.assertNotEqual(blocked.returncode, 0)
+                self.assertIn("PyMuPDF required", blocked.stderr)
+                self.assertNotIn("Traceback", blocked.stderr)
+
     def test_packaged_helpers_run_outside_plugin_directory(self):
         # Hosts execute helpers while their cwd is the user's vault, and
         # plugin cache paths commonly contain spaces. Exercise the real CLIs.
@@ -750,10 +940,12 @@ read: false
                 with self.subTest(script=path.name):
                     result = subprocess.run(
                         [sys.executable, str(path), "--help"], cwd=vault,
-                        capture_output=True, text=True, timeout=30)
+                        capture_output=True, text=True, encoding="utf-8",
+                        timeout=30)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             # Both instruction and shared-resource references survive copying.
-            imported = (install / "CLAUDE.md").read_text().strip().removeprefix("@")
+            imported = (install / "CLAUDE.md").read_text(
+                encoding="utf-8").strip().removeprefix("@")
             self.assertEqual((install / imported).read_bytes(), (ROOT / "AGENTS.md").read_bytes())
             check = [sys.executable, str(install / "tools/build_plugin.py"), "--check"]
             clean_env = dict(os.environ)
@@ -773,7 +965,8 @@ read: false
             self.assertEqual(subprocess.run(
                 check, cwd=vault, capture_output=True,
                 env=clean_env).returncode, 0)
-            with (install / "shared/RUNTIME.md").open("a") as output:
+            with (install / "shared/RUNTIME.md").open(
+                    "a", encoding="utf-8") as output:
                 output.write("\nChanged after packaging.\n")
             self.assertNotEqual(subprocess.run(
                 check, cwd=vault, capture_output=True,
@@ -817,7 +1010,7 @@ read: false
                  "singular", "图"),
                 ("note lint", 1,
                  ROOT / "skills/paper-summarizer/scripts/note_lint.py",
-                 note),
+                 note, "--mode", "empirical"),
                 ("paper scan", 0,
                  ROOT / "skills/paper-summarizer/scripts/paper_scan.py",
                  "--src", pdfs, "--notes", notes, "--images", images,

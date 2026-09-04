@@ -15,7 +15,7 @@ indented, and inline code.  Frontmatter, Related footers, Flashcards, and
 legacy stubs remain outside this detector.  Parsed table spans may be supplied
 to exclude table cells; whole-line italic captions are excluded here.
 
-Stdlib only, Python 3.8+.
+Stdlib only, Python 3.10+ (the plugin runtime floor).
 """
 
 import argparse

@@ -73,11 +73,21 @@ except ImportError:
     try:
         import fitz  # PyMuPDF < 1.24.3
     except ImportError:
-        sys.exit(
-            "PyMuPDF required. Use a Python environment with the plugin\n"
-            "dependencies installed; see shared/RUNTIME.md. Install into a\n"
-            "virtual environment, not the system Python."
-        )
+        fitz = None
+
+
+_PYMUPDF_ERROR = (
+    "PyMuPDF required. Use a Python environment with the plugin\n"
+    "dependencies installed; see shared/RUNTIME.md. Install into a\n"
+    "virtual environment, then run this command with that environment's "
+    "Python."
+)
+
+
+def _require_pymupdf():
+    """Fail after argument parsing so --help remains available during setup."""
+    if fitz is None:
+        raise SystemExit(_PYMUPDF_ERROR)
 
 # Captures the figure label in any of these forms:
 #   Figure 7              → "7"        (single-number figures, common in papers)
@@ -3806,13 +3816,29 @@ def run_self_test():
         # range "Figures 6 to 8". A range whose middle is dropped is a figure
         # nothing cites, so `caption_coverage` cannot report it missing.
         check("find_figure_references cites %s" % want, want in refs, True)
-    edoc = fitz.open()
-    epage = edoc.new_page(width=612, height=792)
-    # `insert_htmlbox`, not `insert_text`: the base-14 font `insert_text` uses
-    # cannot carry an en-dash, and a fixture that silently substitutes one
-    # would be testing a different string than the one it reads like.
-    epage.insert_htmlbox(fitz.Rect(60, 100, 560, 160),
-                         "See Figures 1&#8211;3 and Figs. 5, 6 &amp; 7.")
+    class _TextPage:
+        def __init__(self, text):
+            self.text = text
+
+        def get_text(self):
+            return self.text
+
+    class _TextDoc:
+        def __init__(self, text):
+            self.page = _TextPage(text)
+
+        def __len__(self):
+            return 1
+
+        def __getitem__(self, index):
+            if index != 0:
+                raise IndexError(index)
+            return self.page
+
+    # Use the parser's document interface directly. This keeps the en-dash
+    # literal exact without requiring PyMuPDF's newer `Page.insert_htmlbox`
+    # merely to construct a self-test fixture.
+    edoc = _TextDoc("See Figures 1–3 and Figs. 5, 6 & 7.")
     # The literal span `1-3` is recorded alongside its members, exactly as the
     # ASCII-hyphen case below records `4-6` alongside 4, 5 and 6. It did not
     # used to be: `REF_RE` stopped at `1` and `REF_MORE_RE` consumed the rest,
@@ -3823,9 +3849,8 @@ def run_self_test():
     # other. Unified on the ASCII answer, which is what every document without
     # an en-dash label was already getting.
     check("an en-dash range expands to every figure inside it",
-          sorted(find_figure_references(edoc)),
+          sorted(find_figure_references(edoc, caption_labels=[])),
           ["1", "1-3", "2", "3", "5", "6", "7"])
-    edoc.close()
     edoc = fitz.open()
     epage = edoc.new_page(width=612, height=792)
     epage.insert_text((72, 120), "See Figure 16-8.11 for the mechanism.",
@@ -3968,10 +3993,12 @@ def run_self_test():
                   "as a text-bearing document with no captions, which sends "
                   "the user hunting for a caption style")
         except SystemExit as exc:
-            if "not a PDF" not in str(exc):
+            message = str(exc)
+            if ("not a PDF" not in message
+                    and "could not open as a PDF" not in message):
                 state["bad"] += 1
-                print("FAIL open_pdf on HTML said %r, expected 'not a PDF'"
-                      % str(exc))
+                print("FAIL open_pdf on HTML gave an unexpected refusal: %r"
+                      % message)
 
         zero = os.path.join(tmp, "Doe_Empty_2025.pdf")
         with open(zero, "wb") as fh:
@@ -4061,9 +4088,11 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     if args.test:
+        _require_pymupdf()
         return run_self_test()
     if not args.pdf:
         p.error("give a PDF path, or --test")
+    _require_pymupdf()
 
     # Same wiring batch_extract.py does, so a single-PDF debugging run
     # reproduces the batch run's labels and crops exactly.

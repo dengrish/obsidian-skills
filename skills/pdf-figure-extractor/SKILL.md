@@ -5,8 +5,8 @@ description: >
   with captions removed and filenames tied to the source. Use for requests
   such as "extract figures from my PDFs" or "rip the figures out of this
   paper", including populating Sources/Images/ from Sources/PDFs/. For a
-  paper explanation use paper-summarizer; for renaming or chapters use
-  pdf-organizer.
+  document explanation or reading note use paper-summarizer; for renaming or
+  chapters use pdf-organizer.
 ---
 
 # PDF Figure Extractor
@@ -20,9 +20,9 @@ all commands. The shipped scripts are the implementation; do not copy their
 caption detection or crop logic into a separate script.
 
 The deliverable is **whole-figure PNGs**, not PDF renames, summaries, or wiki
-entries. `paper-summarizer` owns paper explanations, `pdf-organizer` owns
-source naming and chapter splitting, `wiki-builder` owns new wiki entries,
-`wiki-linter` owns existing wiki maintenance, and `clipping-processor` owns
+entries. `paper-summarizer` owns document explanations and reading notes,
+`pdf-organizer` owns source naming and chapter splitting, `wiki-builder` owns
+new wiki entries, `wiki-linter` owns existing wiki maintenance, and `clipping-processor` owns
 Web Clipper captures. An unspecified “process this PDF” request needs a
 stated deliverable before selecting a workflow.
 
@@ -159,7 +159,10 @@ The explicit crop helper performs the same complete, portable whole-vault PDF
 basename check before reading an ownership sidecar or writing into canonical
 `Sources/Images`; it cannot bypass the batch namespace gate. An arbitrary
 external output keeps one-off behavior. The reference provides the crop and
-review commands with coordinate units.
+review commands with coordinate units. The page renderer refuses the whole
+requested set if any preview pathname is occupied; use a unique scratch
+directory. Remove ordinary previews and decrypted scratch copies after the
+verified repair, while preserving every recovery path named by a failed write.
 
 ### 4. Report completed and unresolved work
 

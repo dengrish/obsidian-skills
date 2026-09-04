@@ -13,6 +13,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import unicodedata
 import zipfile
 
 
@@ -22,6 +23,129 @@ if str(SHARED_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SHARED_SCRIPTS))
 
 import atomic_move
+
+
+PACKAGE_ROOT_FILES = (
+    ".gitattributes",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "README.md",
+    "requirements.txt",
+    "requirements-dev.txt",
+)
+PACKAGE_TREES = (".claude-plugin", "skills", "shared", "tests", "tools")
+PACKAGE_INVENTORY = "tools/package-files.txt"
+IGNORED_PACKAGE_FILES = {".DS_Store"}
+IGNORED_PACKAGE_SUFFIXES = {".pyc", ".pyo"}
+IGNORED_PACKAGE_DIRS = {"__pycache__"}
+WINDOWS_RESERVED_STEMS = {
+    "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
+    *("COM%d" % number for number in range(1, 10)),
+    *("LPT%d" % number for number in range(1, 10)),
+    *("COM%s" % number for number in "¹²³"),
+    *("LPT%s" % number for number in "¹²³"),
+}
+WINDOWS_FORBIDDEN_CHARS = frozenset('<>:"\\|?*')
+
+
+def _validate_package_names(files):
+    """Reject archive names that collapse or cannot unpack portably."""
+    owners = {}
+    for name in files:
+        if not isinstance(name, str) or not name:
+            raise ValueError("plugin archive contains an empty or non-text path")
+        if name.startswith("/") or "\\" in name:
+            raise ValueError("plugin archive path is not portable: %r" % name)
+        components = name.split("/")
+        if any(component in ("", ".", "..") for component in components):
+            raise ValueError("plugin archive path is not relative and normalized: %r" % name)
+        for component in components:
+            if component[-1:] in (" ", "."):
+                raise ValueError(
+                    "plugin archive path has a trailing space or dot: %r" % name)
+            if any(ord(char) < 32 or char in WINDOWS_FORBIDDEN_CHARS
+                   for char in component):
+                raise ValueError(
+                    "plugin archive path uses a Windows-forbidden character: %r" % name)
+            stem = component.split(".", 1)[0].upper()
+            if stem in WINDOWS_RESERVED_STEMS:
+                raise ValueError(
+                    "plugin archive path uses a Windows-reserved name: %r" % name)
+        normalized = unicodedata.normalize("NFC", name)
+        if normalized != name:
+            raise ValueError(
+                "plugin archive path is not NFC-normalized: %r" % name)
+        key = normalized.casefold()
+        previous = owners.setdefault(key, name)
+        if previous != name:
+            raise ValueError(
+                "plugin archive paths collide by case or Unicode normalization: "
+                "%r and %r" % (previous, name))
+
+
+def _package_inventory(root):
+    """Read the exact package inventory and reject drift in either direction."""
+    raw = _read_package_source(root, root / PACKAGE_INVENTORY)
+    try:
+        decoded = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("%s is not UTF-8" % PACKAGE_INVENTORY) from exc
+    names = decoded.splitlines()
+    if not names or any(not name or name != name.strip() for name in names):
+        raise ValueError(
+            "%s must contain one nonblank normalized path per line" %
+            PACKAGE_INVENTORY)
+    if names != sorted(set(names)):
+        raise ValueError(
+            "%s must be sorted and contain no duplicates" % PACKAGE_INVENTORY)
+    _validate_package_names(dict.fromkeys(names, b""))
+    allowed_roots = set(PACKAGE_ROOT_FILES)
+    for name in names:
+        if (name not in allowed_roots
+                and not any(name.startswith(tree + "/")
+                            for tree in PACKAGE_TREES)):
+            raise ValueError(
+                "%s lists a path outside the package boundary: %s" %
+                (PACKAGE_INVENTORY, name))
+    missing_roots = sorted(allowed_roots - set(names))
+    if missing_roots:
+        raise ValueError(
+            "%s omits required root files: %s" %
+            (PACKAGE_INVENTORY, ", ".join(missing_roots)))
+
+    actual = set()
+    for tree in PACKAGE_TREES:
+        directory = root / tree
+        reject_symlinks(root, directory)
+        for path in sorted(directory.rglob("*")):
+            relative = path.relative_to(root)
+            if any(part in IGNORED_PACKAGE_DIRS for part in relative.parts):
+                continue
+            reject_symlinks(root, path)
+            if path.is_dir():
+                continue
+            if (path.name in IGNORED_PACKAGE_FILES
+                    or path.suffix.lower() in IGNORED_PACKAGE_SUFFIXES):
+                continue
+            if not path.is_file():
+                raise ValueError(
+                    "plugin package contains a non-regular path: %s" % relative)
+            actual.add(relative.as_posix())
+    listed_tree_files = {
+        name for name in names
+        if any(name.startswith(tree + "/") for tree in PACKAGE_TREES)
+    }
+    unlisted = sorted(actual - listed_tree_files)
+    absent = sorted(listed_tree_files - actual)
+    if unlisted or absent:
+        details = []
+        if unlisted:
+            details.append("unlisted files: %s" % ", ".join(unlisted))
+        if absent:
+            details.append("missing files: %s" % ", ".join(absent))
+        raise ValueError("%s is stale (%s)" %
+                         (PACKAGE_INVENTORY, "; ".join(details)))
+    return names
 
 
 def reject_symlinks(root, path):
@@ -448,7 +572,7 @@ def _codex_manifest_bytes(authored):
     manifest["skills"] = "./skills/"
     manifest["interface"] = {
         "displayName": "Obsidian",
-        "shortDescription": "Turn papers and clippings into a maintained Obsidian vault",
+        "shortDescription": "Turn documents and clippings into a maintained Obsidian vault",
         "longDescription": manifest["description"],
         "developerName": manifest["author"]["name"],
         "category": "Productivity",
@@ -469,26 +593,21 @@ def codex_manifest(root):
 
 
 def package_files(root):
-    """An allowlist keeps local environments, vault data and Git state out."""
-    files = {}
-    for name in ("AGENTS.md", "CLAUDE.md", "README.md", "requirements.txt", "requirements-dev.txt"):
-        files[name] = _read_package_source(root, root / name)
-    for name in (".claude-plugin", "skills", "shared", "tests", "tools"):
-        reject_symlinks(root, root / name)
-        for path in sorted((root / name).rglob("*")):
-            if "__pycache__" in path.parts:
-                continue
-            reject_symlinks(root, path)
-            if path.is_file() and path.suffix in (".md", ".py", ".json", ".txt"):
-                files[path.relative_to(root).as_posix()] = _read_package_source(
-                    root, path)
+    """Collect the complete intentional package tree without local residue."""
+    names = _package_inventory(root)
+    files = {
+        name: _read_package_source(root, root / name)
+        for name in names
+    }
     files[".codex-plugin/plugin.json"] = _codex_manifest_bytes(
         files[".claude-plugin/plugin.json"])
+    _validate_package_names(files)
     return files
 
 
 def archive_bytes(files):
     """Stable order, timestamps and modes make rebuilds byte-for-byte identical."""
+    _validate_package_names(files)
     output = io.BytesIO()
     # Stored entries avoid zlib-version-dependent byte streams.  The plugin is
     # small enough that cross-host reproducibility is worth the size tradeoff.

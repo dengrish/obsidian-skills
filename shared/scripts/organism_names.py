@@ -5,7 +5,7 @@ The helpers here provide a conservative mechanical floor.  They distinguish
 scientific, common, and ambiguous Organism titles only when local text supplies
 enough evidence; ambiguous typography remains a source-aware model judgment.
 
-Stdlib only, Python 3.8+.
+Stdlib only, Python 3.10+ (the plugin runtime floor).
 """
 
 import argparse

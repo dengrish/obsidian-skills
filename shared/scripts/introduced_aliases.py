@@ -7,7 +7,8 @@ uses simple grammatical evidence to avoid treating a component's name as an
 alias of the entry subject. Semantic ownership and cross-domain safety remain
 the executing agent's responsibility.
 
-Stdlib only (apart from sibling shared helpers), Python 3.8+.
+Stdlib only (apart from sibling shared helpers), Python 3.10+ (the plugin
+runtime floor).
 """
 
 import argparse

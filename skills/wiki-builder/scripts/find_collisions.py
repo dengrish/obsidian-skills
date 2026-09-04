@@ -49,7 +49,9 @@ CLI:
 
 Output: per candidate {candidate, slug, matches:[{probe, matched_slug,
 matched_via, alias?, entry_slug, implies}], verdict}, plus the top-level
-``candidate_collisions[]`` and ``summary``.
+``candidate_collisions[]``, ``index_problems[]`` and ``summary``. An index with
+``ok: false`` is incomplete even if its producer's problem list was lost; every
+otherwise-new candidate then requires adjudication.
 
 For source-derived or otherwise untrusted titles, always use ``--titles``;
 never interpolate title text into a shell command. ``--title`` remains a
@@ -219,6 +221,8 @@ def _validate_index(index):
     """Reject malformed lookup data rather than treating it as an empty vault."""
     if not isinstance(index, dict) or not isinstance(index.get("entries"), list):
         raise ValueError("index must contain an entries list")
+    if "ok" in index and not isinstance(index["ok"], bool):
+        raise ValueError("index ok must be a boolean")
     if not isinstance(index.get("problems", []), list):
         raise ValueError("index problems must be a list")
     for i, rec in enumerate(index["entries"], 1):
@@ -236,6 +240,10 @@ def _validate_index(index):
 def _index_problems(index):
     """Keep index omissions visible even when a caller supplied a bare list."""
     problems = [str(p) for p in index.get("problems", [])]
+    if index.get("ok") is False:
+        incomplete = "index reports an incomplete recursive inventory (ok is false)"
+        if incomplete not in problems:
+            problems.append(incomplete)
     for rec in index["entries"]:
         for error in rec.get("errors", []):
             message = "%s: %s" % (rec.get("relpath") or rec["slug"], error)
@@ -662,6 +670,7 @@ def run_self_test():
 
         for incomplete in (
                 {"entries": [], "problems": ["unreadable wiki directory: private"]},
+                {"entries": [], "ok": False, "problems": []},
                 {"entries": [{"slug": "existing", "aliases": [],
                               "errors": ["unparseable YAML scalar"]}]}):
             rep = check_candidates(["A new unmatched term"], incomplete)
@@ -669,7 +678,9 @@ def run_self_test():
                   (rep["results"][0]["verdict"], bool(rep["index_problems"])),
                   ("adjudicate", True))
         malformed_index = os.path.join(tmp, "malformed-index.json")
-        for payload in ({"entries": ["bad"]}, {"entries": [{"slug": "x", "aliases": 0}]}):
+        for payload in ({"entries": ["bad"]},
+                        {"entries": [{"slug": "x", "aliases": 0}]},
+                        {"entries": [], "ok": "false"}):
             with open(malformed_index, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh)
             buf = io.StringIO()

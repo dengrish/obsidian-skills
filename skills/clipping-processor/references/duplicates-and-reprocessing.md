@@ -18,8 +18,12 @@ A PDF wikilink belongs to `paper-summarizer` and is not a clipping rewrite.
 
 Naming a file already in `Articles/` for reprocessing authorizes that owned
 rewrite. Naming a raw capture that matches another note requires an explicit
-overwrite-or-skip decision; honor one already given in the conversation. Batch
-mode never overwrites a duplicate or selects polished notes on its own.
+overwrite-or-skip decision; honor one already given in the conversation. An
+explicit request to resume an interrupted clipping run or reprocess a selected
+batch supplies that decision for matching notes this skill owns: re-read each
+raw and run the complete workflow from its current files rather than continuing
+an old scratch draft. Ordinary batch mode never overwrites a duplicate or
+selects polished notes on its own.
 
 Record the original bytes, file identity, permissions and metadata before
 preparing the replacement. Exclude this one note from its own dedup scan.
@@ -49,8 +53,8 @@ item. Only if that key is absent may legacy scalar `source:` supply the origin.
 Keep quoted scalars and lists intact; do not extract a later URL or infer
 ownership from duplicate keys, an empty current list or malformed YAML. Report
 unindexable notes and existing URL collisions. A valid first PDF wikilink is a
-paper summary, not an unindexable clipping. Decode the complete note strictly as
-UTF-8 (accepting a leading BOM) before trusting its frontmatter; invalid bytes
+PDF reading note, not an unindexable clipping. Decode the complete note strictly
+as UTF-8 (accepting a leading BOM) before trusting its frontmatter; invalid bytes
 anywhere make the note unindexable rather than an owner.
 
 Normalize URLs for comparison only; retain the original URL in the note:
@@ -107,19 +111,9 @@ never moved, deleted or rewritten, including after a successful reprocess.
 
 1. Complete the replacement at a unique scratch path outside the vault, using
    planned new image names. Finish the completeness audit and review against
-   that draft. Review any image rename with `fetch_images.py rename --dry-run`
-   using both `--sources '<vault>/Sources/PDFs'` and
-   `--owner-note '<vault>/Articles/<old_slug>.md'`. The helper snapshots the
-   unchanged note, requires a web URL as its first current `sources:` item, and
-   requires every attachment basename in the plan to appear as an exact
-   rendered filename-only embed. Neither that positive clipping evidence nor
-   the recursive PDF ownership guard may be omitted. Migrate a legacy scalar
-   `source:` before this destructive attachment operation. In a canonical
-   vault the helper also reads every Markdown note outside the owner and refuses
-   inbound links to the old note, references to any old image name, unreadable
-   notes and incomplete folder walks. It reports the exact blocker paths. Do
-   not interpret a failed inventory as permission to proceed or rewrite those
-   notes incidentally as part of the clipping reprocess.
+   that draft. For a changed slug, replace only the slug in each planned image
+   name; preserve its figure tail and extension. Do not copy, move or rename a
+   live attachment before both owner notes are public.
 2. Preflight both paths under the selected `Articles/`. The original must still
    be this clipping's regular, non-symlink file, with the identity and contents
    read at the start. Check destination occupancy with `os.path.lexists`, not
@@ -137,15 +131,37 @@ never moved, deleted or rewritten, including after a successful reprocess.
    public name; a recheck followed by `os.replace` still has a race. If
    publication fails, no attachment has moved and the unchanged old note still
    resolves.
-5. For a changed slug, keep the old note in place and execute the reviewed
-   image rename now, with `--sources` and the unchanged old `--owner-note`.
-   This ordering gives the destination images a public note owner before they
-   exist. If the helper refuses or rolls back a partial move, conditionally
-   withdraw only the exact new note just published; verify the old note and old
-   image names still resolve. Report any failed withdrawal, rollback failure or
-   named recovery path and stop.
-6. After publication and any image rename, re-probe the whole Markdown dependency surface before
-   old-path cleanup:
+5. A same-path rewrite finishes after read-back. For a changed slug, keep both
+   notes in place and review the prepare phase before running it live:
+
+   ```bash
+   python3 '<skill>/scripts/fetch_images.py' rename --phase prepare [--dry-run] \
+       --attachments '<vault>/Sources/Images' \
+       --sources '<vault>/Sources/PDFs' \
+       --owner-note '<vault>/Articles/<old_slug>.md' \
+       --new-owner-note '<vault>/Articles/<new_slug>.md' \
+       --old-slug '<old_slug>' --new-slug '<new_slug>'
+   ```
+
+   The helper snapshots both notes, requires the same current web source, and
+   requires every old image and mapped destination to be an exact rendered
+   filename-only embed in its corresponding owner. It also applies the PDF
+   ownership and destination-collision guards. Prepare exclusively copies the
+   exact old bytes to the new names, rolls back copies it cannot complete, and
+   retains every old name. Its JSON supplies the exact one-to-one mapping and
+   complete dependency report by checking every Markdown note outside the owner.
+   Keep that report unchanged for the next step.
+   A refusal is not permission to copy by hand; retain the old note and images,
+   conditionally withdraw only the exact new note if safe, and report every
+   named recovery path.
+6. Do not finalize while prepare reports blockers. If every blocker is a Wiki
+   entry or recognized root MOC and the dependency rewrite is authorized, pass
+   the exact prepare report and mapping to `wiki-linter`'s
+   [producer-mapped dependency repair](../../wiki-linter/references/external-artifact-repair.md).
+   The old and new images both resolve while it works. Foreign Markdown,
+   unreadable files, an incomplete scan, or an unauthorized rewrite remain
+   blockers; leave both versions in place and report the pending handoff.
+7. After the repair, run the same complete Markdown dependency re-probe:
 
    ```bash
    python3 '<skill>/scripts/fetch_images.py' dependencies \
@@ -154,22 +170,31 @@ never moved, deleted or rewritten, including after a successful reprocess.
    ```
 
    An `ok: true` result means no other scanned note links the old note or
-   references one of its old image names. Only then conditionally remove a
-   distinct old pathname through the shared protocol: displace it, verify the
-   preflight identity and contents, then discard only the verified version. Do
-   not use a check followed by `unlink`, remove it for the same-file spelling
-   case, or remove it if it changed. If the re-probe or cleanup is refused,
-   retain the old note path and exact blocker report; never delete first and
-   tell the user about broken inbound references afterward. A dependency first
-   introduced after the image rename is a concurrent change, not permission to
-   rewrite another note. Stop without declaring completion and either obtain
-   authorization for one complete dependency rewrite or roll the replacement
-   back through the same guarded paths. On that later rollback, the published
-   `Articles/<new_slug>.md` is the owner evidence for reversing the image rename:
-   call the helper with the slugs reversed and that new note as `--owner-note`,
-   then conditionally withdraw the new note. If rollback cannot safely restore
-   every old note and image path, retain every recovery path and report the
-   mixed state rather than hiding it.
+   references one of its old image names. Anything else leaves both versions
+   resolving and returns to step 6; a new dependency is a blocker, not
+   permission for an incidental rewrite.
+8. With an `ok: true` re-probe, review and run the finalize phase using the
+   identical arguments from prepare:
+
+   ```bash
+   python3 '<skill>/scripts/fetch_images.py' rename --phase finalize [--dry-run] \
+       --attachments '<vault>/Sources/Images' \
+       --sources '<vault>/Sources/PDFs' \
+       --owner-note '<vault>/Articles/<old_slug>.md' \
+       --new-owner-note '<vault>/Articles/<new_slug>.md' \
+       --old-slug '<old_slug>' --new-slug '<new_slug>'
+   ```
+
+   Finalize repeats the owner, byte-identity, PDF, mapping and dependency checks;
+   the earlier probe is not standing cleanup authority. It conditionally retires
+   only the exact old image copies and leaves the new copies in place. If any
+   check fails, it retains both sets and reports the blocker or recovery path.
+9. After finalize succeeds, conditionally remove the distinct old note through
+   the shared protocol: displace it, verify the preflight identity and contents,
+   then discard only that verified version. Do not use a check followed by
+   `unlink`, remove it for the same-file spelling case, or remove it if it
+   changed. A cleanup refusal keeps the path; never delete first and report
+   broken references afterward. Report a mixed state rather than hiding it.
 
 If the filesystem cannot provide safe publication, stop and report the refusal.
 Read back the published note and verify its embeds. Report note and attachment

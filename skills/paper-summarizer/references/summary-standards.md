@@ -1,18 +1,18 @@
-# How to state a finding and its limits
+# How to state a contribution and its limits
 
 - [The four claim rules, in full](#the-four-claim-rules-in-full)
 - [Where the qualification goes](#where-the-qualification-goes)
 - [Naming the size of a number](#naming-the-size-of-a-number)
 - [The hedge ladder, and what sets its ceiling](#the-hedge-ladder-and-what-sets-its-ceiling)
 - [Statistical statements](#statistical-statements)
-- [The limitations taxonomy, by design](#the-limitations-taxonomy-by-design)
-- [What the paper should have disclosed](#what-the-paper-should-have-disclosed)
+- [The limitations taxonomy, by mode and design](#the-limitations-taxonomy-by-mode-and-design)
+- [What an empirical document should have disclosed](#what-an-empirical-document-should-have-disclosed)
 - [A phrasing bank](#a-phrasing-bank)
 - [Sources](#sources)
 
-Read before recording claims or drafting a paper summary. This reference owns
-claim scope, confidence and methodological limitations. [Note format](note-format.md)
-owns the section shape and length limits; [verification](review-checklist.md)
+Read before recording claims or drafting a summary. This reference owns claim
+scope, confidence and evidential limitations. [Note format](note-format.md) owns
+the section shape, body modes and length limits; [verification](review-checklist.md)
 checks the resulting claims against the PDF.
 
 ## The four claim rules, in full
@@ -38,7 +38,7 @@ A relative change with no absolute anchor reliably reads as larger than it is, a
 
 - **Write:** "cut recurrence from 45% to 8% — a 37-percentage-point absolute reduction".
 - **Not:** "cut recurrence by 82%".
-- **When the paper gives only the relative figure**, say so: "the absolute rates are not reported". That absence is itself informative, and inventing the denominator is worse than naming the gap.
+- **When the document gives only the relative figure**, say so: "the absolute rates are not reported". That absence is itself informative, and inventing the denominator is worse than naming the gap.
 - **A hazard ratio, an odds ratio and a risk ratio are all relative** and all need the same treatment. So does "2.3× more likely".
 - **Give the denominator.** "14 of 219" beats "6.4%" for anything small, and both together beat either.
 
@@ -112,6 +112,13 @@ These statements sit off the effect ladder:
 - A **descriptive qualitative finding** characterises the participants studied;
   attribute it and make no frequency estimate. A claim extending beyond those
   participants needs the conservative design limit, at rung 4.
+- A **theoretical argument, formal result or normative recommendation** is
+  attributed to the document and assessed through its premises, reasoning and
+  cited evidence. Do not assign it an effect rung unless the document separately
+  reports an empirical effect.
+- A **notice action** states what an issuer corrected, withdrew or questioned
+  and on what stated grounds. It does not independently establish the affected
+  paper's findings, and it takes no effect rung.
 
 The report names the applicable off-ladder case instead of leaving confidence
 unexplained. For effect claims, apply the design ceiling below.
@@ -143,17 +150,19 @@ the design would have supported more.
 
 ## Statistical statements
 
-- **A p-value is not the probability the finding is wrong**, not the probability the null is true, and not a measure of effect size. If a p-value is the only number the paper gives for a result, the note says the effect size is not reported.
+- **A p-value is not the probability the finding is wrong**, not the probability the null is true, and not a measure of effect size. If a p-value is the only number the document gives for a result, the note says the effect size is not reported.
 - **Report the interval, not just the point estimate**, for anything the summary leans on. The interval is what tells a reader how much the study actually pinned down.
 - **"Significant" without "statistically" reads as "important".** Where the note needs the technical sense, write "statistically significant"; where it means important, do not use the word.
 - **A subgroup finding is a hypothesis**, not a result, unless it was pre-specified and the interaction was tested. Say which.
 - **Multiplicity:** a paper reporting twenty outcomes and highlighting the one that reached significance is reporting a different kind of result from one that pre-registered a single primary outcome. Name that in *Limitations*.
 
 
-## The limitations taxonomy, by design
+## The limitations taxonomy, by mode and design
 
-Consider all six categories; write only 2–4 limitations that would change how a
-reader acts on or cites the finding:
+For an empirical note, consider all six categories below; normally write 2–4
+limitations that would change how a reader acts on or cites the finding. One is
+allowed only when a second material limitation would be filler, with that
+advisory exception explained in the run report:
 
 1. What the design cannot show.
 2. Who or what was studied, and the population/setting it does not cover.
@@ -166,8 +175,19 @@ reader acts on or cites the finding:
 
 Merge related limitations, fold repeated author caveats into the relevant
 bullet, and omit categories that do not apply. Put a caveat about one number
-beside that number, not again in Limitations. State the paper-level constraint
+beside that number, not again in Limitations. State the document-level constraint
 once; avoid generic “more research is needed” filler.
+
+For an argument/synthesis note, instead consider its declared scope and source
+selection, premises not supported by its supplied evidence, counterarguments it
+raises but does not resolve, dependence on a particular framework, currency,
+and conditions outside which a conclusion or recommendation does not apply.
+
+For a notice, consider the precise claims and versions covered, the evidence or
+process the notice supplies, and questions it explicitly leaves unresolved. A
+disagreement with the author is not itself a limitation. In either mode, keep
+only boundaries supported by the PDF or by a directly verified absence in it;
+do not invent a failed experiment, missing protocol or generic research caveat.
 
 Use these design-specific prompts to find candidates:
 
@@ -181,12 +201,16 @@ Use these design-specific prompts to find candidates:
 - **Case series** — selection: these are the cases someone chose to write up, which is the strongest possible selection effect.
 - **Qualitative** — who was recruited and who was not; the analyst's framing; and that transferability, not generalisability, is the relevant question.
 
-**A proxy outcome is a limitation on every design.** A biomarker standing in for survival, a benchmark score standing in for capability, an intention standing in for a behaviour, a surrogate endpoint standing in for the thing the reader cares about — name the substitution, in the note, in the *Limitations* section, whether or not the paper does.
+**A proxy outcome is a limitation on every empirical design.** A biomarker standing in for survival, a benchmark score standing in for capability, an intention standing in for a behaviour, a surrogate endpoint standing in for the thing the reader cares about — name the substitution, in the note, in the *Limitations* section, whether or not the paper does.
 
 
-## What the paper should have disclosed
+## What an empirical document should have disclosed
 
-A missing disclosure is a limitation, and it is the one a reader could never notice on their own. Each design has a reporting checklist stating what a complete report contains; hold the paper against the right one and name what is not there.
+For an empirical document, a missing disclosure is a limitation, and it is the
+one a reader could never notice on their own. Each design has a reporting
+checklist stating what a complete report contains; hold the paper against the
+right one and name what is not there. Non-empirical notes use the mode-specific
+prompts above rather than pretending an empirical checklist applies.
 
 | Design | Checklist | The items most often missing |
 |---|---|---|
@@ -211,7 +235,7 @@ A missing disclosure is a limitation, and it is the one a reader could never not
 | shows that X causes Y | in a randomised trial, X reduced Y from A to B (rung 1); or: X is associated with lower Y; the design cannot separate that from the reasons people had X (rung 3) |
 | more research is needed | the open question is specifically whether the effect holds past 12 weeks |
 | the authors conclude | *(only where they actually do — and then say it plainly)* |
-| experts say | *(cut: a summary of one paper has no experts in it)* |
+| experts say | *(cut: a summary of one document has no experts in it)* |
 
 
 ## Sources

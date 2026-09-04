@@ -187,7 +187,7 @@ Use a neutral encyclopedic register: direct, precise, and free of conversational
 
 **1. Main claim first.** The opening sentence names what the entity *is* — the core definition or central claim. Not biographical preamble ("LambdaRank was introduced by Burges in 2005..."), not motivation ("Learning to rank is an important problem..."), not buildup ("Before discussing the algorithm, recall that..."). The thesis itself, stated directly: "LambdaRank is a learning-to-rank method that optimizes ranking metrics by scaling pairwise gradients by the change in NDCG from swapping two items." It is also the entry's stand-alone hook — a reader who has never seen the source still gets the gist. If a reader read only the opening sentence of every entry in the wiki, they would have a usable mental map. **Self-check before saving:** read just the first sentence and ask whether it's the main claim or merely a lead-in. If it's a lead-in, demote or cut it and promote the actual claim.
 
-  **Person and Event entries: dates in the opener.** For `type: Person` or `type: Event`, include the relevant date parenthetical immediately after the bolded title. When the active source omits it, follow [rare-types.md](rare-types.md#dates-in-the-opener-person-and-event): verify an inspectable reliable reference and name it in the report, or leave the finding unresolved rather than supplying a date from memory. That section also owns the exact forms, qualifiers, era markers, spacing, placement, and worked examples; read it whenever the entry is a Person or Event rather than restating its grammar here.
+  **Person and Event entries: dates in the opener.** For `type: Person` or `type: Event`, include the relevant date parenthetical immediately after the bolded title. When the active source omits it, follow [rare-types.md](rare-types.md#dates-in-the-opener-person-and-event): cite another durable vault source, capturing a live page first when necessary, or leave the finding unresolved. A transient lookup or memory never changes the note. That section also owns the exact forms, qualifiers, era markers, spacing, placement, and worked examples; read it whenever the entry is a Person or Event rather than restating its grammar here.
 
 **2. Paraphrase, don't extract.** Write fresh prose, not lightly-edited source sentences with their connective tissue stripped. An entry that lifts source sentences verbatim and just deletes the surrounding words is not a wiki entry — it is a redaction. The exception is technical content that *must* be precise: equation statements, formal definitions, named identifiers (function/class/dataset names that are literally those names in the source). Everything else is rewritten.
 
@@ -200,8 +200,11 @@ Use a neutral encyclopedic register: direct, precise, and free of conversational
    Treat priority and superlative wording the same way. Claims such as *first*,
    *best*, *largest*, and *leading* need independent support from a second
    reliable source or narrow attribution to the active source or named report.
-   Without that support, omit the ranking while preserving the source-backed
-   descriptive claim. Scope software behavior to the version or time period the
+   If independent support changes the published note, it must be a durable vault
+   source listed in `sources:`; capture a web page through `clipping-processor`
+   first. A transient check may justify omitting a ranking, but never adding or
+   broadening one. Without support, omit the ranking while preserving the
+   source-backed descriptive claim. Scope software behavior to the version or time period the
    source establishes, and replace reader-relative words such as *currently*,
    *recently*, and *today* with that durable version or date.
 

@@ -13,10 +13,10 @@ Choose by the requested result, not just the input's file type.
 |---|---|---|
 | Rename, file or split PDFs | [pdf-organizer](skills/pdf-organizer/SKILL.md) | PDFs → organized PDFs and chapter files |
 | Extract figure images | [pdf-figure-extractor](skills/pdf-figure-extractor/SKILL.md) | PDFs → cropped PNGs in `Sources/Images/` |
-| Explain a research paper's findings | [paper-summarizer](skills/paper-summarizer/SKILL.md) | PDF → summary in `Articles/` |
+| Explain a paper, chapter, report, standard or publication notice | [paper-summarizer](skills/paper-summarizer/SKILL.md) | PDF → reading note in `Articles/` |
 | Clean Web Clipper captures | [clipping-processor](skills/clipping-processor/SKILL.md) | raw capture → cleaned note in `Articles/` |
-| Build or enrich wiki entries from a source | [wiki-builder](skills/wiki-builder/SKILL.md) | PDF or cleaned clipping → entries in `Wiki/` |
-| Audit, link or organize existing wiki entries | [wiki-linter](skills/wiki-linter/SKILL.md) | existing `Wiki/` → repairs, links, parents and root-level MOCs |
+| Build or enrich wiki entries from new evidence | [wiki-builder](skills/wiki-builder/SKILL.md) | PDF or cleaned clipping → entries in `Wiki/` |
+| Audit, correct or explicitly refactor existing wiki entries | [wiki-linter](skills/wiki-linter/SKILL.md) | existing `Wiki/`, its cited sources or an exact producer mapping → scoped repairs, links, parents and MOCs |
 
 A PDF attached without a stated goal has no default workflow; ask what result
 the user wants. An inbox-wide request splits captured `.md` files and `.pdf`
@@ -30,7 +30,7 @@ The routes branch; a document does not have to pass through every skill.
 ```text
 Inbox/*.pdf → pdf-organizer → Sources/PDFs/
                                 ├─ pdf-figure-extractor → Sources/Images/
-                                ├─ paper-summarizer → Articles/ summary
+                                ├─ paper-summarizer → Articles/ reading note
                                 └─ wiki-builder → Wiki/
 
 Inbox/*.md → clipping-processor → Articles/ cleaned clipping
@@ -55,6 +55,9 @@ wiki-builder adds source-supported content only to the entries in its current
 run. wiki-linter owns retrospective work across the existing wiki. Their
 [linking ownership](shared/CONVENTIONS.md#9-ownership-split-for-linking) prevents
 later source merges from reversing deliberate maintenance decisions.
+For a named existing entry, wiki-linter may correct it from sources it already
+cites or carry out an explicitly requested structural or producer-mapped
+repair. Evidence from a new source still belongs to wiki-builder.
 
 ## Codex and Claude
 
@@ -106,7 +109,7 @@ it and any per-run path overrides through [RUNTIME.md](shared/RUNTIME.md).
 ```text
 <vault>/
 ├── Inbox/                    raw clippings and incoming PDFs
-├── Articles/                 cleaned clippings and paper summaries
+├── Articles/                 cleaned clippings and PDF reading notes
 ├── Sources/
 │   ├── PDFs/                 organized PDFs
 │   │   └── <Work>/           a split book's chapter PDFs
@@ -118,9 +121,9 @@ it and any per-run path overrides through [RUNTIME.md](shared/RUNTIME.md).
 
 PDFs move out of `Inbox/`; raw clippings stay as the record of what was
 captured. The clipping dedup index determines whether a capture was processed.
-Both note writers share `Articles/` and check provenance before claiming an
-existing note: `sources:` item 1 identifies its origin. MOCs and proposal logs
-stay outside `Wiki/` so they are not treated as entries.
+Both reading-note writers share `Articles/` and check provenance before
+claiming an existing note: `sources:` item 1 identifies its origin. MOCs and
+proposal logs stay outside `Wiki/` so they are not treated as entries.
 
 No skill discards user content. An authorized reprocess or refactor may
 conditionally remove an obsolete path only after its replacement and dependent
@@ -169,7 +172,9 @@ scripts import these instead of copying their algorithms.
 ## Developing and packaging
 
 Edit the source in this repository, not an installed plugin cache. Use
-Python 3.9+ and one isolated environment. From the repository root:
+Python 3.10+ and one isolated environment, using a Python release that still
+receives security fixes. This floor matches the supported PyMuPDF and Pillow
+versions used for untrusted documents and images. From the repository root:
 
 ```bash
 python3 -m venv .venv
@@ -215,6 +220,14 @@ state. Completed outputs are staged on the destination filesystem and replace
 only the exact generated files observed before publication; a late edit or
 occupant stops publication unchanged. `--check` detects stale generated files
 without rewriting them.
+
+[`tools/package-files.txt`](tools/package-files.txt) is the exact authored-file
+inventory for the archive. Add an intentional new reference, script, or asset
+there; an unlisted or missing file under a shipped tree makes the build fail.
+This supports arbitrary asset types without silently packaging editor residue
+or secrets. Archive paths must also be NFC-normalized, free of case-folding
+collisions, and valid on Windows. [`.gitattributes`](.gitattributes) keeps tracked text at LF so the
+same revision produces the same archive from Windows, macOS, and Linux clones.
 
 For a release, bump the authored manifest's version, validate, rebuild, then
 commit source and generated files together before pushing. An explicit

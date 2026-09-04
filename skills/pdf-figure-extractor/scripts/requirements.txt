@@ -1,2 +1,4 @@
-PyMuPDF>=1.20
-Pillow>=9.1
+# Security floors for parsing untrusted PDFs and images. Keep these synchronized
+# with the installed-version probe in shared/RUNTIME.md.
+PyMuPDF>=1.28.0
+Pillow>=12.3.0

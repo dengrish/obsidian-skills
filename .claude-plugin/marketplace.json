@@ -8,7 +8,7 @@
     {
       "name": "obsidian",
       "source": "./",
-      "description": "Turn papers, book chapters and web clippings into a maintained Obsidian knowledge base: name and file PDFs, split books into chapters, extract figures, summarise research papers with their key figures and limitations, clean clippings into notes, build interlinked wiki entries, and keep the vault linted and navigable."
+      "description": "Turn PDFs and web clippings into a maintained Obsidian knowledge base: name and file PDFs, split books into chapters, extract figures, create evidence-grounded reading notes for papers, chapters, reports, standards and publication notices, clean clippings, build interlinked wiki entries, and keep the vault linted and navigable."
     }
   ]
 }

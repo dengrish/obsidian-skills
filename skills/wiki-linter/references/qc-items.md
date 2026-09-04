@@ -437,9 +437,12 @@ and preserved under item 2.
   recipe, identifier catalog, or listing while preserving conceptual claims.
   None grants general rewriting permission.
 - Fact changes, conflict resolution, source-content selection, and substantive
-  trimming need a source-backed request. Cross-entry splits, merges, deletion,
-  and redistribution also need authorization; an existing request covering the
-  refactor supplies it, so do not ask twice.
+  trimming need a source-backed request. A named entry may be corrected from
+  sources it already cites under the
+  [correction protocol](source-backed-corrections.md); a new source routes to
+  builder. Cross-entry splits, merges, deletion, and redistribution use the
+  refactor protocol and also need authorization; an existing request covering
+  the refactor supplies it, so do not ask twice.
 - A retitle or re-slug is a rename. Propose it during routine lint, with inbound
   count and collision risk. Apply only when the request explicitly authorizes
   it, using the full

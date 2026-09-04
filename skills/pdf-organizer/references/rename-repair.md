@@ -60,7 +60,7 @@ in the vault, collisions that differ only in case or Unicode normalization,
 overlong derived names, extension mismatches, unsafe paths, permissions, and
 malformed or conflicting sidecars. Do not force a partial family through.
 
-`edits` maps note paths to their new text. Two associated fields are separate:
+`edits` maps note paths to their new text. Three associated fields are separate:
 
 - `edits.unreadable` lists notes that could not be read as UTF-8 and that do
   not cite a name being changed. They remain untouched and must be reported
@@ -71,6 +71,13 @@ malformed or conflicting sidecars. Do not force a partial family through.
   with the rename. A custom review ledger selected with `--review-file` is
   outside this default lookup: include it explicitly in the review and
   report any marks that could not be carried before claiming completeness.
+- `edits.published_updates` records `(old, new)` publication-date scalars for
+  owned paper-summary notes when the canonical source year changes. The note's
+  source link and this field are one staged rewrite and share the same stale-file
+  guard and rollback. A target `nd` uses `null`; a numeric target retains a
+  valid month/day, or uses `01-01` when the old value was null. Missing,
+  duplicate, quoted, invalid, multiline, or contradictory date metadata is a
+  blocker. Notes that merely cite the PDF never receive this metadata repair.
 
 Filing moves only the source PDF to `Sources/PDFs/`. Figures remain in
 `Sources/Images/`, the source note in `Articles/`, and a chapter family under

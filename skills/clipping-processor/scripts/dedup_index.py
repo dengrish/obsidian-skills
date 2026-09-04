@@ -879,7 +879,8 @@ def run_self_test():
         import io
         hidden = os.path.join(vault, "restricted")
         os.makedirs(hidden)
-        with open(os.path.join(hidden, "Reviewed.md"), "w") as fh:
+        with open(os.path.join(hidden, "Reviewed.md"), "w",
+                  encoding="utf-8") as fh:
             fh.write('---\nsource: "%s"\n---\nUser-edited text.\n' % URL)
         scandir = os.scandir
 
@@ -970,7 +971,8 @@ def main(argv=None):
         except (OSError, ValueError):
             pass
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("cleaned_dir", nargs="?")
+    ap.add_argument("cleaned_dir", nargs="?",
+                    help="Articles/ directory to index")
     ap.add_argument("--raw", action="append", default=[],
                     help="raw .md file or folder of them; repeatable")
     ap.add_argument("--url", action="append", default=[],
@@ -979,7 +981,8 @@ def main(argv=None):
                     help="proposed clipping-note stem to check; repeatable")
     ap.add_argument("--exclude", action="append", default=[],
                     help="note to leave out of the index (reprocessing a Articles/ file)")
-    ap.add_argument("--dump-index", action="store_true")
+    ap.add_argument("--dump-index", action="store_true",
+                    help="include normalized URL ownership in the report")
     ap.add_argument("--test", action="store_true", help="run the self-test")
     args = ap.parse_args(argv)
 

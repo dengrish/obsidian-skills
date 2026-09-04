@@ -1,7 +1,7 @@
 {
   "name": "obsidian",
-  "version": "1.33.15",
-  "description": "Turn papers, book chapters and web clippings into a maintained Obsidian knowledge base: name and file PDFs, split books into chapters, extract figures, summarise research papers with their key figures and limitations, clean clippings into notes, build interlinked wiki entries, and keep the vault linted and navigable.",
+  "version": "1.33.16",
+  "description": "Turn PDFs and web clippings into a maintained Obsidian knowledge base: name and file PDFs, split books into chapters, extract figures, create evidence-grounded reading notes for papers, chapters, reports, standards and publication notices, clean clippings, build interlinked wiki entries, and keep the vault linted and navigable.",
   "repository": "https://github.com/dengrish/obsidian-skills",
   "author": {
     "name": "Dennis Grishin"
@@ -9,8 +9,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Obsidian",
-    "shortDescription": "Turn papers and clippings into a maintained Obsidian vault",
-    "longDescription": "Turn papers, book chapters and web clippings into a maintained Obsidian knowledge base: name and file PDFs, split books into chapters, extract figures, summarise research papers with their key figures and limitations, clean clippings into notes, build interlinked wiki entries, and keep the vault linted and navigable.",
+    "shortDescription": "Turn documents and clippings into a maintained Obsidian vault",
+    "longDescription": "Turn PDFs and web clippings into a maintained Obsidian knowledge base: name and file PDFs, split books into chapters, extract figures, create evidence-grounded reading notes for papers, chapters, reports, standards and publication notices, clean clippings, build interlinked wiki entries, and keep the vault linted and navigable.",
     "developerName": "Dennis Grishin",
     "category": "Productivity",
     "capabilities": [

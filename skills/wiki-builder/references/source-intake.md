@@ -45,7 +45,11 @@ overlaid resolution tree so that staged coverage participates in later-source
 skip decisions. Substitute the actual on-disk names with their extensions,
 using one `--source` for an unpaired source and both actual names for a resolved
 PDF/note pair; the note need not have the PDF's stem. Read `source_matches` and
-`problems` in `$IDX`. Matching uses only decoded frontmatter `sources:`,
+`problems` in `$IDX`. Exit 1 and `ok: false` mean a recursive directory could
+not be inventoried; the helper still writes the useful partial JSON. Exit 0 and
+`ok: true` mean the walk completed, but ordinary entry-level parse/read findings
+can remain in `problems` and still block a source decision. Matching uses only
+decoded frontmatter `sources:`,
 compares literal target basenames after NFC normalization and case folding,
 accepts folder-qualified targets and page anchors, and preserves numeric
 disambiguators. A body example mentioning `[[Foo.pdf]]` does not count as
@@ -67,7 +71,7 @@ behind that link cannot prove prior coverage. Preserve the occupant and resolve
 the filesystem issue separately rather than treating the empty record as a
 free slug or reading the link target as a vault-owned entry.
 
-**Any confirmed source match means the default action is to SKIP** — don't read it, don't extract, don't modify entries. Re-runs churn body prose, reset `updated:`, and — because churned prose is body content — clear `read:` on entries the user had already read, for no gain. **Proceed only on explicit re-run or resume intent in the user's request or existing authorization for this run** ("re-process", "re-run", "resume the interrupted run", "finish the incomplete run", "apply the new rules to existing entries", or equivalent). A plain "process Foo.pdf" does not qualify, even about a known-processed source. Ambiguous intent after a confirmed match → skip; unresolved source identity or malformed metadata → report and resolve, not an automatic previously-processed verdict. Intent is run-level: if the prompt signals it, all previously-processed sources in the batch proceed.
+**Any confirmed source match means the default action is to SKIP** — don't read it, don't extract, don't modify entries. Re-runs churn body prose, reset `updated:`, and — because churned prose is body content — clear `read:` on entries the user had already read, for no gain. **Proceed only on explicit re-run or resume intent in the user's request or existing authorization for this run** ("re-process", "re-run", "resume the interrupted run", "finish the incomplete run", "apply the new rules to existing entries", or equivalent). A plain "process Foo.pdf" does not qualify, even about a known-processed source. Ambiguous intent after a confirmed match → skip; unresolved source identity or malformed metadata → report and resolve, not an automatic previously-processed verdict. Ordinary intent is run-level: if the prompt signals it, all previously-processed sources in the batch proceed. The one narrow exception is an explicit candidate-specific synthesis request, which reopens only its named candidate and source set under [the synthesis protocol](multi-source-synthesis.md).
 
 **Resume belongs to wiki-builder.** A prior match proves that some entry cites the source; it does not prove that an interrupted run completed extraction, every merge, interlinking, or the three audits. Under explicit resume intent, re-read the complete source and run the normal workflow over it. Existing coverage goes through the same collision and source-no-op-merge checks, while missing entities and source-dependent repairs go through their ordinary gates. This is deliberately a safe re-run rather than an attempt to infer an interruption point from partial files. wiki-linter may clean source-independent residue before or after this run, but it cannot recover omitted source claims, entries, page anchors, or figure choices and is never the owner of completing the source run.
 

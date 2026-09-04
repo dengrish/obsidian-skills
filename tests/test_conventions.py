@@ -88,7 +88,7 @@ way for code to end up running at import is refused with a file and a line.
 Run this on a tree you would run the skills from; that is the same trust
 decision, and no smaller.
 
-The harness uses stdlib, Python 3.9+; the script self-tests also need the runtime
+The harness uses stdlib, Python 3.10+; the script self-tests also need the runtime
 dependencies in requirements-dev.txt. The walk is done once and
 cached, the enum extractors skip any file that cannot possibly hold the list,
 and the out-of-process module probes and bundled self-test suites account for
@@ -6177,11 +6177,11 @@ SELFTEST_MIN_CASES = {
     "skills/pdf-figure-extractor/scripts/auto_fig_bbox.py": 338,
     "skills/pdf-figure-extractor/scripts/batch_extract.py": 332,
     "skills/pdf-figure-extractor/scripts/extract_figures.py": 173,
-    "skills/pdf-figure-extractor/scripts/render_page.py": 48,
+    "skills/pdf-figure-extractor/scripts/render_page.py": 66,
     "skills/pdf-organizer/scripts/organize.py": 260,
-    "skills/wiki-builder/scripts/find_collisions.py": 65,
+    "skills/wiki-builder/scripts/find_collisions.py": 67,
     "skills/wiki-builder/scripts/lint_entry.py": 309,
-    "skills/wiki-builder/scripts/vault_index.py": 75,
+    "skills/wiki-builder/scripts/vault_index.py": 78,
     "skills/wiki-linter/scripts/scan_vault.py": 374,
 }
 
@@ -7044,7 +7044,8 @@ def check_note_headings(rep, conv):
         "MAX_SENTENCE_WORDS", "MAX_STEP_WORDS",
         "MAX_PARAGRAPH_SENTENCES",
         "MIN_STEPS", "MAX_STEPS", "MAX_RESULTS_CHARS",
-        "MIN_LIMITATIONS", "MAX_LIMITATIONS", "MAX_LIMITATION_CHARS",
+        "MIN_LIMITATIONS", "PREFERRED_MIN_EMPIRICAL_LIMITATIONS", "MAX_LIMITATIONS",
+        "MAX_LIMITATION_CHARS",
         "MIN_AVAILABILITY", "MAX_AVAILABILITY",
         "MAX_FIGURES", "MAX_TABLES",
     )

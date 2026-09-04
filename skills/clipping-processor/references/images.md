@@ -12,26 +12,37 @@ replace it with a hand-written downloader.
 ## Existing embeds on a reprocess
 
 Keep `![[…]]` embeds and figure numbers. If the slug is unchanged, leave their
-files alone. If it changes, prepare a `fetch_images.py rename --dry-run` plan
-with `--sources '<vault>/Sources/PDFs'` and
-`--owner-note '<vault>/Articles/<old_slug>.md'`. The unchanged owner note must
-have a valid web URL as its first current `sources:` item, and every attachment
-in the plan must appear there as an exact rendered filename-only embed. The
-helper snapshots that evidence while also checking recursive PDF ownership on
-both stems. Update draft embeds from the plan, but defer live renames until the
-[approved replacement](duplicates-and-reprocessing.md#publish-an-approved-replacement).
-Never use bare `mv` or omit either ownership guard to make a rename succeed.
-For canonical vault paths, the same plan scans every Markdown note outside the
-owner for inbound links to the old note and references to each old image name.
-It refuses the whole set on any hit, unreadable note or incomplete walk and
-returns exact blocker paths. This skill has no implicit authority to rewrite
-those other notes.
+files alone. If it changes, update only the draft embeds by replacing the old
+slug and preserving each figure tail and extension. Do not alter live images
+until both owner notes are safely public. Then begin the guarded
+[two-phase replacement](duplicates-and-reprocessing.md#publish-an-approved-replacement)
+with an explicit prepare phase; omitting `--phase` is a usage error:
 
 ```bash
-python3 '<skill>/scripts/fetch_images.py' rename --attachments '<vault>/Sources/Images' \
+python3 '<skill>/scripts/fetch_images.py' rename --phase prepare --dry-run \
+    --attachments '<vault>/Sources/Images' \
     --sources '<vault>/Sources/PDFs' --owner-note '<vault>/Articles/<old_slug>.md' \
-    --old-slug '<old_slug>' --new-slug '<new_slug>' --dry-run
+    --new-owner-note '<vault>/Articles/<new_slug>.md' \
+    --old-slug '<old_slug>' --new-slug '<new_slug>'
 ```
+
+The old owner must still have a valid web URL as its first current `sources:`
+item and exactly embed every old attachment. The new owner must have the same
+normalized web origin and exactly embed every mapped new name. The helper also
+checks recursive PDF ownership on both stems. Run prepare first with
+`--dry-run`, review its exact mapping and complete dependency report, then run
+the same command live. It exclusively publishes byte-identical new copies and
+retains every old file. Never use bare `cp`/`mv`, omit either owner guard, or use
+the deprecated `--phase immediate` for this workflow.
+
+For canonical vault paths, prepare scans every Markdown note outside the old
+owner for inbound links to the old note and references to each old image name.
+Resolving dependencies are reported while both copies remain available; an
+unreadable note or incomplete walk blocks preparation. This skill has no
+implicit authority to rewrite other notes. Retain its exact blocker paths,
+follow the linked procedure to repair authorized Wiki dependencies, run the
+unchanged dependency re-probe, and use the explicit finalize phase only after
+it reports `ok: true`.
 
 The plan inventories the note in both directions: an old-slug image embed with
 no exact attachment is a blocking result, including legacy loose `_figN`
@@ -45,13 +56,17 @@ this plan. A body can contain both old embeds and new remote images; download
 only the remote images, starting after the highest occupied number, even if
 they appear earlier in document order.
 
-The rename rechecks external dependencies around every image move, so a link
-introduced after the dry run causes rollback. After the new note is published,
-run `fetch_images.py dependencies --attachments '<vault>/Sources/Images'
+Finalize rechecks external dependencies around every conditional retirement,
+so a link introduced after the dry run causes rollback. Before finalizing, run
+`fetch_images.py dependencies --attachments '<vault>/Sources/Images'
 --owner-note '<vault>/Articles/<old_slug>.md' --old-slug '<old_slug>'` once more
-before removing the old note path. Cleanup requires `ok: true`. Otherwise keep
+without changing its arguments. Cleanup requires `ok: true`. Otherwise keep
 the old path, report every blocker, and stop or roll back; never discover and
-announce broken links only after deleting their target.
+announce broken links only after deleting their target. An authorized rewrite
+of Wiki-entry or recognized root-MOC blockers uses `wiki-linter`'s
+[producer-mapped dependency repair](../../wiki-linter/references/external-artifact-repair.md)
+with the exact mappings and this re-probe; the clipping producer still owns
+final cleanup.
 
 ## Download and publish
 
@@ -71,6 +86,10 @@ it as one UTF-8 line in a scratch file and pass `--urls-file '<scratch>/urls'`;
 `--urls-file -` reads UTF-8 from stdin. Resolve a protocol-relative source such
 as `//cdn.example/image.png` against the capture page's verified scheme before
 passing it; the helper refuses a URL with no scheme rather than guessing.
+The result's `url` and `final_url` fields are report-safe locators: they omit
+HTTP credentials, queries and fragments, and replace a `data:` payload with an
+omission marker. Use those fields in reports and failure placeholders. Do not
+copy the raw image URL there; the unchanged raw capture retains it for retry.
 
 The helper permits HTTP(S) and data URIs. For each HTTP(S) hop it resolves once,
 rejects the whole answer set if any address is non-public, and connects the
@@ -118,10 +137,14 @@ restrictions and redirect checks are not optional flags.
 
 Use the returned filename and extension. Recognized raster signatures override
 URL suffixes and claimed MIME types. SVG requires an SVG root, not an HTML/XML
-page that happens to contain an SVG. JSON, HTML, other file types and
-unrecognized bytes fail even when served as `image/png`; never guess a `.png`
-extension for them. A format needing conversion must be converted at a scratch
-path and checked before guarded `place` publication.
+page that happens to contain an SVG, and must be inert and self-contained. The
+helper refuses XML DTDs and stylesheets, scripts, `foreignObject`, event
+handlers, external `href`/base attributes, and external CSS resources before
+publication; fragment-only references inside the same SVG remain valid. JSON,
+HTML, other file types and unrecognized bytes fail even when served as
+`image/png`; never guess a `.png` extension for them. A format needing
+conversion must be converted at a scratch path and checked before guarded
+`place` publication.
 
 An occupied `<slug>_fig_<N>.*` slot is refused across extensions. Only an explicit,
 owned replacement may use `--overwrite`, and only for the same filename. Pass
@@ -172,8 +195,9 @@ Use the helper's diagnosis in the report, including a CDN error document or
 login wall where identified.
 
 For a failed download, unsupported source, unavailable helper or failed safe
-publication, leave `<!-- image download failed: <url> -->` at the original
-location and report the reason. Retain any caption as an ordinary paragraph
+publication, leave `<!-- image download failed: [redacted source locator] -->`
+at the original location and report the reason. Substitute the helper's `url`
+field for the bracketed label. Retain any caption as an ordinary paragraph
 because there is no image to caption. There is **no manual download/publication
 fallback**. Do not bypass ownership, host, size or occupied-slot checks to make
 an image appear successful.

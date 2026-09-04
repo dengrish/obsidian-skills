@@ -16,7 +16,7 @@ the candidate lists are worklists, not auto-fixes. See
 references/scanner.md for the field-by-field output contract and for what the
 scanner deliberately does not check.
 
-Stdlib only, Python 3.9+ (the plugin runtime floor).
+Stdlib only, Python 3.10+ (the plugin runtime floor).
 
     python3 scripts/scan_vault.py /path/to/vault/Wiki \
         --images /path/to/vault/Sources/Images \
@@ -6246,18 +6246,23 @@ def run_self_test():
         os.makedirs(_imgdir)
         for _f in ("Doe_X_2025_fig_2.png", "doe_x_2025_fig_3.png",
                    "Doe_X_2025_fig_4.ico"):
-            open(os.path.join(_imgdir, _f), "w").close()
+            open(os.path.join(_imgdir, _f), "w", encoding="utf-8").close()
         # Valid sidecars/OS metadata stay quiet.  Nested and staging residue is
         # reported without making a nested-but-resolving embed look missing.
         for _f in (".figure-manifest.tsv", ".figure-review.txt", ".DS_Store"):
-            open(os.path.join(_imgdir, _f), "w").close()
+            open(os.path.join(_imgdir, _f), "w", encoding="utf-8").close()
         os.makedirs(os.path.join(_imgdir, "nested"))
-        open(os.path.join(_imgdir, "nested", "nested-only.png"), "w").close()
-        open(os.path.join(_imgdir, "Collision.png"), "w").close()
-        open(os.path.join(_imgdir, "nested", "collision.PNG"), "w").close()
+        open(os.path.join(_imgdir, "nested", "nested-only.png"), "w",
+             encoding="utf-8").close()
+        open(os.path.join(_imgdir, "Collision.png"), "w",
+             encoding="utf-8").close()
+        open(os.path.join(_imgdir, "nested", "collision.PNG"), "w",
+             encoding="utf-8").close()
         os.makedirs(os.path.join(_imgdir, ".tmp"))
-        open(os.path.join(_imgdir, ".tmp", "dl_1"), "w").close()
-        open(os.path.join(_imgdir, ".trash_run.dltmp_1"), "w").close()
+        open(os.path.join(_imgdir, ".tmp", "dl_1"), "w",
+             encoding="utf-8").close()
+        open(os.path.join(_imgdir, ".trash_run.dltmp_1"), "w",
+             encoding="utf-8").close()
         _figbody = (
             "**Figured** is a worked example.\n\n"
             "![[Doe_X_2025_fig_99.png]]\n*A figure that is not on disk.*\n\n"
@@ -6346,7 +6351,7 @@ def run_self_test():
         _unusable_dir = os.path.join(tmp, "unusable-images")
         os.makedirs(_unusable_dir)
         _unusable_path = os.path.join(_unusable_dir, "dangling.png")
-        open(_unusable_path, "w").close()
+        open(_unusable_path, "w", encoding="utf-8").close()
         _real_isfile = os.path.isfile
 
         def _unusable_file(path):

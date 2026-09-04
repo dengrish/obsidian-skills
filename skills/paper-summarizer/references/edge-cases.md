@@ -1,32 +1,59 @@
-# Special paper types and reading exceptions
+# Special document types and reading exceptions
 
 Use the relevant section when the design or input needs it. These cases keep
-[the same note roles](note-format.md#section-roles-and-headings). The
-[confidence ladder and design ceilings](summary-standards.md#the-hedge-ladder-and-what-sets-its-ceiling)
-remain the single owner of confidence; this reference adds reading and Methods
-requirements, not a second ladder.
+[the same six-position structure](note-format.md#section-roles-and-headings),
+but first select the document's [body mode](note-format.md#choose-the-body-mode).
+The [confidence ladder and design ceilings](summary-standards.md#the-hedge-ladder-and-what-sets-its-ceiling)
+remain the single owner of confidence; this reference adds reading and
+second-position requirements, not a second ladder.
 
-## Methods for less common designs
+## Empirical approaches with less common methods
 
-| Design | What Methods must make visible |
+| Design | What the second position must make visible |
 |---|---|
 | Preprint | Name the actual design and analysis stage, such as a planned interim analysis. Venue is not a design or a confidence adjustment. Use the date printed on this version, without adding venue/review status to the note. |
-| Systematic review / meta-analysis | Give the number and designs of studies, total participants, search cut-off and pooling model. Do not let pooled *n* look like one primary study. Keep evidence limitations separate from review-process limitations using the [design taxonomy](summary-standards.md#the-limitations-taxonomy-by-design). |
+| Systematic review / meta-analysis | Give the number and designs of studies, total participants, search cut-off and pooling model. Do not let pooled *n* look like one primary study. Keep evidence limitations separate from review-process limitations using the [design taxonomy](summary-standards.md#the-limitations-taxonomy-by-mode-and-design). |
 | Model / simulation | Name the model class, calibration/fitting data, assumptions and scenarios, including the counterfactual comparator. Carry sensitivity ranges with estimates. Scope findings to the model, not the real population it represents; fit is not external validation. |
 | Machine-learning benchmark | Name systems, benchmark version/split, number of runs, fixed data/compute/prompt budgets and dated baselines. Separate the measured score from the capability it is a proxy for. |
 | Case report / series | State the count, lack of control group, and whether cases were consecutive or selected. Describe what happened in those cases, not its frequency in a population or a causal effect. |
 | Qualitative work | Name the interview/focus-group/observation method, participants, recruitment and analysis method. Attribute descriptions/typologies to those studied; neither a vivid quotation nor a purposive sample establishes population frequency. |
 
+## Reading non-empirical arguments
+
+Theory papers, narrative reviews, books, conceptual reports and standards use
+the [argument/synthesis mode](note-format.md#choose-the-body-mode). Preserve the
+same source-verification standard while changing what the six positions mean:
+
+- Separate the document's own thesis, derivation or recommendation from prior
+  work it quotes. A cited statement is not automatically this document's claim.
+- In the second position, name only the premises, scope, corpus, evidence
+  selection, formal reasoning or development process the source supplies. An
+  absent search protocol or experimental method is not a procedure to invent.
+- For a narrative review or book, synthesize the central argument and decisive
+  support instead of cataloguing sections. If it reports a reproducible search
+  and synthesis procedure as its contribution, use empirical mode instead.
+- For a standard, preserve the source's distinction among requirements,
+  recommendations and permissions. Explain the rationale and applicability
+  conditions without turning a normative rule into an observed effect.
+- A report or thesis uses the mode of its main contribution, not whichever
+  `format` value its frontmatter needs.
+
 ## Missing sections or figures
 
 - **No abstract heading:** read the first page before deciding the abstract is
   absent. `--sections` searches headings, not all abstract content. Do not
-  change `format` because the search missed it; write description from results.
-- **No Methods heading:** inspect the last pages and variants such as
-  “Experimental procedures”; methods may follow references or live in an
-  unavailable supplement. If the design remains unstated, say what is known and
-  what is missing. Do not invent a design to support a stronger claim; use the
-  conservative confidence the text supports and name the methodological gap.
+  change `format` because the search missed it; write the description from the
+  main contribution.
+- **No Methods heading in an empirical source:** inspect the last pages and
+  variants such as “Experimental procedures”; methods may follow references or
+  live in an unavailable supplement. If the design remains unstated, say what is
+  known and what is missing. Do not invent a design to support a stronger claim;
+  use the conservative confidence the text supports and name the methodological
+  gap.
+- **No Methods heading in a non-empirical source:** this is expected. Fill the
+  second position from the stated scope, premises, evidence base, reasoning or
+  notice grounds. If none is supplied, state that boundary rather than
+  manufacturing a method.
 - **No figure files:** follow [intake](../SKILL.md#1-select-and-inventory-the-work).
   A `--cites` miss does not prove a figureless paper: inspect unnumbered,
   non-English and image-only exhibits. Re-scan after permitted extraction.
@@ -36,15 +63,18 @@ requirements, not a second ladder.
 
 ## Notices and non-English sources
 
-A retraction, correction or comment is itself the note's subject. State what
-changed, by whom, on what grounds and when, identifying the affected article by
-its printed title/DOI where supplied. The first `sources:` item remains **this
-notice's PDF**, not the affected paper. Do not retell withdrawn findings as if
-the notice established them. Attribute the notice's statements rather than
-forcing them onto an effect rung. If an affected paper has its own note, report
+A retraction, correction, erratum or expression of concern uses [notice
+mode](note-format.md#choose-the-body-mode) and is itself the note's subject. A
+comment that advances an argument instead uses argument/synthesis mode. State
+what changed, by whom, on what grounds and when, identifying the affected
+article by its printed title/DOI where supplied. The first `sources:` item
+remains **this notice's PDF**, not the affected paper. Do not retell withdrawn
+findings as if the notice established them. Attribute the notice's statements
+rather than forcing them onto an effect rung. Separate what the action changes
+from what it leaves unresolved. If an affected paper has its own note, report
 it; do not rewrite that other note as part of this summary.
 
-Write summaries of non-English papers in English while preserving the printed
+Write summaries of non-English documents in English while preserving the printed
 `title`. Verification needles remain in the source's language and typography,
 including a decimal comma (`--find '13,2 meses'`). A translated needle's failure
 says nothing about the original claim. Check numbers, units and names on the

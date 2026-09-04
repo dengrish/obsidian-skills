@@ -12,8 +12,10 @@ broken extension-twin (a .png written from a URL guess sitting next to the
 
 What stays with you: deciding which images are figures, finding and normalizing
 captions, rewriting the body's references to `![[…]]` embeds, and inserting a
-`<!-- image download failed: <url> -->` placeholder for anything reported
-failed here. Those rules are in references/images.md.
+`<!-- image download failed: [redacted source locator] -->` placeholder for
+anything reported failed here. Use the helper's redacted ``url`` field rather
+than copying a signed query string or inline payload from the source. Those
+rules are in references/images.md.
 
 CLI
     python3 fetch_images.py stage --vault '<vault>' --out-dir '<scratch>/images' \\
@@ -27,10 +29,16 @@ CLI
     python3 fetch_images.py place --attachments '<vault>/Sources/Images' \\
         --owner-note '<vault>/Articles/Teslo_Pancreatic_Cancer_2026.md' \\
         --slug Teslo_Pancreatic_Cancer_2026 --index 3 --from-file '<rendered file>'
-    python3 fetch_images.py rename --attachments '<vault>/Sources/Images' \\
-        --sources '<vault>/Sources/PDFs' \\
+    python3 fetch_images.py rename --phase prepare [--dry-run] \\
+        --attachments '<vault>/Sources/Images' --sources '<vault>/Sources/PDFs' \\
         --owner-note '<vault>/Articles/Old_Slug_2025.md' \\
-        --old-slug Old_Slug_2025 --new-slug New_Slug_2026 [--dry-run]
+        --old-slug Old_Slug_2025 --new-slug New_Slug_2026 \\
+        --new-owner-note '<vault>/Articles/New_Slug_2026.md'
+    python3 fetch_images.py rename --phase finalize [--dry-run] \\
+        --attachments '<vault>/Sources/Images' --sources '<vault>/Sources/PDFs' \\
+        --owner-note '<vault>/Articles/Old_Slug_2025.md' \\
+        --old-slug Old_Slug_2025 --new-slug New_Slug_2026 \\
+        --new-owner-note '<vault>/Articles/New_Slug_2026.md'
     python3 fetch_images.py dependencies --attachments '<vault>/Sources/Images' \\
         --owner-note '<vault>/Articles/Old_Slug_2025.md' \\
         --old-slug Old_Slug_2025
@@ -44,6 +52,13 @@ the transport guards below, to a path OUTSIDE the vault; you render; `place`
 moves the result in under the write guards below. Neither the fetch nor the
 final write is left to the rendering step, because a script that does its own
 `urlopen` and its own `os.replace` into Sources/Images has none of this.
+
+`rename` requires an explicit phase. A clipping reprocess uses `prepare` to
+publish verified new-name copies while retaining the old names, then `finalize`
+only after the reported dependencies have been rewritten and an unchanged
+re-probe passes. The explicit `immediate` phase remains for compatibility with
+older callers whose set has no dependencies; it is deprecated for the clipping
+reprocess workflow and never substitutes for the two-owner handoff.
 
 `rename`'s required `--sources` is the vault's `Sources/PDFs`: a `<old_slug>.pdf`
 found anywhere beneath (the folder is recursive — book chapters live in
@@ -63,18 +78,15 @@ Guards, because this is the only script in the skill that writes into the vault:
   or nothing at all is rejected, and every final path is checked to be under
   the Sources/Images folder before anything is moved or renamed. `--slug` is free
   text from the model, not necessarily what `slug.py` returned.
-* **Neither `download` nor `rename` clobbers, and `rename` is all-or-nothing.**
-  A reprocess whose corrected
-  author/year lands on a slug that already has figures would otherwise
-  overwrite them silently, so an existing destination is an error for that
-  file (`--dry-run` reports it too) — and it refuses the whole set rather than
-  the one file, because the note's embeds are rewritten to a single slug and a
-  half-renamed set leaves half of them resolving to nothing under a stem no
-  re-run can reassemble. A case-only rename of the same file
-  (`teslo_…` → `Teslo_…`) is still allowed when identity checks confirm it.
-  The final move and every rollback move are exclusive too, so a destination
-  or old name claimed after the plan is preserved and the mixed state is
-  reported for inspection.
+* **Neither `download` nor a rename phase clobbers.** `prepare` exclusively
+  publishes byte-identical new-name copies and retains every old name;
+  `finalize` conditionally retires only its verified old duplicates. The legacy
+  `immediate` phase moves only a dependency-free set and is all-or-nothing. An
+  unexpected destination is an error (`--dry-run` reports it too). A case-only
+  immediate rename of the same file (`teslo_…` → `Teslo_…`) is still allowed
+  when identity checks confirm it. Publication, retirement and every rollback
+  are conditional, so a path claimed after the plan is preserved and any mixed
+  state is reported for inspection.
   `download` refuses an occupied `<slug>_fig_<N>.*` slot the same way —
   `shutil.move` replaces silently, so a re-run with the wrong `--start`
   destroyed figures with no way back. Pass `--overwrite` for the documented
@@ -82,9 +94,11 @@ Guards, because this is the only script in the skill that writes into the vault:
   clipping note whose rendered embed exactly names the file being replaced.
 * **A changed clipping stem has no hidden dependants.** For a canonical vault,
   `rename` inventories every other Markdown note for inbound old-note links and
-  old-image references before and during the operation. Any dependency or
-  incomplete scan refuses the set with exact blocker paths. `dependencies`
-  repeats that complete check before the old Articles path is retired.
+  old-image references before and during the operation. `prepare` reports those
+  dependencies while keeping both names resolvable; an incomplete scan still
+  blocks it. `finalize` and legacy `immediate` refuse any dependency or
+  incomplete scan with exact blocker paths. `dependencies` repeats that
+  complete check before the old Articles path is retired.
 * **Only `http`, `https` and `data:`** — generic URL clients also speak `file:`
   and `ftp:`, and clipped markdown legitimately carries `file://` image links.
   Each HTTP(S) hop is resolved once, every answer is checked, and the actual
@@ -102,9 +116,13 @@ Guards, because this is the only script in the skill that writes into the vault:
 * **Non-images are failures, not `.png`s, and the BYTES decide that.** A
   JSON/text/PDF error body is reported failed — naming what the bytes looked
   like — so the model writes the documented
-  `<!-- image download failed: <url> -->` placeholder instead of embedding a
-  file that Obsidian can't render. A `Content-Type` is only a hint: an
+  `<!-- image download failed: [redacted source locator] -->` placeholder
+  instead of embedding a file that Obsidian can't render. A `Content-Type` is
+  only a hint: an
   `image/png` header on a JSON body does not make it an image, and used to.
+  SVG is accepted only when the complete file is inert and self-contained;
+  active elements, event handlers, XML DTDs, and external resources are
+  refused before publication.
 
 Importable
     sniff_extension(head, content_type=None, url=None) -> str | None
@@ -114,6 +132,10 @@ Importable
     place_file(src, attachments, slug, index, owner_note=None) -> dict
     rename_slug(attachments, old_slug, new_slug, dry_run=False,
                 *, sources=..., owner_note=...) -> list[dict]
+    prepare_slug_rename(attachments, old_slug, new_slug, *, sources=...,
+                        owner_note=..., new_owner_note=..., dry_run=False) -> dict
+    finalize_slug_rename(attachments, old_slug, new_slug, *, sources=...,
+                         owner_note=..., new_owner_note=..., dry_run=False) -> dict
     dependency_status(attachments, owner_note, old_slug) -> dict
     validate_slug(slug, what="--slug") -> str          # raises ValueError
     validate_index(index, what="figure index") -> int  # raises ValueError
@@ -126,6 +148,7 @@ failed (the JSON lists which). Stdlib only.
 import argparse
 import base64
 import binascii
+import contextlib
 import errno
 import fnmatch
 import glob
@@ -148,6 +171,7 @@ import unicodedata
 import urllib.error
 import urllib.parse
 import warnings
+import xml.etree.ElementTree as ET
 import zipfile
 
 _OBSIDIAN_SHARED_MODULES = ("atomic_move", "figure_state", "slugify", "yaml_scalars")
@@ -329,6 +353,51 @@ CHUNK = 64 * 1024
 # so this helper is direct-only instead of silently weakening its address guard.
 PROXY_POLICY = "direct-only"
 
+
+def _report_url(url, limit=200):
+    """Return a useful URL locator without echoing credentials or payloads.
+
+    Image URLs commonly carry expiring signatures in their query strings, and
+    a ``data:`` URL contains the image itself. The raw capture remains the
+    recovery record, so JSON results and note placeholders need only enough
+    information to identify which source failed. Fragments never reach the
+    server and are omitted as well.
+    """
+    raw = str(url or "")
+    try:
+        parts = urllib.parse.urlsplit(raw)
+    except (TypeError, ValueError):
+        match = re.match(r"\A([A-Za-z][A-Za-z0-9+.-]*):", raw)
+        value = ((match.group(1).lower() + ":") if match else "URL:") \
+            + "<location omitted>"
+        return value[:limit]
+
+    scheme = parts.scheme.lower()
+    if scheme == "data":
+        metadata = raw[5:].split(",", 1)[0]
+        metadata = "".join(
+            char if 0x20 <= ord(char) < 0x7f else "?" for char in metadata)
+        value = "data:" + metadata[:80] + ",<payload omitted>"
+        return value[:limit]
+    if scheme in ("http", "https") and parts.hostname:
+        host = parts.hostname
+        if ":" in host and not host.startswith("["):
+            host = "[" + host + "]"
+        try:
+            explicit_port = parts.port
+        except ValueError:
+            explicit_port = None
+        authority = host + ((":" + str(explicit_port))
+                            if explicit_port is not None else "")
+        path = parts.path or "/"
+        path = "".join(char if ord(char) >= 0x20 and ord(char) != 0x7f else "?"
+                       for char in path)
+        query = "?<query omitted>" if "?" in raw.split("#", 1)[0] else ""
+        value = scheme + "://" + authority + path + query
+        return value[:limit] + ("…" if len(value) > limit else "")
+    value = (scheme + ":" if scheme else "URL:") + "<location omitted>"
+    return value[:limit]
+
 #: Every canonical extension this producer can return. CONVENTIONS.md §8a
 #: publishes the same set; the convention harness compares them and verifies
 #: wiki-linter recognizes every one as an image embed.
@@ -371,6 +440,201 @@ _NOT_IMAGE_MAGIC = (
 
 #: An SVG root element, once the prolog has been stepped over.
 _SVG_ROOT_RE = re.compile(r"<svg([\s>/]|$)", re.I)
+_SVG_NAMESPACE = "http://www.w3.org/2000/svg"
+_SVG_ACTIVE_ELEMENTS = frozenset((
+    "animate", "animatecolor", "animatemotion", "animatetransform",
+    "audio", "discard", "embed", "fencedframe", "foreignobject", "frame",
+    "handler", "iframe", "img", "link", "listener", "meta", "object",
+    "portal", "script", "set", "source", "track", "video",
+))
+_SVG_EXTERNAL_ATTRIBUTES = frozenset(("base", "href", "poster", "src"))
+_SVG_CSS_VALUE_ATTRIBUTES = frozenset((
+    "background", "background-image", "border-image", "border-image-source",
+    "clip-path", "color-profile", "content", "cursor", "fill", "fill-image",
+    "filter",
+    "list-style", "list-style-image", "marker", "marker-end", "marker-mid",
+    "marker-start", "mask", "mask-border", "mask-border-source", "mask-image",
+    "offset", "offset-path", "shape-inside", "shape-outside",
+    "shape-subtract", "stroke", "stroke-image", "style",
+))
+_SVG_CSS_RESOURCE_FUNCTIONS = (
+    "-webkit-image-set", "image-set", "image", "attr", "src",
+)
+
+
+def _xml_name(name):
+    """Return ``(namespace, local-name)`` for an ElementTree name."""
+    if name.startswith("{") and "}" in name:
+        namespace, local = name[1:].split("}", 1)
+        return namespace, local
+    return "", name
+
+
+def _css_without_comments(css):
+    """Remove CSS comments without treating comment markers in strings as syntax."""
+    out = []
+    index = 0
+    quote = None
+    while index < len(css):
+        char = css[index]
+        if quote is not None:
+            out.append(char)
+            if char == "\\" and index + 1 < len(css):
+                index += 1
+                out.append(css[index])
+            elif char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+            out.append(char)
+            index += 1
+            continue
+        if css.startswith("/*", index):
+            end = css.find("*/", index + 2)
+            if end < 0:
+                return None
+            index = end + 2
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
+def _css_reference_issue(css):
+    """Return a reason when CSS can load anything beyond a local fragment.
+
+    This is deliberately a small deny parser, not a CSS sanitizer. Comments are
+    removed before tokens are inspected, strings outside functions are skipped,
+    and escapes in identifiers or ``url()`` arguments are refused because they
+    can spell an external locator without leaving a literal ``url(http...)``.
+    Resource-capable ``image()``, ``image-set()`` and ``src()`` functions, and
+    typed ``attr()`` values that can become URLs, are refused conservatively;
+    unlike ``url()``, their arguments are not reliably distinguishable from
+    inert strings with this small parser. Empty and fragment-only URL functions
+    remain self-contained.
+    """
+    css = _css_without_comments(str(css))
+    if css is None:
+        return "malformed CSS comments"
+    index = 0
+    while index < len(css):
+        char = css[index]
+        if char in ("'", '"'):
+            quote = char
+            index += 1
+            while index < len(css):
+                if css[index] == "\\":
+                    index += 2
+                    continue
+                if css[index] == quote:
+                    index += 1
+                    break
+                index += 1
+            else:
+                return "malformed CSS string"
+            continue
+        if char == "\\":
+            return "an escaped CSS token"
+        if css[index:index + 7].casefold() == "@import":
+            return "a CSS import"
+        if re.match(
+                r"@(?:-[A-Za-z0-9_]+-)?keyframes\b", css[index:], re.I):
+            return "a CSS animation"
+        previous = index - 1
+        while previous >= 0 and css[previous].isspace():
+            previous -= 1
+        if previous < 0 or css[previous] in ("{", ";"):
+            active_property = re.match(
+                r"(?:-[A-Za-z0-9_]+-)?(?:animation|transition)"
+                r"(?:-[A-Za-z0-9_-]+)?\s*:", css[index:], re.I)
+            if active_property:
+                return "a CSS animation or transition"
+        for function_name in _SVG_CSS_RESOURCE_FUNCTIONS:
+            if css[index:index + len(function_name)].casefold() != function_name:
+                continue
+            if index and (css[index - 1].isalnum()
+                          or css[index - 1] in ("_", "-")):
+                continue
+            cursor = index + len(function_name)
+            while cursor < len(css) and css[cursor].isspace():
+                cursor += 1
+            if cursor < len(css) and css[cursor] == "(":
+                return "a CSS resource function"
+        if css[index:index + 3].casefold() != "url":
+            index += 1
+            continue
+        cursor = index + 3
+        while cursor < len(css) and css[cursor].isspace():
+            cursor += 1
+        if cursor >= len(css) or css[cursor] != "(":
+            index += 3
+            continue
+        cursor += 1
+        while cursor < len(css) and css[cursor].isspace():
+            cursor += 1
+        if cursor < len(css) and css[cursor] in ("'", '"'):
+            quote = css[cursor]
+            cursor += 1
+            start = cursor
+            while cursor < len(css) and css[cursor] != quote:
+                if css[cursor] == "\\":
+                    return "an escaped CSS URL"
+                cursor += 1
+            if cursor >= len(css):
+                return "a malformed CSS URL"
+            target = css[start:cursor].strip()
+            cursor += 1
+            while cursor < len(css) and css[cursor].isspace():
+                cursor += 1
+            if cursor >= len(css) or css[cursor] != ")":
+                return "a malformed CSS URL"
+        else:
+            start = cursor
+            while cursor < len(css) and css[cursor] != ")":
+                if css[cursor] in ("\\", "'", '"'):
+                    return "an escaped or malformed CSS URL"
+                cursor += 1
+            if cursor >= len(css):
+                return "a malformed CSS URL"
+            target = css[start:cursor].strip()
+        if target and not target.startswith("#"):
+            return "an external CSS URL"
+        index = cursor + 1
+    return None
+
+
+def _xml_directive_issue(text):
+    """Detect DTDs/stylesheets outside comments and CDATA before XML parsing."""
+    index = 0
+    while True:
+        index = text.find("<", index)
+        if index < 0:
+            return None
+        if text.startswith("<!--", index):
+            end = text.find("-->", index + 4)
+            if end < 0:
+                return "malformed XML comment"
+            index = end + 3
+            continue
+        if text.startswith("<![CDATA[", index):
+            end = text.find("]]>", index + 9)
+            if end < 0:
+                return "malformed XML CDATA"
+            index = end + 3
+            continue
+        if text.startswith("<?", index):
+            end = text.find("?>", index + 2)
+            if end < 0:
+                return "malformed XML processing instruction"
+            if re.match(r"<\?xml-stylesheet\b", text[index:end + 2], re.I):
+                return "an external XML stylesheet"
+            index = end + 2
+            continue
+        if re.match(r"<!DOCTYPE\b", text[index:], re.I):
+            return "an XML DOCTYPE"
+        index += 1
 
 
 def _decode_text(head):
@@ -451,6 +715,75 @@ def _is_svg_text(text):
             return False
         s = s[end + skip:].lstrip()
     return bool(_SVG_ROOT_RE.match(s))
+
+
+def _svg_safety_issue(text):
+    """Name active or externally loaded SVG content, else return ``None``.
+
+    A local SVG is displayed later by Obsidian/Electron, outside this helper's
+    process. Parse its XML structure instead of trying to sanitize markup with
+    regular expressions: character references and CDATA must be interpreted in
+    their actual context, while comments and text labels must not become false
+    element or CSS matches. Fragment-only references such as ``href="#marker"``
+    and ``url("#gradient")`` remain available for ordinary diagrams.
+    """
+    directive_issue = _xml_directive_issue(text)
+    if directive_issue:
+        return directive_issue
+    try:
+        root = ET.fromstring(text)
+    except (ET.ParseError, ValueError) as exc:
+        return "malformed XML (%s)" % exc
+    namespace, local = _xml_name(root.tag)
+    if local.casefold() != "svg" or namespace not in ("", _SVG_NAMESPACE):
+        return "a non-SVG root element or namespace"
+
+    for element in root.iter():
+        if not isinstance(element.tag, str):
+            continue
+        _namespace, local = _xml_name(element.tag)
+        local = local.casefold()
+        if local in _SVG_ACTIVE_ELEMENTS:
+            return "an active script, animation, or foreign element"
+        for raw_name, raw_value in element.attrib.items():
+            _attr_namespace, name = _xml_name(raw_name)
+            name = name.casefold()
+            value = str(raw_value)
+            if len(name) > 2 and name.startswith("on"):
+                return "an event-handler attribute"
+            if name in _SVG_EXTERNAL_ATTRIBUTES:
+                locator = value.strip()
+                if locator and not locator.startswith("#"):
+                    return "an external href, source, or base attribute"
+            if (name in ("animation", "transition")
+                    or name.startswith(("animation-", "transition-"))):
+                return "a CSS animation or transition attribute"
+            if name in _SVG_CSS_VALUE_ATTRIBUTES:
+                issue = _css_reference_issue(value)
+                if issue:
+                    return "an external CSS resource (%s)" % issue
+        if local == "style":
+            issue = _css_reference_issue("".join(element.itertext()))
+            if issue:
+                return "an external CSS resource (%s)" % issue
+    return None
+
+
+def _validate_svg_file(path, max_bytes=DEFAULT_MAX_BYTES):
+    """Require a bounded, complete, inert, self-contained UTF-8 SVG file."""
+    size = os.path.getsize(path)
+    if size > max_bytes:
+        raise ValueError(
+            "SVG exceeds the %d-byte safety cap" % max_bytes)
+    with open(path, "r", encoding="utf-8-sig", newline="") as source:
+        text = source.read()
+    if not _is_svg_text(text):
+        raise ValueError("SVG root could not be validated from the complete file")
+    issue = _svg_safety_issue(text)
+    if issue:
+        raise ValueError(
+            "refusing SVG with %s; only inert self-contained SVG is supported"
+            % issue)
 
 
 def _image_magic(head):
@@ -1200,7 +1533,8 @@ def _load_clipping_owner(owner_note, slug, attachments, *, require_vault=False):
             "owner note's canonical <vault>/Sources/Images folder so the "
             "vault-wide dependency scan cannot be bypassed")
     return {"path": path, "slug": slug, "attachments": attachments,
-            "snapshot": snapshot, "embeds": embeds, "vault": vault}
+            "snapshot": snapshot, "embeds": embeds, "vault": vault,
+            "origin": normalize_url(origin)}
 
 
 def _validate_clipping_owner(owner):
@@ -1611,7 +1945,10 @@ def _vetted_target(url, allow_private=False):
     :func:`_connect_vetted`. The hostname is never handed to a connector a
     second time. ``data:`` returns ``None`` because it has no network target.
     """
-    parts = urllib.parse.urlsplit(url)
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid URL: %s" % _report_url(url)) from exc
     scheme = parts.scheme.lower()
     if scheme not in ALLOWED_SCHEMES:
         raise ValueError(f"unsupported URL scheme {scheme or '(none)'!r} — only "
@@ -1621,7 +1958,7 @@ def _vetted_target(url, allow_private=False):
     if any(ord(ch) < 0x20 or ord(ch) == 0x7f for ch in url):
         raise ValueError("HTTP(S) URL contains a control character")
     if not parts.hostname:
-        raise ValueError(f"URL has no host: {url[:120]!r}")
+        raise ValueError("URL has no host: %s" % _report_url(url))
     if parts.username is not None or parts.password is not None:
         raise ValueError("credentials in HTTP(S) URLs are not supported")
     try:
@@ -2127,8 +2464,8 @@ def _fetch_to_path(url, tmp, timeout, max_bytes, max_seconds, allow_private,
             elif not 200 <= status < 300:
                 raise urllib.error.HTTPError(
                     current_url, status,
-                    "HTTP status is neither success nor a supported redirect: "
-                    + str(resp.reason), resp.headers, None)
+                    "HTTP status is neither success nor a supported redirect",
+                    resp.headers, None)
             else:
                 content_type = resp.headers.get("Content-Type")
                 if record is not None:
@@ -2160,7 +2497,7 @@ def download_one(url, attachments, slug, index, timeout=45,
                  allow_private=False, overwrite=False, owner_note=None,
                  require_vault=False):
     """Fetch one image and move it to <attachments>/<slug>_fig_<index>.<ext>."""
-    result = {"index": index, "url": url[:200] + ("…" if len(url) > 200 else ""),
+    result = {"index": index, "url": _report_url(url),
               "final_url": None, "ok": False, "path": None, "filename": None,
               "ext": None, "bytes": 0, "error": None}
     tmp = _temp_path()
@@ -2188,6 +2525,8 @@ def download_one(url, attachments, slug, index, timeout=45,
             raise ValueError("URL did not resolve to an image — the bytes look "
                              f"like {describe_bytes(head)} (Content-Type: "
                              f"{content_type or 'none'})")
+        if ext == "svg":
+            _validate_svg_file(tmp)
         os.makedirs(attachments, exist_ok=True)
         final = os.path.join(attachments, f"{slug}_fig_{index}.{ext}")
         _ensure_within(attachments, final)
@@ -2214,6 +2553,8 @@ def download_one(url, attachments, slug, index, timeout=45,
     finally:
         if not publication_handed_off and os.path.exists(tmp):
             os.remove(tmp)
+        if result.get("final_url"):
+            result["final_url"] = _report_url(result["final_url"])
     return result
 
 
@@ -2239,7 +2580,7 @@ def fetch_source(url, out=None, timeout=45, max_bytes=DEFAULT_MAX_BYTES,
     rendered result *into* `Sources/Images/` is `place_file`'s job, which is
     where the slug, containment and occupied-slot guards live.
     """
-    result = {"url": url[:200] + ("…" if len(url) > 200 else ""),
+    result = {"url": _report_url(url),
               "final_url": None, "ok": False, "path": None, "bytes": 0,
               "content_type": None, "source_format": None, "error": None}
     tmp = _temp_path()
@@ -2282,6 +2623,8 @@ def fetch_source(url, out=None, timeout=45, max_bytes=DEFAULT_MAX_BYTES,
                 os.remove(tmp)
             except OSError:
                 pass
+        if result.get("final_url"):
+            result["final_url"] = _report_url(result["final_url"])
     return result
 
 
@@ -2347,6 +2690,8 @@ def place_file(src, attachments, slug, index, overwrite=False, owner_note=None,
             if ext is None:
                 raise ValueError("the file is not an image — the bytes look like "
                                  f"{describe_bytes(head)}")
+            if ext == "svg":
+                _validate_svg_file(inspected)
             os.makedirs(attachments, exist_ok=True)
             final = os.path.join(attachments, f"{slug}_fig_{index}.{ext}")
             _ensure_within(attachments, final)
@@ -2515,7 +2860,8 @@ def dependency_status(attachments, owner_note, old_slug):
 
 
 def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources,
-                owner_note=None, require_vault=False):
+                owner_note=None, require_vault=False,
+                _allow_dependencies=False, _allow_prepared=False):
     """Rename every <old_slug>_fig_N.<ext> attachment to the new slug.
 
     **All or nothing.** The whole set is planned first, and if any member is
@@ -2556,6 +2902,8 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources,
     """
     validate_slug(old_slug, "--old-slug")
     validate_slug(new_slug, "--new-slug")
+    if (_allow_dependencies or _allow_prepared) and not dry_run:
+        raise ValueError("internal prepared-handoff allowances are planning-only")
     if sources is None:
         raise ValueError("--sources is required for every rename so PDF-owned "
                          "figures cannot be mistaken for clipping images")
@@ -2620,7 +2968,19 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources,
         # lexists, not exists: a broken symlink at dst is still something there.
         elif any(not _same_file(src, path) for path in destination_slot) \
                 or (os.path.lexists(dst) and not _same_file(src, dst)):
-            entry["error"] = "destination exists (the figure slot includes every extension)"
+            prepared = False
+            if (_allow_prepared and len(destination_slot) == 1
+                    and _manifest_name_key(os.path.basename(destination_slot[0]))
+                    == _manifest_name_key(os.path.basename(dst))):
+                try:
+                    old_snapshot = _stable_regular_snapshot(src)
+                    new_snapshot = _stable_regular_snapshot(dst)
+                    prepared = old_snapshot[1:] == new_snapshot[1:]
+                except (OSError, UnicodeError, ValueError):
+                    prepared = False
+            if not prepared:
+                entry["error"] = ("destination exists (the figure slot includes "
+                                  "every extension)")
         else:
             try:
                 _ensure_within(attachments, src)
@@ -2672,7 +3032,8 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources,
     changed_slug = old_slug != new_slug
     dependency_blockers = (_vault_dependency_blockers(
         owner, old_slug, dependency_images) if changed_slug else [])
-    if dependency_blockers:
+    dependency_errors = [row for row in dependency_blockers if row.get("error")]
+    if dependency_blockers and (not _allow_dependencies or dependency_errors):
         error = _dependency_error(dependency_blockers)
         if not plan:
             entry = {"from": old_slug + ".md", "to": new_slug + ".md",
@@ -2759,6 +3120,287 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources,
     return [e for _s, _d, e in plan]
 
 
+def _handoff_plan(attachments, sources, owner_note, new_owner_note,
+                  old_slug, new_slug):
+    """Validate one two-owner image mapping without changing either set."""
+    if old_slug == new_slug:
+        raise ValueError("a two-phase handoff requires two distinct slug spellings")
+    results = rename_slug(
+        attachments, old_slug, new_slug, True, sources=sources,
+        owner_note=owner_note, require_vault=True,
+        _allow_dependencies=True, _allow_prepared=True)
+    failed = [row for row in results if not row.get("ok")]
+    if failed:
+        raise ValueError("image handoff preflight failed: " + "; ".join(
+            "%s (%s)" % (row.get("from"), row.get("error"))
+            for row in failed))
+
+    old_owner = _load_clipping_owner(
+        owner_note, old_slug, attachments, require_vault=True)
+    new_owner = _load_clipping_owner(
+        new_owner_note, new_slug, attachments, require_vault=True)
+    if old_owner["origin"] != new_owner["origin"]:
+        raise ValueError("old and new owner notes do not have the same normalized "
+                         "web origin")
+    try:
+        if os.path.samefile(old_owner["path"], new_owner["path"]):
+            raise ValueError("old and new owner notes resolve to the same file; "
+                             "a two-phase handoff needs both paths live")
+    except FileNotFoundError as exc:
+        raise ValueError("both old and new owner notes must remain present") from exc
+
+    mapping = []
+    for row in results:
+        old_name, new_name = row["from"], row["to"]
+        old_path = os.path.join(attachments, old_name)
+        new_path = os.path.join(attachments, new_name)
+        if _same_file(old_path, new_path):
+            raise ValueError("%s and %s resolve to the same file; use the ordinary "
+                             "case-only rename path" % (old_name, new_name))
+        if sum(_manifest_name_key(name) == _manifest_name_key(old_name)
+               for name in old_owner["embeds"]) != 1:
+            raise ValueError("%s is no longer a unique rendered filename-only "
+                             "embed in the old owner note %s" %
+                             (old_name, old_owner["path"]))
+        if sum(_manifest_name_key(name) == _manifest_name_key(new_name)
+               for name in new_owner["embeds"]) != 1:
+            raise ValueError("%s is not a unique rendered filename-only embed in "
+                             "the new owner note %s" %
+                             (new_name, new_owner["path"]))
+        if any(_manifest_name_key(name) == _manifest_name_key(old_name)
+               for name in new_owner["embeds"]):
+            raise ValueError("the new owner note still embeds old image %s" % old_name)
+        mapping.append({"from": old_name, "to": new_name})
+
+    dependency = dependency_status(attachments, owner_note, old_slug)
+    incomplete = [row for row in dependency["blockers"] if row.get("error")]
+    if incomplete:
+        raise ValueError(_dependency_error(incomplete))
+    _validate_clipping_owner(old_owner)
+    _validate_clipping_owner(new_owner)
+    return old_owner, new_owner, mapping, dependency
+
+
+def _rollback_new_publications(published, stage, stage_parent):
+    """Withdraw only new-name copies this prepare call published."""
+    failures = []
+    for index, (path, expected) in enumerate(reversed(published), 1):
+        rollback = os.path.join(stage, "rollback-new-%d" % index)
+        try:
+            os.mkdir(rollback)
+            remove_expected(
+                path, expected, _stable_regular_snapshot, rollback,
+                stage_parent=stage_parent,
+                recovery_prefix=".clipping-handoff-recovery-")
+        except (OSError, UnicodeError, ValueError) as exc:
+            failures.append("%s (%s)" % (path, exc))
+    return failures
+
+
+def prepare_slug_rename(attachments, old_slug, new_slug, *, sources,
+                        owner_note, new_owner_note, dry_run=False):
+    """Publish verified new-name image copies while retaining every old name."""
+    old_owner, new_owner, mapping, dependency = _handoff_plan(
+        attachments, sources, owner_note, new_owner_note, old_slug, new_slug)
+    rows = []
+    for item in mapping:
+        src = os.path.join(attachments, item["from"])
+        dst = os.path.join(attachments, item["to"])
+        action = "already-prepared" if os.path.lexists(dst) else (
+            "would-copy" if dry_run else "copy")
+        rows.append(dict(item, ok=True, action=action))
+    if dry_run:
+        return {"ok": True, "phase": "prepare", "old_slug": old_slug,
+                "new_slug": new_slug, "mapping": mapping,
+                "dependency": dependency, "results": rows,
+                "prepared": 0}
+
+    stage_parent = os.path.dirname(os.path.realpath(attachments))
+    stage = tempfile.mkdtemp(prefix=".clipping-handoff-prepare-",
+                             dir=stage_parent)
+    published = []
+    try:
+        for index, (item, row) in enumerate(zip(mapping, rows), 1):
+            src = os.path.join(attachments, item["from"])
+            dst = os.path.join(attachments, item["to"])
+            _validate_clipping_owner(old_owner)
+            _validate_clipping_owner(new_owner)
+            current = dependency_status(attachments, owner_note, old_slug)
+            incomplete = [blocker for blocker in current["blockers"]
+                          if blocker.get("error")]
+            if incomplete:
+                raise ValueError(_dependency_error(incomplete))
+
+            old_mode = stat.S_IMODE(os.lstat(src).st_mode)
+            old_snapshot = _stable_regular_snapshot(src)
+            if os.path.lexists(dst):
+                new_snapshot = _stable_regular_snapshot(dst)
+                if old_snapshot[1:] != new_snapshot[1:]:
+                    raise ValueError("prepared destination %s is not byte-for-byte "
+                                     "and mode-identical to %s" % (dst, src))
+                row["action"] = "already-prepared"
+            else:
+                staged = os.path.join(stage, "image-%d" % index)
+                copied = _stable_regular_snapshot(
+                    src, copy_to=staged, copy_mode=old_mode)
+                if copied != old_snapshot:
+                    raise ValueError("%s changed while its handoff copy was staged"
+                                     % src)
+                published_snapshot = publish_new(
+                    staged, dst, _stable_regular_snapshot, stage_parent,
+                    recovery_prefix=".clipping-handoff-recovery-")
+                published.append((dst, published_snapshot))
+                if (_stable_regular_snapshot(src) != old_snapshot
+                        or _stable_regular_snapshot(dst)[1:] != old_snapshot[1:]):
+                    raise ValueError("the published handoff copy of %s could not be "
+                                     "verified against its old source" % item["from"])
+                row["action"] = "copied"
+            row["sha256"] = old_snapshot[1]
+            row["bytes"] = old_snapshot[3]
+
+        _validate_clipping_owner(old_owner)
+        _validate_clipping_owner(new_owner)
+        dependency = dependency_status(attachments, owner_note, old_slug)
+        incomplete = [blocker for blocker in dependency["blockers"]
+                      if blocker.get("error")]
+        if incomplete:
+            raise ValueError(_dependency_error(incomplete))
+    except BaseException as exc:
+        failures = _rollback_new_publications(published, stage, stage_parent)
+        if failures:
+            raise ValueError(
+                "image handoff preparation failed (%s); rollback was incomplete. "
+                "Preserve and inspect %s and: %s" %
+                (exc, stage, "; ".join(failures))) from exc
+        shutil.rmtree(stage, ignore_errors=True)
+        raise
+    shutil.rmtree(stage, ignore_errors=True)
+    return {"ok": True, "phase": "prepare", "old_slug": old_slug,
+            "new_slug": new_slug, "mapping": mapping,
+            "dependency": dependency, "results": rows,
+            "prepared": sum(row["action"] == "copied" for row in rows)}
+
+
+def _restore_retired_images(retired, stage_parent):
+    """Restore conditionally retired old images; retain stages on any conflict."""
+    failures = []
+    for src, expected, stage in reversed(retired):
+        displaced = os.path.join(stage, ".atomic-displaced")
+        try:
+            if _stable_regular_snapshot(displaced) != expected:
+                raise ValueError("private retired snapshot changed")
+            if os.path.lexists(src):
+                if _stable_regular_snapshot(src) != expected:
+                    raise ValueError("public old-image path was reoccupied by a "
+                                     "different file")
+                # remove_expected can detect a late conflict after it has
+                # already restored the expected public inode. Its retained
+                # private hard link is cleanup state, not an unrestored image.
+                continue
+            move_noreplace(
+                displaced, src, expected=file_identity(displaced),
+                stage_parent=stage_parent)
+            if _stable_regular_snapshot(src) != expected:
+                raise ValueError("restored public image differs from its snapshot")
+        except (OSError, UnicodeError, ValueError) as exc:
+            failures.append("%s (recovery stage %s: %s)" % (src, stage, exc))
+    if not failures:
+        for _src, _expected, stage in retired:
+            shutil.rmtree(stage, ignore_errors=True)
+    return failures
+
+
+def finalize_slug_rename(attachments, old_slug, new_slug, *, sources,
+                         owner_note, new_owner_note, dry_run=False):
+    """Retire only exact old images after every old dependency has disappeared."""
+    old_owner, new_owner, mapping, dependency = _handoff_plan(
+        attachments, sources, owner_note, new_owner_note, old_slug, new_slug)
+    if not dependency["ok"]:
+        raise ValueError(_dependency_error(dependency["blockers"]))
+
+    snapshots = []
+    rows = []
+    for item in mapping:
+        src = os.path.join(attachments, item["from"])
+        dst = os.path.join(attachments, item["to"])
+        old_snapshot = _stable_regular_snapshot(src)
+        new_snapshot = _stable_regular_snapshot(dst)
+        if old_snapshot[1:] != new_snapshot[1:]:
+            raise ValueError("%s is not the verified byte-identical prepared copy "
+                             "of %s" % (dst, src))
+        snapshots.append((src, dst, old_snapshot, new_snapshot))
+        rows.append(dict(item, ok=True,
+                         action="would-retire" if dry_run else "retire",
+                         sha256=old_snapshot[1], bytes=old_snapshot[3]))
+    if dry_run:
+        return {"ok": True, "phase": "finalize", "old_slug": old_slug,
+                "new_slug": new_slug, "mapping": mapping,
+                "dependency": dependency, "results": rows, "retired": 0}
+
+    stage_parent = os.path.dirname(os.path.realpath(attachments))
+    retired = []
+    try:
+        for src, dst, old_snapshot, new_snapshot in snapshots:
+            _validate_clipping_owner(old_owner)
+            _validate_clipping_owner(new_owner)
+            current = dependency_status(attachments, owner_note, old_slug)
+            if not current["ok"]:
+                raise ValueError(_dependency_error(current["blockers"]))
+            if (_stable_regular_snapshot(src) != old_snapshot
+                    or _stable_regular_snapshot(dst) != new_snapshot):
+                raise ValueError("an old or new image changed after finalization "
+                                 "preflight")
+            stage = tempfile.mkdtemp(prefix=".clipping-handoff-retire-",
+                                     dir=stage_parent)
+            try:
+                removed = remove_expected(
+                    src, old_snapshot, _stable_regular_snapshot, stage,
+                    stage_parent=stage_parent,
+                    recovery_prefix=".clipping-handoff-recovery-")
+            except BaseException:
+                if os.path.lexists(os.path.join(stage, ".atomic-displaced")):
+                    retired.append((src, old_snapshot, stage))
+                else:
+                    shutil.rmtree(stage, ignore_errors=True)
+                raise
+            if not removed:
+                shutil.rmtree(stage, ignore_errors=True)
+                raise ValueError("old image disappeared before retirement: %s" % src)
+            retired.append((src, old_snapshot, stage))
+            if _stable_regular_snapshot(dst) != new_snapshot:
+                raise ValueError("new image changed while its old duplicate was "
+                                 "being retired: %s" % dst)
+            current = dependency_status(attachments, owner_note, old_slug)
+            if not current["ok"]:
+                raise ValueError(_dependency_error(current["blockers"]))
+
+        _validate_clipping_owner(old_owner)
+        _validate_clipping_owner(new_owner)
+        dependency = dependency_status(attachments, owner_note, old_slug)
+        if not dependency["ok"]:
+            raise ValueError(_dependency_error(dependency["blockers"]))
+        for _src, dst, _old_snapshot, new_snapshot in snapshots:
+            if _stable_regular_snapshot(dst) != new_snapshot:
+                raise ValueError("new image changed before finalization completed: %s"
+                                 % dst)
+    except BaseException as exc:
+        failures = _restore_retired_images(retired, stage_parent)
+        if failures:
+            raise ValueError(
+                "image handoff finalization failed (%s); rollback was incomplete. "
+                "Preserve every public image and: %s" %
+                (exc, "; ".join(failures))) from exc
+        raise
+    for _src, _expected, stage in retired:
+        shutil.rmtree(stage, ignore_errors=True)
+    for row in rows:
+        row["action"] = "retired"
+    return {"ok": True, "phase": "finalize", "old_slug": old_slug,
+            "new_slug": new_slug, "mapping": mapping,
+            "dependency": dependency, "results": rows,
+            "retired": len(rows)}
+
+
 class _FakeResponse:
     """Just enough of an `http.client.HTTPResponse` for `_stream_to_file`.
 
@@ -2833,6 +3475,22 @@ def run_self_test():
             return ""
         cases.append((label, False, "accepted", "refused"))
         return ""
+
+    phase_stderr = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(phase_stderr):
+            main([
+                "rename", "--attachments", "unused-images",
+                "--sources", "unused-pdfs", "--owner-note", "unused.md",
+                "--old-slug", "Old_Slug_2025",
+                "--new-slug", "New_Slug_2026",
+            ])
+        missing_phase_exit = None
+    except SystemExit as exc:
+        missing_phase_exit = exc.code
+    check("rename CLI refuses an omitted phase before touching paths",
+          (missing_phase_exit, "--phase" in phase_stderr.getvalue()),
+          (2, True))
 
     # --- sniff_extension: bytes beat Content-Type beat the URL --------------
     exercised_extensions = set()
@@ -2967,6 +3625,125 @@ def run_self_test():
             exercised_extensions.add(want)
     check("signature fixtures cover the full advertised output-extension set",
           exercised_extensions, set(OUTPUT_EXTENSIONS))
+
+    for label, svg in (
+            ("fragment references",
+             '<svg><defs><linearGradient id="g"/></defs>'
+             '<rect style="fill:url(#g)"/><use href="#g"/></svg>'),
+            ("quoted fragment CSS",
+             '<svg><style>.x{fill:url("#g")}</style><rect class="x"/></svg>'),
+            ("encoded fragment href",
+             '<svg><use href="&#35;g"/></svg>'),
+            ("inert comment text",
+             '<svg><!-- <script onload="bad()"> --><rect/></svg>'),
+            ("literal text that resembles CSS",
+             '<svg><text>@import url(https://example.test/not-css)</text></svg>'),
+            ("an inert CSS string that names a resource function",
+             '<svg><style>.x::after{content:"image(https://example.test/a)"}'
+             '</style></svg>'),
+            ("an escaped inert CSS content string",
+             '<svg><style>.x::after{content:"\\2022"}</style></svg>'),
+            ("an animation-named CSS class without animation",
+             '<svg><style>.animation:hover{fill:red}</style></svg>'),
+            ("a local shape-inside presentation reference",
+             '<svg><path id="shape"/><text shape-inside="url(#shape)"/></svg>'),
+            ("CDATA that resembles active markup",
+             '<svg><text><![CDATA[<script onload="bad()">]]></text></svg>'),
+            ("a benign processing instruction with directive-looking data",
+             '<svg><?generator value="<!DOCTYPE svg><script/>"?><rect/></svg>'),
+            ("forbidden directives inside comments",
+             '<svg><!-- <!DOCTYPE svg><?xml-stylesheet href="x"?> --></svg>')):
+        check("self-contained SVG permits %s" % label,
+              _svg_safety_issue(svg), None)
+    for label, svg, finding in (
+            ("DOCTYPE", '<!DOCTYPE svg><svg/>', "DOCTYPE"),
+            ("XML stylesheet",
+             '<?xml-stylesheet href="https://cdn.example/a.css"?><svg/>',
+             "stylesheet"),
+            ("script", '<svg><script>bad()</script></svg>', "script"),
+            ("foreignObject", '<svg><foreignObject/></svg>', "foreign"),
+            ("animation", '<svg><animate attributeName="x"/></svg>', "animation"),
+            ("animateColor", '<svg><animateColor attributeName="fill"/></svg>',
+             "animation"),
+            ("event handler", '<svg onload="bad()"/>', "event-handler"),
+            ("remote href", '<svg><image href="https://cdn.example/a.png"/></svg>',
+             "external href"),
+            ("encoded remote href",
+             '<svg><image href="&#104;ttps://cdn.example/a.png"/></svg>',
+             "external href"),
+            ("remote source attribute",
+             '<svg><image src="https://cdn.example/a.png"/></svg>',
+             "external href"),
+            ("data href", '<svg><image href="data:image/png;base64,AA"/></svg>',
+             "external href"),
+            ("external base", '<svg xml:base="https://cdn.example/"><use href="#x"/></svg>',
+             "external href"),
+            ("CSS import", '<svg><style>@import "a.css";</style></svg>',
+             "external CSS"),
+            ("CSS URL", '<svg><style>fill:url(https://cdn.example/a)</style></svg>',
+             "external CSS"),
+            ("comment-obfuscated CSS URL",
+             '<svg><style>fill:u/**/rl(https://cdn.example/a)</style></svg>',
+             "external CSS"),
+            ("escaped CSS URL",
+             '<svg><style>fill:u\\72l(https://cdn.example/a)</style></svg>',
+             "external CSS"),
+            ("CSS image string",
+             '<svg><style>.x{background:image("https://cdn.example/a")}'
+             '</style></svg>', "external CSS"),
+            ("CSS image-set protocol-relative string",
+             '<svg><style>.x{background:image-set("//cdn.example/a" 1x)}'
+             '</style></svg>', "external CSS"),
+            ("comment-obfuscated CSS image function",
+             '<svg><style>.x{background:im/**/age("a.png")}</style></svg>',
+             "external CSS"),
+            ("vendor CSS image-set relative string",
+             '<svg><style>.x{background:-webkit-image-set("a.png" 1x)}'
+             '</style></svg>', "external CSS"),
+            ("CSS src function",
+             '<svg><style>@font-face{src:src("https://cdn.example/a.woff")}'
+             '</style></svg>', "external CSS"),
+            ("escaped CSS string in a resource function",
+             '<svg><style>.x{background:image("\\68ttps://cdn.example/a")}'
+             '</style></svg>', "external CSS"),
+            ("external shape-inside presentation attribute",
+             '<svg><text shape-inside="url(https://cdn.example/shape.svg)"/>'
+             '</svg>', "external CSS"),
+            ("external mask-image presentation attribute",
+             '<svg><rect mask-image="image(https://cdn.example/mask.svg)"/>'
+             '</svg>', "external CSS"),
+            ("external fill-image presentation attribute",
+             '<svg><rect fill-image="image(https://cdn.example/fill.svg)"/>'
+             '</svg>', "external CSS"),
+            ("external offset-path presentation attribute",
+             '<svg><rect offset-path="url(https://cdn.example/path.svg)"/>'
+             '</svg>', "external CSS"),
+            ("typed CSS attr URL",
+             '<svg><text data-shape="https://cdn.example/shape.png" '
+             'shape-outside="attr(data-shape url)"/></svg>', "external CSS"),
+            ("CSS keyframes",
+             '<svg><style>@keyframes spin{to{transform:rotate(1turn)}}'
+             '</style></svg>', "CSS animation"),
+            ("vendor-prefixed CSS keyframes",
+             '<svg><style>@-moz-keyframes spin{to{transform:rotate(1turn)}}'
+             '</style></svg>', "CSS animation"),
+            ("CSS animation property",
+             '<svg><style>.x{animation:spin 1ms infinite}</style></svg>',
+             "CSS animation"),
+            ("inline CSS transition",
+             '<svg><rect style="transition:fill 1ms"/></svg>',
+             "CSS animation"),
+            ("malformed XML", '<svg><rect></svg>', "malformed XML"),
+            ("non-SVG namespace",
+             '<svg xmlns="http://www.w3.org/1999/xhtml"/>', "non-SVG"),
+            ("active element in a foreign namespace",
+             '<svg xmlns:x="urn:example"><x:script/></svg>', "active"),
+            ("HTML responsive image in a foreign namespace",
+             '<svg xmlns:h="http://www.w3.org/1999/xhtml">'
+             '<h:img srcset="https://cdn.example/a.png 1x"/></svg>',
+             "active")):
+        check("self-contained SVG refuses %s" % label,
+              finding in (_svg_safety_issue(svg) or ""), True)
 
     # describe_bytes is what turns a refusal into a diagnosis: "not an image"
     # sends the reader back to the URL with nothing, "a JSON body" says the CDN
@@ -3157,6 +3934,27 @@ continues here`
         bad_urls = touch(os.path.join(tmp, "bad-urls.txt"), b"https://x/\xff.png\n")
         raises("--urls-file refuses invalid UTF-8 instead of dropping bytes",
                _read_urls_file, bad_urls)
+
+        check("report URLs omit HTTP credentials, queries, and fragments",
+              _report_url(
+                  "https://alice:secret@example.com:8443/image.png?token=abc#crop"),
+              "https://example.com:8443/image.png?<query omitted>")
+        check("report URLs omit inline data payloads",
+              _report_url("data:image/png;base64,SECRET-BYTES"),
+              "data:image/png;base64,<payload omitted>")
+        check("an unparseable report URL reveals no location text",
+              _report_url("not a URL with secret material"),
+              "URL:<location omitted>")
+        malformed_secret = (
+            "https://alice:password@example.com\N{FULLWIDTH SOLIDUS}private"
+            "?token=secret")
+        malformed_error = raises(
+            "a malformed URL is refused without echoing its raw text",
+            _vetted_target, malformed_secret)
+        check("the malformed-URL error omits credentials, path, and query",
+              all(secret not in malformed_error
+                  for secret in ("alice", "password", "private", "secret")),
+              True)
 
         def current_owner(folder, slug, extra=()):
             embeds = [os.path.basename(path)
@@ -3458,6 +4256,24 @@ continues here`
                        1000, 30, False)
             check("HTTP %d body is not read" % status, unexpected.read_count, 0)
 
+        # A hostile origin can put arbitrary text in the HTTP reason phrase,
+        # including a reflected signed query. It is not useful diagnostics and
+        # must not bypass URL redaction through HTTPError.__str__.
+        denied = _FakeResponse(
+            [], {}, status=403,
+            reason="reflected token=do-not-report#private")
+        secret_url = "http://media.example/a.png?token=do-not-report#private"
+        with patch.object(socket, "getaddrinfo", return_value=_public4), \
+                patch.dict(globals(), {"_request_once": lambda *_a, **_kw:
+                           (_FakeConnection(), denied)}):
+            denied_result = download_one(
+                secret_url, att, "Redacted_Error_2026", 1)
+        check("an HTTP failure report redacts its query and fragment everywhere",
+              (denied_result["url"],
+               "do-not-report" in json.dumps(denied_result),
+               "private" in json.dumps(denied_result)),
+              ("http://media.example/a.png?<query omitted>", False, False))
+
         raises("a redirect to file: is refused at the hop",
                _vetted_target, "file:///etc/passwd")
 
@@ -3581,9 +4397,10 @@ continues here`
 
         before = strays()
         res = download_one(data_url, att, "Teslo_Cancer_2026", 1)
-        check("download_one writes <slug>_fig_<N>.<ext>",
-              (res["ok"], res["filename"]),
-              (True, "Teslo_Cancer_2026_fig_1.png"))
+        check("download_one writes <slug>_fig_<N>.<ext> without echoing data",
+              (res["ok"], res["filename"], res["url"]),
+              (True, "Teslo_Cancer_2026_fig_1.png",
+               "data:image/png;base64,<payload omitted>"))
         check("...inside the attachments folder",
               os.path.isfile(os.path.join(att, "Teslo_Cancer_2026_fig_1.png")),
               True)
@@ -3876,7 +4693,8 @@ continues here`
         os.makedirs(pdf_owned)
         owned_name = "Doe_Paper_2026_fig_1.png"
         owned_file = touch(os.path.join(pdf_owned, owned_name), _PNG)
-        with open(os.path.join(pdf_owned, MANIFEST_FILE), "w") as fh:
+        with open(os.path.join(pdf_owned, MANIFEST_FILE), "w",
+                  encoding="utf-8") as fh:
             fh.write(owned_name + "\t" + hashlib.sha256(_PNG).hexdigest() + "\n")
         pdf_owner = current_owner(pdf_owned, "Doe_Paper_2026")
         blocked_download = download_one(data_url, pdf_owned, "Doe_Paper_2026", 1,
@@ -3892,7 +4710,8 @@ continues here`
               [row["ok"] for row in checked_rename(
                   pdf_owned, "Doe_Paper_2026", "New_Note_2026")],
               [False])
-        with open(os.path.join(pdf_owned, MANIFEST_FILE), "w") as fh:
+        with open(os.path.join(pdf_owned, MANIFEST_FILE), "w",
+                  encoding="utf-8") as fh:
             fh.write("not a valid ownership record\n")
         check("a malformed ownership manifest does not authorize a write",
               download_one(data_url, pdf_owned, "New_Clipping_2026", 1)["ok"], False)
@@ -3955,6 +4774,15 @@ continues here`
         check("...and the ;utf8 inline-SVG form lands by its bytes, as .svg",
               (res["ok"], res["filename"]),
               (True, "Teslo_Cancer_2026_fig_31.svg"))
+        active_svg = (
+            "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' "
+            "onload='bad()'/>")
+        res = download_one(active_svg, att, "Teslo_Cancer_2026", 32)
+        check("an active SVG is refused before vault publication",
+              (res["ok"], "event-handler" in (res["error"] or ""),
+               _glob_slug(att, "Teslo_Cancer_2026", "_fig_32.*"), res["url"]),
+              (False, True, [],
+               "data:image/svg+xml;utf8,<payload omitted>"))
         # --- fetch / place: the Lottie path, which used to bypass all of this -
         # A heredoc did its own urlopen and its own os.replace into
         # Sources/Images: no scheme allowlist, no private-host refusal, no
@@ -4375,6 +5203,103 @@ continues here`
         check("code and comments do not manufacture dependency blockers",
               dependency_status(dep_images, dep_owner,
                                 "Old_Dependency_2025")["blockers"], [])
+
+        handoff_vault, handoff_images, handoff_pdfs, handoff_owner, handoff_names = \
+            canonical_rename_fixture("two-phase", "Old_Handoff_2025")
+        handoff_new_slug = "New_Handoff_2026"
+        handoff_new_owner = os.path.join(
+            handoff_vault, "Articles", handoff_new_slug + ".md")
+        with open(handoff_new_owner, "w", encoding="utf-8") as fh:
+            fh.write("---\nsources:\n  - https://example.com/two-phase\n---\n")
+            for name in handoff_names:
+                fh.write("![[%s]]\n" % name.replace(
+                    "Old_Handoff_2025", handoff_new_slug, 1))
+        handoff_wiki = os.path.join(handoff_vault, "Wiki")
+        os.makedirs(handoff_wiki)
+        handoff_reference = os.path.join(handoff_wiki, "reference.md")
+        with open(handoff_reference, "w", encoding="utf-8") as fh:
+            fh.write("[[Old_Handoff_2025|old note]]\n"
+                     "![[Old_Handoff_2025_fig_1.png]]\n")
+        prepared = prepare_slug_rename(
+            handoff_images, "Old_Handoff_2025", handoff_new_slug,
+            sources=handoff_pdfs, owner_note=handoff_owner,
+            new_owner_note=handoff_new_owner)
+        handoff_old_image = os.path.join(handoff_images, handoff_names[0])
+        handoff_new_image = os.path.join(
+            handoff_images, handoff_names[0].replace(
+                "Old_Handoff_2025", handoff_new_slug, 1))
+        check("prepare publishes an exact new image while old dependencies resolve",
+              (prepared["ok"], prepared["dependency"]["ok"],
+               os.path.isfile(handoff_old_image),
+               os.path.isfile(handoff_new_image),
+               open(handoff_old_image, "rb").read(),
+               open(handoff_new_image, "rb").read()),
+              (True, False, True, True, _PNG, _PNG))
+        try:
+            finalize_slug_rename(
+                handoff_images, "Old_Handoff_2025", handoff_new_slug,
+                sources=handoff_pdfs, owner_note=handoff_owner,
+                new_owner_note=handoff_new_owner)
+            premature_finalize = False
+        except ValueError:
+            premature_finalize = True
+        check("finalize refuses while an old-note or old-image dependency remains",
+              (premature_finalize, os.path.isfile(handoff_old_image),
+               os.path.isfile(handoff_new_image)), (True, True, True))
+        with open(handoff_reference, "w", encoding="utf-8") as fh:
+            fh.write("[[New_Handoff_2026|new note]]\n"
+                     "![[New_Handoff_2026_fig_1.png]]\n")
+        real_remove_expected = remove_expected
+
+        def refuse_before_retirement(*_args, **_kwargs):
+            raise PublicationConflict("injected pre-displacement conflict")
+
+        with patch.dict(globals(), remove_expected=refuse_before_retirement):
+            try:
+                finalize_slug_rename(
+                    handoff_images, "Old_Handoff_2025", handoff_new_slug,
+                    sources=handoff_pdfs, owner_note=handoff_owner,
+                    new_owner_note=handoff_new_owner)
+                pre_displacement_error = ""
+            except PublicationConflict as exc:
+                pre_displacement_error = str(exc)
+        check("a pre-displacement finalize conflict is not a false mixed rollback",
+              ("rollback was incomplete" in pre_displacement_error,
+               os.path.isfile(handoff_old_image),
+               os.path.isfile(handoff_new_image)), (False, True, True))
+
+        def refuse_after_restoration(target, _expected, _snapshot, stage_dir,
+                                     **_kwargs):
+            os.link(target, os.path.join(stage_dir, ".atomic-displaced"))
+            raise PublicationConflict("injected conflict after restoration")
+
+        with patch.dict(globals(), remove_expected=refuse_after_restoration):
+            try:
+                finalize_slug_rename(
+                    handoff_images, "Old_Handoff_2025", handoff_new_slug,
+                    sources=handoff_pdfs, owner_note=handoff_owner,
+                    new_owner_note=handoff_new_owner)
+                post_restoration_error = ""
+            except PublicationConflict as exc:
+                post_restoration_error = str(exc)
+        handoff_stage_parent = os.path.dirname(os.path.realpath(handoff_images))
+        check("a finalize conflict after atomic restoration cleans private state",
+              ("rollback was incomplete" in post_restoration_error,
+               os.path.isfile(handoff_old_image),
+               os.path.isfile(handoff_new_image),
+               [name for name in os.listdir(handoff_stage_parent)
+                if name.startswith(".clipping-handoff-retire-")]),
+              (False, True, True, []))
+        globals()["remove_expected"] = real_remove_expected
+        finalized = finalize_slug_rename(
+            handoff_images, "Old_Handoff_2025", handoff_new_slug,
+            sources=handoff_pdfs, owner_note=handoff_owner,
+            new_owner_note=handoff_new_owner)
+        check("finalize retires only the exact old copy after a clean re-probe",
+              (finalized["ok"], finalized["retired"],
+               os.path.lexists(handoff_old_image),
+               open(handoff_new_image, "rb").read()),
+              (True, 1, False, _PNG))
 
         nfd_old = unicodedata.normalize("NFD", "Müller_Dependency_2025")
         nfc_new = unicodedata.normalize("NFC", "Müller_Dependency_2025")
@@ -4816,12 +5741,14 @@ continues here`
               [entry["ok"] for entry in checked_rename(
                   folder, "Clipping_Topic_2025", "Doe_Qux_2025", sources=sources)],
               [False])
-        with open(os.path.join(folder, MANIFEST_FILE), "w") as fh:
+        with open(os.path.join(folder, MANIFEST_FILE), "w",
+                  encoding="utf-8") as fh:
             fh.write("Reserved_Paper_2025_fig_1.png\t" + hashlib.sha256(_PNG).hexdigest() + "\n")
         check("a missing figure's PDF manifest record still reserves the rename destination",
               [entry["ok"] for entry in checked_rename(
                   folder, "Clipping_Topic_2025", "Reserved_Paper_2025")], [False])
-        with open(os.path.join(folder, MANIFEST_FILE), "w") as fh:
+        with open(os.path.join(folder, MANIFEST_FILE), "w",
+                  encoding="utf-8") as fh:
             fh.write("Reserved_Paper_2025_fig_1.webp\t" + hashlib.sha256(_PNG).hexdigest() + "\n")
         check("manifest ownership reserves the destination index across extensions",
               [entry["ok"] for entry in checked_rename(
@@ -4910,19 +5837,23 @@ continues here`
               (len(rename_calls) >= 1,
                [c for c in rename_calls if "--owner-note" not in c]),
               (True, []))
+        check("every documented `rename` invocation selects an explicit phase",
+              (len(rename_calls) >= 1,
+               [c for c in rename_calls if "--phase" not in c]),
+              (True, []))
         check("the image procedure requires the recursive PDF ownership guard",
               bool(re.search(r"recursive PDF ownership.{0,100}both stems",
                              images_md, re.S)) and
-              "Never use bare `mv` or omit either ownership guard" in images_md,
+              "Never use bare `cp`/`mv`, omit either owner guard" in images_md,
               True)
         check("the image procedure explains exact positive clipping ownership",
-              "first current `sources:` item is a web URL" in images_md and
-              "exact rendered filename-only embed" in images_md and
+              "web URL as its first current `sources:`" in images_md and
+              "exactly embed every old attachment" in images_md and
               "--owner-note" in images_md, True)
         check("changed-slug docs require the vault-wide dependency probe",
               ("every Markdown note outside the owner" in reprocess_md
                and "fetch_images.py' dependencies" in reprocess_md
-               and "before removing the old note path" in images_md), True)
+               and "Before finalizing" in images_md), True)
         check("dependency refusal is reported before destructive old-path cleanup",
               ("never delete first" in reprocess_md
                and "exact blocker paths" in images_md), True)
@@ -5205,7 +6136,8 @@ def main(argv=None):
                    help="published Articles/<slug>.md whose rendered embed "
                         "exactly names the attachment")
 
-    r = sub.add_parser("rename", help="rename attachments after a slug change")
+    r = sub.add_parser(
+        "rename", help="prepare or finalize an attachment handoff after a slug change")
     r.add_argument("--attachments", required=True)
     r.add_argument("--sources", required=True,
                    help="the vault's Sources/PDFs folder; "
@@ -5216,6 +6148,16 @@ def main(argv=None):
     r.add_argument("--owner-note", required=True,
                    help="the unchanged Articles/<old-slug>.md; every renamed "
                         "attachment must be an exact rendered filename-only embed")
+    r.add_argument("--new-owner-note",
+                   help="published Articles/<new-slug>.md with the same web "
+                        "origin and exact mapped new embeds; required for "
+                        "prepare/finalize")
+    r.add_argument("--phase", choices=("immediate", "prepare", "finalize"),
+                   required=True,
+                   help="required: prepare publishes new-name copies while "
+                        "retaining old names; finalize retires exact old copies "
+                        "after dependencies are clear; immediate is a deprecated "
+                        "compatibility path for an unreferenced set")
     r.add_argument("--dry-run", action="store_true")
 
     q = sub.add_parser(
@@ -5345,17 +6287,41 @@ def main(argv=None):
         return 0 if res["ok"] else 1
 
     try:
-        results = rename_slug(args.attachments, args.old_slug, args.new_slug,
-                              args.dry_run, sources=args.sources,
-                              owner_note=args.owner_note, require_vault=True)
+        if args.phase != "immediate" and not args.new_owner_note:
+            raise ValueError("--new-owner-note is required with --phase %s" %
+                             args.phase)
+        if args.phase == "prepare":
+            report = prepare_slug_rename(
+                args.attachments, args.old_slug, args.new_slug,
+                sources=args.sources, owner_note=args.owner_note,
+                new_owner_note=args.new_owner_note, dry_run=args.dry_run)
+            print(json.dumps(dict(report, mode="rename"), indent=2,
+                             ensure_ascii=False))
+            return 0 if report["ok"] else 1
+        if args.phase == "finalize":
+            report = finalize_slug_rename(
+                args.attachments, args.old_slug, args.new_slug,
+                sources=args.sources, owner_note=args.owner_note,
+                new_owner_note=args.new_owner_note, dry_run=args.dry_run)
+            print(json.dumps(dict(report, mode="rename"), indent=2,
+                             ensure_ascii=False))
+            return 0 if report["ok"] else 1
+        results = rename_slug(
+            args.attachments, args.old_slug, args.new_slug,
+            args.dry_run, sources=args.sources,
+            owner_note=args.owner_note, require_vault=True)
     except (OSError, UnicodeError, ValueError) as exc:
-        print(json.dumps({"mode": "rename", "old_slug": args.old_slug,
+        print(json.dumps({"mode": "rename", "phase": args.phase,
+                          "ok": False, "old_slug": args.old_slug,
                           "new_slug": args.new_slug, "error": str(exc),
-                          "results": [], "renamed": 0, "failed": 0},
+                          "results": [], "renamed": 0, "failed": 1},
                          indent=2, ensure_ascii=False))
         return 1
     failed = [x for x in results if not x["ok"]]
-    print(json.dumps({"mode": "rename", "old_slug": args.old_slug,
+    print(json.dumps({"mode": "rename", "phase": "immediate",
+                      "warning": "--phase immediate is deprecated for clipping "
+                                 "reprocessing; use prepare then finalize",
+                      "ok": not failed, "old_slug": args.old_slug,
                       "new_slug": args.new_slug, "results": results,
                       "renamed": len(results) - len(failed),
                       "failed": len(failed)}, indent=2, ensure_ascii=False))

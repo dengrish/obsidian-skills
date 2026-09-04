@@ -85,7 +85,7 @@ SEARCH ORDER (:func:`find_shared_scripts`)
      and reported by :func:`describe` so the copy is visible rather than
      silently authoritative.
 
-Stdlib only, Python 3.9+.  Usable as a module and as a CLI:
+Stdlib only, Python 3.10+.  Usable as a module and as a CLI:
 
     python3 shared/scripts/plugin_paths.py            # human-readable report
     python3 shared/scripts/plugin_paths.py --json     # same, machine-readable

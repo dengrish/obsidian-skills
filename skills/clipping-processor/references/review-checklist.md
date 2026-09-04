@@ -111,8 +111,11 @@ suggested detector; do not edit an installed plugin during clipping processing.
   `author:` value is a verified human byline; publication names, editorial
   desks and social accounts are omitted rather than credited as people. The
   filename's optional author segment agrees with the first verified human
-  author. Unverified values and padded dates are reported. Meaningful Unicode
-  remains.
+  author. Unverified values and padded dates are reported. Every published note
+  has an evidence-backed title. A missing publication year is represented only
+  by `published: null` plus the `nd` filename segment; a capture missing its
+  title was retained raw and skipped rather than receiving an invented identity.
+  Meaningful Unicode remains.
 - [ ] Description is factual and at most 110 characters; format follows content
   (`Article`, `Post`, or `Video` for a substantive transcript), and tags follow
   the shared enum rather than invented synonyms.
@@ -140,7 +143,9 @@ suggested detector; do not edit an installed plugin during clipping processing.
 - [ ] Images are local embeds or reported failure placeholders. A confirmed
   caption is one italic line below the embed; ambiguous ledes remain prose.
   Caption/credit orphans are removed only with evidence, not when they could
-  be a quotation, aside or retained failed-image caption.
+  be a quotation, aside or retained failed-image caption. Failure placeholders
+  and reports use the helper's redacted URL locator; no image credentials,
+  query string, fragment, or inline data payload was copied into the output.
 - [ ] Decorative rules are removed only from body prose, not YAML, code or the
   Summary/body separator. Code and simple/complex tables follow body-cleaning
   fidelity rules. Footnote references and definitions correspond.
@@ -162,7 +167,9 @@ suggested detector; do not edit an installed plugin during clipping processing.
   Do not rename live images just to make the draft pass this check.
 - [ ] Completed images were opened for readability; their returned extensions
   match the format. No newly created extension twins or unexplained missing
-  attachments remain. Preserve old/foreign files and report conflicts.
+  attachments remain. Any SVG is inert and self-contained and passed the
+  helper's active/external-content refusal. Preserve old/foreign files and
+  report conflicts.
 - [ ] Every capture has an explicit completeness verdict with the actual access
   limits. Each recovery, gap, placeholder and approximate placement is reported.
 - [ ] Recovered captions follow the [fallback chain](completeness-audit.md#recover-missing-images).

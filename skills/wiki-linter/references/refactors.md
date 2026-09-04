@@ -6,6 +6,12 @@ reports these candidates and stops; a long note, duplicate wording, or scanner
 similarity never activates this mode by itself. Authorization already present
 in the request is sufficient. This protocol requires no separate human review.
 
+A correction confined to one named entry and supported only by sources it
+already cites uses [source-backed correction](source-backed-corrections.md), not
+this structural protocol. Evidence from a source new to the target belongs to
+`wiki-builder` unless the authorized operation necessarily redistributes
+existing content across entries.
+
 This is maintenance of existing knowledge, not a second extraction route.
 `wiki-builder` still owns turning a new source into new candidates. A refactor
 may create a split note only for a subject already substantively present in the

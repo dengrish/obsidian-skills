@@ -160,7 +160,10 @@ figure. This workflow creates whole figures only.
 
 2. Render the problem page into a unique scratch directory and view it.
    These tools use **one-based physical PDF page numbers**, not printed
-   folios or the organizer's zero-based chapter indices.
+   folios or the organizer's zero-based chapter indices. The renderer refuses
+   the complete requested page set when any preview name is already occupied;
+   choose a fresh scratch directory rather than deleting or replacing an
+   unknown occupant.
 
    ```bash
    python3 '<skill>/scripts/render_page.py' '<PDF path>' 5 \
@@ -189,8 +192,10 @@ figure. This workflow creates whole figures only.
    unreadable subtree or a second case/NFC-equivalent basename blocks the
    repair; organize the conflicting PDF name and retry. A readable scratch
    representation of an encrypted PDF may sit outside the vault only when one
-   vault PDF uniquely owns that basename. Arbitrary external output remains a
-   one-off and does not imply a vault scan.
+   vault PDF uniquely owns that basename. Remove that decrypted working copy
+   after its repaired crops have been published and verified; preserve the
+   organized encrypted original. Arbitrary external output remains a one-off
+   and does not imply a vault scan.
 
    `--overwrite` is needed to replace a verified crop; without it that crop
    is skipped. Unknown occupants remain protected. Keep `y1` above the
@@ -217,6 +222,10 @@ figure. This workflow creates whole figures only.
    source, output and ledger when run from another working directory. It
    omits `--overwrite` so recording a review preserves an explicit crop repair.
    With `--dry-run`, marks apply only to the preview and nothing is persisted.
+
+   After the crop and review record are verified, remove the scratch page
+   previews. Preserve any staging or recovery directory named by a failed
+   publication until the failure has been reconciled.
 
 For several bad crops, `auto_fig_bbox.py --emit extract --stem '<pdf_stem>'`
 can print one explicit-extraction command with multiple `--crop` arguments.

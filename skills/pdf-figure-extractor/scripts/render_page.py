@@ -22,16 +22,64 @@ not an error. `--dpi 72` makes pixels and points the same number.
 Usage:
     python3 render_page.py input.pdf 16
     python3 render_page.py input.pdf 16,17,18
-    python3 render_page.py input.pdf 16 --out ~/Desktop --dpi 150
+    python3 render_page.py input.pdf 16 --out '<scratch>' --dpi 150
     python3 render_page.py input.pdf 16 --dpi 72     # 1 px == 1 pt
 
     # The adversarial fixtures this module is held to.
     python3 render_page.py --test
+
+An occupied preview name is refused before any requested page is rendered.
+Use a fresh scratch directory for a re-render; symlinks, regular files and
+other occupants are all preserved.
 """
 import argparse
+import math
 import os
+import shutil
 import sys
 import tempfile
+
+
+_OBSIDIAN_SHARED_MODULES = ('atomic_move',)
+
+# --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
+import os as _os, sys as _sys
+_here = _os.path.dirname(_os.path.realpath(__file__))
+_required = tuple(_m + ".py" for _m in (
+    globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
+_env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
+if _env:                                   # explicit override: authoritative, no fallback
+    _tried = [_os.path.abspath(_os.path.expanduser(_env))]
+else:                                      # plugin-relative walk-up, at most 5 levels
+    _tried, _d = [], _here
+    for _ in range(5):
+        _tried.append(_os.path.join(_d, "shared", "scripts"))
+        _d = _os.path.dirname(_d)
+    _tried.append(_here)                   # extracted skill with co-located helpers
+_missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
+            for _p in _tried if _os.path.isdir(_p)}
+_shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
+if _shared is None:
+    raise SystemExit("""obsidian: cannot find the plugin's shared/scripts/ folder, which holds
+the one canonical copy of the conventions this script depends on. A usable
+folder must contain these required module(s): %s
+Looked for:
+  %s
+Fix: install the whole plugin tree, or set OBSIDIAN_VAULT_SHARED to the
+shared/scripts/ directory (unset it to use the plugin-relative walk-up).
+Do NOT paste a second copy of the algorithm into this skill -- a divergent
+copy is the bug the shared layer exists to prevent.""" % (
+    ", ".join(_required), "\n  ".join(
+        _p + (" (not a directory)" if _p not in _missing else
+              " (missing: %s)" % ", ".join(_missing[_p]))
+        for _p in _tried)))
+_sys.path[:] = [_p for _p in _sys.path if _p not in (_shared, _here)]
+_sys.path.insert(0, _shared)               # shared/scripts/ FIRST
+if _here != _shared:
+    _sys.path.insert(1, _here)              # sibling modules before unrelated paths
+# --- end bootstrap ---
+
+import atomic_move
 
 
 def _configure_stdio():
@@ -57,11 +105,65 @@ except ImportError:
     try:
         import fitz  # PyMuPDF < 1.24.3
     except ImportError:
-        sys.exit(
-            "PyMuPDF required. Use a Python environment with the plugin\n"
-            "dependencies installed; see shared/RUNTIME.md. Install into a\n"
-            "virtual environment, not the system Python."
+        fitz = None
+
+
+_PYMUPDF_ERROR = (
+    "PyMuPDF required. Use a Python environment with the plugin\n"
+    "dependencies installed; see shared/RUNTIME.md. Install into a\n"
+    "virtual environment, then run this command with that environment's "
+    "Python."
+)
+
+# PyMuPDF allocates the raster before Pillow ever inspects the PNG. Keep the
+# bound below Pillow's default decompression-bomb warning threshold and still
+# allow a full Letter/A4 page at 600 DPI (about 34 million pixels). The figure
+# cropper imports this helper so previews and final crops enforce one limit.
+MAX_RENDER_PIXELS = 50_000_000
+
+
+def _require_pymupdf():
+    """Fail after argument parsing so --help remains available during setup."""
+    if fitz is None:
+        raise SystemExit(_PYMUPDF_ERROR)
+
+
+def checked_render_dimensions(rect, dpi, label="render"):
+    """Return a conservative pixel-size bound, refusing oversized renders.
+
+    A transformed PyMuPDF rectangle can gain one boundary pixel on each axis,
+    depending on its fractional origin. Account for that before multiplying so
+    the check happens before ``Page.get_pixmap()`` allocates native memory.
+    """
+    try:
+        dpi_value = float(dpi)
+        width_points = float(rect.width)
+        height_points = float(rect.height)
+    except (AttributeError, OverflowError, TypeError, ValueError) as exc:
+        raise ValueError(f"{label} has invalid geometry or DPI") from exc
+    if (not math.isfinite(dpi_value) or dpi_value <= 0
+            or not math.isfinite(width_points)
+            or not math.isfinite(height_points)
+            or width_points <= 0 or height_points <= 0):
+        raise ValueError(f"{label} has invalid geometry or DPI")
+
+    scaled_width = width_points * dpi_value / 72.0
+    scaled_height = height_points * dpi_value / 72.0
+    if not math.isfinite(scaled_width) or not math.isfinite(scaled_height):
+        raise ValueError(
+            f"{label} exceeds the {MAX_RENDER_PIXELS:,}-pixel pre-render "
+            "safety cap; lower --dpi or render a smaller crop"
         )
+    pixel_width = max(1, math.ceil(scaled_width) + 1)
+    pixel_height = max(1, math.ceil(scaled_height) + 1)
+    pixels = pixel_width * pixel_height
+    if pixels > MAX_RENDER_PIXELS:
+        raise ValueError(
+            f"{label} is approximately {pixel_width:,}x{pixel_height:,} "
+            f"({pixels:,} pixels), over the {MAX_RENDER_PIXELS:,}-pixel "
+            "pre-render safety cap; lower --dpi or render a smaller crop"
+        )
+    return pixel_width, pixel_height
 
 
 def parse_pages(spec, n_pages):
@@ -100,6 +202,113 @@ def preview_path(out_dir, pdf_path, idx):
     """
     stem = os.path.splitext(os.path.basename(pdf_path))[0]
     return os.path.join(out_dir, f"{stem}_page{idx + 1}.png")
+
+
+class PreviewPublicationError(OSError):
+    """A complete staged preview set could not be published safely."""
+
+    def __init__(self, message, staging_path, recovery_paths=()):
+        super().__init__(message)
+        self.staging_path = staging_path
+        self.recovery_paths = tuple(recovery_paths)
+
+
+def preflight_preview_paths(out_dir, pdf_path, page_idxs):
+    """Return distinct output paths only when every slot is unoccupied.
+
+    The whole page list is checked before rasterization so a late occupied
+    slot cannot leave an earlier requested preview behind. Publication still
+    uses an exclusive hard link because this preflight does not reserve names.
+    """
+    paths = [preview_path(out_dir, pdf_path, idx) for idx in page_idxs]
+    duplicates = sorted({path for path in paths if paths.count(path) > 1})
+    if duplicates:
+        raise ValueError(
+            "the page list names the same preview slot more than once: %s" %
+            ", ".join(duplicates))
+    occupied = [path for path in paths if os.path.lexists(path)]
+    if occupied:
+        raise FileExistsError(
+            "preview output already exists; use a fresh scratch directory: %s"
+            % ", ".join(occupied))
+    return paths
+
+
+def _rollback_new_previews(publications, stage_parent):
+    """Conditionally withdraw this run's earlier publications."""
+    errors = []
+    recoveries = []
+    for path, published in reversed(publications):
+        rollback = tempfile.mkdtemp(prefix=".render-page-rollback-",
+                                    dir=stage_parent)
+        keep = False
+        try:
+            atomic_move.remove_expected(
+                path, published, atomic_move.regular_file_snapshot, rollback,
+                stage_parent=stage_parent,
+                recovery_prefix=".render-page-recovery-",
+            )
+        except OSError as exc:
+            keep = bool(getattr(exc, "keep_stage", False))
+            recovery = getattr(exc, "recovery_path", None)
+            if recovery:
+                recoveries.append(recovery)
+            errors.append("%s: %s" % (path, exc))
+        finally:
+            if not keep:
+                shutil.rmtree(rollback, ignore_errors=True)
+    return errors, recoveries
+
+
+def render_preview_set(doc, pdf_path, page_idxs, out_dir, dpi):
+    """Stage every page, then publish the complete requested set safely."""
+    paths = preflight_preview_paths(out_dir, pdf_path, page_idxs)
+    resolved_out = os.path.realpath(out_dir)
+    stage_parent = os.path.dirname(resolved_out) or os.curdir
+    stage_dir = tempfile.mkdtemp(prefix=".render-page-stage-",
+                                 dir=stage_parent)
+    rendered = []
+    keep_stage = False
+    try:
+        # Finish every raster before publishing the first pathname. A render
+        # failure therefore exposes no partial preview set.
+        for idx, out_path in zip(page_idxs, paths):
+            staged = os.path.join(stage_dir, os.path.basename(out_path))
+            page = doc[idx]
+            pix = page.get_pixmap(dpi=dpi)
+            pix.save(staged)
+            rendered.append((idx, out_path, staged, pix.width, pix.height))
+
+        publications = []
+        try:
+            for _idx, out_path, staged, _width, _height in rendered:
+                published = atomic_move.publish_new(
+                    staged, out_path, atomic_move.regular_file_snapshot,
+                    stage_parent, recovery_prefix=".render-page-recovery-")
+                publications.append((out_path, published))
+        except BaseException as exc:
+            rollback_errors, recoveries = _rollback_new_previews(
+                publications, stage_parent)
+            keep_stage = True
+            detail = (
+                "; earlier previews were rolled back"
+                if publications and not rollback_errors else "")
+            if rollback_errors:
+                detail += "; rollback incomplete: " + "; ".join(rollback_errors)
+            inherited = getattr(exc, "recovery_path", None)
+            if inherited:
+                recoveries.append(inherited)
+            raise PreviewPublicationError(
+                "%s%s; complete staged previews are preserved at %s" %
+                (exc, detail, stage_dir),
+                stage_dir,
+                recoveries,
+            ) from exc
+        return [(idx, path, width, height)
+                for idx, path, _staged, width, height in rendered]
+    finally:
+        if not keep_stage:
+            shutil.rmtree(stage_dir, ignore_errors=True)
 
 
 def px_to_pt(dpi):
@@ -210,6 +419,24 @@ def run_self_test():
     check("--dpi 72 makes pixels and points the same number", px_to_pt(72), 1.0)
     check("150 DPI", px_to_pt(150), 0.48)
 
+    # The estimate runs before PyMuPDF's native raster allocation. The extra
+    # boundary pixel on each axis makes it a safe upper bound for fractional
+    # clip origins rather than an exact output-size prediction.
+    class RectSize:
+        width = 612
+        height = 792
+
+    width, height = checked_render_dimensions(RectSize(), 600, "test page")
+    ok("a full Letter page at 600 DPI remains below the render cap",
+       width * height <= MAX_RENDER_PIXELS)
+    huge_error = None
+    try:
+        checked_render_dimensions(RectSize(), 100_000, "test page")
+    except ValueError as exc:
+        huge_error = str(exc)
+    ok("an extreme DPI is refused before rendering",
+       bool(huge_error and "pre-render safety cap" in huge_error))
+
     # --- main(), end to end -------------------------------------------------
     tmp = tempfile.mkdtemp(prefix="render-page-selftest-")
     try:
@@ -254,8 +481,7 @@ def run_self_test():
         ok("...and the factor follows the DPI", "multiply by 0.720" in so)
         ok("the output directory is created when it does not exist",
            os.path.isdir(out))
-        ok("a fresh preview prints no replacement notice",
-           "replacing existing preview" not in se)
+        ok("a fresh preview prints no refusal", "REFUSED" not in se)
 
         # The default is unique per invocation, so concurrent inspections of
         # same-stem sources cannot overwrite each other's coordinate image.
@@ -267,18 +493,86 @@ def run_self_test():
             default_dirs.append(os.path.dirname(written))
             ok("the default preview is written outside the source tree",
                os.path.isfile(written) and not written.startswith(tmp + os.sep))
+            ok("the default run tells the caller to remove its temporary preview",
+               "Remove it after visual review" in so)
         ok("two default renders use distinct scratch directories",
            default_dirs[0] != default_dirs[1])
         for directory in default_dirs:
             shutil.rmtree(directory, ignore_errors=True)
-        # A preview name already on disk — a re-render, or another PDF that
-        # merely shares the stem — is replaced WITH a notice, never silently:
-        # coordinates read off a stale or wrong preview are a wrong crop.
+
+        # An occupied slot is user data, even when it resembles an earlier
+        # preview. Refuse the whole page set before rasterization/publication.
+        p2_before = open(p2, "rb").read()
         code, so, se = run([pdf, "2", "--out", out, "--dpi", "72"])
-        check("re-rendering an existing preview still exits 0", code, 0)
-        ok("...and says it is replacing the file, naming it",
-           "replacing existing preview" in se and p2 in se)
-        ok("...and the preview is still written", os.path.exists(p2))
+        check("an occupied preview is refused", code, 1)
+        ok("...and the diagnostic names it and requests fresh scratch",
+           p2 in se and "fresh scratch directory" in se)
+        check("...and its bytes are preserved", open(p2, "rb").read(), p2_before)
+
+        blocked_out = os.path.join(tmp, "blocked-previews")
+        os.makedirs(blocked_out)
+        blocked_p2 = preview_path(blocked_out, pdf, 1)
+        with open(blocked_p2, "wb") as fh:
+            fh.write(b"existing preview")
+        code, so, se = run([pdf, "1,2", "--out", blocked_out, "--dpi", "72"])
+        check("a later occupied slot refuses a multi-page request", code, 1)
+        ok("...before an earlier preview is published",
+           not os.path.lexists(preview_path(blocked_out, pdf, 0)))
+        check("...and preserves the occupied bytes",
+              open(blocked_p2, "rb").read(), b"existing preview")
+
+        duplicate_out = os.path.join(tmp, "duplicate-previews")
+        code, so, se = run([pdf, "1,1", "--out", duplicate_out, "--dpi", "72"])
+        check("a repeated page is refused as one duplicate slot", code, 1)
+        ok("...without publishing the duplicated name",
+           not os.path.lexists(preview_path(duplicate_out, pdf, 0)))
+
+        if hasattr(os, "symlink"):
+            linked_out = os.path.join(tmp, "linked-previews")
+            os.makedirs(linked_out)
+            victim = os.path.join(tmp, "preview-link-target")
+            with open(victim, "wb") as fh:
+                fh.write(b"preserve target")
+            linked_preview = preview_path(linked_out, pdf, 0)
+            try:
+                os.symlink(victim, linked_preview)
+                have_link = True
+            except (OSError, NotImplementedError):
+                have_link = False
+            if have_link:
+                code, so, se = run([pdf, "1", "--out", linked_out, "--dpi", "72"])
+                check("a symlink preview occupant is refused", code, 1)
+                ok("...without removing the link", os.path.islink(linked_preview))
+                check("...or touching its target", open(victim, "rb").read(),
+                      b"preserve target")
+            else:
+                ok("symlink preview refusal skipped where unavailable", True)
+                ok("symlink occupant preservation skipped where unavailable", True)
+                ok("symlink target preservation skipped where unavailable", True)
+
+        # A name that arrives after preflight is preserved. If another page
+        # was already published, this run conditionally withdraws only that
+        # exact new file so the requested set is not left half complete.
+        race_out = os.path.join(tmp, "race-previews")
+        os.makedirs(race_out)
+        real_publish = atomic_move.publish_new
+        publish_calls = {"count": 0}
+
+        def race_publish(staged, target, snapshot, stage_parent, **kwargs):
+            publish_calls["count"] += 1
+            if publish_calls["count"] == 2:
+                with open(target, "wb") as fh:
+                    fh.write(b"late occupant")
+            return real_publish(staged, target, snapshot, stage_parent, **kwargs)
+
+        with mock.patch.object(atomic_move, "publish_new", side_effect=race_publish):
+            code, so, se = run([pdf, "1,2", "--out", race_out, "--dpi", "72"])
+        check("a late occupant makes the preview-set publication fail", code, 1)
+        ok("...and the earlier publication is rolled back",
+           not os.path.lexists(preview_path(race_out, pdf, 0)))
+        check("...while the late occupant survives",
+              open(preview_path(race_out, pdf, 1), "rb").read(), b"late occupant")
+        ok("...and retained staged previews are named", "staged previews" in se)
 
         code, so, se = run([pdf, "9", "--out", out])
         ok("a page past the end is refused", "out of range" in str(code))
@@ -287,6 +581,14 @@ def run_self_test():
         code, so, se = run([pdf, "1", "--out", out, "--dpi", "0"])
         check("a non-positive DPI exits 2", code, 2)
         ok("...explains the positive bound", "greater than zero" in se)
+
+        limited_out = os.path.join(tmp, "limited-previews")
+        code, so, se = run([
+            pdf, "1,2", "--out", limited_out, "--dpi", "100000"])
+        ok("an oversized preview is refused with an actionable error",
+           "pre-render safety cap" in str(code) and "lower --dpi" in str(code))
+        ok("all preview sizes are checked before creating the output folder",
+           not os.path.lexists(limited_out))
 
         zero = os.path.join(tmp, "Doe_Empty_2025.pdf")
         with open(zero, "wb") as fh:
@@ -308,7 +610,8 @@ def run_self_test():
         with open(html, "w", encoding="utf-8") as fh:
             fh.write("<html><body>Not a PDF.</body></html>")
         code, so, se = run([html, "1", "--out", out])
-        ok("an HTML document named .pdf is refused", "not a PDF" in str(code))
+        ok("an HTML document named .pdf is refused",
+           "not a PDF" in str(code) or "could not open as a PDF" in str(code))
 
         code, so, se = run([pdf])
         check("a missing page list exits 2", code, 2)
@@ -340,12 +643,14 @@ def main(argv=None):
         "--dpi",
         type=positive_int,
         default=100,
-        help="Resolution for the preview render (default: 100).",
+        help=("Resolution for the preview render (default: 100); each page is "
+              f"limited to {MAX_RENDER_PIXELS:,} pixels."),
     )
     p.add_argument("--test", action="store_true", help="run the self-test")
     args = p.parse_args(argv)
 
     if args.test:
+        _require_pymupdf()
         return run_self_test()
     # Named rather than left to argparse's positional requirement: `--test`
     # takes neither argument, so a required positional rejects the self-test
@@ -356,6 +661,7 @@ def main(argv=None):
         print("missing required argument(s): %s" % ", ".join(missing),
               file=sys.stderr)
         return 2
+    _require_pymupdf()
 
     pdf_path = os.path.expanduser(args.pdf)
     try:
@@ -372,26 +678,52 @@ def main(argv=None):
         if len(doc) == 0:
             sys.exit(f"{pdf_path}: PDF has zero pages — nothing to render")
         page_idxs = parse_pages(args.pages, len(doc))
+        # Size-check every page before creating the output directory. A later
+        # oversized page must not leave earlier previews from a partially
+        # completed invocation, and the check must precede native allocation.
+        for idx in page_idxs:
+            try:
+                checked_render_dimensions(
+                    doc[idx].rect, args.dpi, f"page {idx + 1}")
+            except ValueError as exc:
+                sys.exit(f"{pdf_path}: {exc}")
+        automatic_out = args.out is None
         out_dir = (os.path.expanduser(args.out) if args.out
                    else tempfile.mkdtemp(prefix="obsidian-figure-preview-"))
-        os.makedirs(out_dir, exist_ok=True)
-
-        for idx in page_idxs:
-            page = doc[idx]
-            pix = page.get_pixmap(dpi=args.dpi)
-            out_path = preview_path(out_dir, pdf_path, idx)
-            # Previews are named `<stem>_page<N>.png`, so a re-render — or another
-            # PDF that merely shares the stem, the exact collision batch_extract
-            # warns about — lands on the same name. Replacing is what a preview
-            # wants, but doing it silently is how coordinates get read off the
-            # wrong document; every other writer in this plugin says so or skips.
-            if os.path.lexists(out_path):
-                print(f"note: replacing existing preview {out_path}",
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+            if not os.path.isdir(out_dir):
+                raise NotADirectoryError("preview output is not a directory: %s"
+                                         % out_dir)
+            rendered = render_preview_set(
+                doc, pdf_path, page_idxs, out_dir, args.dpi)
+        except (FileExistsError, NotADirectoryError, PreviewPublicationError,
+                ValueError) as exc:
+            print("REFUSED: %s" % exc, file=sys.stderr)
+            for recovery in getattr(exc, "recovery_paths", ()):
+                print("  preserve recovery state at %s" % recovery,
                       file=sys.stderr)
-            pix.save(out_path)
+            if automatic_out:
+                try:
+                    os.rmdir(out_dir)
+                except OSError:
+                    pass
+            return 1
+        except Exception as exc:
+            print("ERROR: could not render the requested preview set: %s: %s"
+                  % (type(exc).__name__, exc), file=sys.stderr)
+            if automatic_out:
+                try:
+                    os.rmdir(out_dir)
+                except OSError:
+                    pass
+            return 1
+
+        for idx, out_path, width, height in rendered:
+            page = doc[idx]
             scale = px_to_pt(args.dpi)
             print(
-                f"Wrote {out_path}: {pix.width}x{pix.height} px "
+                f"Wrote {out_path}: {width}x{height} px "
                 f"(page rect: {page.rect.width:.0f}x{page.rect.height:.0f} pts)"
             )
             print(
@@ -399,6 +731,9 @@ def main(argv=None):
                 f"(x_pt = x_px * {scale:.3f}). --crop takes POINTS, and the "
                 f"caption's top edge is the hard limit for y1."
             )
+        if automatic_out:
+            print("  Temporary preview directory: %s. Remove it after visual "
+                  "review and any required crop repair." % out_dir)
         return 0
     finally:
         doc.close()

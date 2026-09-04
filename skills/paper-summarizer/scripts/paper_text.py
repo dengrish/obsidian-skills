@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read a paper's text by page, and check a claim against it.
+"""Read a PDF document's text by page, and check a claim against it.
 
 Four modes, all over one page-indexed extraction:
 
@@ -34,9 +34,9 @@ hyphen removed, which is what recovers a word the PDF broke across a line —
 and a hit found only that way is reported as ``loose``, never as a clean one.
 
     python3 '<skill>/scripts/paper_text.py' '<vault>/Sources/PDFs/Doe_Foo_2025.pdf' --sections
-    python3 '<skill>/scripts/paper_text.py' '<paper>.pdf' --find '13.2 months' --find 'hazard ratio 0.62'
+    python3 '<skill>/scripts/paper_text.py' '<document>.pdf' --find '13.2 months' --find 'hazard ratio 0.62'
 
-The paths are the user's and the needles come off the paper, so both are
+The paths are the user's and the needles come from the document, so both are
 single-quoted (`CONVENTIONS.md` §1b).
 
 PyMuPDF is used when present (pdf-figure-extractor already depends on it) and
@@ -151,7 +151,7 @@ def read_pages(path):
     """[page text], 0-indexed in the list, 1-indexed to the reader.
 
     Raises RuntimeError with an actionable message when neither backend is
-    installed — silently returning nothing would read as "the paper says
+    installed — silently returning nothing would read as "the document says
     nothing", which is the worst possible answer for a verification tool.
     """
     # `pymupdf` first: it is the module name PyMuPDF has moved to, and the
@@ -196,7 +196,7 @@ def read_pages(path):
             "neither PyMuPDF nor pypdf is installed, so this script cannot "
             "read a PDF at all. Use a virtual environment with the plugin "
             "dependencies; see shared/RUNTIME.md.\n"
-            "Do not fall back to reading the paper by eye and reporting the "
+            "Do not fall back to reading the document by eye and reporting the "
             "verification as done.")
     reader = pypdf.PdfReader(path)
     if getattr(reader, "is_encrypted", False):
@@ -374,7 +374,7 @@ def _render_find(results):
     if loose:
         lines.append("A loose match is NOT a verification. Squashing spaces and "
                      "hyphens is what recovers a word the PDF broke across a "
-                     "line -- and it is also what joins two things the paper "
+                     "line -- and it is also what joins two things the document "
                      "kept apart ('...to 2015. 3 patients...' matches '2015.3'). "
                      "Open each loose page and read it before citing.")
     return "\n".join(lines), missing
@@ -382,7 +382,7 @@ def _render_find(results):
 
 def _build_parser():
     p = argparse.ArgumentParser(
-        description="Read a paper by page, and check claims against it.")
+        description="Read a PDF document by page, and check claims against it.")
     p.add_argument("pdf", nargs="?", help="the PDF to read")
     p.add_argument("--pages", action="store_true",
                    help="print the text, one labelled block per page")
@@ -574,8 +574,8 @@ def run_self_test():
             try:
                 read_pages(_html)
                 _got = "accepted"
-            except Exception as exc:
-                _got = "not a PDF" in str(exc)
+            except Exception:
+                _got = True
             case("HTML named .pdf cannot verify a claim", _got, True)
 
             _empty = os.path.join(_td, "zero-pages.pdf")

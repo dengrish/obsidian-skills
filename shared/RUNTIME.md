@@ -39,7 +39,10 @@ running a command. Create scratch files in a unique per-run temporary directory
 **outside the vault**; `/tmp/` examples are illustrative, not shared filenames
 to reuse concurrently. Page renders, crops, decrypted working copies, and other
 review intermediates must not become vault content merely because the run was
-interrupted.
+interrupted. Remove ordinary scratch previews and decrypted working copies after
+the final artifact has been published and verified. Never remove the original
+source, and preserve every staging or recovery path named by a failed guarded
+write until its state has been reconciled.
 
 Guarded publication of regular files also needs hard links on the vault's
 filesystem and a final staging directory on that same filesystem. This is a
@@ -51,20 +54,60 @@ falling back to an overwrite-capable copy or cross-device move. See
 
 ## Use one Python environment
 
-The helpers support Python 3.9+. Examples use `python3`; substitute the full
-path to a suitable interpreter supplied by the host when available. Check its
-imports before installing anything. Wiki and clipping helpers use the standard
-library; PDF reading/splitting needs `pypdf`, and figure extraction needs
-PyMuPDF and Pillow. `requirements.txt` at the plugin root supplies the full set.
+The helpers require Python 3.10+; use a release that is still receiving security
+fixes. Examples use `python3`; substitute the full path to a suitable interpreter
+supplied by the host when available. Python 3.9 is end-of-life, and the supported
+PyMuPDF and Pillow security floors require Python 3.10 or newer. Wiki and clipping
+helpers use the standard library; PDF
+reading/splitting needs `pypdf`, and figure extraction needs PyMuPDF and Pillow.
+`requirements.txt` at the plugin root supplies the full set.
 
-If dependencies are missing, create a virtual environment in an approved,
-writable location outside the installed plugin cache, then use its interpreter
-for both installation and every script invocation:
+PDFs and existing image files are untrusted parser input. An import-only check
+can silently accept an old vulnerable package, so verify installed versions as
+well. Do not disable Pillow's decompression-bomb protection, and do not run the
+helpers with elevated operating-system privileges. The minimum versions below
+mirror `requirements.txt`; keep the two locations synchronized.
+
+If dependencies are missing or below these floors, create a virtual environment
+in an approved, writable location outside the installed plugin cache, then use
+its interpreter for both installation and every script invocation:
 
 ```bash
 python3 -m venv '<venv>'
 '<venv>/bin/python' -m pip install -r '<plugin>/requirements.txt'
 '<venv>/bin/python' - <<'PY'
+import re
+import sys
+from importlib.metadata import PackageNotFoundError, version
+
+minimums = {
+    "pypdf": (6, 16, 1),
+    "PyMuPDF": (1, 28, 0),
+    "Pillow": (12, 3, 0),
+}
+problems = []
+if sys.version_info < (3, 10):
+    problems.append("Python 3.10 or newer is required")
+for package, minimum in minimums.items():
+    try:
+        installed = version(package)
+    except PackageNotFoundError:
+        problems.append(f"{package} is not installed")
+        continue
+    match = re.match(r"^(\d+)\.(\d+)\.(\d+)", installed)
+    release = tuple(map(int, match.groups())) if match else ()
+    suffix = installed[match.end():].lower() if match else ""
+    prerelease_at_floor = (
+        release == minimum
+        and suffix.startswith(("a", "b", "rc", ".dev", "dev"))
+    )
+    if release < minimum or prerelease_at_floor:
+        problems.append(
+            f"{package} {installed} is below {'.'.join(map(str, minimum))}"
+        )
+if problems:
+    raise SystemExit("dependency check failed: " + "; ".join(problems))
+
 import pypdf
 import PIL
 try:
@@ -74,10 +117,12 @@ except ImportError:
 PY
 ```
 
-Older supported PyMuPDF versions expose `fitz` instead of `pymupdf`; the
-scripts handle both. On Windows the environment's interpreter is
-`<venv>/Scripts/python.exe`. Shell examples elsewhere use POSIX syntax; use a
-POSIX shell (such as WSL) or translate arguments for the active shell.
+All supported PyMuPDF versions expose `pymupdf`. The scripts retain a `fitz`
+import fallback for older environments, but that alias does not replace the
+version check above or make an older release supported. On Windows the
+environment's interpreter is `<venv>/Scripts/python.exe`. Shell examples
+elsewhere use POSIX syntax; use a POSIX shell (such as WSL) or translate
+arguments for the active shell.
 Do not override an externally managed Python installation or install globally
 as a fallback. If installation is blocked, report the missing dependency and
 complete only work that does not depend on it.

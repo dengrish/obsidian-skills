@@ -7,7 +7,7 @@ parenthetical in one of wiki-builder's documented forms immediately follows
 the first outer-bold subject; a year later in the sentence may describe
 something else.
 
-Stdlib only, Python 3.8+.
+Stdlib only, Python 3.10+ (the plugin runtime floor).
 """
 
 import argparse

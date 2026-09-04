@@ -83,6 +83,55 @@ The example demonstrates the drawing operation.
 '''
 
 
+def notice_note(stem):
+    return f'''---
+title: A correction to two dosage values
+format: Paper
+sources:
+  - "[[{stem}.pdf]]"
+author:
+  - Jane Doe
+published: 2025-01-01
+created: 2026-09-04
+description: A correction notice replaces two dosage values in the published table.
+tags:
+  - "#medicine"
+read: false
+---
+> [!Summary]
+> - The notice corrects two dosage values.
+> - The replacement table supersedes the original table.
+> - The remaining findings are not reassessed.
+
+___
+
+## The notice corrects two values in a dosage table
+
+The notice identifies two incorrect entries in the published table.
+
+## Editors compared the table with the underlying records
+
+The publisher states that editors checked the source records.
+
+## Two dosage values change in the published record
+
+The corrected values replace the original entries.<sup>[[{stem}.pdf#page=1|1]]</sup>
+
+## Readers should use the replacement table from now on
+
+The correction makes the replacement table authoritative for those values.
+
+## Other findings remain outside the scope of this correction
+
+- **Scope.** The notice does not reassess the article's other findings.
+
+## The corrected article remains the record of reference
+
+- **Record.** The notice identifies the corrected article and replacement table.
+- **Evidence.** No supporting material beyond the source records is supplied.
+'''
+
+
 class WorkflowTests(unittest.TestCase):
     def setUp(self):
         self.scratch = tempfile.TemporaryDirectory(prefix="obsidian-e2e-")
@@ -99,7 +148,8 @@ class WorkflowTests(unittest.TestCase):
     def run_script(self, relative, *args, expected=0):
         result = subprocess.run(
             [sys.executable, str(ROOT / relative), *map(str, args)],
-            cwd=self.vault, env=self.env, capture_output=True, text=True, timeout=60)
+            cwd=self.vault, env=self.env, capture_output=True, text=True,
+            encoding="utf-8", timeout=60)
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
         return result
 
@@ -116,6 +166,15 @@ class WorkflowTests(unittest.TestCase):
         return json.loads(self.run_script(
             "skills/paper-summarizer/scripts/paper_scan.py", "--src", self.pdfs,
             "--notes", self.notes, "--images", self.images, "--json").stdout)
+
+    def test_paper_note_lint_applies_the_selected_nonempirical_mode(self):
+        note = self.notes / "Doe_Correction_2025.md"
+        note.write_text(notice_note("Doe_Correction_2025"), encoding="utf-8")
+        missing_mode = self.run_script(
+            "skills/paper-summarizer/scripts/note_lint.py", note, expected=2)
+        self.assertIn("--mode is required", missing_mode.stderr)
+        self.run_script("skills/paper-summarizer/scripts/note_lint.py", note,
+                        "--mode", "notice")
 
     def test_pdf_repair_and_rename_preserve_notes_images_and_ledgers(self):
         organizer = "skills/pdf-organizer/scripts/organize.py"
@@ -143,7 +202,7 @@ class WorkflowTests(unittest.TestCase):
         note = self.notes / "Doe_Study_2025.md"
         note.write_text(summary_note(pdf.stem), encoding="utf-8")
         self.run_script("skills/paper-summarizer/scripts/note_lint.py", note,
-                        "--images", self.images)
+                        "--mode", "empirical", "--images", self.images)
         self.assertEqual(self.scan_papers()["counts"]["done"], 1)
         references = self.vault / "Wiki/reference.md"
         references.write_text("[[Doe_Study_2025.md]]\n[[Doe_Study_2025.pdf#page=1]]\n",
@@ -167,8 +226,67 @@ class WorkflowTests(unittest.TestCase):
         self.run_script(batch, "--src", renamed, "--out", self.images, "--dpi", 72)
         self.assertEqual(digest(renamed_figure), repaired)
         self.run_script("skills/paper-summarizer/scripts/note_lint.py", renamed_note,
-                        "--images", self.images)
+                        "--mode", "empirical", "--images", self.images)
         self.assertEqual(self.scan_papers()["counts"]["done"], 1)
+
+    def test_pdf_year_rename_keeps_owned_summary_metadata_aligned(self):
+        organizer = "skills/pdf-organizer/scripts/organize.py"
+        source = self.pdfs / "Doe_Correction_2025.pdf"
+        self.make_pdf(source)
+        note = self.notes / "Doe_Correction_2025.md"
+        note.write_text(
+            notice_note(source.stem).replace(
+                "published: 2025-01-01",
+                "published: 2025-03-14 # date printed by the document"),
+            encoding="utf-8")
+        citing_note = self.vault / "Wiki/context.md"
+        citing_note.write_text(
+            "---\npublished: 1999-12-31\n---\n"
+            "[[Doe_Correction_2025.pdf]]\n",
+            encoding="utf-8")
+
+        planned = self.run_script(
+            organizer, "rename", "--vault", self.vault, source,
+            "--to", "Doe_Correction_2026.pdf")
+        self.assertIn("Publication-date updates (1):", planned.stdout)
+        self.assertIn("2025-03-14 -> 2026-03-14", planned.stdout)
+        self.assertTrue(source.is_file())
+        self.assertIn("published: 2025-03-14", note.read_text(encoding="utf-8"))
+
+        self.run_script(
+            organizer, "rename", "--vault", self.vault, source,
+            "--to", "Doe_Correction_2026.pdf", "--apply")
+        source = self.pdfs / "Doe_Correction_2026.pdf"
+        note = self.notes / "Doe_Correction_2026.md"
+        body = note.read_text(encoding="utf-8")
+        self.assertIn(
+            "published: 2026-03-14 # date printed by the document", body)
+        self.assertIn("[[Doe_Correction_2026.pdf]]", body)
+        context = citing_note.read_text(encoding="utf-8")
+        self.assertIn("published: 1999-12-31", context)
+        self.assertIn("[[Doe_Correction_2026.pdf]]", context)
+        self.run_script("skills/paper-summarizer/scripts/note_lint.py", note,
+                        "--mode", "notice")
+
+        self.run_script(
+            organizer, "rename", "--vault", self.vault, source,
+            "--to", "Doe_Correction_nd.pdf", "--apply")
+        source = self.pdfs / "Doe_Correction_nd.pdf"
+        note = self.notes / "Doe_Correction_nd.md"
+        self.assertIn("published: null", note.read_text(encoding="utf-8"))
+        self.run_script("skills/paper-summarizer/scripts/note_lint.py", note,
+                        "--mode", "notice")
+
+        self.run_script(
+            organizer, "rename", "--vault", self.vault, source,
+            "--to", "Doe_Correction_2027.pdf", "--apply")
+        note = self.notes / "Doe_Correction_2027.md"
+        self.assertIn("published: 2027-01-01",
+                      note.read_text(encoding="utf-8"))
+        self.assertIn("published: 1999-12-31",
+                      citing_note.read_text(encoding="utf-8"))
+        self.run_script("skills/paper-summarizer/scripts/note_lint.py", note,
+                        "--mode", "notice")
 
     def test_canonical_inbox_pdf_can_be_filed_without_changing_identity(self):
         source = self.vault / "Inbox/Doe_Study_2025.pdf"
@@ -266,20 +384,21 @@ class WorkflowTests(unittest.TestCase):
         note.write_text(body, encoding="utf-8")
         self.assertEqual(self.scan_papers()["counts"]["done"], 1)
         self.run_script("skills/paper-summarizer/scripts/note_lint.py", note,
-                        "--images", self.images)
+                        "--mode", "empirical", "--images", self.images)
         original = digest(figure)
         self.run_script("skills/pdf-organizer/scripts/organize.py", "rename",
                         "--vault", self.vault, source,
                         "--to", "Doe_Renamed_2025.pdf", "--apply")
         renamed_note = self.notes / "Doe_Renamed_2025.md"
-        metadata = yaml.safe_load(renamed_note.read_text().split("---", 2)[1])
+        metadata = yaml.safe_load(
+            renamed_note.read_text(encoding="utf-8").split("---", 2)[1])
         self.assertEqual(metadata["sources"], ["[[Doe_Renamed_2025.pdf]]"])
         self.assertTrue(metadata["read"])
         self.assertEqual(str(metadata["created"]), "2026-08-30")
         self.assertEqual(digest(self.images / "Doe_Renamed_2025_fig_1.png"), original)
         self.assertEqual(self.scan_papers()["counts"]["done"], 1)
         self.run_script("skills/paper-summarizer/scripts/note_lint.py", renamed_note,
-                        "--images", self.images)
+                        "--mode", "empirical", "--images", self.images)
 
     def test_pdf_rename_preserves_publisher_urls_and_foreign_clipping(self):
         source = self.vault / "Inbox/download.pdf"
@@ -314,8 +433,23 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue((self.pdfs / "Doe_Study_2025.pdf").is_file())
         self.assertEqual(digest(clipping), before[clipping])
         self.assertEqual(digest(relocated), before[figure])
-        self.assertEqual(reference.read_text(),
+        self.assertEqual(reference.read_text(encoding="utf-8"),
                          f'[[Doe_Study_2025.pdf#page=1]]\n[Publisher]({publisher})\n')
+
+    def test_clipping_slug_requires_a_date_decision_and_supports_undated(self):
+        script = "skills/clipping-processor/scripts/slug.py"
+        missing = self.run_script(
+            script, "--no-author", "--topic", "Evergreen Reference",
+            expected=2)
+        self.assertIn("--year YYYY or --undated", missing.stderr)
+        invalid = self.run_script(
+            script, "--no-author", "--topic", "Evergreen Reference",
+            "--year", "unknown", expected=2)
+        self.assertIn("four digits from 0001 to 9999", invalid.stderr)
+        undated = json.loads(self.run_script(
+            script, "--no-author", "--topic", "Evergreen Reference",
+            "--undated").stdout)
+        self.assertEqual(undated["filename"], "Evergreen_Reference_nd.md")
 
     def test_clipping_image_reprocess_keeps_duplicate_detection_and_stems_aligned(self):
         fetch = "skills/clipping-processor/scripts/fetch_images.py"
@@ -370,45 +504,73 @@ class WorkflowTests(unittest.TestCase):
         # Duplicate detection must survive that representation too.
         self.assertEqual(verdict()["status"], "duplicate")
         self.assertEqual(verdict(note)["status"], "new")
-        rename = ["rename", "--attachments", self.images, "--sources", self.pdfs,
-                  "--owner-note", note,
-                  "--old-slug", old, "--new-slug", new]
         external = self.vault / "Wiki/clipping-reference.md"
         external.write_text(
             f'[[{old}|the clipping]]\n![[Sources/Images/{old}_fig_1.png]]\n',
             encoding="utf-8")
-        blocked = json.loads(self.run_script(
-            fetch, *rename, "--dry-run", expected=1).stdout)
-        self.assertEqual(blocked["renamed"], 0)
-        self.assertEqual(blocked["failed"], 1)
-        self.assertEqual(blocked["results"][0]["dependency_blockers"], [{
+        new_note = self.notes / (new + ".md")
+        new_note.write_text(body.replace(old, new), encoding="utf-8")
+        rename = ["rename", "--attachments", self.images, "--sources", self.pdfs,
+                  "--owner-note", note, "--new-owner-note", new_note,
+                  "--old-slug", old, "--new-slug", new]
+
+        planned = json.loads(self.run_script(
+            fetch, *rename, "--phase", "prepare", "--dry-run").stdout)
+        expected_mapping = [{"from": image.name,
+                             "to": new + "_fig_1.png"}]
+        expected_blockers = [{
             "path": str(external.resolve()),
             "references": [old + ".md", old + "_fig_1.png"],
-        }])
+        }]
+        self.assertEqual(planned["phase"], "prepare")
+        self.assertEqual(planned["mapping"], expected_mapping)
+        self.assertEqual(planned["dependency"]["blockers"], expected_blockers)
+        self.assertEqual(planned["results"][0]["action"], "would-copy")
+        self.assertTrue(image.is_file())
+        self.assertFalse((self.images / (new + "_fig_1.png")).exists())
+
+        prepared = json.loads(self.run_script(
+            fetch, *rename, "--phase", "prepare").stdout)
+        self.assertEqual(prepared["mapping"], expected_mapping)
+        self.assertEqual(prepared["dependency"]["blockers"], expected_blockers)
+        self.assertEqual(prepared["results"][0]["action"], "copied")
+        new_image = self.images / (new + "_fig_1.png")
+        self.assertEqual(digest(image), original)
+        self.assertEqual(digest(new_image), original)
+
+        # Dependencies may be rewritten only while both exact artifacts resolve;
+        # premature finalization is refused without retiring either copy.
+        self.run_script(fetch, *rename, "--phase", "finalize", expected=1)
+        self.assertEqual(digest(image), original)
+        self.assertEqual(digest(new_image), original)
         dependency = json.loads(self.run_script(
             fetch, "dependencies", "--attachments", self.images,
             "--owner-note", note, "--old-slug", old, expected=1).stdout)
         self.assertFalse(dependency["ok"])
-        self.assertEqual(dependency["blockers"],
-                         blocked["results"][0]["dependency_blockers"])
-        self.assertEqual(digest(image), original)
+        self.assertEqual(dependency["blockers"], expected_blockers)
         # An external dependency rewrite is a separate authorized operation;
-        # once the fixture supplies it, the clipping rename may proceed.
+        # once the fixture supplies it, the old copies may be retired.
         external.write_text(
             f'[[{new}|the clipping]]\n![[Sources/Images/{new}_fig_1.png]]\n',
             encoding="utf-8")
-        new_note = self.notes / (new + ".md")
-        new_note.write_text(body.replace(old, new), encoding="utf-8")
-        self.run_script(fetch, *rename, "--dry-run")
-        self.assertEqual(digest(image), original)
-        self.run_script(fetch, *rename)
         dependency = json.loads(self.run_script(
             fetch, "dependencies", "--attachments", self.images,
             "--owner-note", note, "--old-slug", old).stdout)
         self.assertTrue(dependency["ok"])
+
+        finalized = json.loads(self.run_script(
+            fetch, *rename, "--phase", "finalize", "--dry-run").stdout)
+        self.assertEqual(finalized["phase"], "finalize")
+        self.assertEqual(finalized["mapping"], expected_mapping)
+        self.assertEqual(finalized["results"][0]["action"], "would-retire")
+        self.assertEqual(digest(image), original)
+        self.assertEqual(digest(new_image), original)
+        finalized = json.loads(self.run_script(
+            fetch, *rename, "--phase", "finalize").stdout)
+        self.assertEqual(finalized["results"][0]["action"], "retired")
         note.unlink()
         self.assertFalse(image.exists())
-        self.assertEqual(digest(self.images / (new + "_fig_1.png")), original)
+        self.assertEqual(digest(new_image), original)
         current = verdict()
         self.assertEqual(current["status"], "duplicate")
         self.assertEqual(current["matches"], [str(self.notes / (new + ".md"))])
@@ -493,20 +655,23 @@ Control sample
             "- [[control-sample|Control sample]]\n", encoding="utf-8")
         index = self.vault / "index.json"
         self.run_script("skills/wiki-builder/scripts/vault_index.py", wiki, "-o", index)
-        self.assertEqual(json.loads(index.read_text())["entry_count"], 1)
+        self.assertEqual(
+            json.loads(index.read_text(encoding="utf-8"))["entry_count"], 1)
         candidates = self.vault / "candidates.json"
-        candidates.write_text(json.dumps(["Control sample", "Unrelated device"]))
+        candidates.write_text(
+            json.dumps(["Control sample", "Unrelated device"]), encoding="utf-8")
         collisions = json.loads(self.run_script(
             "skills/wiki-builder/scripts/find_collisions.py", "--index", index,
             "--titles", candidates).stdout)
         self.assertEqual([r["verdict"] for r in collisions["results"]], ["merge", "create"])
         lint = self.vault / "lint.json"
         self.run_script("skills/wiki-builder/scripts/lint_entry.py", wiki, "-o", lint)
-        self.assertTrue(json.loads(lint.read_text())["summary"]["clean"])
+        self.assertTrue(
+            json.loads(lint.read_text(encoding="utf-8"))["summary"]["clean"])
         scan = self.vault / "scan.json"
         self.run_script("skills/wiki-linter/scripts/scan_vault.py", wiki,
                         "--images", self.images, "--out", scan)
-        report = json.loads(scan.read_text())
+        report = json.loads(scan.read_text(encoding="utf-8"))
         self.assertEqual(report["problems"], [])
         self.assertEqual(report["backfill_candidates"], [])
         for key in ("self_parented", "parent_cycles"):

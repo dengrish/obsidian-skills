@@ -30,7 +30,7 @@ An empty new wiki has no existing-entry collisions; candidates are still probed 
 
 ## Merge Logic
 
-The merge case (existing entry + new source) is the most consequential and the easiest to get wrong. Read this section carefully.
+The merge case (existing entry + new source) is the most consequential and the easiest to get wrong. Read this section carefully. A correction based only on sources the entry already cites is instead wiki-linter's [source-backed correction mode](../../wiki-linter/references/source-backed-corrections.md).
 
 ### Integration principle
 

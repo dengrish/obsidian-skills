@@ -15,7 +15,7 @@ the user's captured prose with fetched text.
 
 Keep two views for different jobs: raw/rendered markup exposes media, while the
 host's extracted article text exposes prose gaps. Reuse the extracted text from
-metadata verification; if needed, fetch it again with the host's web-fetch tool,
+metadata verification; if needed, fetch it again with an available web tool,
 not a hand-written readability extractor.
 
 Start the markup inspection with a permitted static fetch using a browser
@@ -112,15 +112,17 @@ a missing caption.
 Keep equivalent existing `<!-- source has … -->` placeholders on reprocessing;
 do not duplicate or silently remove them.
 
-- A **self-contained inline SVG** may be serialized to a unique scratch file
-  outside the vault. Inspect readability, put its planned filename-only embed
-  in the draft, and after the note is safely public use `fetch_images.py place
+- An **inert, self-contained inline SVG** may be serialized to a unique scratch
+  file outside the vault. Inspect readability, put its planned filename-only
+  embed in the draft, and after the note is safely public use `fetch_images.py place
   --attachments '<vault>/Sources/Images' --slug '<slug>' --index <N>
   --from-file '<scratch>/diagram.svg' --owner-note
   '<vault>/Articles/<slug>.md'`. If it depends
   on external CSS/fonts/JavaScript or definitions outside the serialized SVG,
-  do not save a broken diagram. Leave `<!-- source has an inline SVG diagram
-  here, not capturable as a static file; view at <source> -->` and report it.
+  do not save a broken diagram. The helper also refuses active SVG content,
+  external resource references, and XML DTDs before publication. Leave
+  `<!-- source has an inline SVG diagram here, not capturable as a static file;
+  view at <source> -->` and report it.
 - For video, canvas and interactive widgets without a faithful asset, leave
   `<!-- source has an animation/interactive figure here, not captured; view at
   <source> -->` with a short description. Never pass a random still off as the

@@ -14,7 +14,7 @@ would misclassify domains, prose punctuation, and method names; the executing
 agent's semantic pass remains responsible for uncommon extensions outside this common
 set.
 
-Stdlib only, Python 3.8+.
+Stdlib only, Python 3.10+ (the plugin runtime floor).
 """
 
 import argparse

@@ -9,7 +9,7 @@ a filler list and word order, not article meaning. For example, it suggests
 selected topic below is `Pancreatic_Cancer`. Check its `topic_auto` and `notes`
 fields, then rerun with the intended `--topic` before any image is written.
 
-The polished note's filename is an abbreviation, not the full title — the full title still lives in YAML. Three segments joined by underscores: **`<Author>_<short_topic>_<year>.md`**. Keeping filenames short keeps the file pane scannable and avoids OS path-length issues; the full title in YAML is what shows up in Obsidian's preview and search anyway.
+The polished note's filename is an abbreviation, not the full title — the full title still lives in YAML. Three segments joined by underscores: **`<Author>_<short_topic>_<year-or-nd>.md`**. Keeping filenames short keeps the file pane scannable and avoids OS path-length issues; the full title in YAML is what shows up in Obsidian's preview and search anyway.
 
 The complete stem must also be portable. `CON`, `PRN`, `AUX`, `NUL`,
 `COM1`–`COM9`, and `LPT1`–`LPT9` are reserved Windows device basenames even
@@ -40,7 +40,7 @@ The comma-flip for surname-first names applies **only within a single author's n
 - "Martin Luther King, Jr." → suffix after comma, not surname-first → `King`
 - "Mary Smith-Jones" → `SmithJones` (hyphens dropped, casing kept)
 - Two or more authors → just the **first author's** surname, nothing appended: "Teslo and Smith" → `Teslo`; "Buck, Carlsmith, and Greenblatt" → `Buck`. (No `_etal` — the first surname already identifies the work, and the full author list lives in the YAML for search and wiki-builder. An `_etal` marker would only add noise.)
-- No clean human author ("Editorial Team", "Anonymous", a publication account, blank) → drop the author segment entirely; slug becomes `<short_topic>_<year>.md`.
+- No clean human author ("Editorial Team", "Anonymous", a publication account, blank) → drop the author segment entirely; slug becomes `<short_topic>_<year-or-nd>.md`.
 
 ## Short topic segment
 
@@ -56,13 +56,18 @@ Use 2–4 content words from the **corrected** title, **Title-Cased** (capitaliz
 
 ## Year segment
 
-Use the 4-digit year from the **corrected** `published` date. If `published` couldn't be verified and isn't in the raw, fall back to the year from `created` (the clipping date). If even that's somehow missing, drop the year segment.
+Use the 4-digit year from the **corrected** `published` date. A retained raw
+publication date may supply it when the live page is unavailable and the value
+is reported as unverified. If neither the raw nor usable page evidence supplies
+a publication year, pass `--undated`: the segment is `nd` and frontmatter is
+`published: null`. Never substitute the clipping's `created` year.
 
 ## Combined examples
 
 - Teslo, "Pancreatic cancer just met its match", 2026 → `Teslo_Pancreatic_Cancer_2026.md`
 - Anonymous editorial, "How LLMs work: a deep dive", 2025 → `LLMs_Deep_Dive_2025.md`
 - Smith & Jones, "Synbio bullish thesis", 2024 → `Smith_Synbio_Bullish_2024.md` (first author only; the co-author is recorded in the YAML, not the filename)
+- No author, "Evergreen guide to causal diagrams", undated → `Causal_Diagrams_nd.md`
 
 Other punctuation (`:`, `,`, `?`, `'`, `"`, `—`, `–`) is removed, not replaced.
 

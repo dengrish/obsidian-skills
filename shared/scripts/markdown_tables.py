@@ -6,7 +6,7 @@ mask fenced and indented-code listings before passing text to
 ``markdown_table_spans``; returned inclusive line spans retain the original
 line numbering. Inline code stays visible because GFM finds table cell
 separators before parsing inline spans; a pipe inside code must be escaped.
-Stdlib only, Python 3.8+.
+Stdlib only, Python 3.10+ (the plugin runtime floor).
 """
 
 import argparse

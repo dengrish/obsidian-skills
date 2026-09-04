@@ -2,11 +2,9 @@
 # -*- coding: utf-8 -*-
 """vault_index.py -- walk a wiki folder and emit a JSON index of every entry.
 
-Five separate places in wiki-builder's SKILL.md need a slug -> {title,
-aliases, sources, tags, ...} index and none of them have one; the workflow
-currently offers a bare ``ls '<wiki-folder>'``, which is a flat listing that
-misses subfolders and carries no frontmatter at all.  This walks the folder
-RECURSIVELY (``**/*.md``) and reads each entry's frontmatter and wikilinks.
+wiki-builder's source-coverage and collision checks need a slug -> {title,
+aliases, sources, tags, ...} index. This walks the folder RECURSIVELY
+(``**/*.md``) and reads each entry's frontmatter and wikilinks.
 
 Also the home of the hand-rolled frontmatter parser shared with
 ``lint_entry.py`` -- Python 3 standard library only, no pyyaml.  The parser
@@ -21,7 +19,7 @@ covers exactly the subset wiki-builder writes:
 Anything it cannot parse becomes a recorded error rather than an exception:
 a malformed entry is reported, never fatal.
 
-PACKAGE CONVENTIONS (all four scripts in this folder): Python 3 standard
+PACKAGE CONVENTIONS (all three scripts in this folder): Python 3 standard
 library only -- no pyyaml, no third-party anything.  Each file works as a
 CLI *and* as an importable module, prints JSON to stdout, and takes
 ``--help``.  This module owns the hand-rolled frontmatter parser; the others
@@ -38,8 +36,13 @@ CLI:
     vault_index.py <wiki-folder> [-o index.json] [--compact] [--source NAME ...]
 
 Top-level index shape:
-    {wiki_folder, generated, entry_count, stub_count, entries[],
+    {ok, wiki_folder, generated, entry_count, stub_count, entries[],
      duplicate_slugs, problems[]}
+
+``ok`` records whether the recursive directory inventory completed. Entry-level
+parse/read findings remain in ``problems`` without changing it: the report is
+complete even though individual entries need attention. A walk/onerror failure
+sets ``ok`` false while preserving every entry and problem gathered so far.
 
 ``--source`` additionally emits ``source_matches[]``, matching only decoded
 frontmatter provenance against literal source basenames. Nonempty problems
@@ -61,7 +64,8 @@ targets, and dot-directories are skipped during the walk. A leaf ``.md``
 symlink remains an occupied slug but contributes no target-derived metadata;
 its record and the top-level problems explain the refusal.
 
-Exit codes: 0 ok, 2 wiki folder missing / unreadable.
+Exit codes: 0 complete inventory (entry findings may remain), 1 partial
+recursive inventory emitted, 2 bad usage / missing root / report-write failure.
 """
 
 from __future__ import annotations
@@ -688,8 +692,15 @@ def iter_markdown_files(root, on_error=None):
         try:
             st = os.stat(dirpath)
             key = (st.st_ino, st.st_dev)
-        except OSError:
-            key = dirpath
+        except OSError as exc:
+            # Without a stable device/inode identity we cannot safely follow
+            # children: ``dirpath`` aliases would defeat loop detection and a
+            # transient metadata failure can leave this directory only partly
+            # represented.  Surface the incomplete inventory and prune it.
+            if on_error is not None:
+                on_error(exc)
+            dirnames[:] = []
+            continue
         if key in seen:
             dirnames[:] = []
             continue
@@ -705,6 +716,7 @@ def build_index(root):
     """Build the full index dict for the wiki folder at ``root``."""
     root = os.path.abspath(root)
     index = {
+        "ok": True,
         "wiki_folder": root,
         "generated": _dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
         "entry_count": 0,
@@ -714,11 +726,13 @@ def build_index(root):
         "problems": [],
     }
     if not os.path.isdir(root):
+        index["ok"] = False
         index["problems"].append("wiki folder does not exist: %s" % root)
         return index
 
     by_slug = {}          # folded slug -> [(display slug, relpath)]
     def walk_error(exc):
+        index["ok"] = False
         index["problems"].append("unreadable wiki directory: %s" % exc)
 
     for path in iter_markdown_files(root, on_error=walk_error):
@@ -752,8 +766,8 @@ def source_matches(index, filenames):
     Read only decoded frontmatter sources, never example links in body prose.
     Folder qualifications, anchors, case and Unicode normalization do not
     change the basename. Disambiguators such as _2 remain part of its name.
-    The caller must inspect index problems before treating a match as grounds
-    for an automatic already-processed skip.
+    The caller must inspect ``ok`` and index problems before treating a match
+    as grounds for an automatic already-processed skip.
     """
     requested = {fold_name(str(name).replace("\\", "/").rsplit("/", 1)[-1])
                  for name in filenames}
@@ -897,7 +911,7 @@ def run_self_test():
         # -- the shape the other two scripts consume ------------------------
         check("the top-level index keys are the documented ones",
               sorted(idx),
-              sorted(["wiki_folder", "generated", "entry_count", "stub_count",
+              sorted(["ok", "wiki_folder", "generated", "entry_count", "stub_count",
                       "entries", "duplicate_slugs", "problems"]))
         anchor = [r for r in idx["entries"] if r["slug"] == "anchor"][0]
         check("the per-entry record keys are the documented ones",
@@ -1150,7 +1164,8 @@ def run_self_test():
         # -- a missing folder is a problem, not a traceback ---------------------
         missing = build_index(os.path.join(tmp, "nope"))
         check("a missing wiki folder is reported and returns an empty index",
-              (missing["entry_count"], bool(missing["problems"])), (0, True))
+              (missing["ok"], missing["entry_count"],
+               bool(missing["problems"])), (False, 0, True))
 
         # The source query uses provenance, never a prose example, and names
         # are compared literally (including numeric disambiguators).
@@ -1177,12 +1192,17 @@ def run_self_test():
                 if r["slug"] == "leading-zero"]),
               (True, []))
         out_path = os.path.join(tmp, "source-index.json")
-        with contextlib.redirect_stdout(io.StringIO()):
+        status_out = io.StringIO()
+        with contextlib.redirect_stdout(status_out):
             rc = main([wiki, "--source", "García_Study_2025.pdf", "--source", "DifferentNote.md", "-o", out_path])
         with open(out_path, encoding="utf-8") as fh:
             cli_idx = json.load(fh)
+        cli_status = json.loads(status_out.getvalue())
         check("repeatable CLI --source adds the same provenance matches",
               (rc, [r["slug"] for r in cli_idx["source_matches"]]), (0, ["cited"]))
+        check("entry-level findings keep a complete CLI report successful",
+              (cli_idx["ok"], cli_status["ok"],
+               bool(cli_idx["problems"]), rc), (True, True, True, 0))
 
         from unittest.mock import patch
         def unreadable_walk(root, followlinks=False, onerror=None):
@@ -1192,8 +1212,51 @@ def run_self_test():
         with patch.object(os, "walk", unreadable_walk):
             inaccessible = build_index(wiki)
         check("an unreadable directory cannot masquerade as a clean empty index",
-              (inaccessible["entry_count"], any("unreadable wiki directory" in p for p in inaccessible["problems"])),
-              (0, True))
+              (inaccessible["ok"], inaccessible["entry_count"],
+               any("unreadable wiki directory" in p
+                   for p in inaccessible["problems"])),
+              (False, 0, True))
+
+        partial_path = os.path.join(tmp, "partial-index.json")
+        partial_status_out = io.StringIO()
+        with patch.object(os, "walk", unreadable_walk), \
+                contextlib.redirect_stdout(partial_status_out):
+            partial_rc = main([wiki, "-o", partial_path])
+        with open(partial_path, encoding="utf-8") as fh:
+            partial_idx = json.load(fh)
+        partial_status = json.loads(partial_status_out.getvalue())
+        check("the CLI writes a useful partial index but exits nonzero and says ok false",
+              (partial_rc, partial_idx["ok"], partial_status["ok"],
+               partial_idx["entry_count"],
+               bool(partial_status.get("problems"))),
+              (1, False, False, 0, True))
+
+        stat_race = os.path.join(wiki, "stat-race")
+        os.makedirs(stat_race)
+        with open(os.path.join(stat_race, "must-not-look-complete.md"),
+                  "w", encoding="utf-8") as fh:
+            fh.write(_st_entry_text("Stat race"))
+        real_stat = os.stat
+        def failing_directory_stat(path, *args, **kwargs):
+            if os.path.abspath(os.fspath(path)) == stat_race:
+                raise PermissionError(13, "metadata unavailable", path)
+            return real_stat(path, *args, **kwargs)
+        stat_partial_path = os.path.join(tmp, "stat-partial-index.json")
+        stat_status_out = io.StringIO()
+        with patch.object(os, "stat", failing_directory_stat), \
+                contextlib.redirect_stdout(stat_status_out):
+            stat_partial_rc = main([wiki, "-o", stat_partial_path])
+        with open(stat_partial_path, encoding="utf-8") as fh:
+            stat_partial_idx = json.load(fh)
+        stat_partial_status = json.loads(stat_status_out.getvalue())
+        check("a directory stat failure prunes that subtree and makes the CLI partial",
+              (stat_partial_rc, stat_partial_idx["ok"],
+               stat_partial_status["ok"],
+               any(r["relpath"].startswith("stat-race/")
+                   for r in stat_partial_idx["entries"]),
+               any("metadata unavailable" in p
+                   for p in stat_partial_idx["problems"])),
+              (1, False, False, False, True))
 
         unicode_wiki = os.path.join(tmp, "unicode-space")
         os.makedirs(unicode_wiki)
@@ -1279,6 +1342,7 @@ def main(argv=None):
 
     dumped = json.dumps(index, ensure_ascii=False,
                         **({} if args.compact else {"indent": 2}))
+    report_complete = index["ok"]
     if args.output:
         try:
             with open(args.output, "w", encoding="utf-8") as fh:
@@ -1288,14 +1352,20 @@ def main(argv=None):
                               "error": "could not write %s: %s" % (args.output, exc)},
                              indent=2))
             return 2
-        print(json.dumps({
-            "ok": True, "output": os.path.abspath(args.output),
-            "entry_count": index["entry_count"], "stub_count": index["stub_count"],
+        status = {
+            "ok": report_complete,
+            "output": os.path.abspath(args.output),
+            "entry_count": index["entry_count"],
+            "stub_count": index["stub_count"],
             "problem_count": len(index["problems"]),
-        }, indent=2, ensure_ascii=False))
+        }
+        if not report_complete:
+            status["error"] = "recursive wiki inventory is incomplete"
+            status["problems"] = index["problems"]
+        print(json.dumps(status, indent=2, ensure_ascii=False))
     else:
         print(dumped)
-    return 0
+    return 0 if report_complete else 1
 
 
 if __name__ == "__main__":
