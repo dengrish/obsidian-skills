@@ -4772,7 +4772,11 @@ def _st_entry(title, prose, tags=('"#statistics"',), type_="Concept",
 def _st_write(root, relpath, text, encoding="utf-8"):
     path = os.path.join(root, *relpath.split("/"))
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    mode, kw = ("wb", {}) if isinstance(text, bytes) else ("w", {"encoding": encoding})
+    # Write the fixture's line endings verbatim. On Windows, ordinary text
+    # mode would turn an explicit CRLF fixture into CRCRLF and test bytes that
+    # a normal editor did not produce.
+    mode, kw = (("wb", {}) if isinstance(text, bytes)
+                else ("w", {"encoding": encoding, "newline": ""}))
     with open(path, mode, **kw) as fh:
         fh.write(text)
     return path

@@ -1355,6 +1355,7 @@ def run_self_test():
         with open(post_replace, "wb") as fh:
             fh.write(post_replace_old)
         os.chmod(post_replace, 0o600)
+        post_replace_mode = stat.S_IMODE(os.stat(post_replace).st_mode)
         post_replace_digest = file_digest(post_replace)
         post_replace_late = b"writer replacing the public link before readback"
         injected_post_replace = {"done": False}
@@ -1399,22 +1400,23 @@ def run_self_test():
             check("recovered predecessor retains its exact bytes and mode",
                   (open(recovered, "rb").read(),
                    stat.S_IMODE(os.stat(recovered).st_mode)),
-                  (post_replace_old, 0o600))
+                  (post_replace_old, post_replace_mode))
             shutil.rmtree(post_recovery_dirs[0])
         else:
             check("missing recovered predecessor retains bytes and mode",
-                  None, (post_replace_old, 0o600))
+                  None, (post_replace_old, post_replace_mode))
 
         mode_replace = os.path.join(
             render_images, "Doe_Figs_2025_fig_mode.png")
         with open(mode_replace, "wb") as fh:
             fh.write(b"verified mode predecessor")
         os.chmod(mode_replace, 0o640)
+        mode_before_replace = stat.S_IMODE(os.stat(mode_replace).st_mode)
         mode_digest = file_digest(mode_replace)
         extract_one_figure(doc, 0, (100, 150, 500, 350), mode_replace,
                            dpi=72, trim=False, replace_digest=mode_digest)
         check("successful replacement preserves output permissions",
-              stat.S_IMODE(os.stat(mode_replace).st_mode), 0o640)
+              stat.S_IMODE(os.stat(mode_replace).st_mode), mode_before_replace)
 
         # If a second writer arrives after the verified predecessor was
         # displaced, it keeps the public name. Preserve the predecessor in a

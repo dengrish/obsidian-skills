@@ -1093,7 +1093,9 @@ def run_self_test():
             check("cleanup after a refused publication reports every residue",
                   (finally_incomplete, open(src, "rb").read(),
                    open(dst, "rb").read(), len(recoveries),
-                   all(path in incomplete_message for path in recoveries)),
+                   all(path in incomplete_message
+                       or repr(path) in incomplete_message
+                       for path in recoveries)),
                   (True, b"finally ours", b"finally late", 2, True))
 
             src = put(folder, "unlink-source", b"linked bytes")

@@ -1564,7 +1564,8 @@ def run_self_test():
                 for row in partial.get("pdfs", [])))
         else:
             accepted = (code == 2 and not output.getvalue()
-                        and repr(blocked) in errors.getvalue())
+                        and (blocked in errors.getvalue()
+                             or repr(blocked) in errors.getvalue()))
         if not accepted:
             bad += 1
             print("FAIL unreadable directory was reported as a complete scan: %s "

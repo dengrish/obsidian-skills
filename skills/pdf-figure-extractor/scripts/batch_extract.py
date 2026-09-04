@@ -2715,7 +2715,9 @@ def run_self_test():
         ]
         check("batch reports and retains the recoverable late-occupant crop",
               (len(race_new_stages),
-               bool(race_new_stages and race_new_stages[0] in race_new_reason),
+               bool(race_new_stages
+                    and os.path.basename(race_new_stages[0])
+                    in race_new_reason),
                sorted(os.listdir(race_new_stages[0])) if race_new_stages else []),
               (1, True, ["Doe_RaceNew_2025_fig_1.png"]))
         for race_stage in race_new_stages:
@@ -3023,18 +3025,29 @@ def run_self_test():
         check("seeding a folder that does not exist", empty_seen, {})
 
         # --- the --mark-reviewed line is a command, not a fragment ----------
-        cmd = mark_reviewed_command("/v/Sources/PDFs", "/v/Sources/Images",
+        command_src = os.path.abspath(os.path.join(tmp, "command-src"))
+        command_out = os.path.abspath(os.path.join(tmp, "command-out"))
+        cmd = mark_reviewed_command(command_src, command_out,
                                     "Doe_Tiny_2025", "1")
+        cmd_argv = shlex.split(cmd)
         ok("the mark-reviewed line preserves the Python environment",
-           shlex.split(cmd)[0] == sys.executable)
+           cmd_argv[0] == sys.executable)
         ok("...names this script by absolute path",
-           os.path.abspath(__file__) in cmd)
+           cmd_argv[1] == os.path.abspath(__file__))
         ok("...carries both required arguments",
-           "--src /v/Sources/PDFs" in cmd and "--out /v/Sources/Images" in cmd)
-        ok("...and the mark itself", "--mark-reviewed Doe_Tiny_2025:1" in cmd)
+           cmd_argv[cmd_argv.index("--src") + 1]
+           == command_src
+           and cmd_argv[cmd_argv.index("--out") + 1]
+           == command_out)
+        ok("...and the mark itself",
+           cmd_argv[cmd_argv.index("--mark-reviewed") + 1]
+           == "Doe_Tiny_2025:1")
+        spaced_out = os.path.abspath(os.path.join(tmp, "My Vault", "Images"))
+        spaced_cmd = mark_reviewed_command(
+            command_src, spaced_out, "A", "1")
         ok("a path with a space is quoted for the shell",
-           "'/v/My Vault/Sources/Images'" in mark_reviewed_command(
-               "/v/s", "/v/My Vault/Sources/Images", "A", "1"))
+           shlex.split(spaced_cmd)[shlex.split(spaced_cmd).index("--out") + 1]
+           == spaced_out and shlex.quote(spaced_out) in spaced_cmd)
 
         # --- print_summary --------------------------------------------------
         def summary(per_pdf, **kw):

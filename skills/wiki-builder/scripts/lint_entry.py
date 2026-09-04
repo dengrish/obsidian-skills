@@ -2320,6 +2320,11 @@ def _check_source_duplicates(fm, findings):
 
 def lint_text(text, filename):
     """Lint one entry given its text.  Returns the per-file result dict."""
+    # ``lint_file`` reads bytes to keep the pathname/descriptor race check
+    # exact, so it does not receive Python text mode's universal-newline
+    # translation. Normalize here as part of the programmatic API too: CRLF
+    # and legacy CR notes have the same Markdown structure as LF notes.
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     findings = []
     result = {"file": os.path.abspath(filename), "findings": findings,
               "is_stub": False, "title": None, "aliases": [],
@@ -2847,6 +2852,8 @@ def run_self_test():
 
     check("the clean fixture produces NO finding at any severity",
           items(good), [])
+    check("CRLF and LF entries have the same lint result",
+          items(good.replace("\n", "\r\n")), [])
     check("the clean STUB produces no finding either",
           items(stub, "precision.md"), [])
     check("numeric inline math is not mistaken for currency",

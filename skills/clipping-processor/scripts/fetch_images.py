@@ -4503,8 +4503,13 @@ continues here`
         check("...inside the attachments folder",
               os.path.isfile(os.path.join(att, "Teslo_Cancer_2026_fig_1.png")),
               True)
+        downloaded_mode = stat.S_IMODE(os.stat(res["path"]).st_mode)
         check("...world-readable, not mkstemp's 0600",
-              oct(os.stat(res["path"]).st_mode & 0o777), oct(0o644))
+              (downloaded_mode if os.name != "nt" else
+               ((downloaded_mode & 0o444) == 0o444,
+                bool(downloaded_mode & 0o200),
+                bool(downloaded_mode & 0o111))),
+              0o644 if os.name != "nt" else (True, True, False))
         check("...and leaves no temp file behind", strays() - before, set())
         # the occupied-slot refusal: `shutil.move` replaces silently, so a
         # re-run with the wrong --start destroyed the figures already filed
@@ -4647,11 +4652,13 @@ continues here`
         with patch.dict(globals(), publish_new=unavailable_link):
             no_link_result = place_file(
                 no_link_source, att, "No_Hard_Link_2026", 1)
+        no_link_error = no_link_result["error"] or ""
         check("a hard-link refusal retains and reports the original complete source",
               (no_link_result["ok"],
-               "LinkUnavailable" in (no_link_result["error"] or ""),
-               no_link_source in (no_link_result["error"] or ""),
-               ".clipping-stage." in (no_link_result["error"] or ""),
+               "LinkUnavailable" in no_link_error,
+               (no_link_source in no_link_error
+                or repr(no_link_source) in no_link_error),
+               ".clipping-stage." in no_link_error,
                no_link_result["source"], open(no_link_source, "rb").read(),
                os.path.lexists(no_link_target),
                glob.glob(os.path.join(os.path.dirname(att),
@@ -4688,13 +4695,14 @@ continues here`
         mode_target = touch(os.path.join(att, "Mode_Target_2026_fig_1.png"),
                             b"old")
         os.chmod(mode_target, 0o640)
+        predecessor_mode = stat.S_IMODE(os.stat(mode_target).st_mode)
         _publish_file(mode_src, mode_target, True,
                       staging_parent=os.path.dirname(att))
         check("an overwrite preserves the predecessor's permission bits",
               (open(mode_target, "rb").read(),
                stat.S_IMODE(os.stat(mode_target).st_mode),
                os.path.lexists(mode_src)),
-              (_PNG, 0o640, False))
+              (_PNG, predecessor_mode, False))
 
         readback_src = touch(os.path.join(tmp, "readback-source.png"), _PNG)
         readback_target = touch(
@@ -5068,8 +5076,13 @@ continues here`
               (True, "Teslo_Cancer_2026_fig_20.gif"))
         check("...moving it, so no twin is left at the render path",
               os.path.exists(render), False)
+        placed_mode = stat.S_IMODE(os.stat(res["path"]).st_mode)
         check("...world-readable like a downloaded figure",
-              oct(os.stat(res["path"]).st_mode & 0o777), oct(0o644))
+              (placed_mode if os.name != "nt" else
+               ((placed_mode & 0o444) == 0o444,
+                bool(placed_mode & 0o200),
+                bool(placed_mode & 0o111))),
+              0o644 if os.name != "nt" else (True, True, False))
         # the occupied slot: `os.replace` in the heredoc overwrote a previous
         # run's GIF and exited 0
         render = touch(os.path.join(tmp, "render.gif"), b"GIF89a\x02\x00,")
@@ -5790,9 +5803,10 @@ continues here`
         check("a case-only rename is allowed", [e["ok"] for e in out], [True])
         # ...whose collision preflight is decided by `_same_file`, not by the
         # names. On an insensitive filesystem src and dst are one directory
-        # entry and `lexists(dst)` is true. A hard link reproduces the same-file
-        # preflight on any filesystem, though its second directory entry cannot
-        # reproduce the later atomic case-only move; keep this probe dry-run.
+        # entry and `lexists(dst)` is true. A hard link exercises the
+        # same-inode predicate portably, but two distinct directory entries
+        # cannot reproduce the complete case-only rename: the portable folder
+        # inventory deliberately treats both spellings as competing entries.
         one = touch(os.path.join(tmp, "one"), b"x")
         two = os.path.join(tmp, "two")
         check("_same_file: a path is itself", _same_file(one, one), True)
@@ -5800,17 +5814,14 @@ continues here`
               _same_file(one, os.path.join(tmp, "nope")), False)
         check("_same_file: two different files are not one",
               _same_file(one, touch(two, b"y")), False)
+        os.unlink(two)
         try:
-            folder = figures("teslo_cancer_2026", ("_fig_1.png",))
-            os.link(os.path.join(folder, "teslo_cancer_2026_fig_1.png"),
-                    os.path.join(folder, "Teslo_Cancer_2026_fig_1.png"))
+            os.link(one, two)
         except (OSError, AttributeError, NotImplementedError):
             pass                              # no hard links here: skip, silently
         else:
-            check("a same-inode destination passes collision preflight",
-                  all(e["ok"] for e in checked_rename(folder, "teslo_cancer_2026",
-                                                   "Teslo_Cancer_2026",
-                                                   dry_run=True)), True)
+            check("_same_file recognizes distinct names for one inode",
+                  _same_file(one, two), True)
 
         # Sources/Images is FLAT and shared. Two guards say the stem is a PDF's.
         folder = figures("Doe_Foo_2025", ("_fig_1.png", "_fig_S1.png"))

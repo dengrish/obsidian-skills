@@ -687,11 +687,24 @@ def self_test():
                     self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o444)
                 finally:
                     os.chmod(path, 0o640)
+                writable_mode = stat.S_IMODE(os.stat(path).st_mode)
                 with mock.patch.object(os, "fchmod", None):
                     write_manifest(path, {"B_fig_1.png": "b" * 64})
-                self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o640)
+                # Native Windows maps chmod to its read-only attribute and
+                # reports a writable file as 0666, so 0640 is not an
+                # observable state there. Preserve the exact mode the host
+                # exposed for the predecessor instead of asserting a POSIX
+                # representation that Windows cannot retain.
+                self.assertEqual(
+                    stat.S_IMODE(os.stat(path).st_mode), writable_mode)
                 link = os.path.join(directory, "linked.tsv")
-                os.symlink(path, link)
+                try:
+                    os.symlink(path, link)
+                except (OSError, NotImplementedError):
+                    # Native Windows can deny symlink creation unless its
+                    # developer-mode or privilege policy enables it. The
+                    # path is still exercised on every capable filesystem.
+                    return
                 before = open(path, "rb").read()
                 with self.assertRaises(ValueError):
                     write_manifest(link, {"C_fig_1.png": "c" * 64})
