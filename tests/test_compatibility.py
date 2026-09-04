@@ -11,6 +11,7 @@ import re
 import shlex
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -375,6 +376,47 @@ class CompatibilityTests(unittest.TestCase):
             with patch.object(build.os, "open", side_effect=change_in_place):
                 with self.assertRaises(OSError):
                     build.package_files(root)
+
+    def test_stable_snapshot_tolerates_path_handle_metadata_projection(self):
+        build = load("build_plugin_windows_stat", ROOT / "tools/build_plugin.py")
+        with tempfile.TemporaryDirectory(prefix="obsidian-package-stat-") as tmp:
+            source = Path(tmp) / "source.md"
+            content = b"stable package source\n"
+            source.write_bytes(content)
+            real_fstat = build.os.fstat
+
+            class HandleStat:
+                """Expose a stable handle view that differs from path stat."""
+
+                def __init__(self, item, ctime_delta=100):
+                    self.item = item
+                    self.ctime_delta = ctime_delta
+
+                def __getattr__(self, name):
+                    if name == "st_ctime_ns":
+                        return getattr(self.item, name) + self.ctime_delta
+                    if name == "st_mode":
+                        # Windows path and handle APIs may project permission
+                        # bits differently; keep the regular-file type intact.
+                        return stat.S_IFMT(self.item.st_mode) | 0o444
+                    return getattr(self.item, name)
+
+            def projected_fstat(descriptor):
+                return HandleStat(real_fstat(descriptor))
+
+            with patch.object(build.os, "fstat", side_effect=projected_fstat):
+                snapshot = build._stable_regular_snapshot(source, "package source")
+            self.assertEqual(snapshot[3:], (len(content), content))
+
+            calls = {"count": 0}
+
+            def changing_fstat(descriptor):
+                calls["count"] += 1
+                return HandleStat(real_fstat(descriptor), calls["count"] * 100)
+
+            with patch.object(build.os, "fstat", side_effect=changing_fstat):
+                with self.assertRaisesRegex(OSError, "changed while its bytes"):
+                    build._stable_regular_snapshot(source, "package source")
 
     @unittest.skipUnless(CAN_CREATE_SYMLINK,
                          "host does not grant symlink privileges")

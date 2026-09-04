@@ -1911,6 +1911,12 @@ def _embedded_ipv4_addresses(ip):
 
 def _public_ip(ip):
     """Whether an address is suitable for the default open-web fetch policy."""
+    # Python releases disagree about whether the retired 6to4 prefix itself is
+    # globally routable. For SSRF purposes its only effective endpoint is the
+    # embedded IPv4 address, so apply the stable IPv4 policy directly instead
+    # of inheriting that version-dependent outer classification.
+    if isinstance(ip, ipaddress.IPv6Address) and ip.sixtofour is not None:
+        return _public_ip(ip.sixtofour)
     # Python 3.9 can report the deprecated IPv6 site-local fec0::/10 range as
     # global. Hosts may still route it internally, so reject it explicitly.
     site_local = (getattr(ip, "version", None) == 6
@@ -4029,7 +4035,7 @@ continues here`
         # Resolve one target once, reject every returned address, then connect
         # only to a vetted sockaddr. The second DNS answer below is the private
         # rebinding answer an ordinary URL client would consume.
-        from unittest.mock import patch
+        from unittest.mock import PropertyMock, patch
         _public = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("177.0.0.1", 0))]
         with patch.object(socket, "getaddrinfo", return_value=_public) as _dns:
             for _host in ("0177.0.0.1", "0x7f000001", "2130706433", "127.1"):
@@ -4129,6 +4135,13 @@ continues here`
                 ("ISATAP", "2606:4700::5efe:808:808")):
             check("%s with a public IPv4 endpoint remains public" % label,
                   _public_ip(ipaddress.ip_address(literal)), True)
+        public_6to4 = ipaddress.ip_address("2002:808:808::")
+        with patch.object(ipaddress.IPv6Address, "is_global",
+                          new_callable=PropertyMock, return_value=False), \
+                patch.object(ipaddress.IPv6Address, "is_private",
+                             new_callable=PropertyMock, return_value=True):
+            check("6to4 policy is stable when Python classifies its outer prefix private",
+                  _public_ip(public_6to4), True)
 
         request_probe = {}
 
@@ -5588,6 +5601,12 @@ continues here`
         def _replace_source_after_plan(src, dst, expected=None, **kwargs):
             os.unlink(src)
             touch(src, b"late source identity")
+            if expected is not None and file_identity(src) == expected:
+                # Linux filesystems can immediately reuse the unlinked inode.
+                # This fixture exercises the expected-identity mismatch, so
+                # keep that mismatch deterministic just as atomic_move's own
+                # source-replacement self-test does.
+                expected = (expected[0], -1, expected[2])
             return real_move(src, dst, expected=expected, **kwargs)
 
         globals()["move_noreplace"] = _replace_source_after_plan
