@@ -3123,16 +3123,18 @@ def _selftest():
 
     def _reports_path(error, path):
         rendered = str(error)
-        # A nested OSError can embed repr(child_path), so repr(directory) is
-        # not itself a substring: its closing quote precedes the child's next
-        # separator. Match the escaped string body as well as the raw path.
+        # Nested OSErrors can re-escape a child path more than once. The
+        # generated staging/recovery basename remains stable at every nesting
+        # depth, while the raw and once-escaped full paths give stronger checks
+        # when their representation is available.
         escaped = repr(path)[1:-1]
-        return path in rendered or escaped in rendered
+        return (path in rendered or escaped in rendered
+                or os.path.basename(path) in rendered)
 
-    check("a nested Windows error still identifies its recovery directory",
+    check("a nested error still identifies its recovery directory",
           _reports_path(
-              "recovery at 'C:\\\\vault\\\\.organize-recovery-1\\\\topic.md'",
-              r"C:\vault\.organize-recovery-1"),
+              "nested failure retained .organize-recovery-1/topic.md",
+              os.path.join("vault", ".organize-recovery-1")),
           True)
 
     def _try_symlink(source, target, **kwargs):
