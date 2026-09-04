@@ -3123,7 +3123,17 @@ def _selftest():
 
     def _reports_path(error, path):
         rendered = str(error)
-        return path in rendered or repr(path) in rendered
+        # A nested OSError can embed repr(child_path), so repr(directory) is
+        # not itself a substring: its closing quote precedes the child's next
+        # separator. Match the escaped string body as well as the raw path.
+        escaped = repr(path)[1:-1]
+        return path in rendered or escaped in rendered
+
+    check("a nested Windows error still identifies its recovery directory",
+          _reports_path(
+              "recovery at 'C:\\\\vault\\\\.organize-recovery-1\\\\topic.md'",
+              r"C:\vault\.organize-recovery-1"),
+          True)
 
     def _try_symlink(source, target, **kwargs):
         """Create a self-test symlink when the host grants that capability."""
