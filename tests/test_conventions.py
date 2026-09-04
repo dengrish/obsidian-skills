@@ -330,10 +330,18 @@ class Registry:
 
 
 def rel(path):
+    """Return one canonical slash-separated repository-relative identifier.
+
+    Registry keys, package paths, and self-test floor keys are authored with
+    ``/`` on every host.  ``os.path.relpath`` uses ``\\`` on Windows; leaking
+    that presentation into comparisons makes a valid key simultaneously look
+    unused and absent.
+    """
     try:
-        return os.path.relpath(path, ROOT)
+        relative = os.path.relpath(path, ROOT)
     except ValueError:
-        return path
+        relative = os.fspath(path)
+    return relative.replace("\\", "/")
 
 
 _READ_CACHE = {}
@@ -5714,7 +5722,7 @@ def check_reference_paths(rep, conv):
     # out allowed their instructions to rot while the gate stayed green.
     for path, text in ((p, t) for p, t in walk_plugin_files()
                        if p.endswith(".md")):
-        parts = rel(path).split(os.sep)
+        parts = rel(path).split("/")
         skill = parts[1] if len(parts) > 2 and parts[0] == "skills" else ""
         in_block = canonical_block_lines(text)
         tokens = [(m.group(1), m.start(1), m.end(1))

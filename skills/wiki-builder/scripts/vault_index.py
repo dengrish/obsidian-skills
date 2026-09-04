@@ -595,15 +595,19 @@ def index_entry(path, text=None, root=None):
             descriptor = os.open(abspath, flags)
             with os.fdopen(descriptor, "r", encoding="utf-8-sig") as fh:
                 opened_before = os.fstat(fh.fileno())
-                if stable(item) != stable(opened_before):
+                identity = lambda value: (
+                    value.st_dev, value.st_ino, stat.S_IFMT(value.st_mode))
+                if identity(item) != identity(opened_before):
                     record["errors"].append(
                         "file changed while it was opened; metadata was not indexed")
                     return record
                 text = fh.read()
                 opened_after = os.fstat(fh.fileno())
             after = os.stat(abspath, follow_symlinks=False)
-            if not (stable(item) == stable(opened_before)
-                    == stable(opened_after) == stable(after)):
+            if not (stable(item) == stable(after)
+                    and stable(opened_before) == stable(opened_after)
+                    and identity(item) == identity(opened_before)
+                    and identity(after) == identity(opened_after)):
                 record["errors"].append(
                     "file changed while it was read; metadata was not indexed")
                 return record

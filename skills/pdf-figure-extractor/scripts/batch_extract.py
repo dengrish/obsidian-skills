@@ -562,12 +562,18 @@ def _legacy_png_snapshot(path):
     flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
              | getattr(os, "O_BINARY", 0))
     try:
+        at_name_before = os.stat(path, follow_symlinks=False)
+        if not stat.S_ISREG(at_name_before.st_mode):
+            raise ValueError("it is not a regular file")
         descriptor = os.open(path, flags)
     except OSError as exc:
         raise ValueError("it is not a readable regular file (%s)" % exc) from exc
     try:
         before = os.fstat(descriptor)
-        if not stat.S_ISREG(before.st_mode):
+        if (not stat.S_ISREG(before.st_mode)
+                or (at_name_before.st_dev, at_name_before.st_ino,
+                    stat.S_IFMT(at_name_before.st_mode)) !=
+                (before.st_dev, before.st_ino, stat.S_IFMT(before.st_mode))):
             raise ValueError("it is not a regular file")
         try:
             with warnings.catch_warnings():
@@ -600,7 +606,15 @@ def _legacy_png_snapshot(path):
         getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)),
         stat.S_IMODE(item.st_mode),
     )
-    if not (stable(before) == stable(after) == stable(at_name)):
+    identity = lambda item: (
+        item.st_dev, item.st_ino, stat.S_IFMT(item.st_mode))
+    # Native Windows can project permissions and timestamps differently for
+    # path stats and handle stats.  Require stability within each API and use
+    # the portable identity to prove both views still describe one file.
+    if not (stable(at_name_before) == stable(at_name)
+            and stable(before) == stable(after)
+            and identity(at_name_before) == identity(before)
+            and identity(at_name) == identity(after)):
         raise ValueError("it changed while its bytes were validated")
     return stable(after) + (digest.hexdigest(),)
 
@@ -3184,6 +3198,29 @@ def run_self_test():
                 warning_refused = "fully decoded" in str(exc)
         ok("legacy adoption treats a decompression-bomb warning as refusal",
            warning_refused)
+
+        real_fstat = os.fstat
+
+        class ProjectedHandleStat:
+            """Model Windows' stable but distinct handle metadata view."""
+
+            def __init__(self, item):
+                self.item = item
+
+            def __getattr__(self, name):
+                if name == "st_ctime_ns":
+                    return getattr(self.item, name) + 100
+                if name == "st_mode":
+                    return stat.S_IFMT(self.item.st_mode) | 0o444
+                return getattr(self.item, name)
+
+        with mock.patch.object(
+                os, "fstat",
+                side_effect=lambda descriptor: ProjectedHandleStat(
+                    real_fstat(descriptor))):
+            projected_snapshot = _legacy_png_snapshot(warning_png)
+        check("legacy PNG validation accepts a stable Windows handle view",
+              projected_snapshot[-1], _sha256(warning_png))
 
         adopted_bytes = legacy_png.read_bytes()
         adopted_manifest = (legacy_out / MANIFEST_FILE).read_bytes()

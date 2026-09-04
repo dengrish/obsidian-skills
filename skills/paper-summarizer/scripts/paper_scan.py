@@ -1555,11 +1555,16 @@ def run_self_test():
         n += 1
         if os.path.abspath(blocked) == os.path.abspath(
                 os.path.join(_v, "Sources", "Images")):
-            accepted = (code == 1 and '"figure_inventory_error"' in
-                        output.getvalue() and blocked in output.getvalue())
+            try:
+                partial = json.loads(output.getvalue())
+            except ValueError:
+                partial = {}
+            accepted = (code == 1 and any(
+                blocked in (row.get("figure_inventory_error") or "")
+                for row in partial.get("pdfs", [])))
         else:
             accepted = (code == 2 and not output.getvalue()
-                        and blocked in errors.getvalue())
+                        and repr(blocked) in errors.getvalue())
         if not accepted:
             bad += 1
             print("FAIL unreadable directory was reported as a complete scan: %s "

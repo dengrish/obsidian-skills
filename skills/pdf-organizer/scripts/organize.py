@@ -1130,10 +1130,15 @@ def references(vault, names, dirs=None, directory_names=()):
                 body = fh.read()
                 opened_after = os.fstat(fh.fileno())
             final = os.stat(md, follow_symlinks=False)
-            if not (_change_identity(occupant)
-                    == _change_identity(opened_before)
+            # Windows can expose stable metadata differently through a path
+            # stat and an open handle.  Compare each view with itself, then
+            # bind the two views with the portable file identity.
+            if not (_change_identity(occupant) == _change_identity(final)
+                    and _change_identity(opened_before)
                     == _change_identity(opened_after)
-                    == _change_identity(final)):
+                    and _file_identity(occupant)
+                    == _file_identity(opened_before)
+                    and _file_identity(final) == _file_identity(opened_after)):
                 raise InventoryFailed(
                     "leaf Markdown path %r changed while it was read" % md)
         except InventoryFailed:
@@ -1603,8 +1608,11 @@ def _stable_file_snapshot(path):
     except OSError as exc:
         raise StaleRenamePlan(
             "%s changed while its move snapshot was read: %s" % (path, exc)) from exc
-    if not (_change_identity(before) == _change_identity(opened_before)
-            == _change_identity(opened_after) == _change_identity(after)):
+    if not (_change_identity(before) == _change_identity(after)
+            and _change_identity(opened_before)
+            == _change_identity(opened_after)
+            and _file_identity(before) == _file_identity(opened_before)
+            and _file_identity(after) == _file_identity(opened_after)):
         raise StaleRenamePlan(
             "%s changed while its move snapshot was read" % path)
     return _file_identity(after), digest.hexdigest()
@@ -1645,8 +1653,10 @@ def _read_snapshot(path):
         body = fh.read()
         after = os.fstat(fh.fileno())
     final = os.stat(path, follow_symlinks=False)
-    if not (_change_identity(entry) == _change_identity(before)
-            == _change_identity(after) == _change_identity(final)):
+    if not (_change_identity(entry) == _change_identity(final)
+            and _change_identity(before) == _change_identity(after)
+            and _file_identity(entry) == _file_identity(before)
+            and _file_identity(final) == _file_identity(after)):
         raise StaleRenamePlan(
             "%s changed while it was being read; refusing a mixed snapshot"
             % path)
@@ -4367,6 +4377,40 @@ def _selftest():
               bool(_snapshot_failure), True)
         check("...and leaves the late occupant untouched",
               open(_src, "rb").read(), b"late bytes")
+
+    with _tf.TemporaryDirectory(prefix="org-windows-stat-view-") as _v:
+        _src = _put(_v, "Sources/PDFs/Doe_Study_2025.pdf", b"source bytes")
+        _note = _put(
+            _v, "Articles/Doe_Study_2025.md", b"[[Doe_Study_2025.pdf]]\n")
+        _real_fstat = os.fstat
+
+        class _ProjectedHandleStat:
+            """Model Windows' stable but distinct handle metadata view."""
+
+            def __init__(self, item):
+                self.item = item
+
+            def __getattr__(self, name):
+                if name == "st_ctime_ns":
+                    return getattr(self.item, name) + 100
+                if name == "st_mode":
+                    return stat.S_IFMT(self.item.st_mode) | 0o444
+                return getattr(self.item, name)
+
+        def _projected_fstat(descriptor):
+            return _ProjectedHandleStat(_real_fstat(descriptor))
+
+        with patch.object(os, "fstat", side_effect=_projected_fstat):
+            _move_view = _stable_file_snapshot(_src)
+            _body_view = _read_snapshot(_note)[0]
+            _reference_view = references(_v, {os.path.basename(_src)})
+        check("stable Windows handle metadata does not look like a move race",
+              _move_view[1], hashlib.sha256(b"source bytes").hexdigest())
+        check("stable Windows handle metadata does not block a guarded text read",
+              _body_view, "[[Doe_Study_2025.pdf]]\n")
+        check("stable Windows handle metadata does not erase reference results",
+              sorted(os.path.basename(path) for path in _reference_view),
+              ["Doe_Study_2025.md"])
 
     with _tf.TemporaryDirectory(prefix="org-late-source-identity-") as _v:
         _src = _put(_v, "download.pdf", b"planned source")

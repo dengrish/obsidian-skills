@@ -231,8 +231,18 @@ def regular_file_snapshot(path):
             getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)),
         )
 
-    if not (stable(before) == stable(opened_before)
-            == stable(opened_after) == stable(after)):
+    # Native Windows may project a stable file's permission and timestamp
+    # metadata differently through path stat and handle stat. Compare each API
+    # with itself across the read, and use the portable identity triple to bind
+    # both path observations to the opened handle. Requiring the complete
+    # lstat tuple to equal the complete fstat tuple produces false conflicts
+    # even though neither view changed.
+    identity = lambda item: (
+        item.st_dev, item.st_ino, stat.S_IFMT(item.st_mode))
+    if not (stable(before) == stable(after)
+            and stable(opened_before) == stable(opened_after)
+            and identity(before) == identity(opened_before)
+            and identity(after) == identity(opened_after)):
         raise OSError(errno.EBUSY, "file changed while it was read", path)
     return RegularFileSnapshot(
         identity=(after.st_dev, after.st_ino, stat.S_IFMT(after.st_mode)),

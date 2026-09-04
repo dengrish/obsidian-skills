@@ -394,8 +394,11 @@ def _bound_output_parent(path, expected):
 def _publish_bound(name, content, expected):
     """Publish inside a parent already bound as the current directory."""
     stage_parent = os.curdir
-    stage_dir = tempfile.mkdtemp(prefix=".plugin-build-stage-",
-                                 dir=stage_parent)
+    # Python 3.12+ makes mkdtemp's result absolute even when ``dir`` is
+    # relative. Keep only the newly created leaf so cleanup remains anchored
+    # to this bound directory if its logical pathname is renamed meanwhile.
+    stage_dir = os.path.basename(tempfile.mkdtemp(
+        prefix=".plugin-build-stage-", dir=stage_parent))
     keep_stage = False
     try:
         staged = os.path.join(stage_dir, name)
@@ -434,8 +437,8 @@ def _publish_bound(name, content, expected):
 def _remove_bound(name, published):
     """Remove exactly one publication inside the already-bound parent."""
     stage_parent = os.curdir
-    stage_dir = tempfile.mkdtemp(prefix=".plugin-build-rollback-",
-                                 dir=stage_parent)
+    stage_dir = os.path.basename(tempfile.mkdtemp(
+        prefix=".plugin-build-rollback-", dir=stage_parent))
     keep_stage = False
     try:
         try:

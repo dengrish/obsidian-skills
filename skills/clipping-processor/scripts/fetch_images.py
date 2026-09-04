@@ -989,8 +989,15 @@ def _stable_regular_snapshot(path, copy_to=None, copy_mode=None):
         getattr(item, "st_mtime_ns", int(item.st_mtime * 1e9)),
         getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)),
     )
-    if not (stable(before) == stable(opened_before) == stable(opened_after)
-            == stable(after)):
+    identity = lambda item: (
+        item.st_dev, item.st_ino, stat.S_IFMT(item.st_mode))
+    # Native Windows can project stable permission and timestamp metadata
+    # differently through path stat and handle stat. Compare each API with
+    # itself across the read, then bind the two views by portable identity.
+    if not (stable(before) == stable(after)
+            and stable(opened_before) == stable(opened_after)
+            and identity(before) == identity(opened_before)
+            and identity(after) == identity(opened_after)):
         if copy_to is not None:
             try:
                 os.unlink(copy_to)
@@ -1294,9 +1301,15 @@ def _stable_markdown_text(path):
         opened_after = os.fstat(source.fileno())
     entry_after = os.lstat(path)
     target_after = os.stat(path)
+    identity = lambda item: (
+        item.st_dev, item.st_ino, stat.S_IFMT(item.st_mode))
+    # Keep path and handle projections internally stable without requiring
+    # their platform-specific metadata views to be byte-for-byte identical.
     if (stable(entry_before) != stable(entry_after)
-            or not (stable(target_before) == stable(opened_before)
-                    == stable(opened_after) == stable(target_after))):
+            or stable(target_before) != stable(target_after)
+            or stable(opened_before) != stable(opened_after)
+            or identity(target_before) != identity(opened_before)
+            or identity(target_after) != identity(opened_after)):
         raise ValueError("changed while the dependency inventory read it")
     try:
         return raw.decode("utf-8-sig")
@@ -3462,6 +3475,8 @@ def run_self_test():
     end-to-end download is a `data:` URI, which opens no socket. Nothing is
     written outside a temp directory, which is removed on the way out.
     """
+    from unittest.mock import PropertyMock, patch
+
     cases = []
 
     def check(label, got, want):
@@ -3928,6 +3943,78 @@ continues here`
                 fh.write(data)
             return path
 
+        # Native Windows can expose a stable file differently through path
+        # stat and handle stat. The readers must tolerate that projection while
+        # still rejecting changes within either view and mismatched identities.
+        real_fstat = os.fstat
+
+        class _HandleStat:
+            def __init__(self, item, ctime_delta=100, ino_delta=0):
+                self.item = item
+                self.ctime_delta = ctime_delta
+                self.ino_delta = ino_delta
+
+            def __getattr__(self, name):
+                if name == "st_ctime_ns":
+                    return getattr(self.item, name) + self.ctime_delta
+                if name == "st_mode":
+                    return stat.S_IFMT(self.item.st_mode) | 0o444
+                if name == "st_ino":
+                    return self.item.st_ino + self.ino_delta
+                return getattr(self.item, name)
+
+        def projected_fstat(descriptor):
+            return _HandleStat(real_fstat(descriptor))
+
+        snapshot_path = touch(os.path.join(tmp, "stable-snapshot.bin"), b"stable")
+        markdown_path = touch(
+            os.path.join(tmp, "stable-note.md"),
+            b"---\nsources:\n  - https://example.com/article\n---\nbody\n")
+        with patch.object(os, "fstat", side_effect=projected_fstat):
+            projected_snapshot = _stable_regular_snapshot(snapshot_path)
+            projected_markdown = _stable_markdown_text(markdown_path)
+        check("stable readers tolerate distinct path/handle metadata projections",
+              (projected_snapshot[1], projected_markdown.endswith("body\n")),
+              (__import__("hashlib").sha256(b"stable").hexdigest(), True))
+
+        calls = {"count": 0}
+
+        def changing_fstat(descriptor):
+            calls["count"] += 1
+            return _HandleStat(real_fstat(descriptor),
+                               ctime_delta=calls["count"] * 100)
+
+        try:
+            with patch.object(os, "fstat", side_effect=changing_fstat):
+                _stable_regular_snapshot(snapshot_path)
+            snapshot_changed = False
+        except OSError:
+            snapshot_changed = True
+        check("regular snapshots reject a handle view that changes during the read",
+              snapshot_changed, True)
+
+        calls["count"] = 0
+        try:
+            with patch.object(os, "fstat", side_effect=changing_fstat):
+                _stable_markdown_text(markdown_path)
+            markdown_changed = False
+        except ValueError:
+            markdown_changed = True
+        check("Markdown snapshots reject a handle view that changes during the read",
+              markdown_changed, True)
+
+        def mismatched_fstat(descriptor):
+            return _HandleStat(real_fstat(descriptor), ino_delta=1)
+
+        try:
+            with patch.object(os, "fstat", side_effect=mismatched_fstat):
+                _stable_markdown_text(markdown_path)
+            markdown_mismatched = False
+        except ValueError:
+            markdown_mismatched = True
+        check("Markdown snapshots bind path and handle views by file identity",
+              markdown_mismatched, True)
+
         urls_file = touch(os.path.join(tmp, "urls.txt"),
                           b"\xef\xbb\xbfhttps://example.com/a.png\n\n"
                           b"https://example.com/b.png\n")
@@ -4035,7 +4122,6 @@ continues here`
         # Resolve one target once, reject every returned address, then connect
         # only to a vetted sockaddr. The second DNS answer below is the private
         # rebinding answer an ordinary URL client would consume.
-        from unittest.mock import PropertyMock, patch
         _public = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("177.0.0.1", 0))]
         with patch.object(socket, "getaddrinfo", return_value=_public) as _dns:
             for _host in ("0177.0.0.1", "0x7f000001", "2130706433", "127.1"):
@@ -4701,7 +4787,6 @@ continues here`
               (_PNG, b"later source occupant", True))
         # An explicit overwrite grants replacement of this clipping's figure,
         # never a file another producer has recorded as its own.
-        import hashlib
         pdf_owned = os.path.join(tmp, "pdf-owned")
         os.makedirs(pdf_owned)
         owned_name = "Doe_Paper_2026_fig_1.png"
@@ -5703,11 +5788,11 @@ continues here`
         folder = figures("teslo_cancer_2026", ("_fig_1.png",))
         out = checked_rename(folder, "teslo_cancer_2026", "Teslo_Cancer_2026")
         check("a case-only rename is allowed", [e["ok"] for e in out], [True])
-        # ...which is decided by `_same_file`, not by the names. On an
-        # insensitive filesystem src and dst are one file and `lexists(dst)` is
-        # true; a hard link reproduces that here on any
-        # filesystem, and without `samefile` the documented reprocess is
-        # refused as a collision forever.
+        # ...whose collision preflight is decided by `_same_file`, not by the
+        # names. On an insensitive filesystem src and dst are one directory
+        # entry and `lexists(dst)` is true. A hard link reproduces the same-file
+        # preflight on any filesystem, though its second directory entry cannot
+        # reproduce the later atomic case-only move; keep this probe dry-run.
         one = touch(os.path.join(tmp, "one"), b"x")
         two = os.path.join(tmp, "two")
         check("_same_file: a path is itself", _same_file(one, one), True)
@@ -5722,9 +5807,10 @@ continues here`
         except (OSError, AttributeError, NotImplementedError):
             pass                              # no hard links here: skip, silently
         else:
-            check("a destination that IS the source is not a collision",
+            check("a same-inode destination passes collision preflight",
                   all(e["ok"] for e in checked_rename(folder, "teslo_cancer_2026",
-                                                   "Teslo_Cancer_2026")), True)
+                                                   "Teslo_Cancer_2026",
+                                                   dry_run=True)), True)
 
         # Sources/Images is FLAT and shared. Two guards say the stem is a PDF's.
         folder = figures("Doe_Foo_2025", ("_fig_1.png", "_fig_S1.png"))

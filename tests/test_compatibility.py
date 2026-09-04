@@ -2,6 +2,7 @@
 """Host-independent checks for installation layout and portable execution."""
 
 import ast
+import hashlib
 import importlib.util
 import io
 import json
@@ -418,6 +419,177 @@ class CompatibilityTests(unittest.TestCase):
                 with self.assertRaisesRegex(OSError, "changed while its bytes"):
                     build._stable_regular_snapshot(source, "package source")
 
+    def test_atomic_snapshot_tolerates_path_handle_metadata_projection(self):
+        atomic = load("atomic_move_windows_stat", ROOT / "shared/scripts/atomic_move.py")
+        with tempfile.TemporaryDirectory(prefix="obsidian-atomic-stat-") as tmp:
+            source = Path(tmp) / "source.md"
+            content = b"stable guarded source\n"
+            source.write_bytes(content)
+            real_fstat = atomic.os.fstat
+
+            class HandleStat:
+                """Expose a stable handle view that differs from path stat."""
+
+                def __init__(self, item, ctime_delta=100):
+                    self.item = item
+                    self.ctime_delta = ctime_delta
+
+                def __getattr__(self, name):
+                    if name == "st_ctime_ns":
+                        return getattr(self.item, name) + self.ctime_delta
+                    if name == "st_mode":
+                        return stat.S_IFMT(self.item.st_mode) | 0o444
+                    return getattr(self.item, name)
+
+            def projected_fstat(descriptor):
+                return HandleStat(real_fstat(descriptor))
+
+            with patch.object(atomic.os, "fstat", side_effect=projected_fstat):
+                snapshot = atomic.regular_file_snapshot(source)
+            self.assertEqual(
+                (snapshot.size, snapshot.digest),
+                (len(content), hashlib.sha256(content).hexdigest()))
+
+            calls = {"count": 0}
+
+            def changing_fstat(descriptor):
+                calls["count"] += 1
+                return HandleStat(real_fstat(descriptor), calls["count"] * 100)
+
+            with patch.object(atomic.os, "fstat", side_effect=changing_fstat):
+                with self.assertRaisesRegex(OSError, "changed while it was read"):
+                    atomic.regular_file_snapshot(source)
+
+    def test_convention_paths_use_package_separators(self):
+        conventions = load("conventions_windows_paths", ROOT / "tests/test_conventions.py")
+        with patch.object(conventions.os.path, "relpath",
+                          return_value=r"skills\wiki-builder\scripts\vault_index.py"):
+            self.assertEqual(
+                conventions.rel(ROOT / "skills/wiki-builder/scripts/vault_index.py"),
+                "skills/wiki-builder/scripts/vault_index.py")
+
+    def test_runtime_readers_tolerate_windows_stat_projection(self):
+        """Stable path and handle views may differ from each other on Windows."""
+        modules = {
+            "figure": load(
+                "figure_state_windows_stat", ROOT / "shared/scripts/figure_state.py"),
+            "fetch": load(
+                "fetch_images_windows_stat",
+                ROOT / "skills/clipping-processor/scripts/fetch_images.py"),
+            "index": load(
+                "vault_index_windows_stat",
+                ROOT / "skills/wiki-builder/scripts/vault_index.py"),
+            "lint": load(
+                "lint_entry_windows_stat",
+                ROOT / "skills/wiki-builder/scripts/lint_entry.py"),
+            "scan": load(
+                "scan_vault_windows_stat",
+                ROOT / "skills/wiki-linter/scripts/scan_vault.py"),
+        }
+        real_fstat = os.fstat
+
+        class HandleStat:
+            def __init__(self, item, ctime_delta=100):
+                self.item = item
+                self.ctime_delta = ctime_delta
+
+            def __getattr__(self, name):
+                if name == "st_ctime_ns":
+                    return getattr(self.item, name) + self.ctime_delta
+                if name == "st_mode":
+                    return stat.S_IFMT(self.item.st_mode) | 0o444
+                return getattr(self.item, name)
+
+        def projected_fstat(descriptor):
+            return HandleStat(real_fstat(descriptor))
+
+        note_text = (
+            '---\ntitle: "Anchor"\ntype: "Concept"\naliases: []\n'
+            'sources: []\ncreated: "2026-01-01"\nupdated: "2026-01-01"\n'
+            'description: "A stable test entry."\ntags: []\nparents: []\n'
+            'read: false\n---\n\n**Anchor** is a stable test entry.\n'
+        )
+        with tempfile.TemporaryDirectory(prefix="obsidian-reader-stat-") as tmp:
+            root = Path(tmp)
+            sidecar = root / ".figure-review.txt"
+            sidecar.write_bytes(b"paper\tfig1\n")
+            markdown = root / "anchor.md"
+            markdown.write_bytes(note_text.encode("utf-8"))
+            wiki = root / "Wiki"
+            wiki.mkdir()
+            wiki_note = wiki / "anchor.md"
+            wiki_note.write_bytes(note_text.encode("utf-8"))
+            moc = root / "MOC.md"
+            moc.write_bytes((
+                modules["scan"].MOC_TREE_START + "\n" +
+                modules["scan"].MOC_TREE_END + "\n").encode("utf-8"))
+
+            with patch.object(modules["figure"].os, "fstat",
+                              side_effect=projected_fstat):
+                body, _snapshot = modules["figure"]._stable_sidecar_bytes(sidecar)
+            self.assertEqual(body, b"paper\tfig1\n")
+
+            with patch.object(modules["fetch"].os, "fstat",
+                              side_effect=projected_fstat):
+                self.assertEqual(
+                    modules["fetch"]._stable_regular_snapshot(markdown)[3],
+                    len(note_text.encode("utf-8")))
+                self.assertEqual(
+                    modules["fetch"]._stable_markdown_text(markdown), note_text)
+
+            with patch.object(modules["index"].os, "fstat",
+                              side_effect=projected_fstat):
+                indexed = modules["index"].index_entry(markdown)
+            self.assertEqual(indexed["title"], "Anchor")
+            self.assertFalse(any("changed while" in error
+                                 for error in indexed["errors"]))
+
+            with patch.object(modules["lint"].os, "fstat",
+                              side_effect=projected_fstat):
+                linted = modules["lint"].lint_file(markdown)
+            self.assertFalse(any(finding["item"] == "0-unreadable"
+                                 for finding in linted["findings"]))
+
+            with patch.object(modules["scan"].os, "fstat",
+                              side_effect=projected_fstat):
+                self.assertEqual(
+                    modules["scan"].moc_marker_state(moc)["state"], "marked")
+                scanned = modules["scan"].scan(wiki)
+            self.assertFalse(any(problem["item"] == "item0"
+                                 for problem in scanned["problems"]))
+
+            calls = {"count": 0}
+
+            def changing_fstat(descriptor):
+                calls["count"] += 1
+                return HandleStat(real_fstat(descriptor), calls["count"] * 100)
+
+            with patch.object(modules["index"].os, "fstat",
+                              side_effect=changing_fstat):
+                changed_index = modules["index"].index_entry(markdown)
+            self.assertTrue(any("changed while it was read" in error
+                                for error in changed_index["errors"]))
+
+            calls["count"] = 0
+            with patch.object(modules["lint"].os, "fstat",
+                              side_effect=changing_fstat):
+                changed_lint = modules["lint"].lint_file(markdown)
+            self.assertTrue(any(finding["item"] == "0-unreadable"
+                                for finding in changed_lint["findings"]))
+
+            calls["count"] = 0
+            with patch.object(modules["scan"].os, "fstat",
+                              side_effect=changing_fstat):
+                changed_moc = modules["scan"].moc_marker_state(moc)
+            self.assertEqual(changed_moc["state"], "unreadable")
+
+            calls["count"] = 0
+            with patch.object(modules["scan"].os, "fstat",
+                              side_effect=changing_fstat):
+                changed_scan = modules["scan"].scan(wiki)
+            self.assertTrue(any(problem["item"] == "item0"
+                                for problem in changed_scan["problems"]))
+
     @unittest.skipUnless(CAN_CREATE_SYMLINK,
                          "host does not grant symlink privileges")
     def test_build_does_not_write_through_output_symlinks(self):
@@ -538,7 +710,14 @@ class CompatibilityTests(unittest.TestCase):
             expected_parent = build._directory_identity(parent)
             original_parent = root / "original-parent"
             real_link = build.atomic_move.link_noreplace
+            real_mkdtemp = build.tempfile.mkdtemp
             injected = {"done": False}
+
+            def absolute_mkdtemp(*args, **kwargs):
+                # Python 3.12+ always returns an absolute path. Simulate that
+                # on the supported floor so this parent-rename cleanup stays
+                # covered by every compatibility job.
+                return os.path.abspath(real_mkdtemp(*args, **kwargs))
 
             def inject_parent(source, target):
                 result = real_link(source, target)
@@ -549,8 +728,10 @@ class CompatibilityTests(unittest.TestCase):
                     parent.symlink_to(foreign, target_is_directory=True)
                 return result
 
-            with patch.object(build.atomic_move, "link_noreplace",
-                              side_effect=inject_parent):
+            with patch.object(build.tempfile, "mkdtemp",
+                              side_effect=absolute_mkdtemp), patch.object(
+                                  build.atomic_move, "link_noreplace",
+                                  side_effect=inject_parent):
                 with self.assertRaises(OSError):
                     build._publish_generated(
                         root, output, b"generated", None, expected_parent)

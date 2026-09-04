@@ -1753,6 +1753,7 @@ def moc_marker_state(path):
         with os.fdopen(descriptor, "r", encoding="utf-8-sig") as fh:
             descriptor = None
             text = fh.read()
+            opened_after = os.fstat(fh.fileno())
         after = os.stat(path, follow_symlinks=False)
         stable = lambda item: (
             item.st_dev, item.st_ino, item.st_size,
@@ -1760,7 +1761,12 @@ def moc_marker_state(path):
             getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)),
             stat.S_IFMT(item.st_mode),
         )
-        if not (stable(before) == stable(opened) == stable(after)):
+        identity = lambda item: (
+            item.st_dev, item.st_ino, stat.S_IFMT(item.st_mode))
+        if not (stable(before) == stable(after)
+                and stable(opened) == stable(opened_after)
+                and identity(before) == identity(opened)
+                and identity(after) == identity(opened_after)):
             raise OSError("MOC pathname changed while it was read")
     except (OSError, UnicodeDecodeError) as exc:
         result["state"] = "unreadable"
@@ -2018,13 +2024,19 @@ def scan(wiki, images=None):
             with os.fdopen(descriptor, "r", encoding="utf-8-sig") as fh:
                 descriptor = None
                 text = fh.read()
+                opened_after = os.fstat(fh.fileno())
             after = os.stat(path, follow_symlinks=False)
             stable = lambda item: (
                 item.st_dev, item.st_ino, item.st_size,
                 getattr(item, "st_mtime_ns", int(item.st_mtime * 1e9)),
                 getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)),
             )
-            if not (stable(before) == stable(opened) == stable(after)):
+            identity = lambda item: (
+                item.st_dev, item.st_ino, stat.S_IFMT(item.st_mode))
+            if not (stable(before) == stable(after)
+                    and stable(opened) == stable(opened_after)
+                    and identity(before) == identity(opened)
+                    and identity(after) == identity(opened_after)):
                 raise OSError("leaf Markdown path changed while it was read")
         except (OSError, UnicodeDecodeError) as exc:
             problems.append((sl,"item0",f"unreadable: {type(exc).__name__}: {exc}"))

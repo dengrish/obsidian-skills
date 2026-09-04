@@ -225,7 +225,7 @@ def find_shared_scripts(start=None, module=None, _trace=None):
         trace.append(("env", cand, usable))
         if not os.path.isdir(cand):
             raise SharedLayerNotFound(
-                "%s is set to %r, which is not a directory. Unset it, or point it "
+                "%s is set to %s, which is not a directory. Unset it, or point it "
                 "at the plugin's shared/scripts/ folder." % (ENV_VAR, env)
             )
         # An override that IS a directory but does not hold the module is the
@@ -241,7 +241,7 @@ def find_shared_scripts(start=None, module=None, _trace=None):
             except OSError as exc:
                 present = ["(cannot list the directory: %s)" % exc]
             raise SharedLayerNotFound(
-                "%s is set to %r, which is a directory but does not contain "
+                "%s is set to %s, which is a directory but does not contain "
                 "the required module %s.py.\n"
                 "The override is authoritative -- nothing falls back to the "
                 "plugin-relative walk-up -- so importing %s from it would fail "

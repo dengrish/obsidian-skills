@@ -143,8 +143,15 @@ def _stable_sidecar_bytes(path):
         getattr(item, "st_mtime_ns", int(item.st_mtime * 1e9)),
         getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)),
     )
-    if not (stable(before) == stable(opened_before) == stable(opened_after)
-            == stable(after)):
+    identity = lambda item: (
+        item.st_dev, item.st_ino, stat.S_IFMT(item.st_mode))
+    # Native Windows can project stable permission and timestamp metadata
+    # differently through path stat and handle stat. Compare each API with
+    # itself across the read, then bind the two views by portable identity.
+    if not (stable(before) == stable(after)
+            and stable(opened_before) == stable(opened_after)
+            and identity(before) == identity(opened_before)
+            and identity(after) == identity(opened_after)):
         raise SidecarConflict(
             errno.EEXIST, "%s changed while it was read" % path, path)
     snapshot = (
@@ -372,6 +379,60 @@ def self_test():
                 manifest_key({"Straße.png": "a" * 64, "STRASSE.png": "b" * 64}, "strasse.png")
             with self.assertRaises(ValueError):
                 parse_manifest("Straße.png\t" + "a" * 64 + "\nSTRASSE.png\t" + "b" * 64)
+
+        def test_stable_read_tolerates_path_handle_metadata_projection(self):
+            with tempfile.TemporaryDirectory() as directory:
+                path = os.path.join(directory, MANIFEST_FILE)
+                content = b"A_fig_1.png\t" + b"a" * 64 + b"\n"
+                with open(path, "wb") as fh:
+                    fh.write(content)
+                real_fstat = os.fstat
+
+                class HandleStat:
+                    def __init__(self, item, ctime_delta=100, ino_delta=0):
+                        self.item = item
+                        self.ctime_delta = ctime_delta
+                        self.ino_delta = ino_delta
+
+                    def __getattr__(self, name):
+                        if name == "st_ctime_ns":
+                            return getattr(self.item, name) + self.ctime_delta
+                        if name == "st_mode":
+                            return stat.S_IFMT(self.item.st_mode) | 0o444
+                        if name == "st_ino":
+                            return self.item.st_ino + self.ino_delta
+                        return getattr(self.item, name)
+
+                def projected_fstat(descriptor):
+                    return HandleStat(real_fstat(descriptor))
+
+                with mock.patch.object(os, "fstat",
+                                       side_effect=projected_fstat):
+                    body, snapshot = _stable_sidecar_bytes(path)
+                self.assertEqual(body, content)
+                self.assertEqual(snapshot[2], hashlib.sha256(content).hexdigest())
+
+                calls = {"count": 0}
+
+                def changing_fstat(descriptor):
+                    calls["count"] += 1
+                    return HandleStat(real_fstat(descriptor),
+                                      ctime_delta=calls["count"] * 100)
+
+                with mock.patch.object(os, "fstat",
+                                       side_effect=changing_fstat):
+                    with self.assertRaisesRegex(
+                            SidecarConflict, "changed while it was read"):
+                        _stable_sidecar_bytes(path)
+
+                def mismatched_fstat(descriptor):
+                    return HandleStat(real_fstat(descriptor), ino_delta=1)
+
+                with mock.patch.object(os, "fstat",
+                                       side_effect=mismatched_fstat):
+                    with self.assertRaisesRegex(
+                            SidecarConflict, "changed while it was read"):
+                        _stable_sidecar_bytes(path)
 
         def test_atomic_write_and_bad_input(self):
             with tempfile.TemporaryDirectory() as directory:
