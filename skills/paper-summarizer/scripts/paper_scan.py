@@ -61,7 +61,7 @@ _OBSIDIAN_SHARED_MODULES = ('naming', 'vault_artifacts', 'yaml_scalars')
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
-_here = _os.path.dirname(_os.path.abspath(__file__))
+_here = _os.path.dirname(_os.path.realpath(__file__))
 _required = tuple(_m + ".py" for _m in (
     globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
@@ -72,6 +72,7 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
+    _tried.append(_here)                   # extracted skill with co-located helpers
 _missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
             for _p in _tried if _os.path.isdir(_p)}
 _shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
@@ -104,7 +105,8 @@ import sys
 import unicodedata
 
 from naming import chapter_book_stem, core_stem, looks_canonical, stem_of
-from vault_artifacts import inventory_pdfs, inventory_source_figures
+from vault_artifacts import (inventory_pdfs, inventory_source_figures,
+                             output_vault_root, verify_selected_pdf)
 from yaml_scalars import parse_scalar, strip_comment
 
 #: Figure-label namespaces, ranked so a listing reads main → appendix →
@@ -154,12 +156,27 @@ _WIKILINK_RE = re.compile(r"\A!?\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]\Z")
 #: `Figure 1a` is rejected as a caption because it is a panel pointer -- so
 #: this split reads the convention rather than guessing at it.
 _PANEL_LABEL_RE = re.compile(r"\A(.*[0-9])([a-z])\Z")
+_FIGURE_LABEL_RE = re.compile(
+    r"\A(?P<base>(?:SI|ED|S)?\d+(?:-\d+)*|A-?\d+(?:-\d+)*)"
+    r"(?P<panel>[a-z])?(?:-(?P<variant>[^-].*))?\Z")
 
 
 def panel_parent(label):
     """(figure label, panel letter); the letter is '' for a whole figure."""
     match = _PANEL_LABEL_RE.match(label)
     return (match.group(1), match.group(2)) if match else (label, "")
+
+
+def figure_parts(label):
+    """Return ``(logical figure, panel, derived-variant)`` for a filename label."""
+    match = _FIGURE_LABEL_RE.match(label)
+    if not match:
+        parent, panel = panel_parent(label)
+        return parent, panel, ""
+    base = match.group("base")
+    panel = match.group("panel") or ""
+    variant = match.group("variant") or ""
+    return base, panel, variant
 
 
 def _name_key(name):
@@ -201,7 +218,7 @@ def label_sort_key(label):
     on the page, and because a panel filed after every whole figure reads as a
     separate exhibit rather than as part of one.
     """
-    base, panel = panel_parent(label)
+    base, panel, variant = figure_parts(label)
     rank, rest = 0, base
     for prefix, r in _NAMESPACES:
         tail = base[len(prefix):]
@@ -210,7 +227,7 @@ def label_sort_key(label):
             break
     nums = tuple(int(p) if p.isdecimal() else _BIG
                  for p in rest.split("-") if p)
-    return (rank, nums or (_BIG,), panel, label)
+    return (rank, nums or (_BIG,), panel, variant, label)
 
 
 _FIG_SEP = re.compile(r"_fig(?:ure)?s?[._-]?", re.I)
@@ -260,7 +277,7 @@ def figures_for(attachments, stem):
         tail = base[stem_end:]
         m = _FIG_SEP.match(tail)
         label = tail[m.end():] if m else tail.lstrip("_")
-        parent, panel = panel_parent(label)
+        parent, panel, variant = figure_parts(label)
         # `panel_of` is the whole figure this file is a piece of, or None when
         # it IS the whole figure.  §8b: a consumer embeds the composite by
         # default and reaches for a panel only when the point is that panel's,
@@ -271,6 +288,8 @@ def figures_for(attachments, stem):
                     "label": label,
                     "panel": panel or None,
                     "panel_of": parent if panel else None,
+                    "variant": variant or None,
+                    "variant_of": parent if variant else None,
                     "ext": ext.lower()})
     out.sort(key=lambda f: label_sort_key(f["label"]))
     # Two files claiming ONE label is a finding, not a detail to hand on
@@ -536,6 +555,11 @@ def scan(src, notes, images, allow_unorganized=False,
     if include_chapters is None:
         include_chapters = os.path.isfile(src)
     pdfs = find_pdfs(src)
+    selected_gate = None
+    if os.path.isfile(src):
+        vault_root = output_vault_root(images)
+        if vault_root is not None:
+            selected_gate = verify_selected_pdf(vault_root, src)
     stems = [stem_of(p) for p in pdfs]
     books = books_in(stems)
     by_stem = {}
@@ -566,12 +590,29 @@ def scan(src, notes, images, allow_unorganized=False,
             else:
                 state = "ours"
         conflicts = [p for p in by_stem[_name_key(stem)] if p != path]
+        source_gate_error = ""
+        if selected_gate is not None and not selected_gate.unique:
+            conflicts = sorted(set(conflicts + [
+                p for p in selected_gate.matches
+                if os.path.abspath(p) != os.path.abspath(path)
+            ]))
+            source_gate_error = selected_gate.reason
         status = classify(stem, books, state, allow_unorganized,
                           include_books, include_chapters)
-        if conflicts and status not in ("book", "chapter", "unorganized"):
+        if (conflicts or source_gate_error) \
+                and status not in ("book", "chapter", "unorganized"):
             # Basename-only sources cannot distinguish two different PDFs in
             # nested folders, and both would otherwise write the same note.
             status = "collision"
+        try:
+            figures = figures_for(images, stem)
+            figure_inventory_error = ""
+        except ValueError as exc:
+            # Keep the rest of a vault scan useful. This one paper remains
+            # blocked, but a foreign/symlinked occupant under its stem no
+            # longer erases every other row from the report.
+            figures = []
+            figure_inventory_error = str(exc)
         rows.append({
             "pdf": path,
             "stem": stem,
@@ -579,8 +620,12 @@ def scan(src, notes, images, allow_unorganized=False,
             "note_source": existing,
             "status": status,
             "source_conflicts": conflicts,
+            "source_gate_error": source_gate_error,
             "note_conflicts": note_conflicts,
-            "figures": figures_for(images, stem),
+            "figures": figures,
+            "figure_inventory_error": figure_inventory_error,
+            "unorganized_override": bool(
+                allow_unorganized and not looks_canonical(stem, is_stem=True)),
         })
     counts = {s: sum(1 for r in rows if r["status"] == s) for s in STATUSES}
     return {"src": src, "notes": notes, "images": images,
@@ -588,6 +633,10 @@ def scan(src, notes, images, allow_unorganized=False,
 
 
 def render(result):
+    def shown_text(value):
+        """One-line text safe for a terminal report, including odd filenames."""
+        return json.dumps(str(value), ensure_ascii=False)[1:-1]
+
     lines = []
     c = result["counts"]
     lines.append("%d PDF(s): %d new, %d already summarised, %d book(s) and "
@@ -598,36 +647,65 @@ def render(result):
                     c["legacy"]))
     for row in result["pdfs"]:
         figs = row["figures"]
-        # Whole figures and panels are counted apart, and the labels shown are
-        # the WHOLE figures. A stem whose four figures yielded 27 files has
+        # Whole figures, panels, and derived variants share one logical count,
+        # and the labels shown are the whole/base figures. A stem whose four
+        # figures yielded 27 files has
         # four exhibits, and a bare `figures: 27` followed by a list starting
         # `1, 1a, 1b, 1c` reads as twenty-seven of them -- which then flows
         # into a note that treats each panel as a candidate and into a report
         # that calls twenty-three of them unused (references/figures.md).
         # The JSON has carried `panel_of` since panels existed; this is the
         # human-readable half saying the same thing.
-        whole = [f for f in figs if not f.get("panel_of")]
-        panels = len(figs) - len(whole)
-        shown = ", ".join(f["label"] or "?" for f in whole[:12])
-        if len(whole) > 12:
+        logical = []
+        seen_logical = set()
+        for figure in figs:
+            label = (figure.get("variant_of") or figure.get("panel_of")
+                     or figure.get("label") or "?")
+            key = _name_key(label)
+            if key not in seen_logical:
+                seen_logical.add(key)
+                logical.append(label)
+        logical.sort(key=label_sort_key)
+        panels = sum(bool(f.get("panel_of")) for f in figs)
+        variants = sum(bool(f.get("variant_of")) for f in figs)
+        shown = ", ".join(shown_text(label) for label in logical[:12])
+        if len(logical) > 12:
             shown += ", …"
-        lines.append("  [%-11s] %s" % (row["status"], row["stem"]))
+        lines.append("  [%-11s] %s" % (row["status"], shown_text(row["stem"])))
         lines.append("      figures: %d%s%s"
-                     % (len(whole), ("  (" + shown + ")") if whole else "",
+                     % (len(logical), ("  (" + shown + ")") if logical else "",
                         ("  + %d panel(s) of them, in %d file(s)"
                          % (panels, len(figs))) if panels else ""))
+        if variants:
+            lines.append("      %d derived variant file(s) share their base "
+                         "figure number; they are alternatives, not extra "
+                         "figures" % variants)
+        if row.get("figure_inventory_error"):
+            lines.append("      FIGURE INVENTORY BLOCKED: %s. Skip this paper "
+                         "until the unsafe occupant is resolved; other rows "
+                         "remain valid." %
+                         shown_text(row["figure_inventory_error"]))
         dup = {}
         for f in figs:
             if f.get("duplicate_label"):
-                dup.setdefault(f["label"] or "?", []).append(f["file"])
-        for label, names in sorted(dup.items()):
+                key = _name_key(f["label"] or "?")
+                group = dup.setdefault(key, {"label": f["label"] or "?",
+                                             "names": []})
+                group["names"].append(f["file"])
+        for group in (dup[key] for key in sorted(dup)):
+            label, names = group["label"], group["names"]
             lines.append("      duplicate label %s: %s -- two files claim one "
                          "figure number. The label is what picks the file "
                          "(references/figures.md), so here it picks two, and "
                          "nothing on disk breaks: Sources/Images/ is flat and "
                          "shared, and the two extensions never collide. Ask "
                          "the user which is current; do not embed either on a "
-                         "guess." % (label, ", ".join(names)))
+                         "guess." % (shown_text(label), ", ".join(
+                             shown_text(name) for name in names)))
+        if row.get("unorganized_override"):
+            lines.append("      OVERRIDE: this stem is still unorganized; "
+                         "--allow-unorganized changed the status but did not "
+                         "make the filename durable")
         if row["status"] == "unorganized":
             lines.append("      run pdf-organizer on this file first, or pass "
                          "--allow-unorganized and accept that a later rename "
@@ -642,23 +720,34 @@ def render(result):
                 lines.append("      %s shares this PDF basename and the same "
                              "output note: %s. Nothing may be written until "
                              "pdf-organizer gives the sources distinct names."
-                             % (", ".join(row["source_conflicts"]), row["note"]))
+                             % (", ".join(shown_text(p) for p in
+                                          row["source_conflicts"]),
+                                shown_text(row["note"])))
+            elif row.get("source_gate_error"):
+                lines.append("      vault-wide source identity could not be "
+                             "proved: %s" %
+                             shown_text(row["source_gate_error"]))
             if row.get("note_conflicts"):
                 lines.append("      several Articles basenames occupy this "
                              "note's portable case/Unicode identity: %s. "
                              "Nothing may be written until the duplicate "
                              "ownership is resolved."
-                             % ", ".join(row["note_conflicts"]))
-            if not row.get("source_conflicts") and not row.get("note_conflicts"):
+                             % ", ".join(shown_text(p) for p in
+                                         row["note_conflicts"]))
+            if (not row.get("source_conflicts")
+                    and not row.get("source_gate_error")
+                    and not row.get("note_conflicts")):
                 lines.append("      %s already exists and its source: is %r -- a "
                          "different note under the same name. Do NOT write "
                          "over it; report both and let the user rename one."
-                         % (row["note"], row["note_source"]))
+                         % (shown_text(row["note"]),
+                            shown_text(row["note_source"])))
         if row["status"] == "legacy":
             lines.append("      %s is an embed-note left by an older skill, "
                          "not a summary. Nothing here overwrites a user file: "
                          "report it, and let the user move or rename it if "
-                         "they want the summary written." % row["note"])
+                         "they want the summary written." %
+                         shown_text(row["note"]))
         if row["status"] == "chapter":
             lines.append("      a book chapter: skipped by a folder sweep, "
                          "because a whole book's worth of summaries is rarely "
@@ -696,6 +785,14 @@ _PANEL_CASES = [
     # does not exist.
     ("A1", "A1", ""),
     ("SI1", "SI1", ""),
+]
+
+_FIGURE_PART_CASES = [
+    ("1", ("1", "", "")),
+    ("1a", ("1", "a", "")),
+    ("S2c", ("S2", "c", "")),
+    ("1-38-transparent", ("1-38", "", "transparent")),
+    ("ED2-high-contrast", ("ED2", "", "high-contrast")),
 ]
 
 #: (stem, books-in-run, note state, expected status).
@@ -749,6 +846,13 @@ def run_self_test():
             bad += 1
             print("FAIL panel_parent %r -> %r, expected %r"
                   % (label, got, (parent, panel)))
+    for label, expected in _FIGURE_PART_CASES:
+        n += 1
+        got = figure_parts(label)
+        if got != expected:
+            bad += 1
+            print("FAIL figure_parts %r -> %r, expected %r"
+                  % (label, got, expected))
     for stem, books, state, expected in _CLASSIFY_CASES:
         n += 1
         got = classify(stem, books, state)
@@ -783,7 +887,9 @@ def run_self_test():
     # tells them apart, and getting it wrong reports an unsummarised paper as
     # done forever.
     import tempfile
-    _d = tempfile.mkdtemp()
+    _test_workspace = tempfile.TemporaryDirectory(
+        prefix="paper-scan-selftest-")
+    _d = _test_workspace.name
     os.makedirs(os.path.join(_d, "notes"), exist_ok=True)
 
     # PDF discovery shares the plugin-wide identity-aware walker. A linked
@@ -1071,6 +1177,26 @@ def run_self_test():
     if [f["label"] for f in figures_for(_img, "Straße_Trial_2025")] != ["2"]:
         bad += 1
         print("FAIL casefold expansion shifted the figure label")
+    variant_dir = os.path.join(_d, "images-variant")
+    os.makedirs(variant_dir)
+    for name in ("Doe_Variant_2025_fig_1-38.png",
+                 "Doe_Variant_2025_fig_1-38-transparent.png"):
+        open(os.path.join(variant_dir, name), "w").close()
+    variant_figures = figures_for(variant_dir, "Doe_Variant_2025")
+    n += 1
+    got = [(f["label"], f["variant_of"]) for f in variant_figures]
+    if got != [("1-38", None), ("1-38-transparent", "1-38")]:
+        bad += 1
+        print("FAIL derived figure variant classification -> %r" % (got,))
+    n += 1
+    variant_report = render({"counts": {s: 0 for s in STATUSES},
+                             "pdfs": [{"status": "new",
+                                       "stem": "Doe_Variant_2025",
+                                       "figures": variant_figures}]})
+    if "figures: 1" not in variant_report or "derived variant" not in variant_report:
+        bad += 1
+        print("FAIL render counted a derived image as another figure:\n%s" %
+              variant_report)
     # Two producers can legally occupy `<stem>_fig_2` at two extensions --
     # `Sources/Images/` is flat and shared, the files never collide on disk and
     # nothing deduplicates them -- so the skill picking a figure BY LABEL gets
@@ -1102,9 +1228,14 @@ def run_self_test():
             or "Dup_Paper_2025_fig_2.webp" not in _rendered:
         bad += 1
         print("FAIL render() did not report the duplicate label:\n%s" % _rendered)
+    n += 1
+    if _rendered.count("duplicate label") != 2:
+        bad += 1
+        print("FAIL case variants rendered as separate duplicate groups:\n%s" %
+              _rendered)
 
-    # render() counts whole figures and panels apart, and lists the whole
-    # ones.  A bare `figures: 27` beginning `1, 1a, 1b` reads as 27 exhibits,
+    # render() groups whole figures and panels, and lists the whole ones. A
+    # bare `figures: 27` beginning `1, 1a, 1b` reads as 27 exhibits,
     # which is what makes a note treat every panel as a candidate and a report
     # call 23 of them unused (references/figures.md).
     _panelfigs = [{"label": "1", "panel": None, "panel_of": None,
@@ -1138,6 +1269,14 @@ def run_self_test():
                                        "figures": _panelfigs[:1]}]}):
         bad += 1
         print("FAIL render() reported panels for a stem that has none")
+    n += 1
+    hostile_report = render({"counts": {s: 0 for s in STATUSES},
+                             "pdfs": [{"status": "new",
+                                       "stem": "Doe_Bad\nName_2025",
+                                       "figures": []}]})
+    if "Doe_Bad\\nName_2025" not in hostile_report:
+        bad += 1
+        print("FAIL terminal report emitted a filename control character")
 
     # --- scan(), end to end, over a vault holding both note kinds ---------
     _v = os.path.join(_d, "vault")
@@ -1158,8 +1297,12 @@ def run_self_test():
     _mk("Sources/PDFs/Dir_Occupied_2025.pdf")
     _mk("Sources/PDFs/Case_Owner_2025.pdf")
     _mk("Sources/PDFs/Case_Foreign_2025.pdf")
-    os.symlink(os.path.join(_v, "missing.md"),
-               os.path.join(_v, "Articles", "Link_Occupied_2025.md"))
+    try:
+        os.symlink(os.path.join(_v, "missing.md"),
+                   os.path.join(_v, "Articles", "Link_Occupied_2025.md"))
+    except (OSError, NotImplementedError):
+        os.makedirs(os.path.join(
+            _v, "Articles", "Link_Occupied_2025.md"))
     os.makedirs(os.path.join(_v, "Articles", "Dir_Occupied_2025.md"))
     _mk("Sources/PDFs/Prince_UDL_2026_src.pdf")
     _mk("Sources/PDFs/Prince_UDL_2026/Prince_UDL_2026_01_Intro.pdf")
@@ -1221,6 +1364,26 @@ def run_self_test():
     if sum(res["counts"].values()) != len(res["pdfs"]):
         bad += 1
         print("FAIL scan(): the counts do not add up to the rows")
+    if symlink_supported:
+        blocked_figure = os.path.join(
+            _v, "Sources", "Images", "Doe_Foo_2025_fig_99.png")
+        os.symlink(outside_figure, blocked_figure)
+        try:
+            isolated = scan(os.path.join(_v, "Sources", "PDFs"),
+                            os.path.join(_v, "Articles"),
+                            os.path.join(_v, "Sources", "Images"))
+        finally:
+            os.unlink(blocked_figure)
+        isolated_rows = {row["stem"]: row for row in isolated["pdfs"]}
+        n += 1
+        if (not isolated_rows["Doe_Foo_2025"]["figure_inventory_error"]
+                or len(isolated_rows) != len(res["pdfs"])):
+            bad += 1
+            print("FAIL one unsafe figure occupant aborted or erased the vault scan")
+        n += 1
+        if "FIGURE INVENTORY BLOCKED" not in render(isolated):
+            bad += 1
+            print("FAIL isolated figure inventory error was not rendered")
     n += 1
     # `render` reads a key per status; a status added to `classify` and not to
     # STATUSES would KeyError here rather than in front of a user.
@@ -1247,6 +1410,27 @@ def run_self_test():
     if "shares this PDF basename" not in render(conflicted):
         bad += 1
         print("FAIL source collisions did not explain the conflicting PDF paths")
+    single_conflicted = scan(
+        os.path.join(_v, "Sources", "PDFs", "first", "Dup_Study_2025.pdf"),
+        os.path.join(_v, "Articles"), os.path.join(_v, "Sources", "Images"))
+    n += 1
+    if (single_conflicted["pdfs"][0]["status"] != "collision"
+            or not single_conflicted["pdfs"][0]["source_conflicts"]):
+        bad += 1
+        print("FAIL a single-file scan skipped the vault-wide PDF collision gate")
+
+    unorganized_scan = scan(
+        os.path.join(_v, "Sources", "PDFs", "Doe_Foo_2025.pdf"),
+        os.path.join(_v, "Articles"), os.path.join(_v, "Sources", "Images"),
+        allow_unorganized=True)
+    # Use a direct render fixture because Doe_Foo is already canonical.
+    override_row = dict(unorganized_scan["pdfs"][0],
+                        stem="download (1)", unorganized_override=True)
+    n += 1
+    if "OVERRIDE" not in render({"counts": unorganized_scan["counts"],
+                                  "pdfs": [override_row]}):
+        bad += 1
+        print("FAIL --allow-unorganized erased its warning from the report")
 
     import contextlib
     import io
@@ -1368,10 +1552,20 @@ def run_self_test():
                 contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
             code = main(argv)
         n += 1
-        if code != 2 or output.getvalue() or blocked not in errors.getvalue():
+        if os.path.abspath(blocked) == os.path.abspath(
+                os.path.join(_v, "Sources", "Images")):
+            accepted = (code == 1 and '"figure_inventory_error"' in
+                        output.getvalue() and blocked in output.getvalue())
+        else:
+            accepted = (code == 2 and not output.getvalue()
+                        and blocked in errors.getvalue())
+        if not accepted:
             bad += 1
-            print("FAIL unreadable directory was reported as a complete scan: %s" % blocked)
+            print("FAIL unreadable directory was reported as a complete scan: %s "
+                  "(code=%r stdout=%r stderr=%r)" %
+                  (blocked, code, output.getvalue(), errors.getvalue()))
 
+    _test_workspace.cleanup()
     print("%d/%d self-test cases pass" % (n - bad, n))
     return 1 if bad else 0
 
@@ -1394,7 +1588,19 @@ def _build_parser():
     return p
 
 
+def _configure_stdio():
+    """Keep user paths and report text writable through narrow host pipes."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="backslashreplace")
+            except (AttributeError, OSError, ValueError):
+                pass
+
+
 def main(argv=None):
+    _configure_stdio()
     args = _build_parser().parse_args(argv)
     if args.test:
         return run_self_test()
@@ -1432,7 +1638,8 @@ def main(argv=None):
               file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2) if args.json else render(result))
-    return 0
+    return 1 if any(row.get("figure_inventory_error")
+                    for row in result["pdfs"]) else 0
 
 
 if __name__ == "__main__":

@@ -125,7 +125,7 @@ work under the safe-write rules.
 
 ### 4. Create new entries
 
-Before drafting the first entry, read [writing](references/writing.md) and [flashcards/emphasis](references/flashcards-and-emphasis.md). Derive the filename with `python3 '<skill>/../../shared/scripts/slugify.py' "Title"`; never improvise the slug algorithm. Apply the [cross-domain disambiguation gate](references/writing.md#cross-domain-term-disambiguation) before writing: an ambiguous common noun needs a qualified title, not an occupied bare slug.
+Before drafting the first entry, read [writing](references/writing.md) and [flashcards/emphasis](references/flashcards-and-emphasis.md). Use the `slug` returned for that exact candidate by step 3's `find_collisions.py --titles "$CAND"` report; it calls the canonical slug algorithm without interpolating source text into a shell command. Never improvise the slug algorithm. Apply the [cross-domain disambiguation gate](references/writing.md#cross-domain-term-disambiguation) before writing: an ambiguous common noun needs a qualified title, not an occupied bare slug.
 
 **Count every drafted description before its file is written.** The cap is 110 characters, measured without YAML quotes. Batch the count, shorten every over-limit description under the [description rule](references/writing.md#description), and count again. This applies equally to later audit-created entries and descriptions rewritten by a merge. Final lint is a backstop, not the first count.
 
@@ -168,7 +168,14 @@ Review and lint every staged created, promoted, or merged entry with
 `python3 '<skill>/scripts/lint_entry.py' '<file>'`, then lint the combined review
 tree once for cross-entry alias collisions. **Fix within-scope findings in the
 private working set and rebuild/re-lint the combined view until nothing fixable
-remains.** Re-read the body for atomic scope, paragraph unity and progression,
+remains.** Re-read every passage in the active source that supports a new or
+changed claim. Compare the draft with the source's conditions, population or
+version, time frame, causal direction, units and numbers, and stated
+uncertainty. A priority or superlative claim such as “first,” “only,” “best,”
+“largest,” or “leading” needs either independent support from a second reliable
+source or narrow attribution to the active source or named report; otherwise
+omit it. This verification is autonomous and requires no separate sign-off.
+Then re-read the body for atomic scope, paragraph unity and progression,
 and sentence clarity. Give each paragraph a short phrase naming its purpose,
 verify that every sentence advances its controlling idea, and read the
 paragraph openings in sequence; none of these judgments can be established by
@@ -200,14 +207,16 @@ vault.
 An ordinary request to build or update the wiki authorizes this apply; do not
 ask for a second human review. An explicit preview/plan-only/no-apply request
 does not. For an authorized apply, follow the shared
-[safe-write protocol](../../shared/SAFE_WRITES.md). Copy each final reviewed
+[safe-write protocol and Python API recipe](../../shared/SAFE_WRITES.md#call-the-shared-python-api).
+Copy each final reviewed
 file into a unique private stage on the destination filesystem, outside the
 recursive Wiki tree; resolve a symlinked Wiki directory before choosing that
 stage parent. Preserve the inspected permissions for replacements. If Wiki is
 absent, create that exact directory exclusively immediately before publication
 and verify it is the selected vault child. Publish new slugs with exclusive
-creation and replacements only against their original snapshots, using
-`shared/scripts/atomic_move.py`; never copy or move a working draft straight to
+creation and replacements only against their original snapshots, using the
+imported `shared/scripts/atomic_move.py` API; the file itself is not a
+publication command. Never copy or move a working draft straight to
 the public name. Record every completed publication. If a later member fails,
 conditionally roll back only unchanged publications and retain/report any
 recovery or mixed state as the multi-file protocol requires. Finally refresh
@@ -233,7 +242,7 @@ Types: `Concept`, `Person`, `Organization`, `Dataset`, `Software`, `Device`, `Ev
 
 Tags use the [shared discipline enum](../../shared/CONVENTIONS.md#3-the-discipline-tag-enum), not abbreviations or wikilinks.
 
-Open with prose immediately after YAML. Follow with the body, one `**Related:**` line, `---`, and exactly one `## Flashcards` card. Preserve an existing card's `!!` disabled cue and every scheduling or block-ID attachment recognized by the canonical [card format](references/flashcards-and-emphasis.md#4-flashcards), byte-for-byte and in place. Existing `parents:` and legacy `importance:` stay as found on merge; missing or unknown review state is reported rather than invented.
+Open with prose immediately after YAML. A fresh full entry follows the body with one `**Related:**` line, `---`, and exactly one `## Flashcards` card. On merge, preserve every pre-existing card, its `!!` disabled cue, and every scheduling or block-ID attachment recognized by the canonical [card format](references/flashcards-and-emphasis.md#4-flashcards), byte-for-byte and in place; a legacy extra card is a report-only refactor candidate under the card guide. Existing `parents:` and legacy `importance:` stay as found on merge; missing or unknown review state is reported rather than invented.
 
 ## Quality Checklist
 
@@ -243,25 +252,25 @@ The canonical rule for each check lives in the linked guide. Read that guide
 when the item applies; this list is the final gate and preserves the stable
 item numbers used by `lint_entry.py` and `wiki-linter`.
 
-1. ★ **Valid YAML** — frontmatter starts on line 1, is fenced by `---`, and
+1. **Valid YAML** — frontmatter starts on line 1, is fenced by `---`, and
    parses. See [frontmatter fields](references/writing.md#1-frontmatter-fields).
-2. ★ **Field order and quoting** — use the canonical schema, types, required
+2. **Field order and quoting** — use the canonical schema, types, required
    fields, and quoting policy. On creation write `parents: []` and bare
    `read: false`; on merge preserve populated `parents:`, legacy
    `importance:`, Obsidian-owned properties, and unknown user review state.
    See [fields and quoting](references/writing.md#1-frontmatter-fields) and
    [merge frontmatter](references/merge.md#frontmatter-and-related-footer).
-3. ★ **Dates** — dates are valid `YYYY-MM-DD`; creation dates match, and a
+3. **Dates** — dates are valid `YYYY-MM-DD`; creation dates match, and a
    merge bumps `updated:` for every actual change. Apply the canonical
    [date fields](references/writing.md#created--updated) and the independent
    `updated:` and `read:` tests in [merge logic](references/merge.md#the-read-reset).
-4. ★ **Sources format** — cite PDF introductions with a physical
+4. **Sources format** — cite PDF introductions with a physical
    `#page=N` anchor, cite Markdown without an anchor, and preserve unresolved
    PDF/summary pairs until decoded provenance confirms one document. A legacy
    `"stub"` marker is sole and is replaced on promotion. See
    [sources](references/writing.md#sources) and
    [source intake](references/source-intake.md#resolve-a-markdown-source).
-5. ★ **Filename, collision, disambiguation** — derive the filename from
+5. **Filename, collision, disambiguation** — derive the filename from
    `title:` with `slugify.py`, resolve every collision probe, and qualify
    cross-domain common nouns. See
    [wikilinks and naming](references/writing.md#3-wikilinks-and-naming) and
@@ -270,27 +279,29 @@ item numbers used by `lint_entry.py` and `wiki-linter`.
    models and landmark research systems as `Concept`, and apply the zero-API
    rule to non-`Software` entries and the selective artifact-level rule to
    `Software`. See [API surface](references/api-surface.md).
-7. ★ **Description** — write one plain-text sentence of at most 110
+7. **Description** — write one plain-text sentence of at most 110
    characters, with the entity in canonical running form as subject and tense
    matching its status. Count before writing and after every later edit. See
    [description](references/writing.md#description).
-8. ★ **Tags** — keep the key; when populated, use one or more quoted,
+8. **Tags** — keep the key; when populated, use one or more quoted,
    `#`-prefixed discipline-enum values in block form. Blank is valid on a full
    entry with no disciplinary home, never on a legacy stub. Judge canonical
    ownership rather than source context. See [tags](references/writing.md#tags)
    and [tag calibration](references/calibration.md).
-9. ★ **Body structure, flow, sentence clarity, and atomic scope** — open
+9. **Body structure, flow, sentence clarity, and atomic scope** — open
    immediately with the main claim in prose; use plain `##` headings only for
    sustained inherent facets. Keep one controlling idea per paragraph, useful
    progression across paragraphs, clear relationships and qualifications within
    sentences, and one durable subject per note. Cut tangents, source/tutorial
    scaffolding that does not serve the entry, repetition, and duplicated
    explanatory work; do not use length alone as a finding. A body link belongs
-   in a sentence that states the relationship.
+   in a sentence that states the relationship. Re-check active-source claim
+   scope, conditions, numbers, causal direction, and uncertainty; narrow or
+   support priority and superlative claims.
    Apply the exact `Person`/`Event` opener dates. See
    [body and prose](references/writing.md#2-the-body) and
    [rare types](references/rare-types.md).
-10. ★ **Wikilinks** — link the first eligible body occurrence of each resolved
+10. **Wikilinks** — link the first eligible body occurrence of each resolved
     entry, pipe only when display differs from slug, keep captions and table
     cells link-free, and require a real target. Preserve ambiguous ownership.
     On merge, eligibility remains limited to active-source contributions as
@@ -323,25 +334,26 @@ item numbers used by `lint_entry.py` and `wiki-linter`.
     explanation cannot. A rare justified expansion follows the guide. Do not
     treat a recreated source table as a worked example. See
     [prose principle 7](references/writing.md#prose-principles).
-16. ★ **Bold, italic, and code typography** — use only the enumerated emphasis
+16. **Bold, italic, and code typography** — use only the enumerated emphasis
     roles, preserve required `Work`, scientific-`Organism`, and symbol-title
     forms, and make the opener match the canonical running form. Resolve
     ambiguous taxon typography from the source. See
     [bold and italic](references/flashcards-and-emphasis.md#5-bold-and-italic).
-17. ★ **Aliases: identity and completeness** — aliases name this entity only,
+17. **Aliases: identity and completeness** — aliases name this entity only,
     and every qualifying alternate name introduced for the subject appears in
     slug form after the documented exclusions and collision check. See
     [aliases](references/writing.md#aliases).
-18. ★ **Alias form, collision, and display labels** — aliases are nonempty,
+18. **Alias form, collision, and display labels** — aliases are nonempty,
     canonical, useful, and unique within and across entries. Display labels
     must genuinely name the resolved target, subject to the documented
     cross-domain, inflection, and Organism-common-name carve-outs. See
     [aliases](references/writing.md#aliases) and
     [display-label casing](references/writing.md#display-label-casing).
-19. ★ **Flashcards** — every full entry has exactly one three-content-line
-    definition card after the footer and separator. Keep line 1 self-contained,
-    leak-free, and complete; line 2 is `??` or preserved user `!!`; line 3's
-    content is the canonical primary answer. Preserve every recognized schedule
-    and block-ID attachment on the retained primary card byte-for-byte and in
-    place. See
+19. **Flashcards** — a fresh full entry has one three-content-line definition
+    card after the footer and separator; a legacy extra card remains a finding
+    but is report-only absent the explicit refactor authority in the card guide.
+    Keep line 1 self-contained, leak-free, and complete; line 2 is `??` or
+    preserved user `!!`; line 3's content is the canonical primary answer.
+    Preserve every recognized schedule and block-ID attachment on every
+    pre-existing card byte-for-byte and in place. See
     [flashcards](references/flashcards-and-emphasis.md#4-flashcards).

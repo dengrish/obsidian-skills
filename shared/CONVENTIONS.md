@@ -55,8 +55,8 @@ override paths per-request, for that run only.
 | Path | Holds | Written by | Read by |
 |---|---|---|---|
 | `Inbox/` | **everything new, unsorted** — Web Clipper `.md` captures and dropped-in documents alike. The **file extension is the dispatch**, and it is the whole of it: `.md` to one skill, `.pdf` to the other, **anything else to neither** | the user, the user's clipper | clipping-processor (`.md` only), pdf-organizer (`.pdf` only) |
-| `Articles/` | **flat**; notes *about* a document — cleaned clippings and paper summaries, one schema (§2b), told apart by `sources:` item 1 | clipping-processor, paper-summarizer | wiki-builder, clipping-processor (dedup index), paper-summarizer (dedup and collision check) |
-| `Sources/PDFs/` | organized source documents, recursive. Everything pdf-organizer produces lands here — but the user may also drop a file in directly, which is why both consumers still check the stem and refuse a name pdf-organizer did not produce | pdf-organizer (renames an `Inbox/` file **and moves it here**), the user | pdf-figure-extractor, paper-summarizer, wiki-builder |
+| `Articles/` | **flat**; notes *about* a document — cleaned clippings and paper summaries, one schema (§2b), told apart by `sources:` item 1 | clipping-processor, paper-summarizer; pdf-organizer repairs source references during an authorized PDF rename | wiki-builder, clipping-processor (dedup index), paper-summarizer (dedup and collision check), pdf-organizer (authorized rename preflight) |
+| `Sources/PDFs/` | organized source documents, recursive. Everything pdf-organizer produces lands here — but the user may also drop a file in directly, which is why all three derived-content consumers still check the stem and refuse a name pdf-organizer did not produce | pdf-organizer (renames an `Inbox/` file **and moves it here**), the user | pdf-figure-extractor, paper-summarizer, wiki-builder |
 | `Sources/PDFs/<Work>/` | book-chapter PDFs, e.g. `Sources/PDFs/Prince_UDL_2026/`. The folder is what pdf-organizer creates when it splits a book. paper-summarizer's batch **scans** it — a book is only recognisable as one when a chapter turns up beside it — and then **skips** every chapter it finds, so a sweep never becomes a book's worth of summaries | pdf-organizer, the user | pdf-figure-extractor, paper-summarizer (scans, skips), wiki-builder |
 | `Sources/Images/` | **flat**; every figure and downloaded image, all extensions, whatever it came from | pdf-figure-extractor, clipping-processor; **pdf-organizer** renames in place only within an approved source rename (§1a) | wiki-builder, paper-summarizer, clipping-processor (its `rename` path re-reads the folder — §8a), wiki-linter (with `--images`, validates embeds and reports nested/staging residue without opening or deleting files) |
 | `Wiki/` | wiki entries, one `.md` per entity (walked **recursively**) | wiki-builder, wiki-linter | wiki-builder, wiki-linter |
@@ -147,7 +147,7 @@ rely on.
 **The shape, exactly** — and, like the slug algorithm of §4a, **the rule is the
 script, not this table**. `shared/scripts/naming.py` is the single canonical
 implementation; `looks_canonical()`, `chapter_parts()`, `core_stem()` and
-`split_tail()` are its surface, and both consumers import them rather than
+`split_tail()` are its surface, and its consumers import them rather than
 restating them:
 
 These helpers accept a full filename by default. When a caller has already
@@ -361,9 +361,10 @@ in order of preference:
 The blast radius is not theoretical: these skills run with the user's own
 filesystem permissions, over a vault they are trusted to rewrite.
 
-**Depended on by:** every skill that shells out — clipping-processor (page
-titles, authors and image URLs), wiki-builder (`find`/`grep` probes on source
-filenames), pdf-figure-extractor (`ocrmypdf` on a user path), paper-summarizer
+**Depended on by:** every skill that passes untrusted values to commands or
+host tools — clipping-processor (page titles, authors and image URLs),
+wiki-builder (source filenames and verification needles),
+pdf-figure-extractor (`ocrmypdf` on a user path), paper-summarizer
 (every path it passes to its two scripts, and every verification needle, which
 is text lifted straight off a paper), pdf-organizer (which states the rule for
 its own probes and is the model for it).
@@ -510,13 +511,20 @@ read: false
   review checkbox (`.obsidian/types.json` pins it as `checkbox`), and §2d is
   the whole rule for who may write it.
 
-**Quoting.** Always double-quote `title`, `description`, and every item under
-`aliases`, `sources`, `tags`, `parents`. Never quote `type`, `created`,
-`updated`, `read`. Double quotes only; escape a literal `"` as `\"`. The quotes
-on tags are load-bearing — an unquoted `- #machine-learning` is a YAML comment,
-and the discipline is silently lost. `read` takes the bare YAML booleans `true`
-and `false` — never `"false"`, never `yes`/`no`, never `0`/`1`; a quoted value
-is a string and Obsidian's checkbox renders it as permanently checked.
+**Quoting.** Canonical writers double-quote `title`, `description`, and every
+item under `aliases`, `sources`, `tags`, `parents`. Never quote `type`,
+`created`, `updated`, `read`. Double quotes only; escape a literal `"` as
+`\"`. On lint, a nonempty plain `title`, `description`, or `aliases` item is
+also conforming when its exact YAML spelling resolves losslessly as a string;
+Obsidian's Properties editor removes unnecessary quotes, and restoring them
+would create endless quote churn. Values that a YAML resolver could type as a
+boolean, null, number, date, timestamp, or collection still require quotes.
+Items under `sources`, `tags`, and `parents` always require double quotes. The
+quotes on tags are load-bearing — an unquoted `- #machine-learning` is a YAML
+comment, and the discipline is silently lost. `read` takes the bare YAML
+booleans `true` and `false` — never `"false"`, never `yes`/`no`, never `0`/`1`;
+a quoted value is a string and Obsidian's checkbox renders it as permanently
+checked.
 
 **`importance:` is retired.** It was measured across 123 generated entries at 97
 `high` / 7 `medium` / 1 `low` — a constant carrying no information — and left
@@ -838,10 +846,9 @@ carries the list as `TAG_ENUM`), wiki-linter (validates and format-fixes them,
 derives MOCs and the hierarchy from them; `scripts/scan_vault.py` carries the
 list as `VALID_TAGS` plus safe abbreviation expansions in `TAG_ALIASES`),
 clipping-processor (assigns them to cleaned notes), paper-summarizer (assigns
-them to summary notes). Five prose statements (this canonical block included)
-and three script constants — this is the fact with the widest blast radius in
-the plugin; `tests/test_conventions.py`'s `tag-enum` ledger is the authoritative
-count of the homes.
+them to summary notes). This is the fact with the widest blast radius in the
+plugin; `tests/test_conventions.py`'s `tag-enum` ledger counts every prose and
+script home and is authoritative for whether they still agree.
 
 ---
 
@@ -1030,7 +1037,7 @@ and the test asserts every copy in the tree is byte-identical to
 ```python
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
-_here = _os.path.dirname(_os.path.abspath(__file__))
+_here = _os.path.dirname(_os.path.realpath(__file__))
 _required = tuple(_m + ".py" for _m in (
     globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
@@ -1041,6 +1048,7 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
+    _tried.append(_here)                   # extracted skill with co-located helpers
 _missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
             for _p in _tried if _os.path.isdir(_p)}
 _shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
@@ -1281,13 +1289,12 @@ clipping-processor (its cleaned notes are markdown sources), paper-summarizer
 (its notes put the same wikilink form in `sources:` item 1, and are the `.md` half of
 the pair above), pdf-organizer (§1a).
 
-The same-stem candidate check above is mechanized on **both**
-sides — `wiki-builder/scripts/lint_entry.py` as `4-duplicate-source` and
-`wiki-linter/scripts/scan_vault.py` as `item4`, each over its own copy of a
-`source_stem()` helper. Two implementations of one rule is the shape §10 exists
-to catch, so it is stated here once and the two are expected to agree exactly;
-the *form* half of item 4 (extension present, anchor shape) is the scanner's
-alone. Neither report authorizes deletion without the provenance check above.
+The same-stem candidate check above is mechanized on **both** sides —
+`wiki-builder/scripts/lint_entry.py` as `4-duplicate-source` and
+`wiki-linter/scripts/scan_vault.py` as `item4`. Their differential tests require
+the two public checks to agree on the same corpus; the *form* half of item 4
+(extension present, anchor shape) is the scanner's alone. Neither report
+authorizes deletion without the provenance check above.
 
 ---
 

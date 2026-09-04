@@ -58,7 +58,7 @@ All repairs below apply to rendered prose, never to fenced or inline code. The r
     - **Inconsistent sibling indent — also only a *candidate*, and the one the greps above miss.** This catches the single-tab split: a list block whose **first** item is flush (depth 0) but a **later** sibling is one tab deeper. Surface it with this scan (run on the polished file):
 ```python
 import re, sys
-lines = open(sys.argv[1]).read().split('\n')
+lines = open(sys.argv[1], encoding="utf-8").read().split('\n')
 def strip_q(l):
     m = re.match(r'^((?:>\s?)*)', l); return l[len(m.group(1)):]
 block = []  # (lineno, indent_tabs, is_marker, raw)

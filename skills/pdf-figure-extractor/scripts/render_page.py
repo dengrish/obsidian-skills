@@ -33,6 +33,18 @@ import os
 import sys
 import tempfile
 
+
+def _configure_stdio():
+    """Make paths and Unicode diagnostics printable on narrow host consoles."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="backslashreplace")
+            except (OSError, ValueError):
+                pass
+
+
 try:
     # `import pymupdf` is the modern spelling. The legacy `import fitz`
     # alias prints a deprecation notice **on stdout** in PyMuPDF >= 1.25,
@@ -123,6 +135,7 @@ def run_self_test():
     import io
     import shutil
     import tempfile
+    from unittest import mock
 
     state = {"n": 0, "bad": 0}
 
@@ -147,6 +160,22 @@ def run_self_test():
         state["bad"] += 1
         print("FAIL %s: expected a clean exit, got none" % label)
         return None
+
+    class NarrowConsole:
+        def __init__(self):
+            self.calls = []
+
+        def reconfigure(self, **kwargs):
+            self.calls.append(kwargs)
+
+    narrow_out, narrow_err = NarrowConsole(), NarrowConsole()
+    with mock.patch.object(sys, "stdout", narrow_out), \
+            mock.patch.object(sys, "stderr", narrow_err):
+        _configure_stdio()
+    check("narrow stdout is switched to UTF-8",
+          narrow_out.calls, [{"encoding": "utf-8", "errors": "backslashreplace"}])
+    check("narrow stderr is switched to UTF-8",
+          narrow_err.calls, [{"encoding": "utf-8", "errors": "backslashreplace"}])
 
     # --- parse_pages -------------------------------------------------------
     check("one page", parse_pages("16", 20), [15])
@@ -293,6 +322,7 @@ def run_self_test():
 
 
 def main(argv=None):
+    _configure_stdio()
     p = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__,

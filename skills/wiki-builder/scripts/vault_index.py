@@ -75,11 +75,11 @@ import stat
 import sys
 import unicodedata as _ud
 
-_OBSIDIAN_SHARED_MODULES = ('yaml_scalars',)
+_OBSIDIAN_SHARED_MODULES = ('slugify', 'yaml_scalars')
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
-_here = _os.path.dirname(_os.path.abspath(__file__))
+_here = _os.path.dirname(_os.path.realpath(__file__))
 _required = tuple(_m + ".py" for _m in (
     globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
@@ -90,6 +90,7 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
+    _tried.append(_here)                   # extracted skill with co-located helpers
 _missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
             for _p in _tried if _os.path.isdir(_p)}
 _shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
@@ -114,6 +115,7 @@ if _here != _shared:
 # --- end bootstrap ---
 
 from yaml_scalars import parse_scalar, strip_comment  # noqa: E402
+from slugify import SlugError, slug_stem  # noqa: E402
 
 
 def fold_name(s):
@@ -299,6 +301,12 @@ def parse_frontmatter(text):
         if lines[i].rstrip("\r") == "---":
             close = i
             break
+        if lines[i].rstrip("\r").rstrip(" \t") == "---":
+            close = i
+            fm.errors.append(
+                "line %d: closing frontmatter fence has trailing whitespace; "
+                "write exactly '---'" % (i + 1))
+            break
     if close is None:
         fm.errors.append("frontmatter is never closed by a '---' fence")
         fm.body = ""
@@ -318,6 +326,10 @@ def parse_frontmatter(text):
 
         item_m = _ITEM_RE.match(raw_line)
         if item_m and current is not None and current.kind in ("blank", "block_list"):
+            if item_m.group("indent") != "  ":
+                fm.errors.append(
+                    "line %d: block-list items use exactly two spaces before '-'"
+                    % lineno)
             current.kind = "block_list"
             raw_item = (item_m.group("val") or "").strip()
             try:
@@ -325,6 +337,10 @@ def parse_frontmatter(text):
             except ValueError as exc:
                 fm.errors.append("line %d: unparseable YAML scalar: %s" % (lineno, exc))
                 val = None
+            if raw_item.startswith("#") and val == "":
+                fm.errors.append(
+                    "line %d: unquoted list item %r is a YAML comment, not a value"
+                    % (lineno, raw_item))
             current.raw_items.append(raw_item)
             current.values.append(val)
             current.item_lines.append(lineno)
@@ -405,7 +421,10 @@ _FENCE_LINE_RE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 #: ``## Flashcards`` exactly; lint_entry reports a tolerated variant as a
 #: heading to fix.  scan_vault's ``_FLASH_HEAD_LINE`` is the same rule; the
 #: two tools must agree on what counts as the section.
-_FLASH_HEAD_LINE_RE = re.compile(r"^ {0,3}#{2,3}[ \t]+Flashcards[ \t]*$")
+_FLASH_HEAD_LINE_RE = re.compile(
+    r"^ {0,3}#{2,3}[ \t]+Flashcards(?:[ \t]+#+)?[ \t]*$")
+_RELATED_HEAD_LINE_RE = re.compile(
+    r"^ {0,3}(?:>[ \t]*)?\*\*Related:\*\*(?:[ \t]*.*)?$")
 
 
 def split_sections(body):
@@ -428,21 +447,26 @@ def split_sections(body):
     fence = None                          # the opening run, e.g. "````"
     for i, ln in enumerate(lines):
         m = _FENCE_LINE_RE.match(ln)
-        if m and fence is None:
+        # Backticks are forbidden in a backtick fence's info string. A line
+        # such as `````code``` is inline`` is an inline code span, not a
+        # fence opener; hiding every section marker below it makes the
+        # builder disagree with both linters' listing mask.
+        valid_opener = bool(
+            m and not (m.group(1).startswith("`") and "`" in m.group(2)))
+        if valid_opener and fence is None:
             fence = m.group(1)
             # Retain nested/list fences while rejecting a more-indented sample
             # as the closer of a top-level fence. Tabs count as four columns.
             fence_indent = max(3, len(ln[:m.start(1)].expandtabs(4)))
             continue
-        if (m and m.group(1)[0] == fence[0]
+        if (fence is not None and m and m.group(1)[0] == fence[0]
                 and len(m.group(1)) >= len(fence) and not m.group(2).strip()
                 and len(ln[:m.start(1)].expandtabs(4)) <= fence_indent):
             fence = None
             continue
         if fence is not None:
             continue
-        s = ln.strip()
-        if related_index is None and s.startswith("**Related:**"):
+        if related_index is None and _RELATED_HEAD_LINE_RE.match(ln.rstrip("\r")):
             related_index = i
         if flashcards_index is None and _FLASH_HEAD_LINE_RE.match(ln.rstrip("\r")):
             flashcards_index = i
@@ -484,6 +508,10 @@ def _normalise_target(raw):
     scan_vault has always stripped both (qc-items item 10).
     """
     target = raw.split("|", 1)[0]
+    # Markdown table syntax often escapes a wikilink's display separator.
+    # The escape belongs to the separator, not to the target basename.
+    if target.endswith("\\") and "|" in raw:
+        target = target[:-1]
     target = target.split("#", 1)[0]
     target = target.split("^", 1)[0]
     return target.strip()
@@ -595,7 +623,19 @@ def index_entry(path, text=None, root=None):
     record["created"] = fm.scalar("created")
     record["updated"] = fm.scalar("updated")
     record["description"] = fm.scalar("description")
-    for key in ("aliases", "sources", "tags", "parents"):
+    # Inspect the scalar subset of the canonical schema without restating a
+    # second, easily drifted field list. ``importance`` is a tolerated legacy
+    # scalar that this index preserves but does not validate or consume.
+    for key in SCHEMA_ORDER:
+        if key in LIST_FIELDS or key == "importance":
+            continue
+        field = fm.get(key)
+        if field and field.is_list:
+            record["errors"].append(
+                "%s: expected a scalar, not a list" % key)
+    for key in SCHEMA_ORDER:
+        if key not in LIST_FIELDS:
+            continue
         record[key] = [v for v in fm.values(key) if v not in (None, "")]
         field = fm.get(key)
         if field and field.kind == "scalar":
@@ -605,6 +645,16 @@ def index_entry(path, text=None, root=None):
     for source in record["sources"]:
         if source != STUB_MARKER and not _SOURCE_REF_RE.fullmatch(source):
             record["errors"].append("sources: malformed local source reference %r" % source)
+    if record["title"]:
+        try:
+            expected_slug = slug_stem(record["title"])
+        except SlugError as exc:
+            record["errors"].append("title cannot produce a canonical slug: %s" % exc)
+        else:
+            if fold_name(expected_slug) != fold_name(record["slug"]):
+                record["errors"].append(
+                    "filename stem %r does not derive from title %r (expected %r)"
+                    % (record["slug"], record["title"], expected_slug))
     record["is_stub"] = _is_stub(fm)
 
     sections = split_sections(fm.body)
@@ -889,6 +939,30 @@ def run_self_test():
                   (parsed.scalar("title"), bool(parsed.errors)), (None, True))
         check("bare YAML null is not an entity title",
               parse_frontmatter('---\ntitle: null\n---\n').scalar("title"), None)
+        trailing_close = parse_frontmatter(
+            '---\ntitle: "Close"\n--- \nBody stays body.\n---\nLater\n')
+        check("a trailing-space closing fence stops frontmatter at that line",
+              (trailing_close.body, any("trailing whitespace" in error
+                                        for error in trailing_close.errors)),
+              ("Body stays body.\n---\nLater\n", True))
+        tabbed = parse_frontmatter(
+            '---\ntags:\n\t- "#statistics"\n---\n')
+        check("tab-indented list items are parsed but reported noncanonical",
+              (tabbed.values("tags"), any("exactly two spaces" in error
+                                          for error in tabbed.errors)),
+              (["#statistics"], True))
+        bare_tag = parse_frontmatter(
+            '---\ntags:\n  - #statistics\n---\n')
+        check("a bare hash list item is reported as a YAML comment",
+              any("YAML comment" in error for error in bare_tag.errors), True)
+        wrong_scalar_shapes = index_entry(
+            os.path.join(wiki, "shape.md"),
+            '---\ntitle: [Shape]\ntype: [Concept]\n---\nBody\n', root=wiki)
+        check("list-typed scalar fields remain visible as index errors",
+              sorted(error for error in wrong_scalar_shapes["errors"]
+                     if "expected a scalar" in error),
+              ["title: expected a scalar, not a list",
+               "type: expected a scalar, not a list"])
         check("scalars are unquoted",
               (anchor["title"], anchor["type"], anchor["created"]),
               ("Anchor", "Concept", "2026-01-01"))
@@ -1034,6 +1108,13 @@ def run_self_test():
                "\n".join(sec["prose_lines"]),
                [l for l in sec["flashcard_lines"] if l.strip()]),
               ("**Related:** [[a|A]]", True, ["Def.", "??", "Term"]))
+        sec = split_sections(
+            "```code``` is shown inline.\n\n**Related:**\n\n---\n\n"
+            "## Flashcards\n\nA complete definition.\n??\nProbe\n")
+        check("a leading triple-backtick inline span is not a phantom fence",
+              (sec["related_index"], sec["flashcards_index"],
+               [line for line in sec["flashcard_lines"] if line.strip()]),
+              (2, 6, ["A complete definition.", "??", "Probe"]))
         sec = split_sections("Prose.\n\n---\n\n### Flashcards\n\nDef.\n??\nTerm\n")
         check("a tolerated heading spelling still marks the section, and is "
               "exposed for the spelling check",
@@ -1116,7 +1197,7 @@ def run_self_test():
 
         unicode_wiki = os.path.join(tmp, "unicode-space")
         os.makedirs(unicode_wiki)
-        unicode_titles = {"plan-2": "Plan\u00a0#2", "path-value": "path:\u00a0value"}
+        unicode_titles = {"plan-sharp2": "Plan\u00a0#2", "path-value": "path:\u00a0value"}
         for name, title in unicode_titles.items():
             text = _st_entry_text("Unicode").replace('title: "Unicode"', 'title: ' + title)
             with open(os.path.join(unicode_wiki, name + '.md'), 'w', encoding='utf-8') as fh:
@@ -1175,6 +1256,11 @@ def _build_parser():
 
 
 def main(argv=None):
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (AttributeError, OSError):
+            pass
     args = _build_parser().parse_args(argv)
     if args.test:
         return run_self_test()

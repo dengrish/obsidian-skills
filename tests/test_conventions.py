@@ -1105,6 +1105,268 @@ def _dotted(node):
 #: letting it past the static gate.
 _REFUSAL_CALLS = frozenset(("sys.exit", "exit", "SystemExit", "_sys.exit"))
 
+# These decorators are language/runtime primitives whose application does not
+# dispatch into an imported callback. Every other imported decorator is an
+# import-time call even when its syntax is only ``@name`` rather than
+# ``@name(...)``.
+_INERT_DECORATORS = frozenset(("property", "staticmethod", "classmethod"))
+
+_TRUSTED_IMPORT_ROOTS = {
+    "collections": "collections",
+    "datetime": "datetime",
+    "os": "os",
+    "pathlib": "pathlib",
+    "re": "re",
+    "sys": "sys",
+    "textwrap": "textwrap",
+    "_os": "os",
+    "_sys": "sys",
+}
+
+_TRUSTED_IMPORTED_SYMBOLS = {
+    "Path": ("pathlib", "Path"),
+    "namedtuple": ("collections", "namedtuple"),
+    "timedelta": ("datetime", "timedelta"),
+}
+
+
+def _target_names(node):
+    """Names bound by one assignment/loop/with target."""
+    if isinstance(node, ast.Name):
+        return {node.id}
+    if isinstance(node, (ast.Tuple, ast.List)):
+        return set().union(*(_target_names(item) for item in node.elts)) \
+            if node.elts else set()
+    if isinstance(node, ast.Starred):
+        return _target_names(node.value)
+    return set()
+
+
+def _named_expr_names(node):
+    """Names rebound by evaluated ``:=`` expressions, excluding lambda bodies."""
+    if node is None:
+        return set()
+    names = set()
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, ast.NamedExpr):
+            names.update(_target_names(current.target))
+        if isinstance(current, ast.Lambda):
+            stack.extend(current.args.defaults)
+            stack.extend(value for value in current.args.kw_defaults
+                         if value is not None)
+            continue
+        stack.extend(ast.iter_child_nodes(current))
+    return names
+
+
+def _scope_shadowed_names(body):
+    """Names in this executable scope that invalidate spelling-only trust.
+
+    Pure-call allowances are meaningful only for the builtin or standard-library
+    object they name. A local definition, assignment, or misleading import alias
+    can otherwise make ``sorted()`` or ``re.compile()`` arbitrary code while the
+    gate classifies it as inert.
+    """
+    shadowed = set()
+
+    def note_expressions(*expressions):
+        for expression in expressions:
+            shadowed.update(_named_expr_names(expression))
+
+    def visit(nodes):
+        for node in nodes:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                 ast.ClassDef)):
+                shadowed.add(node.name)
+                note_expressions(*node.decorator_list)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    note_expressions(*node.args.defaults)
+                    note_expressions(*(value for value in node.args.kw_defaults
+                                       if value is not None))
+                    note_expressions(node.returns)
+                    note_expressions(*(arg.annotation for arg in
+                                       list(node.args.posonlyargs)
+                                       + list(node.args.args)
+                                       + list(node.args.kwonlyargs)))
+                else:
+                    note_expressions(*node.bases)
+                    note_expressions(*(item.value for item in node.keywords))
+                continue
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    bound = alias.asname or alias.name.split(".", 1)[0]
+                    expected = _TRUSTED_IMPORT_ROOTS.get(bound)
+                    if expected is not None and alias.name != expected:
+                        shadowed.add(bound)
+                    elif (expected is None
+                          and (bound in PURE_CALL_NAMES
+                               or bound in _REFUSAL_CALLS
+                               or bound in _INERT_DECORATORS)):
+                        shadowed.add(bound)
+                continue
+            if isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                for alias in node.names:
+                    if alias.name == "*":
+                        shadowed.update(
+                            name for name in PURE_CALL_NAMES
+                            if "." not in name)
+                        shadowed.update(_INERT_DECORATORS)
+                        continue
+                    bound = alias.asname or alias.name
+                    if bound in _TRUSTED_IMPORT_ROOTS:
+                        shadowed.add(bound)
+                        continue
+                    trusted = _TRUSTED_IMPORTED_SYMBOLS.get(bound)
+                    if trusted is not None and trusted != (module, alias.name):
+                        shadowed.add(bound)
+                    elif (bound in PURE_CALL_NAMES
+                          or bound in _REFUSAL_CALLS
+                          or bound in _INERT_DECORATORS) and trusted is None:
+                        shadowed.add(bound)
+                continue
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    shadowed.update(_target_names(target))
+                note_expressions(node.value)
+            elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+                shadowed.update(_target_names(node.target))
+                note_expressions(node.value)
+            elif isinstance(node, (ast.For, ast.AsyncFor)):
+                shadowed.update(_target_names(node.target))
+                note_expressions(node.iter)
+                visit(node.body)
+                visit(node.orelse)
+            elif isinstance(node, ast.While):
+                note_expressions(node.test)
+                visit(node.body)
+                visit(node.orelse)
+            elif isinstance(node, ast.If):
+                note_expressions(node.test)
+                visit(node.body)
+                visit(node.orelse)
+            elif isinstance(node, ast.Try):
+                visit(node.body)
+                for handler in node.handlers:
+                    if handler.name:
+                        shadowed.add(handler.name)
+                    note_expressions(handler.type)
+                    visit(handler.body)
+                visit(node.orelse)
+                visit(node.finalbody)
+            elif isinstance(node, (ast.With, ast.AsyncWith)):
+                for item in node.items:
+                    note_expressions(item.context_expr)
+                    if item.optional_vars is not None:
+                        shadowed.update(_target_names(item.optional_vars))
+                visit(node.body)
+            elif isinstance(node, ast.Expr):
+                note_expressions(node.value)
+            elif isinstance(node, ast.Raise):
+                note_expressions(node.exc, node.cause)
+            elif isinstance(node, ast.Assert):
+                note_expressions(node.test, node.msg)
+
+    visit(body)
+    return shadowed
+
+
+def _scope_local_classes(body):
+    """Return classes defined directly in this executable scope."""
+    classes = {}
+
+    def visit(nodes):
+        for node in nodes:
+            if isinstance(node, ast.ClassDef):
+                classes[node.name] = node
+                continue
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                 ast.Lambda)):
+                continue
+            if isinstance(node, ast.If):
+                visit(node.body)
+                visit(node.orelse)
+            elif isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+                visit(node.body)
+                visit(node.orelse)
+            elif isinstance(node, ast.Try):
+                visit(node.body)
+                for handler in node.handlers:
+                    visit(handler.body)
+                visit(node.orelse)
+                visit(node.finalbody)
+            elif isinstance(node, (ast.With, ast.AsyncWith)):
+                visit(node.body)
+
+    visit(body)
+    return classes
+
+
+def _local_base_has_callback(name, local_classes, seen=None):
+    """Whether a local class can run code when another class subclasses it."""
+    node = local_classes.get(name)
+    if node is None:
+        return False
+    trail = set() if seen is None else set(seen)
+    if name in trail:
+        return True
+    trail.add(name)
+    if any(isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+           and item.name == "__init_subclass__" for item in node.body):
+        return True
+    return any(
+        (base_name := _dotted(base)) in local_classes
+        and _local_base_has_callback(base_name, local_classes, trail)
+        for base in node.bases)
+
+
+def _imported_reference(node, imported_names):
+    """Return a dotted reference rooted in an import, or ``None``.
+
+    Decorator application and class creation can execute user code without an
+    explicit :class:`ast.Call`: ``@decorate`` calls ``decorate``;
+    ``class C(Base)`` may invoke ``Base``'s metaclass and class hooks; and
+    ``metaclass=meta`` calls ``meta``. The ordinary call scanner therefore
+    needs this small definition-context companion.
+    """
+    name = _dotted(node)
+    if name is None:
+        return None
+    return name if name.split(".", 1)[0] in imported_names else None
+
+
+def _definition_reference_effect(role, node, imported_names,
+                                 shadowed_names=(), local_classes=None):
+    """Describe an implicit callback while a definition is constructed."""
+    name = _dotted(node)
+    if name is None:
+        if role == "decorator":
+            return "applies a computed decorator"
+        if role == "base":
+            return "creates a subclass from a computed base"
+        if role == "metaclass":
+            return "calls a computed metaclass"
+        return None
+    root = name.split(".", 1)[0]
+    imported = root in imported_names
+    shadowed = root in shadowed_names
+    local_classes = local_classes or {}
+    if role == "decorator" and not (
+            name in _INERT_DECORATORS and not imported and not shadowed):
+        return "applies decorator `%s`" % name
+    if role == "base" and (
+            imported or (root in local_classes
+                         and _local_base_has_callback(
+                             root, local_classes))
+            or (shadowed and root not in local_classes)):
+        return "creates a subclass of callback-capable base `%s`" % name
+    if role == "metaclass" and not (
+            name == "type" and not imported and not shadowed):
+        return "calls metaclass `%s`" % name
+    return None
+
 
 def _expr_nodes(node):
     """Every node of ``node`` that is actually EVALUATED at import.
@@ -1130,28 +1392,99 @@ def _expr_nodes(node):
     return out
 
 
-def _impure_expr(node):
+def _impure_expr(node, imported_names=(), shadowed_names=()):
     """The first import-time effect inside an expression, or ``None``."""
     for sub in _expr_nodes(node):
         if not isinstance(sub, ast.Call):
             continue
         name = _dotted(sub.func)
         if name is not None:
-            if name in PURE_CALL_NAMES or name in _REFUSAL_CALLS:
+            root = name.split(".", 1)[0]
+            trusted_spelling = root not in shadowed_names
+            if trusted_spelling and (
+                    name in PURE_CALL_NAMES or name in _REFUSAL_CALLS):
                 continue
-            if name.rsplit(".", 1)[0] in _PATH_SETUP:
+            if (trusted_spelling
+                    and name.rsplit(".", 1)[0] in _PATH_SETUP):
                 continue                     # sys.path.insert/append -- see above
-            # `os.environ.get(...)` and friends: judged on the method name.
-            if isinstance(sub.func, ast.Attribute) \
-                    and sub.func.attr in PURE_METHOD_NAMES:
+            # A method name alone proves nothing about its receiver:
+            # `payload.copy()` may be a harmless dict copy or arbitrary user
+            # code.  Exempt the small method list only on a literal, the
+            # result of an already-approved constructor, or a module constant
+            # (whose initializer is screened separately).  This keeps common
+            # constant-table expressions readable without letting an imported
+            # object smuggle an arbitrary call through as `.copy()` or
+            # `.replace()`.
+            if (isinstance(sub.func, ast.Attribute)
+                    and sub.func.attr in PURE_METHOD_NAMES
+                    and _pure_method_receiver(
+                        sub.func.value, imported_names, shadowed_names)):
                 continue
             return "calls %s()" % name
         if isinstance(sub.func, ast.Attribute):
-            if sub.func.attr in PURE_METHOD_NAMES:
+            if (sub.func.attr in PURE_METHOD_NAMES
+                    and _pure_method_receiver(
+                        sub.func.value, imported_names, shadowed_names)):
                 continue
             return "calls .%s()" % sub.func.attr
         return "calls a computed expression"
     return None
+
+
+def _pure_method_receiver(node, imported_names=(), shadowed_names=()):
+    """Whether a whitelisted method is bound to statically inert data.
+
+    This is deliberately narrower than type inference.  Module-level constant
+    initializers are checked on their own assignment, so an ALL_CAPS name can
+    be reused here; arbitrary local/imported names cannot.
+    """
+    if isinstance(node, (ast.Constant, ast.List, ast.Tuple, ast.Set, ast.Dict)):
+        return True
+    # A name is not proof of an inert receiver. Even an ALL_CAPS name may be
+    # an alias for an imported module or an instance with an effectful method
+    # (``PAYLOAD = shutil; PAYLOAD.copy(...)``). Keep the exemption tied to
+    # syntax whose receiver can be classified without executing the module.
+    if isinstance(node, ast.Call):
+        name = _dotted(node.func)
+        return bool(name in PURE_CALL_NAMES
+                    and name.split(".", 1)[0] not in shadowed_names)
+    return False
+
+
+def _module_import_names(tree):
+    """Names bound by imports that execute while this module is defined."""
+    names = set()
+
+    def visit(nodes):
+        for node in nodes:
+            if isinstance(node, ast.Import):
+                names.update(alias.asname or alias.name.split(".", 1)[0]
+                             for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                names.update(alias.asname or alias.name for alias in node.names
+                             if alias.name != "*")
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                   ast.Lambda)):
+                continue
+            elif isinstance(node, ast.ClassDef):
+                visit(node.body)
+            elif isinstance(node, ast.If):
+                visit(node.body)
+                visit(node.orelse)
+            elif isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+                visit(node.body)
+                visit(node.orelse)
+            elif isinstance(node, ast.Try):
+                visit(node.body)
+                for handler in node.handlers:
+                    visit(handler.body)
+                visit(node.orelse)
+                visit(node.finalbody)
+            elif isinstance(node, (ast.With, ast.AsyncWith)):
+                visit(node.body)
+
+    visit(tree.body)
+    return names
 
 
 def _is_main_guard(test):
@@ -1166,26 +1499,69 @@ def _is_main_guard(test):
     return "__name__" in names and "__main__" in consts
 
 
-def _scope_effects(body, out):
+def _scope_effects(body, out, imported_names=(), inherited_shadowed=(),
+                   inherited_classes=None):
+    shadowed_names = set(inherited_shadowed) | _scope_shadowed_names(body)
+    local_classes = dict(inherited_classes or {})
+    local_classes.update(_scope_local_classes(body))
     for node in body:
         line = getattr(node, "lineno", 1)
         if isinstance(node, (ast.Import, ast.ImportFrom, ast.Pass)):
             continue
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
                              ast.ClassDef)):
-            # A decorator runs at import; the bases of a class are evaluated
-            # at import.  Everything else in here is just definition.
-            for dec in list(node.decorator_list) + list(
-                    getattr(node, "bases", [])):
-                bad = _impure_expr(dec)
+            # Decorators, defaults, annotations, class bases and class keyword
+            # arguments are evaluated while the definition is created.  A
+            # class body also executes immediately; only a function body is
+            # deferred until the function is called.
+            evaluated = [("decorator", expr)
+                         for expr in node.decorator_list]
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                evaluated.extend(("default", expr)
+                                 for expr in node.args.defaults)
+                evaluated.extend(("default", expr)
+                                 for expr in node.args.kw_defaults
+                                 if expr is not None)
+                evaluated.extend(("annotation", arg.annotation) for arg in
+                                 list(node.args.posonlyargs)
+                                 + list(node.args.args)
+                                 + list(node.args.kwonlyargs)
+                                 if arg.annotation is not None)
+                if node.args.vararg and node.args.vararg.annotation is not None:
+                    evaluated.append(("annotation",
+                                      node.args.vararg.annotation))
+                if node.args.kwarg and node.args.kwarg.annotation is not None:
+                    evaluated.append(("annotation",
+                                      node.args.kwarg.annotation))
+                if node.returns is not None:
+                    evaluated.append(("annotation", node.returns))
+            else:
+                evaluated.extend(("base", expr) for expr in node.bases)
+                evaluated.extend((
+                    "metaclass" if keyword.arg == "metaclass" else
+                    "class keyword",
+                    keyword.value,
+                ) for keyword in node.keywords)
+            evaluated.extend(("type parameter", expr)
+                             for expr in getattr(node, "type_params", []))
+            for role, expr in evaluated:
+                bad = _impure_expr(expr, imported_names, shadowed_names)
+                if bad is None:
+                    bad = _definition_reference_effect(
+                        role, expr, imported_names, shadowed_names,
+                        local_classes)
                 if bad:
-                    out.append((line, "the decorator/base of `%s` %s"
+                    out.append((getattr(expr, "lineno", line),
+                                "the definition of `%s` %s"
                                 % (node.name, bad)))
+            if isinstance(node, ast.ClassDef):
+                _scope_effects(node.body, out, imported_names,
+                               shadowed_names, local_classes)
             continue
         if isinstance(node, ast.Expr):
             if isinstance(node.value, ast.Constant):
                 continue                     # a docstring or a string comment
-            bad = _impure_expr(node.value)
+            bad = _impure_expr(node.value, imported_names, shadowed_names)
             if bad:
                 out.append((line, "evaluates an expression for its effect "
                                   "(it %s)" % bad))
@@ -1204,7 +1580,7 @@ def _scope_effects(body, out):
                                   "object that already exists"
                             % (_dotted(tgt) or ast.dump(tgt)[:40])))
             if node.value is not None:
-                bad = _impure_expr(node.value)
+                bad = _impure_expr(node.value, imported_names, shadowed_names)
                 if bad:
                     out.append((line, "computes a module-level value that %s"
                                 % bad))
@@ -1214,27 +1590,36 @@ def _scope_effects(body, out):
                 # `if __name__ == "__main__":` -- the body is exactly the code
                 # that does NOT run on import.  Refusing it would be refusing
                 # the fix this gate asks for.
-                _scope_effects(node.orelse, out)
+                _scope_effects(node.orelse, out, imported_names,
+                               shadowed_names, local_classes)
                 continue
-            bad = _impure_expr(node.test)
+            bad = _impure_expr(node.test, imported_names, shadowed_names)
             if bad:
                 out.append((line, "a module-level `if` whose test %s" % bad))
-            _scope_effects(node.body, out)
-            _scope_effects(node.orelse, out)
+            _scope_effects(node.body, out, imported_names,
+                           shadowed_names, local_classes)
+            _scope_effects(node.orelse, out, imported_names,
+                           shadowed_names, local_classes)
             continue
         if isinstance(node, ast.For):
-            bad = _impure_expr(node.iter)
+            bad = _impure_expr(node.iter, imported_names, shadowed_names)
             if bad:
                 out.append((line, "a module-level `for` whose iterable %s" % bad))
-            _scope_effects(node.body, out)
-            _scope_effects(node.orelse, out)
+            _scope_effects(node.body, out, imported_names,
+                           shadowed_names, local_classes)
+            _scope_effects(node.orelse, out, imported_names,
+                           shadowed_names, local_classes)
             continue
         if isinstance(node, ast.Try):
-            _scope_effects(node.body, out)
+            _scope_effects(node.body, out, imported_names,
+                           shadowed_names, local_classes)
             for h in node.handlers:
-                _scope_effects(h.body, out)
-            _scope_effects(node.orelse, out)
-            _scope_effects(node.finalbody, out)
+                _scope_effects(h.body, out, imported_names,
+                               shadowed_names, local_classes)
+            _scope_effects(node.orelse, out, imported_names,
+                           shadowed_names, local_classes)
+            _scope_effects(node.finalbody, out, imported_names,
+                           shadowed_names, local_classes)
             continue
         if isinstance(node, ast.Raise):
             # `raise SystemExit(...)` is how the §5 bootstrap reports a missing
@@ -1287,7 +1672,7 @@ def module_scope_effects(text):
         tree = ast.parse(text)
     except SyntaxError as exc:
         return [(exc.lineno or 1, "does not parse: %s" % exc.msg)]
-    return _scope_effects(tree.body, [])
+    return _scope_effects(tree.body, [], _module_import_names(tree))
 
 
 _PROBED = {}
@@ -3873,6 +4258,7 @@ def derive_description_max(rep, check, conv):
 
 
 FM_FENCE_RE = re.compile(r"```[a-z]*\n(---\n.*?\n---)\s*?\n", re.S)
+YAML_FENCE_RE = re.compile(r"```ya?ml[ \t]*\n(.*?)\n```", re.S | re.I)
 FM_KEY_RE = re.compile(r"^([a-z_][a-z_0-9]*):[ \t]*(.*)$")
 FM_ITEM_RE = re.compile(r"^[ \t]+-[ \t]*(.*)$")
 #: A `**Related:**` footer line and everything on it.
@@ -3932,6 +4318,34 @@ def _dq(v):
     return len(v) >= 2 and v[0] == '"' and v[-1] == '"'
 
 
+def _frontmatter_example_blocks(text, schemas, optional):
+    """Yield complete output examples, including YAML fences without `---`.
+
+    Partial property snippets are useful documentation and are not full
+    frontmatter. An unfenced YAML block therefore joins the semantic corpus
+    only when it contains every required key of one canonical schema. This
+    closes the easy delimiter-free `yaml` fence evasion without treating a partial example
+    as a malformed note.
+    """
+    examples = [(m.start(), m.group(1)) for m in FM_FENCE_RE.finditer(text)]
+    for match in YAML_FENCE_RE.finditer(text):
+        body = match.group(1)
+        if body.lstrip().startswith("---"):
+            continue                    # already found by FM_FENCE_RE
+        fields = parse_frontmatter(body)
+        keys = [field[0] for field in fields]
+        if len(keys) < 4:
+            continue
+        name = _classify(keys, schemas)
+        if name is None:
+            continue
+        required = [key for key in schemas[name]
+                    if key not in optional[name]]
+        if all(key in keys for key in required):
+            examples.append((match.start(1), body))
+    return sorted(examples)
+
+
 def check_yaml_examples(rep, conv):
     """Complete frontmatter examples obey §2a/§2b, not just the field order."""
     check = "yaml-example"
@@ -3950,8 +4364,9 @@ def check_yaml_examples(rep, conv):
     for skill, path, text in walk_skill_files():
         if not path.endswith(".md"):
             continue
-        for m in FM_FENCE_RE.finditer(text):
-            fields = parse_frontmatter(m.group(1))
+        for start, block in _frontmatter_example_blocks(
+                text, schemas, optional):
+            fields = parse_frontmatter(block)
             keys = [f[0] for f in fields]
             if len(keys) < 4:
                 continue
@@ -3964,7 +4379,7 @@ def check_yaml_examples(rep, conv):
             # presence is what marks a fence as this plugin's own output.
             if name == "source-note" and "format" not in keys:
                 continue
-            base = line_of(text, m.start())
+            base = line_of(text, start)
             where = at(path, base)
 
             def bad(msg, f=None):
@@ -4823,7 +5238,7 @@ ENUM_SCOPE = re.compile(
 #: count -- "all five skills", "Five skills cover ..." -- never a subset count
 #: like "four skills fire on a PDF".
 ROSTER_COUNT = re.compile(
-    r"\b(?:all|these)\s+(%s)\s+skills\b"
+    r"\b(?:all|these|same)\s+(%s)\s+skills\b"
     r"|\b(%s)\s+skills\s+cover\b"
     r"|\bplugin(?:'s)?\s+(%s)\s+skills\b"
     % (_COUNT_ALT, _COUNT_ALT, _COUNT_ALT), re.I)
@@ -5100,7 +5515,10 @@ def check_skill_roster(rep, conv):
 # check 7 -- bundled paths resolve, and every reference is reachable
 # ===========================================================================
 
-PATH_REF = re.compile(r"`?((?:[a-z0-9-]+/)?(?:references|scripts)/[a-z0-9_.-]+\.(?:md|py))`?")
+PATH_REF = re.compile(
+    r"(?<![A-Za-z0-9_./-])`?"
+    r"((?:[A-Za-z0-9_-]+/)?(?:references|scripts)/"
+    r"[A-Za-z0-9_.-]+\.(?:md|py))`?")
 
 #: Everything else a file can point at inside the plugin: `skills/…`,
 #: `shared/…`, `<skill>/SKILL.md`, and any bundled file whose name is not
@@ -5108,7 +5526,7 @@ PATH_REF = re.compile(r"`?((?:[a-z0-9-]+/)?(?:references|scripts)/[a-z0-9_.-]+\.
 #: component made of lowercase characters, so `skills/wiki-linter/RULEBOOK.md`
 #: -- a pointer at a file that does not exist -- was simply not a path to it.
 PLUGIN_PATH_REF = re.compile(
-    r"`((?:skills|shared|tests)/[A-Za-z0-9_./-]+\.(?:md|py)|"
+    r"`((?:skills|shared|tests|tools)/[A-Za-z0-9_./-]+\.(?:md|py)|"
     r"[a-z0-9-]+/[A-Za-z][A-Za-z0-9_.-]*\.(?:md|py))`")
 
 #: Markdown links with a local fragment. Path existence alone does not make
@@ -5226,9 +5644,35 @@ def _absent_paths(conv):
     return out
 
 
-def _resolve_ref(skill, token, nearby_skills=()):
+def _exact_regular_file(path):
+    """Like ``isfile``, but require every component's exact spelling.
+
+    A case-insensitive developer filesystem otherwise approves a pointer that
+    breaks when the plugin is installed on Linux.
+    """
+    path = os.path.abspath(path)
+    try:
+        if os.path.commonpath((ROOT, path)) != ROOT:
+            return False
+        current = ROOT
+        for part in os.path.relpath(path, ROOT).split(os.sep):
+            if part in ("", "."):
+                continue
+            if part not in os.listdir(current):
+                return False
+            current = os.path.join(current, part)
+        return os.path.isfile(current)
+    except (OSError, ValueError):
+        return False
+
+
+def _resolve_ref(skill, token, nearby_skills=(), source_path=None):
     """Candidate on-disk locations for a `references/…` or `scripts/…` token."""
-    cands = [os.path.join(SKILLS_DIR, skill, token)]
+    cands = []
+    if source_path is not None:
+        cands.append(os.path.join(os.path.dirname(source_path), token))
+    if skill:
+        cands.append(os.path.join(SKILLS_DIR, skill, token))
     segs = token.split("/")
     if len(segs) == 3 or (len(segs) >= 2 and segs[0] in skill_names()):
         cands.append(os.path.join(SKILLS_DIR, token))   # <skill>/SKILL.md
@@ -5239,7 +5683,16 @@ def _resolve_ref(skill, token, nearby_skills=()):
     # this does not degrade into "exists anywhere".
     for other in nearby_skills:
         cands.append(os.path.join(SKILLS_DIR, other, token))
-    return cands
+    # A bare skill-relative pointer is also unambiguous when exactly one skill
+    # ships it.  Shared prose often names the consumer in the preceding clause,
+    # outside the deliberately tight sentence window used above.
+    global_matches = [os.path.join(SKILLS_DIR, other, token)
+                      for other in skill_names()
+                      if _exact_regular_file(
+                          os.path.join(SKILLS_DIR, other, token))]
+    if len(global_matches) == 1:
+        cands.extend(global_matches)
+    return list(dict.fromkeys(cands))
 
 
 def check_reference_paths(rep, conv):
@@ -5256,13 +5709,23 @@ def check_reference_paths(rep, conv):
 
     # (a) every referenced path exists.
     n_tokens, n_borrowed = 0, [0]
-    for skill, path, text in walk_skill_files():
-        tokens = [(m.group(1), m.start(), m.end()) for m in PATH_REF.finditer(text)]
+    # Read every authored Markdown contract, not only files below skills/.
+    # README and the shared guides contain executable paths too; leaving them
+    # out allowed their instructions to rot while the gate stayed green.
+    for path, text in ((p, t) for p, t in walk_plugin_files()
+                       if p.endswith(".md")):
+        parts = rel(path).split(os.sep)
+        skill = parts[1] if len(parts) > 2 and parts[0] == "skills" else ""
+        in_block = canonical_block_lines(text)
+        tokens = [(m.group(1), m.start(1), m.end(1))
+                  for m in PATH_REF.finditer(text)]
         tokens += [(m.group(1), m.start(1), m.end(1))
                    for m in PLUGIN_PATH_REF.finditer(text)]
         for token, tstart, tend in sorted(set(tokens)):
             if "<" in token or ">" in token:
                 continue                      # a shape, not a pointer
+            if line_of(text, tstart) in in_block:
+                continue                      # registry key/example, not prose
             n_tokens += 1
             # Both the "deliberately absent" cue and the "resolve against the
             # skill named beside it" rescue are scoped to the token's own
@@ -5273,10 +5736,12 @@ def check_reference_paths(rep, conv):
             # skill's name resolved into that skill's directory.
             sent = _enclosing_sentence(text, tstart, tend)
             nearby = [s for s in all_skills if s in sent and s != skill]
-            hit = next((c for c in _resolve_ref(skill, token, nearby)
-                        if os.path.isfile(c)), None)
+            hit = next((c for c in _resolve_ref(
+                skill, token, nearby, source_path=path)
+                        if _exact_regular_file(c)), None)
             if hit:
-                owner = os.path.dirname(os.path.relpath(hit, SKILLS_DIR)).split("/")[0]
+                owner = os.path.dirname(
+                    os.path.relpath(hit, SKILLS_DIR)).split(os.sep)[0]
                 if (token.count("/") == 1 and nearby and owner in nearby
                         and owner != skill):
                     # A bare `references/x.md` that only resolves because
@@ -5309,14 +5774,17 @@ def check_reference_paths(rep, conv):
             else:
                 rep.fail(check,
                          "%s points at `%s`, which does not exist under "
-                         "skills/%s/, under a skill named in the same "
+                         "%s, under a skill named in the same "
                          "sentence, or at the plugin root. A pointer at a "
                          "missing file is read as an instruction to consult "
                          "rules that are not there. If the file is deliberately "
                          "not shipped, say so in the text AND register the pair "
                          "`%s :: %s` in CONVENTIONS.md §10c -- prose alone no "
                          "longer exempts a pointer."
-                         % (r, token, skill, r, token), where)
+                         % (r, token,
+                            "skills/%s/" % skill if skill else
+                            "the document's directory",
+                            r, token), where)
     for f, tok in sorted(absent - absent_used):
         rep.fail(check,
                  "CONVENTIONS.md §10c registers `%s :: %s` as deliberately "
@@ -5538,6 +6006,27 @@ def _bare_script_re(scripts):
     return _BARE_SCRIPT_CACHE[key]
 
 
+def _logical_documentation_lines(text):
+    """Yield ``(first_line, last_line, text)`` with shell continuations joined.
+
+    Documentation commonly puts a script on the first physical line and its
+    options on following backslash-continued lines. Validating each physical
+    line independently checked the executable but silently skipped most of
+    the command's flags.
+    """
+    lines = text.split("\n")
+    index = 0
+    while index < len(lines):
+        first = index + 1
+        parts = [lines[index]]
+        while re.search(r"\\[ \t]*$", parts[-1]) and index + 1 < len(lines):
+            parts[-1] = re.sub(r"\\[ \t]*$", "", parts[-1])
+            index += 1
+            parts.append(lines[index].lstrip())
+        yield first, index + 1, " ".join(parts)
+        index += 1
+
+
 def check_script_surface(rep, conv):
     """Every documented `scripts/x.py --flag` exists and parses.
 
@@ -5562,8 +6051,8 @@ def check_script_surface(rep, conv):
     seen = set()
     for path, text in walk_plugin_files():
         in_block = canonical_block_lines(text)
-        for i, line in enumerate(text.split("\n"), 1):
-            if i in in_block:
+        for i, last_i, line in _logical_documentation_lines(text):
+            if any(n in in_block for n in range(i, last_i + 1)):
                 continue
             named = []
             for m in SCRIPT_MENTION.finditer(line):
@@ -5662,38 +6151,38 @@ SELFTEST_TALLY = re.compile(
 #: fails.  Lowering a number here is a deliberate, reviewable statement that
 #: cases went away; a script with no line is checked for a clean tally only.
 SELFTEST_MIN_CASES = {
-    # Re-tuned to the exact tallies of 2026-09-02. Raising after growth is the
+    # Re-tuned to the exact tallies of 2026-09-03. Raising after growth is the
     # mirror duty of the "lowering is a deliberate, reviewable statement" rule
     # below: new regression cases must not disappear with the harness green.
-    "shared/scripts/atomic_move.py": 21,
+    "shared/scripts/atomic_move.py": 31,
     "shared/scripts/code_typography.py": 16,
-    "shared/scripts/equation_coverage.py": 152,
+    "shared/scripts/equation_coverage.py": 160,
     "shared/scripts/figure_state.py": 8,
-    "shared/scripts/introduced_aliases.py": 21,
-    "shared/scripts/markdown_tables.py": 36,
+    "shared/scripts/introduced_aliases.py": 23,
+    "shared/scripts/markdown_tables.py": 40,
     "shared/scripts/naming.py": 191,
-    "shared/scripts/organism_names.py": 26,
-    "shared/scripts/entry_structure.py": 103,
-    "shared/scripts/plugin_paths.py": 107,
-    "shared/scripts/plurals.py": 212,
-    "shared/scripts/slugify.py": 71,
-    "shared/scripts/vault_artifacts.py": 37,
+    "shared/scripts/organism_names.py": 29,
+    "shared/scripts/entry_structure.py": 108,
+    "shared/scripts/plugin_paths.py": 110,
+    "shared/scripts/plurals.py": 251,
+    "shared/scripts/slugify.py": 82,
+    "shared/scripts/vault_artifacts.py": 39,
     "shared/scripts/yaml_scalars.py": 8,
-    "skills/clipping-processor/scripts/dedup_index.py": 135,
-    "skills/clipping-processor/scripts/fetch_images.py": 451,
-    "skills/clipping-processor/scripts/slug.py": 130,
-    "skills/paper-summarizer/scripts/note_lint.py": 196,
-    "skills/paper-summarizer/scripts/paper_scan.py": 131,
-    "skills/paper-summarizer/scripts/paper_text.py": 48,
-    "skills/pdf-figure-extractor/scripts/auto_fig_bbox.py": 328,
-    "skills/pdf-figure-extractor/scripts/batch_extract.py": 318,
-    "skills/pdf-figure-extractor/scripts/extract_figures.py": 161,
-    "skills/pdf-figure-extractor/scripts/render_page.py": 46,
-    "skills/pdf-organizer/scripts/organize.py": 245,
-    "skills/wiki-builder/scripts/find_collisions.py": 62,
-    "skills/wiki-builder/scripts/lint_entry.py": 290,
-    "skills/wiki-builder/scripts/vault_index.py": 70,
-    "skills/wiki-linter/scripts/scan_vault.py": 355,
+    "skills/clipping-processor/scripts/dedup_index.py": 149,
+    "skills/clipping-processor/scripts/fetch_images.py": 466,
+    "skills/clipping-processor/scripts/slug.py": 137,
+    "skills/paper-summarizer/scripts/note_lint.py": 203,
+    "skills/paper-summarizer/scripts/paper_scan.py": 144,
+    "skills/paper-summarizer/scripts/paper_text.py": 49,
+    "skills/pdf-figure-extractor/scripts/auto_fig_bbox.py": 338,
+    "skills/pdf-figure-extractor/scripts/batch_extract.py": 332,
+    "skills/pdf-figure-extractor/scripts/extract_figures.py": 173,
+    "skills/pdf-figure-extractor/scripts/render_page.py": 48,
+    "skills/pdf-organizer/scripts/organize.py": 260,
+    "skills/wiki-builder/scripts/find_collisions.py": 65,
+    "skills/wiki-builder/scripts/lint_entry.py": 309,
+    "skills/wiki-builder/scripts/vault_index.py": 75,
+    "skills/wiki-linter/scripts/scan_vault.py": 374,
 }
 
 
@@ -6393,19 +6882,64 @@ def check_readability(rep, conv):
 
 
 def mod_generic(path):
-    """The module's namespace, for reading a frozenset constant out of it.
+    """A static namespace of literal module constants.
 
-    `ast.literal_eval` cannot build a `frozenset({...})` call, so this one
-    constant is read by executing the module -- with `module_scope_effects`
-    applied HERE, first, not assumed from check ordering: "check_scripts_run
-    has already refused it" was true only when that check happened to run
-    earlier, and an import-time hang in this in-process exec would have wedged
-    the harness.  Returns None if it is refused or will not import.
+    The harness used to import the module in-process just to read a
+    ``frozenset``.  The ordinary import probe is time-limited and isolated,
+    but this shortcut was neither.  Decode literal assignments (including a
+    small set of literal container constructors) from the AST instead; return
+    ``None`` when the source cannot be parsed.
     """
     try:
-        return _load_module(path, "_ns_probe", screen=True)
-    except Exception:
+        tree = ast.parse(read(path), filename=path)
+    except (OSError, SyntaxError, UnicodeDecodeError):
         return None
+
+    class StaticNamespace:
+        pass
+
+    namespace = StaticNamespace()
+    constructors = {
+        "frozenset": frozenset,
+        "set": set,
+        "tuple": tuple,
+        "list": list,
+        "dict": dict,
+    }
+
+    def bind(target, value):
+        if isinstance(target, ast.Name):
+            setattr(namespace, target.id, value)
+            return True
+        if (isinstance(target, (ast.Tuple, ast.List))
+                and isinstance(value, (tuple, list))
+                and len(target.elts) == len(value)):
+            return all(bind(child, item)
+                       for child, item in zip(target.elts, value))
+        return False
+
+    for node in tree.body:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        if len(targets) != 1:
+            continue
+        value_node = node.value
+        try:
+            if (isinstance(value_node, ast.Call)
+                    and isinstance(value_node.func, ast.Name)
+                    and value_node.func.id in constructors
+                    and len(value_node.args) <= 1
+                    and not value_node.keywords):
+                raw = ast.literal_eval(value_node.args[0]) \
+                    if value_node.args else ()
+                value = constructors[value_node.func.id](raw)
+            else:
+                value = ast.literal_eval(value_node)
+        except (TypeError, ValueError, SyntaxError):
+            continue
+        bind(targets[0], value)
+    return namespace
 
 
 def check_note_headings(rep, conv):
@@ -6489,7 +7023,8 @@ def check_note_headings(rep, conv):
                  % (" | ".join(table) or "(empty)", " | ".join(stated)),
                  rel(format_doc))
         return
-    generic = getattr(mod_generic(lint), "GENERIC_HEADINGS", None)
+    lint_constants = mod_generic(lint)
+    generic = getattr(lint_constants, "GENERIC_HEADINGS", None)
     if not isinstance(generic, (set, frozenset, list, tuple)):
         rep.fail(check, "note_lint.py's GENERIC_HEADINGS could not be read as "
                         "a collection; its agreement with the section roles "
@@ -6501,10 +7036,61 @@ def check_note_headings(rep, conv):
                         "so a note headed with that role name would pass"
                  % ", ".join(loose), rel(lint))
         return
+
+    limit_names = (
+        "MAX_DESCRIPTION",
+        "MIN_HEADING", "MAX_HEADING", "MIN_HEADING_WORDS",
+        "MIN_BULLETS", "MAX_BULLETS",
+        "MAX_SENTENCE_WORDS", "MAX_STEP_WORDS",
+        "MAX_PARAGRAPH_SENTENCES",
+        "MIN_STEPS", "MAX_STEPS", "MAX_RESULTS_CHARS",
+        "MIN_LIMITATIONS", "MAX_LIMITATIONS", "MAX_LIMITATION_CHARS",
+        "MIN_AVAILABILITY", "MAX_AVAILABILITY",
+        "MAX_FIGURES", "MAX_TABLES",
+    )
+    limit_lines = canonical_block(
+        format_text, "summary-note:limits", required=False)
+    parsed_limits = []
+    malformed_limits = []
+    for line in limit_lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        match = re.fullmatch(r"([A-Z][A-Z0-9_]*)=([0-9]+)", stripped)
+        if match:
+            parsed_limits.append((match.group(1), int(match.group(2))))
+        else:
+            malformed_limits.append(stripped)
+    stated_limit_names = tuple(name for name, _value in parsed_limits)
+    if malformed_limits or stated_limit_names != limit_names:
+        rep.fail(
+            check,
+            "note-format.md's canonical numeric-limit block must list exactly "
+            "%s in that order%s" %
+            (", ".join(limit_names),
+             "; malformed line(s): %s" % ", ".join(malformed_limits)
+             if malformed_limits else ""),
+            rel(format_doc))
+        return
+    drift = []
+    for name, documented in parsed_limits:
+        implemented = getattr(lint_constants, name, None)
+        if (not isinstance(implemented, int)
+                or isinstance(implemented, bool)
+                or implemented != documented):
+            drift.append("%s=%r (documented %d)" %
+                         (name, implemented, documented))
+    if drift:
+        rep.fail(
+            check,
+            "note_lint.py and note-format.md disagree on numeric limits: %s"
+            % "; ".join(drift), rel(lint))
+        return
     rep.saw(check, "section roles stated in both places", len(stated))
     rep.saw(check, "role-table rows cross-checked", len(table))
+    rep.saw(check, "numeric limits cross-checked", len(parsed_limits))
     rep.ok(check, "note-format.md's canonical block, its example table and "
-                  "note_lint.py's ROLES and GENERIC_HEADINGS all agree",
+                  "note_lint.py's roles, headings, and numeric limits all agree",
            rel(format_doc))
 
 
@@ -6680,7 +7266,7 @@ def check_moc_placement(rep, conv):
 
 
 def check_link_rules(rep, conv):
-    """§6's footer-pipe rule and its known resurrection shape.
+    """§6's footer-pipe rule, curation rule, and known drift shapes.
 
     §6: EVERY Related-footer link is piped, even when slug-equal.  writing.md
     carried a slug-equal exception that contradicted §6, builder item 11 and
@@ -6705,6 +7291,24 @@ def check_link_rules(rep, conv):
                         "(§6's rule)", rel(wb))
     else:
         rep.ok(check, "writing.md states §6's footer-pipe rule", rel(wb))
+    wl = os.path.join(
+        SKILLS_DIR, "wiki-linter", "references", "link-hygiene.md")
+    try:
+        ltext = read(wl)
+    except OSError:
+        ltext = ""
+    if ("most useful navigation choices" not in ltext
+            or "rather than copying every accepted body link" not in ltext):
+        rep.fail(
+            check,
+            "link-hygiene.md no longer applies §6's curated-footer rule to "
+            "backfills -- an accepted body link is not automatically a "
+            "Related-footer neighbor",
+            rel(wl),
+        )
+    else:
+        rep.ok(check, "wiki-linter curates backfilled Related links instead "
+               "of copying every accepted body link", rel(wl))
     n_files = 0
     for skill, path, text in walk_skill_files():
         n_files += 1
@@ -6874,6 +7478,123 @@ def check_review_before_publication(rep, conv):
                "state before guarded public publication", rel(builder_path))
 
 
+def check_linter_finding_routes(rep, _conv):
+    """New scanner subkeys stay documented and routed to a concrete action."""
+    check = "linter-finding-routes"
+    paths = {
+        "scanner": os.path.join(
+            SKILLS_DIR, "wiki-linter", "references", "scanner.md"),
+        "actions": os.path.join(
+            SKILLS_DIR, "wiki-linter", "references", "qc-items.md"),
+    }
+    try:
+        texts = {name: read(path) for name, path in paths.items()}
+    except OSError as exc:
+        rep.fail(check, "cannot read the linter finding contract: %s" % exc)
+        return
+    pins = (
+        ("scanner", "`item12/equation-typography`"),
+        ("actions", "`item12/equation-typography`"),
+        ("scanner", "`item10/redundant-pipe`"),
+        ("actions", "`item10/redundant-pipe`"),
+        ("scanner", "`item2/parents-null`"),
+    )
+    found = 0
+    for home, marker in pins:
+        if marker in texts[home]:
+            found += 1
+        else:
+            rep.fail(
+                check,
+                "%s no longer documents/routes scanner finding %s"
+                % (os.path.basename(paths[home]), marker),
+                rel(paths[home]),
+            )
+    rep.saw(check, "scanner-key documentation/action pins", found)
+    if found == len(pins):
+        rep.ok(check, "new deterministic scanner subkeys have both detection "
+               "documentation and repair routing", rel(paths["scanner"]))
+
+
+def check_safe_write_programmatic_api(rep, _conv):
+    """Vault-writing skills point to a real, documented import surface."""
+    check = "safe-write-programmatic-api"
+    paths = {
+        "safe": os.path.join(SHARED_DIR, "SAFE_WRITES.md"),
+        "atomic": os.path.join(
+            SHARED_DIR, "scripts", "atomic_move.py"),
+        "builder": os.path.join(SKILLS_DIR, "wiki-builder", "SKILL.md"),
+        "linter": os.path.join(SKILLS_DIR, "wiki-linter", "SKILL.md"),
+        "clipping": os.path.join(
+            SKILLS_DIR, "clipping-processor", "SKILL.md"),
+        "paper": os.path.join(
+            SKILLS_DIR, "paper-summarizer", "SKILL.md"),
+    }
+    try:
+        texts = {name: read(path) for name, path in paths.items()}
+    except OSError as exc:
+        rep.fail(check, "cannot read safe-write API contract: %s" % exc)
+        return
+
+    markers = (
+        ("safe", "`atomic_move.py` is a Python import library, not a publication command."),
+        ("safe", "`regular_file_snapshot(path)`"),
+        ("safe", "published = atomic_move.publish_new("),
+        ("safe", "published = atomic_move.replace_expected("),
+        ("safe", "Keep `stage_dir` and report its path on **any**"),
+        ("atomic", "programmatic import library, not a publication CLI"),
+        ("builder", "SAFE_WRITES.md#call-the-shared-python-api"),
+        ("linter", "SAFE_WRITES.md#call-the-shared-python-api"),
+        ("clipping", "SAFE_WRITES.md#call-the-shared-python-api"),
+        ("clipping", "`atomic_move.publish_new(..., atomic_move.regular_file_snapshot, ...)`"),
+        ("paper", "SAFE_WRITES.md#call-the-shared-python-api"),
+        ("paper", "`atomic_move.publish_new(..., atomic_move.regular_file_snapshot, ...)`"),
+        ("paper", "`atomic_move.replace_expected`"),
+    )
+    found = 0
+    for owner, marker in markers:
+        if marker in texts[owner]:
+            found += 1
+        else:
+            rep.fail(check, "%s no longer documents %r" % (owner, marker),
+                     rel(paths[owner]))
+
+    try:
+        tree = ast.parse(texts["atomic"], filename=paths["atomic"])
+    except SyntaxError as exc:
+        rep.fail(check, "atomic_move.py does not parse: %s" % exc,
+                 rel(paths["atomic"]))
+        functions = {}
+    else:
+        functions = {
+            node.name: [arg.arg for arg in
+                        list(getattr(node.args, "posonlyargs", ()))
+                        + list(node.args.args)]
+            for node in tree.body if isinstance(node, ast.FunctionDef)
+        }
+    signatures = {
+        "regular_file_snapshot": ["path"],
+        "publish_new": ["staged", "target", "snapshot", "stage_parent"],
+        "replace_expected": [
+            "staged", "target", "expected", "snapshot", "stage_dir"],
+        "remove_expected": [
+            "target", "expected", "snapshot", "stage_dir"],
+    }
+    for name, prefix in signatures.items():
+        if functions.get(name, [])[:len(prefix)] != prefix:
+            rep.fail(check, "documented atomic_move API %s%s is absent or "
+                     "incompatible" % (name, tuple(prefix)),
+                     rel(paths["atomic"]))
+
+    rep.saw(check, "safe-write API documentation pins", found)
+    if found == len(markers) and not any(
+            status == "FAIL" and name == check
+            for name, status, _where, _message in rep.results):
+        rep.ok(check, "all model-authored vault writers reach one concrete "
+               "import API instead of a nonexistent publication CLI",
+               rel(paths["safe"]))
+
+
 CHECKS = [
     check_readability,
     check_note_headings,
@@ -6899,10 +7620,24 @@ CHECKS = [
     check_physical_page,
     check_autonomous_wiki_lint,
     check_review_before_publication,
+    check_safe_write_programmatic_api,
+    check_linter_finding_routes,
 ]
 
 
+def _configure_utf8_stdio():
+    """Keep JSON and diagnostics writable through legacy Windows pipes."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="backslashreplace")
+            except (OSError, ValueError):
+                pass
+
+
 def main(argv=None):
+    _configure_utf8_stdio()
     ap = argparse.ArgumentParser(
         prog="test_conventions.py",
         description="Check the skills against shared/CONVENTIONS.md.")

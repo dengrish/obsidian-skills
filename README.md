@@ -202,6 +202,12 @@ claude plugin validate .claude-plugin/marketplace.json
 claude plugin validate skills
 ```
 
+The plugin-manifest command may report that the repository-root `CLAUDE.md` is
+not loaded as plugin context. That file exists for contributors working on this
+repository and imports `AGENTS.md`; runtime plugin guidance lives in the six
+skills. The warning is expected, while the marketplace and skill validations
+should pass cleanly (including with `--strict`).
+
 Author common metadata in `.claude-plugin/plugin.json`. The build command
 generates `.codex-plugin/plugin.json` and `obsidian.plugin`, including all
 references and shared helpers while excluding local environments and Git

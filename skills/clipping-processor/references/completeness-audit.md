@@ -113,9 +113,11 @@ Keep equivalent existing `<!-- source has … -->` placeholders on reprocessing;
 do not duplicate or silently remove them.
 
 - A **self-contained inline SVG** may be serialized to a unique scratch file
-  outside the vault and published with `fetch_images.py place --attachments
-  '<vault>/Sources/Images' --slug '<slug>' --index <N> --from-file
-  '<scratch>/diagram.svg'`. Inspect readability before embedding. If it depends
+  outside the vault. Inspect readability, put its planned filename-only embed
+  in the draft, and after the note is safely public use `fetch_images.py place
+  --attachments '<vault>/Sources/Images' --slug '<slug>' --index <N>
+  --from-file '<scratch>/diagram.svg' --owner-note
+  '<vault>/Articles/<slug>.md'`. If it depends
   on external CSS/fonts/JavaScript or definitions outside the serialized SVG,
   do not save a broken diagram. Leave `<!-- source has an inline SVG diagram
   here, not capturable as a static file; view at <source> -->` and report it.

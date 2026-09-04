@@ -106,6 +106,34 @@ with no trailing full stop or all-capitals styling. Preserve technical casing
 such as `p53` or `mRNA`. A heading must say something about this paper and obey
 the claim rules; a cautious paragraph cannot repair an overstated heading.
 
+The prose in this guide and `figures.md` explains the limits. This block is the
+same contract in a machine-readable form so the conformance harness can stop a
+documentation or linter edit from changing only one side:
+
+<!-- canonical:summary-note:limits -->
+```text
+MAX_DESCRIPTION=110
+MIN_HEADING=20
+MAX_HEADING=90
+MIN_HEADING_WORDS=3
+MIN_BULLETS=3
+MAX_BULLETS=7
+MAX_SENTENCE_WORDS=25
+MAX_STEP_WORDS=20
+MAX_PARAGRAPH_SENTENCES=6
+MIN_STEPS=3
+MAX_STEPS=8
+MAX_RESULTS_CHARS=2400
+MIN_LIMITATIONS=2
+MAX_LIMITATIONS=4
+MAX_LIMITATION_CHARS=420
+MIN_AVAILABILITY=1
+MAX_AVAILABILITY=3
+MAX_FIGURES=4
+MAX_TABLES=4
+```
+<!-- /canonical -->
+
 ## Body content
 
 - **Question:** the question and why it remained open, usually one paragraph.
@@ -126,6 +154,9 @@ the claim rules; a cautious paragraph cannot repair an overstated heading.
 - **Limitations:** 2–4 bullets that would change how the reader acts or cites.
   Use the [limitations sweep](summary-standards.md#the-limitations-taxonomy-by-design)
   to select them; do not repeat a row-level caveat or generic research filler.
+  Keep each bullet at or below 420 characters. Put detail that qualifies one
+  result beside that result instead of turning the limitation into a second
+  discussion section.
 - **Availability:** at most three bullets: Data, Code, and Materials only when
   applicable. State what is available and what is not; use “not stated” rather
   than silently omitting Data or Code. Preserve partial-release distinctions.

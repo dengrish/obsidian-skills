@@ -129,21 +129,22 @@ never moved, deleted or rewritten, including after a successful reprocess.
    entries are not a spelling alias.
 3. Stage the finished bytes in a unique temporary directory beside `Articles/`,
    outside the note folder and on its filesystem. Preserve the original note's
-   permissions. Recheck the destination before any attachment mutation. If the
-   slug changed, execute the exact reviewed image rename with `--sources` and
-   the unchanged old `--owner-note`.
-   A failed rename publishes no note: inspect per-file errors and verify its
-   rollback restored the old figure names. Report any rollback failure and the
-   actual paths left on disk.
+   permissions. Recheck the destination before publication.
 4. Publish the complete staged note through the shared
    [safe-write protocol](../../../shared/SAFE_WRITES.md). At a free destination
    use exclusive creation. For an authorized rewrite, displace and verify the
    exact snapshotted note before linking the staged replacement into the empty
    public name; a recheck followed by `os.replace` still has a race. If
-   publication fails after image renames, reverse them with the same helper
-   before stopping; report any failed restoration or named recovery path rather
-   than claiming the original still resolves.
-5. After publication, re-probe the whole Markdown dependency surface before
+   publication fails, no attachment has moved and the unchanged old note still
+   resolves.
+5. For a changed slug, keep the old note in place and execute the reviewed
+   image rename now, with `--sources` and the unchanged old `--owner-note`.
+   This ordering gives the destination images a public note owner before they
+   exist. If the helper refuses or rolls back a partial move, conditionally
+   withdraw only the exact new note just published; verify the old note and old
+   image names still resolve. Report any failed withdrawal, rollback failure or
+   named recovery path and stop.
+6. After publication and any image rename, re-probe the whole Markdown dependency surface before
    old-path cleanup:
 
    ```bash
@@ -163,9 +164,12 @@ never moved, deleted or rewritten, including after a successful reprocess.
    introduced after the image rename is a concurrent change, not permission to
    rewrite another note. Stop without declaring completion and either obtain
    authorization for one complete dependency rewrite or roll the replacement
-   back through the same guarded paths. If rollback cannot safely restore every
-   old note and image path, retain every recovery path and report the mixed
-   state rather than hiding it.
+   back through the same guarded paths. On that later rollback, the published
+   `Articles/<new_slug>.md` is the owner evidence for reversing the image rename:
+   call the helper with the slugs reversed and that new note as `--owner-note`,
+   then conditionally withdraw the new note. If rollback cannot safely restore
+   every old note and image path, retain every recovery path and report the
+   mixed state rather than hiding it.
 
 If the filesystem cannot provide safe publication, stop and report the refusal.
 Read back the published note and verify its embeds. Report note and attachment

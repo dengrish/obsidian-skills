@@ -17,7 +17,7 @@ Run the following, then inspect every match in context. These commands do not
 parse Markdown: ignore YAML and literal fenced/inline code when judging body
 matches. Never edit source code to satisfy a prose detector.
 
-```sh
+```bash
 f='<path to the completed scratch .md>'
 echo "[1  H1 in body — expect NONE]";                          grep -nE '^# ' "$f"
 echo "[2  Summary callouts — expect exactly 1]";               grep -cE '^> \[!Summary\]' "$f"
@@ -70,7 +70,7 @@ limit. A representative note-side outline/count scan is:
 
 ```python
 import re, sys
-body = open(sys.argv[1]).read()
+body = open(sys.argv[1], encoding="utf-8").read()
 body = re.sub(r'^---\n.*?\n---\n', '', body, count=1, flags=re.S)   # drop YAML
 heads  = [(len(m.group(1)), m.group(2).strip())
           for m in re.finditer(r'^(#{1,6})\s+(.*)$', body, re.M)]
@@ -107,8 +107,12 @@ suggested detector; do not edit an installed plugin during clipping processing.
 - [ ] First current `sources:` item establishes web ownership; legacy `source:`
   is used only when current `sources:` is absent. This is not a PDF summary.
   The output has its one preserved capture URL, no substituted canonical URL.
-- [ ] Corrected title, byline and publication date match their evidence;
-  unverified values and padded dates are reported. Meaningful Unicode remains.
+- [ ] Corrected title, byline and publication date match their evidence. Every
+  `author:` value is a verified human byline; publication names, editorial
+  desks and social accounts are omitted rather than credited as people. The
+  filename's optional author segment agrees with the first verified human
+  author. Unverified values and padded dates are reported. Meaningful Unicode
+  remains.
 - [ ] Description is factual and at most 110 characters; format follows content
   (`Article`, `Post`, or `Video` for a substantive transcript), and tags follow
   the shared enum rather than invented synonyms.

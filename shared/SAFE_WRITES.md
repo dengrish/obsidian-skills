@@ -41,6 +41,13 @@ that appeared after preflight, makes publication fail unchanged. Never turn
 `path does not exist` followed by `os.replace`, ordinary `mv`, or a write to the
 final pathname into a creation protocol.
 
+These regular-file primitives require hard-link support and a staging file on
+the destination filesystem. FAT/exFAT and some network mounts cannot provide
+that guarantee. The helper reports this capability limit as `LinkUnavailable`,
+separately from a concurrent-edit conflict; retain the staged bytes and name
+the filesystem limitation. Do not retry through `copy`, `os.replace`, or a
+cross-device move, because each would remove the no-clobber guarantee.
+
 ## Replace only the snapshotted occupant
 
 An `unchanged` check immediately followed by `os.replace` still has a race
@@ -64,13 +71,63 @@ If exclusive restoration is blocked because another writer has already taken
 the public name, preserve the displaced file in a named recovery directory on
 the same filesystem and report both paths. Never overwrite the new occupant to
 make rollback look complete. If the filesystem cannot provide the required
-link or move semantics, leave the staged draft and stop.
+link or move semantics, leave the staged draft and stop with the distinct
+capability error above.
 
 Repository Python helpers use `shared/scripts/atomic_move.py` for exclusive
 moves, new-file publication, expected-file replacement, and conditional
 removal. Its `set_private_mode` helper preserves staged permissions on hosts
 with or without `os.fchmod`. Reuse those primitives instead of maintaining a
 workflow-local copy.
+
+### Call the shared Python API
+
+`atomic_move.py` is a Python import library, not a publication command. Its
+command line intentionally exposes only `--test`. Do not invent positional
+arguments or interpolate a vault path or note bytes into `python -c`, a shell
+heredoc, or command text. When a workflow-specific writer exists, use it.
+Otherwise, put the publication logic in a private Python driver, pass paths as
+ordinary `sys.argv` values, and import `atomic_move` after putting the trusted
+plugin `shared/scripts/` directory first on `sys.path` (a shipped skill script
+uses the canonical bootstrap in `CONVENTIONS.md` §5).
+
+Use one snapshot function throughout the operation. The shared
+`regular_file_snapshot(path)` rejects leaf symlinks and non-regular files,
+reads identity and content from one stable descriptor, and returns an
+equality-comparable token whose `.mode` can be copied to a replacement stage.
+Capture the expected token **when the public bytes used to make the decision
+are read**, and retain that exact token through review; taking it only when
+publication begins would adopt an intervening edit:
+
+```python
+snapshot = atomic_move.regular_file_snapshot
+expected = snapshot(target) if os.path.lexists(target) else None
+# Read/derive/review the complete replacement while retaining `expected`.
+```
+
+Once the reviewed bytes have been copied to `staged` in a unique private
+`stage_dir` on the target filesystem, flushed, and given `expected.mode` for a
+replacement, publish with the matching programmatic call:
+
+```python
+if expected is None:
+    published = atomic_move.publish_new(
+        staged, target, snapshot, stage_parent)
+else:
+    published = atomic_move.replace_expected(
+        staged, target, expected, snapshot, stage_dir,
+        stage_parent=stage_parent)
+```
+
+Here `stage_parent` is outside the resolved public output directory and
+`stage_dir` is its unique private child. `published` is the exact public
+snapshot returned after readback. Keep `stage_dir` and report its path on **any**
+exception, including `LinkUnavailable`; clean it only after success. For an
+authorized old-path cleanup, pass the original token and the same callback to
+`remove_expected(target, expected, snapshot, stage_dir,
+stage_parent=stage_parent)`. For a move, pass the source identity captured at
+planning to `move_noreplace`. Never replace either expected value with a fresh
+snapshot at commit time.
 
 ## Remove or move an old pathname conditionally
 

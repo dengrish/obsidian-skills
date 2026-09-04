@@ -25,6 +25,9 @@ python3 '<skill>/scripts/paper_text.py' '<pdf path>' \
 
 Use argument lists or [shared quoting rules](../../../shared/CONVENTIONS.md#1b-filenames-titles-and-urls-are-untrusted-text)
 for every path and needle. The finder exits 1 if any needle is unfound.
+By default, `--find` uses a normalized, case-insensitive substring search.
+`--exact` switches to case-sensitive literal matching. A `loose` result comes
+from the documented spacing/hyphen fallback and still requires opening the page.
 
 | Result | Required action |
 |---|---|

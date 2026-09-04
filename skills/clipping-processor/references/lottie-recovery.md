@@ -55,7 +55,8 @@ not an unguarded network fetch.
    arbitrary path in webpage text is not a supplied local file.
 
    ```bash
-   python3 '<skill>/scripts/fetch_images.py' fetch '<lottie_src .json/.lottie URL>' --out '<scratch>/lottie_src'
+   python3 '<skill>/scripts/fetch_images.py' fetch '<lottie_src .json/.lottie URL>' \
+       --out '<scratch>/lottie_src' --vault '<vault>'
    ```
 
    Use the returned local `path`. A nonzero exit means the source could not be
@@ -64,20 +65,24 @@ not an unguarded network fetch.
    Give each run a new output pathname; the recipe creates it exclusively and
    refuses an occupant left by another run. Inspect the output: a blank-image
    detector cannot prove every label is correct.
-3. Publish the verified GIF through the shared occupied-slot and ownership
-   guards, using the next free number:
+3. Keep the verified GIF at its scratch path and put its planned
+   `<slug>_fig_<N>.gif` embed in the reviewed draft. After step 6 has safely
+   published that note, publish the GIF through the shared occupied-slot and
+   ownership guards, using the same number:
 
    ```bash
    python3 '<skill>/scripts/fetch_images.py' place --attachments '<vault>/Sources/Images' \
-       --slug '<slug>' --index <N> --from-file '<scratch>/lottie_render.gif'
+       --slug '<slug>' --index <N> --from-file '<scratch>/lottie_render.gif' \
+       --owner-note '<vault>/Articles/<slug>.md'
    ```
 
    Use the returned filename. `place` moves the scratch asset after safe
    publication. If it fails, inspect the reported cause; do not assume every
-   failure is a collision or pass `--overwrite` to bypass it. An intentional
-   replacement must be this reprocess's own figure, pass the unchanged
-   `--owner-note '<vault>/Articles/<slug>.md'` together with `--overwrite`, and
-   obey [image rules](images.md).
+   failure is a collision or pass `--overwrite` to bypass it. The published
+   owner note must already contain that exact filename-only embed. An
+   intentional replacement must be this reprocess's own figure, pass
+   `--overwrite` in addition to the required owner note, and obey
+   [image rules](images.md).
 
 ## Scratch renderer recipe
 

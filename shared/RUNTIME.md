@@ -35,8 +35,19 @@ authorize overwriting a later editor save.
 
 Single-quote literal paths and URLs in POSIX shell examples, escaping embedded
 single quotes as described in `CONVENTIONS.md` §1b. Replace placeholders before
-running a command. Create scratch files in a unique per-run temporary directory;
-`/tmp/` examples are illustrative, not shared filenames to reuse concurrently.
+running a command. Create scratch files in a unique per-run temporary directory
+**outside the vault**; `/tmp/` examples are illustrative, not shared filenames
+to reuse concurrently. Page renders, crops, decrypted working copies, and other
+review intermediates must not become vault content merely because the run was
+interrupted.
+
+Guarded publication of regular files also needs hard links on the vault's
+filesystem and a final staging directory on that same filesystem. This is a
+filesystem capability, not an operating-system promise: FAT/exFAT and some
+network mounts do not support it. `atomic_move.py` reports that condition as
+`LinkUnavailable`; keep the staged result and report the limitation instead of
+falling back to an overwrite-capable copy or cross-device move. See
+[`SAFE_WRITES.md`](SAFE_WRITES.md) for the recovery rules.
 
 ## Use one Python environment
 

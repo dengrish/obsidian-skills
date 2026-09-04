@@ -83,7 +83,7 @@ _OBSIDIAN_SHARED_MODULES = (
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
-_here = _os.path.dirname(_os.path.abspath(__file__))
+_here = _os.path.dirname(_os.path.realpath(__file__))
 _required = tuple(_m + ".py" for _m in (
     globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
@@ -94,6 +94,7 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
+    _tried.append(_here)                   # extracted skill with co-located helpers
 _missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
             for _p in _tried if _os.path.isdir(_p)}
 _shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
@@ -152,6 +153,7 @@ from organism_names import (  # noqa: E402
 from code_typography import find_bare_code_shapes  # noqa: E402
 from equation_coverage import (  # noqa: E402
     find_missing_display_equation_candidates,
+    find_noncanonical_display_equation_candidates,
 )
 from entry_structure import (  # noqa: E402
     answer_surface_match,
@@ -170,6 +172,7 @@ from entry_structure import (  # noqa: E402
 from introduced_aliases import missing_introduced_aliases  # noqa: E402
 from markdown_tables import (  # noqa: E402
     caption_faults,
+    markdown_block_start,
     markdown_table_spans,
     mask_line_spans,
 )
@@ -476,12 +479,15 @@ def leftover_dollars(body):
     # understood only the first — so a `~~~` shell listing containing `$HOME`
     # was counted, and item 12's class-1 remediation writes `\$` into the
     # middle of the listing, corrupting the command it shows.
-    s = strip_fenced(body)                            # fenced code (``` and ~~~)
-    s = re.sub(r"`[^`]*`", " ", s)                    # inline code
+    s = strip_code(body)                              # every Markdown listing
     s = s.replace(r"\$", " ")                          # escaped \$
     s = re.sub(r"\$\$.*?\$\$", " ", s, flags=re.S)    # display math
-    s = re.sub(r"\$[^$\n]*\$", " ", s)               # inline math
-    return s.count("$")                               # leftover literal $
+    # A closing inline-math delimiter cannot be immediately followed by a
+    # digit. Keeping that dollar visible distinguishes two currency amounts
+    # (``$20 ... $30``) without misclassifying numeric math such as
+    # ``$1 \\le k \\le m$`` or ``$1-e^{-1}$`` as currency.
+    s = re.sub(r"(?<!\\)\$(?!\$)[^$\n]*\$(?!\d)", " ", s)
+    return s.count("$")                              # literal dollars
 
 # A standalone image-embed line (Obsidian ![[…png]] or Markdown ![](url))
 # for the caption check. Detection runs against listing-masked text below;
@@ -821,17 +827,21 @@ def markdown_tables(body):
     not a table renderer.  A body row may contain fewer cells than the header,
     including no pipe at all; the table ends at a blank, a new block, or this
     vault's whole-line italic caption.  The caption has to be immediate. Table
-    positions come from ``strip_code`` so fenced, indented and tab-indented
-    listings cannot masquerade as tables.  Caption text comes from the original
-    lines so real backticks remain visible to ``caption_faults``.
+    positions come from fenced/indented-code masking. Inline code remains
+    visible because GFM identifies pipe-separated cells before parsing inline
+    spans; an unescaped pipe inside code is still a table separator. Caption
+    text comes from the original lines so real backticks remain visible to
+    ``caption_faults``.
     """
     original_lines = body.split("\n")
-    return original_lines, markdown_table_spans(strip_code(body))
+    return original_lines, markdown_table_spans(
+        strip_indented(strip_fenced(body)))
 
 
 _NAVIGATION_ONLY_LINK_RE = re.compile(
     r"(?:^|[.!?,;:]\s+|\(\s*|[—–-]\s+)"
-    r"(?:see(?:\s+also)?|refer\s+to|consult)\s+\[\[", re.IGNORECASE)
+    r"(?:see(?:\s+also)?|refer\s+to|consult|"
+    r"for\s+(?:more\s+)?details,?\s+see)\s+\[\[", re.IGNORECASE)
 
 
 def navigation_only_link_lines(body):
@@ -858,7 +868,7 @@ def navigation_only_link_lines(body):
         and _NAVIGATION_ONLY_LINK_RE.search(line)
     ]
 
-def split_frontmatter(text):
+def split_frontmatter(text, bad=None):
     # BOM only -- never whitespace: Obsidian reads properties only when the
     # opening fence is the very first line of the file, so a leading blank
     # line means the "frontmatter" renders as literal text.  The lenient
@@ -872,8 +882,10 @@ def split_frontmatter(text):
     # `-` into the body), so an entry whose broken fence Obsidian refuses to
     # parse scanned completely clean while lint_entry (whose parser requires
     # the exact line) reported item 1 on the same file.
-    m = re.compile(r"(?m)^---$").search(text, 4)
+    m = re.compile(r"(?m)^---[ \t]*$").search(text, 4)
     if m is None: return None, text, False
+    if m.group(0) != "---" and bad is not None:
+        bad.append("closing frontmatter fence has trailing whitespace; write exactly '---'")
     after = text[m.end():]                        # starts at the fence line's own "\n" (or EOF)
     body = after.lstrip("\n")
     blank_after = (len(after) - len(body)) >= 2   # ≥2 leading newlines ⇒ a blank line after the fence
@@ -1044,8 +1056,11 @@ def source_stem(item):
     return (unicodedata.normalize("NFC", stem.strip()).lower(),
             unicodedata.normalize("NFC", ext.strip()).lower())
 
-WIKILINK = re.compile(r"(?<!\!)\[\[([^\]\|]+)(?:\|([^\]]+))?\]\]")  # (?<!!) excludes ![[embeds]]
+WIKILINK = re.compile(
+    r"(?<!\!)\[\[([^\]\|]+?)(?:\\?\|([^\]]+))?\]\]")  # (?<!!) excludes ![[embeds]]
 ANYLINK  = re.compile(r"!?\[\[[^\]]*\]\]")                          # links + embeds, for masking
+REDUNDANT_PIPE = re.compile(
+    r"(?<!!)\[\[(?P<target>[^\[\]\n|#^/\\]+)\|(?P=target)\]\]")
 
 
 def entry_link_path_key(raw):
@@ -1077,9 +1092,11 @@ def entry_link_key(raw):
 #: adding a second section beside the one Obsidian already renders.  The
 #: canonical spelling is `## Flashcards` exactly; a tolerated variant gets its
 #: own item19 finding ("fix the heading"), never "add the section".
-_FLASH_HEAD_LINE = re.compile(r"^ {0,3}#{2,3}[ \t]+Flashcards[ \t]*$")
+_FLASH_HEAD_LINE = re.compile(
+    r"^ {0,3}#{2,3}[ \t]+Flashcards(?:[ \t]+#+)?[ \t]*$")
 _FLASH_HEAD_CANON = re.compile(r"^## Flashcards[ \t]*$")
-_RELATED_HEAD_LINE = re.compile(r"^ {0,3}\*\*Related:\*\*(?:\s|$)")
+_RELATED_HEAD_LINE = re.compile(
+    r"^ {0,3}(?:>[ \t]*)?\*\*Related:\*\*(?:[ \t]*.*)?$")
 
 
 def section_marker_indexes(body):
@@ -1154,6 +1171,10 @@ READ_BOOLEANS = {"true", "false"}
 #: retype — so they route with the missing key, not with `read: yes`.  See the
 #: `read:` block in `scan()`.
 READ_NULLS = {"", "null", "~"}
+_YAML_TYPED_PLAIN_RE = re.compile(
+    r"^(?:null|~|true|false|yes|no|on|off|\.nan|[+-]?\.inf|"
+    r"[+-]?(?:0|[1-9][0-9_]*)(?:\.[0-9_]*)?(?:e[+-]?[0-9]+)?|"
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2})$", re.IGNORECASE)
 VALID_TYPES = [
     "Concept", "Person", "Organization", "Dataset", "Software", "Device",
     "Event", "Standard", "Gene/Protein", "Organism", "Chemical", "Reaction",
@@ -1179,6 +1200,14 @@ TAG_ALIASES = {"ml":"machine-learning","ai":"machine-learning","artificial-intel
 #: stacked-merge scar) is still a plain `item2`.
 OBSIDIAN_KEYS = {"cssclasses", "cssclass", "publish", "permalink", "cover",
                  "image", "banner", "icon"}
+
+
+def plain_string_allowed(value, style):
+    """Whether a conservative letter-led plain scalar stays a YAML string."""
+    return (style == "bare" and isinstance(value, str) and bool(value)
+            and value[:1].isalpha()
+            and not _YAML_TYPED_PLAIN_RE.fullmatch(value.strip())
+            and not re.search(r":(?:\s|$)|\s#", value))
 
 
 def tag_canonical(tag_slug):
@@ -1220,14 +1249,19 @@ def strip_fenced(text):
     out, fence = [], None            # fence = the opening run, e.g. "````"
     for ln in (text or "").split("\n"):
         m = _FENCE_RE.match(ln)
-        if m and fence is None:
+        # Backticks cannot occur in a backtick fence's info string. A line
+        # beginning with a closed triple-backtick inline span is prose, not a
+        # fence opener; treating it as one hides the rest of the entry.
+        valid_opener = bool(
+            m and not (m.group(1).startswith("`") and "`" in m.group(2)))
+        if valid_opener and fence is None:
             fence = m.group(1)
             # Retain nested/list fences while rejecting a more-indented sample
             # as the closer of a top-level fence. Tabs count as four columns.
             fence_indent = max(3, len(ln[:m.start(1)].expandtabs(4)))
             out.append("")
             continue
-        if (m and m.group(1)[0] == fence[0]
+        if (fence is not None and m and m.group(1)[0] == fence[0]
                 and len(m.group(1)) >= len(fence) and not m.group(2).strip()
                 and len(ln[:m.start(1)].expandtabs(4)) <= fence_indent):
             fence = None
@@ -1855,6 +1889,45 @@ def duplicate_sentence_surfaces(prose, table_spans=()):
     return out
 
 
+def _vault_root_for(wiki, images=None):
+    """Infer the vault root without assuming Wiki/ is a direct child."""
+    if images:
+        image_path = os.path.abspath(images)
+        if (fold_name(os.path.basename(image_path)) == "images"
+                and fold_name(os.path.basename(os.path.dirname(image_path)))
+                == "sources"):
+            return os.path.dirname(os.path.dirname(image_path))
+    current = os.path.abspath(wiki)
+    while True:
+        if os.path.isdir(os.path.join(current, ".obsidian")):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return os.path.dirname(os.path.abspath(wiki))
+
+
+class _ProblemList(list):
+    """Internal problem rows with optional physical-path identity.
+
+    Public reports have historically keyed ordinary findings by ``slug``.
+    Keep that stable, but retain the Wiki-relative path while checking a
+    basename collision: two physical files then share one slug and the path is
+    the only safe way to identify which body produced a local finding.
+    """
+    current_path = ""
+
+    def append(self, row):
+        slug_value, item, message = row
+        super().append((slug_value, item, message, self.current_path))
+
+
+def _entry_physical_key(wiki, path):
+    """Exact Wiki-relative filename used only for physical-record identity."""
+    return os.path.relpath(path, wiki).replace("\\", "/")
+
+
 def scan(wiki, images=None):
     """Parse every entry in the `wiki` folder; return the Step 0 model as a dict.
 
@@ -1868,26 +1941,42 @@ def scan(wiki, images=None):
     the embeds left pointing at the old stem are silent otherwise.
     """
     img_fold, image_folder_findings = image_index(images)
-    vault_root = os.path.dirname(os.path.abspath(wiki))
-    entries, problems = {}, []
+    vault_root = _vault_root_for(wiki, images)
+    entries, problems = {}, _ProblemList()
     # Every slug whose FILE is on disk, whether or not it parsed as an entry.
     # A link to an unparseable file resolves in Obsidian, so it is not dangling
     # -- and stubbing it would write over the file.
     on_disk = set()
     seen_paths = {}
     paths_by_basename = {}
-    path_records = {}             # folded Wiki-relative path -> parsed record or None
-    ambiguous_files = set()
+    # Exact Wiki-relative filename -> parsed record or None. Keep the extension
+    # spelling too: on a case-sensitive filesystem `foo.md` and `foo.MD` are two
+    # physical files even though both resolve through one portable link
+    # identity. Resolution derives that normalized, extensionless identity only
+    # while comparing; physical records must never collapse first.
+    path_records = {}
     def walk_error(exc):
         location = os.path.relpath(exc.filename, wiki) if exc.filename else "."
         problems.append((location, "item0", "unreadable wiki directory: %s" % exc))
 
-    for path in iter_entry_files(wiki, on_error=walk_error):
+    physical_paths = iter_entry_files(wiki, on_error=walk_error)
+    for path in physical_paths:
         fn = os.path.basename(path)
         sl = fn[:-3]
-        rel = os.path.relpath(path, wiki)
-        path_key = entry_link_path_key(rel)
+        rel = _entry_physical_key(wiki, path)
+        path_key = rel
         paths_by_basename.setdefault(fold_name(sl), set()).add(path_key)
+    ambiguous_files = {
+        basename for basename, owners in paths_by_basename.items()
+        if len(owners) > 1
+    }
+
+    for path in physical_paths:
+        fn = os.path.basename(path)
+        sl = fn[:-3]
+        rel = _entry_physical_key(wiki, path)
+        path_key = rel
+        problems.current_path = rel if fold_name(sl) in ambiguous_files else ""
         path_records[path_key] = None
         # Bare links use basename ownership. Two equal basenames in different
         # folders, including case/normalization variants under the plugin's
@@ -1944,16 +2033,32 @@ def scan(wiki, images=None):
         finally:
             if descriptor is not None:
                 os.close(descriptor)
-        fm_raw, body, blank_after = split_frontmatter(text)
+        _frontmatter_boundary_bad = []
+        fm_raw, body, blank_after = split_frontmatter(
+            text, _frontmatter_boundary_bad)
         if fm_raw is None:
             problems.append((sl,"item1","no YAML frontmatter"))
             on_disk.add(sl)
             continue
+        for _message in _frontmatter_boundary_bad:
+            problems.append((sl, "item1", _message))
         _fm_bad = []
         fm = parse_fm(fm_raw, _fm_bad)
         for _ln in _fm_bad:
             problems.append((sl,"item1",
                              f"unparseable frontmatter line: {_ln.strip()[:60]!r}"))
+        for _line_no, _line in enumerate(fm_raw.split("\n"), 2):
+            _list_match = re.match(r"^([ \t]*)-", _line)
+            if _list_match and _list_match.group(1) != "  ":
+                problems.append((
+                    sl, "item1",
+                    "frontmatter line %d: block-list items use exactly two "
+                    "spaces before '-'" % _line_no))
+            if re.match(r"^  -[ \t]+#", _line):
+                problems.append((
+                    sl, "item1",
+                    "frontmatter line %d: an unquoted hash list item is a "
+                    "YAML comment, not a value" % _line_no))
         def _scalar(k):                    # a key written as a list is not a scalar
             v = fm.get(k, "")
             return v if isinstance(v, str) else ""
@@ -2007,6 +2112,15 @@ def scan(wiki, images=None):
         path_records[path_key] = record
         if keep_entry:
             entries[sl] = record
+    problems.current_path = ""
+
+    # Every parsed physical file receives source-independent local QC. The
+    # slug-keyed ``entries`` map deliberately remains the unique-owner model
+    # used by resolution, collision planning, backfill, renames, and hierarchy.
+    diagnostic_records = sorted(
+        (record for record in path_records.values() if record is not None),
+        key=lambda record: (fold_name(record["path_key"]), record["path_key"]),
+    )
 
     # fold_name(slug) -> exact on-disk slug. A unique case/normalization match
     # is an existing owner needing canonical spelling, not a missing target;
@@ -2074,18 +2188,70 @@ def scan(wiki, images=None):
             if len(owners) != 1:
                 return None, "ambiguous", None
             owner = next(iter(owners))
-        elif lookup in owners:
-            owner = lookup
         else:
-            candidates = {candidate for candidate in owners
-                          if candidate.endswith("/" + lookup)}
-            if len(candidates) != 1:
-                return None, ("ambiguous" if candidates or len(owners) > 1
-                              else "missing"), None
-            owner = next(iter(candidates))
+            exact = {candidate for candidate in owners
+                     if entry_link_path_key(candidate) == lookup}
+            if len(exact) == 1:
+                owner = next(iter(exact))
+            elif len(exact) > 1:
+                return None, "ambiguous", None
+            else:
+                candidates = {
+                    candidate for candidate in owners
+                    if entry_link_path_key(candidate).endswith("/" + lookup)
+                }
+                if len(candidates) != 1:
+                    return None, ("ambiguous" if candidates or len(owners) > 1
+                                  else "missing"), None
+                owner = next(iter(candidates))
 
         record = path_records.get(owner)
         return record, ("parsed" if record is not None else "unparsed"), owner
+
+    def _canonical_qualified_target(raw_target, owner_path):
+        """Exact spelling of the qualified path form that resolved ``owner``.
+
+        Resolution deliberately folds case and Unicode so it behaves the same
+        across filesystems. Repair diagnostics need the opposite view: retain
+        every directory component as it exists on disk, while preserving a
+        caller's valid unique-suffix qualification and optional ``Wiki/``
+        prefix and ``.md`` suffix.
+        """
+        target = raw_target.split("#", 1)[0].split("^", 1)[0].strip()
+        target = target.replace("\\", "/").strip().strip("/")
+        if "/" not in target:
+            return None
+
+        parts = target.split("/")
+        canonical_prefix = []
+        wiki_name = os.path.basename(os.path.abspath(wiki))
+        if parts and fold_name(parts[0]) == fold_name(wiki_name):
+            canonical_prefix = [wiki_name]
+            parts = parts[1:]
+        elif parts and fold_name(parts[0]) == "wiki":
+            # Test fixtures and callers may pass the Wiki folder itself under
+            # another temporary basename; ``Wiki/`` is the documented
+            # vault-root qualifier in either case.
+            canonical_prefix = ["Wiki"]
+            parts = parts[1:]
+        if not parts:
+            return None
+
+        explicit_md = parts[-1].lower().endswith(".md")
+        owner = owner_path.replace("\\", "/").strip("/")
+        owner_no_ext = owner[:-3] if owner.lower().endswith(".md") else owner
+        owner_parts = owner_no_ext.split("/")
+
+        # `_resolve_entry_file` accepts an exact path or a unique suffix. Keep
+        # that useful amount of qualification rather than needlessly widening
+        # a link, but take the spelling of every retained component from disk.
+        count = len(parts)
+        selected = (owner_parts[-count:] if count <= len(owner_parts)
+                    else owner_parts)
+        if explicit_md and selected:
+            extension = owner[-3:] if owner.lower().endswith(".md") else ".md"
+            selected[-1] += extension
+        return "/".join(canonical_prefix + selected)
 
     _work_surfaces = set()
     for _entry in entries.values():
@@ -2127,7 +2293,11 @@ def scan(wiki, images=None):
                             visible, re.IGNORECASE)
                    for surface in _work_surfaces)
 
-    for sl,e in entries.items():
+    for e in diagnostic_records:
+        sl = e["slug"]
+        problems.current_path = (
+            e["path_key"]
+            if fold_name(sl) in ambiguous_files else "")
         fm_raw, is_stub, title = e["fm_raw"], e["is_stub"], e["title"]
         # ---- item 5: slug == filename; bare-slug common noun ----
         _newslug = slug(title) if title else ""
@@ -2344,8 +2514,13 @@ def scan(wiki, images=None):
                     _value, _style = parse_scalar(val)
                 except ValueError:
                     _value, _style = None, "invalid"
-                if k in ("title","description") and val and _style != "double":
-                    problems.append((sl,"item2",f'{k} must be double-quoted'))
+                if (k in ("title", "description") and val
+                        and _style != "double"
+                        and not plain_string_allowed(_value, _style)):
+                    problems.append((
+                        sl, "item2",
+                        f'{k} must be double-quoted unless its plain YAML '
+                        'spelling round-trips as a string'))
                 if k in ("type","created","updated") and (val.startswith('"') or val.startswith("'")):
                     problems.append((sl,"item2",f'{k} must not be quoted'))
                 if k in ("aliases","sources","tags","parents"):
@@ -2359,7 +2534,13 @@ def scan(wiki, images=None):
                                 _iv_style = parse_scalar(iv)[1]
                             except ValueError:
                                 _iv_style = "invalid"
-                            if _iv_style != "double":
+                            try:
+                                _iv_value = parse_scalar(iv)[0]
+                            except ValueError:
+                                _iv_value = None
+                            if (_iv_style != "double"
+                                    and not (k == "aliases" and plain_string_allowed(
+                                        _iv_value, _iv_style))):
                                 problems.append((sl,"item2",f'{k} item not double-quoted: {iv[:30]}'))
                     else:
                         cur = k
@@ -2371,7 +2552,13 @@ def scan(wiki, images=None):
                         _iv_style = parse_scalar(iv)[1]
                     except ValueError:
                         _iv_style = "invalid"
-                    if iv and _iv_style != "double":
+                    try:
+                        _iv_value = parse_scalar(iv)[0]
+                    except ValueError:
+                        _iv_value = None
+                    if (iv and _iv_style != "double"
+                            and not (cur == "aliases" and plain_string_allowed(
+                                _iv_value, _iv_style))):
                         problems.append((sl,"item2",f'{cur} item not double-quoted: {iv[:30]}'))
         # ---- item 3: dates ----
         for f in ("created","updated"):
@@ -2481,7 +2668,6 @@ def scan(wiki, images=None):
                 (r"\bcreated (with|by) `", "'created with/by `…`' how-to signpost"),
                 (r"\bavailable (through|via|in) `", "'available through `…`' how-to signpost"),
                 (r"\buse `[^`]+` to\b", "'use `…` to' how-to signpost"),
-                (r"`[^`]+` or `[^`]+`", "`…` or `…` alternative signposts"),
                 (r"\bflag enables\b", "kwarg/flag documentation"),
                 (r"`[A-Za-z_][A-Za-z0-9_]*\s*=", "backticked kwarg/default-value (`name=`)"),
                 (r"`(True|False|None)`", "Python language literal in code form"),
@@ -2489,6 +2675,19 @@ def scan(wiki, images=None):
             for pat,label in api_fails:
                 if re.search(pat, e["prose"]):
                     problems.append((sl,"item6",f'API-surface failure string — {label}')); break
+            else:
+                for _alternatives in re.finditer(
+                        r"`([^`\n]+)`\s+or\s+`([^`\n]+)`", e["prose"]):
+                    _values = [value.strip() for value in _alternatives.groups()]
+                    _presentation_only = all(
+                        re.fullmatch(r"\.[A-Za-z0-9]+|\[[^\]\n]+\]", value)
+                        for value in _values)
+                    if not _presentation_only:
+                        problems.append((
+                            sl, "item6",
+                            "API-surface failure string — `…` or `…` "
+                            "alternative signposts"))
+                        break
             # fenced code block — code listings don't belong in a non-Software entry.
             # Both fence spellings: markdown opens a block with ``` or ~~~, and
             # `strip_fenced` above has always known that, so a `~~~` listing sat
@@ -2524,6 +2723,12 @@ def scan(wiki, images=None):
         marks.extend(flashcard_line1_markup(e["desc"]))
         if marks:
             problems.append((sl,"item7",f'description has non-plain-text markup ({", ".join(marks)}) — renders literally in Obsidian Properties'))
+        if re.search(r"ℓ(?:[0-9₀-₉])", e["desc"]):
+            problems.append((
+                sl, "item12/equation-typography",
+                "raw ℓ-norm notation in description must use plain words "
+                "such as `ell-one` or `ell-two`; YAML descriptions do not "
+                "render LaTeX"))
         if e["desc"]:
             sentence_count = count_sentences(e["desc"])
             if sentence_count > 1:
@@ -2565,7 +2770,7 @@ def scan(wiki, images=None):
                              'no disciplinary home uses a blank `tags:` key'))
         if not e_tags_raw:
             if is_stub:
-                problems.append((sl,"item8","stub has blank tags: — every stub needs ≥1 discipline tag, inherited from the entry that links it (wiki-builder's SKILL.md, Stubs (legacy): Structure)"))
+                problems.append((sl,"item8","stub has blank tags: — every legacy stub needs ≥1 discipline tag; inherit one only from strong local evidence (wiki-builder SKILL.md, Stubs (legacy))"))
             # blank tags: on a FULL entry is valid (no discipline genuinely applies) — not a violation
         for t in e_tags_raw:
             inner = t.strip()
@@ -2661,7 +2866,10 @@ def scan(wiki, images=None):
                         "body heading on prose line %d is noncanonical: %s — %s"
                         % (line_no, heading_line.strip()[:80], "; ".join(faults))))
 
-            if (line_i > 0 and heading_lines[line_i - 1].strip()
+            previous_heading_line = (
+                heading_lines[line_i - 1] if line_i > 0 else "")
+            if (line_i > 0 and previous_heading_line.strip()
+                    and not markdown_block_start(previous_heading_line)
                     and re.fullmatch(r" {0,3}(?:=+|-+)[ \t]*", heading_line)):
                 problems.append((
                     sl, "item9",
@@ -2688,9 +2896,23 @@ def scan(wiki, images=None):
         # ---- item 12 (format): unescaped literal $ and remote image embeds ----
         _pure_math_opener_markup = None
         if not is_stub:
-            nd = leftover_dollars(e["body"])
+            nd = leftover_dollars(e["prose"])
             if nd:
                 problems.append((sl,"item12",f'{nd} unescaped literal "$" in body — escape as \\$ (a lone $ renders as math; a $ in a URL needs the image localized)'))
+            for _line_no, _line in enumerate(
+                    strip_code(e["prose"]).split("\n"), 1):
+                if re.search(r"ℓ(?:[0-9₀-₉])", _line):
+                    problems.append((
+                        sl, "item12/equation-typography",
+                        "raw ℓ-norm notation on prose line %d must use inline "
+                        "LaTeX, such as `$\\ell_1$` or `$\\ell_2$`"
+                        % _line_no))
+                if re.search(r"(?<!\w)(?:μ|µ)m\b", _line):
+                    problems.append((
+                        sl, "item12/equation-typography",
+                        "raw micrometre notation on prose line %d must use "
+                        "inline LaTeX, such as `$\\mu\\mathrm{m}$`"
+                        % _line_no))
             _equation_prose = strip_code(e["prose"])
             _equation_tables = markdown_tables(e["prose"])[1]
             _equation_candidates = find_missing_display_equation_candidates(
@@ -2710,6 +2932,18 @@ def scan(wiki, images=None):
                     "under wiki-builder/references/equations.md; a "
                     "square-root-of-variance cue never authorizes inferring a "
                     "population or sample denominator"))
+            _equation_form_candidates = \
+                find_noncanonical_display_equation_candidates(
+                    _equation_prose, _equation_tables)
+            if _equation_form_candidates:
+                _lines = ", ".join(
+                    str(candidate["line"])
+                    for candidate in _equation_form_candidates)
+                problems.append((
+                    sl, "item12/equation-format",
+                    "display math has content on the same line as its `$$` "
+                    f"delimiters (prose line(s) {_lines}) — keep the existing "
+                    "equation and put each delimiter on its own line"))
             # Remote ![](http…) embeds are REPORT-ONLY, not a violation. wiki-builder MANDATES this exact
             # form for an external URL coming from a markdown source's clipping ("use standard markdown
             # image syntax ![alt](https://...) since wikilinks don't handle remote URLs" —
@@ -2860,6 +3094,13 @@ def scan(wiki, images=None):
         in_opener = True; opener_skipped = False
         _item16_prose = mask_line_spans(
             strip_code(e["prose"]), e.get("table_spans", ()))
+        # Markup inside a wikilink display label is item 18's violation. Mask
+        # the complete link here so its inner ``**Label**`` does not also
+        # produce item 16's misleading "use italics or a wikilink" remedy.
+        # Outer emphasis around the link remains owned by the dedicated item-16
+        # pass below, which reads the unmasked prose.
+        _item16_prose = ANYLINK.sub(
+            lambda match: " " * len(match.group(0)), _item16_prose)
         for ln in _item16_prose.split("\n"):
             if in_opener and ln.strip() == "": in_opener = False   # opener = the first paragraph
             if re.match(r"^\s*\*(?!\*).*\*\s*$", ln):              # caption line (whole-line italic) — item-12 owns it
@@ -2885,6 +3126,15 @@ def scan(wiki, images=None):
         emphasis_zones = mask_line_spans(
             strip_indented(strip_fenced(e["prose"])),
             e.get("table_spans", ())) + "\n" + e["rel"]
+        # Keep the backtick delimiters visible so emphasis wrapped around an
+        # actual code span is still detected, but blank its contents. Markup
+        # shown *inside* a code sample (for example `` `*[[x]]*` ``) is not
+        # rendered emphasis or a wikilink and must not create item 16.
+        emphasis_zones = _INLINE_CODE.sub(
+            lambda _m: (_m.group(1)
+                        + " " * (len(_m.group(0)) - 2 * len(_m.group(1)))
+                        + _m.group(1)),
+            emphasis_zones)
         opener_break = re.search(r"\n[ \t]*\n", emphasis_zones)
         opener_limit = (opener_break.start() if opener_break
                         else len(e["prose"]))
@@ -2940,13 +3190,23 @@ def scan(wiki, images=None):
         if re.search(r"(?m)^(title|type|aliases|sources|created|updated|description|tags|importance|parents|read):",
                      _merge_scan):
             problems.append((sl,"item13","stray frontmatter key in the body — stacked-merge scar; remove it"))
-        if re.search(r"(?m)^\s*---\s*$", _merge_scan):
+        _merge_scan_lines = _merge_scan.split("\n")
+        _stray_rule = any(
+            re.fullmatch(r"\s*---\s*", _line)
+            and not (_index > 0 and _merge_scan_lines[_index - 1].strip()
+                     and not markdown_block_start(
+                         _merge_scan_lines[_index - 1]))
+            for _index, _line in enumerate(_merge_scan_lines))
+        if _stray_rule:
             problems.append((
                 sl, "item13",
                 "stray `---` fence in explanatory body prose — stacked-merge "
                 "scar; the only body separator belongs between Related and "
                 "Flashcards"))
-        if re.search(r"(?m)^\s*[0-9]+\s*$", _merge_scan):
+        _digit_scan = re.sub(
+            r"(?ms)^ {0,3}\$\$[ \t]*(?:\n.*?\n|.*?) {0,3}\$\$[ \t]*$",
+            "", _merge_scan)
+        if re.search(r"(?m)^\s*[0-9]+\s*$", _digit_scan):
             problems.append((
                 sl, "item13",
                 "standalone bare digit line in explanatory body prose — "
@@ -2999,7 +3259,13 @@ def scan(wiki, images=None):
             if not cards:
                 problems.append((sl,"item19","## Flashcards section has no card"))
             elif len(cards) > 1:
-                problems.append((sl,"item19",f'{len(cards)} cards in ## Flashcards — exactly one card per entry; keep the primary card whose line 3 uses the exact canonical title/base/math-plain term and includes any required opener-established, alias-bound counterpart, then split or drop the rest'))
+                problems.append((
+                    sl, "item19",
+                    f'{len(cards)} cards in ## Flashcards — exactly one is the '
+                    "current presentation shape, but extra cards are report-only "
+                    "in routine lint; identify the primary card, preserve every "
+                    "card and attachment, and move/remove an extra only under an "
+                    "explicitly authorized refactor that accounts for its claim"))
             alias_forms = list(e["aliases"])
             for ci, cl in enumerate(cards, 1):
                 tag = (f"card {ci}" if len(cards) > 1 else "flashcard")
@@ -3016,6 +3282,16 @@ def scan(wiki, images=None):
                         '`sr|card-metadata` callout, so other content '
                         'after the term is malformed'))
                 line1, line2, line3 = cl[0], cl[1].strip(), cl[2]
+                if re.search(r"ℓ(?:[0-9₀-₉])", line1):
+                    problems.append((
+                        sl, "item12/equation-typography",
+                        f"raw ℓ-norm notation in {tag} line 1 must use inline "
+                        "LaTeX, such as `$\\ell_1$` or `$\\ell_2$`"))
+                if re.search(r"(?<!\w)(?:μ|µ)m\b", line1):
+                    problems.append((
+                        sl, "item12/equation-typography",
+                        f"raw micrometre notation in {tag} line 1 must use "
+                        "inline LaTeX, such as `$\\mu\\mathrm{m}$`"))
                 if line2 not in ("??","!!"):
                     problems.append((sl,"item19",f'{tag} line 2 is "{line2[:20]}", must be exactly ?? (or !! if the user disabled the card)'))
                 _sentence_faults = flashcard_line1_faults(line1)
@@ -3144,6 +3420,12 @@ def scan(wiki, images=None):
                                 "body content appears after the Related footer "
                                 "before Flashcards — move it back into prose or "
                                 "remove it; the footer must be terminal"))
+                        if (_separator_i is not None
+                                and _separator_i == _related_i + 1):
+                            problems.append((
+                                sl, "item11",
+                                "leave a blank line after the Related footer; "
+                                "an immediate `---` renders it as a Setext heading"))
                 elif any(line.strip()
                          for line in e["body_lines"][_related_i + 1:]):
                     problems.append((
@@ -3163,7 +3445,6 @@ def scan(wiki, images=None):
         # ---- item 14: source-meta phrasings (prose only) ----
         META = [
             r"\b(?:the|this) paper\b", r"\bthe chapter\b",
-            r"\bthe book\b", r"\bthe article\b",
             # “source code” names software material, not the document. The
             # carve-out is symmetric for “the” and “this,” including the
             # ordinary hyphenated spelling.
@@ -3173,6 +3454,12 @@ def scan(wiki, images=None):
             r"\bin the previous section\b", r"\bas we saw\b",
             r"\bthe figure (?:above|below)\b",
         ]
+        # In a Work entry, “the book” or “the article” can name the entry's
+        # own subject rather than the source currently being processed. The
+        # mechanical scan cannot distinguish those readings, so it must not
+        # prescribe deleting either phrase there.
+        if e.get("type") != "Work":
+            META.extend((r"\bthe book\b", r"\bthe article\b"))
         _meta_text = strip_code(e["prose"])
         _meta_found = False
         for pat in META:
@@ -3266,6 +3553,21 @@ def scan(wiki, images=None):
                     "to this entry itself — remove the redundant footer link or "
                     "render a subject mention as plain text; if an anchored body "
                     "link is deliberate navigation, use a local anchor"))
+                continue
+            canonical_target = (
+                _canonical_qualified_target(tgt, _file_path)
+                if file_record is not None and _file_path is not None else None
+            )
+            normalized_target = tgt.replace("\\", "/").strip().strip("/")
+            if (canonical_target is not None
+                    and normalized_target != canonical_target):
+                problems.append((
+                    sl, "item10/case",
+                    f'wikilink target "{tgt}" matches the on-disk path '
+                    f'"{canonical_target}" only under the portable '
+                    "case/normalization identity — this is a FIX IN PLACE "
+                    f'(rewrite the target to "{canonical_target}", preserving '
+                    "its anchor and display label), NEVER a stub"))
                 continue
             if actual == lookup:
                 continue
@@ -3385,7 +3687,8 @@ def scan(wiki, images=None):
             if (record is not None
                     and record.get("path_key") == e.get("path_key")):
                 continue
-            tt = record.get("title", "") if record else ""
+            raw_title = record.get("title", "") if record else ""
+            tt = math_title_plain_text(raw_title) if raw_title else ""
             if not tt:
                 continue
             if disp is None:
@@ -3395,9 +3698,15 @@ def scan(wiki, images=None):
                                  f'Related footer link [[{tgt}|{disp}]] must use '
                                  f'the canonical title "{tt}" as its display label'))
 
+    problems.current_path = ""
+
     # ---- item 18: alias collisions + within-entry dup + display-label sanity ----
     alias_owner = {}
-    for sl,e in entries.items():
+    for e in diagnostic_records:
+        sl = e["slug"]
+        problems.current_path = (
+            e["path_key"]
+            if fold_name(sl) in ambiguous_files else "")
         al = e["aliases"]
         if e["aliases_present"] and not e["aliases_is_list"]:
             if raw_scalar(e["fm_raw"], "aliases") == "":
@@ -3472,15 +3781,18 @@ def scan(wiki, images=None):
         # the user has to be told which two they are.
         for a in al:
             k = fold_name(a)
-            if k in alias_owner and alias_owner[k][0] != sl:
-                own_sl, own_raw = alias_owner[k]
+            if (k in alias_owner
+                    and alias_owner[k][2] != e["path_key"]):
+                own_sl, own_raw, own_path = alias_owner[k]
                 problems.append((sl,"item18",
                                  f'alias "{a}" also on "{own_sl}"'
                                  + ("" if own_raw == a else
                                     f' (spelled "{own_raw}" there — the two differ only in '
-                                    f'case/normalization and share one portable alias identity)')))
+                                    f'case/normalization and share one portable alias identity)')
+                                 + (f' at "{own_path}"'
+                                    if own_sl == sl else "")))
             elif k not in alias_owner:
-                alias_owner[k] = (sl, a)
+                alias_owner[k] = (sl, a, e["path_key"])
     def _toks(s):                                    # tokens: lowercased, hyphens→spaces, a disambiguation parenthetical dropped
         s = re.sub(r"\s*\([^)]*\)\s*", " ", s.lower())
         return re.findall(r"[a-z0-9]+", s.replace("-", " "))
@@ -3500,10 +3812,20 @@ def scan(wiki, images=None):
             return True
         sa, sb = _stem(a), _stem(b)
         return len(sa) >= 3 and sa == sb
-    for sl,e in entries.items():
-        _display_label_text = (
-            mask_line_spans(strip_code(e["prose"]), e.get("table_spans", ()))
-            + "\n" + strip_code(e["rel"]))
+    for e in diagnostic_records:
+        sl = e["slug"]
+        problems.current_path = (
+            e["path_key"]
+            if fold_name(sl) in ambiguous_files else "")
+        _display_label_prose = mask_line_spans(
+            strip_code(e["prose"]), e.get("table_spans", ()))
+        for _match in REDUNDANT_PIPE.finditer(_display_label_prose):
+            _target = _match.group("target")
+            problems.append((
+                sl, "item10/redundant-pipe",
+                f'wikilink [[{_target}|{_target}]] in body prose has a '
+                f'display label identical to its slug — use [[{_target}]]'))
+        _display_label_text = _display_label_prose + "\n" + strip_code(e["rel"])
         for m in re.finditer(r"\[\[([^\]|#^]+)(?:[#^][^\]|]*)?\|([^\]\n]+)\]\]",
                              _display_label_text):
             tgt, disp = m.group(1).strip(), m.group(2).strip()
@@ -3590,6 +3912,8 @@ def scan(wiki, images=None):
                     target_title = target_record.get("title") or target_slug
                     location = _target_path or target_slug
                     problems.append((sl,"item18",f'wikilink [[{tgt}|{disp}]] — "{disp}" shares no surface form with the canonical target "{target_title}" at "{location}" (its title/aliases), and no explicit Organism common-name binding applies; likely wrong target or invented label'))
+
+    problems.current_path = ""
 
     # ---- item 5: collision probes across entries (REPORT as candidates; merge is the user's call) ----
     collisions = []
@@ -3732,9 +4056,9 @@ def scan(wiki, images=None):
                 _slug, "item9/duplicate-sentence",
                 "a long prose sentence has the same normalized word sequence "
                 "in %s: %r — preserve both until source evidence and conceptual "
-                "ownership support consolidation; an existing request to lint "
-                "and fix these notes or refactor them authorizes the repair "
-                "without a second approval"
+                "ownership support consolidation; apply it only under explicit "
+                "refactor authorization naming the operation or affected "
+                "entries and outcome (a generic lint/fix request is insufficient)"
                 % (", ".join(_peers), _snippet)))
 
     stubs = [sl for sl,e in entries.items() if e["is_stub"]]
@@ -3758,7 +4082,7 @@ def scan(wiki, images=None):
     # The share of entries affected is the recurrence signal for wiki-builder-improvement
     # proposals — see references/backlogs.md.
     tally = {}                                   # item -> [issue_count, set_of_entries]
-    for sl,item,_ in problems:
+    for sl,item,_message,_path in problems:
         t = tally.setdefault(item, [0, set()])
         t[0] += 1; t[1].add(sl)
     nfull = len(fulls) or 1
@@ -3904,7 +4228,7 @@ def scan(wiki, images=None):
 
     def _moc_expected_label(entry, discipline):
         """Canonical visible label for an entry in one discipline MOC."""
-        title = entry.get("title") or ""
+        title = math_title_plain_text(entry.get("title") or "")
         match = re.search(r"\s+\(([^()]*)\)\s*$", title)
         if match and slug(match.group(1)) == discipline:
             return title[:match.start()].rstrip()
@@ -4306,6 +4630,13 @@ def scan(wiki, images=None):
             full_per_disc[d] = full_per_disc.get(d,0) + 1
             if sl in selfp: per_disc[d] = per_disc.get(d,0) + 1
 
+    def _public_problem(row):
+        slug_value, item, message, path = row
+        result = {"slug": slug_value, "item": item, "message": message}
+        if path:
+            result["path"] = path
+        return result
+
     return {
         # stamp the suggestion-log appends with this
         "run_timestamp": f"{datetime.datetime.now():%Y-%m-%d %H:%M}",
@@ -4321,7 +4652,8 @@ def scan(wiki, images=None):
         "discipline_tags": {d: {"full": c[0], "stub": c[1]} for d,c in sorted(tag_counts.items())},
         "off_enum_tags": {d: sorted(set(v)) for d,v in sorted(off_enum.items())},
         "untagged_full": sorted(untagged_full),
-        "problems": [{"slug": s, "item": i, "message": m} for s,i,m in sorted(problems)],
+        "problems": [_public_problem(row) for row in sorted(
+            problems, key=lambda row: (row[0], row[1], row[3], row[2]))],
         "problem_tally": tally_out,
         "collision_candidates": [{"a": a, "b": b, "probe": p, "detail": d}
                                  for a,b,p,d in sorted(collisions2)],
@@ -4459,6 +4791,19 @@ def run_self_test():
 
     def check(label, got, want):
         cases.append((label, got == want, got, want))
+
+    check("numeric inline math is not mistaken for currency",
+          [leftover_dollars(value) for value in (
+              r"The rank satisfies $1 \le k \le m$.",
+              r"The probability obeys $0 < p < 1$.",
+              r"The fraction approaches $1-e^{-1}$.")],
+          [0, 0, 0])
+    check("two currency amounts remain two literal dollars",
+          leftover_dollars("The price ranges from $20 to $30."), 2)
+    check("dollars inside code spans and blocks remain literal examples",
+          [leftover_dollars(value) for value in (
+              "    echo $HOME", "``$HOME``", "```sh\necho $HOME\n```")],
+          [0, 0, 0])
 
     tmp = tempfile.mkdtemp(prefix="scan_vault-selftest-")
     try:
@@ -4663,7 +5008,7 @@ def run_self_test():
                if k in ("item10/ambiguous", "item11", "item18")], [])
         check("item 11 and item 18 diagnose against the qualified path's owner",
               ("Beta" in _st_msg(res, "wrong-qualified-reader", "item11"),
-               'canonical target "Beta" at "b/foo"'
+               'canonical target "Beta" at "b/foo.md"'
                in _st_msg(res, "wrong-qualified-reader", "item18")),
               (True, True))
         check("a repeated ambiguous alias gets no duplicate-removal finding",
@@ -4671,6 +5016,115 @@ def run_self_test():
         check("the ambiguous alias remains report-only instead",
               _st_msg(res, "alias-reader", "item10/ambiguous").count(
                   "claimed as an alias by multiple entries"), 2)
+
+        # A duplicate portable basename is one resolution identity, but each
+        # physical file still has its own body and must receive local QC. The
+        # optional path is the only backward-compatible way to distinguish
+        # those findings while retaining the public slug field.
+        v_path = os.path.join(tmp, "v2-path-diagnostics")
+        duplicate_clean = _st_entry(
+            "Duplicate", "**Duplicate** is the clean physical owner.")
+        _st_write(v_path, "a/duplicate.md", duplicate_clean)
+        _st_write(v_path, "b/duplicate.md", duplicate_clean.replace(
+            "type: Concept\n", "type: Model\n", 1))
+        path_res = scan(v_path)
+        path_type_rows = [
+            (p["slug"], p.get("path"), p["message"])
+            for p in path_res["problems"]
+            if p["item"] == "item2/type-enum"
+        ]
+        check("duplicate basenames preserve the legacy slug-keyed inventory",
+              (path_res["inventory"]["entries"],
+               path_res["inventory"]["full"]), (1, 1))
+        check("the second same-basename file receives its own local type lint",
+              [(slug_value, path) for slug_value, path, _message
+               in path_type_rows],
+              [("duplicate", "b/duplicate.md")])
+        check("that path-keyed type finding retains the enum diagnosis",
+              len(path_type_rows) == 1
+              and 'not one of the 15 canonical type values'
+              in path_type_rows[0][2], True)
+        check("ordinary findings keep the historical three-field shape",
+              any("path" in p for p in res["problems"]
+                  if p["slug"] == "hub"), False)
+
+        # A case-sensitive filesystem can hold two entries whose only pathname
+        # difference is the Markdown extension's case. Link identity correctly
+        # folds that suffix, but physical QC must still retain both files.
+        v_ext = os.path.join(tmp, "v2-extension-case")
+        os.makedirs(v_ext)
+        ext_body = _st_entry(
+            "Extension", "**Extension** is the extension-case fixture.")
+        lower_ext = os.path.join(v_ext, "extension.md")
+        upper_ext = os.path.join(v_ext, "extension.MD")
+        with open(lower_ext, "w", encoding="utf-8") as fh:
+            fh.write(ext_body)
+        try:
+            descriptor = os.open(
+                upper_ext, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            descriptor = None       # case-insensitive host: exercise on Linux
+        if descriptor is None:
+            extension_case_observed = ["extension.MD"]
+        else:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as fh:
+                fh.write(ext_body.replace("type: Concept\n", "type: Model\n", 1))
+            ext_res = scan(v_ext)
+            extension_case_observed = [
+                p.get("path") for p in ext_res["problems"]
+                if p["item"] == "item2/type-enum"
+            ]
+        check("extension-case twins retain separate physical QC records",
+              (len({_entry_physical_key(v_ext, lower_ext),
+                    _entry_physical_key(v_ext, upper_ext)}),
+               extension_case_observed),
+              (2, ["extension.MD"]))
+
+        # Resolution folds the whole path for portability, but the repair must
+        # restore directory spelling as well as the basename. Looking only at
+        # file_record["slug"] let [[a/foo]] silently survive beside A/foo.md.
+        v_dir_case = os.path.join(tmp, "v2-qualified-directory-case")
+        _st_write(v_dir_case, "A/foo.md", _st_entry(
+            "Foo", "**Foo** is the qualified-directory fixture."))
+        _st_write(v_dir_case, "wrong-path-case.md", _st_entry(
+            "Wrong path case", "**Wrong path case** links "
+            "[[a/foo|Foo]] through the wrong directory case."))
+        _st_write(v_dir_case, "exact-path-case.md", _st_entry(
+            "Exact path case", "**Exact path case** links "
+            "[[A/foo|Foo]] through the on-disk path."))
+        dir_case_res = scan(v_dir_case)
+        check("qualified link case checks every on-disk path component",
+              ("item10/case" in _st_keys(dir_case_res, "wrong-path-case"),
+               '"A/foo"' in _st_msg(
+                   dir_case_res, "wrong-path-case", "item10/case"),
+               "item10/case" in _st_keys(
+                   dir_case_res, "exact-path-case")),
+              (True, True, False))
+
+        # Different directories let this fixture run even on a case-insensitive
+        # filesystem. Their basenames still share the plugin's portable case /
+        # Unicode identity, so bare resolution is ambiguous while each fully
+        # qualified path remains usable.
+        v_case = os.path.join(tmp, "v2-portable-paths")
+        _st_write(v_case, "a/Case-Twin.md", _st_entry(
+            "Case twin", "**Case twin** is the first portable owner."))
+        _st_write(v_case, "b/case-twin.md", _st_entry(
+            "Case twin", "**Case twin** is the second portable owner."))
+        _st_write(v_case, "portable-reader.md", _st_entry(
+            "Portable reader", "**Portable reader** distinguishes "
+            "[[a/Case-Twin|Case twin]] from [[b/case-twin|Case twin]], while "
+            "[[case-twin|Case twin]] has no unique path."))
+        case_res = scan(v_case)
+        check("case-equivalent basenames retain distinct qualified owners",
+              ("item10/dangling" in _st_keys(case_res, "portable-reader"),
+               "item10/case" in _st_keys(case_res, "portable-reader"),
+               _st_msg(case_res, "portable-reader", "item10/ambiguous").count(
+                   "multiple same-basename paths")),
+              (False, False, 1))
+        check("portable-owner diagnostics carry their exact physical paths",
+              sorted({p.get("path") for p in case_res["problems"]
+                      if p["slug"] in ("Case-Twin", "case-twin")}),
+              ["a/Case-Twin.md", "b/case-twin.md"])
 
         # ------------------------------------------------------------------
         # 3. item 8 -- tag aliases, case variants, and the duplicate check
@@ -4812,8 +5266,10 @@ def run_self_test():
               _st_keys(res, "blank-tags"), [])
         check("the tag census counts the enum tags",
               res["discipline_tags"].get("statistics", {}).get("full"), 3)
-        check("a second flashcard trips the one-card cap",
-              "exactly one card per entry" in _st_msg(res, "twocards", "item19"), True)
+        check("a second flashcard is reported without authorizing deletion",
+              ("report-only" in _st_msg(res, "twocards", "item19")
+               and "preserve every card" in _st_msg(
+                   res, "twocards", "item19")), True)
         check("a second card joined without a blank line is malformed visible content",
               "visible lines" in _st_msg(res, "joined-cards", "item19"), True)
         check("a non-SR line-four HTML comment is malformed visible content",
@@ -4861,6 +5317,13 @@ def run_self_test():
               [plural_surface(t) for t in
                ("Confusion matrix", "Hypothesis", "ROC curve", "Analysis")],
               ["Confusion matrices", "Hypotheses", "ROC curves", "Analyses"])
+        _dotted_index, _dotted_words = _index_surfaces({
+            "e. coli": "escherichia-coli"})
+        check("dotted scientific abbreviations remain backfill surfaces",
+              list(_scan_surfaces(
+                  "The *E. coli* strain grows.",
+                  _dotted_index, _dotted_words)),
+              [("e. coli", "E. coli")])
         v = os.path.join(tmp, "v4")
         _st_write(v, "confusion-matrix.md",
                   _st_entry("Confusion matrix", "**Confusion matrix** is a worked example.",
@@ -6353,6 +6816,32 @@ def run_self_test():
         _st_write(v, "periodless-description.md", _st_entry(
             "Periodless description", "**Periodless description** is a worked example.",
             description="Periodless description is a worked example used by the self-test"))
+        _st_write(v, "raw-ell-description.md", _st_entry(
+            "Raw ell description", "**Raw ell description** is a worked example.",
+            description="Raw ell description uses an ℓ1 distance."))
+        _raw_ell_card = _st_entry(
+            "Raw ell card", "**Raw ell card** is a worked example.")
+        _raw_ell_card = _raw_ell_card.replace(
+            "The idea this entry is about, stated once.",
+            "A quantity measured under an ℓ2 distance.")
+        _st_write(v, "raw-ell-card.md", _raw_ell_card)
+        _st_write(v, "raw-ell-prose.md", _st_entry(
+            "Raw ell prose",
+            "**Raw ell prose** uses an ℓ1 distance in its definition."))
+        _raw_micro_card = _st_entry(
+            "Raw micro card", "**Raw micro card** is a worked example.")
+        _raw_micro_card = _raw_micro_card.replace(
+            "The idea this entry is about, stated once.",
+            "A specimen is 10 µm wide.")
+        _st_write(v, "raw-micro-card.md", _raw_micro_card)
+        _st_write(v, "raw-micro-prose.md", _st_entry(
+            "Raw micro prose",
+            "**Raw micro prose** describes a specimen that is 10 μm wide."))
+        _st_write(v, "unicode-micro-description.md", _st_entry(
+            "Unicode micro description",
+            "**Unicode micro description** is a worked example.",
+            description=(
+                "Unicode micro description depicts features at a 10 μm scale.")))
         _st_write(v, "wrong-level-heading.md", _st_entry(
             "Wrong level heading", "**Wrong level heading** is a worked example.\n\n"
             "### A narrower aspect\n\nThe aspect remains part of the entry."))
@@ -6419,6 +6908,9 @@ def run_self_test():
         _st_write(v, "canonical-target.md", _st_entry(
             "Canonical target", "**Canonical target** is a worked example.",
             aliases=('"canonical-name"',)))
+        _st_write(v, "redundant-pipe.md", _st_entry(
+            "Redundant pipe", "**Redundant pipe** builds on "
+            "[[canonical-target|canonical-target]]."))
         _st_write(v, "non-slug-alias.md", _st_entry(
             "Non-slug alias", "**Non-slug alias** is a worked example.",
             aliases=('"True Positive Rate"',)))
@@ -6636,6 +7128,24 @@ def run_self_test():
               ("capitalized" in _st_msg(res, "lower-description", "item7"),
                "period" in _st_msg(res, "periodless-description", "item7")),
               (True, True))
+        check("raw ell typography covers descriptions, card prompts, and prose",
+              [("item12/equation-typography" in _st_keys(res, slug_),
+                remedy in _st_msg(
+                    res, slug_, "item12/equation-typography"))
+               for slug_, remedy in (
+                   ("raw-ell-description", "ell-one"),
+                   ("raw-ell-card", "$\\ell_1$"),
+                   ("raw-ell-prose", "$\\ell_1$"))],
+              [(True, True)] * 3)
+        check("raw micro units in card prompts and prose use inline LaTeX",
+              [("item12/equation-typography" in _st_keys(res, slug_),
+                "$\\mu\\mathrm{m}$" in _st_msg(
+                    res, slug_, "item12/equation-typography"))
+               for slug_ in ("raw-micro-card", "raw-micro-prose")],
+              [(True, True)] * 2)
+        check("a description keeps its documented plain-Unicode allowance",
+              "item12/equation-typography" in _st_keys(
+                  res, "unicode-micro-description"), False)
         check("body headings use exactly ## and plain text",
               ["item9" in _st_keys(res, slug_) for slug_ in
                ("wrong-level-heading", "marked-up-heading",
@@ -6758,6 +7268,10 @@ def run_self_test():
               in _st_msg(res, "related-wrong-label", "item11"), True)
         check("fully piped Related links are the valid near miss",
               "item11" in _st_keys(res, "related-piped"), False)
+        check("an exact body display alias is redundant in the whole-vault linter",
+              "item10/redundant-pipe" in _st_keys(res, "redundant-pipe"), True)
+        check("the mandatory piped Related form is outside the body-only check",
+              "item10/redundant-pipe" in _st_keys(res, "related-piped"), False)
         check("a flashcard term unrelated to the canonical title is rejected",
               "must be exactly"
               in _st_msg(res, "wrong-card", "item19"), True)
@@ -7020,6 +7534,10 @@ def run_self_test():
             "Equation unrelated", "**Equation unrelated** is a measure. It is the "
             "square root of the variance:\n\n$$\n"
             "f(x) = \\sqrt{x} + \\operatorname{Var}(Y)\n$$"))
+        _st_write(v, "equation-one-line.md", _st_entry(
+            "Equation one line", "**Equation one line** is a measure. It is the "
+            "square root of the variance:\n\n"
+            "$$\\sigma = \\sqrt{\\operatorname{Var}(X)}$$"))
         _st_write(v, "negated-equation.md", _st_entry(
             "Negated equation", "**Negated equation** is a measure. It is not "
             "the square root of variance."))
@@ -7055,6 +7573,11 @@ def run_self_test():
               "coverage candidate",
               "item12/equation-coverage-candidate" in
               _st_keys(res, "equation-unrelated"), True)
+        check("a one-line display is a form finding, not a missing-equation finding",
+              ("item12/equation-format" in
+               _st_keys(res, "equation-one-line"),
+               "item12/equation-coverage-candidate" in
+               _st_keys(res, "equation-one-line")), (True, False))
         check("negated wording does not become an equation-coverage candidate",
               "item12/equation-coverage-candidate" in
               _st_keys(res, "negated-equation"), False)
@@ -7173,6 +7696,9 @@ def run_self_test():
         _st_write(v, "same-owner-display-reader.md", _st_entry(
             "Same owner display reader",
             "**Same owner display reader** names [[yeast|Budding yeast]]."))
+        _st_write(v, "marked-up-display-reader.md", _st_entry(
+            "Marked up display reader",
+            "**Marked up display reader** names [[yeast|**Yeast**]]."))
         _st_write(v, "culture-a.md", _st_entry(
             "Culture A", "**Culture A** is a worked example.",
             aliases=('"culture"',)))
@@ -7187,7 +7713,7 @@ def run_self_test():
         check("a display that exactly names a different canonical entry is item18",
               ('different canonical entry' in _st_msg(
                    res, "conflicting-display-reader", "item18"),
-               '"Yeast" at "yeast"' in _st_msg(
+               '"Yeast" at "yeast.md"' in _st_msg(
                    res, "conflicting-display-reader", "item18")), (True, True))
         check("a display that exactly names another entry's unique alias is item18",
               ('different unique alias' in _st_msg(
@@ -7196,6 +7722,12 @@ def run_self_test():
                    res, "conflicting-display-reader", "item18")), (True, True))
         check("an exact alias display owned by the chosen target remains valid",
               "item18" in _st_keys(res, "same-owner-display-reader"), False)
+        check("markup inside a display label is owned only by item18",
+              ([key for key in _st_keys(res, "marked-up-display-reader")
+                if key in ("item16", "item18")],
+               "labels render as plain text" in _st_msg(
+                   res, "marked-up-display-reader", "item18")),
+              (["item18"], True))
         check("an ambiguously owned display never chooses the first alias owner",
               "different unique alias" in _st_msg(
                   res, "ambiguous-display-reader", "item18"), False)
@@ -7367,6 +7899,11 @@ def run_self_test():
 
 
 def main(argv=None):
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (AttributeError, OSError):
+            pass
     ap = argparse.ArgumentParser(
         prog="scan_vault.py",
         description="Scan a wiki-builder vault and emit the wiki-linter Step 0 inventory as JSON.")

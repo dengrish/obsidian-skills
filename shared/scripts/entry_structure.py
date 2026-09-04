@@ -38,6 +38,7 @@ __all__ = [
     "normalized_answer_surface",
     "opening_paragraph",
     "parse_flashcard_blocks",
+    "sentence_prefix",
     "split_sentences",
     "strip_flashcard_review_metadata",
 ]
@@ -294,15 +295,23 @@ _EVENT_DATE_RE = re.compile(
 _ABBREVS = [
     "e.g.", "i.e.", "cf.", "et al.", "approx.", "vs.", "ca.", "c.", "fl.",
     "Dr.", "Prof.", "Mr.", "Mrs.", "Ms.", "St.", "Jr.", "Sr.", "Fig.",
-    "No.", "b.", "d.", "r.", "U.S.", "U.K.", "var.", "subsp.", "ssp.",
-    "sp.", "spp.", "aff.", "cv.", "fo.",
+    "b.", "d.", "r.", "U.S.", "U.K.", "var.", "subsp.", "ssp.",
+    "sp.", "spp.", "aff.", "cv.", "fo.", "Dept.", "Inc.", "vol.",
+    "pp.",
 ]
 _ABBREV_RE = re.compile(
     r"(?:^|[^0-9A-Za-z])(?:%s)$"
     % "|".join(re.escape(a) for a in sorted(_ABBREVS, key=len, reverse=True)),
     re.IGNORECASE,
 )
+# ``No.`` is an abbreviation only with its conventional capitalization.
+# Folding it case-insensitively made the ordinary sentence ending in
+# ``yes or no.`` disappear from the sentence count.
+_CASE_SENSITIVE_ABBREV_RE = re.compile(r"(?:^|[^0-9A-Za-z])No\.$")
 _INITIAL_RE = re.compile(r"(?:^|[^0-9A-Za-z'’])[A-Za-z]\.$")
+_NEXT_INITIAL_RE = re.compile(r"^\s+[A-Za-z]\.\s")
+_HONORIFIC_TAIL_RE = re.compile(r"(?:^|\s)(?:Dr|Prof|Mr|Mrs|Ms)\.\s*$")
+_PREVIOUS_INITIAL_TAIL_RE = re.compile(r"(?:^|\s)[A-Za-z]\.\s*$")
 _STRONG_SENTENCE_START_RE = re.compile(
     r"^\s+(?:A|An|The|This|That|These|Those|It|Its|He|His|She|Her|"
     r"They|Their|We|Our|You|Your|I|My|"
@@ -373,22 +382,58 @@ def _sentence_end_offsets(compact):
         following = compact[cursor:cursor + 1]
         if following and not following.isspace():
             continue
+        # A terminal period always ends the final sentence, even when its
+        # last token is a one-letter label (``option A.``) or abbreviation.
+        if not following:
+            yield cursor
+            continue
         if match.group(0) == ".":
             head = compact[max(0, match.end() - 16):match.end()]
             initial = bool(_INITIAL_RE.search(head))
-            abbreviation = bool(_ABBREV_RE.search(head))
+            abbreviation = bool(
+                _ABBREV_RE.search(head)
+                or _CASE_SENSITIVE_ABBREV_RE.search(head))
             # An abbreviation can also end a sentence. Split only when the
             # following surface begins with a strong sentence-start word;
             # this preserves ``U.S. Army`` and ``e.g. linear regression``
             # while recognizing ``U.S. It runs online.``.
             if initial or abbreviation:
-                clause_end = initial or bool(
+                before = compact[:match.start()]
+                after = compact[cursor:]
+                # Initial chains and honorific + initial forms are names, not
+                # sentence boundaries. This matters especially for ``J. A.``:
+                # the next ``A.`` otherwise looks like the article ``A``.
+                name_initial = bool(
+                    initial
+                    and (_NEXT_INITIAL_RE.match(after)
+                         or _PREVIOUS_INITIAL_TAIL_RE.search(before)
+                         or _HONORIFIC_TAIL_RE.search(before)))
+                clause_end = (not name_initial and initial) or bool(
                     _CLAUSE_END_ABBREV_RE.search(head))
+                # An ordinary abbreviation may end a sentence before a clear
+                # sentence-start word. Honorifics remain attached to names.
+                if (abbreviation and not _HONORIFIC_TAIL_RE.search(head)
+                        and not re.search(r"(?:^|[^A-Za-z])(?:Dr|Prof|Mr|Mrs|Ms)\.$",
+                                          head)):
+                    clause_end = True
                 strong_next = bool(
                     _STRONG_SENTENCE_START_RE.search(compact[cursor:]))
                 if not (clause_end and strong_next):
                     continue
         yield cursor
+
+
+def sentence_prefix(text, end):
+    """Return the current sentence's text before ``end``.
+
+    The boundary rules are exactly those used by :func:`split_sentences`, so
+    alias extraction cannot drift on initials or abbreviations.
+    """
+    prefix = (text or "")[:max(0, end)]
+    start = 0
+    for boundary in _sentence_end_offsets(prefix):
+        start = boundary
+    return prefix[start:].lstrip()
 
 
 def split_sentences(text):
@@ -532,7 +577,9 @@ def flashcard_line1_markup(text):
     if _FOOTNOTE_RE.search(visible):
         faults.append("footnote")
     if (_BLOCK_MARKDOWN_RE.search(visible)
-            or _INDENTED_CODE_RE.search(visible)):
+            # Masking a leading ``$x$`` leaves spaces; inspect real indentation
+            # so permitted inline LaTeX cannot manufacture a code block.
+            or _INDENTED_CODE_RE.search(value)):
         faults.append("block Markdown")
     if "$$" in value:
         faults.append("display LaTeX")
@@ -879,6 +926,24 @@ def run_self_test(verbose=False):
              "reinforcement schedules. A second sentence follows."),
          ["B. F. Skinner worked in the U.S. and used examples, e.g. "
           "reinforcement schedules.", "A second sentence follows."]),
+        ("an initial chain beginning with J. A. stays in one sentence",
+         split_sentences(
+             "J. A. Swets developed detection theory. It matters."),
+         ["J. A. Swets developed detection theory.", "It matters."]),
+        ("common publication abbreviations stay inside their sentence",
+         [split_sentences(value) for value in (
+             "The U.S. Dept. sets rules. It enforces them.",
+             "Acme Inc. builds tools. It ships them.",
+             "See vol. 2 for details. It continues.",
+             "See pp. 2–4 for details. It continues.")],
+         [["The U.S. Dept. sets rules.", "It enforces them."],
+          ["Acme Inc. builds tools.", "It ships them."],
+          ["See vol. 2 for details.", "It continues."],
+          ["See pp. 2–4 for details.", "It continues."]]),
+        ("lowercase no is an ordinary sentence ending",
+         count_sentences("Answer yes or no. The result matters."), 2),
+        ("a terminal one-letter label still ends a sentence",
+         count_sentences("The procedure selects option A."), 1),
         ("a multi-dot abbreviation may end a sentence",
          count_sentences("A service used in the U.S. It runs online."), 2),
         ("sentence splitting recognizes an abbreviation boundary",
@@ -927,6 +992,8 @@ def run_self_test(verbose=False):
          ["italic", "strikethrough"]),
         ("inline LaTeX remains allowed",
          flashcard_line1_markup(r"A quantity equal to $x^2$."), []),
+        ("inline LaTeX may begin a card without becoming indentation",
+         flashcard_line1_markup(r"$x$ is the measured quantity."), []),
         ("Markdown-like math operators remain inline LaTeX",
          flashcard_line1_markup(r"A product $x*y*z$ with $x_i<y_i$."), []),
         ("emphasis wrapped around inline LaTeX remains forbidden",

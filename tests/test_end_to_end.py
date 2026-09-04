@@ -180,6 +180,50 @@ class WorkflowTests(unittest.TestCase):
         self.assertFalse(source.exists())
         self.assertEqual(digest(self.pdfs / source.name), original)
 
+    def test_book_split_feeds_paper_scan_and_figure_extraction(self):
+        book = self.pdfs / "Doe_SynthBook_2025.pdf"
+        with pymupdf.open() as doc:
+            for number, heading in ((1, "Chapter 1 First topic"),
+                                    (2, "Chapter 2 Second topic")):
+                page = doc.new_page(width=612, height=792)
+                page.insert_text((72, 50), heading)
+                page.insert_text((72, 75), "A synthetic chapter for integration testing.")
+                page.draw_rect((100, 150, 500, 350), color=(0, 0, 1),
+                               fill=(0.3, 0.5, 0.8))
+                page.insert_text((100, 400),
+                                 f"Figure {number}. A blue rectangle.")
+            doc.save(book)
+        chapters = [
+            {"heading_text": "Chapter 1 First topic",
+             "filename": "Doe_SynthBook_2025_01_FirstTopic.pdf",
+             "start_idx": 0, "end_idx": 1},
+            {"heading_text": "Chapter 2 Second topic",
+             "filename": "Doe_SynthBook_2025_02_SecondTopic.pdf",
+             "start_idx": 1, "end_idx": 2},
+        ]
+        chapter_plan = Path(self.scratch.name) / "chapters.json"
+        chapter_plan.write_text(json.dumps(chapters), encoding="utf-8")
+        chapter_dir = self.pdfs / book.stem
+        self.run_script("skills/pdf-organizer/scripts/organize.py", "split", book,
+                        "--chapters", chapter_plan, "--out", chapter_dir,
+                        "--vault", self.vault)
+        chapter_paths = [chapter_dir / item["filename"] for item in chapters]
+        self.assertTrue(all(path.is_file() for path in chapter_paths))
+
+        sweep = self.scan_papers()
+        self.assertEqual(sweep["counts"]["book"], 1)
+        self.assertEqual(sweep["counts"]["chapter"], 2)
+        selected = json.loads(self.run_script(
+            "skills/paper-summarizer/scripts/paper_scan.py",
+            "--src", chapter_paths[0], "--notes", self.notes,
+            "--images", self.images, "--json").stdout)
+        self.assertEqual(selected["counts"]["new"], 1)
+        self.run_script("skills/pdf-figure-extractor/scripts/batch_extract.py",
+                        "--src", chapter_paths[0], "--out", self.images,
+                        "--dpi", 72)
+        self.assertTrue((self.images /
+                         "Doe_SynthBook_2025_01_FirstTopic_fig_1.png").is_file())
+
     def test_dotted_pdf_names_require_organization_before_downstream_work(self):
         sources = [self.pdfs / name for name in
                    ("Doe_Study_2025.revised.pdf", "Doe_Study_2025.pdf.pdf")]
@@ -276,7 +320,17 @@ class WorkflowTests(unittest.TestCase):
     def test_clipping_image_reprocess_keeps_duplicate_detection_and_stems_aligned(self):
         fetch = "skills/clipping-processor/scripts/fetch_images.py"
         dedup = "skills/clipping-processor/scripts/dedup_index.py"
-        old, new = "Smith_Cell_Signals_2026", "Smith_Cell_Receptors_2026"
+
+        def clipping_slug(topic):
+            result = json.loads(self.run_script(
+                "skills/clipping-processor/scripts/slug.py",
+                "--author", "Alice Smith", "--topic", topic,
+                "--year", "2026").stdout)
+            self.assertEqual(result["image_prefix"], result["slug"] + "_fig_")
+            return result["slug"]
+
+        old = clipping_slug("Cell Signals")
+        new = clipping_slug("Cell Receptors")
         raw = self.vault / "Inbox/capture.md"
         raw.write_text('---\nsources:\n  - "https://example.org/study?utm_source=clip"\n---\nBody.\n',
                        encoding="utf-8")
@@ -288,10 +342,20 @@ class WorkflowTests(unittest.TestCase):
             return json.loads(self.run_script(dedup, *args).stdout)["checked"][0]
 
         self.assertEqual(verdict()["status"], "new")
+        note = self.notes / (old + ".md")
+        # Publish the complete owner before placing its image.  The guarded
+        # placement path requires the exact rendered filename-only embed so a
+        # failed run cannot leave an ownerless file in Sources/Images.
+        metadata = {"title": "Cell signals", "format": "Article",
+                    "sources": ["https://example.org/study"], "read": True}
+        body = ('---\n' + yaml.safe_dump(metadata, sort_keys=False) + '---\n'
+                + f'![[{old}_fig_1.png]]\n*The cells exchange signals.*\n')
+        note.write_text(body, encoding="utf-8")
         rendered = Path(self.scratch.name) / "browser render.png"
         Image.new("RGB", (64, 48), (20, 100, 180)).save(rendered)
         self.run_script(fetch, "place", "--attachments", self.images,
-                        "--slug", old, "--index", 1, "--from-file", rendered)
+                        "--slug", old, "--index", 1, "--from-file", rendered,
+                        "--owner-note", note)
         image = self.images / (old + "_fig_1.png")
         original = digest(image)
         # First-time PDF manifest migration must not claim this clipping.
@@ -302,14 +366,8 @@ class WorkflowTests(unittest.TestCase):
         manifest = (self.images / ".figure-manifest.tsv").read_text(encoding="utf-8")
         self.assertIn("Doe_Study_2025_fig_1.png", manifest)
         self.assertNotIn(image.name, manifest)
-        note = self.notes / (old + ".md")
         # Default YAML serialization uses valid, indentless block lists.
         # Duplicate detection must survive that representation too.
-        metadata = {"title": "Cell signals", "format": "Article",
-                    "sources": ["https://example.org/study"], "read": True}
-        body = ('---\n' + yaml.safe_dump(metadata, sort_keys=False) + '---\n'
-                + f'![[{old}_fig_1.png]]\n*The cells exchange signals.*\n')
-        note.write_text(body, encoding="utf-8")
         self.assertEqual(verdict()["status"], "duplicate")
         self.assertEqual(verdict(note)["status"], "new")
         rename = ["rename", "--attachments", self.images, "--sources", self.pdfs,
@@ -339,11 +397,16 @@ class WorkflowTests(unittest.TestCase):
         external.write_text(
             f'[[{new}|the clipping]]\n![[Sources/Images/{new}_fig_1.png]]\n',
             encoding="utf-8")
+        new_note = self.notes / (new + ".md")
+        new_note.write_text(body.replace(old, new), encoding="utf-8")
         self.run_script(fetch, *rename, "--dry-run")
         self.assertEqual(digest(image), original)
         self.run_script(fetch, *rename)
-        note.rename(self.notes / (new + ".md"))
-        (self.notes / (new + ".md")).write_text(body.replace(old, new), encoding="utf-8")
+        dependency = json.loads(self.run_script(
+            fetch, "dependencies", "--attachments", self.images,
+            "--owner-note", note, "--old-slug", old).stdout)
+        self.assertTrue(dependency["ok"])
+        note.unlink()
         self.assertFalse(image.exists())
         self.assertEqual(digest(self.images / (new + "_fig_1.png")), original)
         current = verdict()

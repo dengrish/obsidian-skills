@@ -8,18 +8,35 @@ directories use a host exclusive-rename primitive or fail closed.
 ``publish_new``, ``replace_expected`` and ``remove_expected`` implement the
 shared staged-publication protocol for regular files, including readback and
 conditional rollback of only the snapshot the caller authorized.
+``regular_file_snapshot`` supplies their default identity/content callback.
 
-Run ``python3 atomic_move.py --test`` for the adversarial cases.
+The guarantees are about concurrent directory-entry changes while the process
+is running. They do not claim power-loss durability; callers needing that must
+also flush file data and the affected directories according to the host
+filesystem's durability contract before reporting a durable commit.
+On a host that lacks an exclusive rename primitive, process termination during
+the regular-file fallback can leave the source under a sibling
+``.atomic-move-*`` directory. Preserve such a directory and inspect its
+``.removed``/``.observed`` entries; it is recovery state, not disposable cache.
+
+This module is a programmatic import library, not a publication CLI. Its
+command line intentionally exposes only ``--test`` for the adversarial cases.
 """
 
 import argparse
 import ctypes
 import errno
+import hashlib
 import os
 import shutil
 import stat
 import sys
 import tempfile
+from collections import namedtuple
+
+
+RegularFileSnapshot = namedtuple(
+    "RegularFileSnapshot", ("identity", "digest", "mode", "size"))
 
 
 def set_private_mode(file_or_fd, path, mode):
@@ -67,6 +84,39 @@ class SourceChanged(OSError):
     """The source no longer has the identity authorized by the caller."""
 
 
+class LinkUnavailable(OSError):
+    """The hard link needed for safe publication is unsupported or denied."""
+
+    def __init__(self, source, target, cause):
+        OSError.__init__(
+            self, getattr(cause, "errno", None) or errno.ENOTSUP,
+            "safe publication requires hard links on one filesystem; cannot "
+            "link %r to %r (%s). Move the staging area onto the target "
+            "filesystem and verify that its permissions and filesystem permit "
+            "hard links" %
+            (source, target, cause), target)
+        self.source = source
+        self.target = target
+        self.cause = cause
+        self.recovery_path = None
+        self.staging_path = None
+        self.keep_stage = False
+
+
+def _retain_link_unavailable(exc, detail, recovery_path=None,
+                             staging_path=None):
+    """Add recoverable publication state without erasing the error category."""
+    if detail:
+        exc.strerror = "%s; %s" % (exc.strerror, detail)
+        # OSError stores the display message both as ``strerror`` and in
+        # ``args``. Keep them aligned for callers that serialize either form.
+        exc.args = (exc.errno, exc.strerror)
+    exc.recovery_path = recovery_path
+    exc.staging_path = staging_path
+    exc.keep_stage = True
+    return exc
+
+
 class PublicationConflict(OSError):
     """Expected-file replacement/removal met a newer filesystem occupant."""
 
@@ -87,18 +137,137 @@ class RecoveryFailed(OSError):
         self.path = path
 
 
+def _validate_stage_dir(stage_dir, reserved_names):
+    """Refuse missing, unsafe, or previously used private publication state."""
+    try:
+        stage_stat = os.lstat(stage_dir)
+    except OSError as exc:
+        raise PublicationConflict(
+            "private staging directory %s is missing or unreadable (%s: %s); "
+            "refusing publication before changing the target" %
+            (stage_dir, type(exc).__name__, exc),
+            recovery_path=stage_dir, keep_stage=True) from exc
+    if not stat.S_ISDIR(stage_stat.st_mode) or stat.S_ISLNK(stage_stat.st_mode):
+        raise PublicationConflict(
+            "private staging path %s is not a real directory; refusing "
+            "publication before changing the target" % stage_dir,
+            recovery_path=stage_dir, keep_stage=True)
+    for name in reserved_names:
+        path = os.path.join(stage_dir, name)
+        if os.path.lexists(path):
+            raise PublicationConflict(
+                "private staging directory contains prior publication state "
+                "at %s; preserve and inspect it, then use a fresh unique "
+                "stage directory" % path,
+                recovery_path=path, keep_stage=True)
+
+
 def file_identity(path):
     """Stable directory-entry identity without following a symlink."""
     item = os.lstat(path)
     return item.st_dev, item.st_ino, stat.S_IFMT(item.st_mode)
 
 
+def regular_file_snapshot(path):
+    """Return a stable identity/content token for guarded publication.
+
+    The file is read through one no-follow descriptor and its identity and
+    change-sensitive metadata are compared before, during, and after that
+    read. The returned equality token deliberately omits ctime and link count:
+    ``publish_new`` and ``replace_expected`` create private hard links, which
+    change those fields without changing the authorized file or its bytes.
+
+    ``RegularFileSnapshot.mode`` is the permission mode to copy to a staged
+    replacement. The other fields make the object suitable as both the
+    ``expected`` value and the ``snapshot`` callback result used by this
+    module's regular-file publication primitives.
+    """
+    path = os.fspath(path)
+    before = os.lstat(path)
+    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    attributes = getattr(before, "st_file_attributes", 0)
+    if (not stat.S_ISREG(before.st_mode)
+            or stat.S_ISLNK(before.st_mode)
+            or bool(reparse and attributes & reparse)):
+        raise OSError(
+            errno.EINVAL, "snapshot target is a symlink, reparse point, or "
+            "non-regular file", path)
+
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags)
+    source = None
+    digest = hashlib.sha256()
+    try:
+        source = os.fdopen(descriptor, "rb")
+        descriptor = None
+        with source:
+            opened_before = os.fstat(source.fileno())
+            if (not stat.S_ISREG(opened_before.st_mode)
+                    or file_identity(path) != (
+                        opened_before.st_dev,
+                        opened_before.st_ino,
+                        stat.S_IFMT(opened_before.st_mode))):
+                raise OSError(
+                    errno.EBUSY, "file changed while it was opened", path)
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+            opened_after = os.fstat(source.fileno())
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+    after = os.lstat(path)
+
+    def stable(item):
+        return (
+            item.st_dev,
+            item.st_ino,
+            stat.S_IFMT(item.st_mode),
+            stat.S_IMODE(item.st_mode),
+            item.st_size,
+            getattr(item, "st_mtime_ns", int(item.st_mtime * 1e9)),
+            getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)),
+        )
+
+    if not (stable(before) == stable(opened_before)
+            == stable(opened_after) == stable(after)):
+        raise OSError(errno.EBUSY, "file changed while it was read", path)
+    return RegularFileSnapshot(
+        identity=(after.st_dev, after.st_ino, stat.S_IFMT(after.st_mode)),
+        digest=digest.hexdigest(),
+        mode=stat.S_IMODE(after.st_mode),
+        size=after.st_size,
+    )
+
+
 def link_noreplace(source, target):
     """Expose one regular inode atomically only at an unoccupied name."""
     try:
-        os.link(source, target, follow_symlinks=False)
-    except (TypeError, NotImplementedError):
-        os.link(source, target)
+        try:
+            os.link(source, target, follow_symlinks=False)
+        except (TypeError, NotImplementedError):
+            os.link(source, target)
+    except NotImplementedError as exc:
+        cause = OSError(errno.ENOSYS, "hard links are not implemented")
+        raise LinkUnavailable(source, target, cause) from exc
+    except OSError as exc:
+        # POSIX specifies EPERM when a filesystem does not support hard links;
+        # network filesystems also commonly translate that refusal to EACCES.
+        # Either way the capability this operation needs is unavailable, and
+        # presenting it as a content race sends callers toward the wrong fix.
+        unavailable = {errno.EXDEV, errno.ENOSYS, errno.EPERM, errno.EACCES}
+        for name in ("ENOTSUP", "EOPNOTSUPP"):
+            number = getattr(errno, name, None)
+            if number is not None:
+                unavailable.add(number)
+        # Native Windows reports an unsupported hard-link operation through
+        # winerror even when errno is the generic EINVAL/EACCES translation.
+        if (exc.errno in unavailable
+                or getattr(exc, "winerror", None) in {1, 50}):
+            raise LinkUnavailable(source, target, exc) from exc
+        raise
 
 
 def _restore_or_recover(displaced, target, stage_parent, recovery_prefix):
@@ -115,6 +284,10 @@ def _restore_or_recover(displaced, target, stage_parent, recovery_prefix):
                            expected=file_identity(displaced))
         except MoveIncomplete as move_exc:
             if os.path.lexists(recovery):
+                if isinstance(restore_exc, LinkUnavailable):
+                    return (("the displaced file could not be restored because "
+                             "hard links are unavailable; it is preserved at %s"
+                             % recovery), recovery)
                 return (("the public path was reoccupied (%s); the displaced "
                          "file is preserved at %s" % (restore_exc, recovery)),
                         recovery)
@@ -125,6 +298,10 @@ def _restore_or_recover(displaced, target, stage_parent, recovery_prefix):
             except OSError:
                 pass
             raise RecoveryFailed(displaced, move_exc) from move_exc
+        if isinstance(restore_exc, LinkUnavailable):
+            return (("the displaced file could not be restored because hard "
+                     "links are unavailable; it is preserved at %s" % recovery),
+                    recovery)
         return (("the public path was reoccupied (%s); the displaced file is "
                  "preserved at %s" % (restore_exc, recovery)), recovery)
 
@@ -142,7 +319,7 @@ def _displace_expected(target, expected, snapshot, stage_dir, stage_parent,
         if snapshot(observed) != expected:
             raise PublicationConflict(
                 "%s changed after planning; refusing publication" % target)
-    except PublicationConflict:
+    except (PublicationConflict, LinkUnavailable):
         raise
     except (OSError, UnicodeError) as exc:
         raise PublicationConflict(
@@ -155,6 +332,8 @@ def _displace_expected(target, expected, snapshot, stage_dir, stage_parent,
         # captures a writer that won after observation instead of overwriting
         # it; the second snapshot below decides which inode was captured.
         move_noreplace(target, displaced, stage_parent=stage_parent)
+    except LinkUnavailable:
+        raise
     except OSError as exc:
         if isinstance(exc, MoveIncomplete) and os.path.lexists(displaced):
             try:
@@ -204,13 +383,18 @@ def replace_expected(staged, target, expected, snapshot, stage_dir,
 
     ``snapshot(path)`` returns any equality-comparable identity+content value.
     The caller owns ``stage_dir`` and must retain it when a raised
-    :class:`PublicationConflict` has ``keep_stage`` true. A named recovery path
-    is exposed on the exception whenever the displaced predecessor could not
-    reclaim the public name.
+    :class:`PublicationConflict` or :class:`LinkUnavailable` has ``keep_stage``
+    true. A named recovery path is exposed on the exception whenever the
+    displaced predecessor could not reclaim the public name.
     """
     stage_parent = stage_parent or os.path.dirname(stage_dir)
+    _validate_stage_dir(
+        stage_dir,
+        (".atomic-observed", ".atomic-displaced",
+         ".atomic-publication-rollback"))
     try:
-        if not stat.S_ISREG(os.lstat(staged).st_mode):
+        staged_stat = os.lstat(staged)
+        if not stat.S_ISREG(staged_stat.st_mode):
             raise OSError(errno.EINVAL, "staged publication is not a regular file",
                           staged)
         replacement = snapshot(staged)
@@ -218,10 +402,48 @@ def replace_expected(staged, target, expected, snapshot, stage_dir,
         raise PublicationConflict(
             "%s could not be verified before publication (%s: %s)" %
             (staged, type(exc).__name__, exc)) from exc
-    displaced = _displace_expected(
-        target, expected, snapshot, stage_dir, stage_parent, recovery_prefix)
+    # Once the predecessor has been displaced, rollback itself needs a hard
+    # link. Refuse a cross-device replacement before touching the public name
+    # instead of discovering EXDEV only at staged -> target publication time.
+    try:
+        target_parent_stat = os.stat(os.path.dirname(target) or os.curdir)
+    except OSError as exc:
+        raise PublicationConflict(
+            "%s parent could not be verified before publication (%s: %s)" %
+            (target, type(exc).__name__, exc)) from exc
+    if (getattr(staged_stat, "st_dev", None) is not None
+            and staged_stat.st_dev != target_parent_stat.st_dev):
+        cause = OSError(errno.EXDEV, "staged file and target are on different "
+                        "filesystems", target)
+        raise _retain_link_unavailable(
+            LinkUnavailable(staged, target, cause),
+            "the staged replacement is preserved at %s" % staged,
+            recovery_path=staged, staging_path=stage_dir)
+    try:
+        displaced = _displace_expected(
+            target, expected, snapshot, stage_dir, stage_parent, recovery_prefix)
+    except LinkUnavailable as exc:
+        raise _retain_link_unavailable(
+            exc, "the public predecessor remains unchanged and the staged "
+            "replacement is preserved at %s" % staged,
+            recovery_path=staged, staging_path=stage_dir)
     try:
         link_noreplace(staged, target)
+    except LinkUnavailable as exc:
+        try:
+            disposition, recovery = _restore_or_recover(
+                displaced, target, stage_parent, recovery_prefix)
+        except RecoveryFailed as recovery_exc:
+            raise _retain_link_unavailable(
+                exc, "publication failed and the predecessor could not be "
+                "restored; inspect %s. The staged replacement remains at %s"
+                % (recovery_exc.path, staged),
+                recovery_path=recovery_exc.path,
+                staging_path=stage_dir) from recovery_exc
+        raise _retain_link_unavailable(
+            exc, "%s; the staged replacement is preserved at %s"
+            % (disposition, staged),
+            recovery_path=(recovery or staged), staging_path=stage_dir)
     except OSError as exc:
         try:
             disposition, recovery = _restore_or_recover(
@@ -299,6 +521,7 @@ def remove_expected(target, expected, snapshot, stage_dir, stage_parent=None,
     if not os.path.lexists(target):
         return False
     stage_parent = stage_parent or os.path.dirname(stage_dir)
+    _validate_stage_dir(stage_dir, (".atomic-observed", ".atomic-displaced"))
     _displace_expected(
         target, expected, snapshot, stage_dir, stage_parent, recovery_prefix)
     return True
@@ -326,7 +549,13 @@ def publish_new(staged, target, snapshot, stage_parent,
                                 dir=stage_parent)
     keep_stage = False
     try:
-        link_noreplace(staged, target)
+        try:
+            link_noreplace(staged, target)
+        except LinkUnavailable as exc:
+            raise _retain_link_unavailable(
+                exc, "the staged file is preserved at %s" % staged,
+                recovery_path=staged,
+                staging_path=os.path.dirname(os.path.abspath(staged)))
         verification = None
         try:
             if snapshot(target) != expected:
@@ -437,6 +666,17 @@ def _move_regular_via_links(src, dst, expected, stage_parent=None):
         try:
             os.rename(src, removed)
         except OSError as exc:
+            # A plain rename failure can leave the public source wholly
+            # untouched (permissions, read-only media, transient I/O). In
+            # that state this operation has nothing to recover: remove the
+            # private observation link and preserve the original exception.
+            try:
+                source_unchanged = (not os.path.lexists(removed)
+                                    and file_identity(src) == expected)
+            except OSError:
+                source_unchanged = False
+            if source_unchanged:
+                raise
             keep_stage = True
             raise MoveIncomplete(src, dst, exc,
                                  recovery_paths=retained_private_paths()) from exc
@@ -710,6 +950,10 @@ def run_self_test():
         expected = file_identity(src)
         os.unlink(src)
         put(folder, "identity-source", b"replacement")
+        if file_identity(src) == expected:
+            # Some filesystems can immediately reuse an inode. The test is for
+            # an expected-identity mismatch, so make that mismatch deterministic.
+            expected = (expected[0], -1, expected[2])
         dst = os.path.join(folder, "identity-target")
         try:
             move_noreplace(src, dst, expected=expected)
@@ -756,6 +1000,62 @@ def run_self_test():
             check("the fallback also preserves an occupied destination",
                   (refused, open(src, "rb").read(), open(dst, "rb").read()),
                   (True, b"ours", b"late"))
+
+            real_os_link = os.link
+            capability_results = []
+            for number in (errno.EXDEV, errno.EPERM, errno.EACCES):
+                src = put(folder, "unsupported-link-source-%d" % number,
+                          b"still public")
+                dst = os.path.join(folder, "unsupported-link-target-%d" % number)
+
+                def refuse_hard_links(*_args, **_kwargs):
+                    raise OSError(number, "injected unavailable hard link")
+
+                os.link = refuse_hard_links
+                try:
+                    try:
+                        move_noreplace(src, dst)
+                        unavailable = False
+                        unavailable_message = ""
+                    except LinkUnavailable as exc:
+                        unavailable = True
+                        unavailable_message = str(exc)
+                finally:
+                    os.link = real_os_link
+                capability_results.append((
+                    unavailable, "requires hard links" in unavailable_message,
+                    os.path.lexists(src), os.path.lexists(dst)))
+            check("an unavailable hard link has a distinct actionable error",
+                  (capability_results,
+                   any(name.startswith(".atomic-move-")
+                       for name in os.listdir(folder))),
+                  ([(True, True, True, False)] * 3, False))
+
+            src = put(folder, "rename-refusal-source", b"untouched")
+            dst = os.path.join(folder, "rename-refusal-target")
+            real_rename = os.rename
+
+            def refuse_source_rename(source, target):
+                if source == src and os.path.basename(target) == ".removed":
+                    raise PermissionError(
+                        errno.EACCES, "injected source rename refusal", source)
+                return real_rename(source, target)
+
+            os.rename = refuse_source_rename
+            try:
+                try:
+                    move_noreplace(src, dst)
+                    original_error_preserved = False
+                except PermissionError:
+                    original_error_preserved = True
+            finally:
+                os.rename = real_rename
+            check("an untouched source rename failure needs no recovery",
+                  (original_error_preserved, open(src, "rb").read(),
+                   os.path.lexists(dst),
+                   any(name.startswith(".atomic-move-")
+                       for name in os.listdir(folder))),
+                  (True, b"untouched", False, False))
 
             src = put(folder, "finally-source", b"finally ours")
             dst = put(folder, "finally-target", b"finally late")
@@ -975,31 +1275,202 @@ def run_self_test():
                os.path.lexists(source_dir), os.path.lexists(target_dir)),
               (True, b"planned directory", b"late directory", False, False))
 
+        snapshot_target = put(folder, "public-snapshot", b"snapshot bytes")
+        snapshot = regular_file_snapshot(snapshot_target)
+        check("the public snapshot carries identity, digest, mode, and size",
+              (snapshot.identity == file_identity(snapshot_target),
+               snapshot.digest == hashlib.sha256(b"snapshot bytes").hexdigest(),
+               snapshot.size),
+              (True, True, len(b"snapshot bytes")))
+
+        snapshot_alias = os.path.join(folder, "public-snapshot-alias")
+        os.link(snapshot_target, snapshot_alias)
+        check("a publication hard link does not invalidate the snapshot token",
+              regular_file_snapshot(snapshot_alias), snapshot)
+
+        snapshot_link = os.path.join(folder, "public-snapshot-symlink")
+        try:
+            os.symlink(snapshot_target, snapshot_link)
+        except (OSError, NotImplementedError):
+            symlink_refused = True       # host cannot create the adversary
+        else:
+            try:
+                regular_file_snapshot(snapshot_link)
+                symlink_refused = False
+            except OSError:
+                symlink_refused = True
+        check("the public snapshot refuses a leaf symlink", symlink_refused,
+              True)
+
+        snapshot_race = put(folder, "public-snapshot-race", b"before")
+        real_lstat = os.lstat
+        lstat_calls = {"target": 0}
+
+        def mutate_before_final_snapshot(path, *args, **kwargs):
+            if os.path.abspath(os.fspath(path)) == os.path.abspath(snapshot_race):
+                lstat_calls["target"] += 1
+                if lstat_calls["target"] == 3:
+                    with open(snapshot_race, "wb") as fh:
+                        fh.write(b"changed during snapshot")
+            return real_lstat(path, *args, **kwargs)
+
+        os.lstat = mutate_before_final_snapshot
+        try:
+            try:
+                regular_file_snapshot(snapshot_race)
+                snapshot_race_refused = False
+            except OSError:
+                snapshot_race_refused = True
+        finally:
+            os.lstat = real_lstat
+        check("the public snapshot refuses a pathname changed during read",
+              (snapshot_race_refused, open(snapshot_race, "rb").read()),
+              (True, b"changed during snapshot"))
+
         def byte_snapshot(path):
             with open(path, "rb") as fh:
                 return file_identity(path), fh.read()
 
+        cross_target = put(folder, "cross-device-target", b"old")
+        cross_expected = byte_snapshot(cross_target)
+        with tempfile.TemporaryDirectory(
+                prefix=".cross-device-stage-", dir=folder) as cross_stage:
+            cross_staged = put(cross_stage, "replacement", b"new")
+            real_stat = os.stat
+
+            class OtherDevice:
+                st_dev = os.lstat(cross_staged).st_dev + 1
+
+            def different_target_device(path, *args, **kwargs):
+                if os.path.abspath(os.fspath(path)) == os.path.abspath(folder):
+                    return OtherDevice()
+                return real_stat(path, *args, **kwargs)
+
+            os.stat = different_target_device
+            try:
+                try:
+                    replace_expected(cross_staged, cross_target,
+                                     cross_expected, byte_snapshot,
+                                     cross_stage, stage_parent=folder)
+                    cross_refused = False
+                except LinkUnavailable:
+                    cross_refused = True
+            finally:
+                os.stat = real_stat
+            check("cross-device replacement is refused before displacement",
+                  (cross_refused, open(cross_target, "rb").read(),
+                   os.path.lexists(os.path.join(
+                       cross_stage, ".atomic-displaced"))),
+                  (True, b"old", False))
+
         target = put(folder, "replace-target", b"old text")
-        expected = byte_snapshot(target)
+        expected = regular_file_snapshot(target)
         with tempfile.TemporaryDirectory(
                 prefix=".replace-stage-", dir=folder) as stage:
             staged = put(stage, "replacement", b"new text")
             published = replace_expected(
-                staged, target, expected, byte_snapshot, stage,
+                staged, target, expected, regular_file_snapshot, stage,
                 stage_parent=folder)
             check("expected replacement is published and read back",
-                  (published, byte_snapshot(target)[1]),
-                  (byte_snapshot(target), b"new text"))
+                  published, regular_file_snapshot(target))
+
+        target = put(folder, "unavailable-displacement-target", b"old text")
+        expected = regular_file_snapshot(target)
+        with tempfile.TemporaryDirectory(
+                prefix=".unavailable-displacement-stage-", dir=folder) as stage:
+            staged = put(stage, "replacement", b"new text")
+            real_move = globals()["move_noreplace"]
+
+            def refuse_displacement(source, destination, **kwargs):
+                if source == target and destination.endswith(".atomic-displaced"):
+                    cause = OSError(errno.ENOTSUP,
+                                    "injected displacement capability failure")
+                    raise LinkUnavailable(source, destination, cause)
+                return real_move(source, destination, **kwargs)
+
+            globals()["move_noreplace"] = refuse_displacement
+            try:
+                try:
+                    replace_expected(
+                        staged, target, expected, regular_file_snapshot, stage,
+                        stage_parent=folder)
+                    displacement_error = None
+                except LinkUnavailable as exc:
+                    displacement_error = exc
+            finally:
+                globals()["move_noreplace"] = real_move
+            check("a displacement capability error keeps its type and draft",
+                  (isinstance(displacement_error, LinkUnavailable),
+                   bool(displacement_error and displacement_error.keep_stage),
+                   getattr(displacement_error, "staging_path", None),
+                   open(target, "rb").read(), open(staged, "rb").read()),
+                  (True, True, stage, b"old text", b"new text"))
+
+        target = put(folder, "unavailable-publication-target", b"old text")
+        expected = regular_file_snapshot(target)
+        with tempfile.TemporaryDirectory(
+                prefix=".unavailable-publication-stage-", dir=folder) as stage:
+            staged = put(stage, "replacement", b"new text")
+            real_link = globals()["link_noreplace"]
+
+            def refuse_replacement_link(source, destination):
+                if source == staged and destination == target:
+                    cause = OSError(errno.ENOTSUP,
+                                    "injected publication capability failure")
+                    raise LinkUnavailable(source, destination, cause)
+                return real_link(source, destination)
+
+            globals()["link_noreplace"] = refuse_replacement_link
+            try:
+                try:
+                    replace_expected(
+                        staged, target, expected, regular_file_snapshot, stage,
+                        stage_parent=folder)
+                    publication_error = None
+                except LinkUnavailable as exc:
+                    publication_error = exc
+            finally:
+                globals()["link_noreplace"] = real_link
+            check("a late link failure restores the predecessor and keeps the draft",
+                  (isinstance(publication_error, LinkUnavailable),
+                   bool(publication_error and publication_error.keep_stage),
+                   getattr(publication_error, "staging_path", None),
+                   "restored to its original path" in str(publication_error),
+                   open(target, "rb").read(), open(staged, "rb").read()),
+                  (True, True, stage, True, b"old text", b"new text"))
+
+        target = put(folder, "reused-stage-target", b"old text")
+        expected = regular_file_snapshot(target)
+        with tempfile.TemporaryDirectory(
+                prefix=".reused-stage-", dir=folder) as stage:
+            staged = put(stage, "replacement", b"new text")
+            residue = put(stage, ".atomic-observed", b"prior state")
+            try:
+                replace_expected(
+                    staged, target, expected, regular_file_snapshot, stage,
+                    stage_parent=folder)
+                reused_refused = False
+                message = ""
+                recovery = None
+            except PublicationConflict as exc:
+                reused_refused = True
+                message = str(exc)
+                recovery = exc.recovery_path
+            check("a reused stage reports its residue without blaming the target",
+                  (reused_refused, "prior publication state" in message,
+                   "target changed" in message, recovery,
+                   open(target, "rb").read(),
+                   os.path.lexists(os.path.join(stage, ".atomic-displaced"))),
+                  (True, True, False, residue, b"old text", False))
 
         with tempfile.TemporaryDirectory(
                 prefix=".new-stage-", dir=folder) as stage:
             staged = put(stage, "new-file", b"new file")
             target = os.path.join(folder, "new-target")
             published = publish_new(
-                staged, target, byte_snapshot, stage_parent=folder)
+                staged, target, regular_file_snapshot, stage_parent=folder)
             check("a new file is published exclusively and read back",
-                  (published, byte_snapshot(target)[1]),
-                  (byte_snapshot(target), b"new file"))
+                  published, regular_file_snapshot(target))
 
         with tempfile.TemporaryDirectory(
                 prefix=".edited-new-stage-", dir=folder) as stage:

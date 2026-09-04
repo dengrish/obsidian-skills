@@ -148,11 +148,11 @@ except ImportError:
 #: DIGIT and a title dash is not (`Figure 1–Title`, `Figure 1 — Title`). EM
 #: DASH is deliberately NOT in this class: no publisher numbers with one, and
 #: leaving it out keeps `Figure 1—2D convolution` reading as a title.
-LABEL_SEP = r'[.\-–]'
+LABEL_SEP = r'[.\-–−]'
 
 CAP_RE = re.compile(
     r'^\s*'
-    r'((?i:Supplementary|Suppl?\.|Extended\s+Data))?\s*'   # group 1: optional marker
+    r'((?i:Supplementary|Supplemental|Suppl?\.|Extended\s+Data))?\s*'  # group 1
     r'(?i:Figure|Fig\.?)\s+'                                # Figure | Fig. | Fig (any case)
     r'(SI\d+(?:' + LABEL_SEP + r'\d+)*'                     # SI1, SI2-3 (Supporting Info)
     r'|S\d+(?:' + LABEL_SEP + r'\d+)*'                      # S1, S2-3, S1.2 (S-prefixed)
@@ -164,12 +164,13 @@ CAP_RE = re.compile(
 )
 # A narrative reference can inherit CAP_RE's line-start shape when a caption is
 # wrapped immediately after "shown in" (or an equivalent phrase). Apply this
-# only to a SECOND match inside one already-recognized caption block: the first
-# match remains the caption, while the later phrase is part of its prose. This
-# keeps the general finditer behavior that recovers a real caption merged below
-# an axis label or body block.
+# wherever it occurs inside a text block. In multi-column PDFs a body paragraph
+# can be the block's first caption-shaped match; requiring an earlier match made
+# that prose look like a caption and collide with the real caption later.
 CONTINUED_FIGURE_REFERENCE_RE = re.compile(
-    r'\b(?:shown|illustrated|depicted|presented|summarized)\s+in\s*$', re.I)
+    r'\b(?:(?:shown|illustrated|depicted|presented|summari[sz]ed|described|'
+    r'reported|plotted|displayed|compared)\s+(?:in|by|as)|'
+    r'(?:as\s+you\s+can\s+see|see|like)\s+in)\s*$', re.I)
 # The final lookahead distinguishes captions from prose references that
 # happen to start with the same phrase. Real captions look like:
 #   "Figure 1-23. Overfitting the training data"        (Géron — period+space)
@@ -601,6 +602,7 @@ def collect_text_rects(page):
 # "Extended Data" vs "Extended  Data".
 MARKER_TO_PREFIX = {
     "supplementary": "S",
+    "supplemental": "S",
     "suppl.": "S",
     "supp.": "S",
     "extended data": "S",
@@ -622,7 +624,7 @@ def normalize_label(label):
     collision report shows the user, and it has to keep the source's own
     spelling to be worth showing.
     """
-    return label.replace("–", "-")
+    return label.replace("–", "-").replace("−", "-")
 
 
 def _normalize_marker(marker):
@@ -679,7 +681,8 @@ def find_caption_blocks(page):
     collision or a duplicate, while a missed caption is visible nowhere at
     all.
     """
-    out = []
+    candidates = []
+    style_blocks = None
     for rect, text, lines in collect_text_blocks(page):
         raw_matches = list(CAP_RE.finditer(text))
         if not raw_matches:
@@ -694,9 +697,9 @@ def find_caption_blocks(page):
         # false match truncate the real caption rectangle above it, weakening
         # the later caption-overlap guard even though no false label survived.
         matches = []
-        for raw_index, match in enumerate(raw_matches):
+        for match in raw_matches:
             first = _line_index(line_start, match.start())
-            if (raw_index > 0 and first > 0
+            if (first > 0
                     and CONTINUED_FIGURE_REFERENCE_RE.search(
                         lines[first - 1][1])):
                 continue
@@ -726,8 +729,56 @@ def find_caption_blocks(page):
             cap_rect = None
             for lr, _ in lines[first:last + 1]:
                 cap_rect = union(cap_rect, lr)
-            out.append((fig_num, raw_label, cap_rect or rect))
-    return out
+            own_rect = cap_rect or rect
+            if style_blocks is None:
+                try:
+                    style_blocks = page.get_text("dict")["blocks"]
+                except Exception:
+                    style_blocks = []
+            candidates.append({
+                "row": (fig_num, raw_label, own_rect),
+                "italic": _italic_text_share(style_blocks, own_rect),
+                "lines": last - first + 1,
+                "text": "\n".join(t for _r, t in lines[first:last + 1]),
+            })
+
+    # Some books put body prose and captions in distinct type styles. A body
+    # paragraph may itself begin ``Figure N.`` and therefore pass the caption
+    # shape check; when the same page also has the real italic caption, retain
+    # the latter only under a deliberately narrow signal. Do not resolve a
+    # same-label pair when both have the same style: that ambiguity still
+    # belongs in the batch collision report.
+    by_label = {}
+    for candidate in candidates:
+        by_label.setdefault(candidate["row"][0], []).append(candidate)
+    rejected = set()
+    for peers in by_label.values():
+        italic = [item for item in peers if item["italic"] >= 0.8]
+        if len(italic) != 1:
+            continue
+        for item in peers:
+            sentence_marks = len(re.findall(r"[.!?](?:\s|$)", item["text"]))
+            if (item is not italic[0] and item["italic"] <= 0.2
+                    and item["lines"] >= 2 and sentence_marks >= 2):
+                rejected.add(id(item))
+    return [item["row"] for item in candidates if id(item) not in rejected]
+
+
+def _italic_text_share(blocks, rect):
+    """Fraction of caption-line characters carried by an italic font."""
+    italic = total = 0
+    for block in blocks:
+        if block.get("type", 0) != 0:
+            continue
+        for line in block.get("lines", []):
+            if not fitz.Rect(line.get("bbox", (0, 0, 0, 0))).intersects(rect):
+                continue
+            for span in line.get("spans", []):
+                count = len(span.get("text", ""))
+                total += count
+                if span.get("flags", 0) & 2 or "italic" in span.get("font", "").lower():
+                    italic += count
+    return italic / float(total or 1)
 
 
 def _line_index(line_start, offset):
@@ -1733,7 +1784,7 @@ def prose_chars_in(page, bbox, body_size=None):
 
 
 def header_bands(doc, min_share=0.4):
-    """[(y0, y1, text)] for lines that repeat at the same height across pages.
+    """[(x0, y0, x1, y1, text)] for repeated lines in the page top band.
 
     A running head is never figure content, so a crop containing one has
     reached above the figure.  This is the only signal that catches it: the
@@ -1762,12 +1813,20 @@ def header_bands(doc, min_share=0.4):
                 if not bb or bb[1] > band:
                     continue                 # only the top band of the page
                 key = (txt, round(bb[1] / 4.0))
-                lo, hi, c = seen.get(key, (bb[1], bb[3], 0))
-                seen[key] = (min(lo, bb[1]), max(hi, bb[3]), c + 1)
+                lo, hi, c, x_spans = seen.get(
+                    key, (bb[1], bb[3], 0, set()))
+                x_spans.add((round(bb[0], 1), round(bb[2], 1)))
+                seen[key] = (min(lo, bb[1]), max(hi, bb[3]), c + 1,
+                             x_spans)
     out = []
-    for (txt, _), (lo, hi, c) in seen.items():
+    for (txt, _), (lo, hi, c, x_spans) in seen.items():
         if c >= max(3, int(n * min_share)):
-            out.append((lo, hi, txt))
+            # Keep each observed horizontal placement. Running heads often
+            # alternate between the left and right margin on facing pages; a
+            # union across those positions would incorrectly mark every crop
+            # between them as containing the header.
+            out.extend((x0, lo, x1, hi, txt)
+                       for x0, x1 in sorted(x_spans))
     return out
 
 
@@ -1885,8 +1944,10 @@ def suspicious(bbox, region=None, page=None, caption_rect=None, headers=None,
     # UP is structurally uncatchable by any of it — over-reach RAISES coverage.
     # These two close that side. Both were reproduced on a real paper where
     # every bucket read zero and two of seven crops were wrong.
-    for hy0, hy1, txt in (headers or ()):
-        if bbox.y0 <= hy0 + 1 and bbox.y1 >= hy1 - 1:
+    for hx0, hy0, hx1, hy1, txt in (headers or ()):
+        horizontal_overlap = min(bbox.x1, hx1) - max(bbox.x0, hx0)
+        if (horizontal_overlap > 1 and bbox.y0 <= hy0 + 1
+                and bbox.y1 >= hy1 - 1):
             return (f"the running page header ({txt[:40]!r}) is inside the crop "
                     f"— the top edge reached above the figure")
     if page is not None:
@@ -1950,7 +2011,7 @@ def suspicious(bbox, region=None, page=None, caption_rect=None, headers=None,
 # the document would appear in the PARTIAL bucket as "cited, no caption" —
 # noise on the one signal that has no other witness.
 REF_RE = re.compile(
-    r'((?i:Supplementary|Suppl?\.|Extended\s+Data))?\s*'
+    r'\b((?i:Supplementary|Supplemental|Suppl?\.|Extended\s+Data))?\s*'
     r'(?i:Figures|Figure|Figs\.?|Fig\.?)\s+'
     r'(SI\d+(?:' + LABEL_SEP + r'\d+)*'
     r'|S\d+(?:' + LABEL_SEP + r'\d+)*'
@@ -2042,6 +2103,8 @@ def find_figure_references(doc, page_idxs=None, caption_labels=None):
     if caption_labels is None:
         caption_labels = [n for i in page_idxs
                           for n, _, _ in find_caption_blocks(doc[i])]
+    caption_labels = list(caption_labels)
+    caption_set = set(caption_labels)
     hyphenated = _uses_hyphen_labels(caption_labels)
 
     def record(marker, label):
@@ -2053,6 +2116,15 @@ def find_figure_references(doc, page_idxs=None, caption_labels=None):
         # capturing the whole span as one label.
         label = normalize_label(label)
         lab = _normalize_ref(marker, label)
+        # Superscript footnote numbers often flatten into text immediately
+        # after a sentence-ending reference, for example ``Figure 16-8.11``.
+        # Prefer the established shorter caption only when the exact dotted
+        # label is absent; a real caption numbered ``1.2.4`` keeps its label.
+        base, dot, footnote = lab.rpartition(".")
+        if (lab not in caption_set and dot and footnote.isdigit()
+                and base in caption_set):
+            lab = base
+            label = base
         out[lab] = out.get(lab, 0) + 1
         # The literal is recorded above whatever happens next, so a document
         # that really does label figures `4-6` still matches its own caption.
@@ -2190,8 +2262,9 @@ def open_pdf(path):
     Covers the two failure shapes that show up when a folder of downloads
     is pointed at these scripts: a file that isn't a PDF at all (truncated
     download, HTML error page saved with a .pdf extension) and a PDF with
-    zero pages. Both are reported for what they are — neither is an OCR
-    problem, which is what a bare "no text found" would imply.
+    zero pages, and an encrypted PDF whose page objects cannot be read. Each
+    is reported for what it is — none is an OCR problem, which is what a bare
+    "no text found" would imply.
     """
     try:
         doc = fitz.open(path)
@@ -2205,9 +2278,16 @@ def open_pdf(path):
     # for an unusual caption style in a file that is not a PDF at all.
     if not doc.is_pdf:
         fmt = (doc.metadata or {}).get("format") or "an unknown format"
+        doc.close()
         sys.exit(f"{path}: not a PDF — opened as {fmt} (an HTML error page or "
                  f"a truncated download saved with a .pdf extension)")
+    if getattr(doc, "needs_pass", False) or getattr(doc, "is_encrypted", False):
+        doc.close()
+        sys.exit(f"{path}: encrypted/password-protected PDF — decrypt a unique "
+                 "scratch copy outside Sources/PDFs, preserve the organized "
+                 "source unchanged, and run detection against the copy")
     if len(doc) == 0:
+        doc.close()
         sys.exit(f"{path}: PDF has zero pages — nothing to scan")
     return doc
 
@@ -2438,6 +2518,7 @@ def run_self_test():
             ("Figure S2-3. Title", None, "S2-3"),
             ("Figure SI1. Title", None, "SI1"),
             ("Supplementary Figure 1. Title", "Supplementary", "1"),
+            ("Supplemental Figure 1. Title", "Supplemental", "1"),
             ("Suppl. Figure 1. Title", "Suppl.", "1"),
             ("Supp. Figure 1. Title", "Supp.", "1"),
             ("Supplementary Fig. 1. Title", "Supplementary", "1"),
@@ -2465,6 +2546,7 @@ def run_self_test():
             ("Figure 1–1", None, "1–1"),                      # label, then EOL
             ("Figure 1–2. With a period", None, "1–2"),
             ("Figure S1–3. Supplementary, en-dashed", None, "S1–3"),
+            ("Figure 16−8. Unicode-minus chapter label", None, "16−8"),
     ):
         m = CAP_RE.search(text)
         state["n"] += 1
@@ -2520,6 +2602,42 @@ def run_self_test():
     ok("the detected caption belongs to the actual chart",
        len(found) == 1 and found[0][4].y0 > 400
        and found[0][3].y0 <= 200 and found[0][3].y1 >= 400)
+    doc.close()
+
+    # A wrapped body reference may be the first caption-shaped match in its
+    # block. This is the live shape in Alberts chapter 4 ("only some of which
+    # are depicted in / Figure 4–11. Regardless ..."). Requiring a prior match
+    # turned it into a second Figure 4-11 caption and a collision.
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 300), "Only some features are depicted in", fontsize=8)
+    page.insert_text((72, 312), "Figure 4-11. Regardless of the representation,", fontsize=8)
+    check("a wrapped narrative reference cannot be a block's first caption",
+          find_caption_blocks(page), [])
+    doc.close()
+
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 300), "The parts are visible, as you can see in", fontsize=8)
+    page.insert_text((72, 312), "Figure 16-8.11 See the notebook for code.", fontsize=8)
+    check("a reference with a glued footnote stays prose after 'see in'",
+          find_caption_blocks(page), [])
+    doc.close()
+
+    # Géron chapter 7 contains a prose paragraph beginning "Figure 7-3.
+    # Ta-da!" above the real italic Figure 7-3 caption on the same page. The
+    # identical label, different styles, and multi-sentence prose together are
+    # enough to reject the paragraph without guessing between ordinary
+    # same-style duplicate captions.
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 100), "Figure 7-3. Ta-da! We reduced three dimensions.",
+                     fontsize=8)
+    page.insert_text((72, 112), "Note that the axes are new features.", fontsize=8)
+    page.insert_text((72, 400), "Figure 7-3. The projected dataset",
+                     fontsize=8, fontname="Times-Italic")
+    check("styled real caption defeats same-label prose opener",
+          [f[0] for f in find_caption_blocks(page)], ["7-3"])
     doc.close()
 
     # --- label normalisation, through the function that names the file ----
@@ -2688,9 +2806,9 @@ def run_self_test():
     hdoc = _st_header_doc(True)
     bands = header_bands(hdoc)
     check("header_bands on a doc with a running head",
-          [t for _, _, t in bands], ["JOURNAL OF SYNTHETIC RESULTS"])
+          [t for _, _, _, _, t in bands], ["JOURNAL OF SYNTHETIC RESULTS"])
     ok("the band sits in the page's top strip",
-       bool(bands) and bands[0][0] < header_y(hdoc[0]) and bands[0][1] > 30)
+       bool(bands) and bands[0][1] < header_y(hdoc[0]) and bands[0][3] > 30)
     hdoc.close()
     ndoc = _st_header_doc(False)
     check("header_bands on a doc with no running head", header_bands(ndoc), [])
@@ -2701,6 +2819,8 @@ def run_self_test():
     ok("suspicious: the running head is inside the crop",
        "running page header" in suspicious(
            fitz.Rect(60, 25, 520, 420), None, None, None, bands))
+    check("suspicious: a horizontally separate crop misses the running head",
+          suspicious(fitz.Rect(300, 25, 560, 420), None, None, None, bands), "")
     check("suspicious: the crop stops below the running head",
           suspicious(fitz.Rect(60, 60, 520, 420), None, None, None, bands), "")
 
@@ -3708,6 +3828,16 @@ def run_self_test():
     edoc.close()
     edoc = fitz.open()
     epage = edoc.new_page(width=612, height=792)
+    epage.insert_text((72, 120), "See Figure 16-8.11 for the mechanism.",
+                      fontsize=9)
+    check("a glued footnote is folded to an established caption label",
+          sorted(find_figure_references(edoc, caption_labels=["16-8"])),
+          ["16-8"])
+    check("the glued footnote does not create a missing figure",
+          caption_coverage(edoc, ["16-8"])[1], [])
+    edoc.close()
+    edoc = fitz.open()
+    epage = edoc.new_page(width=612, height=792)
     epage.insert_text((72, 120), "Figure 4-2 and Figure 9 are chapter labels.",
                       fontsize=9)
     # A HYPHEN inside a number is part of the label (`Figure 1-2` is Géron's
@@ -3784,6 +3914,24 @@ def run_self_test():
             state["bad"] += 1
             print("FAIL open_pdf refused a good PDF: %s" % exc)
 
+        encrypted = os.path.join(tmp, "Doe_Locked_2025.pdf")
+        encrypted_doc = fitz.open(good)
+        encrypted_doc.save(
+            encrypted, encryption=fitz.PDF_ENCRYPT_AES_256,
+            owner_pw="owner-secret", user_pw="reader-secret")
+        encrypted_doc.close()
+        state["n"] += 1
+        try:
+            open_pdf(encrypted)
+            state["bad"] += 1
+            print("FAIL open_pdf accepted an encrypted PDF")
+        except SystemExit as exc:
+            message = str(exc)
+            if "encrypted/password-protected" not in message or "scratch" not in message:
+                state["bad"] += 1
+                print("FAIL open_pdf on an encrypted PDF was not actionable: %r"
+                      % message)
+
         def run(argv):
             so, se = io.StringIO(), io.StringIO()
             code = 0
@@ -3798,6 +3946,9 @@ def run_self_test():
         check("--emit extract derives the exact PDF stem", code, 0)
         ok("...and includes that stem in the emitted command",
            "--stem Doe_Foo_2025" in so)
+        code, once, se = run([good, "--pages", "1"])
+        code, repeated, se = run([good, "--pages", "1,1"])
+        check("duplicate --pages selections are de-duplicated", repeated, once)
         code, so, se = run([good, "--emit", "extract", "--stem", "Other"])
         ok("--emit extract refuses a mismatched explicit stem",
            code != 0 and "exact" in str(code))
@@ -3856,7 +4007,19 @@ def run_self_test():
     return 1 if state["bad"] else 0
 
 
+def _configure_stdio():
+    """Keep source paths and crop diagnostics writable through narrow pipes."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="backslashreplace")
+            except (AttributeError, OSError, ValueError):
+                pass
+
+
 def main(argv=None):
+    _configure_stdio()
     p = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__,
@@ -3929,7 +4092,8 @@ def main(argv=None):
                     f"--pages: page {tok} out of range "
                     f"(PDF has {len(doc)} pages)"
                 )
-            page_idxs.append(idx)
+            if idx not in page_idxs:
+                page_idxs.append(idx)
         if not page_idxs:
             sys.exit(f"--pages: {args.pages!r} names no page")
     else:
@@ -3998,6 +4162,9 @@ def main(argv=None):
                 f"--stem {shlex.quote(stem)}",
             ] + crop_lines
             print(" \\\n".join(lines))
+    elif not found_labels:
+        print("# No figure captions detected on the selected page(s).",
+              file=sys.stderr)
 
     if n_skipped:
         print(

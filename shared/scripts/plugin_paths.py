@@ -59,15 +59,11 @@ was actually shipped:
     locations and the fix, not a fall-through to ``ModuleNotFoundError: No
     module named 'slugify'``.
 
-The lack of a co-located fallback is why the snippet is deliberately stricter
-than :func:`find_shared_scripts`.  It cannot
-have one, because it does not know which module the script is about to import
--- and "a slug module sitting next to the script wins when ``shared/`` is
-absent" is one typo in a walk-up away from being the shadowing bug again.  A
-skill genuinely extracted alone points ``$OBSIDIAN_VAULT_SHARED`` at the
-directory holding every shared module that script declares; the error message
-says so.  The richer, fallback-bearing search below is still available to
-anything that has already imported this module.
+The snippet knows the complete required-module list before it searches, so it
+can use the same final co-located fallback as :func:`find_shared_scripts`.
+That directory is accepted only when every declared helper is present. A stray
+same-named module beside a normally installed skill cannot win because the
+plugin-relative shared directory is searched first.
 
 SEARCH ORDER (:func:`find_shared_scripts`)
 ------------------------------------------
@@ -148,7 +144,7 @@ PROBE_MODULE = "slugify"
 BOOTSTRAP = '''\
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
-_here = _os.path.dirname(_os.path.abspath(__file__))
+_here = _os.path.dirname(_os.path.realpath(__file__))
 _required = tuple(_m + ".py" for _m in (
     globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
@@ -159,6 +155,7 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
+    _tried.append(_here)                   # extracted skill with co-located helpers
 _missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
             for _p in _tried if _os.path.isdir(_p)}
 _shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
@@ -198,9 +195,9 @@ class SharedLayerNotFound(ImportError):
 
 def _caller_dir(start):
     if start:
-        return os.path.dirname(os.path.abspath(start)) if os.path.isfile(start) \
-            else os.path.abspath(start)
-    return os.path.dirname(os.path.abspath(__file__))
+        resolved = os.path.realpath(start)
+        return os.path.dirname(resolved) if os.path.isfile(resolved) else resolved
+    return os.path.dirname(os.path.realpath(__file__))
 
 
 def find_shared_scripts(start=None, module=None, _trace=None):
@@ -209,9 +206,8 @@ def find_shared_scripts(start=None, module=None, _trace=None):
     ``start`` is a file or directory to search up from (default: this file's
     directory).  ``module`` is an optional bare module name (``"slugify"``)
     that a candidate must contain; :data:`PROBE_MODULE` is used when it is
-    omitted.  The co-located fallback still requires an explicitly named
-    module, because otherwise it cannot tell a stray directory from a usable
-    one.
+    omitted. The co-located fallback applies the same probe, so it can tell a
+    stray directory from a usable extracted skill.
 
     Raises :class:`SharedLayerNotFound` with a message naming every location
     tried and the fix.
@@ -274,12 +270,11 @@ def find_shared_scripts(start=None, module=None, _trace=None):
         d = parent
 
     # 3. co-located fallback (skill extracted alone)
-    if module:
-        cand = os.path.join(base, module + ".py")
-        hit = os.path.isfile(cand)
-        trace.append(("co-located", cand, hit))
-        if hit:
-            return base
+    cand = os.path.join(base, probe + ".py")
+    hit = os.path.isfile(cand)
+    trace.append(("co-located", cand, hit))
+    if hit:
+        return base
 
     tried = "\n".join("  %-11s %s%s" % (
         kind, path, "" if ok else "  (missing directory or %s.py)" % probe)
@@ -484,7 +479,7 @@ def run_self_test():
         else:
             os.environ[ENV_VAR] = value
 
-    tmp = tempfile.mkdtemp(prefix="plugin_paths-selftest-")
+    tmp = os.path.realpath(tempfile.mkdtemp(prefix="plugin_paths-selftest-"))
     saved_env = os.environ.get(ENV_VAR)
     saved_path = list(sys.path)
     try:
@@ -507,6 +502,18 @@ def run_self_test():
         eq("full plugin: not the co-located fallback", info["co_located_fallback"], False)
         eq("full plugin: plugin_root is the plugin", plugin_root(start=script), plug)
         agree("full plugin: describe and plugin_root agree", script)
+
+        # Claude/Codex installations may expose a skill through a symlink.
+        # Resolve the script itself before walking, so the source plugin's
+        # shared directory remains discoverable.
+        linked_script = os.path.join(tmp, "linked-skill-script.py")
+        try:
+            os.symlink(script, linked_script)
+        except (AttributeError, NotImplementedError, OSError):
+            linked_script = None
+        if linked_script is not None:
+            eq("symlinked skill script resolves from its source tree",
+               find_shared_scripts(start=linked_script), shared)
 
         sys.path[:] = list(saved_path)
         eq("ensure_shared_on_path returns the directory",
@@ -563,8 +570,8 @@ def run_self_test():
         _touch(os.path.join(copy_dir, "slugify.py"))
         eq("co-located copy: resolves to the script's own directory",
            find_shared_scripts(start=copy_script, module="slugify"), copy_dir)
-        refuses("co-located copy: only when the module is named",
-                find_shared_scripts, start=copy_script)
+        eq("co-located copy: the default probe resolves too",
+           find_shared_scripts(start=copy_script), copy_dir)
         info = describe(start=copy_script)
         eq("co-located copy: resolved via the fallback", info["via"], "co-located")
         eq("co-located copy: reported as a fallback, not silently authoritative",
@@ -744,14 +751,15 @@ def run_self_test():
                 eq("BOOTSTRAP %s: the script's own directory is second" % label,
                    path[1], os.path.dirname(os.path.abspath(start)))
 
-        # The snippet is deliberately STRICTER than find_shared_scripts: it
-        # has no co-located step, because it cannot know which module the
-        # script is about to import.  That asymmetry is documented, so it is
-        # asserted rather than left to be "fixed" by a future reader.
         path, err = _run_bootstrap(copy_script)
-        eq("BOOTSTRAP has no co-located fallback", path, None)
-        eq("...where find_shared_scripts does have one",
-           find_shared_scripts(start=copy_script, module="slugify"), copy_dir)
+        eq("BOOTSTRAP reaches co-located helpers for an extracted skill",
+           path[0] if path else None, copy_dir)
+        eq("BOOTSTRAP co-located fallback emits no error", err, None)
+        if linked_script is not None:
+            path, err = _run_bootstrap(linked_script)
+            eq("BOOTSTRAP resolves a symlinked skill through its source tree",
+               path[0] if path else None, shared)
+            eq("BOOTSTRAP symlink resolution emits no error", err, None)
 
         # A copy dropped beside the script must not shadow the shared one.
         _touch(os.path.join(here, "slugify.py"))
@@ -841,7 +849,19 @@ def run_self_test():
 # CLI
 # ---------------------------------------------------------------------------
 
+def _configure_utf8_stdio():
+    """Keep paths and diagnostics writable through legacy Windows pipes."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="backslashreplace")
+            except (OSError, ValueError):
+                pass
+
+
 def main(argv=None):
+    _configure_utf8_stdio()
     p = argparse.ArgumentParser(
         prog="plugin_paths.py",
         description="Locate the obsidian plugin's shared/scripts/ folder.",

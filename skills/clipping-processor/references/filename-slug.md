@@ -16,6 +16,12 @@ The complete stem must also be portable. `CON`, `PRN`, `AUX`, `NUL`,
 when `.md` is appended. The helper refuses them on every host. Add the real
 author or year, or choose a more specific topic; do not publish a Unix-only
 note name and expect a later rename to carry its attachment namespace safely.
+The helper also caps the UTF-8 stem at 180 bytes so the longer
+`<slug>_fig_<N>.<ext>` attachment names still fit. It spells `+`, `#`, and `*`
+inside content words as `Plus`, `Sharp`, and `Star` (for example `C++` becomes
+`CPlusPlus`) so distinct technical names do not collapse onto one slug; other
+punctuation is dropped. Do not hand-build a longer or differently collapsed
+stem after the helper reports its shortening or symbol notes.
 
 ## Author segment
 
@@ -38,7 +44,7 @@ The comma-flip for surname-first names applies **only within a single author's n
 
 ## Short topic segment
 
-Use 2–4 content words from the **corrected** title, **Title-Cased** (capitalize the first letter of each word), underscore-separated. Keep the nouns and verbs that actually identify the topic; drop articles, prepositions, possessives, and rhetorical filler (`a`, `the`, `of`, `for`, `just`, `how`, `why`, `is`, `met`, `bullish on`, etc.). **Acronyms and initialisms are fully uppercased** (`LLM`, `RNA`, `AI`, `KRAS`, `GPT`, `AGI`, `OOM`) — and a trailing plural `s` stays lowercase, so `LLMs`, `OOMs`, `GPUs`. A word that mixes an acronym with a number is uppercased as a unit: `gpt4` → `GPT4`. **A word that already carries an internal capital — a brand, product, or camelCase name — keeps its own casing rather than being forced to Title Case:** `iPhone` stays `iPhone` (not `Iphone`), `macOS` stays `macOS`, `PyTorch` stays `PyTorch`, `eLife` stays `eLife`. (The Title-Case topic plus the proper-cased author make the file pane far more scannable than an all-lowercase slug.)
+Use 2–4 content words from the **corrected** title, **Title-Cased** (capitalize the first letter of each word), underscore-separated. Keep the nouns and verbs that actually identify the topic; drop articles, prepositions, possessives, and rhetorical filler (`a`, `the`, `of`, `for`, `just`, `how`, `why`, `is`, `met`, `bullish on`, etc.). **Acronyms and initialisms are fully uppercased** (`LLM`, `RNA`, `AI`, `KRAS`, `GPT`, `AGI`, `OOM`) — and a trailing plural `s` stays lowercase, so `LLMs`, `OOMs`, `GPUs`. A word that mixes a known acronym with a number is uppercased as a unit: `gpt4` → `GPT4`; ordinary numeric terms keep their spelling (`web3` → `Web3`, `10x` → `10x`, `1st` → `1st`). **A word that already carries an internal capital — a brand, product, or camelCase name — keeps its own casing rather than being forced to Title Case:** `iPhone` stays `iPhone` (not `Iphone`), `macOS` stays `macOS`, `PyTorch` stays `PyTorch`, `eLife` stays `eLife`. (The Title-Case topic plus the proper-cased author make the file pane far more scannable than an all-lowercase slug.)
 
 - "Pancreatic cancer just met its match" → `Pancreatic_Cancer`
 - "How LLMs work: a deep dive" → `LLMs_Deep_Dive`

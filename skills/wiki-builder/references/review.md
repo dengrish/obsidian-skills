@@ -50,7 +50,7 @@ Fix prose contributed by the active source during this run before finalizing. Th
 
 Each bullet appears only when it has content, except the audit bullets, which report their count even when zero (so it's visible the audit ran):
 
-- **Sources processed** — filename(s), classification, counts: `attention.pdf — primary; 9 entries created, 2 merged`. When step 1 resolved a pairing, name both files and which one was read: `attention.pdf — primary (read in place of the note attention.md the run was handed)`.
+- **Sources processed** — filename(s), classification, counts: `Vaswani_AttentionIsAllYouNeed_2017.pdf — primary; 9 entries created, 2 merged`. When step 1 resolved a pairing, name both files and which one was read: `Vaswani_AttentionIsAllYouNeed_2017.pdf — primary (read in place of the note attention.md the run was handed)`.
 - **Sources skipped (previously processed, no rerun/resume intent)** — `<filename> (already in N entries)`
 - **Sources skipped (no durable content)** — `<filename> — <classification>; <one-line reason>`
 - **Entities accepted** — with type breakdown

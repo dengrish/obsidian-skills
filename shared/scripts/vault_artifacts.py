@@ -205,7 +205,7 @@ class InventoryIncomplete(OSError):
     """A recursive inventory could not establish a complete namespace."""
 
 
-def inventory_pdfs(root, *, include_hidden=True):
+def inventory_pdfs(root, *, include_hidden=False):
     """Inventory every ``.pdf`` directory entry below *root*.
 
     Directory symlinks are followed.  Physical identities are tracked per
@@ -217,9 +217,9 @@ def inventory_pdfs(root, *, include_hidden=True):
     later uniqueness claim unsound. Other non-regular PDF-named entries are
     also retained and reported.
 
-    ``include_hidden=False`` skips dot-prefixed entries and their subtrees.
-    That option is for consumers whose documented source scope excludes hidden
-    files; vault-wide bare-link checks should keep the default.
+    Dot-prefixed entries and subtrees are skipped by default because consumer
+    source scopes exclude vault internals such as ``.trash`` and ``.obsidian``.
+    ``include_hidden=True`` is an explicit forensic inventory mode.
     """
     root_path = Path(os.path.abspath(os.path.expanduser(os.fspath(root))))
     entries = []
@@ -748,6 +748,20 @@ def run_self_test():
         decision = verify_selected_pdf(vault, selected, inventory=inv)
         check("one selected vault basename is unique", decision.unique, True)
 
+        hidden = vault / ".trash"
+        hidden.mkdir()
+        hidden_pdf = hidden / "Discarded_Study_2020.pdf"
+        hidden_pdf.write_bytes(b"%PDF fixture")
+        check("default consumer inventory excludes dot-prefixed vault trees",
+              [p.name for p in inventory_pdfs(vault).paths],
+              ["García_Study_2025.pdf", "Other_Work_2024.PDF"])
+        check("forensic inventory can include dot-prefixed vault trees",
+              "Discarded_Study_2020.pdf" in
+              [p.name for p in inventory_pdfs(vault, include_hidden=True).paths],
+              True)
+        hidden_pdf.unlink()
+        hidden.rmdir()
+
         collision_dir = vault / "Archive"
         collision_dir.mkdir()
         collision = collision_dir / "Garci\u0301a_Study_2025.PDF"
@@ -997,14 +1011,22 @@ def run_self_test():
 
 
 def main(argv=None):
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if callable(reconfigure):
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (OSError, ValueError):
+            pass
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--test", action="store_true", help="run self-tests")
     sub = parser.add_subparsers(dest="command")
     pdfs = sub.add_parser("pdfs", help="inventory portable PDF basenames")
     pdfs.add_argument("--vault", required=True, help="selected vault root")
     pdfs.add_argument("--selected", help="PDF whose basename must be unique")
-    pdfs.add_argument("--exclude-hidden", action="store_true",
-                      help="skip dot-prefixed files and subtrees")
+    pdfs.add_argument("--include-hidden", action="store_true",
+                      help="also inventory dot-prefixed files and subtrees")
+    pdfs.add_argument("--exclude-hidden", action="store_false",
+                      dest="include_hidden", help=argparse.SUPPRESS)
     figures = sub.add_parser("figures", help="inventory one source's figures")
     figures.add_argument("--images", required=True,
                          help="flat Sources/Images folder")
@@ -1015,7 +1037,7 @@ def main(argv=None):
         return run_self_test()
     if args.command == "pdfs":
         inventory = inventory_pdfs(args.vault,
-                                   include_hidden=not args.exclude_hidden)
+                                   include_hidden=args.include_hidden)
         has_selection = args.selected is not None
         result = (verify_selected_pdf(args.vault, args.selected,
                                       inventory=inventory)

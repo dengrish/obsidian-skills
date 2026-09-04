@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -19,6 +20,23 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _can_create_symlink():
+    """Whether this host grants the test process symlink privileges."""
+    try:
+        with tempfile.TemporaryDirectory(prefix="obsidian-symlink-probe-") as tmp:
+            root = Path(tmp)
+            target = root / "target"
+            link = root / "link"
+            target.write_text("probe", encoding="utf-8")
+            link.symlink_to(target)
+            return link.is_symlink()
+    except (AttributeError, NotImplementedError, OSError):
+        return False
+
+
+CAN_CREATE_SYMLINK = _can_create_symlink()
 
 
 def load(name, path):
@@ -102,6 +120,9 @@ class CompatibilityTests(unittest.TestCase):
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
             self.assertEqual(set(archive.namelist()), set(expected))
             self.assertEqual(len(archive.namelist()), len(expected))
+            self.assertTrue(all(
+                info.compress_type == zipfile.ZIP_STORED
+                for info in archive.infolist()))
             for name, data in expected.items():
                 self.assertEqual(archive.read(name), data, name)
                 self.assertFalse(Path(name).is_absolute())
@@ -117,6 +138,8 @@ class CompatibilityTests(unittest.TestCase):
         convert.assert_called_once_with(files[".claude-plugin/plugin.json"])
         self.assertEqual(files[".codex-plugin/plugin.json"], derived)
 
+    @unittest.skipUnless(CAN_CREATE_SYMLINK,
+                         "host does not grant symlink privileges")
     def test_packaging_does_not_read_through_source_symlinks(self):
         build = load("build_plugin", ROOT / "tools/build_plugin.py")
         with tempfile.TemporaryDirectory(prefix="obsidian-package-boundary-") as tmp:
@@ -146,6 +169,8 @@ class CompatibilityTests(unittest.TestCase):
                             path.write_bytes(original)
                     self.assertEqual(foreign.read_text(), "not repository content")
 
+    @unittest.skipUnless(CAN_CREATE_SYMLINK,
+                         "host does not grant symlink privileges")
     def test_packaging_rejects_a_source_swapped_during_the_read(self):
         build = load("build_plugin_source_race", ROOT / "tools/build_plugin.py")
         with tempfile.TemporaryDirectory(prefix="obsidian-package-race-") as tmp:
@@ -194,6 +219,8 @@ class CompatibilityTests(unittest.TestCase):
                 with self.assertRaises(OSError):
                     build.package_files(root)
 
+    @unittest.skipUnless(CAN_CREATE_SYMLINK,
+                         "host does not grant symlink privileges")
     def test_build_does_not_write_through_output_symlinks(self):
         with tempfile.TemporaryDirectory(prefix="obsidian-build-boundary-") as tmp:
             root = Path(tmp) / "plugin"
@@ -213,6 +240,8 @@ class CompatibilityTests(unittest.TestCase):
             self.assertEqual(foreign.read_text(), "preserve external bytes")
             self.assertTrue((root / "obsidian.plugin").is_symlink())
 
+    @unittest.skipUnless(CAN_CREATE_SYMLINK,
+                         "host does not grant symlink privileges")
     def test_generated_publication_preserves_late_occupants_and_changes(self):
         build = load("build_plugin_publication", ROOT / "tools/build_plugin.py")
         with tempfile.TemporaryDirectory(prefix="obsidian-build-races-") as tmp:
@@ -293,6 +322,8 @@ class CompatibilityTests(unittest.TestCase):
             self.assertEqual(fallback.read_bytes(), b"fallback bytes")
             self.assertEqual(os.getcwd(), cwd)
 
+    @unittest.skipUnless(CAN_CREATE_SYMLINK,
+                         "host does not grant symlink privileges")
     def test_generated_publication_rejects_a_late_parent_symlink(self):
         build = load("build_plugin_parent_race", ROOT / "tools/build_plugin.py")
         with tempfile.TemporaryDirectory(prefix="obsidian-build-parent-race-") as tmp:
@@ -434,6 +465,182 @@ class CompatibilityTests(unittest.TestCase):
             self.assertTrue(any(case[0] == "C++" for case in detected[0]["diffs"]))
             self.assertFalse(sentinel.exists())
 
+    def test_import_gate_covers_definition_time_and_arbitrary_methods(self):
+        conventions = load("convention_import_gate", ROOT / "tests/test_conventions.py")
+        unsafe = {
+            "function default": "def f(value=run_now()):\n    return value\n",
+            "function annotation": "def f(value: run_now()):\n    return value\n",
+            "class body": "class C:\n    value = run_now()\n",
+            "bare imported decorator":
+                "from danger import mutate\n@mutate\ndef f():\n    pass\n",
+            "bare imported base":
+                "from danger import Base\nclass C(Base):\n    pass\n",
+            "bare imported metaclass":
+                "from danger import meta\nclass C(metaclass=meta):\n    pass\n",
+            "method receiver": "value = imported.copy()\n",
+            "subscript method receiver": "value = imported[0].copy()\n",
+            "uppercase imported receiver":
+                "import shutil as PAYLOAD\nvalue = PAYLOAD.copy('a', 'b')\n",
+            "uppercase module alias":
+                "import shutil\nPAYLOAD = shutil\n"
+                "value = PAYLOAD.copy('a', 'b')\n",
+            "trusted root imported from the wrong module":
+                "from danger import re\nvalue = re.compile('x')\n",
+            "walrus shadows qualified pure root":
+                "(re := attacker)\nvalue = re.compile('x')\n",
+            "walrus shadows pure builtin":
+                "(sorted := attacker)\nvalue = sorted()\n",
+        }
+        for label, source in unsafe.items():
+            with self.subTest(label=label):
+                self.assertTrue(conventions.module_scope_effects(source))
+        self.assertEqual(
+            conventions.module_scope_effects(
+                'VALUE = {"a": 1}.copy()\n'
+                'TEXT = ",".join(("a", "b"))\n'
+                'class LocalBase:\n    pass\n'
+                'class LocalChild(LocalBase):\n    pass\n'
+                'class Typed(metaclass=type):\n    pass\n'
+                '@property\ndef value(self):\n    return 1\n'),
+            [],
+        )
+
+        # Static refusal must happen before the probe imports the candidate.
+        # Each spelling below used to return an empty effect list, so the child
+        # process executed the callback with the repository as its cwd.
+        with tempfile.TemporaryDirectory(prefix="obsidian-import-callback-") as tmp:
+            directory = Path(tmp)
+            callbacks = {
+                "local_decorator": lambda sentinel: (
+                    "def mutate(item):\n"
+                    f"    open({str(sentinel)!r}, 'w').write('ran')\n"
+                    "    return item\n"
+                    "@mutate\n"
+                    "def value():\n    return 1\n"),
+                "shadowed_property": lambda sentinel: (
+                    "def property(item):\n"
+                    f"    open({str(sentinel)!r}, 'w').write('ran')\n"
+                    "    return item\n"
+                    "@property\n"
+                    "def value():\n    return 1\n"),
+                "local_base_callback": lambda sentinel: (
+                    "class Base:\n"
+                    "    def __init_subclass__(cls):\n"
+                    f"        open({str(sentinel)!r}, 'w').write('ran')\n"
+                    "class Child(Base):\n    pass\n"),
+                "local_metaclass": lambda sentinel: (
+                    "class Meta(type):\n"
+                    "    def __new__(mcls, name, bases, namespace):\n"
+                    f"        open({str(sentinel)!r}, 'w').write('ran')\n"
+                    "        return type.__new__(mcls, name, bases, namespace)\n"
+                    "class Child(metaclass=Meta):\n    pass\n"),
+                "shadowed_pure_call": lambda sentinel: (
+                    "def sorted():\n"
+                    f"    open({str(sentinel)!r}, 'w').write('ran')\n"
+                    "    return ()\n"
+                    "VALUE = sorted()\n"),
+                "walrus_shadowed_pure_call": lambda sentinel: (
+                    "def attacker():\n"
+                    f"    open({str(sentinel)!r}, 'w').write('ran')\n"
+                    "    return ()\n"
+                    "(sorted := attacker)\n"
+                    "VALUE = sorted()\n"),
+            }
+            for label, source_for in callbacks.items():
+                with self.subTest(local_callback=label):
+                    sentinel = directory / (label + ".sentinel")
+                    candidate = directory / (label + ".py")
+                    candidate.write_text(source_for(sentinel), encoding="utf-8")
+                    result = conventions.probe_module(str(candidate))
+                    self.assertTrue(result["refused"], result)
+                    self.assertFalse(sentinel.exists())
+
+    def test_static_constant_reader_never_imports_the_target(self):
+        conventions = load("convention_static_constants", ROOT / "tests/test_conventions.py")
+        with tempfile.TemporaryDirectory(prefix="obsidian-static-constant-") as tmp:
+            sentinel = Path(tmp) / "must-not-exist"
+            source = Path(tmp) / "module.py"
+            source.write_text(
+                "from pathlib import Path\n"
+                f"Path({str(sentinel)!r}).write_text('ran')\n"
+                "GENERIC_HEADINGS = frozenset({'question', 'methods'})\n",
+                encoding="utf-8",
+            )
+            namespace = conventions.mod_generic(str(source))
+            self.assertEqual(
+                namespace.GENERIC_HEADINGS, frozenset({"question", "methods"}))
+            self.assertFalse(sentinel.exists())
+
+    def test_documented_continuation_flags_are_checked(self):
+        conventions = load("convention_continued_flags", ROOT / "tests/test_conventions.py")
+        conv = (ROOT / "shared/CONVENTIONS.md").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory(prefix="obsidian-command-surface-") as tmp:
+            script = Path(tmp) / "demo.py"
+            script.write_text(
+                "import argparse\n"
+                "def main():\n"
+                "    parser = argparse.ArgumentParser()\n"
+                "    parser.add_argument('--real')\n",
+                encoding="utf-8",
+            )
+            prose = "python3 scripts/demo.py " + "\\\n  --missing value\n"
+            report = conventions.Report()
+            with patch.object(conventions, "bundled_scripts", return_value=[str(script)]), \
+                    patch.object(conventions, "walk_plugin_files",
+                                 return_value=[(str(Path(tmp) / "guide.md"), prose)]):
+                conventions.check_script_surface(report, conv)
+            failures = report.by_status("FAIL")
+            self.assertTrue(any("--missing" in row[3] for row in failures))
+
+    def test_complete_yaml_examples_without_delimiters_are_still_checked(self):
+        conventions = load(
+            "convention_yaml_examples", ROOT / "tests/test_conventions.py")
+        canonical = (ROOT / "shared/CONVENTIONS.md").read_text(
+            encoding="utf-8")
+        example = '''```yaml
+title: "Fixture"
+type: Concept
+sources:
+  - "[[Doe_Work_2025.pdf#page=1]]"
+created: 2026-09-03
+updated: 2026-09-03
+description: "A fixture exercises semantic checking."
+tags:
+  - #statistics
+parents: []
+read: false
+```
+'''
+        report = conventions.Report()
+        with patch.object(
+                conventions, "walk_skill_files",
+                return_value=[("wiki-builder", "fixture.md", example)]):
+            conventions.check_yaml_examples(report, canonical)
+        failures = [row[3] for row in report.by_status("FAIL")
+                    if row[0] == "yaml-example"]
+        self.assertTrue(any("tags:" in message for message in failures),
+                        failures)
+
+    def test_reference_paths_require_exact_case(self):
+        conventions = load("convention_reference_case", ROOT / "tests/test_conventions.py")
+        exact = ROOT / "shared/CONVENTIONS.md"
+        wrong = ROOT / "shared/conventions.md"
+        self.assertTrue(conventions._exact_regular_file(str(exact)))
+        self.assertFalse(conventions._exact_regular_file(str(wrong)))
+        self.assertIsNotNone(
+            conventions.PATH_REF.search("references/WrongCase.md"))
+
+        report = conventions.Report()
+        conv = (ROOT / "shared/CONVENTIONS.md").read_text(encoding="utf-8")
+        with patch.object(
+                conventions, "walk_plugin_files",
+                return_value=[(str(ROOT / "README.md"),
+                               "Consult `shared/MissingGuide.md`.\n")]):
+            conventions.check_reference_paths(report, conv)
+        self.assertTrue(any(
+            "shared/MissingGuide.md" in row[3]
+            for row in report.by_status("FAIL")))
+
     def test_heading_check_preserves_import_paths_and_reports_unreadable_rules(self):
         conventions = load("convention_headings", ROOT / "tests/test_conventions.py")
         before = list(sys.path)
@@ -445,6 +652,26 @@ class CompatibilityTests(unittest.TestCase):
             conventions.check_note_headings(report, (ROOT / "shared/CONVENTIONS.md").read_text())
         self.assertEqual(report.exit_code(), 1)
         self.assertTrue(any("GENERIC_HEADINGS" in row[3] for row in report.by_status("FAIL")))
+
+    def test_builder_and_linter_share_source_identity(self):
+        builder = load(
+            "compat_builder_source_identity",
+            ROOT / "skills/wiki-builder/scripts/lint_entry.py")
+        linter = load(
+            "compat_linter_source_identity",
+            ROOT / "skills/wiki-linter/scripts/scan_vault.py")
+        cases = (
+            "stub",
+            "[[Doe_Study_2025.pdf#page=7]]",
+            "[[Sources/PDFs/Doe_Study_2025.pdf#page=7|page 7]]",
+            "[[Cafe\u0301.md]]",
+            "[[CAFÉ.MD]]",
+            "malformed-without-extension",
+        )
+        for item in cases:
+            with self.subTest(item=item):
+                self.assertEqual(builder.source_stem(item),
+                                 linter.source_stem(item))
 
     def test_heading_contract_requires_its_reference_and_ordered_examples(self):
         conventions = load("convention_heading_contract", ROOT / "tests/test_conventions.py")
@@ -476,6 +703,19 @@ class CompatibilityTests(unittest.TestCase):
                 self.assertEqual(report.exit_code(), 1)
                 self.assertTrue(any("role table" in row[3]
                                     for row in report.by_status("FAIL")))
+
+        original = format_path.read_text(encoding="utf-8")
+        changed = original.replace("MAX_STEPS=8", "MAX_STEPS=9")
+        self.assertNotEqual(changed, original)
+        report = conventions.Report()
+        with patch.object(
+                conventions, "read",
+                side_effect=lambda path: changed
+                if Path(path) == format_path else read(path)):
+            conventions.check_note_headings(report, conv)
+        self.assertEqual(report.exit_code(), 1)
+        self.assertTrue(any("numeric limits" in row[3]
+                            for row in report.by_status("FAIL")))
 
     def test_figure_caption_checks_follow_the_writers_scope(self):
         conventions = load("convention_caption_scope", ROOT / "tests/test_conventions.py")
@@ -516,12 +756,95 @@ class CompatibilityTests(unittest.TestCase):
             imported = (install / "CLAUDE.md").read_text().strip().removeprefix("@")
             self.assertEqual((install / imported).read_bytes(), (ROOT / "AGENTS.md").read_bytes())
             check = [sys.executable, str(install / "tools/build_plugin.py"), "--check"]
+            clean_env = dict(os.environ)
+            clean_env.pop("OBSIDIAN_VAULT_SHARED", None)
+            # A source checkout need not already contain the generated Codex
+            # directory. `--check` stays write-free; the build creates it.
+            shutil.rmtree(install / ".codex-plugin")
+            missing = subprocess.run(
+                check, cwd=vault, capture_output=True, env=clean_env)
+            self.assertEqual(missing.returncode, 1)
+            self.assertFalse((install / ".codex-plugin").exists())
             # The archive does not contain itself: build it in the isolated copy.
-            subprocess.run(check[:-1], cwd=vault, check=True, capture_output=True)
-            self.assertEqual(subprocess.run(check, cwd=vault, capture_output=True).returncode, 0)
+            subprocess.run(
+                check[:-1], cwd=vault, check=True, capture_output=True,
+                env=clean_env)
+            self.assertTrue((install / ".codex-plugin/plugin.json").is_file())
+            self.assertEqual(subprocess.run(
+                check, cwd=vault, capture_output=True,
+                env=clean_env).returncode, 0)
             with (install / "shared/RUNTIME.md").open("a") as output:
                 output.write("\nChanged after packaging.\n")
-            self.assertNotEqual(subprocess.run(check, cwd=vault, capture_output=True).returncode, 0)
+            self.assertNotEqual(subprocess.run(
+                check, cwd=vault, capture_output=True,
+                env=clean_env).returncode, 0)
+
+    def test_unicode_cli_output_survives_a_narrow_redirected_stream(self):
+        """Public CLIs must not fail after work because cp1252 cannot encode it."""
+        try:
+            import pymupdf
+        except ImportError:
+            import fitz as pymupdf
+
+        with tempfile.TemporaryDirectory(prefix="obsidian-unicode-stdio-") as tmp:
+            root = Path(tmp)
+            pdf = root / "图.pdf"
+            notes = root / "Articles"
+            images = root / "Images"
+            pdfs = root / "PDFs"
+            crops = root / "Crops"
+            for path in (notes, images, pdfs, crops):
+                path.mkdir()
+            with pymupdf.open() as document:
+                page = document.new_page(width=400, height=400)
+                page.insert_text((72, 50), "Study 图", fontname="china-s")
+                page.draw_rect((100, 100, 250, 220),
+                               color=(0, 0, 0), fill=(0.2, 0.5, 0.8))
+                page.insert_text((100, 250), "Figure 1. Sample")
+                document.save(pdf)
+            (pdfs / pdf.name).write_bytes(pdf.read_bytes())
+            note = notes / "图.md"
+            note.write_text("not a valid note\n", encoding="utf-8")
+
+            env = dict(os.environ)
+            env.update({
+                "PYTHONIOENCODING": "cp1252:strict",
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "OBSIDIAN_VAULT_SHARED": str(ROOT / "shared/scripts"),
+            })
+            commands = (
+                ("plurals", 0, ROOT / "shared/scripts/plurals.py",
+                 "singular", "图"),
+                ("note lint", 1,
+                 ROOT / "skills/paper-summarizer/scripts/note_lint.py",
+                 note),
+                ("paper scan", 0,
+                 ROOT / "skills/paper-summarizer/scripts/paper_scan.py",
+                 "--src", pdfs, "--notes", notes, "--images", images,
+                 "--allow-unorganized"),
+                ("paper text", 0,
+                 ROOT / "skills/paper-summarizer/scripts/paper_text.py",
+                 pdf, "--pages"),
+                ("automatic crop", 0,
+                 ROOT / "skills/pdf-figure-extractor/scripts/auto_fig_bbox.py",
+                 pdf, "--pages", "1", "--emit", "extract"),
+                ("explicit crop", 0,
+                 ROOT / "skills/pdf-figure-extractor/scripts/extract_figures.py",
+                 pdf, "--out", crops, "--stem", pdf.stem,
+                 "--crop", "1:1:50,50,300,300", "--dpi", "72",
+                 "--no-caption-check"),
+            )
+            for label, expected, script, *arguments in commands:
+                with self.subTest(command=label):
+                    result = subprocess.run(
+                        [sys.executable, str(script), *map(str, arguments)],
+                        env=env, capture_output=True, timeout=30)
+                    output = result.stdout + result.stderr
+                    self.assertEqual(result.returncode, expected,
+                                     output.decode("utf-8", "replace"))
+                    output.decode("utf-8")
+                    self.assertIn("图".encode("utf-8"), output)
+                    self.assertNotIn(b"UnicodeEncodeError", output)
 
     def test_ambiguous_numeric_hosts_cannot_depend_on_resolver(self):
         fetch = load("fetch_images", ROOT / "skills/clipping-processor/scripts/fetch_images.py")

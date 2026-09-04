@@ -38,10 +38,10 @@ Module use:
     report = check_candidates(["Masked language modeling"], idx)
 
 CLI:
-    find_collisions.py --index index.json --title "Foo" [--title ...]
     find_collisions.py --index index.json --titles titles.json
         titles.json is either ["Foo", "Bar"] or [{"title": "Foo"}, ...]
-    find_collisions.py --wiki '<vault>/Wiki' --title "Foo"   (indexes on the fly)
+    find_collisions.py --wiki '<vault>/Wiki' --titles titles.json
+        (indexes on the fly)
       [--no-stem]      probe (f) off
       [--no-superset]  probe (g), the token-superset extension, off
       [--no-peers]     skip the candidate-vs-candidate pass
@@ -51,8 +51,10 @@ Output: per candidate {candidate, slug, matches:[{probe, matched_slug,
 matched_via, alias?, entry_slug, implies}], verdict}, plus the top-level
 ``candidate_collisions[]`` and ``summary``.
 
-Gotcha: a title that begins with "-" must use the "=" form, or argparse eats
-it as a flag -- find_collisions.py --title=--- (not --title "---").
+For source-derived or otherwise untrusted titles, always use ``--titles``;
+never interpolate title text into a shell command. ``--title`` remains a
+convenience for a literal title supplied directly by a human. A title that
+begins with ``-`` must use the equals form, such as ``--title=---``.
 
 Exit codes: 0 ok, 2 bad usage / unreadable input.
 """
@@ -69,7 +71,7 @@ _OBSIDIAN_SHARED_MODULES = ('plurals', 'slugify', 'yaml_scalars')
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
-_here = _os.path.dirname(_os.path.abspath(__file__))
+_here = _os.path.dirname(_os.path.realpath(__file__))
 _required = tuple(_m + ".py" for _m in (
     globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
@@ -80,6 +82,7 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
+    _tried.append(_here)                   # extracted skill with co-located helpers
 _missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
             for _p in _tried if _os.path.isdir(_p)}
 _shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
@@ -246,7 +249,8 @@ def build_targets(index):
 
     Returns a list of dicts:
     ``{slug, via, alias, entry_slug, path}`` -- one for each filename stem
-    and one for each alias on each entry.
+    one for its canonical title when that derives to a different slug, and one
+    for each alias on each entry.
     """
     _validate_index(index)
     targets = []
@@ -257,7 +261,22 @@ def build_targets(index):
                 "slug": slug, "via": "filename", "alias": None,
                 "entry_slug": slug, "path": rec.get("relpath") or rec.get("path"),
                 "is_stub": bool(rec.get("is_stub")),
+                "entry_errors": list(rec.get("errors") or ()),
             })
+        title = rec.get("title")
+        if isinstance(title, str) and title.strip():
+            try:
+                title_slug = slug_stem(title)
+            except SlugError:
+                title_slug = None
+            if title_slug and _fold(title_slug) != _fold(slug):
+                targets.append({
+                    "slug": title_slug, "via": "title", "alias": None,
+                    "entry_slug": slug,
+                    "path": rec.get("relpath") or rec.get("path"),
+                    "is_stub": bool(rec.get("is_stub")),
+                    "entry_errors": list(rec.get("errors") or ()),
+                })
         for alias in rec.get("aliases") or []:
             alias = (alias or "").strip()
             if not alias:
@@ -277,6 +296,7 @@ def build_targets(index):
                 "entry_slug": slug,
                 "path": rec.get("relpath") or rec.get("path"),
                 "is_stub": bool(rec.get("is_stub")),
+                "entry_errors": list(rec.get("errors") or ()),
             })
     return targets
 
@@ -420,6 +440,7 @@ def check_candidate(title, index, use_stem=True, use_superset=True, peers=None,
                 "entry_slug": target["entry_slug"],
                 "entry_path": target["path"],
                 "is_stub": target["is_stub"],
+                "entry_errors": target.get("entry_errors", []),
                 "implies": _implies(probe),
             }
             if target["via"] == "alias":
@@ -431,13 +452,34 @@ def check_candidate(title, index, use_stem=True, use_superset=True, peers=None,
             continue
         for probe in _probe_pair(keys, peer_slug, use_stem=use_stem,
                                  use_superset=use_superset):
+            implied = _implies(probe)
+            # Another candidate is a collision signal, not an existing merge
+            # destination. Mark it for adjudication so ``merge`` always names
+            # a concrete vault owner.
+            if implied == "merge":
+                implied = "adjudicate"
             result["matches"].append({
                 "probe": probe,
                 "matched_slug": peer_slug,
                 "matched_via": "candidate",
                 "matched_candidate": peer_title,
-                "implies": _implies(probe),
+                "implies": implied,
             })
+
+    unsafe_merge_matches = [
+        match for match in result["matches"]
+        if match["matched_via"] != "candidate"
+        and match["implies"] == "merge"
+        and match.get("entry_errors")
+    ]
+    if unsafe_merge_matches:
+        for match in unsafe_merge_matches:
+            match["implies"] = "adjudicate"
+        result["verdict"] = "adjudicate"
+        result["error"] = (
+            "the matching path is occupied but its entry metadata is unsafe; "
+            "inspect the index errors before choosing a merge destination")
+        return result
 
     # A decisive spelling match does not choose between several existing
     # owners. Keep paths in the identity: two subfolders can contain distinct
@@ -749,6 +791,10 @@ def run_self_test():
         check("...and marked matched_via candidate",
               sorted({m["matched_via"] for r in rep["results"] for m in r["matches"]}),
               ["candidate"])
+        rep = check_candidates(["ROC curve", "roc curve"], empty)
+        check("an exact candidate-peer spelling has no fictitious merge owner",
+              (rep["summary"], rep["candidate_collisions"][0]["implies"]),
+              ({"create": 0, "merge": 0, "adjudicate": 2}, "adjudicate"))
         rep = check_candidates(["Masked language model", "Masked language modeling"],
                                empty, include_peers=False)
         check("--no-peers turns the peer pass off",
@@ -789,6 +835,36 @@ def run_self_test():
                                "relpath": "shared.md"}]}
         check("several exact spellings on one owner remain a merge",
               check_candidate("Shared", unique)["verdict"], "merge")
+
+        hand_named = os.path.join(tmp, "hand-named")
+        os.makedirs(hand_named)
+        with open(os.path.join(hand_named, "ROC Curve.md"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(_st_entry_text("ROC curve"))
+        hand_index = _vault_index.build_index(hand_named)
+        hand_result = check_candidate("ROC curve", hand_index)
+        check("a hand-named file owns its canonical title but is unsafe to merge",
+              (hand_result["verdict"],
+               any(match["matched_via"] == "title"
+                   for match in hand_result["matches"]),
+               bool(hand_result.get("error"))),
+              ("adjudicate", True, True))
+
+        if hasattr(os, "symlink"):
+            linked_wiki = os.path.join(tmp, "leaf-link")
+            os.makedirs(linked_wiki)
+            outside = os.path.join(tmp, "outside.md")
+            with open(outside, "w", encoding="utf-8") as fh:
+                fh.write(_st_entry_text("Occupied"))
+            try:
+                os.symlink(outside, os.path.join(linked_wiki, "occupied.md"))
+            except (OSError, NotImplementedError):
+                pass
+            else:
+                linked_result = check_candidate(
+                    "Occupied", _vault_index.build_index(linked_wiki))
+                check("a leaf symlink is occupancy, never a merge destination",
+                      linked_result["verdict"], "adjudicate")
 
         # -- --titles, in each shape a caller actually writes ---------------
         for label, payload, want in (
@@ -871,7 +947,7 @@ def _build_parser():
         description="Run wiki-builder's collision probes for candidate titles "
                     "against a vault index (stdlib only).",
         epilog='example: find_collisions.py --index /tmp/index.json '
-               '--title "Masked language modeling"',
+               '--titles /tmp/candidates.json',
     )
     # Neither group is `required=True`: that made `--test` unreachable, since
     # argparse refuses the command line before main() ever runs.  A real run
@@ -900,6 +976,11 @@ def _build_parser():
 
 
 def main(argv=None):
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (AttributeError, OSError):
+            pass
     parser = _build_parser()
     args = parser.parse_args(argv)
 

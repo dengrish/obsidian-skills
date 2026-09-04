@@ -77,12 +77,6 @@ A randomised, double-blind, placebo-controlled trial at 14 hospitals in Denmark 
 ![[Doe_GutMicrobiome_2025_fig_2.png]]
 *The two arms separated inside the first fortnight and stayed apart to week 8. Kaplan–Meier curves for time to first recurrence, transplant against placebo, with the number of patients still at risk printed below each week.*
 
-| Arm | Recurrence by 8 weeks |
-|---|---|
-| Transplant (n=110) | **8.2%** (9 of 110) |
-| Placebo (n=109) | 45.0% (49 of 109) |
-*Recurrence was about five times lower on transplant. The primary outcome only; the secondary outcomes and the subgroup rows are in the paper.*
-
 **Harms.** Abdominal cramping in the first 48 hours was reported by 27 of 110 on transplant and 11 of 109 on placebo. One patient in the transplant arm developed *Escherichia coli* bacteraemia within 7 days, which the independent safety committee adjudicated as possibly treatment-related. There were no deaths in either arm within 8 weeks.<sup>[[Doe_GutMicrobiome_2025.pdf#page=6|6]]</sup>
 
 **A secondary outcome that did not move.** On gastrointestinal quality of life at 8 weeks the trial did not detect a difference between the arms. The mean difference was 2.6 points on the 144-point GIQLI, 95% CI −3.1 to +8.3.<sup>[[Doe_GutMicrobiome_2025.pdf#page=6|6]]</sup> A benefit of up to 8.3 points is not ruled out by this result, and neither is a 3.1-point deficit.

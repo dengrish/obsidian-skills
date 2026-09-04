@@ -43,6 +43,7 @@ import argparse
 import json
 import os
 import re
+import stat
 import sys
 import unicodedata
 from urllib.parse import unquote_plus, urlsplit, urlunsplit
@@ -51,7 +52,7 @@ _OBSIDIAN_SHARED_MODULES = ('slugify', 'yaml_scalars')
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
-_here = _os.path.dirname(_os.path.abspath(__file__))
+_here = _os.path.dirname(_os.path.realpath(__file__))
 _required = tuple(_m + ".py" for _m in (
     globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
@@ -62,6 +63,7 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
+    _tried.append(_here)                   # extracted skill with co-located helpers
 _missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
             for _p in _tried if _os.path.isdir(_p)}
 _shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
@@ -89,19 +91,6 @@ from slugify import is_windows_device_stem
 from yaml_scalars import parse_scalar, strip_comment
 
 
-def _path_keys(path):
-    """Comparable spellings of one file path, for the --exclude match.
-
-    ``os.path.realpath`` resolves symlinks but preserves the spelling it was
-    given. A filename may be NFD when read from disk and NFC when typed, and
-    case variants may alias or coexist depending on the filesystem. Comparing
-    raw realpaths can therefore fail to exclude the note being reprocessed,
-    making it match its own ``source:``. Keys use the plugin's portable
-    NFC-normalized, case-folded path identity.
-    """
-    real = os.path.realpath(path)
-    return {real, unicodedata.normalize("NFC", real).casefold()}
-
 # Tracking parameters carry no page identity: the same article shared by email,
 # by tweet and from the archive yields three URLs differing only here. Strip
 # what is recognized as tracking and nothing else — ?id=, ?p=, ?page=, ?v= and
@@ -122,6 +111,7 @@ TRACKING_PARAMS = {
 }
 TRACKING_PREFIXES = ("utm_",)
 SUBSTACK_TRACKING_PARAMS = {"r", "showwelcome"}
+X_TRACKING_PARAMS = {"s", "t"}
 
 #: A fragment that ROUTES rather than anchors: `#/posts/1`, `#!/posts/1`.
 #: Dropping every fragment collapsed a fragment-routed SPA onto one key — every
@@ -158,6 +148,7 @@ def normalize_url(url):
     path = parts.path.rstrip("/")
     host_name = parts.hostname.lower().rstrip(".")
     is_substack = host_name == "substack.com" or host_name.endswith(".substack.com")
+    is_x = host_name in {"x.com", "twitter.com", "mobile.twitter.com"}
     query_fields = []
     for field in parts.query.split("&") if parts.query else ():
         # Decode only a COPY of the key to recognize percent-encoded tracking
@@ -173,7 +164,8 @@ def normalize_url(url):
             key = raw_key.lower()
         if key in TRACKING_PARAMS \
                 or any(key.startswith(p) for p in TRACKING_PREFIXES) \
-                or (is_substack and key in SUBSTACK_TRACKING_PARAMS):
+                or (is_substack and key in SUBSTACK_TRACKING_PARAMS) \
+                or (is_x and key in X_TRACKING_PARAMS):
             continue
         query_fields.append(field)
     # Preserve order AND spelling. An HTTP query is opaque to the origin: some
@@ -294,6 +286,48 @@ def _md_files(folder):
     return sorted(out)
 
 
+def _validated_exclusions(cleaned_dir, exclude):
+    """Resolve explicit reprocessing exclusions to unique direct note paths.
+
+    A typo must never make a duplicate check look clean. Exclusions therefore
+    have to identify one existing, regular direct child of the Articles folder
+    under the plugin's portable filename identity.
+    """
+    try:
+        names = os.listdir(cleaned_dir)
+    except OSError as exc:
+        raise ValueError("cannot inspect Articles names in %r: %s" %
+                         (cleaned_dir, exc)) from exc
+    by_name = {}
+    for name in names:
+        if _portable_name(name).endswith(".md"):
+            by_name.setdefault(_portable_name(name), []).append(
+                os.path.join(cleaned_dir, name))
+    resolved = []
+    for requested in exclude:
+        requested_abs = os.path.abspath(os.path.expanduser(requested))
+        parent = os.path.dirname(requested_abs)
+        try:
+            same_parent = os.path.samefile(parent, cleaned_dir)
+        except OSError:
+            same_parent = False
+        matches = (by_name.get(_portable_name(os.path.basename(requested_abs)), [])
+                   if same_parent else [])
+        if len(matches) != 1:
+            detail = "no direct note" if not matches else "%d portable-name occupants" % len(matches)
+            raise ValueError("--exclude %r identifies %s in Articles; refusing "
+                             "an unverifiable exclusion" % (requested, detail))
+        candidate = matches[0]
+        try:
+            if not stat.S_ISREG(os.lstat(candidate).st_mode):
+                raise ValueError("--exclude %r is not a regular note" % requested)
+        except OSError as exc:
+            raise ValueError("cannot inspect --exclude %r: %s" %
+                             (requested, exc)) from exc
+        resolved.append(os.path.abspath(candidate))
+    return resolved
+
+
 def build_index(cleaned_dir, exclude=()):
     """Scan Articles/ once. Returns (index, unindexable, non_url).
 
@@ -310,12 +344,10 @@ def build_index(cleaned_dir, exclude=()):
                 got wikilink-wrapped, which IS a defect; SKILL.md step 1 says
                 how to tell and what to report.
     """
-    excluded = set()
-    for p in exclude:
-        excluded |= _path_keys(p)
+    excluded = set(_validated_exclusions(cleaned_dir, exclude))
     index, unindexable, non_url = {}, [], []
     for path in _md_files(cleaned_dir):
-        if excluded and (_path_keys(path) & excluded):
+        if os.path.abspath(path) in excluded:
             continue
         src = read_source(path)
         if not src:
@@ -337,13 +369,14 @@ def _portable_name(name):
     return unicodedata.normalize("NFC", name).casefold()
 
 
-def article_name_index(cleaned_dir):
+def article_name_index(cleaned_dir, exclude=()):
     """Map each portable direct-child Markdown name to every occupant.
 
     `Articles/` is flat. An entry whose name ends in `.md` occupies that output
     identity regardless of its filesystem type, so directories and symlinks
     (including dangling ones) remain visible to the publication preflight.
     """
+    excluded = set(_validated_exclusions(cleaned_dir, exclude))
     try:
         names = os.listdir(cleaned_dir)
     except OSError as exc:
@@ -353,8 +386,11 @@ def article_name_index(cleaned_dir):
     for name in names:
         if not _portable_name(name).endswith(".md"):
             continue
+        path = os.path.join(cleaned_dir, name)
+        if os.path.abspath(path) in excluded:
+            continue
         index.setdefault(_portable_name(name), []).append(
-            os.path.join(cleaned_dir, name))
+            path)
     for paths in index.values():
         paths.sort(key=lambda path: (_portable_name(os.path.basename(path)),
                                      os.path.basename(path)))
@@ -367,6 +403,7 @@ def _slug_filename(slug):
                if ord(ch) < 0x20 or ord(ch) == 0x7f
                or ch in '<>:"/\\|?*'] if isinstance(slug, str) else []
     if not isinstance(slug, str) or not slug or invalid or ".." in slug \
+            or slug.startswith((".", " ")) \
             or not slug.strip(". ") or slug.endswith((".", " ")) \
             or os.path.basename(slug) != slug \
             or "/" in slug or "\\" in slug or slug.casefold().endswith(".md"):
@@ -515,6 +552,13 @@ def run_self_test():
         same("Substack tracking %s carries no identity on Substack" % param,
              "https://newsletter.substack.com/p/a?%s=x" % param,
              "https://newsletter.substack.com/p/a")
+        differ("?%s= is preserved on an unrelated origin" % param,
+               "https://example.com/a?%s=1" % param,
+               "https://example.com/a?%s=2" % param)
+    for param in ("s", "t"):
+        same("X/Twitter sharing parameter %s carries no identity" % param,
+             "https://x.com/example/status/1?%s=20" % param,
+             "https://x.com/example/status/1")
         differ("?%s= is preserved on an unrelated origin" % param,
                "https://example.com/a?%s=1" % param,
                "https://example.com/a?%s=2" % param)
@@ -730,6 +774,17 @@ def run_self_test():
               any(d in v for v in index.values()), False)
         case("--exclude keeps a note from matching itself",
               build_index(vault, exclude=[a])[0].get(normalize_url(URL)), [b])
+        case("--exclude also releases that note's output-name slot",
+             check_slugs(["A"], article_name_index(vault, exclude=[a]))[0]["status"],
+             "free")
+        try:
+            build_index(vault, exclude=[os.path.join(vault, "Typo.md")])
+        except ValueError:
+            bad_exclusion_rejected = True
+        else:
+            bad_exclusion_rejected = False
+        case("a nonexistent --exclude cannot silently weaken the guard",
+             bad_exclusion_rejected, True)
         malformed = article("Malformed.md",
                             '---\nsources:\n  - "https://[broken/article"\n---\n')
         after_bad, unreadable, _ = build_index(vault)
@@ -741,10 +796,20 @@ def run_self_test():
         # ownership. Every `.md` directory entry occupies a publish name,
         # including types a provenance reader cannot open.
         os.makedirs(os.path.join(vault, "Held.md"))
-        os.symlink(os.path.join(tmp, "missing-target"),
-                   os.path.join(vault, "Broken.md"))
         link_target = article("link-target.txt", "not a note")
-        os.symlink(link_target, os.path.join(vault, "Linked.md"))
+        try:
+            os.symlink(os.path.join(tmp, "missing-target"),
+                       os.path.join(vault, "Broken.md"))
+            os.symlink(link_target, os.path.join(vault, "Linked.md"))
+            symlink_occupants_exercised = True
+        except (OSError, NotImplementedError):
+            # Preserve the portable-name occupancy part of this test on hosts
+            # where creating symlinks needs a privilege the process lacks.
+            for fallback in ("Broken.md", "Linked.md"):
+                path = os.path.join(vault, fallback)
+                if not os.path.lexists(path):
+                    article(fallback, "placeholder occupant")
+            symlink_occupants_exercised = False
         name_index = article_name_index(vault)
         slug_results = check_slugs(
             ["Held", "Broken", "Linked", "a", "Free"], name_index)
@@ -753,6 +818,8 @@ def run_self_test():
              [("Held", "occupied"), ("Broken", "occupied"),
               ("Linked", "occupied"), ("a", "occupied"),
               ("Free", "free")])
+        case("symlink occupancy cases run or degrade without crashing",
+             isinstance(symlink_occupants_exercised, bool), True)
         with patch.object(os, "listdir", return_value=[
                     "Caf\u00e9.md", "Cafe\u0301.MD", "ignored.txt"]):
             ambiguous_index = article_name_index(vault)
@@ -869,7 +936,7 @@ def run_self_test():
              "references/duplicates-and-reprocessing.md#settle-a-slug-before-writing-images"
              in skill_md, True)
         naming = skill_md.find("Settle the slug before downloading any image")
-        download = skill_md.find("fetch_images.py' download")
+        download = skill_md.find("fetch_images.py' stage")
         case("the naming decision precedes the image download command",
              0 <= naming < download, True)
         case("a collision uses the same disambiguator for note and image stem",
@@ -896,6 +963,12 @@ def run_self_test():
 
 
 def main(argv=None):
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if callable(reconfigure):
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (OSError, ValueError):
+            pass
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("cleaned_dir", nargs="?")
     ap.add_argument("--raw", action="append", default=[],
@@ -921,7 +994,8 @@ def main(argv=None):
 
     try:
         index, unindexable, non_url = build_index(args.cleaned_dir, args.exclude)
-        slug_checks = (check_slugs(args.slug, article_name_index(args.cleaned_dir))
+        slug_checks = (check_slugs(
+            args.slug, article_name_index(args.cleaned_dir, args.exclude))
                        if args.slug else [])
     except ValueError as exc:
         print(json.dumps({"error": str(exc)}))

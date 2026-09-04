@@ -93,6 +93,7 @@ import hashlib
 import os
 import re
 import shlex
+import shutil
 import stat
 import sys
 from collections import defaultdict
@@ -103,7 +104,7 @@ _OBSIDIAN_SHARED_MODULES = ('atomic_move', 'figure_state', 'naming',
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
-_here = _os.path.dirname(_os.path.abspath(__file__))
+_here = _os.path.dirname(_os.path.realpath(__file__))
 _required = tuple(_m + ".py" for _m in (
     globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
@@ -114,6 +115,7 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
+    _tried.append(_here)                   # extracted skill with co-located helpers
 _missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
             for _p in _tried if _os.path.isdir(_p)}
 _shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
@@ -169,6 +171,7 @@ from auto_fig_bbox import (
 )
 from extract_figures import (extract_one_figure, normalize_fig_num,
                              validated_figure_suffix)
+import atomic_move
 
 
 #: The chapter-stem rule is `pdf-organizer`'s, so it is imported rather than
@@ -227,6 +230,17 @@ MANIFEST_HEADER = (
 #: Used only to seed the duplicate-detection index. Ownership is never inferred
 #: from this broad glob; legacy migration names exact files with --adopt-legacy.
 FIGURE_GLOB = "*_fig_*.png"
+
+
+def _configure_stdio():
+    """Make paths and Unicode diagnostics printable on narrow host consoles."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="backslashreplace")
+            except (OSError, ValueError):
+                pass
 
 
 def split_book_chapters(pdfs):
@@ -510,11 +524,17 @@ def load_manifest(path, with_snapshot=False):
     return (manifest, snapshot) if with_snapshot else manifest
 
 
-def save_manifest(path, manifest, expected=None):
-    """Rewrite ownership records; False means the run must report failure."""
+def save_manifest(path, manifest, expected=None, return_snapshot=False):
+    """Rewrite ownership records; False means the run must report failure.
+
+    ``return_snapshot`` lets a long batch carry the version just published
+    into the next conditional write. The default boolean result preserves the
+    small programmatic API used by older callers.
+    """
     try:
-        write_manifest(path, manifest, MANIFEST_HEADER, expected=expected)
-        return True
+        snapshot = write_manifest(path, manifest, MANIFEST_HEADER,
+                                  expected=expected)
+        return snapshot if return_snapshot else True
     except (OSError, ValueError) as e:
         print(f"note: could not write {path} ({e}) — the next run cannot tell "
               f"its own figures from another skill's", file=sys.stderr)
@@ -528,7 +548,8 @@ def _legacy_png_snapshot(path):
     except ImportError:
         sys.exit("Pillow is required to verify legacy PNGs before recording "
                  "ownership. Use the Python environment from shared/RUNTIME.md.")
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+             | getattr(os, "O_BINARY", 0))
     try:
         descriptor = os.open(path, flags)
     except OSError as exc:
@@ -574,13 +595,9 @@ def _legacy_png_snapshot(path):
 
 def adopt_legacy_files(out_dir, entries, eligible_stems, manifest,
                        manifest_existed):
-    """Explicitly claim exact complete PNGs during an absent-manifest migration."""
+    """Explicitly claim complete PNGs in currently unrecorded figure slots."""
     if not entries:
         return []
-    if manifest_existed:
-        raise ValueError(
-            "--adopt-legacy is available only while the ownership manifest "
-            "is absent; reconcile an existing manifest directly instead")
     eligible_stems = set(eligible_stems)
     planned = []
     seen_targets = set()
@@ -604,6 +621,12 @@ def adopt_legacy_files(out_dir, entries, eligible_stems, manifest,
         except ValueError as exc:
             raise ValueError("--adopt-legacy %r: %s" % (entry, exc)) from exc
         filename = "%s_fig_%s.png" % (stem, suffix)
+        prior_key = manifest_key(manifest, filename)
+        if prior_key is not None:
+            raise ValueError(
+                "--adopt-legacy %r names %s, which already has an ownership "
+                "record; adoption is only for an unrecorded slot" %
+                (entry, prior_key))
         identity = figure_identity(filename)
         if identity in seen_targets:
             raise ValueError(
@@ -659,8 +682,10 @@ def revalidate_legacy_adoptions(adoptions, manifest):
 def seed_output_index(out_dir):
     """Hash existing figure PNGs for cross-run duplicate detection."""
     seen = {}
-    for path in sorted(Path(out_dir).glob(FIGURE_GLOB)) if os.path.isdir(out_dir) else []:
-        if not path.is_file():
+    paths = sorted(Path(out_dir).iterdir()) if os.path.isdir(out_dir) else []
+    for path in paths:
+        if (not path.is_file() or path.suffix.casefold() != ".png"
+                or "_fig_" not in path.stem.casefold()):
             continue
         try:
             digest = _sha256(str(path))
@@ -704,6 +729,11 @@ def find_pdfs(src_dir):
     invalid = []
     for entry in inventory.entries:
         path = Path(entry.path)
+        # AppleDouble resource-fork sidecars are metadata, not source PDFs.
+        # Treating ``._Paper.pdf`` as a paper creates a second, unorganized
+        # source and can make a removable-volume sweep fail needlessly.
+        if path.name.startswith("._"):
+            continue
         if entry.kind == "regular":
             usable.append(path)
             continue
@@ -814,8 +844,19 @@ def _figure_slot_conflict(out_dir, stem, fig_suffix, out_path):
         if figure_identity(candidate_stem) != slot:
             continue
         candidate_abs = os.path.abspath(os.fspath(candidate))
-        if candidate in direct and candidate_abs == exact:
-            continue
+        if candidate in direct:
+            same_entry = candidate_abs == exact
+            if not same_entry and os.path.lexists(out_path):
+                try:
+                    same_entry = os.path.samefile(candidate, out_path)
+                except OSError:
+                    same_entry = False
+            if same_entry:
+                # Normalization-insensitive filesystems can return an NFD
+                # directory spelling for the NFC path we opened. It is one
+                # file, not a semantic-slot twin; ownership is decided by the
+                # manifest and digest below.
+                continue
         conflicts.append(candidate)
     if not conflicts:
         return None
@@ -866,7 +907,8 @@ def _note_output(result, seen_hashes, out_path, fig_num, stem, manifest=None,
 
 def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                 reviewed=(), seen_hashes=None, manifest=None,
-                chapter_pdfs=(), chapter_caption_cache=None):
+                chapter_pdfs=(), chapter_caption_cache=None,
+                manifest_commit=None):
     """Detect and extract every figure in one PDF.
 
     Args:
@@ -881,6 +923,10 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
             `load_manifest`. Read before an "already exists" skip, so a file
             another skill put at that name is reported rather than skipped;
             updated in place with every figure written.
+        manifest_commit: optional zero-argument callback invoked immediately
+            after each published crop is added to ``manifest``. The CLI uses
+            it to persist ownership incrementally instead of leaving an entire
+            batch unrecorded until process exit.
         chapter_pdfs: complete source/vault PDF inventory used only to prove
             cross-chapter references against an exact sibling caption.
         chapter_caption_cache: optional shared sibling-caption cache.
@@ -922,6 +968,10 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                             crop rect, render error). Without this the
                             count in the summary silently disagrees with
                             what is on disk.
+        ownership_failures: list — (fig_label, reason) for crops successfully
+                            written whose ownership record could not be
+                            persisted. The image exists, but automatic
+                            overwrite is unsafe until the sidecar is repaired.
         blank:      list  — (fig_label, page) for crops that rendered nothing
                             but white. Its own bucket because it is its own
                             failure: the bbox was plausible, the render
@@ -967,6 +1017,7 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
         "cross_chapter": [],
         "referenced": 0,
         "failures": [],
+        "ownership_failures": [],
         "blank": [],
         "occupied": [],
         "caption_in": [],
@@ -1108,6 +1159,16 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                     _note_output(result, seen_hashes, out_path, fig_num, stem,
                                  manifest, digest=digest)
                     continue
+                if ((stem, fig_num) in reviewed
+                        or (stem, fig_suffix) in reviewed):
+                    # A review mark commonly follows an explicit-coordinate
+                    # repair. A broad automatic --overwrite must not undo that
+                    # checked crop; remove the ledger row first to opt back in.
+                    written_this_run[out_path] = raw_label
+                    result["skipped"] += 1
+                    _note_output(result, seen_hashes, out_path, fig_num, stem,
+                                 manifest, digest=digest)
+                    continue
                 # `manifest is None` preserves the programmatic API's legacy
                 # overwrite behavior, but publication still needs an exact
                 # byte snapshot to reject a different occupant that arrives
@@ -1144,10 +1205,11 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                 continue
 
             try:
-                _rendered, _final, blank = extract_one_figure(
+                _rendered, _final, blank, publication = extract_one_figure(
                     doc, page_idx, bbox, out_path, dpi=dpi,
                     replace_digest=replace_digest,
-                    publication_guard=publication_guard)
+                    publication_guard=publication_guard,
+                    return_publication=True)
                 if blank:
                     # Nothing was written (extract_one_figure leaves the temp
                     # file behind rather than moving a picture of empty page into
@@ -1156,26 +1218,83 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                     continue
                 result["extracted"] += 1
                 written_this_run[out_path] = raw_label
+                # Record the bytes this guarded publication installed. The
+                # public pathname can be replaced by another writer before the
+                # sidecar update; re-hashing it here would forge ownership of
+                # that writer's bytes and authorize a destructive overwrite.
                 _note_output(result, seen_hashes, out_path, fig_num, stem,
-                             manifest)
+                             manifest, digest=publication[1])
+                if manifest_commit is not None:
+                    try:
+                        manifest_commit()
+                    except Exception as exc:
+                        result["ownership_failures"].append((
+                            fig_num,
+                            "crop was published but its ownership record could "
+                            "not be persisted immediately: %s" % exc,
+                        ))
+                        print(
+                            f"  ERROR: ownership save failed after publishing "
+                            f"{stem} fig {fig_num}: {exc}. Stopping before any "
+                            f"more crops are written.",
+                            file=sys.stderr,
+                        )
+                        break
+            except atomic_move.LinkUnavailable as e:
+                retained = getattr(e, "staging_path", None)
+                recovery = getattr(e, "recovery_path", None)
+                locations = []
+                if retained:
+                    locations.append("staged crop preserved at %s" % retained)
+                if recovery and recovery != retained:
+                    locations.append("additional recovery state at %s" % recovery)
+                location_note = ("; " + "; ".join(locations)) if locations else ""
+                result["failures"].append((
+                    fig_num,
+                    f"safe publication is unavailable on page "
+                    f"{page_idx + 1}: {e}{location_note}",
+                ))
+                print(
+                    f"  ERROR: could not safely publish {stem} fig {fig_num} "
+                    f"(page {page_idx+1}): {e}{location_note}",
+                    file=sys.stderr,
+                )
             except FileExistsError as e:
                 # The name was safe at this figure's preflight, then changed
                 # before publication. This is an occupied slot, not a render
                 # failure and never permission to replace what arrived late.
-                result["occupied"].append((fig_num, out_path, str(e)))
+                retained = getattr(e, "staging_path", None)
+                recovery = getattr(e, "recovery_path", None)
+                locations = []
+                if retained:
+                    locations.append("staged crop preserved at %s" % retained)
+                if recovery and recovery != retained:
+                    locations.append("additional recovery state at %s" % recovery)
+                location_note = ("; " + "; ".join(locations)) if locations else ""
+                result["occupied"].append(
+                    (fig_num, out_path, "%s%s" % (e, location_note)))
                 written_this_run[out_path] = raw_label
                 print(
                     f"  ERROR: refused to publish {stem} fig {fig_num} "
-                    f"(page {page_idx+1}): {e}",
+                    f"(page {page_idx+1}): {e}{location_note}",
                     file=sys.stderr,
                 )
             except Exception as e:
+                retained = getattr(e, "staging_path", None)
+                recovery = getattr(e, "recovery_path", None)
+                locations = []
+                if retained:
+                    locations.append("staged crop preserved at %s" % retained)
+                if recovery and recovery != retained:
+                    locations.append("additional recovery state at %s" % recovery)
+                location_note = ("; " + "; ".join(locations)) if locations else ""
                 result["failures"].append(
-                    (fig_num, f"render failed on page {page_idx + 1}: {e}")
+                    (fig_num,
+                     f"render failed on page {page_idx + 1}: {e}{location_note}")
                 )
                 print(
                     f"  ERROR: failed to extract {stem} fig {fig_num} "
-                    f"(page {page_idx+1}): {e}",
+                    f"(page {page_idx+1}): {e}{location_note}",
                     file=sys.stderr,
                 )
 
@@ -1245,8 +1364,9 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
                   include_split_books=False, allow_unorganized=False, dpi=250):
     """Print a human-readable summary of the batch run.
 
-    Sections, in order: header, counts, figures that failed to write,
-    collisions (two captions in the same PDF mapping to the same filename),
+    Sections, in order: header, counts, figures that failed to write, crops
+    written whose ownership record failed to persist, collisions (two
+    captions in the same PDF mapping to the same filename),
     warnings (suspicious bboxes needing visual review), PARTIAL detection
     (figure numbers the text cites with no caption found), byte-identical
     duplicates, split books whose figures came from the chapters, zero-yield
@@ -1259,6 +1379,8 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
     total_reviewed = sum(len(r["reviewed"]) for r in per_pdf.values())
     total_collisions = sum(len(r["collisions"]) for r in per_pdf.values())
     total_failures = sum(len(r["failures"]) for r in per_pdf.values())
+    total_ownership_failures = sum(
+        len(r.get("ownership_failures", ())) for r in per_pdf.values())
     total_dupes = sum(len(r["duplicates"]) for r in per_pdf.values())
     total_blank = sum(len(r.get("blank", ())) for r in per_pdf.values())
     total_occupied = sum(len(r.get("occupied", ())) for r in per_pdf.values())
@@ -1306,6 +1428,7 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
     else:
         print(f"  Duplicate figures:    {total_dupes} (byte-identical to a figure already written)")
     print(f"  Failed to write:      {total_failures} (detected but not extracted)")
+    print(f"  Ownership save failed: {total_ownership_failures} (crop written; automatic overwrite unsafe)")
     print(f"  Blank crops:          {total_blank} (rendered nothing but white — not written)")
     print(f"  Caption text in crop: {total_caption_in} (the crop overlaps a caption)")
     print(f"  Occupied filenames:   {total_occupied} (a file this extractor did not write is in the way)")
@@ -1327,6 +1450,15 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
         for pdf_path, r in per_pdf.items():
             for fig_num, reason in r["failures"]:
                 print(f"  {pdf_path.name}  Fig {fig_num}  ({reason})")
+        print()
+
+    if total_ownership_failures:
+        print("Crops written but ownership records NOT persisted (the images exist):")
+        for pdf_path, r in per_pdf.items():
+            for fig_num, reason in r.get("ownership_failures", ()):
+                print(f"  {pdf_path.name}  Fig {fig_num}  ({reason})")
+        print("  Preserve these crops and repair the ownership sidecar before any")
+        print("  automatic overwrite. Do not re-extract them as if the PNGs were missing.")
         print()
 
     if total_blank:
@@ -1724,6 +1856,22 @@ def run_self_test():
             state["bad"] += 1
             print("FAIL %s" % label)
 
+    class NarrowConsole:
+        def __init__(self):
+            self.calls = []
+
+        def reconfigure(self, **kwargs):
+            self.calls.append(kwargs)
+
+    narrow_out, narrow_err = NarrowConsole(), NarrowConsole()
+    with mock.patch.object(sys, "stdout", narrow_out), \
+            mock.patch.object(sys, "stderr", narrow_err):
+        _configure_stdio()
+    check("narrow stdout is switched to UTF-8", narrow_out.calls,
+          [{"encoding": "utf-8", "errors": "backslashreplace"}])
+    check("narrow stderr is switched to UTF-8", narrow_err.calls,
+          [{"encoding": "utf-8", "errors": "backslashreplace"}])
+
     tmp = tempfile.mkdtemp(prefix="batch-extract-selftest-")
     try:
         # --- the review ledger, both directions ---------------------------
@@ -1891,10 +2039,13 @@ def run_self_test():
         c = _st_fig_pdf(os.path.join(src, "Prince_UDL_2026",
                                      "Prince_UDL_2026_01_Intro.pdf"))
         upper_ext = _st_fig_pdf(os.path.join(src, "Doe_Upper_2025.PDF"))
+        apple_double = os.path.join(src, "._Doe_Figs_2025.pdf")
+        with open(apple_double, "wb") as fh:
+            fh.write(b"AppleDouble resource fork, not a PDF source")
         with open(os.path.join(src, "notes.txt"), "w") as fh:
             fh.write("not a pdf")
         found = find_pdfs(src)
-        check("find_pdfs walks subfolders and ignores non-PDFs",
+        check("find_pdfs walks subfolders and ignores non-PDFs/AppleDouble",
               found, sorted([a, b, c, upper_ext]))
         ok("find_pdfs matches a .PDF extension too", upper_ext in found)
         check("find_pdfs on a single PDF", find_pdfs(str(a)), [a])
@@ -2035,6 +2186,31 @@ def run_self_test():
         r3 = process_pdf(a, out, dpi=72, overwrite=True)
         check("--overwrite re-extracts", (r3["extracted"], r3["skipped"]),
               (2, 0))
+        reviewed_manifest = {
+            path.name: _sha256(path) for path in Path(out).glob("*.png")
+        }
+        reviewed_overwrite = process_pdf(
+            a, out, dpi=72, overwrite=True, manifest=reviewed_manifest,
+            reviewed={(a.stem, "1"), (a.stem, "S2")})
+        check("--overwrite preserves crops named in the review ledger",
+              (reviewed_overwrite["extracted"], reviewed_overwrite["skipped"]),
+              (0, 2))
+
+        committed_out = os.path.join(tmp, "committed-per-crop")
+        os.makedirs(committed_out)
+        committed_manifest = {}
+        commit_states = []
+
+        def remember_commit():
+            commit_states.append(sorted(committed_manifest))
+
+        committed_result = process_pdf(
+            a, committed_out, dpi=72, manifest=committed_manifest,
+            manifest_commit=remember_commit)
+        check("ownership is offered for persistence after every crop",
+              (committed_result["extracted"], commit_states),
+              (2, [["Doe_Figs_2025_fig_1.png"],
+                   ["Doe_Figs_2025_fig_1.png", "Doe_Figs_2025_fig_S2.png"]]))
 
         scan = process_pdf(_st_scan_pdf(os.path.join(tmp, "Doe_Scan_2025.pdf")),
                            out, dpi=72)
@@ -2422,6 +2598,38 @@ def run_self_test():
         check("the blocked Unicode-alias WebP is preserved",
               unicode_alias.read_bytes(), unicode_bytes)
 
+        # APFS/HFS can expose the one PNG created through an NFC pathname with
+        # an NFD directory spelling. That is the same directory entry, not a
+        # competing variant. On filesystems where both spellings are distinct,
+        # the NFD file correctly remains a collision instead.
+        unicode_own_dir = Path(tmp) / "UnicodeOwned"
+        unicode_own_dir.mkdir()
+        unicode_own_pdf = _st_fig_pdf(Path(tmp) / "García_Own_2025.pdf")
+        unicode_own_manifest = {}
+        unicode_first = process_pdf(
+            unicode_own_pdf, unicode_own_dir, dpi=72,
+            manifest=unicode_own_manifest)
+        unicode_nfc = unicode_own_dir / "García_Own_2025_fig_1.png"
+        unicode_nfd = unicode_own_dir / "Garci\u0301a_Own_2025_fig_1.png"
+        rendered_bytes = unicode_nfc.read_bytes()
+        unicode_nfc.unlink()
+        unicode_nfd.write_bytes(rendered_bytes)
+        unicode_own_manifest = {
+            unicode_nfd.name: hashlib.sha256(rendered_bytes).hexdigest()
+        }
+        aliases_one_entry = os.path.lexists(unicode_nfc)
+        unicode_again = process_pdf(
+            unicode_own_pdf, unicode_own_dir, dpi=72,
+            manifest=unicode_own_manifest)
+        if aliases_one_entry:
+            check("an NFD directory spelling of our NFC PNG is the same output",
+                  (unicode_first["extracted"], unicode_again["skipped"],
+                   unicode_again["occupied"]), (1, 1, []))
+        else:
+            check("a distinct NFD PNG remains a portable-slot collision",
+                  (unicode_again["skipped"], len(unicode_again["occupied"])),
+                  (0, 1))
+
         # Publication happens after the per-figure ownership check and render.
         # Exercise a new name and an approved overwrite being taken during
         # that interval; neither late occupant may be clobbered.
@@ -2432,6 +2640,32 @@ def run_self_test():
                                      "Doe_RaceNew_2025_fig_1.png")
         race_new_bytes = b"late clipping image in a formerly empty slot"
         real_extract_one = extract_one_figure
+
+        def reject_batch_hard_link(doc_arg, page_arg, bbox_arg, out_path,
+                                   *args, **kwargs):
+            exc = atomic_move.LinkUnavailable(
+                out_path + ".stage", out_path,
+                OSError(errno.ENOTSUP, "injected filesystem has no hard links"))
+            exc.staging_path = out_path + ".stage"
+            exc.recovery_path = exc.staging_path
+            raise exc
+
+        no_link_dir = os.path.join(tmp, "NoHardLinks")
+        os.makedirs(no_link_dir)
+        with mock.patch.dict(
+                globals(), {"extract_one_figure": reject_batch_hard_link}), \
+                contextlib.redirect_stderr(io.StringIO()):
+            no_link = process_pdf(
+                race_new_pdf, no_link_dir, dpi=72, manifest={})
+        no_link_reason = " | ".join(reason for _fig, reason
+                                    in no_link["failures"])
+        check("batch classifies hard-link refusal as publication failure",
+              (no_link["extracted"], len(no_link["occupied"]),
+               len(no_link["failures"]),
+               "safe publication is unavailable" in no_link_reason,
+               "render failed" in no_link_reason,
+               "staged crop preserved at" in no_link_reason),
+              (0, 0, 1, True, False, True))
 
         def inject_batch_new(doc_arg, page_arg, bbox_arg, out_path,
                              *args, **kwargs):
@@ -2448,6 +2682,18 @@ def run_self_test():
               (race_new["extracted"], len(race_new["occupied"])), (0, 1))
         check("batch new-output publication preserves the late bytes",
               open(race_new_path, "rb").read(), race_new_bytes)
+        race_new_reason = race_new["occupied"][0][2]
+        race_new_stages = [
+            os.path.join(tmp, name) for name in os.listdir(tmp)
+            if name.startswith(".figure-stage-")
+        ]
+        check("batch reports and retains the recoverable late-occupant crop",
+              (len(race_new_stages),
+               bool(race_new_stages and race_new_stages[0] in race_new_reason),
+               sorted(os.listdir(race_new_stages[0])) if race_new_stages else []),
+              (1, True, ["Doe_RaceNew_2025_fig_1.png"]))
+        for race_stage in race_new_stages:
+            shutil.rmtree(race_stage)
 
         race_replace_dir = os.path.join(tmp, "RaceReplace")
         os.makedirs(race_replace_dir)
@@ -2484,6 +2730,48 @@ def run_self_test():
               open(race_replace_path, "rb").read(), race_replace_bytes)
         check("a refused batch overwrite does not alter ownership records",
               race_manifest, recorded_before_race)
+
+        # A process can replace the public path after the guarded crop CAS but
+        # before `_note_output`. Ownership must follow the exact publication
+        # snapshot returned by extract_one_figure, not a second pathname hash.
+        post_publish_dir = Path(tmp) / "PostPublishReplacement"
+        post_publish_dir.mkdir()
+        post_publish_pdf = _st_fig_pdf(
+            Path(tmp) / "Doe_PostPublish_2025.pdf")
+        post_publish_path = (
+            post_publish_dir / "Doe_PostPublish_2025_fig_1.png")
+        post_publish_foreign = b"foreign replacement after batch publication"
+        post_publish_snapshot = {}
+        post_publish_manifest = {}
+
+        def inject_post_publish_replace(doc_arg, page_arg, bbox_arg, out_path,
+                                        *args, **kwargs):
+            answer = real_extract_one(
+                doc_arg, page_arg, bbox_arg, out_path, *args, **kwargs)
+            post_publish_snapshot["digest"] = answer[3][1]
+            replacement = Path(out_path + ".foreign")
+            replacement.write_bytes(post_publish_foreign)
+            os.replace(replacement, out_path)
+            return answer
+
+        with mock.patch.dict(
+                globals(), {"extract_one_figure": inject_post_publish_replace}):
+            post_publish = process_pdf(
+                post_publish_pdf, post_publish_dir, dpi=72,
+                manifest=post_publish_manifest)
+        check("batch ownership records the publication, not a later path occupant",
+              (post_publish["extracted"],
+               post_publish_manifest[post_publish_path.name],
+               _sha256(post_publish_path) == post_publish_snapshot["digest"]),
+              (1, post_publish_snapshot["digest"], False))
+        post_publish_again = process_pdf(
+            post_publish_pdf, post_publish_dir, dpi=72, overwrite=True,
+            manifest=post_publish_manifest)
+        check("the later batch sees that replacement as foreign",
+              (post_publish_again["extracted"],
+               len(post_publish_again["occupied"])), (0, 1))
+        check("batch overwrite preserves the foreign post-publication bytes",
+              post_publish_path.read_bytes(), post_publish_foreign)
 
         # A different extension can arrive after the batch preflight while a
         # crop renders. The publication guard checks on both sides of the
@@ -2606,6 +2894,12 @@ def run_self_test():
         check("seeding hashes the figures already in --out",
               sorted(os.path.basename(p) for p in seeded.values()),
               ["Doe_Prior_2025_fig_1.png"])
+        upper_seed = Path(seed_dir) / "Doe_Upper_2025_fig_2.PNG"
+        upper_seed.write_bytes(b"uppercase-extension seed")
+        check("seeding includes an uppercase PNG extension",
+              sorted(os.path.basename(p) for p in seed_output_index(seed_dir).values()),
+              ["Doe_Prior_2025_fig_1.png", "Doe_Upper_2025_fig_2.PNG"])
+        upper_seed.unlink()
         clipping = Path(seed_dir) / "Smith_Web_2025_fig_1.png"
         clipping.write_bytes(b"an unrelated clipping image with different bytes")
         unorganized_image = Path(seed_dir) / "download_fig_1.png"
@@ -2640,13 +2934,20 @@ def run_self_test():
               (["Doe_Prior_2025_fig_1.png", "Doe_Prior_2025_fig_2.png"],
                ["Doe_Prior_2025_fig_1.png", "Doe_Prior_2025_fig_2.png"]))
         second_legacy.unlink()
+        existing_manifest = {"Other_Study_2025_fig_1.png": "a" * 64}
+        existing_adoption = adopt_legacy_files(
+            seed_dir, ["Doe_Prior_2025:1"], {"Doe_Prior_2025"},
+            existing_manifest, True)
+        check("an existing manifest can adopt a distinct unrecorded slot",
+              ([item[1] for item in existing_adoption],
+               sorted(existing_manifest)),
+              (["Doe_Prior_2025_fig_1.png"],
+               ["Doe_Prior_2025_fig_1.png", "Other_Study_2025_fig_1.png"]))
         for entry, eligible, existed, phrase in (
                 ("Doe_Prior_2025:2", {"Doe_Prior_2025"}, False,
                  "requires the exact regular file"),
                 ("doe_prior_2025:1", {"Doe_Prior_2025"}, False,
                  "exact on-disk stem"),
-                ("Doe_Prior_2025:1", {"Doe_Prior_2025"}, True,
-                 "only while the ownership manifest is absent"),
                 ("Doe_Prior_2025:../1", {"Doe_Prior_2025"}, False,
                  "filename fragment")):
             state["n"] += 1
@@ -2659,6 +2960,17 @@ def run_self_test():
                     state["bad"] += 1
                     print("FAIL unclear adoption refusal for %s: %s" %
                           (entry, exc))
+        state["n"] += 1
+        try:
+            adopt_legacy_files(
+                seed_dir, ["Doe_Prior_2025:1"], {"Doe_Prior_2025"},
+                {"DOE_PRIOR_2025_FIG_1.PNG": "a" * 64}, True)
+            state["bad"] += 1
+            print("FAIL adoption accepted a slot already in the manifest")
+        except ValueError as exc:
+            if "already has an ownership record" not in str(exc):
+                state["bad"] += 1
+                print("FAIL unclear recorded-slot adoption refusal: %s" % exc)
         changed_manifest = dict(explicit_manifest)
         Path(prior).write_bytes(clipping.read_bytes())
         with contextlib.redirect_stderr(io.StringIO()):
@@ -3209,6 +3521,12 @@ def run_self_test():
                                 "--dpi", "72"])
         check("a late ownership-save failure cannot report success", code, 1)
         ok("the ownership-save failure names the recovery problem", "could not write" in se)
+        ok("an ownership-save failure reports the crop as written, not missing",
+           "Crops written but ownership records NOT persisted" in so
+           and "Figures detected but NOT written" not in so)
+        check("the crop named by that ownership failure remains on disk",
+              sorted(path.name for path in late_failure_out.glob("*.png")),
+              ["Doe_One_2025_fig_1.png"])
 
         damaged_src = Path(tmp) / "damaged-late-page"
         damaged_src.mkdir()
@@ -3287,6 +3605,7 @@ def run_self_test():
 
 
 def main(argv=None):
+    _configure_stdio()
     p = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__,
@@ -3309,10 +3628,10 @@ def main(argv=None):
     )
     p.add_argument(
         "--adopt-legacy", action="append", default=[], metavar="STEM:FIG",
-        help=("During an absent-manifest migration, record one exact complete "
-              "PNG as historical extractor output (repeatable). The stem must "
-              "identify one eligible selected PDF; no files are adopted by "
-              "default."),
+        help=("Record one exact complete PNG in an unrecorded figure slot as "
+              "historical extractor output (repeatable). Existing manifest "
+              "records remain authoritative. The stem must identify one "
+              "eligible selected PDF; no files are adopted by default."),
     )
     p.add_argument(
         "--dry-run", action="store_true",
@@ -3593,8 +3912,8 @@ def main(argv=None):
 
     # One pass over figures already in --out makes byte-identical output from
     # an earlier run visible to duplicate detection. Ownership is independent:
-    # no occupied name is claimed unless the caller selected it exactly with
-    # --adopt-legacy during this absent-manifest migration.
+    # no occupied name is claimed unless the caller selected its currently
+    # unrecorded slot exactly with --adopt-legacy.
     seen_hashes = seed_output_index(out_dir)
     if adoptions:
         verb = "Would record" if args.dry_run else "Selected for recording"
@@ -3603,6 +3922,35 @@ def main(argv=None):
         for path, _filename, _snapshot in adoptions:
             print(f"  {path}")
         print()
+
+    # An adoption describes bytes that already exist, so publish those claims
+    # before extraction starts. A later crash must not erase them, and an
+    # existing manifest does not prevent adding another explicitly selected,
+    # previously unrecorded slot.
+    adoptions_stable = True
+    if adoptions and not args.dry_run:
+        adoptions_stable = revalidate_legacy_adoptions(adoptions, manifest)
+        if not adoptions_stable:
+            return 1
+        next_snapshot = save_manifest(
+            manifest_file, manifest, expected=manifest_snapshot,
+            return_snapshot=True)
+        if not next_snapshot:
+            return 1
+        manifest_snapshot = next_snapshot
+
+    manifest_commit_failed = [False]
+
+    def commit_manifest():
+        """Persist the ownership of the crop just published, with CAS."""
+        nonlocal manifest_snapshot
+        next_snapshot = save_manifest(
+            manifest_file, manifest, expected=manifest_snapshot,
+            return_snapshot=True)
+        if not next_snapshot:
+            manifest_commit_failed[0] = True
+            raise OSError("the ownership manifest could not be updated")
+        manifest_snapshot = next_snapshot
 
     chapter_reference_pdfs = (list(vault_pdfs)
                               if vault_root is not None else list(pdfs))
@@ -3625,6 +3973,7 @@ def main(argv=None):
                 reviewed=reviewed, seen_hashes=seen_hashes, manifest=manifest,
                 chapter_pdfs=chapter_reference_pdfs,
                 chapter_caption_cache=chapter_caption_cache,
+                manifest_commit=(None if args.dry_run else commit_manifest),
             )
             per_pdf[pdf_path] = result
             n = result["extracted"]
@@ -3632,6 +3981,7 @@ def main(argv=None):
             c = len(result["collisions"])
             w = len(result["warnings"])
             f = len(result["failures"])
+            ownership_f = len(result.get("ownership_failures", ()))
             if result["open_error"]:
                 print("  → could not be opened or fully read as a PDF (not an OCR problem)")
             elif result["no_pages"]:
@@ -3668,20 +4018,20 @@ def main(argv=None):
                             f"Fig {m}" for m in result["cross_chapter"][:6]))
                 if f:
                     parts.append(f"{f} failed")
+                if ownership_f:
+                    parts.append(
+                        f"{ownership_f} ownership save failed (crop exists)")
                 print(f"  → {', '.join(parts)}")
+            if manifest_commit_failed[0]:
+                break
 
     finally:
-        # Keep ownership of completed crops on a damaged-page exception or
-        # Ctrl-C too; otherwise the next run sees our own PNGs as foreign.
-        adoptions_stable = revalidate_legacy_adoptions(adoptions, manifest)
-        needs_manifest = manifest_existed or bool(manifest)
-        manifest_saved = (
-            args.dry_run
-            or (not needs_manifest)
-            or save_manifest(manifest_file, manifest,
-                             expected=manifest_snapshot)
-        )
-        manifest_saved = manifest_saved and adoptions_stable
+        # Ownership is committed immediately after every crop and before the
+        # next caption is processed. This finally block deliberately performs
+        # no end-of-batch rewrite: a stale whole-run snapshot was the source of
+        # lost concurrent updates and unowned crops after abrupt termination.
+        manifest_saved = (not manifest_commit_failed[0]
+                          and adoptions_stable)
 
     print_summary(per_pdf, out_dir, skipped_books, review_file, args.dry_run,
                   src_dir=src_dir, ed_prefix=args.ed_prefix, keep_frame=args.keep_frame,
@@ -3693,14 +4043,16 @@ def main(argv=None):
     # detected figures it then failed to write reported success, and anything
     # reading `$?` (a shell `&&`, a wrapper, the model) took the report's word
     # for it without reading the report. Three outcomes are failures:
-    # refusals, files that could not be opened at all, and figures detected but
-    # not written. A suspicious bbox is NOT one of them — it is advisory, the
+    # refusals, files that could not be opened at all, figures detected but not
+    # written, and crops whose ownership could not be persisted. A suspicious
+    # bbox is NOT one of them — it is advisory, the
     # PNG is on disk, and `--mark-reviewed` is the answer to it.
     # A blank crop and an occupied output name join that list for the same
     # reason: in both, a figure was detected and is NOT in `--out` afterwards.
     # A caption inside a crop does not — the PNG is there, it is just wrong,
     # and it is reported the way every other suspicious bbox is.
-    failed = any(r["failures"] or r["open_error"] or r["no_pages"]
+    failed = any(r["failures"] or r.get("ownership_failures")
+                 or r["open_error"] or r["no_pages"]
                  or r["blank"] or r["occupied"]
                  for r in per_pdf.values())
     return 1 if (unorganized or stem_collisions or failed or not manifest_saved) else 0

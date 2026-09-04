@@ -2,9 +2,11 @@
 """Shared Markdown-table span parsing for the Obsidian Wiki skills.
 
 The parser is a conservative GFM structural floor, not a renderer.  Callers
-mask fenced, indented, and inline-code listings before passing text to
+mask fenced and indented-code listings before passing text to
 ``markdown_table_spans``; returned inclusive line spans retain the original
-line numbering.  Stdlib only, Python 3.8+.
+line numbering. Inline code stays visible because GFM finds table cell
+separators before parsing inline spans; a pipe inside code must be escaped.
+Stdlib only, Python 3.8+.
 """
 
 import argparse
@@ -15,9 +17,9 @@ __all__ = ["caption_faults", "markdown_block_start", "markdown_table_spans",
 
 
 _TABLE_DELIM_RE = re.compile(
-    r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")
+    r"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$")
 _ONE_COLUMN_TABLE_DELIM_RE = re.compile(
-    r"^\s*\|\s*:?-{3,}:?\s*\|\s*$")
+    r"^\s*\|\s*:?-+:?\s*\|\s*$")
 _BLOCK_HTML_TAGS = (
     "address|article|aside|base|basefont|blockquote|body|caption|center|col|"
     "colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|"
@@ -26,6 +28,13 @@ _BLOCK_HTML_TAGS = (
     "option|p|param|section|source|summary|table|tbody|td|tfoot|th|thead|"
     "title|tr|track|ul"
 )
+_INLINE_HTML_TAGS = (
+    "a|abbr|b|bdi|bdo|br|button|cite|code|data|del|dfn|em|i|img|ins|"
+    "kbd|label|mark|q|ruby|s|samp|small|span|strong|sub|sup|time|u|var|wbr"
+)
+_HTML_TAG_RE = re.compile(
+    r"</?(?:" + _BLOCK_HTML_TAGS + "|" + _INLINE_HTML_TAGS
+    + r")(?:[ \t]|/?>|$)", re.IGNORECASE)
 _TABLE_BLOCK_START_RE = re.compile(
     r"^ {0,3}(?:"
     r"#{1,6}(?:[ \t]+|$)|>|(?:[-+*]|[0-9]{1,9}[.)])(?:[ \t]+|$)|"
@@ -180,7 +189,7 @@ def caption_faults(caption):
     if (re.search(r"!?\[[^\]\n]*\]\([^)\n]*\)", prose)
             or re.search(r"!?\[[^\]\n]+\]\[[^\]\n]*\]", prose)):
         faults.append("Markdown link")
-    if re.search(r"</?[A-Za-z][^>\n]*>", prose):
+    if _HTML_TAG_RE.search(prose):
         faults.append("HTML")
     if "~~" in prose:
         faults.append("strikethrough")
@@ -208,6 +217,10 @@ def _self_test():
         ("ordinary table",
          markdown_table_spans(
              "Method | Score\n--- | ---\nA | 0.8\n*Scores.*"),
+         [(0, 2)]),
+        ("GFM permits one-hyphen delimiter cells",
+         markdown_table_spans(
+             "Method | Score\n- | -\nA | 0.8\n*Scores.*"),
          [(0, 2)]),
         ("leading-pipe table",
          markdown_table_spans(
@@ -239,6 +252,12 @@ def _self_test():
          []),
         ("header and delimiter cell counts must match",
          markdown_table_spans("A | B\n| --- |\nvalue"), []),
+        ("a raw pipe inside inline code is still a cell separator",
+         markdown_table_spans("A | `x|y`\n--- | ---\nvalue | other"), []),
+        ("an escaped pipe inside inline code stays in its cell",
+         markdown_table_spans(
+             r"A | `x\|y`" "\n--- | ---\nvalue | other\n*Caption.*"),
+         [(0, 2)]),
         ("escaped header pipes do not create extra cells",
          markdown_table_spans(
              r"A \| name | B" "\n--- | ---\nvalue | other\n*Caption.*"),
@@ -288,6 +307,8 @@ def _self_test():
          ["Markdown link"]),
         ("caption HTML", caption_faults("*A <span>label</span>.*"),
          ["HTML"]),
+        ("mathematical comparisons are not invented HTML tags",
+         caption_faults("*For x<y and p>q, the condition holds.*"), []),
         ("caption strikethrough", caption_faults("*A ~~label~~.*"),
          ["strikethrough"]),
         ("caption backtick", caption_faults("*A `label`.*"),

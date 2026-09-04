@@ -22,7 +22,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-from entry_structure import math_title_plain_text
+from entry_structure import math_title_plain_text, sentence_prefix
 from plurals import singular_keys
 from slugify import SlugError, base_term, has_parenthetical, slug_stem
 
@@ -32,19 +32,6 @@ __all__ = ["introduced_alias_candidates", "missing_introduced_aliases"]
 
 _BOLD_OUTER_RE = re.compile(
     r"(?<!\*)\*\*((?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)\*\*(?!\*)")
-
-_ABBREVS = [
-    "e.g.", "i.e.", "cf.", "et al.", "approx.", "vs.", "ca.", "c.", "fl.",
-    "Dr.", "Prof.", "Mr.", "Mrs.", "Ms.", "St.", "Jr.", "Sr.", "Fig.",
-    "No.", "b.", "d.", "r.", "U.S.", "U.K.",
-]
-
-_ABBREV_RE = re.compile(
-    r"(?:^|[^0-9A-Za-z])(?:%s)$"
-    % "|".join(re.escape(a) for a in sorted(_ABBREVS, key=len, reverse=True)),
-    re.IGNORECASE)
-
-_INITIAL_RE = re.compile(r"(?:^|[^0-9A-Za-z'’])[A-Za-z]\.$")
 
 _SYN_CUE_RE = re.compile(
     r"\b(?:also\s+(?:called|known\s+as|termed|named)|known\s+as|short\s+for|"
@@ -56,12 +43,16 @@ _SYN_CUE_RE = re.compile(
 _BOLD_PAREN_RE = re.compile(
     r"(?<!\*)\*\*(?P<bold>(?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)"
     r"\*\*(?!\*)(?:\s+algorithm)?\s*"
+    r"(?:\((?:[?0-9]|b\.|c\.|fl\.|annual\b|ongoing\b)"
+    r"[^()\n]{0,59}\)\s*)?"
     r"\((?P<paren>[A-Za-z*][^()\n]{0,59})\)",
     re.IGNORECASE)
 
 _NON_NAME_PAREN_RE = re.compile(
     r"^(?:b\.|c\.|d\.|fl\.|r\.|e\.g|i\.e|cf\.|vs\.|see\s|a\s|an\s|the\s|"
-    r"annual|ongoing)|\d{3,4}", re.IGNORECASE)
+    r"annual|ongoing|born\b|died\b|founded\b|established\b|launched\b|"
+    r"acquired\b|renamed\b|now\b|figure\s+[A-Za-z0-9])|\d{3,4}",
+    re.IGNORECASE)
 
 _PAREN_LEADIN_RE = re.compile(
     r"^(?:(?:short\s+for|originally\s+called|also\s+called|"
@@ -105,21 +96,6 @@ def _opening_block(prose_lines):
         elif block:
             break
     return " ".join(block)
-
-
-def _sentence_prefix(text, end):
-    """Return the current sentence's text before ``end``, preserving markup."""
-    start = 0
-    for match in re.finditer(r"[.!?]+", text[:end]):
-        following = text[match.end():match.end() + 1]
-        if following and not following.isspace():
-            continue
-        if match.group(0) == ".":
-            head = text[max(0, match.end() - 16):match.end()]
-            if _INITIAL_RE.search(head) or _ABBREV_RE.search(head):
-                continue
-        start = match.end()
-    return text[start:end].lstrip()
 
 
 def _surface_keys(value):
@@ -219,7 +195,7 @@ def introduced_alias_candidates(prose_lines, subject_forms=None):
     for match in _SYN_CUE_RE.finditer(prose):
         direct = _DIRECT_SYNONYM_RE.match(prose[match.end():])
         if direct and _cue_names_subject(
-                _sentence_prefix(prose, match.start()), subject_forms):
+                sentence_prefix(prose, match.start()), subject_forms):
             add(direct.group(1), "italicized synonym")
     return out
 
@@ -297,6 +273,20 @@ def run_self_test(verbose=False):
             ["**A. M. Turing** (1912–1954) was a mathematician."],
             ["A. M. Turing"]),
         [])
+    add("status and exhibit parentheticals are not aliases",
+        [introduced_alias_candidates([value], [title]) for title, value in (
+            ("Meta", "**Meta** (founded 2015) builds products."),
+            ("Facebook", "**Facebook** (now Meta) was renamed."),
+            ("Plot", "**Plot** (Figure 1) shows data."),
+            ("Turing", "**Turing** (born 1912) worked."))],
+        [[], [], [], []])
+    add("a date before an Event acronym expansion does not hide the expansion",
+        introduced_alias_candidates(
+            ["**ILSVRC** (2010–2017) (ImageNet Large Scale Visual "
+             "Recognition Challenge) was an annual competition."],
+            ["ILSVRC"]),
+        [("ImageNet Large Scale Visual Recognition Challenge",
+          "opener parenthetical")])
     add("many-people-call cue",
         introduced_alias_candidates(
             ["**Min-max scaling** — which many people call *normalization* — rescales data."],

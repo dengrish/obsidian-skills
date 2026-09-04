@@ -70,7 +70,7 @@ For most of the last half-century, a diagnosis of metastatic pancreatic cancer w
 
 ```
 Metadata corrections:
-  published: 2022-09-05 → 2026-05-12 (source: og:article:published_time)
+  published: 2022-09-05 → 2026-05-12 (source: article:published_time)
 ```
 
 Images saved to `Sources/Images/`:

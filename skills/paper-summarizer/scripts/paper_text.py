@@ -76,7 +76,7 @@ _TRANSLATE = {
 #: `S`.  Without the marker group `Supplementary Figure 1` counted toward
 #: figure 1, which is a different figure.
 _FIG_REF = re.compile(
-    r"(?:\b(?P<marker>supplementary|suppl\.|supp\.|extended\s+data)\s+)?"
+    r"(?:\b(?P<marker>supplementary|supplemental|suppl\.|supp\.|extended\s+data)\s+)?"
     r"\bfig(?:ure)?(?P<plural>s)?\.?\s*"
     # A hierarchical label is `1.2` or `1-2`; a *range* is `1-3` after a plural.
     # Reading "Figures 1-3" as one label `1-3` scores a figure no run can write
@@ -84,7 +84,7 @@ _FIG_REF = re.compile(
     # actually use folds to `-` before this ever runs, so it is the common case.
     r"(?P<label>(?:si|ed|s)?\d+(?:\.\d+)*"
     r"(?P<tail>-(?:si|ed|s)?\d+(?:\.\d+)*)?)"
-    r"[a-z]?\b", re.I)
+    r"[a-z]?\b(?!\s*%)", re.I)
 
 #: Further labels after a plural reference: ``Figures 1, 2 and 3``. The
 #: figure keyword establishes the namespace once; later labels inherit its
@@ -306,8 +306,8 @@ def sections(pages):
     A heading is a *short line that is only the heading*.  Matching a line's
     first word was the old rule and it fired on ordinary prose -- "Results were
     consistent across all three cohorts.", "Limitations of this approach are
-    discussed below." -- which is worse than finding nothing, because step 10
-    uses the results page range to decide which numbers to look at hardest.
+    discussed below." -- which is worse than finding nothing, because the
+    results-page reading pass uses that range to decide which numbers to inspect.
     It also *missed* the common real forms: "5. Empirical Results" (the section
     word is not first) and "7. Discussion, Limitations, Conclusion" (three
     sections on one line).
@@ -457,6 +457,8 @@ def run_self_test():
     case("panel letter folds to its figure", c.get("2"), 3)
     case("supplementary marker kept", c.get("S1"), 1)
     case("no phantom figures", sorted(c), ["2", "S1"])
+    case("plural prose percentages are not figure citations",
+         cites(["The headline figures 45% and 8% both held."]), {})
     # The marker set must be the extractor's, no wider: a marker counted here
     # that `auto_fig_bbox.py`'s caption regex cannot match scores a figure
     # under a label no run can write to disk, and the tiebreak then
@@ -587,7 +589,19 @@ def run_self_test():
     return 1 if bad else 0
 
 
+def _configure_stdio():
+    """Keep extracted paper text writable through narrow host pipes."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="backslashreplace")
+            except (AttributeError, OSError, ValueError):
+                pass
+
+
 def main(argv=None):
+    _configure_stdio()
     args = _build_parser().parse_args(argv)
     if args.test:
         return run_self_test()

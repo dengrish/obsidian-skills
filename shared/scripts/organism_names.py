@@ -20,16 +20,29 @@ __all__ = [
 ]
 
 
-_INITIAL_RE = re.compile(r"(?:^|[\s(\[])[A-Z]\.$")
+_INITIAL_RE = re.compile(r"(?:^|[^0-9A-Za-z'’])[A-Za-z]\.$")
+_NEXT_INITIAL_RE = re.compile(r"^\s+[A-Za-z]\.\s")
+_PREVIOUS_INITIAL_TAIL_RE = re.compile(r"(?:^|\s)[A-Za-z]\.\s*$")
+_HONORIFIC_TAIL_RE = re.compile(r"(?:^|\s)(?:Dr|Prof|Mr|Mrs|Ms)\.\s*$")
 _ABBREVS = (
-    "al", "approx", "ca", "cf", "dept", "dr", "e.g", "ed", "eds",
-    "et al", "etc", "fig", "figs", "i.e", "inc", "jr", "no", "nos",
-    "prof", "rev", "sr", "ssp", "st", "subsp", "trans", "var", "vs",
+    "e.g.", "i.e.", "cf.", "et al.", "approx.", "vs.", "ca.", "c.",
+    "fl.", "Dr.", "Prof.", "Mr.", "Mrs.", "Ms.", "St.", "Jr.",
+    "Sr.", "Fig.", "b.", "d.", "r.", "U.S.", "U.K.", "var.",
+    "subsp.", "ssp.", "sp.", "spp.", "aff.", "cv.", "fo.",
+    "Dept.", "Inc.", "vol.", "pp.",
 )
 _ABBREV_RE = re.compile(
-    r"(?:^|\b)(?:" + "|".join(re.escape(x) for x in _ABBREVS) + r")\.$",
-    re.IGNORECASE,
-)
+    r"(?:^|[^0-9A-Za-z])(?:%s)$"
+    % "|".join(re.escape(value) for value in sorted(
+        _ABBREVS, key=len, reverse=True)), re.IGNORECASE)
+_CASE_SENSITIVE_ABBREV_RE = re.compile(r"(?:^|[^0-9A-Za-z])No\.$")
+_STRONG_SENTENCE_START_RE = re.compile(
+    r"^\s+(?:A|An|The|This|That|These|Those|It|Its|He|His|She|Her|"
+    r"They|Their|We|Our|You|Your|I|My|However|Therefore|Thus|"
+    r"Meanwhile|Moreover|Nevertheless|By|In|On|At|When|Where|Why|"
+    r"How|After|Before|During|Although|Because|If|As)\b")
+
+
 _LATIN_TAXON_RE = re.compile(
     r"^(?P<taxon>(?P<genus>(?:[A-Z][a-z]+|[A-Z]\.))\s+"
     r"(?P<species>[a-z][A-Za-z.-]*)"
@@ -57,9 +70,9 @@ _COMMON_TAXON_GROUP_WORDS = {
     "weed", "weeds", "wolf", "wolves", "worm", "worms", "yeast",
     "yeasts",
 }
-_COMMON_ORGANISM_HEADS = {
-    "archaeon", "bacterium", "dog", "elephant", "fish", "fly", "fungus",
-    "mouse", "protozoan", "rat", "virus", "weed", "wolf", "worm", "yeast",
+_GENERIC_BINDING_HEADS = {
+    "category", "clade", "example", "genus", "group", "isolate", "model",
+    "organism", "pathogen", "species", "strain", "subject", "taxon",
 }
 
 # The title-bound parenthetical form used by both skills.  It accepts ordinary
@@ -78,18 +91,31 @@ def first_sentence(text):
     """Return the first sentence while preserving initials/abbreviations."""
     compact = " ".join((text or "").split())
     for match in re.finditer(r"[.!?]+", compact):
-        following = compact[match.end():match.end() + 1]
+        cursor = match.end()
+        following = compact[cursor:cursor + 1]
         if following and not following.isspace():
             continue
+        if not following:
+            return compact[:cursor]
         if match.group(0) == ".":
-            head = compact[max(0, match.end() - 16):match.end()]
-            # Markdown emphasis may sit immediately around a scientific
-            # initial (``(*E. coli*)``).  It is presentation, not part of the
-            # token the sentence-boundary test is trying to recognize.
+            head = compact[max(0, cursor - 16):cursor]
             head_plain = head.replace("*", "").replace("_", "")
-            if _INITIAL_RE.search(head_plain) or _ABBREV_RE.search(head_plain):
-                continue
-        return compact[:match.end()]
+            initial = bool(_INITIAL_RE.search(head_plain))
+            abbreviation = bool(
+                _ABBREV_RE.search(head_plain)
+                or _CASE_SENSITIVE_ABBREV_RE.search(head_plain))
+            if initial or abbreviation:
+                before = compact[:match.start()]
+                after = compact[cursor:]
+                name_initial = bool(
+                    initial
+                    and (_NEXT_INITIAL_RE.match(after)
+                         or _PREVIOUS_INITIAL_TAIL_RE.search(before)
+                         or _HONORIFIC_TAIL_RE.search(before)))
+                strong_next = bool(_STRONG_SENTENCE_START_RE.search(after))
+                if name_initial or not strong_next:
+                    continue
+        return compact[:cursor]
     return compact
 
 
@@ -138,8 +164,9 @@ def bound_common_names(title, description, opening):
     """Common names directly bound to an Organism's canonical title.
 
     Explicit ``called``/``known as`` cues may introduce an uncommon name.  A
-    weak ``is the`` or appositive cue is accepted only when its complete phrase
-    ends in a recognized organism head and does not repeat a title word.  An
+    weak ``is the`` or appositive cue is accepted when its complete phrase is
+    name-like, does not repeat a title word, and does not end in a generic
+    taxonomic or experimental role (such as ``model organism``).  An
     optional parenthetical between title and equation must be the matching
     scientific abbreviation; an arbitrary aside cannot establish the binding.
     """
@@ -185,12 +212,11 @@ def bound_common_names(title, description, opening):
                 words = [
                     item.casefold() for item in _COMMON_NAME_WORD_RE.findall(name)
                 ]
-                if not explicit and not (
-                    words
-                    and words[-1] in _COMMON_ORGANISM_HEADS
-                    and not title_words.intersection(words)
-                ):
-                    continue
+                if not explicit:
+                    if (not words or words[0] in {"called", "commonly", "known", "usually"}
+                            or title_words.intersection(words)
+                            or words[-1] in _GENERIC_BINDING_HEADS):
+                        continue
                 if name and name.casefold() not in {item.casefold() for item in found}:
                     found.append(name)
     return found
@@ -322,6 +348,14 @@ def _self_test():
          bound_common_names(
              "Mus musculus", "Mus musculus is the standard model organism used in genetics.", ""),
          []),
+        ("an unlisted common-name head is accepted by an explicit equation",
+         bound_common_names(
+             "Xenopus laevis", "Xenopus laevis is the African clawed frog.", ""),
+         ["African clawed frog"]),
+        ("a generic taxonomic role is not a common name",
+         bound_common_names(
+             "Xenopus laevis", "Xenopus laevis is the reference species.", ""),
+         []),
         ("explicit binding preserves a Unicode common name",
          bound_common_names(
              "Eleutherodactylus coqui",
@@ -339,6 +373,9 @@ def _self_test():
          first_sentence(
              "Pan troglodytes ssp. verus inhabits West Africa. It is endangered."),
          "Pan troglodytes ssp. verus inhabits West Africa."),
+        ("sentence-final capital is not treated as a name initial",
+         first_sentence("The genotype is X. The other genotype is Y."),
+         "The genotype is X."),
     ]
     bad = [(name, got, want) for name, got, want in cases if got != want]
     for name, got, want in bad:

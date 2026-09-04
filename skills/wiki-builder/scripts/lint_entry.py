@@ -14,8 +14,9 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
   2   2-field-order           schema order; mandatory keys present
                               (parents: present, `[]` when empty; read: last)
   2   2-type-enum             type: is one of the 15 enum values
-  2   2-quoting               Quoting Policy: title/description and every
-                              aliases/sources/tags/parents item double-quoted;
+  2   2-quoting               Quoting Policy: lossless plain or double-quoted
+                              title/description/aliases; sources/tags/parents
+                              items double-quoted;
                               type/created/updated/read never quoted;
                               double quotes, never single
   2   2-read-state            read: holds a boolean answer; a null or unknown
@@ -50,6 +51,8 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               make the answer safe to act on
       10-table-cell-wikilink  rendered wikilink occurs inside a Markdown
                               table cell, where links are forbidden
+      10-redundant-pipe       exact `[[slug|slug]]` in body prose; the Related
+                              footer keeps its mandatory canonical-title pipe
   11  11-related-display      in folder mode, every Related-footer link is
                               piped to the resolved target's canonical title
   12  12-image-caption        every Obsidian or Markdown image embed has an
@@ -59,6 +62,10 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
       12-equation-coverage-candidate
                               corpus-backed defining prose or inline formula
                               lacks canonical nearby display form; agent reviews
+      12-equation-format       an existing display has content on the same line
+                              as its `$$` delimiters
+      12-equation-typography  raw ell-norm or micrometre symbols in body/card
+                              surfaces that require inline LaTeX
   16  16-bold-opener          first outer-bold span equals the title/base/math
                               skeleton and uses the type-specific plain,
                               bold-italic, or mixed taxon/strain style
@@ -144,7 +151,8 @@ check for it.  It stays in ``vault_index.SCHEMA_ORDER`` on purpose, so that a
 legacy entry carrying it in its historical slot is neither reported as an
 out-of-order key nor as an unknown one.
 
-Exit code is ALWAYS 0 -- this is a reporting tool, not a gate.
+Exit code is 0 when no finding meets the selected severity floor, 1 when one
+does, and 2 for invocation or I/O failure.
 """
 
 from __future__ import annotations
@@ -154,6 +162,7 @@ import datetime as _dt
 import json
 import os
 import re
+import stat
 import sys
 import unicodedata
 
@@ -171,7 +180,7 @@ _OBSIDIAN_SHARED_MODULES = (
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
-_here = _os.path.dirname(_os.path.abspath(__file__))
+_here = _os.path.dirname(_os.path.realpath(__file__))
 _required = tuple(_m + ".py" for _m in (
     globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
@@ -182,6 +191,7 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
+    _tried.append(_here)                   # extracted skill with co-located helpers
 _missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
             for _p in _tried if _os.path.isdir(_p)}
 _shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
@@ -218,6 +228,7 @@ from organism_names import (  # noqa: E402
 from code_typography import find_bare_code_shapes  # noqa: E402
 from equation_coverage import (  # noqa: E402
     find_missing_display_equation_candidates,
+    find_noncanonical_display_equation_candidates,
 )
 from entry_structure import (  # noqa: E402
     answer_surface_match,
@@ -234,7 +245,9 @@ from entry_structure import (  # noqa: E402
 )
 from markdown_tables import (  # noqa: E402
     caption_faults as _caption_faults,
+    markdown_block_start,
     markdown_table_spans,
+    mask_line_spans,
 )
 from vault_index import (  # noqa: E402
     SCHEMA_ORDER,
@@ -275,13 +288,17 @@ TAG_ENUM = [
     "music", "machine-learning",
 ]
 
-ALWAYS_DOUBLE_QUOTED = ["title", "description"]
+PLAIN_OR_DOUBLE_SCALARS = ["title", "description"]
 NEVER_QUOTED = ["type", "created", "updated", "read"]
-QUOTED_LIST_FIELDS = ["aliases", "sources", "tags", "parents"]
+QUOTED_LIST_FIELDS = ["sources", "tags", "parents"]
 
 DESCRIPTION_MAX = 110
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_YAML_TYPED_PLAIN_RE = re.compile(
+    r"^(?:null|~|true|false|yes|no|on|off|\.nan|[+-]?\.inf|"
+    r"[+-]?(?:0|[1-9][0-9_]*)(?:\.[0-9_]*)?(?:e[+-]?[0-9]+)?|"
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2})$", re.IGNORECASE)
 # One outer-bold reader for all title shapes.  The inner expression admits an
 # italic span, so it reads ordinary ``**Title**``, combined
 # ``***Latin binomial***``, and the mixed taxon/strain form
@@ -348,6 +365,20 @@ def _style_of(raw):
         return "invalid"  # The parser already reports the malformed scalar.
 
 
+def _plain_string_allowed(value, style):
+    """Whether a conservative plain scalar remains a YAML string.
+
+    Requiring a Unicode letter first excludes every numeric/timestamp family
+    (including YAML 1.1 octal, sexagesimal, and prefixed integers) without
+    trying to emulate competing YAML schemas. Colon-space/end and space-hash
+    are the two interior forms that change plain-scalar structure.
+    """
+    return (style == "bare" and isinstance(value, str) and bool(value)
+            and value[:1].isalpha()
+            and not _YAML_TYPED_PLAIN_RE.fullmatch(value.strip())
+            and not re.search(r":(?:\s|$)|\s#", value))
+
+
 def source_stem(item):
     """``(stem, ext)`` of one ``sources:`` item, both case-folded.
 
@@ -401,8 +432,7 @@ def _check_structure(fm, findings):
             findings.append(_f("1-valid-yaml", "error", err))
         return False
     for err in fm.errors:
-        severity = "error" if "duplicate" in err or "unparseable" in err else "warning"
-        findings.append(_f("1-valid-yaml", severity, err))
+        findings.append(_f("1-valid-yaml", "error", err))
     return True
 
 
@@ -421,6 +451,13 @@ def _check_field_order(fm, findings):
 
     for key in MANDATORY_KEYS:
         if key not in fm.fields:
+            if key == "read":
+                findings.append(_f(
+                    "2-read-state", "info",
+                    "read: is missing -- preserve this unresolved user-owned "
+                    "state and include it in the run report; do not invent false",
+                    {"report_only": True}))
+                continue
             findings.append(_f(
                 "2-field-order", "error",
                 "mandatory key %r is missing (the key is never omitted, even "
@@ -460,6 +497,12 @@ def _check_type(fm, findings):
     field = fm.get("type")
     if field is None:
         return
+    if field.kind != "scalar":
+        findings.append(_f(
+            "2-type-enum", "error",
+            "type: must be one bare scalar, not %s" % field.kind,
+            {"line": field.line, "kind": field.kind}))
+        return
     value = field.scalar
     if not value:
         findings.append(_f("2-type-enum", "error", "type: is blank; it is mandatory"))
@@ -470,15 +513,17 @@ def _check_type(fm, findings):
 
 
 def _check_quoting(fm, findings):
-    for key in ALWAYS_DOUBLE_QUOTED:
+    for key in PLAIN_OR_DOUBLE_SCALARS:
         field = fm.get(key)
         if field is None:
             continue
         style = _style_of(field.raw_value)
-        if style != "double":
+        if style != "double" and not _plain_string_allowed(
+                field.scalar, style):
             findings.append(_f(
                 "2-quoting", "error",
-                "%s: must be double-quoted (Quoting Policy)" % key,
+                "%s: must be double-quoted unless its plain YAML spelling "
+                "round-trips as a string" % key,
                 {"line": field.line, "raw": field.raw_value, "style": style}))
 
     for key in NEVER_QUOTED:
@@ -506,6 +551,18 @@ def _check_quoting(fm, findings):
                     "2-quoting", "error",
                     "every item under %s: must be double-quoted "
                     "(single quotes and bare values are both wrong)" % key,
+                    {"line": line, "raw": raw, "style": style}))
+
+    aliases = fm.get("aliases")
+    if aliases is not None:
+        for raw, value, line in zip(
+                aliases.raw_items, aliases.values, aliases.item_lines):
+            style = _style_of(raw)
+            if style != "double" and not _plain_string_allowed(value, style):
+                findings.append(_f(
+                    "2-quoting", "error",
+                    "aliases: items must be double-quoted unless their plain "
+                    "YAML spelling round-trips as a string",
                     {"line": line, "raw": raw, "style": style}))
 
 
@@ -732,11 +789,11 @@ def _check_description(fm, findings, title=None):
         lowercase_title_subject = any(
             s[0].islower() and desc.startswith(s) for s in subjects)
         if not lowercase_title_subject:
-            findings.append(_f("7-description", "info",
+            findings.append(_f("7-description", "error",
                                "description does not start with a capitalised word",
                                {"description": desc}))
     if not ends_with_sentence_period(desc):
-        findings.append(_f("7-description", "info",
+        findings.append(_f("7-description", "error",
                            "description does not end with a period",
                            {"description": desc}))
 
@@ -793,13 +850,87 @@ def _check_body_structure(fm, sections, findings):
         # A Setext underline renders the preceding body line as a heading even
         # though it contains no '#'. The entry schema permits only ATX `##`
         # headings, so this must not escape both builder and whole-vault lint.
-        if (line_i > 0 and visible_lines[line_i - 1].strip()
+        previous = visible_lines[line_i - 1] if line_i > 0 else ""
+        if (line_i > 0 and previous.strip()
+                and not markdown_block_start(previous)
                 and re.fullmatch(r" {0,3}(?:=+|-+)[ \t]*", line)):
             findings.append(_f(
                 "9-body-structure", "error",
                 "Setext body headings are noncanonical; use a plain-text `##` heading",
                 {"body_line": line_i + 1,
                  "text": visible_lines[line_i - 1].strip()[:160]}))
+
+
+_RELATED_RENDERED_RE = re.compile(
+    r"^ {0,3}(?:>[ \t]*)?\*\*Related:\*\*(?:[ \t]*.*)?$")
+
+
+def _check_related_footer(sections, findings, is_stub):
+    """Require one canonical terminal footer without hiding malformed forms."""
+    if is_stub:
+        return
+    masked = strip_fenced("\n".join(sections["lines"])).split("\n")
+    indexes = [index for index, line in enumerate(masked)
+               if _RELATED_RENDERED_RE.match(line)]
+    if not indexes:
+        findings.append(_f(
+            "11-related-footer", "error",
+            "full entry has no `**Related:**` footer before Flashcards"))
+        return
+    if len(indexes) > 1:
+        findings.append(_f(
+            "11-related-footer", "error",
+            "entry has %d rendered Related footers; consolidate them into one"
+            % len(indexes), {"body_lines": [index + 1 for index in indexes]}))
+    index = indexes[0]
+    line = sections["lines"][index]
+    form_bad = not line.startswith("**Related:**")
+    if not form_bad:
+        tail = line[len("**Related:**"):]
+        if tail:
+            if not tail.startswith(" "):
+                form_bad = True
+            else:
+                parts = tail[1:].split(" · ")
+                form_bad = (not parts or any(
+                    re.fullmatch(r"\[\[[^\[\]\n]+\]\]", part) is None
+                    for part in parts))
+    if form_bad:
+        findings.append(_f(
+            "11-related-footer", "error",
+            "Related footer must be exactly `**Related:**`, optionally followed "
+            "by whole-line wikilinks separated with ` · `",
+            {"body_line": index + 1, "text": line[:160]}))
+
+    flash = sections.get("flashcards_index")
+    if flash is not None:
+        if index >= flash:
+            findings.append(_f(
+                "11-related-footer", "error",
+                "Related footer must precede the Flashcards separator and heading"))
+            return
+        nonblank = [i for i in range(index + 1, flash)
+                    if sections["lines"][i].strip()]
+        allowed_separator = nonblank[-1] if nonblank else None
+        stray = [i for i in nonblank
+                 if i != allowed_separator
+                 or sections["lines"][i].strip() != "---"]
+        if stray:
+            findings.append(_f(
+                "11-related-footer", "error",
+                "body content appears after the Related footer before Flashcards",
+                {"body_lines": [i + 1 for i in stray]}))
+        if (allowed_separator is not None and allowed_separator == index + 1
+                and sections["lines"][allowed_separator].strip() == "---"):
+            findings.append(_f(
+                "11-related-footer", "error",
+                "leave a blank line after the Related footer; an immediate `---` "
+                "renders the footer as a Setext heading",
+                {"body_line": allowed_separator + 1}))
+    elif any(line.strip() for line in sections["lines"][index + 1:]):
+        findings.append(_f(
+            "11-related-footer", "error",
+            "body content appears after the Related footer; it must be terminal"))
 
 
 def _check_tags(fm, findings, is_stub):
@@ -1165,14 +1296,20 @@ def strip_fenced(text):
     out, fence = [], None            # fence = the opening run, e.g. "````"
     for ln in (text or "").split("\n"):
         m = _FENCE_RE.match(ln)
-        if m and fence is None:
+        # Backticks are forbidden in a backtick fence's info string. A prose
+        # line such as `````code``` is inline`` therefore contains an inline
+        # span; it must not open a phantom fence that hides the rest of the
+        # entry. Tilde-fence info strings have no corresponding restriction.
+        valid_opener = bool(
+            m and not (m.group(1).startswith("`") and "`" in m.group(2)))
+        if valid_opener and fence is None:
             fence = m.group(1)
             # Retain nested/list fences while rejecting a more-indented sample
             # as the closer of a top-level fence. Tabs count as four columns.
             fence_indent = max(3, len(ln[:m.start(1)].expandtabs(4)))
             out.append("")
             continue
-        if (m and m.group(1)[0] == fence[0]
+        if (fence is not None and m and m.group(1)[0] == fence[0]
                 and len(m.group(1)) >= len(fence) and not m.group(2).strip()
                 and len(ln[:m.start(1)].expandtabs(4)) <= fence_indent):
             fence = None
@@ -1395,7 +1532,7 @@ def _image_embed_lines(body):
     ]
 
 
-def _check_image_captions(sections, findings):
+def _check_image_captions(fm, sections, findings):
     """Item 12 image-caption adjacency and plainness for both embed forms."""
     body = "\n".join(sections["prose_lines"])
     lines, embeds = _image_embed_lines(body)
@@ -1407,13 +1544,15 @@ def _check_image_captions(sections, findings):
                 "12-image-caption", "error",
                 "image embed needs an italic plain-text caption on the "
                 "immediately following line",
-                {"line": embed_i + 1, "embed": lines[embed_i].strip()[:80]}))
+                {"line": fm.body_start_line + embed_i,
+                 "embed": lines[embed_i].strip()[:80]}))
         elif faults:
             findings.append(_f(
                 "12-image-caption", "error",
                 "image caption has %s; captions are italic plain text "
                 "(only inline LaTeX is allowed)" % ", ".join(faults),
-                {"line": embed_i + 2, "caption": caption[:80]}))
+                {"line": fm.body_start_line + embed_i + 1,
+                 "caption": caption[:80]}))
 
 
 def _markdown_tables(body):
@@ -1423,10 +1562,10 @@ def _markdown_tables(body):
     read from the original text so forbidden markup remains visible.
     """
     original = body.split("\n")
-    return original, markdown_table_spans(strip_code(body))
+    return original, markdown_table_spans(strip_indented(strip_fenced(body)))
 
 
-def _check_table_captions(sections, findings):
+def _check_table_captions(fm, sections, findings):
     """Item 12's mechanical table-caption adjacency and plainness check."""
     body = "\n".join(sections["prose_lines"])
     lines, tables = _markdown_tables(body)
@@ -1438,21 +1577,25 @@ def _check_table_captions(sections, findings):
                 "12-table-caption", "error",
                 "Markdown table needs an italic plain-text caption on the "
                 "immediately following line",
-                {"line": header_i + 1, "header": lines[header_i].strip()[:80]}))
+                {"line": fm.body_start_line + header_i,
+                 "header": lines[header_i].strip()[:80]}))
         elif faults:
             findings.append(_f(
                 "12-table-caption", "error",
                 "Markdown table caption has %s; captions are italic plain text "
                 "(only inline LaTeX is allowed)" % ", ".join(faults),
-                {"line": end_i + 2, "caption": caption[:80]}))
+                {"line": fm.body_start_line + end_i + 1,
+                 "caption": caption[:80]}))
 
 
-def _check_equation_coverage_candidates(sections, findings):
+def _check_equation_coverage_candidates(fm, sections, findings):
     """Item 12's conservative floor for prose/inline defining math."""
     prose = "\n".join(sections["prose_lines"])
     masked = strip_code(prose)
     _lines, table_spans = _markdown_tables(prose)
     candidates = find_missing_display_equation_candidates(masked, table_spans)
+    for candidate in candidates:
+        candidate["line"] += fm.body_start_line - 1
     if candidates:
         findings.append(_f(
             "12-equation-coverage-candidate", "warning",
@@ -1461,9 +1604,79 @@ def _check_equation_coverage_candidates(sections, findings):
             "operations, then typeset only that relationship under the "
             "equation policy",
             {"matches": candidates, "agent_review": True}))
+    form_candidates = find_noncanonical_display_equation_candidates(
+        masked, table_spans)
+    for candidate in form_candidates:
+        candidate["line"] += fm.body_start_line - 1
+    if form_candidates:
+        findings.append(_f(
+            "12-equation-format", "error",
+            "display math has content on the same line as its `$$` delimiters; "
+            "keep the existing equation and put each delimiter on its own line",
+            {"matches": form_candidates}))
 
 
-def _check_table_cell_wikilinks(sections, findings):
+def _literal_dollar_count(text):
+    """Count literal dollars after removing code and valid math spans."""
+    visible = strip_code(text or "").replace(r"\$", " ")
+    visible = re.sub(r"\$\$.*?\$\$", " ", visible, flags=re.DOTALL)
+    # A closing math delimiter is not immediately followed by a digit. This
+    # preserves both signs in ``$20 ... $30`` while accepting numeric math.
+    visible = re.sub(r"(?<!\\)\$(?!\$)[^$\n]*\$(?!\d)", " ", visible)
+    return visible.count("$")
+
+
+def _check_literal_dollars(body, findings):
+    count = _literal_dollar_count(body)
+    if count:
+        findings.append(_f(
+            "12-literal-dollar", "error",
+            "%d unescaped literal dollar sign%s in body prose; escape each "
+            "currency or other literal sign as `\\$`" %
+            (count, "" if count == 1 else "s")))
+
+
+def _check_unicode_math(fm, sections, findings):
+    """Catch raw mathematical Unicode in rendered prose/card surfaces."""
+    prose = strip_code("\n".join(sections["prose_lines"]))
+    for line_no, line in enumerate(prose.split("\n"), 1):
+        if re.search(r"ℓ(?:[0-9₀-₉])", line):
+            findings.append(_f(
+                "12-equation-typography", "error",
+                "raw ℓ-norm notation must use inline LaTeX, such as "
+                "`$\\ell_1$` or `$\\ell_2$`",
+                {"body_line": line_no, "text": line.strip()[:160]}))
+        if re.search(r"(?<!\w)(?:μ|µ)m\b", line):
+            findings.append(_f(
+                "12-equation-typography", "error",
+                "raw micrometre notation must use inline LaTeX, such as "
+                "`$\\mu\\mathrm{m}$`",
+                {"body_line": line_no, "text": line.strip()[:160]}))
+    description = fm.scalar("description") or ""
+    if re.search(r"ℓ(?:[0-9₀-₉])", description):
+        findings.append(_f(
+            "12-equation-typography", "error",
+            "raw ℓ-norm notation in description must use plain words such "
+            "as `ell-one` or `ell-two`; YAML descriptions do not render LaTeX",
+            {"field": "description", "text": description[:160]}))
+    for card_no, card in enumerate(
+            parse_flashcards(sections["flashcard_lines"]), 1):
+        line1 = card[0] if card else ""
+        if re.search(r"ℓ(?:[0-9₀-₉])", line1):
+            findings.append(_f(
+                "12-equation-typography", "error",
+                "raw ℓ-norm notation in flashcard %d line 1 must use inline "
+                "LaTeX, such as `$\\ell_1$` or `$\\ell_2$`" % card_no,
+                {"card": card_no, "line1": line1[:160]}))
+        if re.search(r"(?<!\w)(?:μ|µ)m\b", line1):
+            findings.append(_f(
+                "12-equation-typography", "error",
+                "raw micrometre notation in flashcard %d line 1 must use "
+                "inline LaTeX, such as `$\\mu\\mathrm{m}$`" % card_no,
+                {"card": card_no, "line1": line1[:160]}))
+
+
+def _check_table_cell_wikilinks(fm, sections, findings):
     """Item 10: rendered wikilinks never belong inside table cells."""
     body = "\n".join(sections["prose_lines"])
     lines, tables = _markdown_tables(body)
@@ -1476,16 +1689,32 @@ def _check_table_cell_wikilinks(sections, findings):
                     "10-table-cell-wikilink", "error",
                     "wikilinks are not allowed in Markdown table cells; use "
                     "plain text in the table and integrate the link in prose",
-                    {"line": line_i + 1, "target": target,
+                    {"line": fm.body_start_line + line_i, "target": target,
                      "text": lines[line_i].strip()[:160]}))
 
 
 _NAVIGATION_ONLY_LINK_RE = re.compile(
     r"(?:^|[.!?,;:]\s+|\(\s*|[—–-]\s+)"
-    r"(?:see(?:\s+also)?|refer\s+to|consult)\s+\[\[", re.IGNORECASE)
+    r"(?:see(?:\s+also)?|refer\s+to|consult|"
+    r"for\s+(?:more\s+)?details,?\s+see)\s+\[\[", re.IGNORECASE)
+_REDUNDANT_PIPE_RE = re.compile(
+    r"(?<!!)\[\[(?P<target>[^\[\]\n|#^/\\]+)\|(?P=target)\]\]")
 
 
-def _check_integrated_wikilinks(sections, findings):
+def _check_redundant_piped_wikilinks(sections, findings):
+    """Reject an exact body-prose ``[[slug|slug]]`` alias."""
+    raw_prose = "\n".join(sections["prose_lines"])
+    prose = mask_line_spans(strip_code(raw_prose), _markdown_tables(raw_prose)[1])
+    for match in _REDUNDANT_PIPE_RE.finditer(prose):
+        target = match.group("target")
+        findings.append(_f(
+            "10-redundant-pipe", "error",
+            "wikilink [[%s|%s]] in body prose has a display label identical "
+            "to its slug; use [[%s]]" % (target, target, target),
+            {"target": target, "region": "body prose"}))
+
+
+def _check_integrated_wikilinks(fm, sections, findings):
     """Item 9: a body link participates in the claim rather than directing.
 
     This narrow floor catches only an imperative cue immediately governing a
@@ -1511,7 +1740,8 @@ def _check_integrated_wikilinks(sections, findings):
                 "9-link-integration", "error",
                 "navigation-only cross-reference; integrate the wikilink into "
                 "the sentence's claim instead of directing the reader to see it",
-                {"line": i + 1, "text": raw_lines[i].strip()[:160]}))
+                {"line": fm.body_start_line + i,
+                 "text": raw_lines[i].strip()[:160]}))
 
 
 def _body_wikilink_occurrences(sections):
@@ -1854,10 +2084,12 @@ def _check_flashcards_present(fm, sections, findings, is_stub):
     elif len(cards) > 1:
         findings.append(_f(
             "19-flashcards", "error",
-            "the `## Flashcards` section holds %d cards -- item 19 allows "
-            "exactly one; a second term that warrants a card is a split into "
-            "its own entry, not a second card" % len(cards),
-            {"cards": len(cards)}))
+            "the `## Flashcards` section holds %d cards -- exactly one is the "
+            "current presentation shape, but extra cards are report-only in "
+            "routine lint; preserve every card and attachment unless an "
+            "explicitly authorized refactor accounts for its tested claim"
+            % len(cards),
+            {"cards": len(cards), "report_only": True}))
 
     # Item 19's remaining mechanical clauses (scan_vault checks them too; the
     # two tools must agree). Line 1 is one sentence. Line 2 is exactly `??` --
@@ -2000,7 +2232,9 @@ def _check_stub_structure(fm, sections, findings, is_stub):
     if sections["related_index"] is not None:
         findings.append(_f("stub-no-related", "error",
                            "stubs carry no **Related:** footer",
-                           {"line": sections["related_line"]}))
+                           {"line": (fm.body_start_line
+                                     + sections["related_index"]),
+                            "text": sections["related_line"][:160]}))
     # A syntax sample inside inline/fenced/indented code is not an image.
     # Read the same listing-masked body as the linter's stub check.
     masked_stub_body = strip_code(body_text)
@@ -2117,14 +2351,18 @@ def lint_text(text, filename):
     _check_aliases(fm, findings, filename)
     _check_alias_completeness(fm, sections, findings, filename)
     _check_body_structure(fm, sections, findings)
-    _check_table_cell_wikilinks(sections, findings)
+    _check_related_footer(sections, findings, is_stub)
+    _check_table_cell_wikilinks(fm, sections, findings)
+    _check_redundant_piped_wikilinks(sections, findings)
     _check_duplicate_wikilinks(sections, findings)
-    _check_integrated_wikilinks(sections, findings)
+    _check_integrated_wikilinks(fm, sections, findings)
     _check_person_event_date(fm, sections, findings)
     if not is_stub:
-        _check_image_captions(sections, findings)
-        _check_equation_coverage_candidates(sections, findings)
-    _check_table_captions(sections, findings)
+        _check_image_captions(fm, sections, findings)
+        _check_equation_coverage_candidates(fm, sections, findings)
+    _check_literal_dollars("\n".join(sections["prose_lines"]), findings)
+    _check_unicode_math(fm, sections, findings)
+    _check_table_captions(fm, sections, findings)
     _check_bold_opener(fm, sections, findings)
     _check_code_typography(sections, findings)
     _check_flashcards_present(fm, sections, findings, is_stub)
@@ -2137,32 +2375,51 @@ def lint_file(path):
     """Lint one file on disk.  Never raises."""
     abspath = os.path.abspath(path)
     preamble = []
+    descriptor = None
     try:
-        # utf-8-sig, not utf-8: a BOM left lines[0] as "﻿---", so
-        # parse_frontmatter reported "no YAML frontmatter", _check_structure
-        # returned False, and all 13 remaining checks silently skipped -- the
-        # entry came back reported as otherwise clean.
-        with open(abspath, "r", encoding="utf-8-sig") as fh:
-            text = fh.read()
+        before = os.stat(abspath, follow_symlinks=False)
+        if stat.S_ISLNK(before.st_mode):
+            raise OSError("leaf Markdown path is a symlink; its target is "
+                          "outside this lint run's editable ownership")
+        if not stat.S_ISREG(before.st_mode):
+            raise OSError("leaf Markdown path is not a regular file")
+        descriptor = os.open(
+            abspath, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        opened = os.fstat(descriptor)
+        if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            raise OSError("leaf Markdown path changed while it was opened")
+        with os.fdopen(descriptor, "rb") as fh:
+            descriptor = None
+            raw = fh.read()
+        after = os.stat(abspath, follow_symlinks=False)
+        stable = lambda item: (
+            item.st_dev, item.st_ino, item.st_size,
+            getattr(item, "st_mtime_ns", int(item.st_mtime * 1e9)),
+            getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)),
+        )
+        if not (stable(before) == stable(opened) == stable(after)):
+            raise OSError("leaf Markdown path changed while it was read")
+        # utf-8-sig strips a BOM before the opening frontmatter fence.
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            text = raw.decode("utf-8-sig", errors="replace")
+            preamble.append(_f("0-encoding", "error",
+                               "file is not valid UTF-8 (%s); linted with "
+                               "replacement characters" % exc))
     except UnicodeDecodeError as exc:
         preamble.append(_f("0-encoding", "error",
                            "file is not valid UTF-8 (%s); linted with "
                            "replacement characters" % exc))
-        try:
-            with open(abspath, "r", encoding="utf-8-sig", errors="replace") as fh:
-                text = fh.read()
-        except Exception as exc2:
-            return {"file": abspath, "is_stub": False, "title": None,
-                    "aliases": [], "description_chars": None,
-                    "findings": preamble + [_f("0-unreadable", "error",
-                                               "could not read file: %s: %s"
-                                               % (type(exc2).__name__, exc2))]}
     except Exception as exc:
         return {"file": abspath, "is_stub": False, "title": None, "aliases": [],
                 "description_chars": None,
                 "findings": [_f("0-unreadable", "error",
                                 "could not read file: %s: %s"
                                 % (type(exc).__name__, exc))]}
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
     try:
         result = lint_text(text, abspath)
         result["findings"] = preamble + result["findings"]
@@ -2183,6 +2440,10 @@ def _check_alias_collisions(results):
     on another would otherwise have filesystem-dependent ownership.
     """
     owners = {}                    # folded alias -> (display alias, [files])
+    filename_owners = {}
+    for res in results:
+        stem = os.path.splitext(os.path.basename(res["file"]))[0]
+        filename_owners.setdefault(fold_name(stem), []).append(res["file"])
     for res in results:
         for alias in res["aliases"]:
             entry = owners.setdefault(fold_name(alias), (alias, []))
@@ -2206,6 +2467,22 @@ def _check_alias_collisions(results):
                     "the other becomes silently unreachable" % (alias, len(files) - 1),
                     {"alias": alias,
                      "files": [os.path.basename(f) for f in files]}))
+    for folded, (alias, alias_files) in sorted(owners.items()):
+        target_files = filename_owners.get(folded, [])
+        for alias_file in alias_files:
+            others = [path for path in target_files if path != alias_file]
+            if not others:
+                continue
+            collision_files = [alias_file] + others
+            collisions.append({"alias": alias, "files": collision_files,
+                               "kind": "alias-filename"})
+            result = next(res for res in results if res["file"] == alias_file)
+            result["findings"].append(_f(
+                "18-alias-collision", "error",
+                "alias %r is another entry's filename slug; the file owns that "
+                "Obsidian destination and silently shadows this alias" % alias,
+                {"alias": alias,
+                 "files": [os.path.basename(path) for path in collision_files]}))
     return collisions
 
 
@@ -2289,6 +2566,9 @@ def _recheck_folder_duplicate_wikilinks(results, root):
         return "unresolved-target:" + lookup
 
     for result in results:
+        if any(finding["item"] == "0-unreadable"
+               for finding in result["findings"]):
+            continue
         try:
             with open(result["file"], "r", encoding="utf-8-sig") as handle:
                 text = handle.read()
@@ -2367,6 +2647,9 @@ def _check_folder_related_labels(results, root):
         return next(iter(alias_matches)) if len(alias_matches) == 1 else None
 
     for result in results:
+        if any(finding["item"] == "0-unreadable"
+               for finding in result["findings"]):
+            continue
         try:
             with open(result["file"], "r", encoding="utf-8-sig") as handle:
                 fm = parse_frontmatter(handle.read())
@@ -2377,20 +2660,22 @@ def _check_folder_related_labels(results, root):
             continue
         for target, display in extract_wikilinks(related):
             owner = resolve(target)
-            canonical = titles.get(owner) if owner else None
+            raw_canonical = titles.get(owner) if owner else None
+            canonical = (math_title_plain_text(raw_canonical)
+                         if raw_canonical else None)
             if not canonical:
                 continue
             if display is None:
                 result["findings"].append(_f(
                     "11-related-display", "error",
                     "Related footer link [[%s]] must be piped to the target's "
-                    "canonical title %r" % (target, canonical),
+                    "canonical plain-text title %r" % (target, canonical),
                     {"target": target, "expected_display": canonical}))
             elif display != canonical:
                 result["findings"].append(_f(
                     "11-related-display", "error",
                     "Related footer display %r must equal the target's canonical "
-                    "title %r" % (display, canonical),
+                    "plain-text title %r" % (display, canonical),
                     {"target": target, "display": display,
                      "expected_display": canonical}))
 
@@ -2558,6 +2843,79 @@ def run_self_test():
           items(good), [])
     check("the clean STUB produces no finding either",
           items(stub, "precision.md"), [])
+    check("numeric inline math is not mistaken for currency",
+          [_literal_dollar_count(value) for value in (
+              r"The rank satisfies $1 \le k \le m$.",
+              r"The probability obeys $0 < p < 1$.",
+              r"The fraction approaches $1-e^{-1}$.")],
+          [0, 0, 0])
+    check("two currency amounts remain two literal dollars",
+          _literal_dollar_count("The price ranges from $20 to $30."), 2)
+    raw_description = mutate(
+        'description: "A ROC curve plots true positive rate against false '
+        'positive rate."',
+        'description: "A ROC curve compares outcomes under an ℓ1 distance."')
+    check("raw ell notation in a YAML description gets a plain-word remedy",
+          [(f["item"], "ell-one" in f["message"])
+           for f in lint_text(raw_description, "roc-curve.md")["findings"]],
+          [("12-equation-typography", True)])
+    raw_card = mutate(
+        "The plot tracing the trade-off between two error rates as a decision "
+        "threshold moves.",
+        "A plot measured under an ℓ1 distance.")
+    check("raw ell notation in a card prompt gets an inline-LaTeX remedy",
+          [(f["item"], "$\\ell_1$" in f["message"])
+           for f in lint_text(raw_card, "roc-curve.md")["findings"]],
+          [("12-equation-typography", True)])
+    raw_prose = mutate(
+        "decision threshold moves.\n",
+        "decision threshold moves. It uses an ℓ2 distance.\n")
+    check("raw ell notation in prose gets an inline-LaTeX remedy",
+          items(raw_prose), ["12-equation-typography"])
+    raw_micro_card = mutate(
+        "The plot tracing the trade-off between two error rates as a decision "
+        "threshold moves.",
+        "A specimen is 10 µm wide.")
+    check("raw micro-sign units in a card get an inline-LaTeX remedy",
+          [(f["item"], "$\\mu\\mathrm{m}$" in f["message"])
+           for f in lint_text(raw_micro_card, "roc-curve.md")["findings"]],
+          [("12-equation-typography", True)])
+    raw_micro_prose = mutate(
+        "decision threshold moves.\n",
+        "decision threshold moves. A specimen is 10 μm wide.\n")
+    check("raw Greek-mu units in prose get an inline-LaTeX remedy",
+          items(raw_micro_prose), ["12-equation-typography"])
+    unicode_micro_description = mutate(
+        'description: "A ROC curve plots true positive rate against false '
+        'positive rate."',
+        'description: "A ROC curve depicts features at a 10 μm scale."')
+    check("a description keeps its documented plain-Unicode allowance",
+          items(unicode_micro_description), [])
+    numeric_math = mutate(
+        "decision threshold moves.\n",
+        r"decision threshold moves. Its rank satisfies $1 \le k \le m$." + "\n")
+    check("a complete entry accepts numeric inline math",
+          items(numeric_math), [])
+    currency_pair = mutate(
+        "decision threshold moves.\n",
+        "decision threshold moves. It costs $20 to $30.\n")
+    check("a complete entry reports both literal currency signs",
+          [(f["item"], f["message"].startswith("2 unescaped"))
+           for f in lint_text(currency_pair, "roc-curve.md")["findings"]],
+          [("12-literal-dollar", True)])
+    writing_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "references", "writing.md")
+    with open(writing_path, encoding="utf-8") as writing_handle:
+        writing_text = writing_handle.read()
+    complete_example = re.search(
+        r'```markdown\n(---\ntitle: "LambdaRank".*?\n)```',
+        writing_text, re.DOTALL)
+    check("writing.md exposes the complete LambdaRank example",
+          complete_example is not None, True)
+    if complete_example is not None:
+        check("the documented complete entry passes the actual linter",
+              items(complete_example.group(1), "lambdarank.md"), [])
     commented = good.replace('title: "ROC curve"', 'title: "ROC curve" # user annotation')
     commented = commented.replace('"auroc"', '"aur\\u006fc" # an escaped alias')
     commented = commented.replace('sources:\n', 'sources: # reference\n# provenance annotation\n')
@@ -2686,8 +3044,11 @@ def run_self_test():
           items(mutate('title: "ROC curve"\ntype: Concept\n',
                        'type: Concept\ntitle: "ROC curve"\n')),
           ["2-field-order"])
-    check("a missing mandatory key",
-          items(mutate("read: false\n", "")), ["2-field-order"])
+    check("a missing read key is report-only user state",
+          [(f["item"], f["severity"], f["evidence"].get("report_only"))
+           for f in lint_text(mutate("read: false\n", ""),
+                              "roc-curve.md")["findings"]],
+          [("2-read-state", "info", True)])
     check("an off-schema key is a WARNING, not an error",
           [(f["item"], f["severity"])
            for f in lint_text(mutate("read: false\n", "mood: bright\nread: false\n"),
@@ -2726,8 +3087,16 @@ def run_self_test():
     # `type:` present-but-blank is a 2-type-enum finding only: the KEY is
     # there, so the mandatory-key check has nothing to say about it.
     check("type: blank", items(mutate("type: Concept", "type:")), ["2-type-enum"])
-    check("title: not double-quoted",
-          items(mutate('title: "ROC curve"', "title: ROC curve")), ["2-quoting"])
+    check("a lossless plain title is accepted after an Obsidian Properties edit",
+          items(mutate('title: "ROC curve"', "title: ROC curve")), [])
+    check("typed, numeric, and timestamp-like plain titles still require quotes",
+          ["2-quoting" in items(mutate(
+              'title: "ROC curve"', "title: " + value))
+           for value in ("true", "0x10", "0o10", "0b10", "0123", ".5",
+                         "12:34:56", "2026-09-03T10:00:00Z")],
+          [True] * 8)
+    check("a lossless plain alias is accepted after a Properties edit",
+          items(mutate('  - "auroc"', "  - auroc")), [])
     check("type: quoted (it is a bare enum value)",
           items(mutate("type: Concept", 'type: "Concept"')), ["2-quoting"])
     check("read: quoted -- the string Obsidian renders as permanently checked",
@@ -2744,7 +3113,7 @@ def run_self_test():
           items(mutate('aliases:\n  - "auroc"\n', 'aliases: []\n')), [])
     check("an UNQUOTED #tag, which YAML reads as a comment",
           items(mutate('  - "#statistics"', "  - #statistics")),
-          ["2-quoting", "8-tags"])
+          ["1-valid-yaml", "2-quoting", "8-tags"])
 
     # -- item 3: dates -----------------------------------------------------
     check("a malformed date", items(mutate("created: 2026-01-01", "created: 2026-1-1")),
@@ -2815,11 +3184,11 @@ def run_self_test():
               "plots %%true%%",
           )],
           [["7-description"]] * 9)
-    check("a description with no closing period is INFO, not an error",
+    check("a description with no closing period is an error in both linters",
           [(f["item"], f["severity"])
            for f in lint_text(mutate("false positive rate.", "false positive rate"),
                               "roc-curve.md")["findings"]],
-          [("7-description", "info")])
+          [("7-description", "error")])
     check("two declarative or question-ended description sentences are rejected",
           (items(mutate(
               'description: "A ROC curve plots true positive rate against '
@@ -2905,12 +3274,20 @@ def run_self_test():
     # -- item 10: duplicate wikilinks --------------------------------------
     check("the same target linked twice in prose, under two labels",
           items(mutate("decision threshold moves.\n",
-                       "decision threshold moves, per [[precision|precision]] "
+                       "decision threshold moves, per [[precision]] "
                        "and [[precision|the positive predictive value]].\n")),
           ["10-duplicate-wikilink"])
     check("...counted by TARGET, so one link plus the Related footer is fine",
           items(mutate("decision threshold moves.\n",
-                       "decision threshold moves, per [[precision|precision]].\n")),
+                       "decision threshold moves, per [[precision]].\n")),
+          [])
+    check("an exact body display alias is redundant",
+          items(mutate("decision threshold moves.\n",
+                       "decision threshold moves, per "
+                       "[[precision|precision]].\n")),
+          ["10-redundant-pipe"])
+    check("the mandatory piped Related form is outside the body-only check",
+          items(mutate("[[precision|Precision]]", "[[precision|precision]]")),
           [])
     check("a ^block anchor is stripped, so the same target twice is still a dup",
           items(mutate("decision threshold moves.\n",
@@ -3398,7 +3775,7 @@ def run_self_test():
     check('the "stub" marker beside a real source',
           items(mutate('  - "stub"\n', '  - "stub"\n  - "[[Doe_X_2025.pdf#page=2]]"\n',
                        base=stub), "precision.md"),
-          ["19-flashcards", "stub-sources-marker"])
+          ["11-related-footer", "19-flashcards", "stub-sources-marker"])
 
     # -- item 9: structure plus semantic body review -----------------------
     check("the body starts immediately after frontmatter",
@@ -3499,7 +3876,7 @@ def run_self_test():
                        "rates as a decision threshold moves.\n",
                        "A **ROC curve** plots one error-rate pair per threshold "
                        "and can be summarized by the area under the curve:\n\n"
-                       "$$A = \\int_0^1 f(x)\\,dx$$\n\n"
+                       "$$\nA = \\int_0^1 f(x)\\,dx\n$$\n\n"
                        "The integral aggregates ranking behaviour across all "
                        "operating points while the curve preserves the "
                        "threshold-specific trade-off.\n")),
@@ -3517,6 +3894,19 @@ def run_self_test():
           items(equationless.replace(
               "variance.\n", "variance:\n\n$$\n"
               "\\sigma = \\sqrt{\\operatorname{Var}(X)}\n$$\n", 1)), [])
+    one_line_display = equationless.replace(
+        "variance.\n", "variance:\n\n"
+        "$$\\sigma = \\sqrt{\\operatorname{Var}(X)}$$\n", 1)
+    check("a one-line display is a form finding, not a missing-equation finding",
+          items(one_line_display), ["12-equation-format"])
+    one_line_finding = next(
+        finding for finding in lint_text(
+            one_line_display, "roc-curve.md")["findings"]
+        if finding["item"] == "12-equation-format")
+    check("an equation form finding uses the physical file line",
+          one_line_finding["evidence"]["matches"][0]["line"],
+          one_line_display.splitlines().index(
+              "$$\\sigma = \\sqrt{\\operatorname{Var}(X)}$$") + 1)
     check("an expanded squared-deviation average clears the prose equation candidate",
           items(equationless.replace(
               "variance.\n", "variance:\n\n$$\n"
@@ -3580,7 +3970,7 @@ def run_self_test():
           []),
     check("a navigation-only cue pointing straight at a wikilink is item 9",
           items(mutate("decision threshold moves.\n",
-                       "decision threshold moves (see [[precision|precision]]).\n")),
+                       "decision threshold moves (see [[precision]]).\n")),
           ["9-link-integration"])
     check("ordinary 'to see how' prose is not a navigation-only link cue",
           items(mutate("decision threshold moves.\n",
@@ -3589,7 +3979,7 @@ def run_self_test():
     check("semantic 'see X as Y' prose is not a navigation-only cue",
           items(mutate("decision threshold moves.\n",
                        "decision threshold moves. Researchers see "
-                       "[[precision|precision]] as context-dependent.\n")), [])
+                       "[[precision]] as context-dependent.\n")), [])
     check("a navigation cue shown in a fenced listing is ignored",
           items(mutate("\n**Related:**",
                        "\n\n```markdown\nsee [[precision]]\n```\n\n**Related:**")),
@@ -3617,8 +4007,17 @@ def run_self_test():
           items(images.replace(
               "![[figure.png]]\n*A local", "![[figure.png]]\n\n*A local")),
           ["12-image-caption"])
+    missing_caption = mutate(
+        "\n**Related:**", "\n\n![[uncaptioned.png]]\n\n**Related:**")
+    caption_finding = next(
+        finding for finding in lint_text(
+            missing_caption, "roc-curve.md")["findings"]
+        if finding["item"] == "12-image-caption")
+    check("body evidence uses a physical file line, not a body-relative line",
+          caption_finding["evidence"]["line"],
+          missing_caption.splitlines().index("![[uncaptioned.png]]") + 1)
     for label, markup, fault in (("nested italic", "*extra detail*", "italic"),
-                                 ("wikilink", "[[precision|precision]]", "wikilink"),
+                                 ("wikilink", "[[precision|linked detail]]", "wikilink"),
                                  ("Markdown link", "[source](https://example.test)", "Markdown link"),
                                  ("HTML", "<span>detail</span>", "HTML"),
                                  ("strikethrough", "~~extra detail~~", "strikethrough"),
@@ -3673,7 +4072,7 @@ def run_self_test():
           items(pipe_less_link_table), ["10-table-cell-wikilink"])
     check("wikilink syntax in inline code inside a table cell stays literal",
           items(pipe_less_link_table.replace(
-              "[[precision|Precision]]", "`[[precision|Precision]]`")), [])
+              "[[precision|Precision]]", "`[[precision|Precision]]`", 1)), [])
     emphasized_row = table.replace("| A | 0.8 |",
                                    "| A | 0.8 |\n*Recall* | *0.8*")
     check("an emphasized table row is not mistaken for the caption",
@@ -4064,6 +4463,11 @@ def _build_parser():
 
 
 def main(argv=None):
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (AttributeError, OSError):
+            pass
     args = _build_parser().parse_args(argv)
     if args.test:
         return run_self_test()

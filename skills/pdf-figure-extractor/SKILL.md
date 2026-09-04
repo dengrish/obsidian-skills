@@ -82,11 +82,12 @@ Replace `--src` with the full PDF path for one file. Add `--dry-run` for a
 preview that writes **nothing**: no PNGs, review marks, manifest, or output
 directory. For less common options, use the script's `--help`.
 
-Verified existing figures are skipped. `--overwrite` replaces **verified
-output only**; an unknown or conflicting occupant is protected in both batch
-and explicit-coordinate extraction. Malformed, protected, or symlinked
-ownership manifests block extraction. Do not delete sidecars or occupied images
-to force a run.
+Verified existing figures are skipped. `--overwrite` replaces **verified,
+unreviewed output only**; a review-ledger row protects the checked crop from a
+broad automatic overwrite. An unknown or conflicting occupant is protected in
+both batch and explicit-coordinate extraction. Malformed, protected, or
+symlinked ownership manifests block extraction. Do not delete sidecars or
+occupied images to force a run.
 Ownership is checked for the whole portable figure slot, not only the intended
 `.png` pathname. A `.jpg`, `.webp`, or other inventoried image with the same
 case/Unicode-normalized `<stem>_fig_<label>` identity blocks publication; an
@@ -96,13 +97,14 @@ Read [review and repair](references/review-and-repair.md) when ownership or
 legacy migration needs attention.
 
 No occupied image is adopted automatically, even when its filename matches a
-canonical PDF stem: a Web Clipper image can occupy that same name. During an
-absent-manifest migration, inspect each confirmed historical extractor crop
-and select it exactly with the repeatable option
+canonical PDF stem: a Web Clipper image can occupy that same name. To migrate
+an unrecorded historical extractor crop, inspect it and select that exact slot
+with the repeatable option
 `--adopt-legacy '<pdf_stem>:<figure_label>'`. The helper accepts only a complete
 PNG for one eligible, uniquely identified PDF in the selected scope, records
-only those named files, and reports every selection. Once a manifest exists,
-reconcile its records directly rather than using the migration option.
+only those named files, and reports every selection. An existing manifest does
+not block migration of another unrecorded slot, but a recorded slot must be
+reconciled as an ownership record rather than adopted again.
 Do not combine `--adopt-legacy` with `--overwrite`: establish ownership in one
 run, then request any re-extraction separately.
 

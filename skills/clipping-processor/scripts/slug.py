@@ -76,7 +76,7 @@ _OBSIDIAN_SHARED_MODULES = ('slugify',)
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
-_here = _os.path.dirname(_os.path.abspath(__file__))
+_here = _os.path.dirname(_os.path.realpath(__file__))
 _required = tuple(_m + ".py" for _m in (
     globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
@@ -87,6 +87,7 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
+    _tried.append(_here)                   # extracted skill with co-located helpers
 _missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
             for _p in _tried if _os.path.isdir(_p)}
 _shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
@@ -167,6 +168,7 @@ PUBLICATION_TAIL = {
     "weekly", "daily", "quarterly", "newsroom", "desk", "bureau", "team",
     "editorial", "editors", "staff", "institute", "foundation", "university",
     "lab", "labs", "laboratory", "inc", "ltd", "llc", "plc", "gmbh", "corp",
+    "research", "deepmind",
 }
 
 # Both a publication word and a real surname — Emily Post, Bill Press. Too
@@ -175,6 +177,10 @@ PUBLICATION_TAIL = {
 AMBIGUOUS_TAIL = {"post", "press"}
 
 LEADING_ARTICLES = {"the", "a", "an"}
+PUBLICATION_LEADS = {
+    "journal", "works", "institute", "university", "college", "school",
+    "department", "centre", "center", "academy", "society", "association",
+}
 
 # Nobiliary and patronymic particles, which legitimately sit lowercase inside a
 # person's name. Without them the phrase test below would eat "Ludwig van
@@ -385,6 +391,10 @@ def author_kind(name):
     s = " ".join((name or "").split())
     if not s:
         return "person", None
+    if re.fullmatch(r"@[A-Za-z0-9_]+", s):
+        return "publication", "is a social account handle, not a verified human byline"
+    if re.fullmatch(r"[A-Za-z](?:\.)?", s):
+        return "publication", "is only an initial, not a verifiable surname"
     if NON_HUMAN.match(s):
         return "publication", "an editorial or anonymous byline, not a person"
     toks = s.split()
@@ -404,8 +414,14 @@ def author_kind(name):
         stray = [t for t in toks
                  if t.islower() and _strip_punct(t).lower() not in NAME_PARTICLES]
         if stray:
-            return "publication", ("reads as a phrase, not a personal name (%s)"
-                                   % ", ".join(repr(t) for t in stray))
+            explanation = "reads as a phrase, not a simple personal name (%s)" % \
+                ", ".join(repr(t) for t in stray)
+            if _strip_punct(toks[0]).lower() in PUBLICATION_LEADS:
+                return "publication", explanation
+            # Historical/byname forms such as “Richard of York” have this
+            # shape too. Keep the visible segment but require review rather
+            # than silently deleting a real person's surname.
+            return "unsure", explanation
     if tail in AMBIGUOUS_TAIL:
         return "unsure", ("ends in %r, which is both a publication word and a "
                           "real surname" % toks[-1])
@@ -466,7 +482,12 @@ def _case_word(w, acronyms=None, uncertain=None):
     if any(c.isupper() for c in w):
         return w                                  # LLMs, iPhone, macOS, PyTorch, GPT4
     if any(c.isdigit() for c in w) and any(c.isalpha() for c in w):
-        return w.upper()                          # gpt4 -> GPT4
+        letters = "".join(c for c in w if c.isalpha())
+        if letters.upper() in acronyms:
+            return w.upper()                      # gpt4 -> GPT4
+        if w[:1].isdigit():
+            return w                              # 1st, 10x
+        return w[0].upper() + w[1:]               # web3 -> Web3
     if w.upper() in acronyms:
         return w.upper()                          # agi -> AGI
     if _PLURAL_ACRONYM_RE.match(w) and w[:-1].upper() in acronyms:
@@ -660,6 +681,14 @@ def build_slug(author=None, topic=None, title=None, year=None, no_author=False,
     else:
         words = []
     topic_seg = topic_segment(words, acronyms, notes)
+    if topic:
+        topic_words = [piece for piece in topic_seg.split("_") if piece]
+        if not 2 <= len(topic_words) <= 4:
+            notes.append(
+                "explicit topic has %d surviving content word%s; clipping "
+                "filenames normally use 2–4 — confirm the shorter/longer "
+                "topic is necessary" %
+                (len(topic_words), "" if len(topic_words) == 1 else "s"))
     if not topic_seg:
         notes.append("no usable topic words survived — the slug has no topic segment")
 
@@ -843,6 +872,18 @@ def run_self_test():
     check("a lowercase phrase word still identifies a publication",
           slug_of(author="Works in Progress", topic="Voting Systems", year=2025),
           "Voting_Systems_2025")
+    uncertain_person = build_slug(author="Richard of York",
+                                  topic="English History", year=2025)
+    check("a phrase-shaped historical byline is retained but flagged",
+          (uncertain_person["author_segment"],
+           any("not a simple personal name" in note
+               for note in uncertain_person["notes"])),
+          ("York", True))
+    for given in ("@asklivermore", "J", "J.", "Citrini Research",
+                  "Google DeepMind"):
+        check("an account/organization is not invented into a surname (%r)" % given,
+              build_slug(author=given, topic="Market Research",
+                         year=2025)["author_segment"], "")
 
     # --- topic segment: every case the reference ships ----------------------
     for title_words, want in (
@@ -853,6 +894,7 @@ def run_self_test():
             ("Transformer Genomics", "Transformer_Genomics"),
             ("GPT-4 AGI OOMs", "GPT4_AGI_OOMs"),
             ("gpt4 agi ooms", "GPT4_AGI_OOMs"),
+            ("web3 10x 1st", "Web3_10x_1st"),
             ("Intelligence Explosion", "Intelligence_Explosion"),
             ("Start Google", "Start_Google"),
             # a word carrying an internal capital keeps its own casing
@@ -1088,6 +1130,12 @@ def run_self_test():
 
 
 def main(argv=None):
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if callable(reconfigure):
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (OSError, ValueError):
+            pass
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--author", action="append", default=[])
     ap.add_argument("--no-author", action="store_true")

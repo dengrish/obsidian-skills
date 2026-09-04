@@ -427,6 +427,12 @@ def _build_parser():
 
 
 def main(argv=None):
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if callable(reconfigure):
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (OSError, ValueError):
+            pass
     args = _build_parser().parse_args(argv)
 
     if args.test:

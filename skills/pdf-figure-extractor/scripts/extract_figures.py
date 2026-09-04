@@ -79,7 +79,7 @@ _OBSIDIAN_SHARED_MODULES = ('atomic_move', 'figure_state', 'naming',
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
-_here = _os.path.dirname(_os.path.abspath(__file__))
+_here = _os.path.dirname(_os.path.realpath(__file__))
 _required = tuple(_m + ".py" for _m in (
     globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
@@ -90,6 +90,7 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
+    _tried.append(_here)                   # extracted skill with co-located helpers
 _missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
             for _p in _tried if _os.path.isdir(_p)}
 _shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
@@ -116,7 +117,9 @@ if _here != _shared:
 from figure_state import (MANIFEST_FILE, file_digest, read_manifest,
                           read_manifest_snapshot, write_manifest, manifest_key)
 import atomic_move
-from vault_artifacts import output_vault_root, verify_selected_pdf
+from naming import looks_canonical
+from vault_artifacts import (inventory_source_figures, output_vault_root,
+                             verify_selected_pdf)
 
 try:
     # `import pymupdf` is the modern spelling. The legacy `import fitz`
@@ -392,6 +395,51 @@ def _stable_output_digest(path):
     return _stable_output_snapshot(path)[1]
 
 
+def _figure_slot_conflict(out_dir, stem, suffix, out_path):
+    """Return a portable same-label occupant other than ``out_path``."""
+    if not os.path.lexists(out_dir):
+        return None
+    inventory = inventory_source_figures(out_dir, stem)
+    if not inventory.safe:
+        details = []
+        if inventory.blocked_matches:
+            details.append("blocked source-keyed occupant(s): " + ", ".join(
+                inventory.blocked_matches[:4]))
+        details.extend("%s (%s)" % (item.path, item.message)
+                       for item in inventory.findings
+                       if item.severity == "error")
+        return out_path, ("the portable figure namespace cannot be proved "
+                          "safe: %s" % ("; ".join(details)
+                                        or "inventory incomplete"))
+    wanted = unicodedata.normalize(
+        "NFC", "%s_fig_%s" % (stem, suffix)).casefold()
+    exact = os.path.abspath(os.fspath(out_path))
+    candidates = []
+    for candidate in inventory.candidates + inventory.blocked_matches:
+        base = os.path.splitext(os.path.basename(candidate))[0]
+        if unicodedata.normalize("NFC", base).casefold() != wanted:
+            continue
+        candidate_abs = os.path.abspath(os.fspath(candidate))
+        same_entry = candidate_abs == exact
+        if not same_entry and os.path.lexists(out_path):
+            try:
+                same_entry = os.path.samefile(candidate, out_path)
+            except OSError:
+                same_entry = False
+        if same_entry:
+            continue
+        candidates.append(candidate)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda path: unicodedata.normalize(
+        "NFC", os.fspath(path)).casefold())
+    return candidates[0], (
+        "the portable figure slot is already occupied by %s; writing %s "
+        "would leave ambiguous extension, case, or Unicode variants" %
+        (", ".join(os.path.basename(path) for path in candidates),
+         os.path.basename(out_path)))
+
+
 def _restore_after_slot_conflict(out_path, published, predecessor,
                                  predecessor_snapshot, stage_dir, stage_parent):
     """Conditionally undo one crop after a late semantic-slot conflict."""
@@ -465,6 +513,13 @@ def _publish_staged(tmp_path, out_path, replace_snapshot=None,
                         keep_stage=True,
                     ) from rollback_exc
                 raise
+        return published
+    except atomic_move.LinkUnavailable:
+        # A filesystem/permission capability failure is not evidence that the
+        # destination became occupied. Preserve the shared helper's concrete
+        # diagnosis so batch callers can report a publication failure instead
+        # of blaming another skill's file.
+        raise
     except OSError as exc:
         detail = getattr(exc, "strerror", None) or str(exc)
         if (replace_snapshot is None and isinstance(exc, FileExistsError)
@@ -479,7 +534,8 @@ def _publish_staged(tmp_path, out_path, replace_snapshot=None,
 
 def extract_one_figure(doc, page_idx, bbox, out_path, dpi=250,
                        trim=True, trim_pad=4, trim_tolerance=10,
-                       replace_digest=None, publication_guard=None):
+                       replace_digest=None, publication_guard=None,
+                       return_publication=False):
     """Programmatic entrypoint: crop one figure and write it to disk.
 
     This is the API used by `batch_extract.py`. The CLI `main()` below wraps
@@ -505,10 +561,17 @@ def extract_one_figure(doc, page_idx, bbox, out_path, dpi=250,
             caller to re-check the wider semantic figure slot immediately
             before and after publication. A post-publication failure
             conditionally withdraws the new crop or restores the predecessor.
+        return_publication: preserve the historical three-tuple by default.
+            When true, append the exact publication snapshot returned by the
+            guarded filesystem operation. Ownership callers must use this
+            snapshot rather than re-reading a pathname that another process
+            can replace after publication.
 
     Returns:
         (rendered_size, final_size, blank) — the first two (width, height)
-        tuples in pixels; when `trim` is False, they are identical.
+        tuples in pixels; when `trim` is False, they are identical. If
+        `return_publication` is true, a fourth item is appended: the exact
+        output snapshot, or None for a blank crop that published no file.
 
         `blank` is True when the crop rendered to nothing but white, and in
         that case **no file is written** (an existing `out_path` is left
@@ -572,6 +635,7 @@ def extract_one_figure(doc, page_idx, bbox, out_path, dpi=250,
     stage_parent = os.path.dirname(output_dir)
     stage_dir = tempfile.mkdtemp(prefix=".figure-stage-", dir=stage_parent)
     keep_stage = False
+    publication = None
     try:
         tmp_path = os.path.join(stage_dir, os.path.basename(out_path))
         pix.save(tmp_path)
@@ -601,20 +665,33 @@ def extract_one_figure(doc, page_idx, bbox, out_path, dpi=250,
                 os.chmod(tmp_path, replace_snapshot[2])
             try:
                 if publication_guard is None:
-                    _publish_staged(
+                    publication = _publish_staged(
                         tmp_path, out_path, replace_snapshot=replace_snapshot)
                 else:
-                    _publish_staged(
+                    publication = _publish_staged(
                         tmp_path, out_path, replace_snapshot=replace_snapshot,
                         before_publish=publication_guard,
                         after_publish=publication_guard)
-            except FileExistsError as exc:
-                keep_stage = bool(getattr(exc, "keep_stage", False))
+            except BaseException as exc:
+                # Once a complete, nonblank PNG exists, every publication
+                # failure retains that recoverable draft.  The shared helper's
+                # recovery_path may name a displaced predecessor, so expose the
+                # crop stage separately and fill recovery_path only when no
+                # more specific recovery location already exists.
+                keep_stage = True
+                try:
+                    exc.keep_stage = True
+                    exc.staging_path = stage_dir
+                    if not getattr(exc, "recovery_path", None):
+                        exc.recovery_path = stage_dir
+                except (AttributeError, TypeError):
+                    pass
                 raise
     finally:
         if not keep_stage:
             shutil.rmtree(stage_dir, ignore_errors=True)
-    return rendered_size, final_size, blank
+    result = (rendered_size, final_size, blank)
+    return result + (publication,) if return_publication else result
 
 
 # ---------------------------------------------------------------------------
@@ -925,6 +1002,7 @@ def run_self_test():
         # preserves it forever as a broken embed.
         blocked = os.path.join(render_images, "Doe_Figs_2025_fig_3.png")
         os.makedirs(blocked)
+        blocked_error = None
         state["n"] += 1
         try:
             extract_one_figure(doc, 0, (100, 150, 500, 350), blocked, dpi=72,
@@ -932,11 +1010,15 @@ def run_self_test():
             state["bad"] += 1
             print("FAIL extract_one_figure reported success writing onto a "
                   "directory")
-        except OSError:
-            pass
-        ok("the staging directory is cleaned up when publication fails late",
-           not [f for f in os.listdir(render_root)
-                if f.startswith(".figure-stage-")])
+        except OSError as exc:
+            blocked_error = exc
+        blocked_stage = getattr(blocked_error, "staging_path", None)
+        ok("a complete crop is retained and reported when publication fails late",
+           bool(blocked_stage and os.path.isdir(blocked_stage)
+                and os.path.isfile(os.path.join(
+                    blocked_stage, os.path.basename(blocked)))))
+        if blocked_stage:
+            shutil.rmtree(blocked_stage)
 
         # --- an all-white render ------------------------------------------
         # A caption whose figure is on the NEXT page: `auto_fig_bbox`'s
@@ -1021,6 +1103,39 @@ def run_self_test():
         ok("an unverifiable staged PNG leaves no output",
            not os.path.lexists(unverifiable))
 
+        # A safe publish needs a hard link on the target filesystem. Preserve
+        # that capability diagnosis; wrapping it as FileExistsError would make
+        # the batch blame a nonexistent competing file.
+        no_link_out = os.path.join(
+            render_images, "Doe_Figs_2025_fig-no-hard-link.png")
+
+        def refuse_hard_link(source, target, *args, **kwargs):
+            raise atomic_move.LinkUnavailable(
+                source, target,
+                OSError(errno.ENOTSUP, "injected filesystem has no hard links"))
+
+        no_link_error = None
+        with mock.patch.object(atomic_move, "publish_new",
+                               side_effect=refuse_hard_link):
+            try:
+                extract_one_figure(
+                    doc, 0, (100, 150, 500, 350), no_link_out,
+                    dpi=72, trim=False)
+            except Exception as exc:
+                no_link_error = exc
+        check("hard-link capability failures retain their concrete type",
+              (isinstance(no_link_error, atomic_move.LinkUnavailable),
+               isinstance(no_link_error, FileExistsError),
+               os.path.lexists(no_link_out),
+               os.path.isfile(os.path.join(
+                   getattr(no_link_error, "staging_path", ""),
+                   os.path.basename(no_link_out))),
+               getattr(no_link_error, "recovery_path", None)
+               == getattr(no_link_error, "staging_path", None)),
+              (True, False, False, True, True))
+        if getattr(no_link_error, "staging_path", None):
+            shutil.rmtree(no_link_error.staging_path)
+
         # New publication must be exclusive at the final operation. Simulate
         # another producer taking the name after rendering but before link().
         late_new = os.path.join(render_images, "Doe_Figs_2025_fig_late-new.png")
@@ -1033,6 +1148,7 @@ def run_self_test():
                     fh.write(late_new_bytes)
             return real_link(source, target, *args, **kwargs)
 
+        late_new_error = None
         with mock.patch.object(os, "link", side_effect=occupy_before_link):
             state["n"] += 1
             try:
@@ -1041,11 +1157,16 @@ def run_self_test():
                 state["bad"] += 1
                 print("FAIL exclusive publication replaced a late occupant")
             except FileExistsError as exc:
+                late_new_error = exc
                 if "occupied after preflight" not in str(exc):
                     state["bad"] += 1
                     print("FAIL late-occupant refusal was unclear: %s" % exc)
         check("exclusive publication preserves the late occupant",
-              open(late_new, "rb").read(), late_new_bytes)
+              (open(late_new, "rb").read(),
+               os.path.isfile(os.path.join(
+                   getattr(late_new_error, "staging_path", ""),
+                   os.path.basename(late_new)))),
+              (late_new_bytes, True))
 
         # Publication includes readback. Mutating the just-linked inode also
         # mutates its private hard link, so the shared helper must compare
@@ -1275,9 +1396,17 @@ def run_self_test():
             # Keep a stable tally even when the preceding assertion failed.
             check("the missing recovery copy retains its exact bytes", None,
                   after_displace_bytes)
-        ok("publication races leave no ordinary staging directory",
-           not [f for f in os.listdir(render_root)
-                if f.startswith(".figure-stage-")])
+        retained_stages = [
+            os.path.join(render_root, name) for name in os.listdir(render_root)
+            if name.startswith(".figure-stage-")
+        ]
+        ok("publication races retain complete crops in reported staging",
+           bool(retained_stages) and all(
+               any(name.endswith(".png") and os.path.isfile(os.path.join(stage, name))
+                   for name in os.listdir(stage))
+               for stage in retained_stages))
+        for stage in retained_stages:
+            shutil.rmtree(stage)
         doc.close()
 
         # --- main(): the CLI surface --------------------------------------
@@ -1309,6 +1438,66 @@ def run_self_test():
         check("a crop run exits 0", code, 0)
         ok("the crop run wrote the figure", os.path.exists(png))
         ok("the run said what it wrote", "Wrote" in so)
+        check("a first explicit crop creates its ownership manifest",
+              read_manifest(os.path.join(outdir, MANIFEST_FILE)),
+              {os.path.basename(png): file_digest(png)})
+
+        twin_dir = os.path.join(tmp, "ExtensionTwin")
+        os.makedirs(twin_dir)
+        twin = os.path.join(twin_dir, "Doe_Figs_2025_fig_2.webp")
+        with open(twin, "wb") as fh:
+            fh.write(b"another producer's same-label image")
+        code, so, se = run([
+            pdf, "--out", twin_dir, "--stem", "Doe_Figs_2025",
+            "--crop", "1:2:100,150,500,350", "--dpi", "72", "--no-trim",
+        ])
+        ok("an extension twin blocks an explicit PNG crop",
+           code != 0 and "ambiguous extension" in str(code))
+        check("the extension-twin refusal preserves the existing file",
+              open(twin, "rb").read(), b"another producer's same-label image")
+        ok("the extension-twin refusal publishes no PNG or manifest",
+           not os.path.exists(os.path.join(
+               twin_dir, "Doe_Figs_2025_fig_2.png"))
+           and not os.path.exists(os.path.join(twin_dir, MANIFEST_FILE)))
+
+        cli_no_link_root = os.path.join(tmp, "CliNoHardLinks")
+        cli_no_link_dir = os.path.join(cli_no_link_root, "Images")
+        with mock.patch.object(atomic_move, "publish_new",
+                               side_effect=refuse_hard_link):
+            code, so, se = run([
+                pdf, "--out", cli_no_link_dir, "--stem", "Doe_Figs_2025",
+                "--crop", "1:2:100,150,500,350", "--dpi", "72", "--no-trim",
+            ])
+        cli_no_link_stages = [
+            os.path.join(cli_no_link_root, name)
+            for name in os.listdir(cli_no_link_root)
+            if name.startswith(".figure-stage-")
+        ]
+        check("the explicit CLI reports and retains an unpublished crop",
+              (code != 0, "staged crop preserved at" in str(code),
+               len(cli_no_link_stages),
+               bool(cli_no_link_stages and os.path.isfile(os.path.join(
+                   cli_no_link_stages[0], "Doe_Figs_2025_fig_2.png")))),
+              (True, True, 1, True))
+        for stage in cli_no_link_stages:
+            shutil.rmtree(stage)
+
+        unicode_slot_dir = os.path.join(tmp, "UnicodeSlot")
+        os.makedirs(unicode_slot_dir)
+        unicode_nfd = os.path.join(
+            unicode_slot_dir, "Garci\u0301a_Study_2025_fig_1.png")
+        unicode_nfc = os.path.join(
+            unicode_slot_dir, "García_Study_2025_fig_1.png")
+        with open(unicode_nfd, "wb") as fh:
+            fh.write(b"one filesystem entry")
+        conflict = _figure_slot_conflict(
+            unicode_slot_dir, "García_Study_2025", "1", unicode_nfc)
+        if os.path.lexists(unicode_nfc):
+            check("an NFD spelling of the same output entry is not a twin",
+                  conflict, None)
+        else:
+            ok("a distinct NFD pathname remains a portable-slot twin",
+               conflict is not None)
 
         # Skip-existing is the default, and it is what keeps a hand-set crop
         # from being undone by the next batch run.
@@ -1391,6 +1580,50 @@ def run_self_test():
               read_manifest(os.path.join(cli_replace_dir, MANIFEST_FILE))[
                   os.path.basename(cli_replace_path)],
               cli_replace_digest)
+
+        # The publication CAS and manifest CAS cannot be one filesystem
+        # transaction. A different producer may replace the public name in
+        # between; the sidecar must describe the exact inode this crop
+        # published, never whatever bytes happen to occupy the path afterward.
+        cli_claim_dir = os.path.join(tmp, "CliPostPublishReplacement")
+        os.makedirs(cli_claim_dir)
+        cli_claim_path = os.path.join(
+            cli_claim_dir, "Doe_Figs_2025_fig_8.png")
+        cli_claim_foreign = b"foreign replacement after explicit publication"
+        cli_claim_published = {}
+
+        def inject_cli_post_publish(doc_arg, page_arg, bbox_arg, out_path,
+                                    *args, **kwargs):
+            answer = real_extract_one(
+                doc_arg, page_arg, bbox_arg, out_path, *args, **kwargs)
+            cli_claim_published["digest"] = answer[3][1]
+            replacement = out_path + ".foreign"
+            with open(replacement, "wb") as fh:
+                fh.write(cli_claim_foreign)
+            os.replace(replacement, out_path)
+            return answer
+
+        with mock.patch.dict(
+                globals(), {"extract_one_figure": inject_cli_post_publish}):
+            code, so, se = run([
+                pdf, "--out", cli_claim_dir, "--stem", "Doe_Figs_2025",
+                "--crop", "1:8:100,150,500,350", "--dpi", "72", "--no-trim",
+            ])
+        cli_claim_manifest = read_manifest(
+            os.path.join(cli_claim_dir, MANIFEST_FILE))
+        check("an explicit crop records its publication, not a later path occupant",
+              (code, cli_claim_manifest[os.path.basename(cli_claim_path)],
+               file_digest(cli_claim_path) == cli_claim_published["digest"]),
+              (0, cli_claim_published["digest"], False))
+        code, so, se = run([
+            pdf, "--out", cli_claim_dir, "--stem", "Doe_Figs_2025",
+            "--crop", "1:8:100,150,500,350", "--dpi", "72", "--no-trim",
+            "--overwrite",
+        ])
+        ok("the exact publication digest makes that later occupant unowned",
+           code != 0 and "bytes changed" in str(code))
+        check("a later explicit overwrite preserves the foreign replacement",
+              open(cli_claim_path, "rb").read(), cli_claim_foreign)
 
         # The crop and its ownership record are separate publications. If a
         # concurrent run updates the manifest while this crop renders, retain
@@ -1572,6 +1805,18 @@ def run_self_test():
               os.listdir(repair_images), [])
         os.unlink(repair_collision)
 
+        unorganized_pdf = os.path.join(repair_pdfs, "download (1).pdf")
+        shutil.copyfile(pdf, unorganized_pdf)
+        code, so, se = run([
+            unorganized_pdf, "--out", repair_images,
+            "--stem", "download (1)",
+            "--crop", "1:1:100,150,500,350", "--dpi", "72", "--no-trim",
+        ])
+        ok("a vault crop refuses an unorganized source stem",
+           code != 0 and "pdf-organizer" in str(code))
+        check("the unorganized vault crop publishes nothing",
+              os.listdir(repair_images), [])
+
         # A readable external scratch representation is allowed when one vault
         # source uniquely owns its basename (the encrypted-PDF recovery route).
         scratch_pdf = os.path.join(tmp, "scratch", "Doe_Figs_2025.pdf")
@@ -1670,7 +1915,19 @@ def run_self_test():
     return 1 if state["bad"] else 0
 
 
+def _configure_stdio():
+    """Keep source paths and publication diagnostics writable through pipes."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="backslashreplace")
+            except (AttributeError, OSError, ValueError):
+                pass
+
+
 def main(argv=None):
+    _configure_stdio()
     p = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__,
@@ -1790,6 +2047,12 @@ def main(argv=None):
     # external output remains an explicit one-off target.
     vault_root = output_vault_root(out_dir)
     if vault_root is not None:
+        if not looks_canonical(pdf_stem, is_stem=True):
+            sys.exit(
+                "Refusing explicit crops into the vault's canonical "
+                "Sources/Images folder: the selected PDF stem %r has not "
+                "been produced by pdf-organizer. Organize it first so a "
+                "later rename does not orphan this crop." % pdf_stem)
         decision = verify_selected_pdf(vault_root, pdf_path)
         if not decision.unique:
             detail = decision.reason
@@ -1850,16 +2113,16 @@ def main(argv=None):
     # An explicit repair is this extractor's own output too. Without updating
     # its digest, the next batch called a repaired crop another skill's file
     # and recommended overwriting it with the original, wrong automatic crop.
-    # Preserve legacy no-manifest folders as such; batch migration requires an
-    # exact --adopt-legacy STEM:FIG selection rather than claiming images here.
+    # A newly created explicit crop is extractor output and therefore receives
+    # an ownership record even when this is the folder's first manifest. An
+    # occupied legacy slot remains unowned and still requires the batch
+    # extractor's exact --adopt-legacy STEM:FIG selection.
     manifest_path = os.path.join(out_dir, MANIFEST_FILE)
-    manifest = None
-    manifest_snapshot = None
+    try:
+        manifest, manifest_snapshot = read_manifest_snapshot(manifest_path)
+    except (OSError, UnicodeError, ValueError) as exc:
+        die(f"Refusing explicit crops: cannot safely read {manifest_path}: {exc}")
     if os.path.lexists(manifest_path):
-        try:
-            manifest, manifest_snapshot = read_manifest_snapshot(manifest_path)
-        except (OSError, UnicodeError, ValueError) as exc:
-            die(f"Refusing explicit crops: cannot safely read {manifest_path}: {exc}")
         if os.path.islink(manifest_path) or not os.access(manifest_path, os.W_OK):
             die(f"Refusing explicit crops: {manifest_path} is not a writable regular sidecar")
     # Preflight every target even in a legacy folder. An absent manifest is
@@ -1868,16 +2131,15 @@ def main(argv=None):
     preflight_digests = {}
     for _spec, _page_idx, suffix, _rect in parsed_crops:
         target = os.path.join(out_dir, f"{args.stem}_fig_{suffix}.png")
+        conflict = _figure_slot_conflict(out_dir, args.stem, suffix, target)
+        if conflict is not None:
+            occupied, why = conflict
+            die(f"Refusing explicit crop of {target}: {why} ({occupied})")
         if not os.path.lexists(target):
             preflight_digests[target] = None
             continue
         if os.path.islink(target):
             die(f"Refusing explicit crop of {target}: it is a symlink, not a recorded output file")
-        if manifest is None:
-            die(f"Refusing explicit crop of {target}: no ownership manifest exists. "
-                "Inspect this legacy image and run batch extraction with the exact "
-                f"--adopt-legacy '{args.stem}:{suffix}' selection before replacing "
-                "it; --overwrite does not claim another file.")
         try:
             digest = file_digest(target)
         except OSError as exc:
@@ -1930,6 +2192,14 @@ def main(argv=None):
                         file=sys.stderr,
                     )
         out_path = os.path.join(out_dir, f"{args.stem}_fig_{fig_suffix}.png")
+
+        def publication_guard():
+            conflict = _figure_slot_conflict(
+                out_dir, args.stem, fig_suffix, out_path)
+            if conflict is None:
+                return
+            occupied, why = conflict
+            raise FileExistsError(errno.EEXIST, why, occupied)
         # Skip-existing is batch_extract.py's documented default and this is
         # the same output folder, so it is the default here too. Without it,
         # an explicit crop and a batch run silently overwrite each other's work
@@ -1946,14 +2216,24 @@ def main(argv=None):
             print(f"Exists, skipped: {out_path} (pass --overwrite to replace)")
             continue
         try:
-            (rw, rh), (fw, fh), blank = extract_one_figure(
+            (rw, rh), (fw, fh), blank, publication = extract_one_figure(
                 doc, page_idx, (x0, y0, x1, y1), out_path,
                 dpi=args.dpi, trim=args.trim,
                 trim_pad=args.trim_pad, trim_tolerance=args.trim_tolerance,
                 replace_digest=(expected_digest if args.overwrite else None),
+                publication_guard=publication_guard,
+                return_publication=True,
             )
         except (OSError, RuntimeError, ValueError) as exc:
-            die(f"Refusing explicit crop of {out_path}: {exc}")
+            staged = getattr(exc, "staging_path", None)
+            recovery = getattr(exc, "recovery_path", None)
+            locations = []
+            if staged:
+                locations.append(f"staged crop preserved at {staged}")
+            if recovery and recovery != staged:
+                locations.append(f"additional recovery state at {recovery}")
+            suffix = ("; " + "; ".join(locations)) if locations else ""
+            die(f"Refusing explicit crop of {out_path}: {exc}{suffix}")
         if blank:
             blank_crops += 1
             print(
@@ -1965,24 +2245,26 @@ def main(argv=None):
                 file=sys.stderr,
             )
             continue
-        if manifest is not None:
-            try:
-                name = os.path.basename(out_path)
-                manifest[manifest_key(manifest, name) or name] = file_digest(out_path)
-                manifest_snapshot = write_manifest(
-                    manifest_path, manifest,
-                    "# pdf-figure-extractor output manifest.\n"
-                    "# One per line: <figure filename><TAB><sha256 of the bytes written>\n",
-                    expected=manifest_snapshot)
-            except (OSError, UnicodeError, ValueError) as exc:
-                die(f"Crop written to {out_path}, but its ownership record could not be updated: {exc}. "
-                    "Do not run automatic overwrite; preserve this explicit crop while repairing the sidecar.")
+        try:
+            name = os.path.basename(out_path)
+            # `publication` describes the inode and bytes this run actually
+            # installed. Re-reading `out_path` here could claim a foreign file
+            # that replaced it between the guarded publication and sidecar CAS.
+            manifest[manifest_key(manifest, name) or name] = publication[1]
+            manifest_snapshot = write_manifest(
+                manifest_path, manifest,
+                "# pdf-figure-extractor output manifest.\n"
+                "# One per line: <figure filename><TAB><sha256 of the bytes written>\n",
+                expected=manifest_snapshot)
+        except (OSError, UnicodeError, ValueError) as exc:
+            die(f"Crop written to {out_path}, but its ownership record could not be updated: {exc}. "
+                "Do not run automatic overwrite; preserve this explicit crop while repairing the sidecar.")
         msg = f"Wrote {out_path}: {rw}x{rh}"
         if args.trim:
             if (fw, fh) != (rw, rh):
                 msg += f" → trimmed to {fw}x{fh}"
             else:
-                msg += " (no whitespace to trim)"
+                msg += " (trim unchanged; no safe removable margin detected)"
         print(msg)
     doc.close()
     return 1 if blank_crops else 0

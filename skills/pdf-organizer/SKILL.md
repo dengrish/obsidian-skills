@@ -184,8 +184,12 @@ Length around 50 pages or more is a supporting signal, not enough on its own.
 If it is an article, finish. If it is already one chapter, do not split it
 again.
 
-When a book is detected, splitting is part of this workflow and needs no
-additional permission: **keep the original and add chapter PDFs**. Read
+When a book is detected under a broad request to organize/process PDFs, clean
+the inbox, or split a book, splitting is part of that authorized workflow:
+**keep the original and add chapter PDFs**. A narrow request to rename or
+identify one PDF authorizes only that rename/identification; report the book
+and proposed split, but do not create chapters unless the user also asks to
+organize or split it. Read
 [book splitting](references/book-splitting.md) before choosing boundaries or
 writing chapters. It governs page mapping, names, collisions, and existing
 chapter folders. An existing chapter set is authoritative; stop and report

@@ -184,6 +184,23 @@ def _observe_parent(path):
     return _directory_identity(path)
 
 
+def _create_output_parent(root, path):
+    """Create one direct generated-output directory, then bind its identity."""
+    root = Path(os.path.abspath(root))
+    path = Path(os.path.abspath(path))
+    if path.parent != root:
+        raise OSError(errno.EPERM,
+                      "generated output parent must be directly under plugin root",
+                      os.fspath(path))
+    reject_symlinks(root, path)
+    try:
+        os.mkdir(path, 0o755)
+    except FileExistsError:
+        pass                       # a racing builder may have created it
+    reject_symlinks(root, path)
+    return _directory_identity(path)
+
+
 @contextmanager
 def _bound_output_parent(path, expected):
     """Run relative pathname operations inside the planned parent directory.
@@ -473,17 +490,31 @@ def package_files(root):
 def archive_bytes(files):
     """Stable order, timestamps and modes make rebuilds byte-for-byte identical."""
     output = io.BytesIO()
-    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    # Stored entries avoid zlib-version-dependent byte streams.  The plugin is
+    # small enough that cross-host reproducibility is worth the size tradeoff.
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as archive:
         for name, content in sorted(files.items()):
             info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
             info.create_system = 3
             info.external_attr = 0o100644 << 16
-            info.compress_type = zipfile.ZIP_DEFLATED
+            info.compress_type = zipfile.ZIP_STORED
             archive.writestr(info, content)
     return output.getvalue()
 
 
+def _configure_utf8_stdio():
+    """Keep paths and diagnostics writable through legacy Windows pipes."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="backslashreplace")
+            except (OSError, ValueError):
+                pass
+
+
 def main():
+    _configure_utf8_stdio()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="fail if generated files are stale; write nothing")
     args = parser.parse_args()
@@ -501,8 +532,14 @@ def main():
         observed_parents = {
             path: _observe_parent(path.parent) for path in paths
         }
+        if not args.check:
+            for path in paths:
+                if observed_parents[path] is None:
+                    observed_parents[path] = _create_output_parent(
+                        root, path.parent)
         observed = {
-            path: _observe_bound_output(root, path, observed_parents[path])
+            path: (None if observed_parents[path] is None else
+                   _observe_bound_output(root, path, observed_parents[path]))
             for path in paths
         }
     except (OSError, ValueError) as exc:
@@ -510,8 +547,9 @@ def main():
     if args.check:
         try:
             current = {
-                path: _observe_bound_output(
-                    root, path, observed_parents[path])
+                path: (None if observed_parents[path] is None else
+                       _observe_bound_output(
+                           root, path, observed_parents[path]))
                 for path in outputs
             }
         except (OSError, ValueError) as exc:

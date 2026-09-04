@@ -59,9 +59,15 @@ establish ownership, and multiple portable-equivalent basenames are a collision.
 | `done` | Batch: skip. Named file: obtain overwrite-or-skip authorization before replacing it, honoring authorization already given. |
 | `legacy` | Leave the older embed note untouched; report that its occupied path must be resolved. |
 | `collision` | Write nothing. Report the existing origin, `source_conflicts`, or `note_conflicts`; resolve PDF names through `pdf-organizer`, never append `_2` to the summary or hand-rename another producer's note. Multiple portable-equivalent article names require ownership cleanup rather than choosing one by directory order. |
-| `unorganized` | Stop for that PDF and route naming to `pdf-organizer`. Use `--allow-unorganized` only for a deliberate, reported override. |
+| `unorganized` | Stop for that PDF and route naming to `pdf-organizer`. After it files the PDF, re-run the inventory and continue from the new path; the old path is no longer the source identity. Use `--allow-unorganized` only for a deliberate, reported override. |
 | `book` | Skip a whole split book and name the chapter folder; include it only when requested with `--include-split-books`. |
 | `chapter` | Skip during an ordinary folder sweep. Include a named chapter with `--include-chapters`, then ignore every other row; the flag also selects chapters for a requested sweep. |
+
+An inventory row with `figure_inventory_error` is blocked even when its
+ordinary status is `new` or `done`: resolve the named unsafe image occupant and
+scan again before reading its figure count. The helper exits non-zero when any
+row has this error while retaining the other rows so one bad figure slot does
+not erase the rest of a batch report.
 
 Non-zero scan failures and unreadable directories are not empty inventories or
 zero figure counts. If the scan helper is unavailable, an equivalent read-only
@@ -87,7 +93,9 @@ python3 '<plugin>/skills/pdf-figure-extractor/scripts/batch_extract.py' \
 ```
 
 Read its diagnostics and re-run the scan before selecting exhibits. Respect its
-naming/ownership refusals; do not repair them by cropping or renaming here.
+naming/ownership refusals. When it flags a bad automatic crop, complete the
+extractor's own review-and-explicit-crop workflow, then re-run both extraction
+and this scan. Do not invent a separate crop or rename procedure in this skill.
 This preparation is the only point that invokes `pdf-figure-extractor`.
 Thereafter the image folder is read-only. If extraction cannot recover a needed
 image, retain the supported claim in prose and report the gap; never invent an
@@ -206,19 +214,26 @@ destination. Stage the final bytes in a unique private temporary directory
 outside the note folder and beside the **resolved real `Articles/` directory**,
 on the same filesystem. Continue publishing through the selected logical path;
 a symlinked `Articles/` directory must not send staging to a different volume.
-For a new note, use exclusive creation such as `os.link(staged_path, final_path)`;
-any occupied destination, including a dangling symlink, must fail unchanged.
+Follow the shared [safe-write protocol and Python API
+recipe](../../shared/SAFE_WRITES.md#call-the-shared-python-api) for both new
+notes and rewrites. Import `shared/scripts/atomic_move.py`; do not execute it as
+a publication command or call `os.link` directly. For a new note, call
+`atomic_move.publish_new(..., atomic_move.regular_file_snapshot, ...)`; any
+occupied destination, including a dangling symlink, must fail unchanged. Keep
+the private stage and report its path on every publication failure, including
+`LinkUnavailable`.
 
 For an authorized rewrite, confirm the destination is the same regular,
 non-symlink note inspected at the start, with unchanged contents and the expected
-PDF origin. Preserve its permissions and review state, then follow the shared
-[safe-write protocol](../../shared/SAFE_WRITES.md): displace and verify that
-snapshotted version before linking the staged replacement exclusively into the
-empty public name. A recheck followed by `os.replace` can still clobber a later
-editor save. If safe publication or restoration is unavailable, retain the
-draft and report the original, current, and any recovery paths rather than using
-an ordinary overwrite. Read the published note back before reporting
-completion. Do not move/delete the PDF, rename images or write wiki entries.
+PDF origin. Preserve its permissions and review state, and pass the exact
+snapshot retained when those bytes were read to `atomic_move.replace_expected`;
+do not refresh it at publication time. A recheck followed by `os.replace` can
+still clobber a later editor save. If safe publication or restoration is
+unavailable, retain the draft and report the original, current, and any
+recovery paths rather than using an ordinary overwrite. Verify that the
+published snapshot returned by the helper and the final public bytes match the
+reviewed draft before reporting completion. Do not move/delete the PDF, rename
+images or write wiki entries.
 
 ## 7. Report
 

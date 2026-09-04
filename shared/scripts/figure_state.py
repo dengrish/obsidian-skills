@@ -237,6 +237,11 @@ def _publish_sidecar(staged, path, expected):
             staged, path, _publication_snapshot,
             stage_parent, recovery_prefix=".figure-state-recovery-",
         )
+    except atomic_move.LinkUnavailable:
+        # This is a filesystem capability failure, not a stale sidecar or a
+        # competing writer. Let callers report the distinct diagnosis; the
+        # outer writer attaches and retains the complete sidecar stage.
+        raise
     except OSError as exc:
         recovery_path = getattr(exc, "recovery_path", None)
         keep_stage = bool(getattr(exc, "keep_stage", False))
@@ -279,8 +284,18 @@ def _write_sidecar(path, body, expected=None):
                 atomic_move.set_private_mode(fh, temporary, mode)
         try:
             return _publish_sidecar(temporary, path, expected)
-        except SidecarConflict as exc:
-            keep_stage = exc.keep_stage
+        except BaseException as exc:
+            # Every exception after the complete sidecar exists retains that
+            # recoverable draft. A more specific recovery_path may name a
+            # displaced predecessor, so expose the draft as staging_path too.
+            keep_stage = True
+            try:
+                exc.keep_stage = True
+                exc.staging_path = stage_dir
+                if not getattr(exc, "recovery_path", None):
+                    exc.recovery_path = stage_dir
+            except (AttributeError, TypeError):
+                pass
             raise
     finally:
         if not keep_stage:
@@ -322,14 +337,17 @@ def self_test():
                 path = os.path.join(images, REVIEW_FILE)
                 write_review(path, text)
                 before = open(path, "rb").read()
+                interrupted = None
                 with mock.patch.dict(globals(), {
                         "_publish_sidecar": mock.Mock(
                             side_effect=OSError("interrupted"))}):
-                    with self.assertRaises(OSError):
+                    with self.assertRaises(OSError) as caught:
                         write_review(path, text + "New\t4\n")
+                    interrupted = caught.exception
                 self.assertEqual(open(path, "rb").read(), before)
-                self.assertFalse(any(name.startswith(".figure-state-stage-")
-                                     for name in os.listdir(directory)))
+                self.assertTrue(os.path.isfile(os.path.join(
+                    interrupted.staging_path, REVIEW_FILE)))
+                shutil.rmtree(interrupted.staging_path)
 
         def test_conflicts_and_malformed_rows(self):
             for text in ("broken", "A.png\tbad\n", "A.png\t" + "a" * 64 + "\na.png\t" + "b" * 64):
@@ -381,11 +399,31 @@ def self_test():
                 with mock.patch.dict(globals(), {
                         "_publish_sidecar": mock.Mock(
                             side_effect=OSError("blocked publication"))}):
-                    with self.assertRaises(OSError):
+                    with self.assertRaises(OSError) as caught:
                         write_manifest(path, {"B_fig_1.png": "b" * 64})
                 self.assertEqual(open(path, "rb").read(), before)
-                self.assertFalse(any(name.startswith(".figure-state-stage-")
-                                     for name in os.listdir(real_root)))
+                self.assertTrue(os.path.isfile(os.path.join(
+                    caught.exception.staging_path, MANIFEST_FILE)))
+                shutil.rmtree(caught.exception.staging_path)
+
+                no_link = os.path.join(real_images, "no-link.tsv")
+
+                def refuse_link(source, target, *args, **kwargs):
+                    raise atomic_move.LinkUnavailable(
+                        source, target,
+                        OSError(errno.ENOTSUP,
+                                "injected filesystem has no hard links"))
+
+                with mock.patch.object(atomic_move, "publish_new",
+                                       side_effect=refuse_link):
+                    with self.assertRaises(atomic_move.LinkUnavailable) as caught:
+                        write_manifest(no_link, {"C_fig_1.png": "c" * 64})
+                self.assertEqual(caught.exception.recovery_path,
+                                 caught.exception.staging_path)
+                self.assertTrue(os.path.isfile(os.path.join(
+                    caught.exception.staging_path,
+                    os.path.basename(no_link))))
+                shutil.rmtree(caught.exception.staging_path)
                 with self.assertRaises(ValueError):
                     write_manifest(path, {"A_fig_1.png": "bad"})
                 self.assertEqual(open(path, "rb").read(), before)

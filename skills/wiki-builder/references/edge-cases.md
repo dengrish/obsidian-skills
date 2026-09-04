@@ -53,7 +53,7 @@ F_1 &= \frac{2}{\frac{1}{\text{precision}} + \frac{1}{\text{recall}}} \\
 $$
 ```
 
-This is the default form for any equation with multiple equivalent expressions, derivation steps, or simplifications. A single-form equation stays on one line — a single-line `$$...$$` display block when it is a defining equation (`references/equations.md` §2) — and does **not** use `aligned`. The rule is: one line per *form*, not one form per equation — if the source presents three equivalent expressions of the same quantity, the entry shows all three, vertically aligned inside `\begin{aligned}...\end{aligned}`.
+This is the default form for any equation with multiple equivalent expressions, derivation steps, or simplifications. A single-form equation keeps its equation content on one line inside a display block whose opening and closing `$$` delimiters each occupy their own line (`references/equations.md` §2), and does **not** use `aligned`. The rule is: one line per *form*, not one form per equation — if the source presents three equivalent expressions of the same quantity, the entry shows all three, vertically aligned inside `\begin{aligned}...\end{aligned}`.
 
 This section owns only the multi-form layout. Literal-`$` escaping and numbers
 in prose stay in [writing.md](writing.md#prose-principles); whether an equation

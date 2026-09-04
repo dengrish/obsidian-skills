@@ -176,6 +176,12 @@ NON_DECOMPOSING = {
     "ø": "o", "Ø": "O",
     "æ": "ae", "Æ": "AE",
     "œ": "oe", "Œ": "OE",
+    "ł": "l", "Ł": "L",
+    "đ": "d", "Đ": "D",
+    "ħ": "h", "Ħ": "H",
+    "ð": "d", "Ð": "D",
+    "þ": "th", "Þ": "Th",
+    "ı": "i",
 }
 
 # FIX-B -- must run before the main pipeline or C / C++ / C# / C* all collide.
@@ -244,6 +250,9 @@ def preprocess(title: str) -> str:
 
     # 8. middle dot
     s = s.replace("·", "-")
+
+    # Multiplication is semantic title text, not punctuation to discard.
+    s = s.replace("×", "-times-")
 
     # 9. non-decomposing Latin
     s = "".join(NON_DECOMPOSING.get(ch, ch) for ch in s)
@@ -390,6 +399,15 @@ TEST_CASES = [
     ("Ångström", "angstrom.md", "NFKD fold, ring + umlaut"),
     ("Straße", "strasse.md", "L399 non-decomposing eszett"),
     ("Søren Kierkegaard", "soren-kierkegaard.md", "L399 non-decomposing o-slash"),
+    ("Marie Skłodowska Curie", "marie-sklodowska-curie.md",
+     "non-decomposing l-stroke remains visible"),
+    ("Đorđe", "dorde.md", "non-decomposing d-stroke remains visible"),
+    ("ħ-bar", "h-bar.md", "non-decomposing h-stroke remains visible"),
+    ("Guðrún", "gudrun.md", "eth remains visible"),
+    ("Þór", "thor.md", "thorn remains visible"),
+    ("ınput", "input.md", "dotless i remains visible"),
+    ("2×2 matrix", "2-times-2-matrix.md",
+     "multiplication sign is named rather than dropped"),
 
     # --- FIX-B: +, #, * would otherwise all collide on c.md ------------------
     ("C", "c.md", "FIX-B baseline"),
@@ -477,9 +495,25 @@ def run_self_test():
                 "expected": expected,
                 "got": got,
             })
+    guard_cases = [
+        (["---", "--stem"], ["--stem", "--", "---"]),
+        (["--stem", "---"], ["--stem", "--", "---"]),
+        (["-3dB point", "--stem"], ["--stem", "--", "-3dB point"]),
+        (["ROC curve", "--stem"], ["ROC curve", "--stem"]),
+    ]
+    for argv, expected in guard_cases:
+        got = _guard_argv(argv)
+        if got != expected:
+            failures.append({
+                "title": repr(argv),
+                "note": "CLI dash-title argument guard",
+                "expected": expected,
+                "got": got,
+            })
+    total = len(TEST_CASES) + len(guard_cases)
     return {
-        "total": len(TEST_CASES),
-        "passed": len(TEST_CASES) - len(failures),
+        "total": total,
+        "passed": total - len(failures),
         "failed": len(failures),
         "failures": failures,
         "ok": not failures,
@@ -524,12 +558,23 @@ def _guard_argv(argv):
         # so the user sees the error.  Anything else that merely starts with a
         # dash ("---", "-", "-3dB point") is a title.
         if token.startswith("-") and not re.match(r"^--?[A-Za-z]", token):
+            # argparse treats every token after ``--`` as positional. Move
+            # the remaining known, value-free flags before that marker so a
+            # natural trailing ``--stem`` keeps working.
+            trailing = argv[i + 1:]
+            if all(flag in _KNOWN_FLAGS - {"--"} for flag in trailing):
+                return argv[:i] + trailing + ["--", token]
             return argv[:i] + ["--"] + argv[i:]
         return argv
     return argv
 
 
 def main(argv=None):
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (AttributeError, OSError):
+            pass
     argv = _guard_argv(sys.argv[1:] if argv is None else argv)
     args = _build_parser().parse_args(argv)
 

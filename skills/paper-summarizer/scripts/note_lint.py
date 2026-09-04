@@ -31,7 +31,7 @@ _OBSIDIAN_SHARED_MODULES = ('vault_artifacts', 'yaml_scalars')
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
-_here = _os.path.dirname(_os.path.abspath(__file__))
+_here = _os.path.dirname(_os.path.realpath(__file__))
 _required = tuple(_m + ".py" for _m in (
     globals().get("_OBSIDIAN_SHARED_MODULES") or ("slugify",)))
 _env = _os.environ.get("OBSIDIAN_VAULT_SHARED")
@@ -42,6 +42,7 @@ else:                                      # plugin-relative walk-up, at most 5 
     for _ in range(5):
         _tried.append(_os.path.join(_d, "shared", "scripts"))
         _d = _os.path.dirname(_d)
+    _tried.append(_here)                   # extracted skill with co-located helpers
 _missing = {_p: [_m for _m in _required if not _os.path.isfile(_os.path.join(_p, _m))]
             for _p in _tried if _os.path.isdir(_p)}
 _shared = next((_p for _p in _tried if _p in _missing and not _missing[_p]), None)
@@ -160,6 +161,7 @@ _ABBREVIATIONS = frozenset({
     "e.g.", "i.e.", "cf.", "vs.", "al.", "approx.", "ca.", "no.", "eq.",
     "ref.", "refs.", "vol.", "pp.", "st.", "dr.", "prof.", "sp.", "spp.",
     "min.", "max.", "ml.", "mg.", "fig.", "figs.", "tab.", "sect.", "ver.",
+    "u.s.",
 })
 
 MAX_DESCRIPTION = 110
@@ -177,6 +179,9 @@ _NUMBER = re.compile(r"[-+]?(?:[0-9][0-9_]*(?:\.[0-9_]*)?"
                      r"(?:[eE][-+]?[0-9]+)?|\.[0-9]+(?:[eE][-+]?[0-9]+)?"
                      r"|0[xob][0-9a-fA-F_]+|\.(?:inf|nan))", re.I)
 _EMBED = re.compile(r"\A!\[\[([^\]]+)\]\]\Z")
+_ANY_EMBED = re.compile(r"!\[\[[^\]\n]+\]\]")
+_AVAILABILITY_BULLET = re.compile(
+    r"\A-\s+\*\*(Data|Code|Materials)\.\*\*\s+", re.I)
 # `[[Stem.pdf#page=5|5]]` -- group 1 the target, group 2 the display text if any.
 _PAGE_LINK = re.compile(r"\[\[([^\]|]*#page=[^\]|]*)(?:\|([^\]]*))?\]\]")
 # The whole citation: the link wrapped in <sup>, which is how Obsidian renders a
@@ -541,6 +546,9 @@ def _check_callout(note, body_start, fenced):
             bullets += 1
             if not stripped[4:].strip():
                 note.fail(i + 1, "empty callout bullet")
+            if _URLS.search(stripped[4:]):
+                note.fail(i + 1, "the Summary callout contains a URL; keep "
+                                 "source links in frontmatter or Availability")
         elif stripped.strip() == ">":
             note.fail(i + 1, "blank line inside the callout")
         else:
@@ -667,6 +675,20 @@ def _check_structure(note, body_start, fenced):
                                          "to %d -- data, code, and materials only, "
                                          "with no reference list after them"
                               % (len(bullets), MIN_AVAILABILITY, MAX_AVAILABILITY))
+                labels = []
+                for bullet in bullets:
+                    match = _AVAILABILITY_BULLET.match(bullet)
+                    if not match:
+                        note.fail(start + 1, "Availability bullets begin with "
+                                             "`**Data.**`, `**Code.**`, or "
+                                             "`**Materials.**`")
+                        continue
+                    labels.append(match.group(1).casefold())
+                for required in ("data", "code"):
+                    if required not in labels:
+                        note.fail(start + 1, "Availability must state %s, using "
+                                             "`not stated` when the paper gives "
+                                             "no disclosure" % required.title())
             if name == "Limitations":
                 bullets = [l for l in content if l.startswith("- ")]
                 if not MIN_LIMITATIONS <= len(bullets) <= MAX_LIMITATIONS:
@@ -684,7 +706,7 @@ def _check_structure(note, body_start, fenced):
                         break
             # Every line, not just one: a trailing paragraph after the last
             # bullet is how a reference list gets back into a note that is
-            # supposed to end at Availability (step 11, rule 11).
+            # supposed to end at Availability (the note-format terminator).
             for l in content:
                 if not (l.startswith("- ") or l[:1] in (" ", "\t")):
                     note.fail(start + 1, "the %s section holds only `- ` bullets; "
@@ -931,6 +953,10 @@ def _check_figures(note, bounds, images, fenced, source=None):
             continue
         m = _EMBED.match(l.strip())
         if not m:
+            if _ANY_EMBED.search(l):
+                note.fail(n + 1, "a figure embed must occupy its own line; "
+                                 "inline text around `![[...]]` breaks caption "
+                                 "and inventory checks")
             continue
         embeds += 1
         name = m.group(1).split("|")[0].strip()
@@ -1009,7 +1035,8 @@ def _check_tables(note, bounds, fenced):
     for start, stop in blocks:
         if stop - start < 2:
             note.fail(start + 1, "a one- or two-line `|` block is not a table; "
-                                 "two numbers belong in a sentence (step 4)")
+                                 "two numbers belong in a sentence "
+                                 "(references/figures.md)")
         if not any(_TABLE_SEP.match(lines[i]) for i in range(start, stop + 1)):
             note.fail(start + 1, "table has no `|---|---|` separator row, so it "
                                  "renders as literal pipes")
@@ -1355,6 +1382,9 @@ def _cases():
                  "The design follows B. F. Skinner closely. One. Two. "
                  "Three. Four."),
          CLEAN),
+        ("U.S. is not a sentence end",
+         _mutate("Prose.", "The U.S. trial enrolled adults. The result held."),
+         CLEAN),
         ("...and six real sentences still trip the cap",
          _mutate("## Worth offering after a second recurrence in adults\n\nProse.",
                  "## Worth offering after a second recurrence in adults\n\n"
@@ -1363,6 +1393,9 @@ def _cases():
          "one topic per paragraph"),
         ("blank line above callout",
          _mutate("---\n> [!Summary]", "---\n\n> [!Summary]"), "blank line between"),
+        ("URL in Summary callout",
+         _mutate("> - Three.", "> - Details are at https://example.org/data."),
+         "callout contains a URL"),
         ("quoted read", _mutate("read: false", 'read: "false"'), "bare boolean"),
         ("bare year", _mutate("published: 2025-01-03", "published: 2025"),
          "full YYYY-MM-DD"),
@@ -1573,6 +1606,20 @@ def _cases():
                  "- **Code.** github.example/x\n- Doe, P. (2025). Nature 600, 1-9."
                  "\n- Smith, J. (2024). NEJM 390, 22-30."),
          "Availability has 4 bullets"),
+        ("Availability cannot omit Data",
+         _mutate("- **Data.** Not stated.\n", ""),
+         "must state Data"),
+        ("Availability cannot omit Code",
+         _mutate("- **Code.** github.example/x\n", ""),
+         "must state Code"),
+        ("Availability uses named disclosure bullets",
+         _mutate("- **Code.** github.example/x",
+                 "- **Software.** github.example/x"),
+         "Availability bullets begin"),
+        ("inline figure embed is rejected",
+         _mutate("![[Doe_X_2025_fig_2.png]]",
+                 "Result: ![[Doe_X_2025_fig_2.png]]"),
+         "embed must occupy its own line"),
         ("front-matter continuation is not silently swallowed",
          _mutate("description: Doe cut recurrence from 45% to 8% in a 219-patient "
                  "trial.",
@@ -1937,6 +1984,19 @@ def _selftest():
                 fail += 1
                 print("FAIL  %s: status %r, output %r"
                       % (name, result, output.getvalue()))
+        note_path = os.path.join(scratch, "note-without-images.md")
+        with open(note_path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(GOOD)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            result = main([note_path])
+        if result == 1 and "--images is required" in output.getvalue():
+            ok += 1
+        else:
+            fail += 1
+            print("FAIL  CLI omitted --images without disclosing unchecked "
+                  "embeds: status %r, output %r" %
+                  (result, output.getvalue()))
     # Same trailer as every other script in the plugin ("N/M self-test cases
     # pass"), which README.md documents as uniform and this one alone did not
     # emit -- so a caller grepping for it read a passing run as a missing suite.
@@ -1944,7 +2004,19 @@ def _selftest():
     return 0 if not fail else 1
 
 
+def _configure_stdio():
+    """Keep user paths and note text writable through narrow host pipes."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="backslashreplace")
+            except (AttributeError, OSError, ValueError):
+                pass
+
+
 def main(argv=None):
+    _configure_stdio()
     p = argparse.ArgumentParser(
         description="Check a summary note against paper-summarizer's format.")
     p.add_argument("note", nargs="?", help="the .md note to check")
@@ -1965,6 +2037,17 @@ def main(argv=None):
         text = fh.read()
     advisories = []
     findings = lint(text, a.note, a.images, advisories=advisories)
+    if a.images is None:
+        fenced = _fenced(text.splitlines())
+        for index, line in enumerate(text.splitlines()):
+            if index not in fenced and _ANY_EMBED.search(line):
+                findings.append((
+                    index + 1,
+                    "--images is required when the note embeds a figure; "
+                    "resolution and source ownership were not checked",
+                ))
+                break
+        findings.sort()
     for line, msg in findings:
         print("%s:%s: %s" % (a.note, line if line else "-", msg))
     for line, msg in advisories:

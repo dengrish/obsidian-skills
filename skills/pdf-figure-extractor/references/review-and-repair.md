@@ -59,7 +59,9 @@ failed, degenerate detection for explicit repair.
 - `.figure-manifest.tsv` records figure ownership and digests. A current
   matching record lets extraction skip or deliberately replace that output.
 - `.figure-review.txt` records bounding boxes a person or agent has checked.
-  A review mark is not an ownership claim or permission to overwrite.
+  A review mark is not an ownership claim or permission to overwrite. It also
+  protects the checked crop from a later broad batch `--overwrite`; remove the
+  exact ledger row deliberately before asking automatic detection to replace it.
 
 Both batch and explicit-coordinate extraction protect unknown/conflicting occupied names,
 including with `--overwrite`. A malformed, protected, or symlinked manifest
@@ -92,25 +94,25 @@ caller parsed; a concurrent mark or ownership update is retained and the stale
 write fails. If restoration is blocked by another writer, the error names the
 outside-Images recovery directory holding the displaced bytes.
 
-When a manifest is absent, the default batch still treats every occupied name
-as unclaimed. A matching canonical stem is not provenance: a URL-origin
-clipping can have the same stem and exact figure filename. After inspecting a
-confirmed historical extractor crop, select that exact file with a repeatable
+The default batch treats every occupied name without an ownership record as
+unclaimed. A matching canonical stem is not provenance: a URL-origin clipping
+can have the same stem and exact figure filename. After inspecting a confirmed
+historical extractor crop, select that exact file with a repeatable
 `--adopt-legacy '<pdf_stem>:<figure_label>'` option. Adoption is limited to
 complete PNGs for eligible, uniquely identified PDFs in this run and is
 revalidated before the sidecar is saved. A missing, changed, truncated,
 symlinked, ambiguous, or differently formatted file is left unchanged and
-unclaimed. The option is available only while the manifest is absent and
-cannot be combined with `--overwrite`; migrate ownership first, then run any
-requested re-extraction separately.
+unclaimed. A manifest may already exist, but the selected slot must not already
+have an ownership record. Adoption cannot be combined with `--overwrite`;
+migrate ownership first, then run any requested re-extraction separately.
 Readable figure PNGs still participate in duplicate detection independently of
 ownership.
 
-A new explicit crop may add a **new** file to a folder without a manifest, but may
-not replace an occupied name there. Inspect legacy images and explicitly adopt
-each confirmed `STEM:FIG` before repairing an existing crop. When a manifest is
-present, an explicit crop repair updates its digest so a later batch recognizes the
-repaired output.
+A new explicit crop records its digest, creating the manifest when necessary,
+but may not replace an occupied unrecorded name. Inspect legacy images and
+explicitly adopt each confirmed `STEM:FIG` before repairing an existing crop.
+An explicit repair of a recorded crop updates its digest so a later batch
+recognizes the repaired output.
 
 `--review-file` selects a custom review ledger; keep using that same path
 when adding marks. It does not relax image ownership. The organizer's rename

@@ -53,9 +53,12 @@ complete-reference-rewrite gate.
   `updated:` and `read:`. Report conflicting user-owned metadata from an entry
   that may be removed rather than silently selecting a value.
 - Preserve the retained primary flashcard's recognized scheduling attachments
-  and block ID byte-for-byte. Apply the one-card rule; quote any removed card
-  with all attachments in the report. Preserve existing exhibits unless source
-  evidence and the requested refactor establish their new owner.
+  and block ID byte-for-byte. Do not discard an extra card merely to enforce
+  the one-card presentation rule. Preserve every card unless the authorized
+  refactor inventory assigns its tested claim to a retained or new entry, or
+  the request explicitly names that card for deletion; quote every moved or
+  removed card with all attachments in the report. Preserve existing exhibits
+  unless source evidence and the requested refactor establish their new owner.
 
 ## Publish in dependency order
 
@@ -70,10 +73,14 @@ filesystem transaction, so order prevents a disappearing target:
    connected hierarchy closure so `parents:` and MOCs come from one tree.
 3. Re-scan and verify that every changed link resolves, every moved claim keeps
    a valid source, and no obsolete slug remains referenced.
-4. Only then conditionally remove an obsolete entry, and only when all of its
-   supported content and user-owned metadata have been accounted for. If a
-   later edit or an unresolved inbound reference appears, retain the file and
-   report the mixed state; never force cleanup to make the refactor look done.
+4. Only then conditionally remove an obsolete entry. Every substantive claim,
+   equation, exhibit, card (including its scheduling attachments and block ID),
+   citation, and user-owned metadata value must either survive in an identified
+   destination or be named explicitly by the authorized request as content to
+   delete. Missing or unverified source support is a reason to retain the
+   content, never evidence that it is disposable. If a later edit or an
+   unresolved inbound reference appears, retain the file and report the mixed
+   state; never force cleanup to make the refactor look done.
 
 Finish with Tasks 1–3 on the affected closure and re-scan until all fixable
 findings introduced by the refactor are gone. Report source evidence, created,

@@ -61,9 +61,16 @@ in source order on one counter. Fresh notes start at 1. Use argument lists or
 for source-controlled URLs and names.
 
 ```bash
-python3 '<skill>/scripts/fetch_images.py' download --attachments '<vault>/Sources/Images' \
-    --slug '<slug>' --start <N> '<url1>' '<url2>'
+python3 '<skill>/scripts/fetch_images.py' stage --vault '<vault>' \
+    --out-dir '<run-temp>/images' --slug '<slug>' --start <N> \
+    '<url1>' '<url2>'
 ```
+
+For a very large data URI that cannot safely fit in one shell argument, write
+it as one UTF-8 line in a scratch file and pass `--urls-file '<scratch>/urls'`;
+`--urls-file -` reads UTF-8 from stdin. Resolve a protocol-relative source such
+as `//cdn.example/image.png` against the capture page's verified scheme before
+passing it; the helper refuses a URL with no scheme rather than guessing.
 
 The helper permits HTTP(S) and data URIs. For each HTTP(S) hop it resolves once,
 rejects the whole answer set if any address is non-public, and connects the
@@ -75,6 +82,20 @@ publication. New files use exclusive creation; explicit replacements are
 atomic. A failure to provide safe publication leaves existing files alone.
 These are reasons to use the helper, not instructions to reimplement it with
 `curl` and `mv`.
+
+`stage` writes only to the selected scratch directory outside the vault. After
+the reviewed note is safely public, place each returned file with:
+
+```bash
+python3 '<skill>/scripts/fetch_images.py' place \
+    --attachments '<vault>/Sources/Images' --slug '<slug>' --index <N> \
+    --from-file '<scratch image>' --owner-note '<vault>/Articles/<slug>.md'
+```
+
+The owner note must already contain the exact filename-only embed. `place`
+moves the scratch file only after byte sniffing and occupied-slot checks.
+`download` is reserved for an already published owner note and likewise
+requires `--owner-note`; it must not be used to populate a new draft.
 
 The network policy is direct-only: ambient HTTP(S) proxy settings are not used.
 A forward proxy could resolve the hostname again after the local check and undo

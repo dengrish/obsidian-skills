@@ -84,8 +84,17 @@ IRREGULAR_PLURALS = {
     "bacterium": "bacteria", "archaeon": "archaea", "fungus": "fungi",
     "protozoan": "protozoa", "mitochondrion": "mitochondria",
     "curriculum": "curricula", "series": "series", "species": "species",
+    # Common scientific heads that appear in entity titles. Keeping these in
+    # the shared table prevents the builder and whole-vault linter from
+    # disagreeing on pairs such as taxon/taxa or phylum/phyla.
+    "taxon": "taxa", "phylum": "phyla", "alga": "algae",
+    "larva": "larvae", "vertebra": "vertebrae", "ovum": "ova",
+    "stratum": "strata", "focus": "foci", "locus": "loci",
+    "cortex": "cortices", "apex": "apices",
 }
-IRREGULAR_SINGULARS = {v: k for k, v in IRREGULAR_PLURALS.items()}
+IRREGULAR_SINGULARS = {
+    IRREGULAR_PLURALS[key]: key for key in IRREGULAR_PLURALS
+}
 
 # Irregular plurals that ALSO read as a regular plural of a different real word:
 # "bases" is the plural of both "basis" and "base".  For these the regular
@@ -97,8 +106,12 @@ AMBIGUOUS_IRREGULAR_PLURALS = {"bases"}
 # in -ves is a regular plural of a -ve word: "curves" -> "curve", not "curf".
 _F_SINGULARS = ["leaf", "half", "knife", "wolf", "shelf", "life", "wife",
                 "thief", "calf", "self"]
-VES_IRREGULARS = {(w[:-1] if w.endswith("f") else w[:-2]) + "ves": w
+VES_IRREGULARS = {(w[:-1] if w[-1:] == "f" else w[:-2]) + "ves": w
                   for w in _F_SINGULARS}
+F_SINGULAR_PLURALS = {
+    w: (w[:-1] if w[-1:] == "f" else w[:-2]) + "ves"
+    for w in _F_SINGULARS
+}
 
 _SIBILANT_RE = re.compile(r"(s|x|z|ch|sh)$")
 
@@ -111,14 +124,12 @@ def pluralize(word):
         return IRREGULAR_PLURALS[word]
     if word in IRREGULAR_SINGULARS:      # already plural
         return word
+    if word in F_SINGULAR_PLURALS:
+        return F_SINGULAR_PLURALS[word]
     if _SIBILANT_RE.search(word):
         return word + "es"
     if word.endswith("y") and len(word) > 1 and word[-2] not in "aeiou":
         return word[:-1] + "ies"
-    if word.endswith("f"):
-        return word[:-1] + "ves"
-    if word.endswith("fe"):
-        return word[:-2] + "ves"
     return word + "s"
 
 
@@ -253,7 +264,12 @@ def _stem_token(token):
     """Light suffix stem used only for collision signals, never titles."""
     value = token
     for suffix in _STEM_SUFFIXES:
-        if value.endswith(suffix) and len(value) - len(suffix) >= 3:
+        # Agent-noun endings are too short and too common in lexical roots for
+        # a three-character remainder to be useful: ``error`` became ``er``
+        # after ``-or`` removal plus doubled-tail folding. A four-character
+        # floor still groups tokenizer/tokenization and modeler/modeling.
+        floor = 4 if suffix in ("er", "ers", "or", "ors") else 3
+        if value.endswith(suffix) and len(value) - len(suffix) >= floor:
             value = value[: -len(suffix)]
             break
     value = _DOUBLE_TAIL_RE.sub(r"\1", value)  # modell -> model
@@ -296,6 +312,10 @@ PLURAL_PAIRS = [
     ("archaea", "archaeon"), ("fungi", "fungus"),
     ("protozoa", "protozoan"), ("mitochondria", "mitochondrion"),
     ("curricula", "curriculum"), ("species", "species"),
+    ("taxa", "taxon"), ("phyla", "phylum"), ("algae", "alga"),
+    ("larvae", "larva"), ("vertebrae", "vertebra"), ("ova", "ovum"),
+    ("strata", "stratum"), ("foci", "focus"), ("loci", "locus"),
+    ("cortices", "cortex"), ("apices", "apex"),
     # --- -f / -fe plurals that really are -ves ---
     ("halves", "half"), ("knives", "knife"), ("wolves", "wolf"),
     ("shelves", "shelf"), ("lives", "life"), ("wives", "wife"),
@@ -322,7 +342,8 @@ AMBIGUOUS_CASES = [("bases", "base", "basis")]
 #: loses its `s`; that is the accepted cost of having no dictionary, and it is
 #: symmetric, so both skills group such a token with itself and nothing else.
 UNCHANGED = ["gene", "curve", "class", "matrix", "hypothesis", "analysis",
-             "index", "leaf", "mouse", "axis", "tie", "is", "as"]
+             "index", "leaf", "mouse", "axis", "tie", "is", "as",
+             "proof", "safe"]
 
 #: Slug-level cases: `(slug_a, slug_b, probe-c pair?, probe-e permutation?)`.
 #: The first row is the pair that went unreported for wiki-linter and reported
@@ -420,6 +441,18 @@ def run_self_test():
             failures.append("stem_key(%r) == stem_key(%r) -> %r, expected %r"
                             % (a, b, got, same_stem))
 
+    for token, expected in (("error", "error"), ("order", "order")):
+        total += 1
+        if _stem_token(token) != expected:
+            failures.append("_stem_token(%r) -> %r, expected %r"
+                            % (token, _stem_token(token), expected))
+
+    for singular, expected in (("proof", "proofs"), ("safe", "safes")):
+        total += 1
+        if pluralize(singular) != expected:
+            failures.append("pluralize(%r) -> %r, expected %r"
+                            % (singular, pluralize(singular), expected))
+
     # The head token is the only one probe (c) rewrites: a plural sitting
     # earlier in the slug is part of the qualifier, not the thing named.
     for slug, key in (("confusion-matrices", "confusion-matrix"),
@@ -456,7 +489,19 @@ def _build_parser():
     return p
 
 
+def _configure_stdio():
+    """Keep arbitrary words writable through narrow host pipes."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="backslashreplace")
+            except (AttributeError, OSError, ValueError):
+                pass
+
+
 def main(argv=None):
+    _configure_stdio()
     args = _build_parser().parse_args(argv)
 
     if args.test:

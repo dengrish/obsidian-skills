@@ -1,6 +1,6 @@
-# Tag calibration — the discipline calls the three-way test doesn't settle
+# Tag calibration — discipline calls the ownership test does not settle
 
-> **When to read this:** Read this when either condition holds, and both are checkable before you write a line of the entry: (1) SKILL.md item 8's three-way test (ML / statistics / mathematics) leaves a candidate's `tags:` genuinely undecided; or (2) the source itself is a history, law, political-science, finance/markets, or startup/business document, which you know when you open the file. Otherwise apply the SKILL.md test and skip this file.
+> **When to read this:** Read this when either condition holds, and both are checkable before you write a line of the entry: (1) the tag-ownership and “uses” tests in `writing.md` leave a candidate's `tags:` genuinely undecided, especially among machine learning, statistics, and mathematics; or (2) the source itself is a history, law, political-science, finance/markets, or startup/business document, which you know when you open the file. Otherwise apply the ordinary tag rule and skip this file.
 
 ---
 

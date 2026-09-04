@@ -21,13 +21,19 @@ Stdlib only, Python 3.8+.
 import argparse
 import re
 
-__all__ = ["find_missing_display_equation_candidates"]
+__all__ = [
+    "find_missing_display_equation_candidates",
+    "find_noncanonical_display_equation_candidates",
+]
 
 
 _DISPLAY_BLOCK_RE = re.compile(
     r"(?ms)^ {0,3}\$\$[ \t]*\n(.*?)\n {0,3}\$\$[ \t]*$")
+_ONE_LINE_DISPLAY_RE = re.compile(
+    r"(?m)^ {0,3}\$\$[ \t]*(\S(?:.*?\S)?)[ \t]*\$\$[ \t]*$")
 _INLINE_MATH_RE = re.compile(
     r"(?<![\\$])\$(?!\$)((?:\\.|[^$\n])+?)(?<!\\)\$(?!\$)")
+_OBSIDIAN_LINK_RE = re.compile(r"(?<!!)\[\[([^\[\]\n]+)\]\]")
 _CAPTION_RE = re.compile(r"^\s*\*(?!\*)\S(?:.*\S)?\*\s*$")
 _ROOT_VARIANCE_RE = re.compile(
     r"\b(?:is(?:[ \t]+(?:defined[ \t]+as|equal[ \t]+to))?|equals)[ \t]+"
@@ -242,11 +248,23 @@ def _fold_hard_wraps(text):
 
 def _display_line_spans(prose, require_content=True,
                         require_blank_adjacency=True):
-    """Return inclusive zero-based line spans for canonical display blocks."""
+    """Return inclusive zero-based line spans for existing display blocks.
+
+    A one-line ``$$...$$`` spelling still renders as display math and therefore
+    can cover the calculation stated immediately above it.  Its delimiter form
+    is noncanonical and is reported separately by
+    :func:`find_noncanonical_display_equation_candidates`; treating it as
+    absent produced the wrong repair (add another equation) instead of the
+    safe repair (move the existing delimiters onto their own lines).
+    """
     spans = []
     lines = prose.split("\n")
-    for match in _DISPLAY_BLOCK_RE.finditer(prose):
-        if require_content and not match.group(1).strip():
+    matches = [(match, match.group(1))
+               for match in _DISPLAY_BLOCK_RE.finditer(prose)]
+    matches.extend((match, match.group(1))
+                   for match in _ONE_LINE_DISPLAY_RE.finditer(prose))
+    for match, content in matches:
+        if require_content and not content.strip():
             continue
         start = _line_number(prose, match.start()) - 1
         end = _line_number(prose, match.end()) - 1
@@ -256,7 +274,33 @@ def _display_line_spans(prose, require_content=True,
             if not (blank_before and blank_after):
                 continue
         spans.append((start, end))
-    return spans
+    return sorted(set(spans))
+
+
+def find_noncanonical_display_equation_candidates(
+        masked_prose, excluded_line_spans=()):
+    """Return one-line display equations whose ``$$`` share a content line.
+
+    Callers pass the same code-masked prose and parsed table spans used by the
+    coverage detector.  Findings are line-oriented so they can identify the
+    existing equation without proposing a second one.
+    """
+    excluded = {
+        line
+        for start, end in (excluded_line_spans or ())
+        for line in range(start, end + 1)
+    }
+    candidates = []
+    for match in _ONE_LINE_DISPLAY_RE.finditer(masked_prose or ""):
+        line = _line_number(masked_prose, match.start())
+        if line - 1 in excluded:
+            continue
+        candidates.append({
+            "kind": "one-line-display",
+            "phrase": " ".join(match.group(0).strip().split()),
+            "line": line,
+        })
+    return candidates
 
 
 def _lhs_has_symbol(lhs, symbols):
@@ -362,6 +406,36 @@ def _probability_average_operands_are_named(compact):
                 r"(?:^|[^a-z\\])p(?:[_({]|(?=$|[^a-z]))", rhs)))
 
 
+_GENERIC_SUBJECT_WORDS = {
+    "a", "an", "each", "its", "measure", "one", "quantity", "result",
+    "that", "the", "this", "value", "within",
+}
+
+
+def _lhs_matches_named_context(lhs, context, boundary_pattern):
+    """Whether a display result is visibly tied to the prose subject.
+
+    Open-ended notation must not mean that *any* letter-valued left-hand side
+    covers a nearby definition.  Use the subject words before the defining
+    operation as conservative evidence: their initials/acronym or an explicit
+    name on the LHS is enough.  Closed-vocabulary symbols remain handled by
+    each caller before this fallback.
+    """
+    boundary = re.search(boundary_pattern, context or "", re.IGNORECASE)
+    if boundary is None:
+        return False
+    words = [word.lower() for word in re.findall(
+        r"[A-Za-z][A-Za-z0-9]*", context[:boundary.start()])]
+    words = [word for word in words[-6:] if word not in _GENERIC_SUBJECT_WORDS]
+    if not words:
+        return False
+    markers = set(words)
+    markers.update(word[:1] for word in words)
+    if len(words) > 1:
+        markers.add("".join(word[:1] for word in words))
+    return _lhs_has_symbol(lhs, markers)
+
+
 def _majority_aggregation_is_named(compact):
     """Require a vote/count aggregation, not merely a generic argmax."""
     if any(marker in compact for marker in ("mode", "majority", "vote")):
@@ -383,25 +457,33 @@ def _named_fraction_result_is_named(compact, context):
     """Match a prose quantity to the result named on a fraction's left side."""
     lhs = compact.split("=", 1)[0]
     words = context.lower()
+    generic_lhs = bool(
+        lhs and "=" in compact
+        and _lhs_matches_named_context(
+            lhs, context,
+            r"\b(?:probability|rate|proportion|share|score|coefficient)\b"))
     if "probability" in words:
         return ("prob" in lhs or r"\pr" in lhs
-                or _lhs_has_symbol(lhs, ("p",)))
+                or _lhs_has_symbol(lhs, ("p",)) or generic_lhs)
     if "rate" in words:
         return (any(marker in lhs for marker in
                     ("rate", "tpr", "fpr", "fnr", "tnr", "precision",
                      "recall", "specificity", "sensitivity", "error"))
-                or _lhs_has_symbol(lhs, ("r",)))
+                or _lhs_has_symbol(lhs, ("r",)) or generic_lhs)
     if "proportion" in words or "share" in words:
         return ("prop" in lhs or "share" in lhs
-                or _lhs_has_symbol(lhs, ("p", "q")))
+                or _lhs_has_symbol(lhs, ("p", "q")) or generic_lhs)
     if "score" in words:
         return ("score" in lhs or "f_1" in lhs or "f1" in lhs
-                or _lhs_has_symbol(lhs, ("s", "z")))
+                or _lhs_has_symbol(lhs, ("s", "z")) or generic_lhs)
     if "coefficient" in words:
         return (any(marker in lhs for marker in
                     ("coef", r"\beta", r"\rho"))
-                or _lhs_has_symbol(lhs, ("r", "c")))
-    return False
+                or _lhs_has_symbol(lhs, ("r", "c")) or generic_lhs)
+    # Named ratios and scores use arbitrary conventional symbols (Jaccard's
+    # ``J``, Dice's ``D``, and domain-specific abbreviations). Requiring a
+    # closed list makes a correct nearby fraction a perpetual candidate.
+    return generic_lhs
 
 
 def _sum_components_are_named(compact, context):
@@ -422,7 +504,33 @@ def _sum_components_are_named(compact, context):
     if "penalty" in words:
         expected.append(any(marker in compact for marker in
                             ("penalty", r"\lambda")))
-    return bool(expected) and all(expected)
+    if expected:
+        return all(expected)
+    # A generic decomposition still has a determinate structural signature:
+    # a named result and at least two symbolic additive terms. The prose
+    # supplies their meaning; this floor need not know every domain vocabulary.
+    if "=" not in compact:
+        return False
+    lhs, rhs = compact.split("=", 1)
+    terms = [term for term in re.split(r"(?<!\\)\+", rhs) if term]
+    return (_lhs_matches_named_context(
+                lhs, context, r"\bdecompos(?:e|es|ed|ing|ition)\b")
+            and len(terms) >= 2
+            and all(re.search(r"[a-z]|\\[a-z]+", term) for term in terms))
+
+
+def _plain_wikilinks(text):
+    """Expose rendered wikilink labels while preserving source offsets."""
+    def replace(match):
+        payload = match.group(1)
+        target, separator, label = payload.partition("|")
+        visible = label if separator else target
+        visible = visible.split("#", 1)[0].split("^", 1)[0]
+        visible = visible.rsplit("/", 1)[-1].strip()
+        if len(visible) > len(match.group(0)):
+            visible = visible[:len(match.group(0))]
+        return visible + " " * (len(match.group(0)) - len(visible))
+    return _OBSIDIAN_LINK_RE.sub(replace, text or "")
 
 
 def _balanced_group_end(value, start):
@@ -782,9 +890,10 @@ def find_missing_display_equation_candidates(masked_prose,
     # Remove emphasis delimiters only from the prose/cue view. The raw inline
     # formula must remain byte-faithful: deleting ``_`` changed ``x_0`` into
     # ``x0`` before the simple-assignment exception could classify it.
-    plain_chars = list(visible)
+    plain_visible_links = _plain_wikilinks(visible)
+    plain_chars = list(plain_visible_links)
     protected = bytearray(len(visible))
-    for math_match in _INLINE_MATH_RE.finditer(visible):
+    for math_match in _INLINE_MATH_RE.finditer(plain_visible_links):
         protected[math_match.start():math_match.end()] = \
             b"\x01" * (math_match.end() - math_match.start())
     for index, char in enumerate(plain_chars):
@@ -878,6 +987,9 @@ def run_self_test(verbose=False):
          "It is the square root of the variance.", 1, ()),
         ("named definition with emphasis",
          "The **standard deviation** is the square root of variance.", 1, ()),
+        ("a wikilink does not hide the variance cue",
+         "The standard deviation is the square root of the [[variance]].",
+         1, ()),
         ("defined-as spelling",
          "This quantity is defined as the square root of the variance.", 1, ()),
         ("is-equal-to spelling",
@@ -940,8 +1052,10 @@ def run_self_test(verbose=False):
         ("coverage distance is measured from a hard-wrapped cue's end",
          "It is the square\nroot of the\nvariance.\n\n$$\n"
          "\\sigma = \\sqrt{\\operatorname{Var}(X)}\n$$", 0, ()),
-        ("a one-line display spelling is not the required form",
-         "It is the square root of variance.\n\n$$\\sigma=1$$", 1, ()),
+        ("a one-line display covers the stated calculation without pretending "
+         "the equation is absent",
+         "It is the square root of variance.\n\n"
+         "$$\\sigma = \\sqrt{\\operatorname{Var}(X)}$$", 0, ()),
         ("an unclosed delimiter is not a display equation",
          "It is the square root of variance.\n\n$$\n\\sigma=1", 1, ()),
         ("an empty display block does not satisfy coverage",
@@ -1198,6 +1312,12 @@ def run_self_test(verbose=False):
          "The error decomposes into the sum of bias, variance, and noise."
          "\n\n$$\nE = \\operatorname{Bias}^2 + "
          "\\operatorname{Var} + \\sigma_\\epsilon^2\n$$", 0, ()),
+        ("a generic named decomposition is covered without a fixed vocabulary",
+         "The error decomposes into the sum of approximation and estimation error."
+         "\n\n$$\nE = A + B\n$$", 0, ()),
+        ("an unrelated arbitrary sum does not cover a named decomposition",
+         "The error decomposes into the sum of approximation and estimation error."
+         "\n\n$$\nx = A + B\n$$", 1, ()),
         ("an incomplete decomposition display does not supply every operand",
          "The error decomposes into the sum of bias, variance, and noise."
          "\n\n$$\nE = \\operatorname{Bias}^2 + "
@@ -1232,6 +1352,12 @@ def run_self_test(verbose=False):
         ("a probability-labelled unrelated ratio does not cover its fraction",
          "The class probability is the fraction of class-k instances in a "
          "leaf.\n\n$$\np_k = x_k/z\n$$", 1, ()),
+        ("a score may use a domain-specific result symbol",
+         "The Jaccard score is the ratio of intersection to union.\n\n$$\n"
+         "J = |A \\cap B| / |A \\cup B|\n$$", 0, ()),
+        ("an unrelated arbitrary fraction does not cover a named score",
+         "The Jaccard score is the ratio of intersection to union.\n\n$$\n"
+         "x = |A \\cap B| / |A \\cup B|\n$$", 1, ()),
         ("an average of unrelated values does not cover averaged probabilities",
          "It predicts from class probabilities averaged over all classifiers."
          "\n\n$$\np=1/N\\sum_i x_i\n$$", 1, ()),
@@ -1271,6 +1397,7 @@ def run_self_test(verbose=False):
          "The scale is the square root of variance.", 1, ()),
     ]
     failed = 0
+    total = len(cases)
     for name, prose, expected, spans in cases:
         got = len(find_missing_display_equation_candidates(prose, spans))
         ok = got == expected
@@ -1279,7 +1406,24 @@ def run_self_test(verbose=False):
         if not ok:
             print("  expected %r, got %r" % (expected, got))
             failed += 1
-    print("%d/%d self-test cases pass" % (len(cases) - failed, len(cases)))
+    format_cases = [
+        ("a one-line display is reported as existing noncanonical math",
+         "Prose.\n\n$$x = 1$$", 1, ()),
+        ("a canonical multiline display has no one-line-form finding",
+         "Prose.\n\n$$\nx = 1\n$$", 0, ()),
+        ("a one-line display in a parsed table is outside body prose",
+         "Name | Value\n--- | ---\nX | $$x = 1$$", 0, ((0, 2),)),
+    ]
+    total += len(format_cases)
+    for name, prose, expected, spans in format_cases:
+        got = len(find_noncanonical_display_equation_candidates(prose, spans))
+        ok = got == expected
+        if verbose or not ok:
+            print(("PASS" if ok else "FAIL") + ": " + name)
+        if not ok:
+            print("  expected %r, got %r" % (expected, got))
+            failed += 1
+    print("%d/%d self-test cases pass" % (total - failed, total))
     return failed
 
 

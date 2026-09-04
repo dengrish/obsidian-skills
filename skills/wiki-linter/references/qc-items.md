@@ -40,14 +40,18 @@ ownership.
 | `item3`, `item3/report-only` | Report date problems; wiki-linter writes neither date. |
 | `item4/source-identity` | Establish provenance under item 4 before removing anything; preserve independent or uncertain citations. |
 | `item9/imperative-link` | Integrate the link only when adjacent prose already states the relationship and the edit adds no claim; otherwise report a source-backed proposal. |
-| `item9/duplicate-sentence` | This is a cross-entry ownership candidate. Preserve both copies and report the pair and likely owner unless the requested scope already authorizes a clear refactor. Normalized similarity alone never authorizes deletion. |
+| `item9/duplicate-sentence` | This is a cross-entry ownership candidate. Preserve both copies and report the pair and likely owner unless the request explicitly names the consolidation or redistribution operation, or the affected entries and intended outcome. Normalized similarity alone never authorizes deletion. |
 | `item10/case`, `item10/alias` | In Task 1, canonicalize the unambiguous existing target while preserving anchor and explicit display label. Never create a variant file. |
 | `item10/self` | In Task 2, unlink an ordinary self-mention. Preserve real section/block navigation as a local `[[#Heading|Display]]` or `[[^block|Display]]` anchor. |
 | `item10/ambiguous` | Preserve the whole link and report its competing owners. |
 | `item10/unparsed` | Preserve the link; the target file's `item0` or `item1` governs repair. |
 | `item10/dangling`, `item10/dup` | Use Task 2's [link protocol](link-hygiene.md), not an ordinary Task 1 repair. |
 | `item10/table` | Replace only the table-cell link markup with its visible plain-text label. |
+| `item10/redundant-pipe` | In Task 1, collapse exact `[[slug|slug]]` body-prose links to `[[slug]]`. Never apply this to the Related footer. |
+| `item12/equation-typography` | In descriptions, replace raw ℓ-norm notation with plain `ell-one`/`ell-two` and retain Unicode `μm`. In prose and card prompts, replace raw ℓ-norm and `μm`/`µm` notation with canonical inline LaTeX. |
 | `item12/equation-coverage-candidate` | Inspect the local prose or inline formula. Insert or promote an equation only when the note completely states the quantity or calculation; otherwise preserve and report the non-defining cue. |
+| `item12/equation-format` | Preserve the existing equation and put its opening and closing `$$` delimiters on separate lines. Do not add a duplicate display. |
+| `item12/panel-composite` | Preserve both embeds and report the duplicated exhibit until source-backed review chooses either the default composite or the subject-specific panel. |
 | `item12/remote-image`, `item12/missing-image` | Report and preserve the embed and caption; repair requires work outside this entry. |
 | `image_folder_findings` | Report and preserve nested, staging, unreadable, or portable-name-collision paths. Collision records retain all owner paths; an unreadable inventory also suppresses missing-image claims. |
 | `item17/alias-candidate` | Apply the same-entity, collision, cross-domain, and Organism-common-name gates before adding anything. |
@@ -210,8 +214,9 @@ chronological order, citations, equations, and image/table-plus-caption units.
 Report every repair. If the change crosses a section, changes a fact, removes
 substantive content, chooses between claims, or redistributes material across
 entries, preserve it and propose a source-backed follow-up. Entry splits,
-merges, and redistribution also require authorization unless the user's current
-request already supplies it. Pure renames keep their separate approval rule.
+merges, and redistribution also require authorization that names the operation,
+or the affected entries and intended outcome. Pure renames keep their separate
+approval rule.
 
 For a missing `Person`/`Event` opener date, copy the exact date only when it is
 already present elsewhere in the entry. Normalize an existing malformed date
@@ -226,7 +231,10 @@ Judge first occurrence by resolved entry, not raw spelling; a real file outranks
 an alias, while ambiguous basename or alias ownership stays unresolved. In
 Task 1, canonicalize unambiguous case, Unicode, path, `.md`, or alias variants
 without changing display text or anchors. Replace table-cell links with visible
-plain text. Preserve unparsed and ambiguous targets.
+plain text. In body prose, collapse an exact `[[slug|slug]]` to `[[slug]]`;
+do not apply that cleanup to the Related footer, whose canonical-title pipe is
+mandatory even when the title text equals the slug. Preserve unparsed and
+ambiguous targets.
 
 Self-links, duplicate resolving links, and dangling targets use Task 2's
 [link protocol](link-hygiene.md). Preserve genuine local section/block
@@ -249,7 +257,10 @@ that [canonical policy](../../wiki-builder/references/equations.md) rather than
 reconstructing it from scanner output. Apply the separate canonical
 [media rules](../../wiki-builder/references/media.md) to existing exhibits.
 The adjacent [body math typography](../../wiki-builder/references/writing.md#prose-principles)
-still governs plain quantities and escaped literal dollars.
+still governs plain quantities and escaped literal dollars. It also keeps
+Greek-letter unit symbols in inline LaTeX: `10 $\mu\mathrm{m}$`, rather than
+raw `10 μm` or `10 µm`; descriptions retain their separate plain-Unicode
+allowance.
 
 **Media and table format.** Preserve both valid embed classes: a local image is
 an Obsidian embed by bare basename, while an external clipping image may remain
@@ -391,12 +402,15 @@ The canonical card-format rule defines the protected same-line, immediately
 following-line, metadata-callout, and block-ID attachments. A blank line closes
 the attachment position. Preserve each recognized attachment byte-for-byte and
 in place; line-3 plainness never authorizes removing a block ID. Other visible
-or comment content is malformed. When legacy content has
-multiple cards, keep the one satisfying the complete primary-answer contract,
-preserve its attachments, quote each removed card verbatim in the report, and
-propose a split only when a cited source supports the removed term as a real
-entity. Visible metadata absence does not establish a fresh card; apply the
-[history-aware rewrite bar](flashcards.md) before changing a definition.
+or comment content is malformed. When legacy content has multiple cards,
+identify the one satisfying the complete primary-answer contract, preserve
+every card and attachment, quote each extra card verbatim in the report, and
+propose a split when a cited source supports the extra term as a real entity.
+Routine lint does not delete an extra card. Move or remove one only under an
+explicitly authorized source-backed refactor that accounts for its claim and
+attachments, or an explicit request to delete that card. Visible metadata
+absence does not establish a fresh card; apply the [history-aware rewrite
+bar](flashcards.md) before changing a definition.
 
 **The checklist ends at 19.** The retired `importance:` item was last, so its
 removal created no numbering gap. Legacy populated `importance:` remains valid
