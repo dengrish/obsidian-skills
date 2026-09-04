@@ -1278,15 +1278,20 @@ read: false
         sys.path.insert(0, str(scripts))
         try:
             batch = load("batch_extract", scripts / "batch_extract.py")
-            interpreter = "/tmp/python environment/bin/python3"
-            with patch.object(batch.sys, "executable", interpreter):
-                command = batch.mark_reviewed_command(
-                    "/tmp/vault's PDFs", "/tmp/images $literal", "Doe_Paper_2026", "1")
-            self.assertEqual(shlex.split(command), [
-                interpreter, str(scripts / "batch_extract.py"),
-                "--src", "/tmp/vault's PDFs", "--out", "/tmp/images $literal",
-                "--mark-reviewed", "Doe_Paper_2026:1",
-            ])
+            with tempfile.TemporaryDirectory(
+                    prefix="obsidian-generated-command-") as tmp:
+                base = Path(tmp)
+                interpreter = str(base / "python environment" / "python3")
+                source = str(base / "vault's PDFs")
+                output = str(base / "images $literal")
+                with patch.object(batch.sys, "executable", interpreter):
+                    command = batch.mark_reviewed_command(
+                        source, output, "Doe_Paper_2026", "1")
+                self.assertEqual(shlex.split(command), [
+                    interpreter, str(scripts / "batch_extract.py"),
+                    "--src", source, "--out", output,
+                    "--mark-reviewed", "Doe_Paper_2026:1",
+                ])
         finally:
             sys.path.remove(str(scripts))
 
