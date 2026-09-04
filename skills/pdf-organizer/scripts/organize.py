@@ -3121,6 +3121,10 @@ def _selftest():
     def check(label, got, want):
         cases.append((label, got == want, got, want))
 
+    def _reports_path(error, path):
+        rendered = str(error)
+        return path in rendered or repr(path) in rendered
+
     def _try_symlink(source, target, **kwargs):
         """Create a self-test symlink when the host grants that capability."""
         try:
@@ -3859,7 +3863,8 @@ def _selftest():
         p_ = os.path.join(v, *rel.split("/"))
         os.makedirs(os.path.dirname(p_), exist_ok=True)
         mode = "wb" if isinstance(data, bytes) else "w"
-        kwargs = {} if mode == "wb" else {"encoding": "utf-8"}
+        kwargs = ({} if mode == "wb" else
+                  {"encoding": "utf-8", "newline": ""})
         with open(p_, mode, **kwargs) as fh:
             fh.write(data)
         return p_
@@ -4684,7 +4689,8 @@ def _selftest():
         check("the final text-publication CAS gap preserves both writers",
               (open(_note, encoding="utf-8").read(), _recovered,
                bool(_cas_failure and not _cas_failure.rolled_back),
-               bool(_recoveries and _recoveries[0] in str(_cas_failure))),
+               bool(_recoveries and
+                    _reports_path(_cas_failure, _recoveries[0]))),
               ("late editor save\n", _old_note, True, True))
 
     # A link reaching the public name is still provisional until readback.
@@ -4724,8 +4730,8 @@ def _selftest():
         check("text readback preserves an editor save and the predecessor",
               (open(_note, encoding="utf-8").read(), _recovered,
                bool(_readback_failure and not _readback_failure.rolled_back),
-               bool(_recoveries
-                    and _recoveries[0] in str(_readback_failure))),
+               bool(_recoveries and
+                    _reports_path(_readback_failure, _recoveries[0]))),
               ("late editor readback save\n", _old_note, True, True))
 
     # A platform/filesystem can reject the hard link after a complete rewrite
@@ -4749,7 +4755,7 @@ def _selftest():
         check("a note link failure reports and preserves its complete rewrite",
               (isinstance(_note_link_error, LinkUnavailable),
                bool(_note_link_error and _note_link_error.keep_stage),
-               bool(_stage and _stage in str(_note_link_error)),
+               bool(_stage and _reports_path(_note_link_error, _stage)),
                open(_note, encoding="utf-8").read(),
                open(_staged_note, encoding="utf-8").read()
                if _staged_note else None),
@@ -4881,7 +4887,8 @@ def _selftest():
                          if _split_stage and os.path.isdir(_split_stage) else [])
         check("a late chapter occupant retains and reports the staged PDF",
               (open(_chapter_target, "rb").read(),
-               bool(_split_stage and _split_stage in str(_split_stage_error)),
+               bool(_split_stage
+                    and _reports_path(_split_stage_error, _split_stage)),
                _staged_parts,
                open(os.path.join(_split_stage, _staged_parts[0]), "rb").read(4)
                if _staged_parts else None),
