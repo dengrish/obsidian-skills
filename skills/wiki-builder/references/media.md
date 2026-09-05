@@ -46,7 +46,7 @@ or the cleaned Markdown note's stem for a clipping.
 
 The reason must describe this figure's contribution, not merely say that the note has reached its image limit.
 
-**Diagnostic for forgotten figures.** Reconcile the complete inventory against embeds and recorded skip reasons (Quality Checklist item 12). An unused exhibit with no reason needs a selection decision, not automatic placement. Many unused figures are acceptable when their reasons hold; the check measures whether every figure was considered, not the proportion included. Report remote references and unavailable source figures as well as local `[source_stem]_fig*` files, with panels grouped under their composite.
+**Diagnostic for forgotten figures.** Reconcile the complete inventory against embeds and recorded skip reasons (Quality Checklist item 12). An unused exhibit with no reason needs a selection decision, not automatic placement. Many unused figures are acceptable when their reasons hold; the check measures whether every figure was considered, not the proportion included. Report remote references and unavailable source figures as well as local `[source_stem]_fig*` files, with panels grouped under their composite. For Markdown sources, include every rendered image reference even when an older local filename has a different source prefix. Resolve those references directly; the filename mismatch neither makes a resolving image unavailable nor authorizes renaming it.
 
 ## Placement and embed syntax
 

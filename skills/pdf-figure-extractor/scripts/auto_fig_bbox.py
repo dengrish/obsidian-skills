@@ -307,6 +307,14 @@ TOP_SIDE_CAPTION_SLOP = 12
 # width lines separately in `_side_figure_text_rects`.
 TOP_SIDE_TEXT_GAP = 20
 
+# A value label or compact chart title can sit wholly above the tallest drawn
+# mark, so vertical overlap alone cannot identify all figure-internal text.
+# Admit only a nearby, horizontally contained, non-paragraph-width block. The
+# same 20pt measured allowance as side-figure labels covers ordinary chart
+# label spacing without turning a preceding prose paragraph into crop content.
+ABOVE_FIGURE_TEXT_GAP = 20
+ABOVE_FIGURE_TEXT_MAX_SHARE = 0.75
+
 # Figure labels above a compact vector row can extend slightly farther than
 # the general 8pt crop pad (Alberts 3-1 needs about 9pt for “molecule”). Keep
 # the exception local to top-band side crops rather than widening every crop.
@@ -714,7 +722,6 @@ def find_caption_blocks(page):
                         lines[first - 1][1])):
                 continue
             matches.append(match)
-        seen = set()
         for k, m in enumerate(matches):
             first = _line_index(line_start, m.start())
             supp_marker = m.group(1)
@@ -729,9 +736,6 @@ def find_caption_blocks(page):
                 prefix = MARKER_TO_PREFIX.get(_normalize_marker(supp_marker), "S")
                 if not fig_num.startswith(prefix):
                     fig_num = prefix + fig_num
-            if fig_num in seen:
-                continue          # same label twice in one block — one figure
-            seen.add(fig_num)
             last = len(lines) - 1
             if k + 1 < len(matches):
                 nxt = _line_index(line_start, matches[k + 1].start())
@@ -1271,24 +1275,31 @@ def text_block_inside_figure(rect, span):
     """True when a text block belongs to the figure rather than sitting above it.
 
     `span` is the figure's drawing cluster (`figure_content_span`). A block
-    counts as figure-internal when it starts below the figure's top edge AND
-    its full width fits inside the figure's horizontal span, padded the way
-    the crop itself pads (left for rotated y-axis labels, right a hair).
-    That covers bar value labels, schematic box labels, legend entries and
-    the axis tick row / axis title hanging below the plot — all of which are
-    "a preceding text block" by pure y-ordering, and raising the crop's top
-    edge past any of them throws away everything above it.
+    counts as figure-internal when its full width fits inside the figure's
+    horizontal span, padded the way the crop itself pads (left for rotated
+    y-axis labels, right a hair), and it either overlaps the drawing's vertical
+    span or is a compact block just above it. That covers bar value labels,
+    schematic box labels, legend entries and the axis tick row / axis title
+    hanging below the plot — all of which are "a preceding text block" by pure
+    y-ordering, and raising the crop's top edge past any of them throws away
+    evidence.
 
-    Prose above the figure fails the first test (it ends before the drawings
-    begin) and text in the neighbouring column of a two-column page fails
-    the second, so both still push the top edge down as they should.
+    Prose above the figure is normally too far away or too wide for the compact
+    above-drawing exception, and text in the neighbouring column of a
+    two-column page fails horizontal containment, so both still push the top
+    edge down as they should.
     """
     if span is None:
         return False
+    contained = (rect.x0 >= span.x0 - INNER_SLOP_LEFT
+                 and rect.x1 <= span.x1 + INNER_SLOP_RIGHT)
+    if not contained:
+        return False
     if rect.y1 <= span.y0:
-        return False                      # entirely above the figure — prose
-    return (rect.x0 >= span.x0 - INNER_SLOP_LEFT
-            and rect.x1 <= span.x1 + INNER_SLOP_RIGHT)
+        gap = span.y0 - rect.y1
+        return (gap <= ABOVE_FIGURE_TEXT_GAP
+                and rect.width <= span.width * ABOVE_FIGURE_TEXT_MAX_SHARE)
+    return True
 
 
 def _side_figure_text_rects(page, region, captions, left=None, right=None):
@@ -2757,6 +2768,23 @@ def run_self_test():
           ["4", "5"])
     doc.close()
 
+    # Two genuinely distinct caption styles can normalize to one filename.
+    # PyMuPDF often merges nearby captions into a single text block; dropping
+    # the second normalized label here bypassed batch_extract's collision
+    # report and made one source exhibit disappear without any diagnostic.
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 300), "Supplementary Figure 1. First caption.",
+                     fontsize=8)
+    page.insert_text((72, 312), "Extended Data Figure 1. Second caption.",
+                     fontsize=8)
+    found = find_caption_blocks(page)
+    check("same normalized label twice in one block remains visible",
+          [(f[0], f[1]) for f in found],
+          [("S1", "Supplementary Figure 1"),
+           ("S1", "Extended Data Figure 1")])
+    doc.close()
+
     # A real caption can mention an earlier figure in its narrative. When the
     # reference wraps after "shown in", CAP_RE sees a second line-start
     # caption shape inside the same text block. It is still prose belonging to
@@ -3754,6 +3782,12 @@ def run_self_test():
           text_block_inside_figure(fitz.Rect(100, 100, 500, 180), span), False)
     check("text_block_inside_figure: a bar value label",
           text_block_inside_figure(fitz.Rect(150, 250, 300, 260), span), True)
+    check("text_block_inside_figure: a value label just above the tallest bar",
+          text_block_inside_figure(fitz.Rect(220, 180, 250, 190), span), True)
+    check("text_block_inside_figure: prose-width text above the figure",
+          text_block_inside_figure(fitz.Rect(120, 180, 480, 190), span), False)
+    check("text_block_inside_figure: a compact block too far above the figure",
+          text_block_inside_figure(fitz.Rect(220, 150, 250, 170), span), False)
     check("text_block_inside_figure: the next column over",
           text_block_inside_figure(fitz.Rect(520, 250, 600, 260), span), False)
     check("text_block_inside_figure: no drawings to judge against",
@@ -3800,6 +3834,36 @@ def run_self_test():
        all(g[3].y1 <= g[4].y0 for g in got))
     check("detect_figures on one page only",
           [g[1] for g in detect_figures(doc, [1])], ["S2"])
+    doc.close()
+
+    # A value printed above the tallest bar has no vertical overlap with any
+    # vector content. It used to be classified as preceding prose, making its
+    # own bottom edge the crop boundary and silently cutting the value out.
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((130, 150),
+                     "A paragraph above the chart stays outside the crop.",
+                     fontsize=10)
+    page.draw_line(fitz.Point(130, 580), fitz.Point(500, 580))
+    page.draw_line(fitz.Point(130, 220), fitz.Point(130, 580))
+    page.draw_rect(fitz.Rect(190, 436, 290, 580), fill=(0.2, 0.5, 0.8))
+    page.draw_rect(fitz.Rect(350, 220, 450, 580), fill=(0.8, 0.2, 0.2))
+    page.insert_text((225, 430), "12", fontsize=12)
+    page.insert_text((385, 214), "30", fontsize=12)
+    page.insert_text((72, 644),
+                     "Figure 1. Values above two bars.", fontsize=10)
+    texts = {text: rect for rect, text in collect_text_rects(page)}
+    got = list(detect_figures(doc))
+    ok("a chart with an above-bar value is detected", bool(got))
+    if got:
+        crop = got[0][3]
+        value = texts["30"]
+        prose = texts["A paragraph above the chart stays outside the crop."]
+        ok("the crop contains the full above-bar value label",
+           crop.y0 <= value.y0 and crop.x0 <= value.x0
+           and crop.x1 >= value.x1)
+        ok("the crop still excludes preceding prose", crop.y0 > prose.y1)
+        check("the corrected chart crop is not flagged", got[0][5], "")
     doc.close()
 
     # --- references and coverage -------------------------------------------

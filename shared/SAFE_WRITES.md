@@ -120,7 +120,9 @@ else:
 ```
 
 Here `stage_parent` is outside the resolved public output directory and
-`stage_dir` is its unique private child. `published` is the exact public
+`stage_dir` is a fresh unique private child for this one operation. Never reuse
+it for another replacement or removal, including rollback: the helper keeps
+observation/recovery entries there even after success. `published` is the exact public
 snapshot returned after readback. Keep `stage_dir` and report its path on **any**
 exception, including `LinkUnavailable`; clean it only after success. For an
 authorized old-path cleanup, pass the original token and the same callback to
@@ -144,7 +146,9 @@ that no move occurred.
 ## Multi-file operations
 
 Per-file guards prevent data loss; they do not make a group of writes a single
-transaction. Record every completed publication and roll it back only while
+transaction. Give each replacement/removal its own fresh `stage_dir`; a shared
+`stage_parent` is fine. Use another fresh child for each rollback operation,
+preserving any failed stage for recovery. Record every completed publication and roll it back only while
 its published snapshot remains unchanged. If a rollback encounters a newer
 edit, retain it, name the mixed state, and stop. For a hierarchy closure or
 another derived group, re-read the current files and re-derive the complete

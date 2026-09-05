@@ -300,6 +300,24 @@ def _inside_existing_directory(path, directory, *, require_all=False):
     return all(results) if require_all else any(results)
 
 
+def _at_or_inside_existing_directory(path, directory):
+    """Whether ``path`` is ``directory`` itself or physically beneath it.
+
+    ``_inside_existing_directory`` starts at a path's parent because most
+    callers pass a prospective file.  Scratch-directory gates also have to
+    reject the vault root itself, including a symlink alias of that root.
+    """
+    if _inside_existing_directory(path, directory):
+        return True
+    try:
+        return os.path.samefile(path, directory)
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise ValueError("cannot establish whether %r is the directory %r: %s" %
+                         (path, directory, exc)) from exc
+
+
 def _figure_stem_end(attachments, filename, slug, tail_pattern):
     """End offset of ``slug`` in a matching figure basename, or None.
 
@@ -1017,6 +1035,11 @@ def _stable_regular_snapshot(path, copy_to=None, copy_mode=None):
     return snapshot
 
 
+def _frontmatter_fence(line):
+    """True for a column-zero YAML fence, allowing only trailing whitespace."""
+    return line.rstrip("\r\n").rstrip(" \t") == "---"
+
+
 def _body_after_frontmatter(text):
     """Return the body behind a closed leading YAML block, or ``None``.
 
@@ -1030,10 +1053,10 @@ def _body_after_frontmatter(text):
         if line.strip():
             opening = index
             break
-    if opening is None or lines[opening].strip() != "---":
+    if opening is None or not _frontmatter_fence(lines[opening]):
         return None
     for index in range(opening + 1, len(lines)):
-        if lines[index].strip() == "---":
+        if _frontmatter_fence(lines[index]):
             return "".join(lines[index + 1:])
     return None
 
@@ -1042,11 +1065,11 @@ def _has_current_sources_key(text):
     """Whether the closed leading YAML block has one top-level ``sources``."""
     lines = text.splitlines()
     opening = next((index for index, line in enumerate(lines) if line.strip()), None)
-    if opening is None or lines[opening].strip() != "---":
+    if opening is None or not _frontmatter_fence(lines[opening]):
         return False
     count = 0
     for line in lines[opening + 1:]:
-        if line.strip() == "---":
+        if _frontmatter_fence(line):
             return count == 1
         if re.match(r"\Asources\s*:", line, re.IGNORECASE):
             count += 1
@@ -1980,10 +2003,21 @@ def _vetted_target(url, allow_private=False):
         raise ValueError("URL has no host: %s" % _report_url(url))
     if parts.username is not None or parts.password is not None:
         raise ValueError("credentials in HTTP(S) URLs are not supported")
+    authority = parts.netloc.rsplit("@", 1)[-1]
+    if authority.startswith("["):
+        explicit_port = authority.partition("]")[2].startswith(":")
+    else:
+        explicit_port = ":" in authority
+    if explicit_port and authority.endswith(":"):
+        raise ValueError("invalid empty port in URL")
     try:
-        port = parts.port or (443 if scheme == "https" else 80)
+        parsed_port = parts.port
     except ValueError as exc:
         raise ValueError(f"invalid port in URL: {exc}") from exc
+    if parsed_port == 0:
+        raise ValueError("invalid zero port in URL")
+    port = (parsed_port if parsed_port is not None
+            else (443 if scheme == "https" else 80))
 
     logical_host = parts.hostname
     try:
@@ -2034,13 +2068,6 @@ def _vetted_target(url, allow_private=False):
             seen.add(key)
 
     host_literal = f"[{host}]" if ":" in host else host
-    authority = parts.netloc.rsplit("@", 1)[-1]
-    if authority.startswith("["):
-        explicit_port = authority.partition("]")[2].startswith(":")
-    else:
-        explicit_port = ":" in authority
-    if explicit_port and authority.endswith(":"):
-        raise ValueError("invalid empty port in URL")
     host_header = (f"{host_literal}:{port}" if explicit_port else host_literal)
     return _VettedTarget(url, scheme, host, port, addresses,
                          _request_path(parts, url), host_header)
@@ -2611,7 +2638,7 @@ def fetch_source(url, out=None, timeout=45, max_bytes=DEFAULT_MAX_BYTES,
                                  "scratch path can be proved outside it")
             if not os.path.isdir(vault):
                 raise ValueError("--vault is not a directory: %r" % vault)
-            if _inside_existing_directory(out, vault):
+            if _at_or_inside_existing_directory(out, vault):
                 raise ValueError("--out must be outside --vault; Lottie source "
                                  "bytes are scratch material, not vault content")
         if out is not None and os.path.lexists(out) and not overwrite:
@@ -4093,6 +4120,15 @@ continues here`
                                   check_url, "http:///a.png"), True)
         check("check_url allows a data: URI",
               check_url("data:image/png;base64,AAAA"), None)
+        with patch.object(socket, "getaddrinfo") as port_dns:
+            raises("check_url refuses an empty port before resolving",
+                   check_url, "https://example.com:/a.png")
+            raises("check_url refuses port zero before resolving",
+                   check_url, "https://example.com:0/a.png")
+            raises("check_url refuses an empty bracketed-IPv6 port before resolving",
+                   check_url, "https://[2001:4860:4860::8888]:/a.png")
+        check("invalid empty and zero ports do not consult the host resolver",
+              port_dns.call_count, 0)
         check("the proxy policy is explicit and does not weaken address pinning",
               PROXY_POLICY, "direct-only")
         # Loopback, link-local and private space, in the spellings that are
@@ -4578,6 +4614,21 @@ continues here`
         check("embed-shaped text in code or comments cannot claim an attachment",
               (inert["ok"], "not an exact rendered" in (inert["error"] or "")),
               (False, True))
+        scalar_owner = os.path.join(articles, "Teslo_Cancer_2026.md")
+        with open(scalar_owner, "w", encoding="utf-8") as fh:
+            fh.write("---\nsources:\n  - https://example.com/current\n"
+                     "review_notes: |\n  ---\n"
+                     "  ![[Teslo_Cancer_2026_fig_1.png]]\n---\n"
+                     "Actual body without an image embed.\n")
+        scalar_claim = download_one(
+            data_url, att, "Teslo_Cancer_2026", 1,
+            overwrite=True, owner_note=scalar_owner)
+        check("an embed in a YAML block scalar cannot claim an attachment",
+              (scalar_claim["ok"], "not an exact rendered" in
+               (scalar_claim["error"] or ""),
+               open(os.path.join(
+                   att, "Teslo_Cancer_2026_fig_1.png"), "rb").read()),
+              (False, True, _PNG))
         wrong_source_owner = clipping_note(
             "Teslo_Cancer_2026", ("Teslo_Cancer_2026_fig_1.png",),
             source="[[Sources/PDFs/Teslo_Cancer_2026.pdf]]")
@@ -6134,6 +6185,20 @@ continues here`
                    stage_out, "Example_Image_2026_fig_1.png")),
                _inside_existing_directory(stage_out, stage_vault)),
               (0, "stage", True, False))
+        equal_vault = os.path.join(tmp, "empty-stage-vault")
+        os.mkdir(equal_vault)
+        equal_stdout = io.StringIO()
+        with patch.object(sys, "stdout", equal_stdout):
+            equal_code = main([
+                "stage", "--vault", equal_vault, "--out-dir", equal_vault,
+                "--slug", "Example_Image_2026",
+                "data:image/png;base64," +
+                base64.b64encode(_PNG).decode("ascii"),
+            ])
+        equal_report = json.loads(equal_stdout.getvalue())
+        check("stage refuses the vault root itself as an outside scratch directory",
+              (equal_code, "outside --vault" in equal_report.get("error", ""),
+               os.listdir(equal_vault)), (1, True, []))
     finally:
         tempfile.tempdir = previous_tempdir
         shutil.rmtree(tmp, ignore_errors=True)
@@ -6352,7 +6417,7 @@ def main(argv=None):
                                  ensure_ascii=False))
                 return 1
             try:
-                if _inside_existing_directory(attachments, args.vault):
+                if _at_or_inside_existing_directory(attachments, args.vault):
                     raise ValueError("--out-dir must be outside --vault")
                 if os.path.lexists(attachments) and (
                         not os.path.isdir(attachments)

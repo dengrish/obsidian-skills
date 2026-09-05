@@ -139,6 +139,12 @@ _SOURCES_KEY_RE = re.compile(r"\Asources\s*:\s*(.*)\Z", re.I)
 _SOURCES_ITEM_RE = re.compile(r"\A[ \t]*-[ \t]+(.*)\Z")
 _SOURCE_RE = re.compile(r"\Asource\s*:\s*(.*)\Z", re.I)
 
+
+def _frontmatter_fence(line):
+    """True for a column-zero YAML fence with optional trailing whitespace."""
+    return line.rstrip(" \t") == "---"
+
+
 def _yaml_scalar(raw):
     """Decode source scalars using the same rules as clipping dedup."""
     return parse_scalar(raw)[0]
@@ -336,12 +342,12 @@ def note_source(path):
                 break
         else:
             return None
-        if first.strip() != "---":
+        if not _frontmatter_fence(first):
             return None
         found = {}
         pending = False
         for raw in lines:
-            if raw.strip() == "---":
+            if _frontmatter_fence(raw):
                 return found.get("sources", found.get("source")) or None
             if not raw.strip() or raw.lstrip().startswith("#"):
                 continue
@@ -397,9 +403,9 @@ def body_is_embed_only(path):
     while lines and not lines[0].strip():
         lines.pop(0)
     body_lines = lines
-    if lines and lines[0].strip() == "---":
+    if lines and _frontmatter_fence(lines[0]):
         for i in range(1, len(lines)):
-            if lines[i].strip() == "---":
+            if _frontmatter_fence(lines[i]):
                 body_lines = lines[i + 1:]
                 break
         else:
@@ -1039,6 +1045,14 @@ def run_self_test():
          "[[Doe_Foo_2025.pdf]]"),
         ('---\nsources:\n\n  - "[[Doe_Foo_2025.pdf]]"\n---\n',
          "[[Doe_Foo_2025.pdf]]"),
+        # An indented `---` is scalar content, not a document boundary. A
+        # whitespace-stripped fence check ended metadata here and missed the
+        # source field that follows the block scalar.
+        ('---\nabstract: |\n  First paragraph.\n  ---\n  Second paragraph.\n'
+         'sources:\n  - "[[Doe_Foo_2025.pdf]]"\n---\n',
+         "[[Doe_Foo_2025.pdf]]"),
+        ('--- \t\nsources:\n  - "[[Doe_Foo_2025.pdf]]"\n---  \n',
+         "[[Doe_Foo_2025.pdf]]"),
         # an INDENTED `sources:` belongs to another key and is not ours.
         ('---\ncitation:\n  sources:\n    - "[[Other_2020.pdf]]"\n---\n',
          None),
@@ -1105,6 +1119,15 @@ def run_self_test():
         bad += 1
         print("FAIL a `---` inside a frontmatter value defeated the "
               "legacy-embed probe")
+    n += 1
+    if not body_is_embed_only(_note(
+            "block-scalar-rule.md",
+            '---\nabstract: |\n  Before.\n  ---\n  After.\n'
+            'source: "[[Doe_Foo_2025.pdf]]"\n---\n'
+            '![[Doe_Foo_2025.pdf]]\n')):
+        bad += 1
+        print("FAIL an indented block-scalar rule shifted the legacy-embed "
+              "body window")
 
     _img = os.path.join(_d, "images")
     os.makedirs(_img)

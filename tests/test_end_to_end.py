@@ -169,7 +169,8 @@ class WorkflowTests(unittest.TestCase):
 
     def test_paper_note_lint_applies_the_selected_nonempirical_mode(self):
         note = self.notes / "Doe_Correction_2025.md"
-        note.write_text(notice_note("Doe_Correction_2025"), encoding="utf-8")
+        note.write_text(notice_note("Doe_Correction_2025"),
+                        encoding="utf-8", newline="\n")
         missing_mode = self.run_script(
             "skills/paper-summarizer/scripts/note_lint.py", note, expected=2)
         self.assertIn("--mode is required", missing_mode.stderr)
@@ -200,7 +201,7 @@ class WorkflowTests(unittest.TestCase):
                         "--mark-reviewed", "Doe_Study_2025:1")
 
         note = self.notes / "Doe_Study_2025.md"
-        note.write_text(summary_note(pdf.stem), encoding="utf-8")
+        note.write_text(summary_note(pdf.stem), encoding="utf-8", newline="\n")
         self.run_script("skills/paper-summarizer/scripts/note_lint.py", note,
                         "--mode", "empirical", "--images", self.images)
         self.assertEqual(self.scan_papers()["counts"]["done"], 1)
@@ -238,7 +239,7 @@ class WorkflowTests(unittest.TestCase):
             notice_note(source.stem).replace(
                 "published: 2025-01-01",
                 "published: 2025-03-14 # date printed by the document"),
-            encoding="utf-8")
+            encoding="utf-8", newline="\n")
         citing_note = self.vault / "Wiki/context.md"
         citing_note.write_text(
             "---\npublished: 1999-12-31\n---\n"
@@ -381,7 +382,7 @@ class WorkflowTests(unittest.TestCase):
         body = summary_note(source.stem).replace(
             'sources:\n  - "[[Doe_Study_2025.pdf]]"',
             'sources: # recorded origin\n- "[[\\x44oe_Study_2025.pdf]]" # verified')
-        note.write_text(body, encoding="utf-8")
+        note.write_text(body, encoding="utf-8", newline="\n")
         self.assertEqual(self.scan_papers()["counts"]["done"], 1)
         self.run_script("skills/paper-summarizer/scripts/note_lint.py", note,
                         "--mode", "empirical", "--images", self.images)

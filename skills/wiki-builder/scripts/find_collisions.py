@@ -69,7 +69,9 @@ import os
 import unicodedata
 import sys
 
-_OBSIDIAN_SHARED_MODULES = ('plurals', 'slugify', 'yaml_scalars')
+_OBSIDIAN_SHARED_MODULES = (
+    'entry_structure', 'markdown_tables', 'plurals', 'slugify', 'yaml_scalars',
+)
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys

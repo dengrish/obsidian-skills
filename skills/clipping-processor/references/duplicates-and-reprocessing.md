@@ -55,17 +55,23 @@ ownership from duplicate keys, an empty current list or malformed YAML. Report
 unindexable notes and existing URL collisions. A valid first PDF wikilink is a
 PDF reading note, not an unindexable clipping. Decode the complete note strictly
 as UTF-8 (accepting a leading BOM) before trusting its frontmatter; invalid bytes
-anywhere make the note unindexable rather than an owner.
+anywhere make the note unindexable rather than an owner. A Markdown-named
+symlink or other non-regular `Articles/` entry occupies the output namespace but
+cannot establish URL ownership through its target; report it as unindexable.
 
 Normalize URLs for comparison only; retain the original URL in the note:
 
+- Reject origins with a missing host or an invalid, empty or zero port; they do
+  not establish a dedup key.
 - Lowercase scheme and host, drop a leading `www.`, and strip trailing path
   slashes. Do not rewrite other host/path variants such as `m.` or `/amp`.
 - Drop ordinary fragments, but keep routing fragments (`#/posts/1`, `#!/posts/1`).
 - Strip only conventional tracking parameters: `utm_*`, `fbclid`, `gclid`,
   `mc_cid` and `mc_eid`; strip `r` and `showWelcome` only on `substack.com`
-  and its subdomains. Preserve `ref`, `referrer`, `share`, generic-domain `r`
-  and `showWelcome`, and unknown parameters, which can identify different pages.
+  and its subdomains, and strip the share parameters `s` and `t` only on
+  `x.com`, `twitter.com` and `mobile.twitter.com` (with or without `www.`).
+  Preserve `ref`, `referrer`, `share`, generic-domain `r`, `showWelcome`, `s`
+  and `t`, and unknown parameters, which can identify different pages.
 - Preserve the order and original spelling of surviving query fields. Origins
   may distinguish `+` from `%20`, a bare flag from `flag=`, or signed query
   bytes, as well as interpret repeated keys in order. Parsing/re-encoding or

@@ -198,10 +198,10 @@ from figure_state import (MANIFEST_FILE, REVIEW_FILE, write_manifest,
                           write_review, figure_identity, manifest_key,
                           check_manifest_writable, parse_reviewed, read_sidecar,
                           read_manifest_snapshot)  # noqa: E402
-from vault_artifacts import (find_vault_pdfs, inventory_pdfs,
-                             inventory_source_figures,
+from vault_artifacts import (inventory_pdfs, inventory_source_figures,
                              output_vault_root,
-                             source_stem_groups)  # noqa: E402
+                             source_stem_groups,
+                             verify_selected_pdf)  # noqa: E402
 
 #: Default filename for the review ledger, written inside `--out`. A dotfile:
 #: Obsidian hides it, and it can never be mistaken for a figure, because
@@ -1413,7 +1413,7 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
     total_caption_in = sum(len(r.get("caption_in", ())) for r in per_pdf.values())
     total_cross_chapter = sum(
         len(r.get("cross_chapter", ())) for r in per_pdf.values())
-    n_partial = sum(1 for r in per_pdf.values() if r["missing"] and r["figures"])
+    n_partial = sum(1 for r in per_pdf.values() if r["missing"])
     skipped_books = skipped_books or {}
     n_pdfs = len(per_pdf)
     n_zero = sum(
@@ -1597,7 +1597,7 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
         print("Nothing downstream can see this: the figure glob and the unused-figure")
         print("diagnostic both walk the files that exist, so 3-of-4 looks like 4-of-4.")
         for pdf_path, r in per_pdf.items():
-            if r["missing"] and r["figures"]:
+            if r["missing"]:
                 got = len(set(r["figures"]))
                 print(f"  {pdf_path.name}  {got} caption(s) found, "
                       f"{r['referenced']} cited; no caption for: "
@@ -2357,6 +2357,27 @@ def run_self_test():
                dropped_reason["caption_in"], dropped_reason["extracted"]),
               (1, [], [], 1))
 
+        # Exercise the real detector boundary too: nearby captions are often
+        # one PyMuPDF text block. Both must reach this collision report even
+        # though their default supplementary prefixes normalize to one slot.
+        merged_collision_pdf = os.path.join(
+            tmp, "Doe_MergedCollision_2025.pdf")
+        mdoc = fitz.open()
+        mpage = mdoc.new_page(width=612, height=792)
+        mpage.draw_rect(fitz.Rect(80, 100, 280, 250), fill=(0.2, 0.3, 0.4))
+        mpage.draw_rect(fitz.Rect(320, 100, 520, 250), fill=(0.5, 0.6, 0.7))
+        mpage.insert_textbox(
+            fitz.Rect(80, 280, 520, 340),
+            "Supplementary Figure 1. First diagram.\n"
+            "Extended Data Figure 1. Second diagram.", fontsize=10)
+        mdoc.save(merged_collision_pdf)
+        mdoc.close()
+        merged_collision = process_pdf(
+            Path(merged_collision_pdf), out, dpi=72, dry_run=True)
+        check("merged normalized captions reach the batch collision report",
+              merged_collision["collisions"],
+              [("Supplementary Figure 1", "Extended Data Figure 1")])
+
         occupied_reason_pdf = _st_fig_pdf(
             os.path.join(tmp, "Doe_OccupiedReason_2025.pdf"))
         occupied_reason_out = os.path.join(tmp, "occupied-reason")
@@ -2406,6 +2427,18 @@ def run_self_test():
         check("a cited figure with no caption is reported missing",
               part["missing"], ["2"])
         ok("...and the citation count is kept", part["referenced"] >= 2)
+
+        reference_only_pdf = os.path.join(tmp, "Doe_ReferenceOnly_2025.pdf")
+        rodoc = fitz.open()
+        ropage = rodoc.new_page(width=612, height=792)
+        ropage.insert_text((100, 300),
+                           "Figure 9 shows the omitted result.", fontsize=9)
+        rodoc.save(reference_only_pdf)
+        rodoc.close()
+        reference_only = process_pdf(Path(reference_only_pdf), out, dpi=72)
+        check("a reference-only PDF can be PARTIAL with zero captions",
+              (reference_only["figures"], reference_only["missing"]),
+              ([], ["9"]))
 
         # A split chapter commonly cites a figure from an earlier chapter. It
         # is not a missed local caption only when the local namespace agrees
@@ -3069,6 +3102,11 @@ def run_self_test():
         ok("the summary reports PARTIAL detection", "PARTIAL" in text)
         ok("...naming page-margin clipping as a cause, since the caption "
            "regex is only one of three", "page-margin" in text)
+        text = summary({Path(reference_only_pdf): reference_only})
+        ok("the summary counts a zero-caption PARTIAL PDF",
+           "PDFs with PARTIAL detection:      1" in text)
+        ok("the zero-caption PARTIAL detail names its missing figure",
+           "0 caption(s) found" in text and "Fig 9" in text)
         # The three new outcomes each get their own line and their own
         # remediation: a blank crop, a caption inside a crop, and an output
         # name held by another skill's file are three different instructions.
@@ -3262,6 +3300,18 @@ def run_self_test():
         ok("--include-split-books extracts the book too",
            os.path.exists(os.path.join(run_out, "Prince_UDL_2026_fig_1.png")))
 
+        # A caption collision drops a detected figure from the requested
+        # output set. The summary has always named it, but returning success
+        # let wrappers treat that visibly incomplete extraction as complete.
+        code, so, se = run([
+            "--src", merged_collision_pdf, "--out", run_out,
+            "--dpi", "72", "--dry-run",
+        ])
+        check("a run that drops a caption collision exits non-zero", code, 1)
+        ok("the failed collision run names the dropped caption",
+           "later caption dropped" in so
+           and "Extended Data Figure 1" in so)
+
         # An unorganized filename is refused, and the run says so in its exit
         # code as well as its output: a batch that extracted nothing must not
         # report success to whatever called it.
@@ -3448,6 +3498,15 @@ def run_self_test():
            code == 1 and "contains no PDFs" in se)
         ok("the impossible empty-scope mark leaves no output or ledger",
            not empty_mark_out.exists())
+        empty_adopt_out = Path(tmp) / "empty-adopt-output"
+        code, so, se = run([
+            "--src", str(empty_src), "--out", str(empty_adopt_out),
+            "--adopt-legacy", "Doe_Missing_2025:1",
+        ])
+        ok("an empty source cannot silently ignore a requested adoption",
+           code == 1 and "--adopt-legacy" in se and "contains no PDFs" in se)
+        ok("the impossible empty-scope adoption leaves no output or sidecar",
+           not empty_adopt_out.exists())
 
         non_pdf_src = Path(tmp) / "not-a-pdf.txt"
         non_pdf_src.write_text("not a source document", encoding="utf-8")
@@ -3562,6 +3621,94 @@ def run_self_test():
         check("the external run publishes the selected PDF's figure",
               sorted(path.name for path in external_out.glob("*.png")),
               ["Doe_VaultWide_2025_fig_1.png"])
+
+        # Canonical output may read a decrypted/readable scratch copy outside
+        # the vault, but only when its exact basename has one durable vault
+        # owner. Different-basename links and ownerless external PDFs would
+        # otherwise mint figures with no source identity inside the vault.
+        scratch_vault = Path(tmp) / "scratch-copy-vault"
+        scratch_pdf_dir = scratch_vault / "Sources" / "PDFs"
+        scratch_images = scratch_vault / "Sources" / "Images"
+        scratch_pdf_dir.mkdir(parents=True)
+        vault_source = _st_fig_pdf(
+            scratch_pdf_dir / "Doe_Scratch_2025.pdf", fill=(1, 0, 0))
+        scratch_dir = Path(tmp) / "readable-scratch"
+        scratch_dir.mkdir()
+        scratch_copy = scratch_dir / vault_source.name
+        shutil.copyfile(vault_source, scratch_copy)
+        code, so, se = run([
+            "--src", str(scratch_copy), "--out", str(scratch_images),
+            "--dpi", "72", "--dry-run",
+        ])
+        check("an external scratch copy with the sole vault basename is allowed",
+              code, 0)
+        ok("the allowed scratch-copy dry run writes nothing",
+           not scratch_images.exists())
+
+        link_vault = Path(tmp) / "different-link-vault"
+        link_pdf_dir = link_vault / "Sources" / "PDFs"
+        link_images = link_vault / "Sources" / "Images"
+        link_pdf_dir.mkdir(parents=True)
+        link_target = _st_fig_pdf(
+            link_pdf_dir / "Doe_Original_2025.pdf", fill=(0, 1, 0))
+        link_dir = Path(tmp) / "external-link"
+        link_dir.mkdir()
+        selected_link = link_dir / "Doe_Copy_2025.pdf"
+        try:
+            selected_link.symlink_to(link_target)
+            have_selected_link = True
+        except (OSError, NotImplementedError):
+            have_selected_link = False
+        if have_selected_link:
+            code, so, se = run([
+                "--src", str(selected_link), "--out", str(link_images),
+                "--dpi", "72", "--dry-run",
+            ])
+            ok("a differently named external link is cleanly refused",
+               code == 1 and "no vault PDF owns" in so
+               and "unhandled" not in str(code))
+            ok("the refused external link writes no image namespace",
+               not link_images.exists())
+        else:
+            ok("different-basename external-link regression skipped where unavailable",
+               True)
+            ok("different-basename external-link no-write regression skipped where unavailable",
+               True)
+
+        # APFS cannot materialize distinct NFC/NFD directory entries. Inject
+        # the inventory a Linux vault can hold, then drive the public main()
+        # path: both logical owners must survive grouping and block the crop.
+        from vault_artifacts import PDFEntry, PDFInventory
+        unicode_vault = Path(tmp) / "unicode-owner-vault"
+        unicode_pdf_dir = unicode_vault / "Sources" / "PDFs"
+        unicode_images = unicode_vault / "Sources" / "Images"
+        unicode_pdf_dir.mkdir(parents=True)
+        nfd_source = _st_fig_pdf(
+            unicode_pdf_dir / "Cafe\u0301_Study_2025.pdf", fill=(0, 0, 1))
+        nfc_name = "Caf\u00e9_Study_2025.pdf"
+        nfd_name = "Cafe\u0301_Study_2025.pdf"
+        simulated = PDFInventory(
+            str(unicode_vault),
+            [PDFEntry(str(unicode_pdf_dir / nfc_name), "regular"),
+             PDFEntry(str(unicode_pdf_dir / nfd_name), "regular")],
+            [], True)
+        real_inventory_pdfs = inventory_pdfs
+
+        def unicode_inventory(root):
+            if os.path.abspath(os.fspath(root)) == os.path.abspath(unicode_vault):
+                return simulated
+            return real_inventory_pdfs(root)
+
+        with mock.patch.dict(globals(), inventory_pdfs=unicode_inventory):
+            code, so, se = run([
+                "--src", str(nfd_source), "--out", str(unicode_images),
+                "--dpi", "72", "--dry-run", "--allow-unorganized",
+            ])
+        ok("the public batch gate preserves distinct NFC/NFD vault owners",
+           code == 1 and "2 vault PDF pathnames" in so
+           and nfc_name in so and nfd_name in so)
+        ok("the Unicode ownership refusal writes no image namespace",
+           not unicode_images.exists())
 
         for kind in ("read-only", "symlink"):
             protected = Path(tmp) / ("protected-" + kind)
@@ -3819,10 +3966,15 @@ def main(argv=None):
         return 1
     pdfs = find_pdfs(src_dir)
     if not pdfs:
+        pending = []
         if args.mark_reviewed:
-            print("REFUSED: --mark-reviewed cannot be applied because this "
-                  "--src scope contains no PDFs; no review record was written",
-                  file=sys.stderr)
+            pending.append("--mark-reviewed")
+        if args.adopt_legacy:
+            pending.append("--adopt-legacy")
+        if pending:
+            print("REFUSED: %s cannot be applied because this --src scope "
+                  "contains no PDFs; no sidecar or figure was written" %
+                  " and ".join(pending), file=sys.stderr)
             return 1
         print(f"No PDFs found under {src_dir}")
         return 0
@@ -3832,17 +3984,51 @@ def main(argv=None):
     # pathname in the selected vault, not merely against its one-item --src
     # scope. Arbitrary output folders deliberately keep one-off behavior.
     vault_root = output_vault_root(out_dir)
-    try:
-        vault_pdfs = find_vault_pdfs(vault_root) if vault_root is not None else []
-    except (OSError, ValueError) as exc:
-        print("REFUSED: could not inventory PDF basenames across the inferred "
-              "vault %s: %s. No sidecar or figure was written." %
-              (vault_root, exc), file=sys.stderr)
-        return 1
-    by_source_stem = source_stem_groups(pdfs, vault_pdfs)
+    vault_inventory = None
+    if vault_root is not None:
+        try:
+            vault_inventory = inventory_pdfs(vault_root)
+        except (OSError, ValueError) as exc:
+            print("REFUSED: could not inventory PDF basenames across the inferred "
+                  "vault %s: %s. No sidecar or figure was written." %
+                  (vault_root, exc), file=sys.stderr)
+            return 1
+        if not vault_inventory.complete:
+            errors = [item for item in vault_inventory.findings
+                      if item.severity == "error"]
+            detail = "; ".join("%s: %s" % (item.path, item.message)
+                               for item in errors[:3])
+            if len(errors) > 3:
+                detail += "; and %d more" % (len(errors) - 3)
+            print("REFUSED: could not inventory PDF basenames across the inferred "
+                  "vault %s: %s. No sidecar or figure was written." %
+                  (vault_root, detail or "inventory did not complete"),
+                  file=sys.stderr)
+            return 1
+        vault_pdfs = vault_inventory.paths
+    else:
+        vault_pdfs = []
+
+    # The selected processing scope and the vault's durable source namespace
+    # answer different questions. Two selected paths with one portable stem
+    # are ambiguous inputs. A single external scratch copy, however, is valid
+    # for canonical output when exactly one vault PDF owns the same basename;
+    # counting that scratch inode as a second vault owner would defeat the
+    # documented encrypted/decrypted-copy workflow.
+    by_source_stem = source_stem_groups(pdfs, ())
     selected_collision_keys = {
         figure_identity(source.stem) for source in pdfs
         if len(by_source_stem[figure_identity(source.stem)]) > 1
+    }
+    selection_refusals = {}
+    if vault_inventory is not None:
+        for source in pdfs:
+            decision = verify_selected_pdf(
+                vault_root, source, inventory=vault_inventory)
+            if not decision.unique:
+                selection_refusals[source] = decision
+    refused_keys = selected_collision_keys | {
+        figure_identity(source.stem) for source in selection_refusals
     }
 
     # Validate ownership before writing a review mark, creating output, or
@@ -3866,7 +4052,7 @@ def main(argv=None):
     )
     adoptable_stems -= {
         source.stem for source in pdfs
-        if figure_identity(source.stem) in selected_collision_keys
+        if figure_identity(source.stem) in refused_keys
     }
     try:
         adoptions = adopt_legacy_files(
@@ -3888,7 +4074,7 @@ def main(argv=None):
                 allow_unorganized=args.allow_unorganized)
             allowed_review_stems -= {
                 source.stem for source in pdfs
-                if figure_identity(source.stem) in selected_collision_keys
+                if figure_identity(source.stem) in refused_keys
             }
             marked = mark_reviewed(review_file, args.mark_reviewed,
                                    dry_run=args.dry_run,
@@ -3952,6 +4138,20 @@ def main(argv=None):
         print()
         pdfs = [p for p in pdfs if figure_identity(p.stem) not in stem_collisions]
 
+    if selection_refusals:
+        print("REFUSED: canonical Sources/Images output requires one vault PDF "
+              "owner for each selected basename:")
+        for source, decision in sorted(
+                selection_refusals.items(), key=lambda item: str(item[0])):
+            detail = decision.reason
+            if decision.matches:
+                detail += ": " + ", ".join(decision.matches)
+            print("  %s: %s" % (source, detail))
+        print("  Give each source a unique PDF basename with pdf-organizer, "
+              "or keep an external scratch copy's exact vault basename, then re-run.")
+        print()
+        pdfs = [p for p in pdfs if p not in selection_refusals]
+
     if unorganized:
         print("REFUSED: %d PDF(s) whose filename pdf-organizer has not "
               "produced." % len(unorganized))
@@ -3974,7 +4174,7 @@ def main(argv=None):
     for book, chapters in sorted(skipped_books.items()):
         print(f"Skipping {book.name}: split into {len(chapters)} chapter PDF(s); "
               f"figures come from those (--include-split-books to override)")
-    if (unorganized or stem_collisions) and not pdfs:
+    if (unorganized or stem_collisions or selection_refusals) and not pdfs:
         if skipped_books:
             print()
         print("Nothing left to process.")
@@ -4125,18 +4325,21 @@ def main(argv=None):
     # reading `$?` (a shell `&&`, a wrapper, the model) took the report's word
     # for it without reading the report. Three outcomes are failures:
     # refusals, files that could not be opened at all, figures detected but not
-    # written, and crops whose ownership could not be persisted. A suspicious
-    # bbox is NOT one of them — it is advisory, the
+    # written (including a later caption dropped in a filename collision), and
+    # crops whose ownership could not be persisted. A suspicious bbox is NOT
+    # one of them — it is advisory, the
     # PNG is on disk, and `--mark-reviewed` is the answer to it.
     # A blank crop and an occupied output name join that list for the same
     # reason: in both, a figure was detected and is NOT in `--out` afterwards.
     # A caption inside a crop does not — the PNG is there, it is just wrong,
     # and it is reported the way every other suspicious bbox is.
-    failed = any(r["failures"] or r.get("ownership_failures")
+    failed = any(r["failures"] or r["collisions"]
+                 or r.get("ownership_failures")
                  or r["open_error"] or r["no_pages"]
                  or r["blank"] or r["occupied"]
                  for r in per_pdf.values())
-    return 1 if (unorganized or stem_collisions or failed or not manifest_saved) else 0
+    return 1 if (unorganized or stem_collisions or selection_refusals
+                 or failed or not manifest_saved) else 0
 
 
 if __name__ == "__main__":

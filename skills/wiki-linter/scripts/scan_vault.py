@@ -163,6 +163,8 @@ from entry_structure import (  # noqa: E402
     flashcard_line1_markup,
     flashcard_line1_faults,
     math_title_plain_text,
+    mask_body_comments,
+    mask_escaped_wikilinks,
     normalized_answer_surface,
     opening_paragraph,
     opener_subject_date_status,
@@ -1133,13 +1135,14 @@ def regions(body):
     offs, pos = [], 0
     for ln in lines:
         offs.append(pos); pos += len(ln) + 1
-    rel = lines[rel_i] if rel_i is not None else ""
+    visible_body = mask_body_comments(body)
+    rel = visible_body.split("\n")[rel_i].rstrip() if rel_i is not None else ""
     cut = len(body)
     if rel_i is not None: cut = offs[rel_i]
     fc = offs[flash_i] if flash_i is not None else -1
     if fc != -1 and fc < cut: cut = fc
     flash_head = lines[flash_i] if flash_i is not None else ""
-    return body[:cut], rel, (body[fc:] if fc != -1 else ""), fc, flash_head
+    return visible_body[:cut], rel, (body[fc:] if fc != -1 else ""), fc, flash_head
 
 # `importance` is a LEGACY key — removed from wiki-builder's schema, never written on a new entry,
 # but still present (populated) on every entry generated before the removal. Nothing strips it and
@@ -1246,6 +1249,7 @@ def strip_fenced(text):
     `[[link]]` inside the outer listing came back item10/dangling — whose
     Task-2 remedy edits the listing.
     """
+    text = mask_body_comments(text)
     out, fence = [], None            # fence = the opening run, e.g. "````"
     for ln in (text or "").split("\n"):
         m = _FENCE_RE.match(ln)
@@ -1356,8 +1360,7 @@ def strip_code(text):
     about backticks, and the entry that used the other spelling gets the
     destructive finding.
     """
-    return _INLINE_CODE.sub(lambda m: " " * len(m.group(0)),
-                            strip_indented(strip_fenced(text)))
+    return mask_escaped_wikilinks(mask_body_comments(text, mask_code=True))
 
 
 def plural_surface(title):
@@ -2704,7 +2707,7 @@ def scan(wiki, images=None):
             # Both fence spellings: markdown opens a block with ``` or ~~~, and
             # `strip_fenced` above has always known that, so a `~~~` listing sat
             # in a Concept entry unreported by the one check that exists to find it.
-            if re.search(r"(?m)^\s*(?:`{3}|~{3,})", e["body"]):
+            if re.search(r"(?m)^\s*(?:`{3}|~{3,})", mask_body_comments(e["body"])):
                 problems.append((sl,"item6","fenced code block — mechanically allowed only after genuine Software classification; reclassification does not waive Software's artifact-wide relevance gate"))
             # API-identifier cap — ZERO backticked identifiers in a non-Software entry.
             # (Rule change 2026-08-16: the one-name-only-signpost allowance is retired;
@@ -3374,6 +3377,7 @@ def scan(wiki, images=None):
         # that marker disappears from every body/link scan and can conceal a
         # self-link or any other violation indefinitely.
         if not is_stub:
+            _visible_body_lines = mask_body_comments(e["body"]).split("\n")
             _related_indexes = e.get("related_indexes", [])
             _flash_indexes = e.get("flashcard_indexes", [])
             if not _related_indexes:
@@ -3388,7 +3392,7 @@ def scan(wiki, images=None):
                     "footer lines — consolidate them into exactly one terminal line"))
             else:
                 _related_i = _related_indexes[0]
-                _related_line = e["body_lines"][_related_i]
+                _related_line = _visible_body_lines[_related_i].rstrip()
                 _related_form_bad = not _related_line.startswith("**Related:**")
                 if not _related_form_bad:
                     _related_tail = _related_line[len("**Related:**"):]
@@ -3417,15 +3421,15 @@ def scan(wiki, images=None):
                     else:
                         _separator_i = None
                         for _i in range(_flash_i - 1, _related_i, -1):
-                            if e["body_lines"][_i].strip():
-                                if e["body_lines"][_i].strip() == "---":
+                            if _visible_body_lines[_i].strip():
+                                if _visible_body_lines[_i].strip() == "---":
                                     _separator_i = _i
                                 break
                         _tail_end = (_separator_i if _separator_i is not None
                                      else _flash_i)
                         _stray = [
                             _i for _i in range(_related_i + 1, _tail_end)
-                            if e["body_lines"][_i].strip()]
+                            if _visible_body_lines[_i].strip()]
                         if _stray:
                             problems.append((
                                 sl, "item11",
@@ -3439,7 +3443,7 @@ def scan(wiki, images=None):
                                 "leave a blank line after the Related footer; "
                                 "an immediate `---` renders it as a Setext heading"))
                 elif any(line.strip()
-                         for line in e["body_lines"][_related_i + 1:]):
+                         for line in _visible_body_lines[_related_i + 1:]):
                     problems.append((
                         sl, "item11",
                         "body content appears after the Related footer — the "
@@ -4823,6 +4827,26 @@ def run_self_test():
 
     tmp = tempfile.mkdtemp(prefix="scan_vault-selftest-")
     try:
+        comments_vault = os.path.join(tmp, "hidden-comments")
+        _st_write(comments_vault, "linked.md", _st_entry("Linked", "**Linked** describes a relation."))
+        _st_write(comments_vault, "escaped.md", _st_entry("Escaped", "**Escaped** describes a link."))
+        _st_write(comments_vault, "visible.md", _st_entry("Visible", "**Visible** describes a topic."))
+        for kind, opening, closing in (("html", "<!--", "-->"), ("obsidian", "%%", "%%")):
+            body = ("**Probe " + kind + "** introduces a topic.\n\n" + opening +
+                    "\n## Flashcards\n**Related:** [[hidden]]\n```\n"
+                    "[[linked]]\n" + closing + "\n\n"
+                    "Linked explains a mechanism. Visible supplies a contrast.\n"
+                    r"Literal \[[ghost]] and live \![[escaped]] syntax." + "\n")
+            _st_write(comments_vault, "probe-" + kind + ".md",
+                      _st_entry("Probe " + kind, body))
+        result = scan(comments_vault)
+        check("commented templates and escaped syntax create no repair findings",
+              [p for p in result["problems"] if p["slug"].startswith("probe-")], [])
+        check("hidden links do not suppress a later eligible backfill",
+              sorted((c["slug"], c["target"]) for c in result["backfill_candidates"]
+                     if c["slug"].startswith("probe-")),
+              [("probe-html", "linked"), ("probe-html", "visible"),
+               ("probe-obsidian", "linked"), ("probe-obsidian", "visible")])
         # ------------------------------------------------------------------
         # 1. parsing: what becomes an entry, and what becomes a report
         # ------------------------------------------------------------------

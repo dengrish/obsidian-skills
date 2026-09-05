@@ -2172,6 +2172,19 @@ def _selftest():
                 fail += 1
                 print("FAIL  %s: status %r, output %r"
                       % (name, result, output.getvalue()))
+        crlf_path = os.path.join(scratch, "crlf-note.md")
+        with open(crlf_path, "w", encoding="utf-8", newline="") as fh:
+            fh.write(GOOD.replace("\n", "\r\n"))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            result = main([crlf_path, "--mode", "empirical",
+                           "--images", scratch])
+        if result == 1 and "CRLF line endings" in output.getvalue():
+            ok += 1
+        else:
+            fail += 1
+            print("FAIL  the public CLI normalized CRLF before linting: "
+                  "status %r, output %r" % (result, output.getvalue()))
         note_path = os.path.join(scratch, "note-without-images.md")
         with open(note_path, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(GOOD)
@@ -2229,7 +2242,11 @@ def main(argv=None):
     if a.images is not None and not os.path.isdir(a.images):
         sys.stderr.write("--images is not a directory: %s\n" % a.images)
         return 2
-    with open(a.note, encoding="utf-8") as fh:
+    # Preserve physical line endings. Universal-newline translation would
+    # turn CRLF into LF before ``lint`` can enforce the repository's LF-only
+    # note contract, so the public CLI would accept bytes the library API
+    # correctly rejects.
+    with open(a.note, encoding="utf-8", newline="") as fh:
         text = fh.read()
     advisories = []
     findings = lint(text, a.note, a.images, mode=a.mode,

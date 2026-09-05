@@ -238,6 +238,8 @@ from entry_structure import (  # noqa: E402
     flashcard_line1_markup,
     flashcard_line1_faults,
     math_title_plain_text,
+    mask_body_comments,
+    mask_escaped_wikilinks,
     normalized_answer_surface,
     opening_paragraph,
     opener_subject_date_status,
@@ -869,7 +871,8 @@ def _check_related_footer(sections, findings, is_stub):
     """Require one canonical terminal footer without hiding malformed forms."""
     if is_stub:
         return
-    masked = strip_fenced("\n".join(sections["lines"])).split("\n")
+    visible = sections.get("visible_lines", sections["lines"])
+    masked = strip_fenced("\n".join(visible)).split("\n")
     indexes = [index for index, line in enumerate(masked)
                if _RELATED_RENDERED_RE.match(line)]
     if not indexes:
@@ -883,7 +886,7 @@ def _check_related_footer(sections, findings, is_stub):
             "entry has %d rendered Related footers; consolidate them into one"
             % len(indexes), {"body_lines": [index + 1 for index in indexes]}))
     index = indexes[0]
-    line = sections["lines"][index]
+    line = visible[index].rstrip()
     form_bad = not line.startswith("**Related:**")
     if not form_bad:
         tail = line[len("**Related:**"):]
@@ -910,11 +913,11 @@ def _check_related_footer(sections, findings, is_stub):
                 "Related footer must precede the Flashcards separator and heading"))
             return
         nonblank = [i for i in range(index + 1, flash)
-                    if sections["lines"][i].strip()]
+                    if visible[i].strip()]
         allowed_separator = nonblank[-1] if nonblank else None
         stray = [i for i in nonblank
                  if i != allowed_separator
-                 or sections["lines"][i].strip() != "---"]
+                 or visible[i].strip() != "---"]
         if stray:
             findings.append(_f(
                 "11-related-footer", "error",
@@ -927,7 +930,7 @@ def _check_related_footer(sections, findings, is_stub):
                 "leave a blank line after the Related footer; an immediate `---` "
                 "renders the footer as a Setext heading",
                 {"body_line": allowed_separator + 1}))
-    elif any(line.strip() for line in sections["lines"][index + 1:]):
+    elif any(line.strip() for line in visible[index + 1:]):
         findings.append(_f(
             "11-related-footer", "error",
             "body content appears after the Related footer; it must be terminal"))
@@ -1293,6 +1296,7 @@ def strip_fenced(text):
     `[[link]]` inside the outer listing came back item10/dangling — whose
     Task-2 remedy edits the listing.
     """
+    text = mask_body_comments(text)
     out, fence = [], None            # fence = the opening run, e.g. "````"
     for ln in (text or "").split("\n"):
         m = _FENCE_RE.match(ln)
@@ -1404,8 +1408,7 @@ def strip_code(text):
     about backticks, and the entry that used the other spelling gets the
     destructive finding.
     """
-    return _INLINE_CODE.sub(lambda m: " " * len(m.group(0)),
-                            strip_indented(strip_fenced(text)))
+    return mask_escaped_wikilinks(mask_body_comments(text, mask_code=True))
 
 
 _OBSIDIAN_IMAGE_EMBED_LINE_RE = re.compile(
@@ -2852,6 +2855,21 @@ def run_self_test():
 
     check("the clean fixture produces NO finding at any severity",
           items(good), [])
+    for opening, closing in (("<!--", "-->"), ("%%", "%%")):
+        hidden = (opening + "\n## Flashcards\n**Related:** [[ghost]]\n"
+                  "```\n" + closing + "\n\n")
+        commented = good.replace("**Related:**", hidden + "**Related:**", 1)
+        check("hidden section markers do not create phantom cards: " + opening,
+              items(commented), [])
+        between_sections = good.replace("\n---\n\n## Flashcards", "\n" + hidden
+                                        + "---\n\n## Flashcards", 1)
+        check("a hidden template after the footer is not stray content: " + opening,
+              items(between_sections), [])
+        # A duplicate inside a comment is not a second rendered occurrence.
+        duplicated = good.replace("**Related:**", opening + " [[precision]] "
+                                  + closing + "\n\n**Related:**", 1)
+        check("hidden links cannot trigger duplicate repairs: " + opening,
+              items(duplicated), [])
     check("CRLF and LF entries have the same lint result",
           items(good.replace("\n", "\r\n")), [])
     check("the clean STUB produces no finding either",

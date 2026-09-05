@@ -119,11 +119,13 @@ if _here != _shared:
 #: either every chapter's figures or a doubled set of them.  CONVENTIONS.md §1a.
 from naming import (                       # noqa: E402  (after the bootstrap)
     CANONICAL,
+    DISAMBIGUATOR,
     SAFE_NAME,
     chapter_book_stem,
     chapter_parts,
     core_stem,
     looks_canonical,
+    split_tail,
 )
 from figure_state import (MANIFEST_FILE, REVIEW_FILE, rewrite_sidecar,
                           read_manifest, manifest_key, file_digest,
@@ -352,6 +354,27 @@ _SOURCE_LINE = re.compile(r"\Asource\s*:\s*(.*)\Z", re.I)
 _SRC_LINK = re.compile(r"\A!?\[\[([^\]|#\r\n]+)(?:[#|][^\]\r\n]*)?\]\]\Z")
 
 
+def _frontmatter_fence(line):
+    """True for a column-zero YAML fence with optional trailing whitespace."""
+    return line.rstrip("\r\n").rstrip(" \t") == "---"
+
+
+_RAW_SRC_MARKER = re.compile(r"_src(?:_(?:%s))?\Z" % DISAMBIGUATOR)
+
+
+def _existing_src_marker(stem):
+    """Return an exact on-disk `_src` marker, including on raw intake names.
+
+    ``split_tail`` deliberately assigns semantics only to canonical stems.
+    The organizer also receives unorganized downloads, and its user contract
+    says a literal legal `_src` tail already on such a name must survive the
+    canonicalizing rename. Match only that exact tail shape; an interior
+    ``src`` word or other suffix is ordinary title text.
+    """
+    marker = split_tail(stem)[1]
+    return marker or ("_src" if _RAW_SRC_MARKER.search(stem) else "")
+
+
 def _quoted_source_spans(text):
     """Quoted source scalars as (start, end, decoded value, quote style).
 
@@ -362,9 +385,10 @@ def _quoted_source_spans(text):
     """
     start = len(text) - len(text.lstrip("\ufeff \t\r\n"))
     lines = text[start:].splitlines(keepends=True)
-    if not lines or lines[0].strip() != "---":
+    if not lines or not _frontmatter_fence(lines[0]):
         return
-    end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None)
+    end = next((i for i in range(1, len(lines))
+                if _frontmatter_fence(lines[i])), None)
     if end is None:
         return
     position = start + len(lines[0])
@@ -519,9 +543,10 @@ def _note_is_about(path, stem):
         with open(path, encoding="utf-8-sig") as fh:
             body = fh.read().lstrip()
         lines = body.splitlines()
-        if not lines or lines[0].strip() != "---":
+        if not lines or not _frontmatter_fence(lines[0]):
             return _legacy(body)
-        end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None)
+        end = next((i for i in range(1, len(lines))
+                    if _frontmatter_fence(lines[i])), None)
         if end is None:
             return False
         source_values, sources_values = [], []
@@ -565,10 +590,10 @@ def _unquoted_source_claim(path, stem):
             lines = fh.read().splitlines()
     except (OSError, UnicodeError):
         return False
-    if not lines or lines[0].strip() != "---":
+    if not lines or not _frontmatter_fence(lines[0]):
         return False
     end = next((i for i in range(1, len(lines))
-                if lines[i].strip() == "---"), None)
+                if _frontmatter_fence(lines[i])), None)
     if end is None:
         return False
     wanted = _nfc_low(stem)
@@ -1809,6 +1834,17 @@ def plan_rename(vault, path, new_basename, dest=None):
             "<Author>_<AbbreviatedTitle>_<Year>.pdf (or the documented "
             "chapter form) so downstream skills can recognize it."
             % written_basename]
+    old_src_marker = _existing_src_marker(old_stem)
+    new_src_marker = _existing_src_marker(new_stem)
+    if old_src_marker != new_src_marker:
+        change = ("remove the existing `_src` representation marker"
+                  if old_src_marker else
+                  "add an `_src` representation marker")
+        return [], Edits(), [
+            "refusing to %s while "
+            "renaming %r to %r. Preserve that marker exactly; it distinguishes "
+            "another representation of the same document from a different "
+            "document identity." % (change, src_basename, written_basename)]
     if not old_ext:
         try:
             with open(path, "rb") as source:
@@ -3627,6 +3663,30 @@ def _selftest():
     check("...and a blank line there does not unclaim a summary note",
           sorted(os.path.basename(p) for p in keyed_files(_nv, _npdf)),
           ["Doe_Foo_2025.md", "Doe_Foo_2025.pdf"])
+    # An indented `---` is content inside a YAML block scalar, not the
+    # frontmatter's closing fence. Treating `line.strip() == "---"` as a
+    # delimiter stopped before the real `sources:` field and left this owned
+    # summary behind during its PDF rename.
+    _block_scalar_note = _nw(
+        "Articles/Doe_Foo_2025.md",
+        '---\nabstract: |\n  First paragraph.\n  ---\n  Second paragraph.\n'
+        'sources:\n  - "[[Doe_Foo_2025.pdf]]"\n---\nprose\n')
+    check("an indented block-scalar rule is not a frontmatter closing fence",
+          sorted(os.path.basename(p) for p in keyed_files(_nv, _npdf)),
+          ["Doe_Foo_2025.md", "Doe_Foo_2025.pdf"])
+    _nw("Articles/Doe_Foo_2025.md",
+        '--- \t\ntitle: x\nsources:\n  - "[[Doe_Foo_2025.pdf]]"\n---  \n')
+    check("column-zero fences retain the readers' trailing-whitespace tolerance",
+          sorted(os.path.basename(p) for p in keyed_files(_nv, _npdf)),
+          ["Doe_Foo_2025.md", "Doe_Foo_2025.pdf"])
+    _escaped_block = (
+        '---\nabstract: |\n  Before.\n  ---\n  After.\n'
+        'sources:\n  - "[[\\x44oe_Foo_2025.pdf]]"\n---\n')
+    check("reference repair reaches quoted metadata after an indented rule",
+          "[[Smith_Bar_2026.pdf]]" in rewrite_text(
+              _escaped_block,
+              {"Doe_Foo_2025.pdf": "Smith_Bar_2026.pdf"}, {}),
+          True)
     # End to end: the clipping is not merely un-keyed, it is absent from the
     # rename plan — the note stays where the user's clipping run put it.
     _nw("Articles/Doe_Foo_2025.md",
@@ -5379,6 +5439,27 @@ def _selftest():
               any("not a canonical PDF name" in item for item in
                   plan_rename(None, _pdf, "Several_Title_Words_2025.pdf")[2]),
               True)
+        _marked = _put(_v, "Doe_Study_2025_src.pdf", b"%PDF-1.4\n")
+        check("rename cannot remove an existing `_src` marker",
+              any("representation marker" in item for item in
+                  plan_rename(None, _marked, "Doe_NewStudy_2025.pdf")[2]),
+              True)
+        _plain = _put(_v, "Doe_Plain_2025.pdf", b"%PDF-1.4\n")
+        check("rename cannot add an `_src` marker",
+              any("representation marker" in item for item in
+                  plan_rename(None, _plain, "Doe_NewPlain_2025_src.pdf")[2]),
+              True)
+        check("rename preserves an existing `_src` marker",
+              plan_rename(None, _marked,
+                          "Doe_NewStudy_2026_src.pdf")[2], [])
+        _raw_marked = _put(_v, "download_src.pdf", b"%PDF-1.4\n")
+        check("a literal `_src` marker on raw intake can be preserved",
+              plan_rename(None, _raw_marked,
+                          "Doe_Download_2025_src.pdf")[2], [])
+        check("a literal `_src` marker on raw intake cannot be dropped",
+              any("representation marker" in item for item in
+                  plan_rename(None, _raw_marked,
+                              "Doe_Download_2025.pdf")[2]), True)
         _raw = _put(_v, "download", b"%PDF-1.4\n")
         check("an extensionless source cannot remain extensionless",
               any("explicit .pdf destination" in item for item in

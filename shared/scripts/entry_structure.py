@@ -33,6 +33,8 @@ __all__ = [
     "flashcard_line1_faults",
     "flashcard_line1_markup",
     "math_title_plain_text",
+    "mask_body_comments",
+    "mask_escaped_wikilinks",
     "opener_has_subject_date",
     "opener_subject_date_status",
     "normalized_answer_surface",
@@ -104,6 +106,132 @@ _SUBSCRIPT_RE = re.compile(
     "[%s]+" % re.escape("".join(_SUBSCRIPT_CHARS)))
 _FORMATTING_RE = re.compile(
     r"\\(?:%s)\s*\{([^{}]*)\}" % "|".join(_MATH_FORMATTING_COMMANDS))
+
+
+def _escaped_at(text, offset):
+    """Whether the preceding backslash run escapes this Markdown delimiter."""
+    start = offset
+    while start and text[start - 1] == "\\":
+        start -= 1
+    return (offset - start) % 2 == 1
+
+
+def mask_body_comments(text, *, mask_code=False):
+    """Blank HTML/Obsidian comments, retaining every character/line offset.
+
+    Use only for the read-only explanatory-body view, never for flashcard
+    content: its separate parser must preserve and validate review attachments.
+    Comment delimiters shown in code are literal. Parse comments before code
+    masking so a fence shown *inside* a comment cannot hide later visible prose.
+    Link inventories may additionally blank those code spans with mask_code.
+    """
+    text = text or ""
+    chars = list(text)
+    def blank(start, end):
+        for pos in range(start, end):
+            if chars[pos] not in "\r\n":
+                chars[pos] = " "
+
+    index, fence, fence_indent = 0, None, 0
+    previous_nonblank = ""
+    previous_blank = True
+    indented_code = False
+    while index < len(text):
+        if index == 0 or text[index - 1] == "\n":
+            end = text.find("\n", index)
+            end = len(text) if end < 0 else end
+            line = text[index:end]
+            match = re.match(r"^(\s*)(`{3,}|~{3,})(.*)$", line)
+            if fence:
+                if (match and match[2][0] == fence[0]
+                        and len(match[2]) >= len(fence)
+                        and not match[3].strip()
+                        and len(match[1].expandtabs(4)) <= fence_indent):
+                    fence = None
+                if mask_code:
+                    blank(index, end)
+                index = end + 1
+                continue
+            if match and not (match[2][0] == "`" and "`" in match[3]):
+                fence, fence_indent = match[2], max(3, len(match[1].expandtabs(4)))
+                if mask_code:
+                    blank(index, end)
+                index = end + 1
+                previous_blank = False
+                continue
+            indented = bool(re.match(r"^(?: {4}|\t)", line))
+            in_list = bool(
+                re.match(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:\s|$)",
+                         previous_nonblank)
+                or previous_nonblank[:1].isspace())
+            if indented_code and not line.strip():
+                index = end + 1
+                continue
+            if indented and (indented_code or (previous_blank and not in_list)):
+                indented_code = True
+                if mask_code:
+                    blank(index, end)
+                index = end + 1
+                continue
+            indented_code = False
+            previous_blank = not line.strip()
+            if line.strip():
+                previous_nonblank = line
+        if text[index] == "`" and not _escaped_at(text, index):
+            match = re.match(r"`+", text[index:])
+            run = match[0]
+            # Inline code may cross a soft newline, but the block parser
+            # ends its paragraph before a blank line or a new structural block.
+            # A later unrelated tick must not hide either one.
+            remainder = text[index + len(run):]
+            boundary = re.search(
+                r"\n(?:[ \t]*\n| {0,3}(?:#{1,6}(?:[ \t]|$)|>[ \t]*|"
+                r"`{3,}|~{3,}|(?:[-*+]|\d{1,9}[.)])[ \t]+|"
+                r"(?:-{3,}|_{3,}|\*{3,}|={2,}|\$\$)[ \t]*(?:\n|$)))",
+                remainder)
+            code_region = remainder[:boundary.start()] if boundary else remainder
+            close = re.search(r"(?<!`)" + re.escape(run) + r"(?!`)", code_region)
+            if close is not None:
+                end = index + len(run) + close.end()
+                if mask_code:
+                    blank(index, end)
+                index = end
+                continue
+            index += len(run)
+            continue
+        opener = ("<!--" if text.startswith("<!--", index) else
+                  "%%" if text.startswith("%%", index) else None)
+        if opener and not _escaped_at(text, index):
+            closer = "-->" if opener == "<!--" else "%%"
+            end = text.find(closer, index + len(opener))
+            # An unfinished body comment hides the remaining rendered body.
+            end = len(text) if end < 0 else end + len(closer)
+            blank(index, end)
+            index = end
+            continue
+        index += 1
+    return "".join(chars)
+
+
+def mask_escaped_wikilinks(text):
+    """Blank literal escaped wiki syntax so it cannot become a link action."""
+    text = text or ""
+    chars = list(text)
+    for match in re.finditer(r"!?\[\[[^\]\n]*\]\]", text):
+        start = match.start()
+        bracket = start + int(text[start] == "!")
+        if bracket != start and _escaped_at(text, start):
+            # Escaping ! disables embedding, not the following live wikilink.
+            # Remove the exclamation only from this read-only view so the
+            # entry-link regex can see the remaining [[target]].
+            chars[start] = " "
+            continue
+        if not _escaped_at(text, bracket):
+            continue
+        for index in range(start, match.end()):
+            if chars[index] not in "\r\n":
+                chars[index] = " "
+    return "".join(chars)
 
 
 def _math_fragment_plain_text(value):
@@ -1165,6 +1293,44 @@ def run_self_test(verbose=False):
           ("A complete definition.\n??\n"
            "Térm <!--SR:!2026-09-20,30,250--> ^term-card").encode("utf-8"))),
     ]
+    for opening, closing in (("<!--", "-->"), ("%%", "%%")):
+        hidden = opening + "\n## Flashcards\n```\n[[hidden]]\n" + closing
+        source = "Visible before.\n" + hidden + "\nVisible after [[real]]."
+        masked = mask_body_comments(source)
+        helper_cases.append((
+            "body comment is hidden without consuming following prose: " + opening,
+            (len(masked), [i for i, c in enumerate(masked) if c == "\n"],
+             "[[hidden]]" in masked, masked.endswith("Visible after [[real]].")),
+            (len(source), [i for i, c in enumerate(source) if c == "\n"], False, True)))
+        for code in ("`" + opening + "`", "``" + opening + "``",
+                     "```text\n" + opening + "\n```",
+                     "    " + opening):
+            source = code + "\n\nVisible [[real]]."
+            helper_cases.append((
+                "a comment delimiter inside code cannot hide later prose: " + repr(code),
+                mask_body_comments(source), source))
+    source = "An unmatched ` tick.\n\n[[visible]]\n\nAnother ` tick."
+    helper_cases.append((
+        "unmatched inline ticks cannot hide later paragraphs",
+        mask_body_comments(source, mask_code=True), source))
+    source = "Wrapped `literal\n<!-- example` then [[visible]]."
+    helper_cases.append((
+        "soft-wrapped inline code keeps its literal comment delimiter",
+        mask_body_comments(source), source))
+    helper_cases.append((
+        "soft-wrapped inline code hides only its own link examples",
+        ("[[sample]]" in mask_body_comments(
+            "Wrapped `[[sample]]\n<!-- example` then [[visible]].", mask_code=True),
+         "[[visible]]" in mask_body_comments(source, mask_code=True)),
+        (False, True)))
+    helper_cases.append((
+        "only an odd backslash run escapes wiki markup",
+        ["[[target]]" in mask_escaped_wikilinks("\\" * n + "[[target]]")
+         for n in range(5)],
+        [True, False, True, False, True]))
+    helper_cases.append((
+        "escaping the embed prefix preserves the following live wikilink",
+        mask_escaped_wikilinks(r"\![[target]]"), "\\ [[target]]"))
     for name, got, expected in helper_cases:
         ok = got == expected
         if verbose or not ok:

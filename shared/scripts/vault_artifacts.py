@@ -83,9 +83,11 @@ def _is_pdf_name(name):
 
 
 def _logical_path_key(path):
-    # Do not case-fold a pathname here.  Two logical entries that differ only
-    # by case are exactly the portable collision this module must retain.
-    return unicodedata.normalize("NFC", os.path.abspath(os.fspath(path)))
+    # Preserve both case and Unicode spelling. On filesystems such as ext4,
+    # NFC and NFD names can be distinct directory entries even though they
+    # share a portable output stem. Actual filesystem aliases are compared
+    # with samefile below, never inferred from text normalization.
+    return os.path.abspath(os.fspath(path))
 
 
 class ArtifactFinding:
@@ -435,10 +437,14 @@ def _selected_already_in_inventory(selected, inventoried):
     Inventoried logical aliases are deliberately *not* collapsed with one
     another: two vault paths to one inode still create two bare-name owners.
     This helper is only for avoiding a false extra member when a caller's
-    selected spelling is a case-insensitive or symlink alias of the one path
-    already returned by the inventory.
+    selected spelling is a case-insensitive or symlink alias of the same
+    portable basename already returned by the inventory. A differently named
+    link still owns its selected output stem, even when its inode is shared.
     """
-    return any(_same_logical_or_file(selected, path) for path in inventoried)
+    name = portable_identity(os.path.basename(selected))
+    return any(name == portable_identity(os.path.basename(path))
+               and _same_logical_or_file(selected, path)
+               for path in inventoried)
 
 
 def source_stem_groups(selected, vault_inventory=()):
@@ -864,6 +870,13 @@ def run_self_test():
             groups = source_stem_groups([selected_alias], inv.paths)
             check("selected same-file alias does not false-collide",
                   len(groups[portable_identity(selected.stem)]), 1)
+            renamed_alias = Path(tmp) / "Doe_Copy_2025.pdf"
+            renamed_alias.symlink_to(selected)
+            groups = source_stem_groups([renamed_alias], inv.paths)
+            check("differently named same-file selection retains its output stem",
+                  groups.get(portable_identity(renamed_alias.stem)),
+                  [renamed_alias])
+            renamed_alias.unlink()
             alias_inside = pdfs / "GARCÍA_STUDY_2025.PDF"
             if os.path.lexists(alias_inside):
                 ok("inventoried-alias regression skipped when the filesystem "
@@ -880,6 +893,24 @@ def run_self_test():
         else:
             ok("selected-alias regression skipped without symlinks", True)
             ok("inventoried-alias regression skipped without symlinks", True)
+
+        # Model names returned by a normalization-sensitive filesystem without
+        # requiring this host to be able to create both spellings. Inventories
+        # are observations of logical entries; their names must survive grouping.
+        unicode_paths = [
+            Path(tmp) / "unicode-inventory" / "Café_Study_2025.pdf",
+            Path(tmp) / "unicode-inventory" / "Cafe\u0301_Study_2025.pdf",
+        ]
+        unicode_key = portable_identity(unicode_paths[0].stem)
+        for label, selected_paths, inventoried_paths in (
+                ("inventoried", unicode_paths[:1], unicode_paths),
+                ("selected", unicode_paths, [])):
+            groups = source_stem_groups(selected_paths, inventoried_paths)
+            check("distinct NFC/NFD %s names remain a collision" % label,
+                  len(groups[unicode_key]), 2)
+        groups = source_stem_groups(unicode_paths, unicode_paths)
+        check("exact selected paths are not double-counted with NFC/NFD owners",
+              len(groups[unicode_key]), 2)
 
         # Simulate an unreadable subtree deterministically; chmod is not a
         # useful test when the suite runs as a privileged user.

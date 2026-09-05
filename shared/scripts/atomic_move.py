@@ -392,7 +392,9 @@ def replace_expected(staged, target, expected, snapshot, stage_dir,
     """Replace exactly ``expected`` through displacement and exclusive link.
 
     ``snapshot(path)`` returns any equality-comparable identity+content value.
-    The caller owns ``stage_dir`` and must retain it when a raised
+    The caller supplies a fresh, unique ``stage_dir`` for each operation
+    (including rollback), never reusing one from a prior call, and retains it
+    when a raised
     :class:`PublicationConflict` or :class:`LinkUnavailable` has ``keep_stage``
     true. A named recovery path is exposed on the exception whenever the
     displaced predecessor could not reclaim the public name.
@@ -527,7 +529,11 @@ def replace_expected(staged, target, expected, snapshot, stage_dir,
 
 def remove_expected(target, expected, snapshot, stage_dir, stage_parent=None,
                     recovery_prefix=".atomic-recovery-"):
-    """Displace only ``expected``; caller cleanup then removes that version."""
+    """Displace only ``expected`` into a fresh, unique per-operation stage.
+
+    Caller cleanup then removes that version. Never reuse a prior call's
+    ``stage_dir``, including for rollback.
+    """
     if not os.path.lexists(target):
         return False
     stage_parent = stage_parent or os.path.dirname(stage_dir)

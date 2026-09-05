@@ -122,6 +122,28 @@ X_TRACKING_PARAMS = {"s", "t"}
 ROUTING_FRAGMENT = ("/", "!")
 
 
+def _normalized_netloc(parts):
+    """Lowercase only the host, preserving case-sensitive user information."""
+    netloc = parts.netloc
+    userinfo, separator, authority = netloc.rpartition("@")
+    prefix = userinfo + separator if separator else ""
+    authority = authority if separator else netloc
+    if authority.startswith("["):
+        closing = authority.find("]")
+        host = authority[:closing + 1].lower()
+        suffix = authority[closing + 1:]
+    else:
+        host, port_separator, port = authority.rpartition(":")
+        if not port_separator:
+            host, suffix = authority, ""
+        else:
+            suffix = port_separator + port
+        host = host.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return prefix + host + suffix
+
+
 def normalize_url(url):
     """Normalize an HTTP(S) URL for identity; invalid origins return no key."""
     if not isinstance(url, str):
@@ -131,6 +153,8 @@ def normalize_url(url):
         url = url[1:-1].strip()
     if not url:
         return ""
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7f for ch in url):
+        return ""
     try:
         parts = urlsplit(url)
         if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
@@ -138,17 +162,22 @@ def normalize_url(url):
         if any(ch.isspace() for ch in parts.hostname):
             return ""
         # Accessing port validates it; urlsplit alone accepts `:not-a-port`.
-        parts.port
+        port = parts.port
     except ValueError:
         return ""
+    authority = parts.netloc.rsplit("@", 1)[-1]
+    if authority.endswith(":") or port == 0:
+        return ""
     scheme = parts.scheme.lower()
-    host = parts.netloc.lower()
-    if host.startswith("www."):
-        host = host[4:]
+    host = _normalized_netloc(parts)
     path = parts.path.rstrip("/")
     host_name = parts.hostname.lower().rstrip(".")
-    is_substack = host_name == "substack.com" or host_name.endswith(".substack.com")
-    is_x = host_name in {"x.com", "twitter.com", "mobile.twitter.com"}
+    normalized_host_name = (host_name[4:] if host_name.startswith("www.")
+                            else host_name)
+    is_substack = (normalized_host_name == "substack.com"
+                   or normalized_host_name.endswith(".substack.com"))
+    is_x = normalized_host_name in {
+        "x.com", "twitter.com", "mobile.twitter.com"}
     query_fields = []
     for field in parts.query.split("&") if parts.query else ():
         # Decode only a COPY of the key to recognize percent-encoded tracking
@@ -198,6 +227,16 @@ def _yaml_scalar(raw):
     return parse_scalar(raw)[0]
 
 
+def _frontmatter_fence(line):
+    """True for a column-zero YAML fence, allowing only trailing whitespace.
+
+    YAML block-scalar content is indented.  Treating ``line.strip() == "---"``
+    as a closing fence therefore lets an ordinary ``|`` value end frontmatter
+    early, before a later current or duplicate ``sources:`` key is seen.
+    """
+    return line.rstrip(" \t") == "---"
+
+
 def read_source(path):
     """Return a note's origin from its YAML frontmatter, or None.
 
@@ -226,23 +265,35 @@ def read_source(path):
     indexed under the wrong URL is invisible to its own duplicate check *and*
     answers somebody else's.
     """
+    descriptor = None
     try:
+        # Follow an explicitly selected read-only alias, but open nonblocking
+        # and classify the handle before reading. A `.md` path swapped to a
+        # FIFO between a path-stat and ordinary `open()` could otherwise block
+        # the whole batch indefinitely while waiting for a writer.
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) \
+            | getattr(os, "O_NONBLOCK", 0)
+        descriptor = os.open(path, flags)
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            return None
         # Decode the whole note before trusting its frontmatter. Reading only
         # through the closing fence lets invalid bytes in the body hide behind
         # a valid-looking origin and claim a publication identity.
-        with open(path, "r", encoding="utf-8-sig", errors="strict") as fh:
+        with os.fdopen(descriptor, "r", encoding="utf-8-sig",
+                       errors="strict") as fh:
+            descriptor = None                 # fdopen now owns the descriptor
             lines = iter(fh.read().splitlines())
         for first in lines:                    # skip leading blank lines
             if first.strip():
                 break
         else:
             return None
-        if first.strip() != "---":
+        if not _frontmatter_fence(first):
             return None
         found = {}
         pending = False
         for raw in lines:
-            if raw.strip() == "---":
+            if _frontmatter_fence(raw):
                 return found.get("sources", found.get("source")) or None
             if not raw.strip() or raw.lstrip().startswith("#"):
                 continue
@@ -270,6 +321,12 @@ def read_source(path):
         return None
     except (OSError, ValueError):
         return None
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
     return None
 
 
@@ -348,6 +405,17 @@ def build_index(cleaned_dir, exclude=()):
     index, unindexable, non_url = {}, [], []
     for path in _md_files(cleaned_dir):
         if os.path.abspath(path) in excluded:
+            continue
+        # A Markdown-named symlink occupies the flat Articles namespace, but it
+        # is not an Articles note and must not let a target elsewhere claim a
+        # clipping URL. Keep this at the ownership-index boundary: a selected
+        # read-only raw capture may legitimately be reached through an alias.
+        try:
+            if not stat.S_ISREG(os.lstat(path).st_mode):
+                unindexable.append(path)
+                continue
+        except OSError:
+            unindexable.append(path)
             continue
         src = read_source(path)
         if not src:
@@ -504,6 +572,12 @@ def run_self_test():
     case("a host merely starting with www is not touched",
           normalize_url("https://wwwx.example.com/a"),
           "https://wwwx.example.com/a")
+    case("only the host is lowercased when user information is present",
+         normalize_url("https://User:SeCrEt@WWW.Example.COM/a"),
+         "https://User:SeCrEt@example.com/a")
+    differ("case-sensitive URL credentials do not collapse onto one origin",
+           "https://User:SeCrEt@example.com/a",
+           "https://User:secret@example.com/a")
     case("trailing slashes stripped",
           normalize_url("https://example.com/a//"), "https://example.com/a")
     case("an anchor fragment is dropped",
@@ -536,8 +610,11 @@ def run_self_test():
     case("None is the empty key", normalize_url(None), "")
     case("blank is the empty key", normalize_url("   "), "")
     for bad in ("https://[broken/article", "https://", "http:///article",
-                "https://example.com:not-a-port/article", "https://bad host/x",
-                "file:///article.md", "not a URL"):
+                "https://example.com:not-a-port/article",
+                "https://example.com:/article", "https://example.com:0/article",
+                "https://bad host/x", "https://example.com/a\nsmuggled",
+                "https://example.com/a\tsmuggled", "file:///article.md",
+                "not a URL"):
         case("an unusable origin cannot become a dedup key: %r" % bad,
              normalize_url(bad), "")
     case("surrounding quotes are stripped",
@@ -562,6 +639,9 @@ def run_self_test():
         differ("?%s= is preserved on an unrelated origin" % param,
                "https://example.com/a?%s=1" % param,
                "https://example.com/a?%s=2" % param)
+    same("www normalization does not disable X sharing-parameter cleanup",
+         "https://www.x.com/example/status/1?s=20",
+         "https://x.com/example/status/1")
     for param in ("id", "p", "page", "v", "story", "q", "referrer", "share"):
         differ("?%s= often IS the page identity" % param,
                "https://example.com/a?%s=1" % param,
@@ -652,8 +732,14 @@ def run_self_test():
                 ("current sources wins over a later legacy source",
                  '---\nsources:\n  - "%s"\nsource: "[[Old_Paper_2025.pdf]]"\n---\n'
                  % URL, URL),
+                ("an indented block-scalar rule is not the closing fence",
+                 '---\nsource: "https://stale.example/legacy"\nnotes: |\n'
+                 '  ---\nsources:\n  - "%s"\n---\n' % URL, URL),
                 ("duplicate sources keys are ambiguous",
                  '---\nsources:\n  - "%s"\nsources:\n'
+                 '  - "https://other.example/b"\n---\n' % URL, None),
+                ("an indented rule cannot hide a duplicate current origin",
+                 '---\nsources:\n  - "%s"\nnotes: |\n  ---\nsources:\n'
                  '  - "https://other.example/b"\n---\n' % URL, None),
                 ("empty current sources does not fall back to a legacy source",
                  '---\nsource: "%s"\nsources:\n---\n' % URL, None),
@@ -719,6 +805,11 @@ def run_self_test():
         case("a missing file is not a source", read_source(
             os.path.join(tmp, "nope.md")), None)
         case("a directory is not a source", read_source(tmp), None)
+        if hasattr(os, "mkfifo"):
+            fifo = os.path.join(tmp, "capture-fifo.md")
+            os.mkfifo(fifo)
+            case("a Markdown-named FIFO cannot block a source read",
+                 read_source(fifo), None)
         case("invalid UTF-8 in frontmatter cannot establish ownership",
              read_source(note_bytes(
                  "invalid-frontmatter.md",
@@ -796,7 +887,9 @@ def run_self_test():
         # ownership. Every `.md` directory entry occupies a publish name,
         # including types a provenance reader cannot open.
         os.makedirs(os.path.join(vault, "Held.md"))
-        link_target = article("link-target.txt", "not a note")
+        linked_url = "https://outside.example/article"
+        link_target = article(
+            "link-target.txt", "---\nsources:\n  - %s\n---\n" % linked_url)
         try:
             os.symlink(os.path.join(tmp, "missing-target"),
                        os.path.join(vault, "Broken.md"))
@@ -820,6 +913,11 @@ def run_self_test():
               ("Free", "free")])
         case("symlink occupancy cases run or degrade without crashing",
              isinstance(symlink_occupants_exercised, bool), True)
+        linked_index, linked_unindexable, _ = build_index(vault)
+        case("a Markdown symlink occupies the slug but cannot claim its target URL",
+             (normalize_url(linked_url) in linked_index,
+              os.path.join(vault, "Linked.md") in linked_unindexable),
+             (False, True))
         with patch.object(os, "listdir", return_value=[
                     "Caf\u00e9.md", "Cafe\u0301.MD", "ignored.txt"]):
             ambiguous_index = article_name_index(vault)

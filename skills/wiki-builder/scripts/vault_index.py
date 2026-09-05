@@ -79,7 +79,9 @@ import stat
 import sys
 import unicodedata as _ud
 
-_OBSIDIAN_SHARED_MODULES = ('slugify', 'yaml_scalars')
+_OBSIDIAN_SHARED_MODULES = (
+    "entry_structure", "markdown_tables", "slugify", "yaml_scalars",
+)
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
@@ -119,6 +121,7 @@ if _here != _shared:
 # --- end bootstrap ---
 
 from yaml_scalars import parse_scalar, strip_comment  # noqa: E402
+from entry_structure import mask_body_comments, mask_escaped_wikilinks  # noqa: E402
 from slugify import SlugError, slug_stem  # noqa: E402
 
 
@@ -449,7 +452,8 @@ def split_sections(body):
     related_index = None
     flashcards_index = None
     fence = None                          # the opening run, e.g. "````"
-    for i, ln in enumerate(lines):
+    visible_lines = mask_body_comments(body).split("\n")
+    for i, ln in enumerate(visible_lines):
         m = _FENCE_LINE_RE.match(ln)
         # Backticks are forbidden in a backtick fence's info string. A line
         # such as `````code``` is inline`` is an inline code span, not a
@@ -478,7 +482,7 @@ def split_sections(body):
     separator_index = None
     if flashcards_index is not None:
         for i in range(flashcards_index - 1, -1, -1):
-            s = lines[i].strip()
+            s = visible_lines[i].strip()
             if s == "":
                 continue
             separator_index = i if s == "---" else None
@@ -490,8 +494,10 @@ def split_sections(body):
 
     return {
         "lines": lines,
-        "prose_lines": lines[:end],
-        "related_line": lines[related_index] if related_index is not None else None,
+        "visible_lines": visible_lines,
+        "prose_lines": visible_lines[:end],
+        "related_line": (visible_lines[related_index].rstrip()
+                         if related_index is not None else None),
         "related_index": related_index,
         "flashcards_index": flashcards_index,
         "flashcards_head": (lines[flashcards_index]
@@ -529,7 +535,8 @@ def extract_wikilinks(text, include_embeds=False):
     """
     out = []
     pattern = _EMBED_RE if include_embeds else _WIKILINK_RE
-    for m in pattern.finditer(text):
+    visible = mask_escaped_wikilinks(mask_body_comments(text, mask_code=True))
+    for m in pattern.finditer(visible):
         raw = m.group(1)
         label = raw.split("|", 1)[1].strip() if "|" in raw else None
         out.append((_normalise_target(raw), label))
@@ -841,6 +848,24 @@ def run_self_test():
     def check(label, got, want):
         cases.append((label, got == want, got, want))
 
+    for opening, closing in (("<!--", "-->"), ("%%", "%%")):
+        text = _st_entry_text("Probe", body=(
+            "**Probe** explains a topic.\n\n" + opening +
+            "\n## Flashcards\n**Related:** [[hidden]]\n```\n" + closing +
+            "\n\nA relation to [[visible]].\n\n**Related:** [[visible|Visible]]\n"
+            "\n---\n\n## Flashcards\n\nA distinct topic.\n??\nProbe\n"))
+        indexed = index_entry("probe.md", text=text)
+        check("hidden templates do not truncate the body index: " + opening,
+              (indexed["body_wikilink_targets"], indexed["related_wikilink_targets"]),
+              (["visible"], ["visible"]))
+    check("literal code links are absent from the index's orphan-audit surface",
+          extract_wikilinks("`[[inline]]`\n\n    [[indented]]\n\n"
+                            "```md\n[[fenced]]\n```\n\n[[visible]]"),
+          [("visible", None)])
+    check("escaping ! turns an embed into an ordinary link",
+          extract_wikilinks(r"\![[linked]] ![[embedded]]"), [("linked", None)])
+    check("escaped wiki examples are not indexed as live references",
+          extract_wikilinks(r"\[[hidden]] [[visible]]"), [("visible", None)])
     tmp = tempfile.mkdtemp(prefix="vault_index-selftest-")
     try:
         wiki = os.path.join(tmp, "Wiki")

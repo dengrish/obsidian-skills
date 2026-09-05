@@ -18,6 +18,8 @@ python3 scripts/scan_vault.py WIKI [--images DIR] [--out FILE] [--indent N]
 - `--indent N` — JSON indent, default `2`; `--indent 0` emits one compact line.
 - Exit status `2` with a usage error if `WIKI` is not a directory, or if `--images` is given and is not a directory. The second guard is deliberate: a mistyped image folder that read as "empty" would report **every** embed in the vault as naming a missing file, and nothing in the output would distinguish that from a genuinely broken vault. Every other failure is a genuine crash worth recording as execution friction in the [run report](backlogs.md#run-report). A usage error, crash, missing helper, malformed JSON, or incomplete output blocks every dependent write; partial output is never a clean scan.
 
+The body and section readers ignore hidden HTML/Obsidian comments and escaped wikilink examples while retaining source line positions. A commented template heading is not an extra Flashcards section, and a commented link neither triggers pruning nor suppresses a later visible backfill candidate. Delimiters inside code stay literal. This read-only body view does not alter the separate flashcard parser or its protected scheduling attachments.
+
 The scanner **never writes to the vault.** It reads Markdown files recursively inside `Wiki/` and prints; the executing agent applies every authorized fix, MOC, `parents:` value, and log append in the same autonomous run.
 
 ## Output contract
