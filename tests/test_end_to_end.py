@@ -176,7 +176,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_pdf_repair_and_rename_preserve_notes_images_and_ledgers(self):
         organizer = "skills/pdf-organize/scripts/organize.py"
-        batch = "skills/fig-extract/scripts/batch_extract.py"
+        batch = "skills/figure-extract/scripts/batch_extract.py"
         source = self.vault / "Inbox/download.pdf"
         self.make_pdf(source)
         self.run_script(organizer, "rename", "--vault", self.vault, source,
@@ -187,7 +187,7 @@ class WorkflowTests(unittest.TestCase):
         self.run_script(batch, "--src", pdf, "--out", self.images, "--dpi", 72)
         figure = self.images / "Doe_Study_2025_fig_1.png"
         automatic = digest(figure)
-        self.run_script("skills/fig-extract/scripts/extract_figures.py", pdf,
+        self.run_script("skills/figure-extract/scripts/extract_figures.py", pdf,
                         "--out", self.images, "--stem", pdf.stem,
                         "--crop", "1:1:120,170,400,300", "--dpi", 72, "--overwrite")
         repaired = digest(figure)
@@ -334,7 +334,7 @@ class WorkflowTests(unittest.TestCase):
             "--src", chapter_paths[0], "--notes", self.notes,
             "--images", self.images, "--json").stdout)
         self.assertEqual(selected["counts"]["new"], 1)
-        self.run_script("skills/fig-extract/scripts/batch_extract.py",
+        self.run_script("skills/figure-extract/scripts/batch_extract.py",
                         "--src", chapter_paths[0], "--out", self.images,
                         "--dpi", 72)
         self.assertTrue((self.images /
@@ -349,7 +349,7 @@ class WorkflowTests(unittest.TestCase):
         scan = self.scan_papers()
         self.assertEqual(scan["counts"]["unorganized"], 2)
         self.assertEqual(scan["counts"]["new"], 0)
-        batch = "skills/fig-extract/scripts/batch_extract.py"
+        batch = "skills/figure-extract/scripts/batch_extract.py"
         self.run_script(batch, "--src", self.pdfs, "--out", self.images,
                         "--dpi", 72, expected=1)
         self.assertEqual(list(self.images.iterdir()), [])
@@ -372,7 +372,7 @@ class WorkflowTests(unittest.TestCase):
     def test_escaped_source_identity_survives_scan_and_pdf_rename(self):
         source = self.pdfs / "Doe_Study_2025.pdf"
         self.make_pdf(source)
-        self.run_script("skills/fig-extract/scripts/batch_extract.py",
+        self.run_script("skills/figure-extract/scripts/batch_extract.py",
                         "--src", source, "--out", self.images, "--dpi", 72)
         figure = self.images / "Doe_Study_2025_fig_1.png"
         note = self.notes / "Doe_Study_2025.md"
@@ -435,7 +435,7 @@ class WorkflowTests(unittest.TestCase):
                          f'[[Doe_Study_2025.pdf#page=1]]\n[Publisher]({publisher})\n')
 
     def test_clipping_slug_requires_a_date_decision_and_supports_undated(self):
-        script = "skills/clip-clean/scripts/slug.py"
+        script = "skills/clipping-clean/scripts/slug.py"
         missing = self.run_script(
             script, "--no-author", "--topic", "Evergreen Reference",
             expected=2)
@@ -450,12 +450,12 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(undated["filename"], "Evergreen_Reference_nd.md")
 
     def test_clipping_image_reprocess_keeps_duplicate_detection_and_stems_aligned(self):
-        fetch = "skills/clip-clean/scripts/fetch_images.py"
-        dedup = "skills/clip-clean/scripts/dedup_index.py"
+        fetch = "skills/clipping-clean/scripts/fetch_images.py"
+        dedup = "skills/clipping-clean/scripts/dedup_index.py"
 
         def clipping_slug(topic):
             result = json.loads(self.run_script(
-                "skills/clip-clean/scripts/slug.py",
+                "skills/clipping-clean/scripts/slug.py",
                 "--author", "Alice Smith", "--topic", topic,
                 "--year", "2026").stdout)
             self.assertEqual(result["image_prefix"], result["slug"] + "_fig_")
@@ -493,7 +493,7 @@ class WorkflowTests(unittest.TestCase):
         # First-time PDF manifest migration must not claim this clipping.
         pdf = self.pdfs / "Doe_Study_2025.pdf"
         self.make_pdf(pdf)
-        self.run_script("skills/fig-extract/scripts/batch_extract.py",
+        self.run_script("skills/figure-extract/scripts/batch_extract.py",
                         "--src", pdf, "--out", self.images, "--dpi", 72)
         manifest = (self.images / ".figure-manifest.tsv").read_text(encoding="utf-8")
         self.assertIn("Doe_Study_2025_fig_1.png", manifest)
@@ -606,7 +606,7 @@ class WorkflowTests(unittest.TestCase):
         articles.mkdir()
         images.mkdir()
         dedup = json.loads(self.run_script(
-            "skills/clip-clean/scripts/dedup_index.py", articles,
+            "skills/clipping-clean/scripts/dedup_index.py", articles,
             "--raw", raw, "--slug", "Doe_Fresh_Article_2025").stdout)
         self.assertEqual(dedup["checked"][0]["status"], "new")
         self.assertEqual(dedup["slug_checks"][0]["status"], "free")
@@ -948,7 +948,7 @@ Arithmetic mean
         self.assertEqual(existing.read_bytes(), original_entry)
         self.assertEqual(source.read_bytes(), original_source)
         ownership = json.loads(self.run_script(
-            "skills/clip-clean/scripts/dedup_index.py", self.notes,
+            "skills/clipping-clean/scripts/dedup_index.py", self.notes,
             "--url", "https://example.org/averages").stdout)
         self.assertEqual(ownership["checked"][0]["status"], "duplicate")
 

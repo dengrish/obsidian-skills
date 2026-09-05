@@ -125,7 +125,7 @@ SLUGIFY = os.path.join(SHARED_DIR, "scripts", "slugify.py")
 PLUGIN_PATHS = os.path.join(SHARED_DIR, "scripts", "plugin_paths.py")
 NAMING = os.path.join(SHARED_DIR, "scripts", "naming.py")
 FETCH_IMAGES = os.path.join(
-    SKILLS_DIR, "clip-clean", "scripts", "fetch_images.py")
+    SKILLS_DIR, "clipping-clean", "scripts", "fetch_images.py")
 SCAN_VAULT = os.path.join(
     SKILLS_DIR, "wiki-lint", "scripts", "scan_vault.py")
 
@@ -2542,7 +2542,7 @@ FIG_NAME_MIN = 292
 NAMING_CONSUMERS = {
     os.path.join("pdf-organize", "scripts", "organize.py"):
         ("looks_canonical", "CANONICAL"),
-    os.path.join("fig-extract", "scripts", "batch_extract.py"):
+    os.path.join("figure-extract", "scripts", "batch_extract.py"):
         ("chapter_book_stem", "core_stem"),
     os.path.join("paper-summarize", "scripts", "paper_scan.py"):
         ("chapter_book_stem", "core_stem", "looks_canonical"),
@@ -2802,7 +2802,7 @@ def _check_naming_claims(rep, check, canon):
 def check_source_filename(rep, conv):
     """One implementation of the source-filename rule, and both skills use it.
 
-    pdf-organize writes these names and fig-extract reads them to
+    pdf-organize writes these names and figure-extract reads them to
     tell a book's chapters from the book.  The rule had two homes and they
     disagreed about where a `_src` tail sits -- in both directions at once, so
     no chapter name satisfied both consumers.  One choice re-renamed every
@@ -3482,17 +3482,17 @@ def check_figure_naming(rep, conv):
                      "CONVENTIONS.md §8a publishes %s"
                      % (sorted(produced), sorted(clipping_exts)))
         else:
-            rep.ok(check, "clip-clean's %d output extensions match "
+            rep.ok(check, "clipping-clean's %d output extensions match "
                    "CONVENTIONS.md §8a" % len(clipping_exts))
         missed = [ext for ext in sorted(clipping_exts)
                   if not scanner.EMB.fullmatch("![[X_fig_1.%s]]" % ext)
                   or not scanner.IMG_EMBED.search("![[X_fig_1.%s]]" % ext)]
         if missed:
-            rep.fail(check, "wiki-lint does not recognize clip-clean "
+            rep.fail(check, "wiki-lint does not recognize clipping-clean "
                      "output extension(s) as local image embeds: %s"
                      % ", ".join(missed))
         else:
-            rep.ok(check, "wiki-lint recognizes all %d clip-clean "
+            rep.ok(check, "wiki-lint recognizes all %d clipping-clean "
                    "output extensions" % len(clipping_exts))
 
     producers = _parse_producer_table(conv)
@@ -3601,7 +3601,7 @@ def check_figure_naming(rep, conv):
             rep.fail(check,
                      "%s pins an extension onto the consumer glob (`%s`). "
                      "CONVENTIONS.md §8a: match `%s` and accept ANY extension "
-                     "-- PDFs give .png, and clip-clean can emit "
+                     "-- PDFs give .png, and clipping-clean can emit "
                      ".png/.jpg/.gif/.webp/.svg/.avif/.bmp/.tiff/.ico, "
                      "and a pinned extension drops every one of the others "
                      "silently."
@@ -3746,7 +3746,7 @@ def check_figure_naming(rep, conv):
     #      PDF embeds are exempt (§6's legacy PDF-path notes).
     n_embeds = 0
     for skill, path, text in walk_skill_files():
-        if not path.endswith(".md") or skill == "clip-clean":
+        if not path.endswith(".md") or skill == "clipping-clean":
             continue
         lines = text.splitlines()
         for m in FIG_EMBED_RE.finditer(text):
@@ -4378,7 +4378,7 @@ def check_yaml_examples(rep, conv):
                 continue
             # A source-note example without `format:` is the *raw* Web Clipper
             # capture, which several files legitimately show as input.  The
-            # `format:` key is precisely what clip-clean adds, so its
+            # `format:` key is precisely what clipping-clean adds, so its
             # presence is what marks a fence as this plugin's own output.
             if name == "source-note" and "format" not in keys:
                 continue
@@ -5177,7 +5177,7 @@ DECORATED_SKILL = re.compile(
 BACKTICKED_SKILL = re.compile(r"`([a-z][a-z0-9]*(?:-[a-z0-9]+)+)`")
 
 #: A trailing extension makes the token a filename, not a skill name
-#: (`wiki-builder-suggestions.md`, `MOCs/machine-learning.md`).
+#: (`Reviews/wiki-build-suggestions.md`, `MOCs/machine-learning.md`).
 FILENAME_TAIL = re.compile(r"\.[a-z0-9]{1,5}\b")
 
 #: A backticked name used as an *agent*: it owns something ("`pdf-organize`'s
@@ -5228,7 +5228,7 @@ def _loose_frame_applies(sent, roster):
     return len(spans) <= 1 or any(s in roster for s in spans)
 
 #: Lines that route work with an arrow -- README's "figure images ->
-#: fig-extract" and the pipeline diagram.
+#: figure-extract" and the pipeline diagram.
 ARROW_ROUTE = re.compile(r"(?:->|→|▶)\s*\**`?([a-z][a-z0-9]*(?:-[a-z0-9]+)+)")
 
 #: A markdown table: a contiguous run of lines starting with `|`.
@@ -6177,16 +6177,16 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/slugify.py": 74,  # device-name restrictions removed
     "shared/scripts/vault_artifacts.py": 39,
     "shared/scripts/yaml_scalars.py": 8,
-    "skills/clip-clean/scripts/dedup_index.py": 149,
-    "skills/clip-clean/scripts/fetch_images.py": 466,
-    "skills/clip-clean/scripts/slug.py": 133,  # device-name guards removed
+    "skills/clipping-clean/scripts/dedup_index.py": 149,
+    "skills/clipping-clean/scripts/fetch_images.py": 466,
+    "skills/clipping-clean/scripts/slug.py": 133,  # device-name guards removed
     "skills/paper-summarize/scripts/note_lint.py": 203,
     "skills/paper-summarize/scripts/paper_scan.py": 144,
     "skills/paper-summarize/scripts/paper_text.py": 49,
-    "skills/fig-extract/scripts/auto_fig_bbox.py": 338,
-    "skills/fig-extract/scripts/batch_extract.py": 332,
-    "skills/fig-extract/scripts/extract_figures.py": 173,
-    "skills/fig-extract/scripts/render_page.py": 66,
+    "skills/figure-extract/scripts/auto_fig_bbox.py": 338,
+    "skills/figure-extract/scripts/batch_extract.py": 332,
+    "skills/figure-extract/scripts/extract_figures.py": 173,
+    "skills/figure-extract/scripts/render_page.py": 66,
     "skills/pdf-organize/scripts/organize.py": 260,
     "skills/wiki-add/scripts/backlog.py": 28,
     "skills/wiki-build/scripts/find_collisions.py": 67,
@@ -6330,7 +6330,7 @@ def check_self_test(rep, conv):
     the run has to end at exit 0 having reported a complete, all-passing tally
     of at least :data:`SELFTEST_MIN_CASES` cases.
 
-    The four fig-extract suites REQUIRE PyMuPDF: without it they exit
+    The four figure-extract suites REQUIRE PyMuPDF: without it they exit
     non-zero before running a case, and this check FAILs them for it. That is
     the honest report -- they are not testing anything in that environment --
     but it does mean this harness needs the imaging libraries installed, and
@@ -7536,7 +7536,7 @@ def check_safe_write_programmatic_api(rep, _conv):
         "builder": os.path.join(SKILLS_DIR, "wiki-build", "SKILL.md"),
         "linter": os.path.join(SKILLS_DIR, "wiki-lint", "SKILL.md"),
         "clipping": os.path.join(
-            SKILLS_DIR, "clip-clean", "SKILL.md"),
+            SKILLS_DIR, "clipping-clean", "SKILL.md"),
         "paper": os.path.join(
             SKILLS_DIR, "paper-summarize", "SKILL.md"),
     }

@@ -71,7 +71,7 @@ three-task lint. It does not extract unrelated new entities from the source.
 
 ### Producer-mapped dependency repair mode
 
-When `clip-clean` or another producer supplies an exact old → new note
+When `clipping-clean` or another producer supplies an exact old → new note
 and image mapping plus a complete dependency report, an authorized repair of
 the reported Wiki/MOC blockers uses the
 [external-artifact repair protocol](references/external-artifact-repair.md).
@@ -86,7 +86,7 @@ Do not reinterpret it as ordinary link hygiene or a text replacement.
 - Validate embeds against `<vault>/Sources/Images` with `--images` on every real scan. The same inventory reports nested files/directories, recognizable staging residue, unreadable scope, and grouped case/NFC-equivalent basename collisions; these folder findings never authorize moving, renaming, or deleting anything.
 - Task 3 writes `<vault>/MOCs/<discipline-slug>.md`, one per tag with at least one member, including `MOCs/misc.md` for entries tagged only `#misc`, and uses `[[MOCs/<discipline-slug>]]` for discipline root parents and MOC links. Generated tree links use full extensionless vault-relative entry paths such as `[[Wiki/machine-learning|Machine learning]]`. MOCs remain outside `Wiki/` so they are not scanned as entries. Misc uses `[[MOCs/misc]]` and a flat title-ordered list.
 - Inventory existing canonical and legacy root MOCs before creating a file. An explicitly requested [layout migration](references/hierarchy.md#migrate-the-legacy-layout) uses guarded publication and repairs only proven references; whole-outline regeneration still honors its Task 3 closure. Recognized discipline and misc MOCs are fully generated notes; unknown files and suggestion logs remain outside that ownership. Reject `MOCs/` folder collisions/symlinks and duplicate MOC owners; preserve the connected closure when blocked.
-- Proposal logs are `<vault>/wiki-builder-suggestions.md`, `wiki-linter-suggestions.md`, and `wiki-notes-suggestions.md`. They are advisory vault artifacts, never permission to edit either skill.
+- Suggestion logs live in `<vault>/Reviews/`: one for each current skill plus `wiki-notes-suggestions.md` for note-content gaps. Follow [shared suggestion rules](../../shared/SUGGESTIONS.md) for destination ownership and verified issue removal; these logs never authorize editing skill sources during maintenance.
 
 ## Scope and order of a run
 
@@ -112,7 +112,7 @@ python3 '<skill>/scripts/scan_vault.py' '<vault>/Wiki' \
 
 Use the selected paths, keep the output filename unique to this run, and retain it for subsequent slices. A fixed shared temporary filename can supply another vault's results. The image directory must exist; an invalid path is a usage error, not evidence that every figure is missing. Treat `hierarchy_diagnostic` as report-only evidence from the previously written hierarchy. Its placement, unresolved-parent, parent-state, MOC-inventory/legacy-path, MOC-file, MOC-consistency, self-parent, and cycle worklists do not authorize a write; a fresh builder note normally has a placement gap until Task 3 runs. An `unreadable` MOC state or unsafe/ambiguous path ownership blocks the connected closure described in [hierarchy](references/hierarchy.md). Obsolete MOC markers and other non-outline formatting are repair findings, not extra approval gates.
 
-**The scanner reads and reports; it never fixes the vault.** Save its initial `run_timestamp` for this run's backlog updates. Read the JSON in slices rather than loading a large vault report wholesale. Use `inventory`, `discipline_tags`, and `untagged_entries` for scope; `problems` for QC/link work; `collision_candidates` and `rename_candidates` for proposals; `backfill_candidates` for Task 2; `image_folder_findings` for report-only layout/staging/readability/portable-name observations; and `hierarchy_diagnostic` for Task 3. Counts and `problem_tally` also provide report/proposal evidence.
+**The scanner reads and reports; it never fixes the vault.** Save its initial `run_timestamp` for backlog updates unless a coordinating run already supplied one. Read the JSON in slices rather than loading a large vault report wholesale. Use `inventory`, `discipline_tags`, and `untagged_entries` for scope; `problems` for QC/link work; `collision_candidates` and `rename_candidates` for proposals; `backfill_candidates` for Task 2; `image_folder_findings` for report-only layout/staging/readability/portable-name observations; and `hierarchy_diagnostic` for Task 3. Counts and `problem_tally` also provide report/proposal evidence.
 
 Read [the scanner contract](references/scanner.md) if it exits non-zero, a field or finding is unfamiliar, or `item16`/`item18` needs interpretation. Read [QC actions](references/qc-items.md) before fixing any Task 1 finding. Do not infer “fix in place” from a key's name: unreadable files, ambiguous identity, user-state problems, and valid user configuration may all appear in `problems` without authorizing an edit.
 
@@ -170,7 +170,7 @@ an approved pass rewrites every resolving surface and then re-scans. Duplicate
 spellings within one alias list remain format fixes; duplicate or synonym
 entries are reported rather than merged.
 
-**Refresh after QC edits.** Re-run Step 0 before Task 2/3 consumes its worklists when QC changed entries. Use the refreshed inventory, aliases, backfill candidates, discipline tags, and hierarchy diagnostics, but retain the initial scan timestamp for this run's logs and the prior group evidence needed to close any retagging from or to misc.
+**Refresh after QC edits.** Re-run Step 0 before Task 2/3 consumes its worklists when QC changed entries. Use the refreshed inventory, aliases, backfill candidates, discipline tags, and hierarchy diagnostics, but retain the selected logical-run timestamp for logs, including an inherited coordinator timestamp, and the prior group evidence needed to close any retagging from or to misc.
 
 ## Task 2 — Link hygiene
 
@@ -221,7 +221,7 @@ preserved. Re-derive any incomplete active closure before declaring completion.
 
 Read [reports and backlogs](references/backlogs.md) when closing the run and **before any log edit**. Report inventory, autonomous agent-review coverage as `agent-reviewed/readable in-scope entries` with skipped files named, actual QC/link/hierarchy changes, every prune, untouched counts, optional separately scoped proposals, unresolved findings, and checks actually performed. Outstanding proposals do not prevent the current run from completing. Keep “proposed,” “applied,” and “not validated” distinct.
 
-Include evidence-bound proposals for builder, linter, and note content, or say none surfaced; never invent filler. Propose skill improvements without editing skill sources. For logs, read existing items first, reuse stable IDs, append only new proposals, and change only an existing item's `Seen` line on recurrence. Preserve prior content and verify it remains. No new/recurring item means no log write; only the user clears or removes backlog items. A report-only/no-apply run writes no logs.
+Use [shared suggestion rules](../../shared/SUGGESTIONS.md) for `Reviews/wiki-lint-suggestions.md`, applicable consumed-producer logs, and the note-content log. Record only evidenced issues, update existing items without duplicates, and remove specifically verified resolved items while preserving unrelated content. Keep the run report in the conversation; do not create dated review notes. A report-only/no-apply run writes no logs.
 
 ## Reference index
 

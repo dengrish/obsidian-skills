@@ -32,7 +32,7 @@ notes, source links and figures all depend on the
 
 Before scanning a fresh vault, confirm that the resolved vault anchor, the
 configured `Sources/PDFs/` inventory root and the selected PDF(s) already exist.
-Then create only this skill's canonical output folders, `Articles/` and
+For content output, create only this skill's canonical folders, `Articles/` and
 `Sources/Images/`, if absent. Do not create a missing source root or a guessed
 vault path: either means the anchor or input is wrong, not that the inventory is
 empty.
@@ -88,7 +88,7 @@ there are no figures: inspect pages for unnumbered, non-English or image-only
 exhibits. If figures exist, invoke the existing extractor over this PDF alone:
 
 ```bash
-python3 '<plugin>/skills/fig-extract/scripts/batch_extract.py' \
+python3 '<plugin>/skills/figure-extract/scripts/batch_extract.py' \
     --src '<pdf path>' --out '<vault>/Sources/Images'
 ```
 
@@ -96,7 +96,7 @@ Read its diagnostics and re-run the scan before selecting exhibits. Respect its
 naming/ownership refusals. When it flags a bad automatic crop, complete the
 extractor's own review-and-explicit-crop workflow, then re-run both extraction
 and this scan. Do not invent a separate crop or rename procedure in this skill.
-This preparation is the only point that invokes `fig-extract`.
+This preparation is the only point that invokes `figure-extract`.
 Thereafter the image folder is read-only. If extraction cannot recover a needed
 image, retain the supported claim in prose and report the gap; never invent an
 embed or substitute another figure.
@@ -272,3 +272,10 @@ basis, methodological or mode-relevant availability information, padded or null
 dates, low-confidence calls, approved rewrites and explicit scan overrides.
 Do not report inapplicable availability labels or out-of-scope governance fields
 as missing disclosures.
+
+At closeout, read [shared suggestion-log rules](../../shared/SUGGESTIONS.md).
+Record evidenced improvements to this skill in `Reviews/paper-summarize-suggestions.md`.
+Route proven defects in upstream outputs actually consumed this run to the
+applicable producer logs. Keep open issues only; remove only items whose
+resolution was specifically verified under that protocol, and add no proposals
+when none are supported.

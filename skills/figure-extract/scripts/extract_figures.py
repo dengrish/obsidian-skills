@@ -2092,7 +2092,7 @@ def main(argv=None):
     # parent-directory hop writes outside `--out` entirely — `--stem
     # ../../x` lands two directories above the Sources/Images folder. A stem is
     # a filename fragment, not a path; refuse anything else, the same way
-    # clip-clean's `fetch_images.py` refuses a `--slug`.
+    # clipping-clean's `fetch_images.py` refuses a `--slug`.
     for bad in ("/", os.sep, "\x00"):
         if bad and bad in args.stem:
             sys.exit(f"--stem {args.stem!r} contains {bad!r}: a stem is a "
@@ -2346,7 +2346,7 @@ def main(argv=None):
             manifest[manifest_key(manifest, name) or name] = publication[1]
             manifest_snapshot = write_manifest(
                 manifest_path, manifest,
-                "# fig-extract output manifest.\n"
+                "# figure-extract output manifest.\n"
                 "# One per line: <figure filename><TAB><sha256 of the bytes written>\n",
                 expected=manifest_snapshot)
         except (OSError, UnicodeError, ValueError) as exc:

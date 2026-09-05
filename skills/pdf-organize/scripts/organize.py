@@ -112,7 +112,7 @@ if _here != _shared:
     _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
-#: The filename shape is the plugin's, not this skill's: `fig-extract`
+#: The filename shape is the plugin's, not this skill's: `figure-extract`
 #: reads the same rule to tell a book's chapters from the book.  It lives in
 #: `shared/scripts/naming.py` and is imported, never restated — the two used to
 #: hold separate copies and they disagreed about where `_src` sits, which cost
@@ -329,7 +329,7 @@ def _nfc_low(name):
 
 #: Folders holding a note whose *filename* is a source's stem.  Today that is
 #: `Articles/` alone: it holds paper-summarize's summary notes, which take the
-#: PDF's stem, alongside clip-clean's cleaned clippings, which do not.
+#: PDF's stem, alongside clipping-clean's cleaned clippings, which do not.
 #: A note folder missing from this tuple is a note the rename silently leaves
 #: behind under a stem nothing looks for, so a vault reorganisation adds its
 #: new folder here before it does anything else.
@@ -518,7 +518,7 @@ def _note_is_about(path, stem):
     The origin is item 1 of the block-form `sources:` list (schema 2b, the
     shape both producers write today), with the retired scalar `source:` read
     as a fallback for unmigrated notes — the same two-key logic as
-    clip-clean's `dedup_index.read_source`.
+    clipping-clean's `dedup_index.read_source`.
 
     Unknown or malformed metadata establishes no ownership. A legacy note
     without a source field is accepted only when its entire body is an embed
@@ -1548,7 +1548,7 @@ def _image_ownership_blockers(vault, source, keyed):
                 blockers.append(
                     "%s has no matching current PDF ownership record. "
                     "Matching a source stem is not ownership; explicitly adopt "
-                    "or repair this legacy figure through fig-extract "
+                    "or repair this legacy figure through figure-extract "
                     "before renaming the PDF." % image_path)
         return blockers
     except (OSError, UnicodeError, ValueError) as exc:
@@ -1762,7 +1762,7 @@ def plan_rename(vault, path, new_basename, dest=None):
     # machinery below is extension-agnostic and was once pointed at any
     # text-bearing format, so the narrowing has to be a guard rather than a
     # habit: `Sources/PDFs/` is named for what it holds, `split_book` needs a
-    # PDF, `fig-extract` reads only PDFs, and `paper-summarize` globs
+    # PDF, `figure-extract` reads only PDFs, and `paper-summarize` globs
     # `*.pdf`.  A `.epub` renamed into that folder is a file every consumer
     # walks straight past, and nothing reports it.
     #
@@ -2504,7 +2504,7 @@ def _resolve(chapters, text, n_pages, out_dir, taken, book_stem=None):
         chap_stem = os.path.splitext(name)[0]
         if not looks_canonical(chap_stem, is_stem=True):
             problems.append("%r: not a name pdf-organize produces, so "
-                            "fig-extract and paper-summarize will "
+                            "figure-extract and paper-summarize will "
                             "refuse it as unorganized. Use "
                             "Author_Work_Year_NN_ChapterName.pdf with a "
                             "two-digit NN (CONVENTIONS.md 1a)." % name)
@@ -2750,7 +2750,7 @@ def split_book(pdf_path, chapters, out_dir, taken=None, verbose=True):
     # chapter name to give: `Book_2_01_Intro` is not canonical, because the
     # disambiguator may not precede the chapter segment, and
     # `Book_01_Intro_2` reads as a chapter of the OTHER book — so
-    # fig-extract would file this book's chapter figures under that
+    # figure-extract would file this book's chapter figures under that
     # one.  Neither failure raises, which is why it is stopped here rather than
     # at the point the names collide.
     #
@@ -3879,7 +3879,7 @@ def _selftest():
 
     # 17. A `_N`-disambiguated book is not split: its chapters have no legal
     #     name, and minting one anyway files this book's chapters — and every
-    #     figure fig-extract pulls from them — under the OTHER book.
+    #     figure figure-extract pulls from them — under the OTHER book.
     #     The book file is deliberately never created: a refusal naming the
     #     disambiguator therefore proves the guard ran before anything was
     #     read, which is the whole point of putting it at the top.  The others

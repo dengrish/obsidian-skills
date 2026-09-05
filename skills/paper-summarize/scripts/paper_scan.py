@@ -9,7 +9,7 @@ that decide a run:
     vault's portable NFC/case identity **and that note's `sources:` item 1 (or
     its legacy scalar `source:`) names this PDF**.  The second half is not
     pedantry: `Articles/` is shared with
-    clip-clean, whose notes carry the same `LastName_Thing_Year.md`
+    clipping-clean, whose notes carry the same `LastName_Thing_Year.md`
     shape, so a bare existence check would read somebody else's clipping as
     "already summarised" — or, worse, overwrite it.  A note of the right name
     with the wrong `source:` is a `collision`, and nothing is written.
@@ -45,7 +45,7 @@ from this whole-tree result. A row outside the requested scope is context for
 identity and book detection, not authorization to summarize that source.
 
 `--notes` is the flat `Articles/` folder, which this skill shares with
-clip-clean. A note whose basename differs only by case or Unicode
+clipping-clean. A note whose basename differs only by case or Unicode
 normalization still occupies the target's portable identity. Its origin decides
 whether it is ours; a foreign or multiply occupied identity is a `collision`,
 never a second note or an overwrite.
@@ -133,7 +133,7 @@ STATUSES = ("book", "chapter", "unorganized", "collision", "legacy",
 #: is nested under some other key and is not the note's -- reading one turns
 #: a note that is ours into a `collision` and stops the paper ever being
 #: summarised.  Case-insensitive, and the same two-key logic as
-#: clip-clean's `dedup_index.read_source`: the two skills read each
+#: clipping-clean's `dedup_index.read_source`: the two skills read each
 #: other's notes out of one folder and must agree about what is parseable.
 _SOURCES_KEY_RE = re.compile(r"\Asources\s*:\s*(.*)\Z", re.I)
 _SOURCES_ITEM_RE = re.compile(r"\A[ \t]*-[ \t]+(.*)\Z")
@@ -321,7 +321,7 @@ def note_source(path):
     The origin is item 1 of the block-form `sources:` list (schema 2b — the
     shape this skill itself writes); a legacy scalar `source:` is read as a
     fallback so an unmigrated note stays recognisable.  Deliberately the same
-    two-key logic and tolerances as clip-clean's
+    two-key logic and tolerances as clipping-clean's
     `dedup_index.read_source` — a BOM, leading blank lines before the opening
     fence, quote and trailing-comment stripping, and a value returned only
     once the CLOSING fence has been seen (an unterminated `---` is not
@@ -379,7 +379,7 @@ def note_source(path):
 
 
 #: A body that is nothing but one PDF embed.  That is the shape of the light
-#: embed-note an older clip-clean wrote for a PDF; those notes are
+#: embed-note an older clipping-clean wrote for a PDF; those notes are
 #: still on disk in long-lived vaults, they now sit in `Articles/`, and they
 #: carry exactly the `source:` a summary note carries.  Without this probe one
 #: reads as this skill's own output and the paper is never summarised, while
@@ -532,7 +532,7 @@ def classify(stem, books, note_state, allow_unorganized=False,
     `unorganized` whenever it carried a name pdf-organize had not produced,
     which routes a scoping decision to the user as a naming complaint.  For an
     ordinary canonical tree the order is not observable, and it is written this
-    way to match `fig-extract`'s, where it *is* observable.
+    way to match `figure-extract`'s, where it *is* observable.
 
     `include_chapters` is what explicit single-file naming sets: a chapter is
     skipped by a folder sweep and processed when the user names it.
@@ -824,7 +824,7 @@ _CLASSIFY_CASES = [
     # `looks_canonical` rejects the spelling, so the skip beats the refusal
     ("Prince_UDL_2026_src_01_Intro", {"Prince_UDL_2026"}, "absent", "chapter"),
     # A book whose chapters are spelled in another case shares their portable
-    # source identity, and fig-extract pairs them. Raw-string
+    # source identity, and figure-extract pairs them. Raw-string
     # comparison called this book `new`, so the model
     # was sent to extract from the book AND from every chapter, filing the same
     # figures twice under two stems that never collide (§8).
@@ -1060,7 +1060,7 @@ def run_self_test():
         ('---\nsources:\n  - "[[Doe_Foo_2025.pdf]]"\n\nprose\n', None),
         # --- the retired scalar, still read so legacy notes keep working ---
         ('---\nsource: "[[Doe_Foo_2025.pdf]]"\n---\n', "[[Doe_Foo_2025.pdf]]"),
-        # A capitalised key: clip-clean's reader folds case, and a
+        # A capitalised key: clipping-clean's reader folds case, and a
         # disagreement here turns one skill's note into the other's collision.
         ('---\nSource: "[[Doe_Foo_2025.pdf]]"\n---\n', "[[Doe_Foo_2025.pdf]]"),
         # An INDENTED `source:` is nested under another key and is not ours.
@@ -1331,7 +1331,7 @@ def run_self_test():
     _mk("Sources/PDFs/Prince_UDL_2026_src.pdf")
     _mk("Sources/PDFs/Prince_UDL_2026/Prince_UDL_2026_01_Intro.pdf")
     # The same pairing with the two halves spelled in different cases.
-    # fig-extract pairs these; this scan called the book `new`.
+    # figure-extract pairs these; this scan called the book `new`.
     _mk("Sources/PDFs/Kuhn_X_2012.pdf")
     _mk("Sources/PDFs/Kuhn_X_2012/kuhn_x_2012_01_Intro.pdf")
     _mk("Articles/Smith_Done_2024.md",

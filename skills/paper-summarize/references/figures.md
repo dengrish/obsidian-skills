@@ -17,7 +17,7 @@ format](note-format.md) owns the complete note shape and body modes.
 Only files that are already in `Sources/Images/` under this PDF's stem. The scan lists them; nothing else is embeddable.
 
 - **Never invent a filename.** An embed of a file that does not exist renders in Obsidian as ordinary text — no broken-image marker, no error, nothing. It is the most silently-wrong thing this skill can write.
-- **Never extract, crop or rename one.** PDF figure cropping has exactly one implementation in this plugin, in `fig-extract`, and a second copy is the bug the shared layer exists to prevent (`CONVENTIONS.md` §8b).
+- **Never extract, crop or rename one.** PDF figure cropping has exactly one implementation in this plugin, in `figure-extract`, and a second copy is the bug the shared layer exists to prevent (`CONVENTIONS.md` §8b).
 - **Do not re-run extraction during drafting.** Prepare the figure inventory during [intake](../SKILL.md#1-select-and-inventory-the-work), before selecting exhibits. An unresolved extraction gap is reported; carry the supported claim in prose.
 
 The scan matches on `[source_stem]_fig` and accepts any extension, which is §8a's consumer glob exactly. Matching the tighter `_fig_` instead would make figures written before this plugin's naming converged invisible — and invisible in the way that raises nothing (`CONVENTIONS.md` §8a, §8c).

@@ -13,6 +13,15 @@ The user's intended workflow is to edit the skills in this repository and
 push the changes to that GitHub repository to update the plugin. Make lasting
 skill changes here, rather than editing installed plugin cache copies.
 
+An explicit request to review or improve this plugin authorizes fixing source
+issues during that task, with relevant validation and Git history as the
+durable record. Do not leave an actionable authorized fix merely as a proposal
+or create dated `obsidian-plugin-review-*` or `wiki-review-*` reports by default.
+Leave existing reports untouched unless their migration or removal is requested.
+Routine installed-skill runs never edit skill sources; all suggestion-log
+attribution, formatting, verified-resolution cleanup, and migration rules live
+in `shared/SUGGESTIONS.md`.
+
 Skill sources live in `skills/`; shared conventions and helpers live in
 `shared/`. Author shared plugin metadata in `.claude-plugin/plugin.json`.
 `tools/build_plugin.py` generates `.codex-plugin/plugin.json` from it, with

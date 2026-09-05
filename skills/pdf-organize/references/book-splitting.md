@@ -20,7 +20,7 @@ names or not proceed. The helper refuses occupied targets; an existing set
 is not permission to overwrite or delete it.
 
 Keep chapters in the shared source tree so recursive consumers meet them.
-`fig-extract` extracts from chapters rather than the whole book when
+`figure-extract` extracts from chapters rather than the whole book when
 both are in its run. An ordinary `paper-summarize` folder sweep skips recognized
 books and chapters; a named chapter, or the skill's explicit chapter/book
 override, can still select one. Scoping a figure run to the book file itself

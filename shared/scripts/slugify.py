@@ -247,7 +247,7 @@ def preprocess(title: str) -> str:
 #: eventual ``open()``/``mv`` dies with ENAMETOOLONG -- an unhandled crash in
 #: whichever consumer got there first, which is exactly the failure class the
 #: empty-slug guard below exists to turn into an ask-the-user error.
-#: clip-clean's ``slug.py`` bounds its article stems the same way
+#: clipping-clean's ``slug.py`` bounds its article stems the same way
 #: (``MAX_SLUG_BYTES``); a wiki slug carries no ``_fig_<N>`` suffix, so its
 #: budget is simply the filesystem's.
 MAX_STEM_BYTES = 250

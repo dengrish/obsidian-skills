@@ -23,7 +23,7 @@ it does not independently rename unrelated notes or images.
   `[pdf_stem]_fig*`, including older accepted names, but **every image moves only
   when the figure manifest records its exact current digest**. A same-stem
   clipping, a deleted note, or no visible rival does not prove PDF ownership.
-  An unrecorded legacy image must first pass fig-extract's explicit
+  An unrecorded legacy image must first pass figure-extract's explicit
   legacy-adoption procedure against the named PDF. Do not infer ownership from
   the `_fig` name, delete a conflicting occupant, or reset a manifest to make
   the plan pass.

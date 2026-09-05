@@ -143,7 +143,7 @@ class CompatibilityTests(unittest.TestCase):
     def test_runtime_probe_enforces_supported_dependency_floors(self):
         runtime = (ROOT / "shared/RUNTIME.md").read_text(encoding="utf-8")
         figure_requirements = (
-            ROOT / "skills/fig-extract/scripts/requirements.txt"
+            ROOT / "skills/figure-extract/scripts/requirements.txt"
         ).read_text(encoding="utf-8")
         root_requirements = (ROOT / "requirements.txt").read_text(
             encoding="utf-8")
@@ -199,7 +199,7 @@ class CompatibilityTests(unittest.TestCase):
         self.assertEqual(claude_skills.resolve(), codex_skills.resolve())
         skills = sorted(claude_skills.glob("*/SKILL.md"))
         self.assertEqual({path.parent.name for path in skills}, {
-            "clip-clean", "paper-summarize", "fig-extract",
+            "clipping-clean", "paper-summarize", "figure-extract",
             "pdf-organize", "wiki-add", "wiki-build", "wiki-lint",
         })
         for path in skills:
@@ -949,7 +949,7 @@ read: false
         conventions = load("convention_caption_scope", ROOT / "tests/test_conventions.py")
         conv = (ROOT / "shared/CONVENTIONS.md").read_text(encoding="utf-8")
         for skill, caption, expected in (
-            ("clip-clean", "", 0),
+            ("clipping-clean", "", 0),
             ("paper-summarize", "", 1),
             ("wiki-build", "*The study design.*", 0),
         ):
@@ -966,7 +966,7 @@ read: false
                                         for row in report.by_status("FAIL")))
 
     def test_figure_helper_help_works_before_dependencies_are_installed(self):
-        scripts = ROOT / "skills/fig-extract/scripts"
+        scripts = ROOT / "skills/figure-extract/scripts"
         invocations = {
             "auto_fig_bbox.py": ["missing.pdf"],
             "batch_extract.py": ["--src", "missing.pdf", "--out", "images"],
@@ -1082,10 +1082,10 @@ read: false
                  ROOT / "skills/paper-summarize/scripts/paper_text.py",
                  pdf, "--pages"),
                 ("automatic crop", 0,
-                 ROOT / "skills/fig-extract/scripts/auto_fig_bbox.py",
+                 ROOT / "skills/figure-extract/scripts/auto_fig_bbox.py",
                  pdf, "--pages", "1", "--emit", "extract"),
                 ("explicit crop", 0,
-                 ROOT / "skills/fig-extract/scripts/extract_figures.py",
+                 ROOT / "skills/figure-extract/scripts/extract_figures.py",
                  pdf, "--out", crops, "--stem", pdf.stem,
                  "--crop", "1:1:50,50,300,300", "--dpi", "72",
                  "--no-caption-check"),
@@ -1103,7 +1103,7 @@ read: false
                     self.assertNotIn(b"UnicodeEncodeError", output)
 
     def test_ambiguous_numeric_hosts_cannot_depend_on_resolver(self):
-        fetch = load("fetch_images", ROOT / "skills/clip-clean/scripts/fetch_images.py")
+        fetch = load("fetch_images", ROOT / "skills/clipping-clean/scripts/fetch_images.py")
         public = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("177.0.0.1", 0))]
         with patch.object(fetch.socket, "getaddrinfo", return_value=public) as resolve:
             for host in ("0177.0.0.1", "0x7f000001", "2130706433", "127.1"):
@@ -1114,7 +1114,7 @@ read: false
             resolve.assert_called_once()
 
     def test_generated_commands_preserve_interpreter_and_literal_paths(self):
-        scripts = ROOT / "skills/fig-extract/scripts"
+        scripts = ROOT / "skills/figure-extract/scripts"
         sys.path.insert(0, str(scripts))
         try:
             batch = load("batch_extract", scripts / "batch_extract.py")

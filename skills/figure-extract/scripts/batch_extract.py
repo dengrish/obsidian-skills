@@ -198,7 +198,7 @@ from vault_artifacts import (inventory_pdfs, inventory_source_figures,
 #: Obsidian hides it, and it can never be mistaken for a figure, because
 #: every consumer globs `[source_stem]_fig*` and this matches no stem.
 REVIEW_HEADER = (
-    "# fig-extract review marks.\n"
+    "# figure-extract review marks.\n"
     "# One per line: <pdf_stem><TAB><figure label>[<TAB>note]\n"
     "# A flagged bbox listed here is reported as reviewed, not as needing\n"
     "# review, so a crop you have already checked (or fixed explicitly) stops\n"
@@ -209,7 +209,7 @@ REVIEW_HEADER = (
 #: and hidden for the same reasons (Obsidian ignores dotfiles, and it matches
 #: no `[source_stem]_fig*` glob).
 #:
-#: `Sources/Images/` is SHARED. `clip-clean` writes `<slug>_fig_<N>.
+#: `Sources/Images/` is SHARED. `clipping-clean` writes `<slug>_fig_<N>.
 #: <ext>` into the same folder under the same convention (CONVENTIONS.md 8b),
 #: so a clipping whose slug equals a paper's stem can already own
 #: `<stem>_fig_1.png` — and the idempotent "already exists" skip then reports
@@ -220,7 +220,7 @@ REVIEW_HEADER = (
 #: on the skip path is already being computed for the duplicate check, so
 #: keeping it costs nothing on the common re-run path.
 MANIFEST_HEADER = (
-    "# fig-extract output manifest.\n"
+    "# figure-extract output manifest.\n"
     "# One per line: <figure filename><TAB><sha256 of the bytes written>\n"
     "# This is how a re-run tells its own output from another skill's file at\n"
     "# the same name (Sources/Images/ is shared -- see CONVENTIONS.md 8b).\n"
@@ -1151,7 +1151,7 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                                if manifest is not None else ("", None))
                 if why:
                     # NOT a skip. `Sources/Images/` is shared with
-                    # clip-clean, and a file at this name that this
+                    # clipping-clean, and a file at this name that this
                     # extractor did not write means the paper's own figure has
                     # never been extracted — while `1 skipped (already exist)`
                     # says the opposite, in the words of an ordinary re-run.
@@ -1515,11 +1515,11 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
             for fig_num, path, why in r.get("occupied", ()):
                 print(f"  {pdf_path.name}  Fig {fig_num}  → {path}  ({why})")
         print("  These figures were NOT extracted and NOT skipped: Sources/Images/ is shared,")
-        print("  and clip-clean writes <slug>_fig_<N> there too, so a clipping whose")
+        print("  and clipping-clean writes <slug>_fig_<N> there too, so a clipping whose")
         print("  slug equals this PDF's stem owns the name. Left as a skip, the PDF's real")
         print("  figure is never written and every consumer embeds the other file as it.")
         print("  Inspect each one. If it belongs to the clipping, route its note-and-image")
-        print("  rename through clip-clean; if the PDF identity must change, route it")
+        print("  rename through clipping-clean; if the PDF identity must change, route it")
         print("  through pdf-organize. If it is this extractor's own from an")
         print("  older run, inspect it and reconcile that exact ownership record first.")
         print("  --overwrite replaces verified own output only; it never claims a foreign file.")
@@ -2532,7 +2532,7 @@ def run_self_test():
               False)
 
         # --- ownership of an output name that already exists ----------------
-        # `Sources/Images/` is shared: clip-clean writes
+        # `Sources/Images/` is shared: clipping-clean writes
         # `<slug>_fig_<N>.<ext>` into it too, so a clipping whose slug equals a
         # paper's stem can already own `<stem>_fig_1.png`. The skip reported
         # `1 extracted, 1 skipped (already exist)` — an ordinary re-run, word
@@ -3110,7 +3110,7 @@ def run_self_test():
            "Occupied filenames:   1" in text)
         ok("...and says they were neither extracted nor skipped",
            "NOT extracted and NOT skipped" in text)
-        ok("...naming the other producer", "clip-clean" in text)
+        ok("...naming the other producer", "clipping-clean" in text)
         text = summary({a: r, tiny_pdf: tiny, Path(partial_pdf): part,
                         Path(junk): bad_open})
         ok("the summary keeps the unreadable file out of the OCR bucket",

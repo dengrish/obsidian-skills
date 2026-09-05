@@ -2423,7 +2423,7 @@ def _refuse_existing(attachments, slug, index, overwrite, extension=None,
     for name in owned:
         if _manifest_name_key(name).startswith(prefix):
             raise ValueError(f"{name} is recorded in the PDF figure manifest — "
-                             "clip-clean cannot replace that producer's figure")
+                             "clipping-clean cannot replace that producer's figure")
     hit = _glob_slug(attachments, slug, f"_fig_{index}.*")
     if overwrite:
         if owner is None and _published is None:
@@ -2752,7 +2752,7 @@ def _same_file(a, b):
         return False
 
 
-#: Figure-label spellings only `fig-extract` produces (CONVENTIONS
+#: Figure-label spellings only `figure-extract` produces (CONVENTIONS
 #: 8b): a supplementary marker, or a hierarchical `1-2` chapter label. This
 #: skill writes plain integers, so a file carrying one of these under a stem
 #: is a PDF's figure, not a clipping's.
@@ -2914,7 +2914,7 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources,
     while part of its figure set stayed at the old one, unmentioned.
 
     `Sources/Images/` is FLAT and shared: the same stem can belong to a PDF
-    whose figures `fig-extract` wrote. Globbing the stem and renaming
+    whose figures `figure-extract` wrote. Globbing the stem and renaming
     what comes back moved three of those out from under a summary note whose
     embeds then resolved to nothing. Two guards, both cheap: a label spelling
     only the other producer writes, and the required `sources` inventory, where
@@ -2980,7 +2980,7 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources,
         elif any(name.startswith(destination_prefix) for name in owned):
             entry["error"] = "destination is recorded in the PDF figure manifest"
         elif _PDF_ONLY_LABEL.search(tail):
-            entry["error"] = ("label spelling only fig-extract "
+            entry["error"] = ("label spelling only figure-extract "
                               "writes; this file is a PDF's figure, not this "
                               "note's")
         elif sum(_manifest_name_key(name) == _manifest_name_key(base)
@@ -5596,7 +5596,7 @@ continues here`
               ([False, False],
                sorted(["Doe_Old_2025" + old_s1, "Doe_Old_2025_fig_1.png"])))
         check("...naming the label as the reason, as it does for `_fig_S1`",
-              sum("fig-extract" in (e["error"] or "") for e in out), 1)
+              sum("figure-extract" in (e["error"] or "") for e in out), 1)
 
         # ALL OR NOTHING. One occupied destination used to stop the loop with
         # the earlier files already renamed: the note's embeds point at one
@@ -5811,7 +5811,7 @@ continues here`
         check("a supplementary label refuses the set",
               [e["ok"] for e in out], [False, False])
         check("...naming the label as the reason",
-              sum("fig-extract" in (e["error"] or "") for e in out), 1)
+              sum("figure-extract" in (e["error"] or "") for e in out), 1)
         check("...and moves nothing",
               sorted(os.listdir(folder)),
               ["Doe_Foo_2025_fig_1.png", "Doe_Foo_2025_fig_S1.png"])
@@ -5819,7 +5819,7 @@ continues here`
                       "_fig_2.1.png"):
             folder = figures("Doe_Bar_2025", ("_fig_1.png", label))
             out = checked_rename(folder, "Doe_Bar_2025", "New_Note_2026")
-            check("a %s label is fig-extract's" % label,
+            check("a %s label is figure-extract's" % label,
                   any(e["ok"] for e in out), False)
         # ...and a plain integer label is this skill's own, so it renames
         folder = figures("Doe_Baz_2025", ("_fig_1.png", "_fig_12.png"))

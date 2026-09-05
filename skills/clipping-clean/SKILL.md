@@ -1,9 +1,9 @@
 ---
-name: clip-clean
+name: clipping-clean
 description: 'Process Web Clipper Markdown captures into cleaned notes in Articles/ with verified metadata, a summary and local images, preserving the raw capture. Use for one clipping or the Markdown captures in Inbox/. PDF filing, figure extraction and document summaries use the PDF skills.'
 ---
 
-# Clip Clean
+# Clipping Clean
 
 A capture produces one polished note in `Articles/` and its images in the flat
 `Sources/Images/` folder. The raw clipping stays untouched. The cleaned body
@@ -30,7 +30,7 @@ Read other convention sections only where linked by the workflow.
 - `Inbox/` is read-only. Do not move, delete or rewrite raws. For a mixed inbox,
   take only `.md` captures; PDFs needing a name and home go to `pdf-organize`.
   Route other PDF requests by deliverable: an explanation or reading note to
-  `paper-summarize`, and images to `fig-extract`. Routing identifies
+  `paper-summarize`, and images to `figure-extract`. Routing identifies
   the owning skill; it does not widen a Markdown-only request. Process PDFs only when the user
   selected the whole inbox or PDFs; otherwise name them and leave them.
   Name unsupported files and leave them.
@@ -41,7 +41,7 @@ Read other convention sections only where linked by the workflow.
 
 Before scanning a fresh vault, confirm that the resolved vault anchor and the
 selected `Inbox/` or named input already exist. Then create the two canonical
-output folders this skill may need, `Articles/` and `Sources/Images/`, if they
+content output folders, `Articles/` and `Sources/Images/`, if they
 are absent; creating `Sources/` as the structural parent is allowed. Do not
 create a missing input path or any guessed vault directory, because that turns
 a path error into an apparently empty inventory.
@@ -312,3 +312,10 @@ skips to a count and filenames. Report:
 The polished clipping may later be a source for `wiki-build`; this run writes
 no wiki entries and no wiki-state field. [Edge-case navigation](references/edge-cases.md)
 points to the owning procedure for uncommon inputs without adding another rule set.
+
+At closeout, read [shared suggestion-log rules](../../shared/SUGGESTIONS.md).
+Record evidenced improvements to this skill in `Reviews/clipping-clean-suggestions.md`.
+Route proven defects in upstream outputs actually consumed this run to the
+applicable producer logs. Keep open issues only; remove only items whose
+resolution was specifically verified under that protocol, and add no proposals
+when none are supported.

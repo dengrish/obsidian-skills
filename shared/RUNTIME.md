@@ -17,7 +17,10 @@ when a step requires a reference; do not load every reference preemptively.
 ownership rules. Read its §§1b–1c safety rules before handling external
 values or content; consult §1's layout only when resolving folders or routes,
 then follow the active workflow's links for other subjects. Its §§5 and 10
-concern development and troubleshooting.
+concern development and troubleshooting. At closeout, read
+[`SUGGESTIONS.md`](SUGGESTIONS.md) for the shared `Reviews/` logs: record only
+evidenced issues in the owning skill or consumed producer's log, remove
+specifically verified resolutions, and make no log writes on a report-only run.
 
 Before creating, replacing, moving, or removing a vault artifact, follow the
 shared [safe-write protocol](SAFE_WRITES.md). A scan or preflight does not

@@ -3099,7 +3099,7 @@ def scan(wiki, images=None):
         for _start, _end, url in markdown_image_spans(strip_code(e["body"])):
             if not re.match(r"https?://", url, re.IGNORECASE):
                 continue
-            problems.append((sl,"item12/remote-image",f'remote image embed ![]({url[:50]}…) — VALID, DO NOT REWRITE (wiki-build mandates markdown syntax for remote URLs); report only, as a candidate for localizing by re-running clip-clean on the source clipping'))
+            problems.append((sl,"item12/remote-image",f'remote image embed ![]({url[:50]}…) — VALID, DO NOT REWRITE (wiki-build mandates markdown syntax for remote URLs); report only, as a candidate for localizing by re-running clipping-clean on the source clipping'))
         # Image embeds need an italic *caption* on the very next line. Read
         # embed positions from listing-masked text so syntax samples in
         # fenced/indented code do not prescribe a caption edit; read the
@@ -3162,7 +3162,7 @@ def scan(wiki, images=None):
                                  f'(Obsidian renders this as plain text, silently) — REPORT '
                                  f'ONLY, DO NOT DELETE THE EMBED OR ITS CAPTION. There are two '
                                  f'repairs and neither is the linter\'s: the figure was never '
-                                 f'extracted (run fig-extract on the source), or an '
+                                 f'extracted (run figure-extract on the source), or an '
                                  f'approved source rename renamed it with the source '
                                  f'(CONVENTIONS §1a), in which case the embed is rewritten to '
                                  f'the new stem. Deleting the embed throws away the one record '
@@ -4709,7 +4709,7 @@ def scan(wiki, images=None):
         return result
 
     return {
-        # stamp the suggestion-log appends with this
+        # stamp suggestion-item observations with this; rescans are the same run
         "run_timestamp": f"{datetime.datetime.now():%Y-%m-%d %H:%M}",
         "wiki_path": os.path.abspath(wiki),
         "vault_root": vault_root,
@@ -6983,7 +6983,7 @@ def run_self_test():
         check("...and it says not to delete the embed (the repair is at the "
               "filesystem, or is a §1a rename)",
               "DO NOT DELETE" in _st_msg(res, "figured", "item12/missing-image"), True)
-        check("an .ico emitted by clip-clean uses the same existence "
+        check("an .ico emitted by clipping-clean uses the same existence "
               "check as every other supported image extension",
               "fig_100.ico" in _st_msg(res, "figured", "item12/missing-image"), True)
         check("NEAR MISS: an embed present under the portable identity — bare, "

@@ -207,7 +207,7 @@ Use a neutral encyclopedic register: direct, precise, and free of conversational
    reliable source or narrow attribution to the active source or named report.
    If independent support changes the published note, it must be a durable vault
    source listed in `sources:`; process an existing capture through
-   `clip-clean`, or acquire it through `wiki-add`'s research-source
+   `clipping-clean`, or acquire it through `wiki-add`'s research-source
    workflow when that topic-list skill is in scope. A transient check may
    justify omitting a ranking, but never adding or
    broadening one. Without support, omit the ranking while preserving the

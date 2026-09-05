@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """The canonical source-filename rule — the one implementation in this plugin.
 
-`pdf-organize` writes these names and `fig-extract` reads them, and
+`pdf-organize` writes these names and `figure-extract` reads them, and
 until this module existed each held its own copy of the shape: `CANONICAL` in
 `pdf-organize/scripts/organize.py`, and a hand-written `CHAPTER_STEM_RE` in
-`fig-extract/scripts/batch_extract.py`.  The two disagreed about where
+`figure-extract/scripts/batch_extract.py`.  The two disagreed about where
 a `_src` suffix sits, and the disagreement was total in both directions:
 
     Prince_UDL_2026_src_01_Intro   canonical: NO    a chapter: YES

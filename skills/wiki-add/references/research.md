@@ -28,7 +28,7 @@ Inspect current source ownership using the builder's [source-intake rules](../..
 For a webpage, use the clipping producer's complete URL index:
 
 ```bash
-python3 '<plugin>/skills/clip-clean/scripts/dedup_index.py' \
+python3 '<plugin>/skills/clipping-clean/scripts/dedup_index.py' \
     '<vault>/Articles' --url '<verified page URL>'
 ```
 
@@ -76,7 +76,7 @@ reconstructing the whole page or importing unrelated sections. Distinguish
 quoted words from paraphrase. Neither the marker nor attribution grants rights
 to reproduce text or images.
 
-Verify metadata with the clipping producer's [metadata guidance](../../clip-clean/references/metadata-verification.md),
+Verify metadata with the clipping producer's [metadata guidance](../../clipping-clean/references/metadata-verification.md),
 using its evidence ordering, not its raw-capture or reprocessing path.
 Use the actual page title, `Article` or `Post` as appropriate, exactly one
 double-quoted verified original URL in `sources:`, and `created` set to today.
@@ -84,8 +84,8 @@ Use `author: []` if no human author is verified and `published: null` with an
 `nd` filename when undated; never substitute access/update dates for publication
 or invent an author. Apply §2b's description, tags and `read: false` rules.
 
-Use the clipping producer's [source filename rules and slug helper](../../clip-clean/references/filename-slug.md).
-Before images or publication, follow its [source-stem ownership checks](../../clip-clean/SKILL.md#2-verify-metadata-and-settle-the-final-name):
+Use the clipping producer's [source filename rules and slug helper](../../clipping-clean/references/filename-slug.md).
+Before images or publication, follow its [source-stem ownership checks](../../clipping-clean/SKILL.md#2-verify-metadata-and-settle-the-final-name):
 `dedup_index.py --url ... --slug ...` and `fetch_images.py preflight` inspect
 the Articles namespace, recursive PDF stems and image prefixes. Recheck the URL
 as well as the name; a new matching owner returns to reuse, never overwrite.
@@ -135,7 +135,7 @@ reasons to omit/report the optional image, not invent an exhibit or broaden the
 topic. Existing source images may be reused read-only under those same rules.
 
 For a new webpage extract, use the clipping producer's
-[stage/place image helper](../../clip-clean/references/images.md#download-and-publish),
+[stage/place image helper](../../clipping-clean/references/images.md#download-and-publish),
 retaining its network, byte-sniffing, owner-note and exclusive-write guards.
 Only selected source images need downloading. There is no custom downloader or
 overwrite fallback. Inspect successful staged images; omit failed optional
@@ -145,7 +145,7 @@ verify the attachments before publishing a dependent Wiki entry. A placement
 failure after source publication is partial state to reconcile/report, never
 successful completion of an unresolved embed.
 
-For a newly acquired PDF, use [fig-extract](../../fig-extract/SKILL.md)
+For a newly acquired PDF, use [figure-extract](../../figure-extract/SKILL.md)
 only on that scoped source when a useful figure is selected. Its canonical
 source, collision and guarded-write requirements still apply; never replace a
 pre-existing figure or trigger repairs of existing artifacts. A figure that

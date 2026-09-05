@@ -12,9 +12,9 @@ Choose by the requested result, not just the input's file type.
 | Requested result | Skill | Main input and output |
 |---|---|---|
 | Rename, file or split PDFs | [pdf-organize](skills/pdf-organize/SKILL.md) | PDFs → organized PDFs and chapter files |
-| Extract figure images | [fig-extract](skills/fig-extract/SKILL.md) | PDFs → cropped PNGs in `Sources/Images/` |
+| Extract figure images | [figure-extract](skills/figure-extract/SKILL.md) | PDFs → cropped PNGs in `Sources/Images/` |
 | Explain a paper, chapter, report, standard or publication notice | [paper-summarize](skills/paper-summarize/SKILL.md) | PDF → reading note in `Articles/` |
-| Clean Web Clipper captures | [clip-clean](skills/clip-clean/SKILL.md) | raw capture → cleaned note in `Articles/` |
+| Clean Web Clipper captures | [clipping-clean](skills/clipping-clean/SKILL.md) | raw capture → cleaned note in `Articles/` |
 | Build or enrich wiki entries from new evidence | [wiki-build](skills/wiki-build/SKILL.md) | PDF or URL-origin source note → entries in `Wiki/` |
 | Research and add missing requested topics | [wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md` → durable sources and new requested entries only |
 | Audit, correct or explicitly refactor existing wiki entries | [wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources or an exact producer mapping → scoped repairs, links, parents and MOCs |
@@ -30,11 +30,11 @@ The routes branch; a document does not have to pass through every skill.
 
 ```text
 Inbox/*.pdf → pdf-organize → Sources/PDFs/
-                                ├─ fig-extract → Sources/Images/
+                                ├─ figure-extract → Sources/Images/
                                 ├─ paper-summarize → Articles/ reading note
                                 └─ wiki-build → Wiki/
 
-Inbox/*.md → clip-clean → Articles/ cleaned clipping
+Inbox/*.md → clipping-clean → Articles/ cleaned clipping
                                      └─ wiki-build → Wiki/
 
 add-to-wiki.md → wiki-add → durable sources → missing requested entries in Wiki/
@@ -84,7 +84,9 @@ without filesystem access cannot run the vault workflow.
 
 Use `obsidian:wiki-build` and `obsidian:wiki-lint` for the renamed Wiki skills.
 These replace `obsidian:wiki-builder` and `obsidian:wiki-linter`; update explicit
-invocations after upgrading. Suggestion-log names stay unchanged. MOCs are
+invocations after upgrading. Suggestion logs use current skill names under
+`Reviews/`; existing logs can be explicitly migrated under the
+[shared protocol](shared/SUGGESTIONS.md). MOCs are
 fully generated nested outlines without marker comments. The current MOC
 layout is `MOCs/<discipline>.md`; existing
 root `<discipline>-moc.md` files need an explicitly requested
@@ -144,7 +146,9 @@ it and any per-run path overrides through [RUNTIME.md](shared/RUNTIME.md).
 │   ├── <discipline>.md       e.g. machine-learning.md (no -moc suffix)
 │   └── misc.md               Wiki entries tagged #misc
 ├── add-to-wiki.md            wiki-add's requested-topic queue
-└── *-suggestions.md          the linter's three proposal logs
+└── Reviews/                  open suggestion logs
+    ├── <current-skill>-suggestions.md  one per skill
+    └── wiki-notes-suggestions.md      note-content backlog
 ```
 
 PDFs move out of `Inbox/`; raw clippings stay as the record of what was
@@ -166,6 +170,14 @@ use `"#misc"` alone; these entries appear alphabetically by title in
 `MOCs/misc.md` with parent `[[MOCs/misc]]`. Blank, missing, malformed, or mixed
 misc/specific tags remain QC errors until resolved. New entries from wiki-build/wiki-add still start with
 `parents: []`; wiki-lint supplies their hierarchy placement.
+
+Every skill can record evidenced improvements in its own suggestion log or
+the log of a producer whose output it used. Verified resolutions are removed
+automatically; logs hold only open issues. Routine runs do not edit skill
+sources. An explicit plugin review fixes source issues with validation and Git
+history instead of creating dated review reports; existing reports remain
+untouched. The [shared suggestion protocol](shared/SUGGESTIONS.md) owns these
+rules and log format.
 
 Workflow scratch lives in a hidden `.obsidian-skills-tmp-<unique-id>` directory
 outside the vault, never a visible `_to_delete` folder. Skills clean their own
@@ -190,6 +202,7 @@ The full path/ownership table is in
 | [shared/RUNTIME.md](shared/RUNTIME.md) | Host-independent paths, Python setup and tool fallbacks |
 | [shared/CONVENTIONS.md](shared/CONVENTIONS.md) | Shared layout, schemas, enums, naming, links and ownership |
 | [shared/SAFE_WRITES.md](shared/SAFE_WRITES.md) | Exclusive creation, conditional replacement, cleanup and rollback safety |
+| [shared/SUGGESTIONS.md](shared/SUGGESTIONS.md) | Reviews/ log attribution, open-issue lifecycle, format and publication |
 | `skills/<name>/scripts/` | Executable helpers and their embedded self-tests |
 | `shared/scripts/` | Canonical implementations used by several skills |
 | [AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md) | Repository contribution instructions, with one authored copy |

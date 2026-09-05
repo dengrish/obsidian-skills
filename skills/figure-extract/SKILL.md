@@ -1,5 +1,5 @@
 ---
-name: fig-extract
+name: figure-extract
 description: >
   Extract whole figures from one PDF or a folder of PDFs into cropped PNGs,
   with captions removed and filenames tied to the source. Use for requests
@@ -9,7 +9,7 @@ description: >
   chapters use pdf-organize.
 ---
 
-# Fig Extract
+# Figure Extract
 
 ## Setup and scope
 
@@ -22,7 +22,7 @@ caption detection or crop logic into a separate script.
 The deliverable is **whole-figure PNGs**, not PDF renames, summaries, or wiki
 entries. `paper-summarize` owns document explanations and reading notes,
 `pdf-organize` owns source naming and chapter splitting, `wiki-build` owns
-new wiki entries, `wiki-lint` owns existing wiki maintenance, and `clip-clean` owns
+new wiki entries, `wiki-lint` owns existing wiki maintenance, and `clipping-clean` owns
 Web Clipper captures. An unspecified “process this PDF” request needs a
 stated deliverable before selecting a workflow.
 
@@ -172,3 +172,10 @@ failed PDFs, remaining warnings, and explicit crop repairs. State what visual
 review was completed and any review marks recorded. Other PDFs may have succeeded
 during a nonzero run; report that partial outcome without calling the whole
 request complete. Preserve originals, legacy panels, and all unrelated images.
+
+At closeout, read [shared suggestion-log rules](../../shared/SUGGESTIONS.md).
+Record evidenced improvements to this skill in `Reviews/figure-extract-suggestions.md`.
+Route proven defects in upstream outputs actually consumed this run to the
+applicable producer logs. Keep open issues only; remove only items whose
+resolution was specifically verified under that protocol, and add no proposals
+when none are supported.

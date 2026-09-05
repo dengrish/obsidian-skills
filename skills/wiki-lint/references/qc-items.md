@@ -295,7 +295,7 @@ allowance.
 an Obsidian embed by bare basename, while an external clipping image may remain
 standard Markdown with its URL. A remote embed is report-only; converting its
 syntax would break it. Report that reprocessing the source clipping with
-`clip-clean` can localize it. Every existing image or Markdown table has a brief
+`clipping-clean` can localize it. Every existing image or Markdown table has a brief
 plain-text italic caption immediately below it; inline LaTeX is the only
 caption markup. Keep exhibits beside the prose they clarify, never before the
 opener, detached at the end, or grouped as a gallery; one motivating paragraph
@@ -363,7 +363,7 @@ Apply builder [item 15](../../wiki-build/SKILL.md#quality-checklist) during
 semantic review. Identify an unnecessary, tangential, repetitive, or overly
 long example by purpose, never by sentence or note length. Trimming substantive
 example content or verifying its values needs the source, so record a specific
-proposal in `wiki-notes-suggestions.md`. Source/tutorial scaffolding and
+proposal in `Reviews/wiki-notes-suggestions.md`. Source/tutorial scaffolding and
 application catalogs that do not serve the entry belong to item 9; `Software`
 API catalogs belong to item 6.
 

@@ -28,7 +28,7 @@ One JSON object with these keys.
 
 | key | type | contents |
 | --- | --- | --- |
-| `run_timestamp` | string | `YYYY-MM-DD HH:MM` at scan time. This is the stamp for the suggestion-log dated blocks — use it, do not re-derive a time. |
+| `run_timestamp` | string | `YYYY-MM-DD HH:MM` at scan time. Use the initial value for suggestion-item `Seen` timestamps unless a coordinating run supplied its own; rescans and invoked skills do not count as additional runs. |
 | `wiki_path` | string | absolute path actually scanned (confirms an overridden path took effect) |
 | `vault_root` | string | inferred vault root used only for report-only canonical `MOCs/` and legacy root-MOC file and parent-resolution diagnostics: derived from a supplied `Sources/Images` path, otherwise the nearest `.obsidian` ancestor, otherwise the parent of `wiki_path` |
 | `inventory` | object | `entries` is the count and `slugs` is the sorted list of entry filenames without `.md`. The resolution model contributes at most one parsed owner for a portable basename collision; every parseable physical file still receives local QC. |

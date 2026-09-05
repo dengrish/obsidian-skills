@@ -39,7 +39,7 @@ and a hit found only that way is reported as ``loose``, never as a clean one.
 The paths are the user's and the needles come from the document, so both are
 single-quoted (`CONVENTIONS.md` §1b).
 
-PyMuPDF is used when present (fig-extract already depends on it) and
+PyMuPDF is used when present (figure-extract already depends on it) and
 pypdf otherwise; neither is imported until a PDF is actually opened.
 """
 
@@ -97,7 +97,7 @@ _FIG_MORE = re.compile(
 
 _MAX_FIG_RANGE = 20
 
-#: The marker set is exactly `fig-extract`'s, and deliberately so:
+#: The marker set is exactly `figure-extract`'s, and deliberately so:
 #: a marker this counts but the extractor cannot match scores a figure under a
 #: label no run can ever write, so the tiebreak recommends carrying a file that
 #: does not exist.  `Supporting Information` used to be here and is not a

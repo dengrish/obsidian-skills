@@ -4,7 +4,7 @@ description: >
   Rename PDFs from their content, file vault Inbox PDFs in Sources/PDFs/, and
   split books into chapter PDFs while keeping the original. Use for one PDF
   or a folder: "rename this PDF", "organize my papers", "process my inbox", or
-  "split this book". PDFs only; inbox-wide requests also use clip-clean
+  "split this book". PDFs only; inbox-wide requests also use clipping-clean
   for Markdown captures and leave other file types untouched.
 ---
 
@@ -20,7 +20,7 @@ PDF reading and splitting use `pypdf`; the rename helper needs only Python's
 standard library.
 
 This skill changes PDF names and locations and creates chapter PDFs. For
-figure images use `fig-extract`; for a document explanation or reading
+figure images use `figure-extract`; for a document explanation or reading
 note use `paper-summarize`; for new wiki entries use `wiki-build`; for
 existing wiki maintenance use `wiki-lint`. A bare PDF with no stated deliverable needs
 routing clarification, not an automatic chain of all these skills.
@@ -37,8 +37,8 @@ routing clarification, not an automatic chain of all these skills.
 - Outside the vault, rename in place with **no `--vault` or `--dest`** and
   report that vault-wide checks did not run. Do not import an external source
   merely because the user requested a better name.
-- Leave non-PDFs untouched and report them separately: Markdown captures in
-  `Inbox/` belong to `clip-clean`; other file types have no filing
+- Leave non-PDF input files untouched and report them separately: Markdown captures in
+  `Inbox/` belong to `clipping-clean`; other file types have no filing
   skill here. An inbox-wide request includes the clipping workflow, whose raw
   captures stay in `Inbox/`. A PDF-only request does not authorize processing
   those captures.
@@ -220,3 +220,10 @@ Separate already-canonical files, already-split books, pending authorization,
 and failures. List untouched Markdown captures and other non-PDF files in
 their own groups so an inbox-wide request does not falsely read as empty.
 Do not delete originals, figures, or raw captures as cleanup.
+
+At closeout, read [shared suggestion-log rules](../../shared/SUGGESTIONS.md).
+Record evidenced improvements to this skill in `Reviews/pdf-organize-suggestions.md`.
+Route proven defects in upstream outputs actually consumed this run to the
+applicable producer logs. Keep open issues only; remove only items whose
+resolution was specifically verified under that protocol, and add no proposals
+when none are supported.
