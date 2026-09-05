@@ -101,7 +101,7 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-dev.txt
-            skills/pdf-figure-extractor/scripts/requirements.txt
+            skills/fig-extract/scripts/requirements.txt
       - name: Update the package installer
         run: python -m pip install --upgrade pip
       - name: Generate exact dependency-floor constraints

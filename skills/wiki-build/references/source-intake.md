@@ -10,7 +10,7 @@ Read this before resolving a Markdown source, uncertain source identity, or inco
 
 A `.md` handed to this skill may be a *clipping* note — real prose, and a source in its own right — or a note **about a PDF** that is already sitting in `Sources/PDFs/`, which is the same document under a second name. The two are indistinguishable by path, and the difference decides both which file gets read and which name the already-processed check has to probe.
 
-**The tell is `sources:` item 1, not the body.** Per `CONVENTIONS.md` §2b, a note about a document opens its `sources:` list with the document's origin — a **URL** item for a web clipping, and a **wikilink to a local PDF** for a note about that PDF. Read the complete frontmatter with the validated parser below. A block list, a flow list, a comment and a YAML escape must produce the same decoded source identity. The line after `sources:` is not necessarily its first item. A `paper-summarizer` note may contain hundreds of words of structured summary while an older embed-note contains just `![[Something.pdf]]`; neither body tells you which source to process.
+**The tell is `sources:` item 1, not the body.** Per `CONVENTIONS.md` §2b, a note about a document opens its `sources:` list with the document's origin — a **URL** item for a web clipping, and a **wikilink to a local PDF** for a note about that PDF. Read the complete frontmatter with the validated parser below. A block list, a flow list, a comment and a YAML escape must produce the same decoded source identity. The line after `sources:` is not necessarily its first item. A `paper-summarize` note may contain hundreds of words of structured summary while an older embed-note contains just `![[Something.pdf]]`; neither body tells you which source to process.
 
 ```bash
 python3 - '<skill>/scripts' '<cleaned-note>.md' <<'PY'
@@ -34,7 +34,7 @@ PY
 ## Check prior coverage
 
 ```bash
-IDX=$(mktemp -t vault-index.XXXXXX)
+IDX=$(mktemp '<scratch>/vault-index.XXXXXX')
 python3 '<skill>/scripts/vault_index.py' '<coverage-tree>' \
   --source 'Foo.pdf' --source 'Foo.md' -o "$IDX"
 ```
@@ -85,7 +85,7 @@ extracts follow [the research-source contract](../../wiki-add/references/researc
 read them as attributed evidence selections, not full captured pages. Their
 use does not replay an ordinary whole-source run or relax its skip/merge rules.
 
-Read the whole source in one pass — extraction needs relationships across sections, not within chunks. PDFs: first pass the `SKILL.md` canonical-name gate, then use the host's available PDF-reading tools, `pdftotext -layout`, or PyMuPDF, rasterizing pages where you need to see figure content (for your comprehension only — embedded figures come from `Sources/Images/`, never from your rasterization). Markdown: read directly. For very long sources, map the headings first, then read in entity-dense passes; keep one source inside one run. Note the canonical on-disk filename, and track **the physical page where each entity is introduced** — each entity gets its own `#page=N`. Sources are real files on disk. A bare URL needs a Web Clipper capture processed by `clipping-processor`; pasted text needs an existing user-named vault file or the user's exact destination before it can support persistent wiki citations.
+Read the whole source in one pass — extraction needs relationships across sections, not within chunks. PDFs: first pass the `SKILL.md` canonical-name gate, then use the host's available PDF-reading tools, `pdftotext -layout`, or PyMuPDF, rasterizing pages where you need to see figure content (for your comprehension only — embedded figures come from `Sources/Images/`, never from your rasterization). Markdown: read directly. For very long sources, map the headings first, then read in entity-dense passes; keep one source inside one run. Note the canonical on-disk filename, and track **the physical page where each entity is introduced** — each entity gets its own `#page=N`. Sources are real files on disk. A bare URL needs a Web Clipper capture processed by `clip-clean`; pasted text needs an existing user-named vault file or the user's exact destination before it can support persistent wiki citations.
 
 **Classify the source.** *Primary* = teaching durable knowledge is its main purpose (papers, chapters, reviews, substantive explainers, lecture notes) → the substance test alone gates extraction. *Secondary* = primarily transient signal (news, earnings, announcements, opinion posts) → the durability test applies **in addition**.
 

@@ -270,7 +270,6 @@ def build_targets(index):
             targets.append({
                 "slug": slug, "via": "filename", "alias": None,
                 "entry_slug": slug, "path": rec.get("relpath") or rec.get("path"),
-                "is_stub": bool(rec.get("is_stub")),
                 "entry_errors": list(rec.get("errors") or ()),
             })
         title = rec.get("title")
@@ -284,7 +283,6 @@ def build_targets(index):
                     "slug": title_slug, "via": "title", "alias": None,
                     "entry_slug": slug,
                     "path": rec.get("relpath") or rec.get("path"),
-                    "is_stub": bool(rec.get("is_stub")),
                     "entry_errors": list(rec.get("errors") or ()),
                 })
         for alias in rec.get("aliases") or []:
@@ -305,7 +303,6 @@ def build_targets(index):
                 "slug": alias_slug, "via": "alias", "alias": alias,
                 "entry_slug": slug,
                 "path": rec.get("relpath") or rec.get("path"),
-                "is_stub": bool(rec.get("is_stub")),
                 "entry_errors": list(rec.get("errors") or ()),
             })
     return targets
@@ -449,7 +446,6 @@ def check_candidate(title, index, use_stem=True, use_superset=True, peers=None,
                 "matched_via": target["via"],
                 "entry_slug": target["entry_slug"],
                 "entry_path": target["path"],
-                "is_stub": target["is_stub"],
                 "entry_errors": target.get("entry_errors", []),
                 "implies": _implies(probe),
             }
@@ -588,13 +584,13 @@ def check_candidates(titles, index, use_stem=True, use_superset=True,
 #
 #     python3 find_collisions.py --test
 
-def _st_entry_text(title, aliases=(), stub=False):
+def _st_entry_text(title, aliases=()):
     lines = ["---", 'title: "%s"' % title, "type: Concept"]
     if aliases:
         lines.append("aliases:")
         lines.extend('  - "%s"' % a for a in aliases)
     lines.append("sources:")
-    lines.append('  - "stub"' if stub else '  - "[[Doe_X_2025.pdf#page=2]]"')
+    lines.append('  - "[[Doe_X_2025.pdf#page=2]]"')
     lines += ["created: 2026-01-01", "updated: 2026-01-02",
               'description: "A worked example used by the self-test."',
               "tags:", '  - "#statistics"', "parents: []", "read: false", "---",

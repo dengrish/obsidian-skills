@@ -10,9 +10,9 @@
 
 - **Cas9** → `#biology` (a molecular biology system, even though its headline uses are medical).
 - **Thermodynamic entropy** → `#physics` (other fields use the concept; physics is the canonical home).
-- **Herbert Simon** → `#economics`, `#psychology`, `#computer-science` (a polymath — multi-tagged rather than left blank).
+- **Herbert Simon** → `#economics`, `#psychology`, `#computer-science` (a polymath — multi-tagged rather than assigned `#misc`).
 
-Blank is legitimate when nothing owns the entity: `Asilomar Conference on Recombinant DNA` → *leave blank*.
+When no specific discipline owns the entity, use `#misc` alone: `Asilomar Conference on Recombinant DNA` → `#misc`. Never leave Wiki tags blank or combine misc with a specific discipline.
 
 ## Math vs statistics vs ML
 

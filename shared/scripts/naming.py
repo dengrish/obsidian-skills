@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """The canonical source-filename rule — the one implementation in this plugin.
 
-`pdf-organizer` writes these names and `pdf-figure-extractor` reads them, and
+`pdf-organize` writes these names and `fig-extract` reads them, and
 until this module existed each held its own copy of the shape: `CANONICAL` in
-`pdf-organizer/scripts/organize.py`, and a hand-written `CHAPTER_STEM_RE` in
-`pdf-figure-extractor/scripts/batch_extract.py`.  The two disagreed about where
+`pdf-organize/scripts/organize.py`, and a hand-written `CHAPTER_STEM_RE` in
+`fig-extract/scripts/batch_extract.py`.  The two disagreed about where
 a `_src` suffix sits, and the disagreement was total in both directions:
 
     Prince_UDL_2026_src_01_Intro   canonical: NO    a chapter: YES
@@ -73,7 +73,7 @@ __all__ = [
 #: What a name this plugin *writes* may contain: ASCII, no quotes, no shell or
 #: glob metacharacter, and a leading alphanumeric so a written name can never
 #: be a dotfile.  Input names are unconstrained — cleaning those up is
-#: pdf-organizer's whole job.  CONVENTIONS.md §1b is why this is narrow: a
+#: pdf-organize's whole job.  CONVENTIONS.md §1b is why this is narrow: a
 #: filename is untrusted text and reaches tools this plugin does not control.
 SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 
@@ -121,7 +121,7 @@ _FULL_RE = re.compile(r"\A(?P<base>%s(?:_[0-9]{2}_[A-Za-z0-9-]+)?)"
 #:
 #: `mid` exists only to recognise the legacy mis-spelling `<book>_src_NN_Name`
 #: — the form the two former implementations disagreed about.  It is not
-#: canonical (`looks_canonical` still rejects it, so pdf-organizer re-renames
+#: canonical (`looks_canonical` still rejects it, so pdf-organize re-renames
 #: it), but recognising it here means a vault that already holds those files
 #: still gets its book skipped instead of every figure written twice.
 _CHAPTER_RE = re.compile(r"\A(?P<book>%s)(?P<mid>(?:_src)?)"
@@ -299,7 +299,7 @@ TEST_CASES = [
     ("Doe_Study_2025_٢",                   False, None),
 ]
 
-#: Names `SAFE_NAME` must refuse.  Each is a real shape pdf-organizer has been
+#: Names `SAFE_NAME` must refuse.  Each is a real shape pdf-organize has been
 #: handed, and each would reach a tool this plugin does not control.
 UNSAFE_NAMES = [
     "It's a draft.pdf", "O'Reilly Media.pdf", "Prince_UDL_2026.pdf (1)",

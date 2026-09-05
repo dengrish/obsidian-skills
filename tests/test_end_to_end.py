@@ -161,7 +161,7 @@ class WorkflowTests(unittest.TestCase):
 
     def scan_papers(self):
         return json.loads(self.run_script(
-            "skills/paper-summarizer/scripts/paper_scan.py", "--src", self.pdfs,
+            "skills/paper-summarize/scripts/paper_scan.py", "--src", self.pdfs,
             "--notes", self.notes, "--images", self.images, "--json").stdout)
 
     def test_paper_note_lint_applies_the_selected_nonempirical_mode(self):
@@ -169,14 +169,14 @@ class WorkflowTests(unittest.TestCase):
         note.write_text(notice_note("Doe_Correction_2025"),
                         encoding="utf-8", newline="\n")
         missing_mode = self.run_script(
-            "skills/paper-summarizer/scripts/note_lint.py", note, expected=2)
+            "skills/paper-summarize/scripts/note_lint.py", note, expected=2)
         self.assertIn("--mode is required", missing_mode.stderr)
-        self.run_script("skills/paper-summarizer/scripts/note_lint.py", note,
+        self.run_script("skills/paper-summarize/scripts/note_lint.py", note,
                         "--mode", "notice")
 
     def test_pdf_repair_and_rename_preserve_notes_images_and_ledgers(self):
-        organizer = "skills/pdf-organizer/scripts/organize.py"
-        batch = "skills/pdf-figure-extractor/scripts/batch_extract.py"
+        organizer = "skills/pdf-organize/scripts/organize.py"
+        batch = "skills/fig-extract/scripts/batch_extract.py"
         source = self.vault / "Inbox/download.pdf"
         self.make_pdf(source)
         self.run_script(organizer, "rename", "--vault", self.vault, source,
@@ -187,7 +187,7 @@ class WorkflowTests(unittest.TestCase):
         self.run_script(batch, "--src", pdf, "--out", self.images, "--dpi", 72)
         figure = self.images / "Doe_Study_2025_fig_1.png"
         automatic = digest(figure)
-        self.run_script("skills/pdf-figure-extractor/scripts/extract_figures.py", pdf,
+        self.run_script("skills/fig-extract/scripts/extract_figures.py", pdf,
                         "--out", self.images, "--stem", pdf.stem,
                         "--crop", "1:1:120,170,400,300", "--dpi", 72, "--overwrite")
         repaired = digest(figure)
@@ -199,7 +199,7 @@ class WorkflowTests(unittest.TestCase):
 
         note = self.notes / "Doe_Study_2025.md"
         note.write_text(summary_note(pdf.stem), encoding="utf-8", newline="\n")
-        self.run_script("skills/paper-summarizer/scripts/note_lint.py", note,
+        self.run_script("skills/paper-summarize/scripts/note_lint.py", note,
                         "--mode", "empirical", "--images", self.images)
         self.assertEqual(self.scan_papers()["counts"]["done"], 1)
         references = self.vault / "Wiki/reference.md"
@@ -223,12 +223,12 @@ class WorkflowTests(unittest.TestCase):
             self.assertNotIn("Doe_Study_2025", record)
         self.run_script(batch, "--src", renamed, "--out", self.images, "--dpi", 72)
         self.assertEqual(digest(renamed_figure), repaired)
-        self.run_script("skills/paper-summarizer/scripts/note_lint.py", renamed_note,
+        self.run_script("skills/paper-summarize/scripts/note_lint.py", renamed_note,
                         "--mode", "empirical", "--images", self.images)
         self.assertEqual(self.scan_papers()["counts"]["done"], 1)
 
     def test_pdf_year_rename_keeps_owned_summary_metadata_aligned(self):
-        organizer = "skills/pdf-organizer/scripts/organize.py"
+        organizer = "skills/pdf-organize/scripts/organize.py"
         source = self.pdfs / "Doe_Correction_2025.pdf"
         self.make_pdf(source)
         note = self.notes / "Doe_Correction_2025.md"
@@ -263,7 +263,7 @@ class WorkflowTests(unittest.TestCase):
         context = citing_note.read_text(encoding="utf-8")
         self.assertIn("published: 1999-12-31", context)
         self.assertIn("[[Doe_Correction_2026.pdf]]", context)
-        self.run_script("skills/paper-summarizer/scripts/note_lint.py", note,
+        self.run_script("skills/paper-summarize/scripts/note_lint.py", note,
                         "--mode", "notice")
 
         self.run_script(
@@ -272,7 +272,7 @@ class WorkflowTests(unittest.TestCase):
         source = self.pdfs / "Doe_Correction_nd.pdf"
         note = self.notes / "Doe_Correction_nd.md"
         self.assertIn("published: null", note.read_text(encoding="utf-8"))
-        self.run_script("skills/paper-summarizer/scripts/note_lint.py", note,
+        self.run_script("skills/paper-summarize/scripts/note_lint.py", note,
                         "--mode", "notice")
 
         self.run_script(
@@ -283,14 +283,14 @@ class WorkflowTests(unittest.TestCase):
                       note.read_text(encoding="utf-8"))
         self.assertIn("published: 1999-12-31",
                       citing_note.read_text(encoding="utf-8"))
-        self.run_script("skills/paper-summarizer/scripts/note_lint.py", note,
+        self.run_script("skills/paper-summarize/scripts/note_lint.py", note,
                         "--mode", "notice")
 
     def test_canonical_inbox_pdf_can_be_filed_without_changing_identity(self):
         source = self.vault / "Inbox/Doe_Study_2025.pdf"
         self.make_pdf(source)
         original = digest(source)
-        self.run_script("skills/pdf-organizer/scripts/organize.py", "rename",
+        self.run_script("skills/pdf-organize/scripts/organize.py", "rename",
                         "--vault", self.vault, source, "--to", source.name,
                         "--dest", self.pdfs, "--apply")
         self.assertFalse(source.exists())
@@ -320,7 +320,7 @@ class WorkflowTests(unittest.TestCase):
         chapter_plan = Path(self.scratch.name) / "chapters.json"
         chapter_plan.write_text(json.dumps(chapters), encoding="utf-8")
         chapter_dir = self.pdfs / book.stem
-        self.run_script("skills/pdf-organizer/scripts/organize.py", "split", book,
+        self.run_script("skills/pdf-organize/scripts/organize.py", "split", book,
                         "--chapters", chapter_plan, "--out", chapter_dir,
                         "--vault", self.vault)
         chapter_paths = [chapter_dir / item["filename"] for item in chapters]
@@ -330,11 +330,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(sweep["counts"]["book"], 1)
         self.assertEqual(sweep["counts"]["chapter"], 2)
         selected = json.loads(self.run_script(
-            "skills/paper-summarizer/scripts/paper_scan.py",
+            "skills/paper-summarize/scripts/paper_scan.py",
             "--src", chapter_paths[0], "--notes", self.notes,
             "--images", self.images, "--json").stdout)
         self.assertEqual(selected["counts"]["new"], 1)
-        self.run_script("skills/pdf-figure-extractor/scripts/batch_extract.py",
+        self.run_script("skills/fig-extract/scripts/batch_extract.py",
                         "--src", chapter_paths[0], "--out", self.images,
                         "--dpi", 72)
         self.assertTrue((self.images /
@@ -349,13 +349,13 @@ class WorkflowTests(unittest.TestCase):
         scan = self.scan_papers()
         self.assertEqual(scan["counts"]["unorganized"], 2)
         self.assertEqual(scan["counts"]["new"], 0)
-        batch = "skills/pdf-figure-extractor/scripts/batch_extract.py"
+        batch = "skills/fig-extract/scripts/batch_extract.py"
         self.run_script(batch, "--src", self.pdfs, "--out", self.images,
                         "--dpi", 72, expected=1)
         self.assertEqual(list(self.images.iterdir()), [])
         self.assertEqual({path: digest(path) for path in sources}, original)
 
-        self.run_script("skills/pdf-organizer/scripts/organize.py", "rename",
+        self.run_script("skills/pdf-organize/scripts/organize.py", "rename",
                         "--vault", self.vault, sources[0],
                         "--to", "Doe_Study_2025.pdf", "--apply")
         organized = self.pdfs / "Doe_Study_2025.pdf"
@@ -372,7 +372,7 @@ class WorkflowTests(unittest.TestCase):
     def test_escaped_source_identity_survives_scan_and_pdf_rename(self):
         source = self.pdfs / "Doe_Study_2025.pdf"
         self.make_pdf(source)
-        self.run_script("skills/pdf-figure-extractor/scripts/batch_extract.py",
+        self.run_script("skills/fig-extract/scripts/batch_extract.py",
                         "--src", source, "--out", self.images, "--dpi", 72)
         figure = self.images / "Doe_Study_2025_fig_1.png"
         note = self.notes / "Doe_Study_2025.md"
@@ -381,10 +381,10 @@ class WorkflowTests(unittest.TestCase):
             'sources: # recorded origin\n- "[[\\x44oe_Study_2025.pdf]]" # verified')
         note.write_text(body, encoding="utf-8", newline="\n")
         self.assertEqual(self.scan_papers()["counts"]["done"], 1)
-        self.run_script("skills/paper-summarizer/scripts/note_lint.py", note,
+        self.run_script("skills/paper-summarize/scripts/note_lint.py", note,
                         "--mode", "empirical", "--images", self.images)
         original = digest(figure)
-        self.run_script("skills/pdf-organizer/scripts/organize.py", "rename",
+        self.run_script("skills/pdf-organize/scripts/organize.py", "rename",
                         "--vault", self.vault, source,
                         "--to", "Doe_Renamed_2025.pdf", "--apply")
         renamed_note = self.notes / "Doe_Renamed_2025.md"
@@ -395,7 +395,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(str(metadata["created"]), "2026-08-30")
         self.assertEqual(digest(self.images / "Doe_Renamed_2025_fig_1.png"), original)
         self.assertEqual(self.scan_papers()["counts"]["done"], 1)
-        self.run_script("skills/paper-summarizer/scripts/note_lint.py", renamed_note,
+        self.run_script("skills/paper-summarize/scripts/note_lint.py", renamed_note,
                         "--mode", "empirical", "--images", self.images)
 
     def test_pdf_rename_preserves_publisher_urls_and_foreign_clipping(self):
@@ -414,7 +414,7 @@ class WorkflowTests(unittest.TestCase):
             f'[[Inbox/download.pdf#page=1]]\n[Publisher]({publisher})\n',
             encoding="utf-8")
         before = {path: digest(path) for path in (source, clipping, figure, reference)}
-        self.run_script("skills/pdf-organizer/scripts/organize.py", "rename",
+        self.run_script("skills/pdf-organize/scripts/organize.py", "rename",
                         "--vault", self.vault, source,
                         "--to", "Doe_Study_2025.pdf", "--dest", self.pdfs, "--apply",
                         expected=1)
@@ -425,7 +425,7 @@ class WorkflowTests(unittest.TestCase):
         held.mkdir()
         relocated = held / figure.name
         figure.rename(relocated)
-        self.run_script("skills/pdf-organizer/scripts/organize.py", "rename",
+        self.run_script("skills/pdf-organize/scripts/organize.py", "rename",
                         "--vault", self.vault, source,
                         "--to", "Doe_Study_2025.pdf", "--dest", self.pdfs, "--apply")
         self.assertTrue((self.pdfs / "Doe_Study_2025.pdf").is_file())
@@ -435,7 +435,7 @@ class WorkflowTests(unittest.TestCase):
                          f'[[Doe_Study_2025.pdf#page=1]]\n[Publisher]({publisher})\n')
 
     def test_clipping_slug_requires_a_date_decision_and_supports_undated(self):
-        script = "skills/clipping-processor/scripts/slug.py"
+        script = "skills/clip-clean/scripts/slug.py"
         missing = self.run_script(
             script, "--no-author", "--topic", "Evergreen Reference",
             expected=2)
@@ -450,12 +450,12 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(undated["filename"], "Evergreen_Reference_nd.md")
 
     def test_clipping_image_reprocess_keeps_duplicate_detection_and_stems_aligned(self):
-        fetch = "skills/clipping-processor/scripts/fetch_images.py"
-        dedup = "skills/clipping-processor/scripts/dedup_index.py"
+        fetch = "skills/clip-clean/scripts/fetch_images.py"
+        dedup = "skills/clip-clean/scripts/dedup_index.py"
 
         def clipping_slug(topic):
             result = json.loads(self.run_script(
-                "skills/clipping-processor/scripts/slug.py",
+                "skills/clip-clean/scripts/slug.py",
                 "--author", "Alice Smith", "--topic", topic,
                 "--year", "2026").stdout)
             self.assertEqual(result["image_prefix"], result["slug"] + "_fig_")
@@ -493,7 +493,7 @@ class WorkflowTests(unittest.TestCase):
         # First-time PDF manifest migration must not claim this clipping.
         pdf = self.pdfs / "Doe_Study_2025.pdf"
         self.make_pdf(pdf)
-        self.run_script("skills/pdf-figure-extractor/scripts/batch_extract.py",
+        self.run_script("skills/fig-extract/scripts/batch_extract.py",
                         "--src", pdf, "--out", self.images, "--dpi", 72)
         manifest = (self.images / ".figure-manifest.tsv").read_text(encoding="utf-8")
         self.assertIn("Doe_Study_2025_fig_1.png", manifest)
@@ -506,6 +506,11 @@ class WorkflowTests(unittest.TestCase):
         external.write_text(
             f'[[{old}|the clipping]]\n![[Sources/Images/{old}_fig_1.png]]\n',
             encoding="utf-8")
+        moc_dependency = self.vault / "MOCs/biology.md"
+        moc_dependency.parent.mkdir()
+        moc_dependency.write_text(
+            f'# Supporting sources\n[[{old}|the clipping]]\n'
+            f'![[Sources/Images/{old}_fig_1.png]]\n', encoding="utf-8")
         new_note = self.notes / (new + ".md")
         new_note.write_text(body.replace(old, new), encoding="utf-8")
         rename = ["rename", "--attachments", self.images, "--sources", self.pdfs,
@@ -517,6 +522,9 @@ class WorkflowTests(unittest.TestCase):
         expected_mapping = [{"from": image.name,
                              "to": new + "_fig_1.png"}]
         expected_blockers = [{
+            "path": str(moc_dependency.resolve()),
+            "references": [old + ".md", old + "_fig_1.png"],
+        }, {
             "path": str(external.resolve()),
             "references": [old + ".md", old + "_fig_1.png"],
         }]
@@ -551,6 +559,9 @@ class WorkflowTests(unittest.TestCase):
         external.write_text(
             f'[[{new}|the clipping]]\n![[Sources/Images/{new}_fig_1.png]]\n',
             encoding="utf-8")
+        moc_dependency.write_text(
+            f'# Supporting sources\n[[{new}|the clipping]]\n'
+            f'![[Sources/Images/{new}_fig_1.png]]\n', encoding="utf-8")
         dependency = json.loads(self.run_script(
             fetch, "dependencies", "--attachments", self.images,
             "--owner-note", note, "--old-slug", old).stdout)
@@ -595,12 +606,12 @@ class WorkflowTests(unittest.TestCase):
         articles.mkdir()
         images.mkdir()
         dedup = json.loads(self.run_script(
-            "skills/clipping-processor/scripts/dedup_index.py", articles,
+            "skills/clip-clean/scripts/dedup_index.py", articles,
             "--raw", raw, "--slug", "Doe_Fresh_Article_2025").stdout)
         self.assertEqual(dedup["checked"][0]["status"], "new")
         self.assertEqual(dedup["slug_checks"][0]["status"], "free")
         papers = json.loads(self.run_script(
-            "skills/paper-summarizer/scripts/paper_scan.py", "--src", pdfs,
+            "skills/paper-summarize/scripts/paper_scan.py", "--src", pdfs,
             "--notes", articles, "--images", images, "--json").stdout)
         self.assertEqual(papers["counts"]["new"], 1)
         self.assertFalse((fresh / "Wiki").exists())
@@ -618,7 +629,7 @@ class WorkflowTests(unittest.TestCase):
             page.insert_textbox((72, 72, 500, 500), source_text)
             doc.save(source)
         located = json.loads(self.run_script(
-            "skills/paper-summarizer/scripts/paper_text.py", source,
+            "skills/paper-summarize/scripts/paper_text.py", source,
             "--find", "control sample", "--json").stdout)
         self.assertEqual(located["find"][0]["pages"], [1])
         wiki = self.vault / "Wiki"
@@ -634,7 +645,7 @@ description: "A control sample provides a baseline for comparing the effect of a
 tags:
   - "#biology"
 parents:
-  - "[[biology-moc]]"
+  - "[[MOCs/biology]]"
 read: false
 ---
 A **control sample** provides a baseline for comparing an experimental treatment with an otherwise matched condition. The treatment is withheld while the preparation and measurement procedure remain the same. A difference between the treated and untreated groups can then be interpreted within the limits of that comparison.
@@ -649,12 +660,10 @@ An untreated experimental specimen prepared and measured like the treated group 
 ??
 Control sample
 ''', encoding="utf-8")
-        # Freeze the existing vault format independently of scanner constants:
-        # renaming the skill must still recognize previously managed MOCs.
-        (self.vault / "biology-moc.md").write_text(
-            "<!-- wiki-linter:moc-tree:start -->\n"
-            "- [[control-sample|Control sample]]\n"
-            "<!-- wiki-linter:moc-tree:end -->\n", encoding="utf-8")
+        # A complete generated MOC is an ordinary nested bullet list.
+        (self.vault / "MOCs").mkdir()
+        (self.vault / "MOCs/biology.md").write_text(
+            "- [[Wiki/control-sample|Control sample]]\n", encoding="utf-8")
         index = self.vault / "index.json"
         self.run_script("skills/wiki-build/scripts/vault_index.py", wiki, "-o", index)
         self.assertEqual(
@@ -678,10 +687,125 @@ Control sample
         self.assertEqual(report["backfill_candidates"], [])
         for key in ("self_parented", "parent_cycles"):
             self.assertEqual(report["hierarchy_diagnostic"][key], [])
-        marker_states = {row["discipline"]: row["state"] for row in
-                         report["hierarchy_diagnostic"]["moc_marker_states"]}
-        self.assertEqual(marker_states["biology"], "marked")
+        file_states = {row["discipline"]: row["state"] for row in
+                       report["hierarchy_diagnostic"]["moc_file_states"]}
+        self.assertEqual(file_states["biology"], "readable")
         self.assertEqual(report["hierarchy_diagnostic"]["moc_consistency_findings"], [])
+
+        # Content outside the outline is also generated content, not an
+        # unchecked region that silently passes the hierarchy audit.
+        (self.vault / "MOCs/biology.md").write_text(
+            "Introductory prose left by an older generation.\n"
+            "- [[Wiki/control-sample|Control sample]]\n", encoding="utf-8")
+        self.run_script("skills/wiki-lint/scripts/scan_vault.py", wiki,
+                        "--images", self.images, "--out", scan)
+        revised_report = json.loads(scan.read_text(encoding="utf-8"))
+        self.assertTrue(any(
+            finding["kind"] == "malformed-line" and finding["line"] == 1
+            for finding in revised_report["hierarchy_diagnostic"]["moc_consistency_findings"]))
+
+    def test_misc_requires_explicit_fallback_tag_and_retagging_updates_both_mocs(self):
+        wiki = self.vault / "Wiki"
+        entry = wiki / "reference-label.md"
+        self.notes.joinpath("Example_Labels_nd.md").write_text(
+            "A reference label identifies a record independently of its position.\n",
+            encoding="utf-8")
+        original = '''---
+title: "Reference label"
+type: Concept
+sources:
+  - "[[Example_Labels_nd.md]]"
+created: 2026-08-30
+updated: 2026-08-30
+description: "A reference label identifies a record independently of its position."
+tags:
+parents: []
+read: false
+---
+A **reference label** identifies a record independently of its position. The label remains attached to the record when the surrounding collection is reordered. This lets a reference continue to identify the same record after its position changes.
+
+**Related:**
+
+---
+
+## Flashcards
+
+An identifier attached to a record that remains stable when its position in a collection changes.
+??
+Reference label
+'''
+        entry.write_text(original, encoding="utf-8")
+
+        def scan():
+            return json.loads(self.run_script(
+                "skills/wiki-lint/scripts/scan_vault.py", wiki,
+                "--images", self.images).stdout)
+
+        initial = scan()
+        self.assertEqual(initial["untagged_entries"], ["reference-label"])
+        self.assertEqual(initial["inventory"], {"entries": 1, "slugs": ["reference-label"]})
+        self.assertTrue(any(row["item"] == "item8" for row in initial["problems"]))
+        self.assertEqual(initial["hierarchy_diagnostic"]["moc_file_states"], [])
+        lint_path = self.vault / "misc-entry-lint.json"
+        self.run_script("skills/wiki-build/scripts/lint_entry.py", wiki, "-o", lint_path)
+        self.assertFalse(json.loads(lint_path.read_text(encoding="utf-8"))["summary"]["clean"])
+
+        # Blank tags are a repair worklist, not implicit Misc membership.
+        # A producer must explicitly assign the fallback before placement.
+        fallback = original.replace("tags:\n", 'tags:\n  - "#misc"\n')
+        entry.write_text(fallback, encoding="utf-8")
+        assigned = scan()
+        self.assertEqual(assigned["untagged_entries"], [])
+        self.assertEqual(assigned["discipline_tags"], {"misc": 1})
+        self.assertEqual(assigned["hierarchy_diagnostic"]["placement_gaps"][0]["missing_disciplines"], ["misc"])
+        mocs = self.vault / "MOCs"
+        mocs.mkdir()
+        misc = mocs / "misc.md"
+        tree = "- [[Wiki/reference-label|Reference label]]\n"
+        misc.write_text(tree, encoding="utf-8")
+        entry.write_text(fallback.replace("parents: []", 'parents:\n  - "[[MOCs/misc]]"'), encoding="utf-8")
+        placed = scan()
+        self.assertEqual(placed["hierarchy_diagnostic"]["placement_gaps"], [])
+        self.assertEqual(placed["hierarchy_diagnostic"]["moc_consistency_findings"], [])
+        self.run_script("skills/wiki-build/scripts/lint_entry.py", wiki, "-o", lint_path)
+        self.assertTrue(json.loads(lint_path.read_text(encoding="utf-8"))["summary"]["clean"])
+
+        # Misc is exclusive: a specific discipline replaces the fallback.
+        entry.write_text(fallback.replace('  - "#misc"', '  - "#misc"\n  - "#computer-science"'),
+                         encoding="utf-8")
+        mixed = scan()
+        self.assertTrue(any(row["item"] == "item8" for row in mixed["problems"]))
+        self.run_script("skills/wiki-build/scripts/lint_entry.py", wiki, "-o", lint_path)
+        self.assertFalse(json.loads(lint_path.read_text(encoding="utf-8"))["summary"]["clean"])
+
+        # A specific tag places the note in its discipline MOC. Leaving its old
+        # Misc listing behind must remain visible even if parents are correct.
+        entry.write_text(original.replace("tags:\n", 'tags:\n  - "#computer-science"\n')
+                         .replace("parents: []", 'parents:\n  - "[[MOCs/computer-science]]"'), encoding="utf-8")
+        discipline = mocs / "computer-science.md"
+        discipline.write_text(tree, encoding="utf-8")
+        stale = scan()
+        self.assertTrue(any(
+            row.get("discipline") == "misc" and row.get("slug") == "reference-label"
+            for row in stale["hierarchy_diagnostic"]["moc_consistency_findings"]))
+        misc.write_text("", encoding="utf-8")
+        tagged = scan()
+        self.assertEqual(tagged["untagged_entries"], [])
+        self.assertEqual(tagged["hierarchy_diagnostic"]["moc_consistency_findings"], [])
+        self.assertFalse(any(row.get("discipline") == "misc" for row in
+                             tagged["hierarchy_diagnostic"]["moc_inventory_findings"]))
+
+        # Replacing a specific tag with #misc requires a Misc placement again, even when the old
+        # discipline MOC and its matching parent still exist.
+        entry.write_text(fallback.replace("parents: []", 'parents:\n  - "[[MOCs/computer-science]]"'), encoding="utf-8")
+        returning = scan()
+        self.assertEqual(returning["hierarchy_diagnostic"]["placement_gaps"][0]["missing_disciplines"], ["misc"])
+        entry.write_text(fallback.replace("parents: []", 'parents:\n  - "[[MOCs/misc]]"'), encoding="utf-8")
+        misc.write_text(tree, encoding="utf-8")
+        returned = scan()
+        self.assertEqual(returned["hierarchy_diagnostic"]["placement_gaps"], [])
+        self.assertFalse(any(row.get("discipline") == "misc" for row in
+                             returned["hierarchy_diagnostic"]["moc_consistency_findings"]))
 
     def test_topic_queue_reuses_sources_and_checks_off_only_public_entries(self):
         wiki = self.vault / "Wiki"
@@ -824,7 +948,7 @@ Arithmetic mean
         self.assertEqual(existing.read_bytes(), original_entry)
         self.assertEqual(source.read_bytes(), original_source)
         ownership = json.loads(self.run_script(
-            "skills/clipping-processor/scripts/dedup_index.py", self.notes,
+            "skills/clip-clean/scripts/dedup_index.py", self.notes,
             "--url", "https://example.org/averages").stdout)
         self.assertEqual(ownership["checked"][0]["status"], "duplicate")
 

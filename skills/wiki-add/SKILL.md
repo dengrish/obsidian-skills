@@ -1,17 +1,19 @@
 ---
 name: wiki-add
-description: Create missing Obsidian Wiki entries from topics in add-to-wiki.md using web research, then check off created or positively existing topics. Leaves every pre-existing entry unchanged, including stubs. Use for a topic backlog; source-document extraction and existing-entry enrichment use wiki-build, and maintenance uses wiki-lint.
+description: Create missing Obsidian Wiki entries from topics in add-to-wiki.md using web research, then check off created or positively existing topics. Leaves every pre-existing entry unchanged. Use for a topic backlog; source-document extraction and existing-entry enrichment use wiki-build, and maintenance uses wiki-lint.
 ---
 
 # Wiki Add
 
 Process the requested topics in the vault-root `add-to-wiki.md`, or the backlog
 file explicitly selected by the user. Create complete entries only for missing
-topics. A positively identified existing entry, including a legacy stub, is a
-successful no-edit outcome: do not merge, promote, lint-fix, add aliases or
+topics. A positively identified existing entry is a
+successful no-edit outcome: do not merge, lint-fix, add aliases or
 sources, change cards or dates, or repair its links. Every pre-existing Wiki
-entry remains byte-for-byte unchanged. Existing sources, images and root MOCs
-also remain untouched.
+entry remains byte-for-byte unchanged. Existing sources, images and MOCs
+also remain untouched. Every new Wiki entry gets a nonempty quoted tag list,
+using `"#misc"` alone when no specific discipline fits; its `parents: []`
+remains the handoff to wiki-lint.
 
 Read [runtime setup](../../shared/RUNTIME.md) once per task and resolve
 `<skill>`, `<plugin>` and `<vault>`. Below, `<builder>` is the sibling
@@ -24,12 +26,12 @@ writes. Do not run the normal builder merge path or a vault-wide linter pass.
 ## 1. Read the queue
 
 Confirm the selected vault and backlog exist; never create a missing backlog
-or infer requests from another file. Keep snapshots and drafts in a unique
-private directory outside the vault.
+or infer requests from another file. Keep snapshots and drafts under the
+active run's `<scratch>` directory from runtime setup.
 
 ```bash
 python3 '<skill>/scripts/backlog.py' scan '<backlog.md>' \
-    --out '<run-temp>/backlog-snapshot.json'
+    --out '<scratch>/backlog-snapshot.json'
 ```
 
 Read the complete result and retain the snapshot. Process returned pending
@@ -51,9 +53,9 @@ queue candidates using the builder's helpers:
 
 ```bash
 python3 '<builder>/scripts/vault_index.py' '<wiki-or-private-empty-folder>' \
-    -o '<run-temp>/wiki-index.json'
+    -o '<scratch>/wiki-index.json'
 python3 '<builder>/scripts/find_collisions.py' \
-    --index '<run-temp>/wiki-index.json' --titles '<run-temp>/candidates.json'
+    --index '<scratch>/wiki-index.json' --titles '<scratch>/candidates.json'
 ```
 
 Write candidate titles as a JSON array, not interpolated shell text. If Wiki is
@@ -85,7 +87,7 @@ neighboring concepts nor nested backlog context become extra entries.
 
 Apply the builder's [substance, durability and atomicity gates](../wiki-build/SKILL.md#2-extract-entities)
 to the requested topic. Insufficient evidence, unresolved ambiguity or a topic
-that cannot form a conforming entry stays pending; do not create a stub. A
+that cannot form a conforming entry stays pending. A
 source already cited elsewhere does not complete this topic or prevent its
 reuse for a missing entry. Useful images are optional under the research
 reference; a purely textual entry is a valid result.
@@ -115,7 +117,7 @@ lint each draft with `lint_entry.py` and the combined tree for alias collisions.
 Existing notes are read-only resolution context; their unrelated defects are
 report-only. Resolve ownership uncertainty and all findings affecting the new
 entry before publishing. Do not import the builder's missed-entity recovery,
-merge, stub-promotion or unrelated orphan-repair actions: this run may create
+merge or unrelated orphan-repair actions: this run may create
 only queued topics. A clean script result does not establish source accuracy.
 
 ## 5. Publish and verify
@@ -145,7 +147,7 @@ existing one, use the item ID from the current scan:
 
 ```bash
 python3 '<skill>/scripts/backlog.py' complete \
-    --snapshot '<run-temp>/backlog-snapshot.json' --item '<id>' \
+    --snapshot '<scratch>/backlog-snapshot.json' --item '<id>' \
     --wiki '<vault>/Wiki' --entry '<entry.md>'
 ```
 
@@ -158,7 +160,7 @@ still-pending request; never replay an old ID against changed queue text. If an
 entry was published but checkpointing failed, retain it and report that state;
 a later run can identify it as existing without creating a duplicate.
 
-Report created entries, already-existing entries (including stubs), successful
+Report created entries, already-existing entries, successful
 checkmarks, pending items with specific reasons, sources acquired/reused,
 optional-image decisions, actual validation and any partial/recovery state.
 Do not describe a preview as applied. Resolve routine research and identity

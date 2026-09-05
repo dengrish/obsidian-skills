@@ -143,7 +143,7 @@ class CompatibilityTests(unittest.TestCase):
     def test_runtime_probe_enforces_supported_dependency_floors(self):
         runtime = (ROOT / "shared/RUNTIME.md").read_text(encoding="utf-8")
         figure_requirements = (
-            ROOT / "skills/pdf-figure-extractor/scripts/requirements.txt"
+            ROOT / "skills/fig-extract/scripts/requirements.txt"
         ).read_text(encoding="utf-8")
         root_requirements = (ROOT / "requirements.txt").read_text(
             encoding="utf-8")
@@ -199,8 +199,8 @@ class CompatibilityTests(unittest.TestCase):
         self.assertEqual(claude_skills.resolve(), codex_skills.resolve())
         skills = sorted(claude_skills.glob("*/SKILL.md"))
         self.assertEqual({path.parent.name for path in skills}, {
-            "clipping-processor", "paper-summarizer", "pdf-figure-extractor",
-            "pdf-organizer", "wiki-add", "wiki-build", "wiki-lint",
+            "clip-clean", "paper-summarize", "fig-extract",
+            "pdf-organize", "wiki-add", "wiki-build", "wiki-lint",
         })
         for path in skills:
             self.assertTrue((path.parent / "../../shared/RUNTIME.md").resolve().is_file())
@@ -427,13 +427,11 @@ class CompatibilityTests(unittest.TestCase):
                                 for finding in linted["findings"]))
 
             moc = root / "MOC.md"
-            moc.write_text(
-                scan.MOC_TREE_START + "\n" + scan.MOC_TREE_END + "\n",
-                encoding="utf-8")
+            moc.write_text("- [[Wiki/anchor|Anchor]]\n", encoding="utf-8")
             with patch.object(scan.os, "fstat",
                               side_effect=changing_fstat(moc)):
                 self.assertEqual(
-                    scan.moc_marker_state(moc)["state"], "unreadable")
+                    scan.moc_file_state(moc)["state"], "unreadable")
 
             wiki = root / "Wiki"
             wiki.mkdir()
@@ -873,7 +871,7 @@ read: false
     def test_heading_check_preserves_import_paths_and_reports_unreadable_rules(self):
         conventions = load("convention_headings", ROOT / "tests/test_conventions.py")
         before = list(sys.path)
-        module = conventions.mod_generic(str(ROOT / "skills/paper-summarizer/scripts/note_lint.py"))
+        module = conventions.mod_generic(str(ROOT / "skills/paper-summarize/scripts/note_lint.py"))
         self.assertIsNotNone(module)
         self.assertEqual(sys.path, before)
         report = conventions.Report()
@@ -892,7 +890,6 @@ read: false
             "compat_linter_source_identity",
             ROOT / "skills/wiki-lint/scripts/scan_vault.py")
         cases = (
-            "stub",
             "[[Doe_Study_2025.pdf#page=7]]",
             "[[Sources/PDFs/Doe_Study_2025.pdf#page=7|page 7]]",
             "[[Cafe\u0301.md]]",
@@ -906,7 +903,7 @@ read: false
 
     def test_heading_contract_requires_its_reference_and_ordered_examples(self):
         conventions = load("convention_heading_contract", ROOT / "tests/test_conventions.py")
-        format_path = ROOT / "skills/paper-summarizer/references/note-format.md"
+        format_path = ROOT / "skills/paper-summarize/references/note-format.md"
         conv = (ROOT / "shared/CONVENTIONS.md").read_text(encoding="utf-8")
         isfile = conventions.os.path.isfile
         report = conventions.Report()
@@ -952,8 +949,8 @@ read: false
         conventions = load("convention_caption_scope", ROOT / "tests/test_conventions.py")
         conv = (ROOT / "shared/CONVENTIONS.md").read_text(encoding="utf-8")
         for skill, caption, expected in (
-            ("clipping-processor", "", 0),
-            ("paper-summarizer", "", 1),
+            ("clip-clean", "", 0),
+            ("paper-summarize", "", 1),
             ("wiki-build", "*The study design.*", 0),
         ):
             with self.subTest(skill=skill, caption=bool(caption)):
@@ -969,7 +966,7 @@ read: false
                                         for row in report.by_status("FAIL")))
 
     def test_figure_helper_help_works_before_dependencies_are_installed(self):
-        scripts = ROOT / "skills/pdf-figure-extractor/scripts"
+        scripts = ROOT / "skills/fig-extract/scripts"
         invocations = {
             "auto_fig_bbox.py": ["missing.pdf"],
             "batch_extract.py": ["--src", "missing.pdf", "--out", "images"],
@@ -1075,20 +1072,20 @@ read: false
                 ("plurals", 0, ROOT / "shared/scripts/plurals.py",
                  "singular", "图"),
                 ("note lint", 1,
-                 ROOT / "skills/paper-summarizer/scripts/note_lint.py",
+                 ROOT / "skills/paper-summarize/scripts/note_lint.py",
                  note, "--mode", "empirical"),
                 ("paper scan", 0,
-                 ROOT / "skills/paper-summarizer/scripts/paper_scan.py",
+                 ROOT / "skills/paper-summarize/scripts/paper_scan.py",
                  "--src", pdfs, "--notes", notes, "--images", images,
                  "--allow-unorganized"),
                 ("paper text", 0,
-                 ROOT / "skills/paper-summarizer/scripts/paper_text.py",
+                 ROOT / "skills/paper-summarize/scripts/paper_text.py",
                  pdf, "--pages"),
                 ("automatic crop", 0,
-                 ROOT / "skills/pdf-figure-extractor/scripts/auto_fig_bbox.py",
+                 ROOT / "skills/fig-extract/scripts/auto_fig_bbox.py",
                  pdf, "--pages", "1", "--emit", "extract"),
                 ("explicit crop", 0,
-                 ROOT / "skills/pdf-figure-extractor/scripts/extract_figures.py",
+                 ROOT / "skills/fig-extract/scripts/extract_figures.py",
                  pdf, "--out", crops, "--stem", pdf.stem,
                  "--crop", "1:1:50,50,300,300", "--dpi", "72",
                  "--no-caption-check"),
@@ -1106,7 +1103,7 @@ read: false
                     self.assertNotIn(b"UnicodeEncodeError", output)
 
     def test_ambiguous_numeric_hosts_cannot_depend_on_resolver(self):
-        fetch = load("fetch_images", ROOT / "skills/clipping-processor/scripts/fetch_images.py")
+        fetch = load("fetch_images", ROOT / "skills/clip-clean/scripts/fetch_images.py")
         public = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("177.0.0.1", 0))]
         with patch.object(fetch.socket, "getaddrinfo", return_value=public) as resolve:
             for host in ("0177.0.0.1", "0x7f000001", "2130706433", "127.1"):
@@ -1117,7 +1114,7 @@ read: false
             resolve.assert_called_once()
 
     def test_generated_commands_preserve_interpreter_and_literal_paths(self):
-        scripts = ROOT / "skills/pdf-figure-extractor/scripts"
+        scripts = ROOT / "skills/fig-extract/scripts"
         sys.path.insert(0, str(scripts))
         try:
             batch = load("batch_extract", scripts / "batch_extract.py")

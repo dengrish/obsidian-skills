@@ -11,13 +11,15 @@ Also the home of the hand-rolled frontmatter parser shared with
 covers exactly the subset wiki-build writes:
 
     key: "scalar"          scalar, quoted or bare (read: is a bare boolean)
-    key:                   blank value (tags; a legacy bare parents:)
+    key:                   blank value (retained for field validation)
     key:                   block-form list
       - "item"
     key: ["a", "b"]        flow-form list
 
 Anything it cannot parse becomes a recorded error rather than an exception:
 a malformed entry is reported, never fatal.
+The index preserves parsed tag values; ``lint_entry.py`` validates their
+required membership and the sole ``#misc`` fallback rule.
 
 PACKAGE CONVENTIONS (all three scripts in this folder): Python 3 standard
 library only -- no pyyaml, no third-party anything.  Each file works as a
@@ -30,13 +32,13 @@ Module use:
     from vault_index import build_index, index_entry, parse_frontmatter
     idx = build_index("/path/to/Wiki")
     for e in idx["entries"]:
-        print(e["slug"], e["title"], e["is_stub"])
+        print(e["slug"], e["title"])
 
 CLI:
     vault_index.py <wiki-folder> [-o index.json] [--compact] [--source NAME ...]
 
 Top-level index shape:
-    {ok, wiki_folder, generated, entry_count, stub_count, entries[],
+    {ok, wiki_folder, generated, entry_count, entries[],
      duplicate_slugs, problems[]}
 
 ``ok`` records whether the recursive directory inventory completed. Entry-level
@@ -50,7 +52,7 @@ mean lookup data is incomplete or malformed, never an automatic skip decision.
 
 Per-entry record:
     slug, path, relpath, title, type, aliases[], sources[], created, updated,
-    description, tags[], parents[], is_stub,
+    description, tags[], parents[],
     body_wikilink_targets[], related_wikilink_targets[], errors[]
 
 ``importance`` is NOT in the record: the field left the schema, and nothing
@@ -58,8 +60,7 @@ downstream read it (neither ``lint_entry.py``, which parses frontmatter
 itself, nor ``find_collisions.py``, which consumes only slug/title/aliases).
 Legacy entries still carrying the key are simply not reported on.
 
-``is_stub`` is true only when ``sources:`` is exactly the literal string
-``stub``.  Obsidian embeds (``![[fig.png]]``) are excluded from the wikilink
+Obsidian embeds (``![[fig.png]]``) are excluded from the wikilink
 targets, and dot-directories are skipped during the walk. A leaf ``.md``
 symlink remains an occupied slug but contributes no target-derived metadata;
 its record and the top-level problems explain the refusal.
@@ -151,7 +152,6 @@ __all__ = [
     "unquote_scalar",
 ]
 
-STUB_MARKER = "stub"
 
 # `importance` is a LEGACY key: it was removed from the schema and is never
 # written on a new entry, but the entries already in the vault carry it and
@@ -510,14 +510,6 @@ def extract_wikilinks(text, include_embeds=False):
 # indexing
 # --------------------------------------------------------------------------
 
-def _is_stub(fm):
-    """True when ``sources:`` is exactly the literal string ``stub``."""
-    f = fm.get("sources")
-    if f is None:
-        return False
-    vals = [v.strip() for v in f.values if v is not None]
-    return len(vals) == 1 and vals[0] == STUB_MARKER
-
 
 def index_entry(path, text=None, root=None):
     """Index one ``.md`` file.  Never raises -- problems land in ``errors``."""
@@ -530,7 +522,6 @@ def index_entry(path, text=None, root=None):
         "title": None, "type": None, "aliases": [], "sources": [],
         "created": None, "updated": None, "description": None,
         "tags": [], "parents": [],
-        "is_stub": False,
         "body_wikilink_targets": [], "related_wikilink_targets": [],
         "errors": [],
     }
@@ -617,7 +608,7 @@ def index_entry(path, text=None, root=None):
         if field and any(v is None for v in field.values):
             record["errors"].append("%s: null or malformed list item" % key)
     for source in record["sources"]:
-        if source != STUB_MARKER and not _SOURCE_REF_RE.fullmatch(source):
+        if not _SOURCE_REF_RE.fullmatch(source):
             record["errors"].append("sources: malformed local source reference %r" % source)
     if record["title"]:
         try:
@@ -629,7 +620,6 @@ def index_entry(path, text=None, root=None):
                 record["errors"].append(
                     "filename stem %r does not derive from title %r (expected %r)"
                     % (record["slug"], record["title"], expected_slug))
-    record["is_stub"] = _is_stub(fm)
 
     sections = split_sections(fm.body)
     prose = "\n".join(sections["prose_lines"])
@@ -690,7 +680,6 @@ def build_index(root):
         "wiki_folder": root,
         "generated": _dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
         "entry_count": 0,
-        "stub_count": 0,
         "entries": [],
         "duplicate_slugs": {},
         "problems": [],
@@ -715,7 +704,6 @@ def build_index(root):
 
     index["entries"].sort(key=lambda r: r["slug"])
     index["entry_count"] = len(index["entries"])
-    index["stub_count"] = sum(1 for r in index["entries"] if r["is_stub"])
     # Group on the portable folded identity. Case/normalization variants may
     # alias on one filesystem and coexist on another, but either shape makes a
     # bare link owner ambiguous across supported hosts.
@@ -771,7 +759,7 @@ def source_matches(index, filenames):
 #
 #     python3 vault_index.py --test
 
-def _st_entry_text(title, aliases_flow=False, stub=False, extra="", body=None):
+def _st_entry_text(title, aliases_flow=False, extra="", body=None):
     lines = ["---", 'title: "%s"' % title, "type: Concept"]
     if aliases_flow:
         lines.append('aliases: ["%s-alias", "%s-second"]'
@@ -780,9 +768,8 @@ def _st_entry_text(title, aliases_flow=False, stub=False, extra="", body=None):
         lines.append("aliases:")
         lines.append('  - "%s-alias"' % title.lower())
         lines.append('  - "%s-second"' % title.lower())
-    lines.append('sources: ["stub"]' if stub else "sources:")
-    if not stub:
-        lines.append('  - "[[Doe_X_2025.pdf#page=2]]"')
+    lines.append("sources:")
+    lines.append('  - "[[Doe_X_2025.pdf#page=2]]"')
     lines += ["created: 2026-01-01", "updated: 2026-01-02",
               'description: "A worked example used by the self-test."',
               "tags:", '  - "#statistics"']
@@ -817,6 +804,10 @@ def run_self_test():
         check("hidden templates do not truncate the body index: " + opening,
               (indexed["body_wikilink_targets"], indexed["related_wikilink_targets"]),
               (["visible"], ["visible"]))
+    check("plain placeholder source values are malformed provenance",
+          index_entry("probe.md", text=_st_entry_text("Probe").replace(
+              "[[Doe_X_2025.pdf#page=2]]", "placeholder"))["errors"],
+          ["sources: malformed local source reference 'placeholder'"])
     check("literal code links are absent from the index's orphan-audit surface",
           extract_wikilinks("`[[inline]]`\n\n    [[indented]]\n\n"
                             "```md\n[[fenced]]\n```\n\n[[visible]]"),
@@ -840,7 +831,6 @@ def run_self_test():
 
         put("anchor.md", _st_entry_text("Anchor"))
         put("beta.md", _st_entry_text("Beta", aliases_flow=True))
-        put("stubby.md", _st_entry_text("Stubby", stub=True))
         put("sub/nested.md", _st_entry_text("Nested"))
         put("sub/deeper/deep.md", _st_entry_text("Deep"))
         put(".obsidian/workspace.md", _st_entry_text("Plumbing"))
@@ -894,19 +884,18 @@ def run_self_test():
         check("entries are sorted by slug", slugs, sorted(slugs))
         check("entry_count counts what is in entries",
               idx["entry_count"], len(idx["entries"]))
-        check("stub_count counts only stubs", idx["stub_count"], 1)
 
         # -- the shape the other two scripts consume ------------------------
         check("the top-level index keys are the documented ones",
               sorted(idx),
-              sorted(["ok", "wiki_folder", "generated", "entry_count", "stub_count",
+              sorted(["ok", "wiki_folder", "generated", "entry_count",
                       "entries", "duplicate_slugs", "problems"]))
         anchor = [r for r in idx["entries"] if r["slug"] == "anchor"][0]
         check("the per-entry record keys are the documented ones",
               sorted(anchor),
               sorted(["slug", "path", "relpath", "title", "type", "aliases",
                       "sources", "created", "updated", "description", "tags",
-                      "parents", "is_stub", "body_wikilink_targets",
+                      "parents", "body_wikilink_targets",
                       "related_wikilink_targets", "errors"]))
         check("`importance` is deliberately absent from the record",
               "importance" in anchor, False)
@@ -1023,17 +1012,6 @@ def run_self_test():
               any("no YAML frontmatter" in e
                   for r in idx["entries"] if r["slug"] == "no-fm"
                   for e in r["errors"]), True)
-
-        # -- stub detection ---------------------------------------------------
-        check("is_stub is true only for sources: [\"stub\"]",
-              sorted(r["slug"] for r in idx["entries"] if r["is_stub"]), ["stubby"])
-        check("a flow-form stub marker is recognised",
-              _is_stub(parse_frontmatter('---\nsources: ["stub"]\n---\n')), True)
-        check("...and a block-form one",
-              _is_stub(parse_frontmatter('---\nsources:\n  - "stub"\n---\n')), True)
-        check("a stub marker beside a real source is NOT a stub",
-              _is_stub(parse_frontmatter(
-                  '---\nsources:\n  - "stub"\n  - "[[X.pdf#page=1]]"\n---\n')), False)
 
         # -- wikilinks --------------------------------------------------------
         check("body wikilinks are extracted, embeds excluded",
@@ -1344,7 +1322,6 @@ def main(argv=None):
             "ok": report_complete,
             "output": os.path.abspath(args.output),
             "entry_count": index["entry_count"],
-            "stub_count": index["stub_count"],
             "problem_count": len(index["problems"]),
         }
         if not report_complete:

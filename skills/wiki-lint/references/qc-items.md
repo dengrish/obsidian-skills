@@ -41,10 +41,11 @@ ownership.
 | `item4/source-identity` | Establish provenance under item 4 before removing anything; preserve independent or uncertain citations. |
 | `item9/imperative-link` | Integrate the link only when adjacent prose already states the relationship and the edit adds no claim; otherwise report a source-backed proposal. |
 | `item9/duplicate-sentence` | This is a cross-entry ownership candidate. Preserve both copies and report the pair and likely owner unless the request explicitly names the consolidation or redistribution operation, or the affected entries and intended outcome. Normalized similarity alone never authorizes deletion. |
-| `item10/case`, `item10/alias` | In Task 1, canonicalize the unambiguous existing target while preserving anchor and explicit display label. Never create a variant file. |
+| `item10/case`, `item10/alias` | In Task 1, canonicalize the unambiguous existing target while preserving anchor and explicit display label. A real MOC filename outranks a Wiki alias, but only a recognized, readable canonical MOC (discipline or misc) with sole filename ownership gets an `item10/case` repair adding `MOCs/`. Unknown MOC owners are report-only. Keep required Wiki qualification when the target is an entry. Never create a variant file. |
 | `item10/self` | In Task 2, unlink an ordinary self-mention. Preserve real section/block navigation as a local `[[#Heading|Display]]` or `[[^block|Display]]` anchor. |
 | `item10/ambiguous` | Preserve the whole link and report its competing owners. |
 | `item10/unparsed` | Preserve the link; the target file's `item0` or `item1` governs repair. |
+| `item10/moc` | Preserve the original bare or explicit destination for an unknown MOC target, and preserve missing/unsafe explicit `MOCs/` targets. Report and route resolution to authorized Task 3 work; never automatically qualify an unknown owner, unlink it as an entry dangler, or redirect it to a Wiki alias. |
 | `item10/dangling`, `item10/dup` | Use Task 2's [link protocol](link-hygiene.md), not an ordinary Task 1 repair. |
 | `item10/table` | Replace only the table-cell link markup with its visible plain-text label. |
 | `item10/redundant-pipe` | In Task 1, collapse exact `[[slug|slug]]` body-prose links to `[[slug]]`. Never apply this to the Related footer. |
@@ -56,11 +57,9 @@ ownership.
 | `image_folder_findings` | Report and preserve nested, staging, unreadable, or portable-name-collision paths. Collision records retain all owner paths; an unreadable inventory also suppresses missing-image claims. |
 | `item17/alias-candidate` | Apply the same-entity, collision, cross-domain, and Organism-common-name gates before adding anything. |
 | `item19` | Apply the format floor only after reading [flashcard maintenance](flashcards.md). |
-| `stub` | Remove a forbidden Related footer; never promote without a source. |
-| `stub-one-sentence-body`, `stub-no-images` | Preserve and report; extra prose or media may be substantive user content. |
 | `rename_candidates` | Propose with inbound count and collision warning; apply only with explicit authorization in the request and a complete reference rewrite. |
 | `collision_candidates` | Report; routine lint never merges existing entries. |
-| `hierarchy_diagnostic.parent_state_findings`, `moc_consistency_findings` | Use as report-only Task 3 inputs. Re-derive both hierarchy renderings from one authorized connected closure, never patch one edge in isolation. |
+| `hierarchy_diagnostic.parent_state_findings`, `moc_file_states`, `moc_inventory_findings`, `legacy_moc_states`, `moc_consistency_findings` | Use as report-only Task 3 inputs. Re-derive whole generated MOCs and complete parent unions from one authorized connected closure. Old markers/prose need no separate span approval; unsafe paths and unknown files remain protected. |
 | Semantic-invalid alias | Propose the canonical owner and inbound rewrite; remove only through the approved alias-refactor protocol. |
 
 ## Source-independent item guide
@@ -93,7 +92,7 @@ Linter-specific routing:
 - Normalize empty `parents:` to `parents: []`. For a populated scalar, flow
   list, duplicate, or path/anchor/display/`.md` spelling, preserve every usable
   target and write the canonical block list. Re-derive a missing, ambiguous,
-  stub, or unparsed relationship only in Task 3.
+  or unparsed relationship only in Task 3.
 - A missing, null, or unrecognizable `read:` has no recoverable answer: report
   it and do not write one. A quoted boolean, YAML `yes`/`no`, or `0`/`1`
   carries a recognizable answer, so normalize only its representation to the
@@ -140,8 +139,7 @@ hyphen-collapse, word-order, and light stem morphology. When several probes
 flag the same pair, report only the most specific probe label; no probe chooses
 an entry owner. The linter deliberately omits the noisy create-time
 token-superset probe. While reading, also report semantic synonym duplicates
-that shape probes cannot find, including a stub that merely restates a full
-entry.
+that shape probes cannot find.
 
 ### 6. Type and API surface
 
@@ -157,7 +155,7 @@ trim substantive prose from an existing `Software` entry.
 ### 7. Description
 
 Apply the canonical [description rule](../../wiki-build/references/writing.md#description)
-to full entries and legacy stubs. Besides the scanner's form checks, review the
+to every entry. Besides the scanner's form checks, review the
 grammatical subject, current-status tense, precise phrasing, and mathematical
 completeness. Repair awkward wording or empty framing only when it is a
 concrete clarity defect; do not rewrite an already clear description. A
@@ -175,9 +173,14 @@ member, and duplicate removal after canonicalization.
 
 Semantic disciplinary ownership remains a judgment. Re-home or add a tag only
 when the entry and vault make the canonical home unambiguous; otherwise report
-the competing candidates. Blank `tags:` is valid on a full entry with no home.
-A legacy stub must have at least one tag, but fill a blank only from strong,
-consistent existing-vault evidence, never a mere majority or weak neighbor.
+the competing candidates. Wiki tags must be a nonempty quoted block list.
+For a genuinely blank key or empty list, inspect the note and assign its
+supported specific disciplines, or `"#misc"` alone if none fits. Never combine
+misc with specific tags. Missing, malformed, mixed, or uncertain metadata
+requires its own evidence-based resolution, not blind replacement with misc.
+Entries tagged only `#misc` belong to `MOCs/misc.md` and receive
+`[[MOCs/misc]]` during Task 3; preserve prior group evidence across the rescan
+so retagging closes the old and new hierarchy together.
 
 ### 9. Body structure, coherence, flow, and scope
 
@@ -248,9 +251,7 @@ approval rule.
 
 For a missing `Person`/`Event` opener date, copy the exact date only when it is
 already present elsewhere in the entry. Normalize an existing malformed date
-only when all values and qualifiers are unambiguous. Otherwise report it. A
-stub's one-sentence and no-image violations are report-only because deleting
-content could destroy substantive work.
+only when all values and qualifiers are unambiguous. Otherwise report it.
 
 ### 10. Wikilinks
 
@@ -294,7 +295,7 @@ allowance.
 an Obsidian embed by bare basename, while an external clipping image may remain
 standard Markdown with its URL. A remote embed is report-only; converting its
 syntax would break it. Report that reprocessing the source clipping with
-`clipping-processor` can localize it. Every existing image or Markdown table has a brief
+`clip-clean` can localize it. Every existing image or Markdown table has a brief
 plain-text italic caption immediately below it; inline LaTeX is the only
 caption markup. Keep exhibits beside the prose they clarify, never before the
 opener, detached at the end, or grouped as a gallery; one motivating paragraph
@@ -406,8 +407,7 @@ merely to silence a display-label finding.
 ### 19. Flashcards
 
 Apply the canonical [card format](../../wiki-build/references/flashcards-and-emphasis.md#4-flashcards)
-and the linter's [bidirectional definition review](flashcards.md). Every full
-entry has one card after the Related footer and separator; stubs have none. A
+and the linter's [bidirectional definition review](flashcards.md). Every entry has one card after the Related footer and separator. A
 variant Flashcards heading is repaired in place rather than duplicated.
 A missing section or empty section is repaired by writing the one primary card
 from the entry's already-established main claim, with `??` and the canonical
@@ -484,8 +484,8 @@ and preserved under item 2.
   identity and owner, inventory inbound alias-target entry links, rewrite every
   resolving surface, verify, then remove the alias. Text matches in sources,
   embeds, and logs are not entry links.
-- Valid blanks remain valid. Blank `tags:` may be correct on a full entry;
-  `parents: []` is a valid empty hierarchy. Missing or unrecognizable `read:`
+- Blank or empty Wiki tags need the item-8 home/fallback repair above.
+  `parents: []` remains valid producer handoff syntax, with placement completed by Task 3. Missing or unrecognizable `read:`
   is different because supplying a boolean would invent user-owned state.
 
 ## Coding content in non-Software entries (item 6)

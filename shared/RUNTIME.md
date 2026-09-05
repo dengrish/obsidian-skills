@@ -42,20 +42,72 @@ notes, images and requested Wiki identities are reused or skipped without edits.
   named input, only when it is unambiguously an Obsidian vault (for example,
   it contains `.obsidian/`). If several vaults qualify or none does, ask which
   vault to use before writing. Never create a vault at a remembered home path.
+- wiki-lint writes discipline navigation notes to `<vault>/MOCs/<discipline>.md`
+  and links them as `[[MOCs/<discipline>]]`. Each specific-discipline MOC
+  is a fully generated nested outline; `MOCs/misc.md` is the flat title-ordered
+  list for Wiki entries whose sole discipline tag is `"#misc"`. Every misc member
+  receives `[[MOCs/misc]]` as parent during wiki-lint; producers still write
+  `parents: []` for new entries and assign `"#misc"` when no specific
+  discipline fits. Wiki tag lists must be nonempty; source-note schemas keep
+  their own blank-tag rules. All MOCs have no marker comments, H1, or
+  frontmatter. Task 3 snapshots and regenerates its whole file within the
+  authorized closure; unknown files and suggestion logs are not generated
+  MOCs. Keep this folder outside `Wiki/`. An authorized misc refresh clears
+  a zero-member list to empty and retains the file; an explicit request may
+  create empty misc.
+  Before creation, reject a non-directory or symlink occupant at `MOCs/` and
+  portable-equivalent folder collisions; never overwrite or follow one to
+  create navigation artifacts. Existing root `<discipline>-moc.md` notes use
+  the [authorized layout migration](../skills/wiki-lint/references/hierarchy.md#migrate-the-legacy-layout),
+  not automatic copy-and-delete during plugin setup.
 - Individual folder overrides apply to the requested run. Confirm existing
   inputs and keep the skills' normal output folders under the selected vault.
   Do not edit installed skills to configure a different user's vault.
 
 Single-quote literal paths and URLs in POSIX shell examples, escaping embedded
 single quotes as described in `CONVENTIONS.md` §1b. Replace placeholders before
-running a command. Create scratch files in a unique per-run temporary directory
-**outside the vault**; `/tmp/` examples are illustrative, not shared filenames
-to reuse concurrently. Page renders, crops, decrypted working copies, and other
-review intermediates must not become vault content merely because the run was
-interrupted. Remove ordinary scratch previews and decrypted working copies after
-the final artifact has been published and verified. Never remove the original
-source, and preserve every staging or recovery path named by a failed guarded
-write until its state has been reconciled.
+running a command.
+
+### One owned scratch directory per run
+
+`<scratch>` is the current run's private `.obsidian-skills-tmp-<unique-id>`
+directory under system temporary storage, or an approved writable base that
+resolves **outside the vault**. Confirm that boundary before creating it,
+including when temporary storage is overridden. Create it once when needed,
+then reuse its returned absolute path throughout the active run and across
+skills; never reuse another run's directory. For example:
+
+```bash
+python3 - <<'PY'
+import tempfile
+print(tempfile.mkdtemp(prefix=".obsidian-skills-tmp-"))
+PY
+```
+
+For an approved alternative base, pass it as `mkdtemp`'s `dir` argument. Put
+workflow drafts, scan reports, page renders, crops, decrypted working copies,
+and temporary drivers under `<scratch>`, using unique child paths when a step
+needs an empty directory. Do not create visible vault scratch folders such as
+`_to_delete`, `tmp`, or `Scratch`, and do not copy plugin trees or shipped
+scripts into scratch; invoke the selected plugin's actual helpers. A temporary
+driver may import those helpers from their original paths.
+
+Automatically remove this run's ordinary scratch files once they are no longer
+needed, after required publication and verification. Remove the owned run
+directory when nothing must remain. Preserve material still needed for a retry,
+pending review, or a user-requested deliverable, and preserve every staging or
+recovery path named by a failed guarded write until its state is reconciled.
+Report any residual paths and why they remain. Never delete original sources,
+unknown additions, another run's files, a shared temporary base, or unrelated
+caches. Dependencies and reusable virtual environments belong outside disposable
+scratch unless deliberately created as disposable for this run.
+
+Helper-managed internal temporary files and existing hidden staging/recovery
+names retain their own guards and cleanup rules. Final publication staging is
+the narrow exception to ordinary scratch staying outside the vault: it may
+need a hidden directory beside the resolved real destination on its filesystem,
+always outside scanned output folders. Do not relocate it to `<scratch>` when
+that would cross filesystems or discard recovery state.
 
 Guarded publication of regular files also needs hard links on the vault's
 filesystem and a final staging directory on that same filesystem. This is a

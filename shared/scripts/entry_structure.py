@@ -415,7 +415,7 @@ _EVENT_DATE_RE = re.compile(
 
 
 # Sentence-shape checks are shared because wiki-build and wiki-lint apply
-# the same floor to descriptions, legacy stubs, and flashcard definitions.  A
+# the same floor to descriptions and flashcard definitions.  A
 # duplicated implementation previously disagreed on quoted sentence endings:
 # ``... called them \"cells.\"`` was valid prose but the linter looked only at
 # the final byte and reported a missing period.

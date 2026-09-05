@@ -1,6 +1,6 @@
 # Writing an entry — flashcards, bold and italic
 
-> **When to read this:** before writing a full entry or promoting a legacy stub. This guide owns [flashcard format](#4-flashcards) and [bold/italic rules](#5-bold-and-italic); [writing.md](writing.md) owns fields, prose, and link form. Maintenance of an existing card additionally follows [wiki-lint's review-history rules](../../wiki-lint/references/flashcards.md).
+> **When to read this:** before writing an entry. This guide owns [flashcard format](#4-flashcards) and [bold/italic rules](#5-bold-and-italic); [writing.md](writing.md) owns fields, prose, and link form. Maintenance of an existing card additionally follows [wiki-lint's review-history rules](../../wiki-lint/references/flashcards.md).
 
 ---
 

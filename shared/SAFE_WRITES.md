@@ -21,11 +21,16 @@ of detecting a stale plan.
 
 ## Stage complete bytes off the public path
 
-A working draft may live in any approved scratch location. Before publication,
+A working draft belongs in the current run's owned `<scratch>` directory. Before publication,
 copy its complete reviewed bytes into a unique private temporary directory on
 the **target filesystem**. Keep that final stage outside flat or recursively
 scanned output folders, so an interrupted draft cannot be mistaken for a note,
 image, or sidecar. Preserve the existing file's permissions when replacing it.
+Ordinary scratch follows [RUNTIME.md](RUNTIME.md#one-owned-scratch-directory-per-run);
+this hidden same-filesystem final stage is a separate publication requirement
+and may sit inside the vault outside scanned folders. Keep existing helper
+staging/recovery names and guards; do not move them to another filesystem
+just to collect all temporary files under `<scratch>`.
 
 Resolve the destination directory before choosing that private stage parent.
 If `Wiki/`, `Articles/`, or `Sources/Images/` is a directory symlink, a sibling

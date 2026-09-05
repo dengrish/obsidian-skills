@@ -3,9 +3,9 @@
 Read this only when a plugin producer has completed a non-destructive prepare
 phase outside `Wiki/`, kept both old and new artifacts available, and supplied
 an exact old → new mapping plus its complete dependency report and re-probe
-command. This mode repairs resolving references in Wiki entries and recognized
-root MOCs; it is not Task 2, an entry retitle, or permission to rename, finalize
-or remove the artifacts.
+command. This mode repairs resolving references in Wiki entries, recognized
+MOCs in `MOCs/`, and recognized legacy root MOCs. It is not Task 2, an entry
+retitle, or permission to rename, finalize or remove the artifacts.
 
 ## Validate the handoff
 
@@ -19,8 +19,8 @@ or remove the artifacts.
   basename, unreadable blocker, or incomplete dependency inventory blocks the
   affected rewrite.
 - Work only on blocker paths named by the producer that are Wiki entries or
-  recognized root MOCs. Markdown elsewhere remains the producer's blocker and
-  is reported unchanged.
+  recognized MOCs in `MOCs/` or legacy root MOCs. Markdown elsewhere remains
+  the producer's blocker and is reported unchanged.
 
 ## Rewrite only resolving references
 

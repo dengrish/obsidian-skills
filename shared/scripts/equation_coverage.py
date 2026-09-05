@@ -10,9 +10,9 @@ and a small set of prose calculations whose operands and operation are named.
 It does not generate LaTeX and is not a general natural-language mathematics
 parser.
 
-Callers pass the full-entry prose region only, after blanking fenced,
-indented, and inline code.  Frontmatter, Related footers, Flashcards, and
-legacy stubs remain outside this detector.  Parsed table spans may be supplied
+Callers pass the entry's prose region only, after blanking fenced,
+indented, and inline code. Frontmatter, Related footers, and Flashcards
+remain outside this detector. Parsed table spans may be supplied
 to exclude table cells; whole-line italic captions are excluded here.
 
 Stdlib only, Python 3.10+ (the plugin runtime floor).

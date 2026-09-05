@@ -125,7 +125,7 @@ SLUGIFY = os.path.join(SHARED_DIR, "scripts", "slugify.py")
 PLUGIN_PATHS = os.path.join(SHARED_DIR, "scripts", "plugin_paths.py")
 NAMING = os.path.join(SHARED_DIR, "scripts", "naming.py")
 FETCH_IMAGES = os.path.join(
-    SKILLS_DIR, "clipping-processor", "scripts", "fetch_images.py")
+    SKILLS_DIR, "clip-clean", "scripts", "fetch_images.py")
 SCAN_VAULT = os.path.join(
     SKILLS_DIR, "wiki-lint", "scripts", "scan_vault.py")
 
@@ -517,8 +517,8 @@ def enum_statements(text, members, min_len, token_re=None, glue=frozenset()):
     """Statements of a closed enum, with the values that do not belong to it.
 
     ``maximal_runs`` below *breaks* a run on the first token that is not a
-    member, which means a 28th value written at either end of the list -- the
-    cheapest way to widen a closed enum -- leaves an intact 27-value run and
+    member, which means an extra value written at either end of the list -- the
+    cheapest way to widen a closed enum -- leaves an intact canonical run and
     reports as canonical.  This extractor instead keeps a non-member token
     inside the run when it is decorated exactly like its neighbours (same
     backtick or quote wrapper), and returns it as an *extra*.
@@ -564,7 +564,7 @@ def enum_statements(text, members, min_len, token_re=None, glue=frozenset()):
         def belongs(k, prev_gap_index):
             # A token outside the member run belongs to the same list only if
             # it is decorated the way the members are.  A trailing code
-            # comment (`# the 27-discipline enum`) is not a 28th value; a
+            # comment (`# the discipline enum`) is not an extra value; a
             # backticked `artificial-intelligence` sitting against the end of
             # a backticked list is.
             if not gap_ok[prev_gap_index]:
@@ -713,31 +713,36 @@ def _check_enum_statement(rep, check, values, extras, canonical, where, what,
 
 
 def check_tag_enum(rep, conv):
-    """Every skill that states the enum states exactly the canonical 27."""
+    """Every skill that states the enum states all 28 canonical values."""
     check = "tag-enum"
     canonical = canonical_block(conv, "tag-enum")
-    if len(canonical) != 27:
-        raise HarnessError("canonical:tag-enum has %d values, expected 27"
+    if len(canonical) != 28:
+        raise HarnessError("canonical:tag-enum has %d values, expected 28"
                            % len(canonical))
     canon_set = set(canonical)
     n_prose = n_const = 0
 
     for skill, path, text in walk_skill_files():
-        # A file "mentions discipline tags" if it names enough of them to be
-        # restating the enum.  A single `#machine-learning` in prose is a use,
-        # not a restatement, and is not the thing that drifts.
-        distinct = {v for v in canon_set if re.search(r"(?<![a-z-])%s(?![a-z-])"
-                                                      % re.escape(v), text)}
+        # A compact paragraph/list naming most tags may be a broken enum
+        # restatement. Count within that block, not across an entire guide:
+        # calibration examples can legitimately discuss many disciplines
+        # without claiming to enumerate them. Parsed runs and Python
+        # constants below are checked independently of this fallback.
+        distinct_counts = [sum(
+            bool(re.search(r"(?<![a-z-])%s(?![a-z-])" % re.escape(value), block))
+            for value in canon_set)
+            for block in re.split(r"\n[ \t]*\n", text)]
+        most_in_block = max(distinct_counts, default=0)
         runs = enum_statements(text, canon_set, min_len=8)
 
-        if len(distinct) >= 15 and not runs:
+        if most_in_block >= 15 and not runs:
             rep.fail(check,
-                     "%s names %d of the 27 discipline tags but states no "
+                     "%s names %d of the 28 discipline tags in one block but states no "
                      "recognisable enum list -- the enum has probably been "
                      "split by a non-enum value spliced into it, or restated "
                      "in a layout this extractor cannot read. Either way the "
-                     "27 values are no longer checkable here."
-                     % (rel(path), len(distinct)), at(path, 1))
+                     "28 values are no longer checkable here."
+                     % (rel(path), most_in_block), at(path, 1))
             continue
 
         for values, extras, off in runs:
@@ -748,7 +753,7 @@ def check_tag_enum(rep, conv):
 
         # A Python constant is the copy that decides behaviour.  Read it from
         # the AST rather than from punctuation: `VALID_TAGS = {...}` with a
-        # 28th member appended is invisible to any prose extractor that stops
+        # noncanonical member appended is invisible to any prose extractor that stops
         # at the first non-member token.
         if path.endswith(".py"):
             for vals, lineno in python_literal_lists(text):
@@ -1986,7 +1991,7 @@ def _slug_producers(mod, fingerprinted):
 #: canonical script; (B) a restated slug *table* -- the shape §4a forbids; and
 #: (C) a prose consequence written as `Some Title` -> `some-title.md`.
 #: The tree is full of unrelated `x` -> `y` mappings (`image/jpeg` -> `jpg`,
-#: `#machine-learning` -> `machine-learning-moc.md`, `2024` -> `2024-01-01`),
+#: `#machine-learning` -> `MOCs/machine-learning.md`, `2024` -> `2024-01-01`),
 #: so each trigger is deliberately narrow: reading one of those as a slug
 #: claim would report the harness's own confusion as drift.
 SLUG_CLI_RE = re.compile(
@@ -2033,7 +2038,7 @@ def _check_slug_claims(rep, check, canon):
             b = text.find("\n\n", m.end())
             para = text[a:b if b != -1 else len(text)]
             # A title-shaped left side only: `#machine-learning` ->
-            # `machine-learning-moc.md` is §3's MOC derivation, not a slug.
+            # `MOCs/machine-learning.md` is §3's MOC derivation, not a slug.
             if (SLUG_CONTEXT.search(para) and re.search(r"[A-Z ]", m.group(1))
                     and not COUNTEREXAMPLE_CUE.search(para)):
                 claims.append((m.group(1), m.group(2), m.start()))
@@ -2535,11 +2540,11 @@ FIG_NAME_MIN = 292
 #: defining for itself.  paper_scan.py was the one importer this map did not
 #: watch -- a local rebind of its skip logic would have gone unseen.
 NAMING_CONSUMERS = {
-    os.path.join("pdf-organizer", "scripts", "organize.py"):
+    os.path.join("pdf-organize", "scripts", "organize.py"):
         ("looks_canonical", "CANONICAL"),
-    os.path.join("pdf-figure-extractor", "scripts", "batch_extract.py"):
+    os.path.join("fig-extract", "scripts", "batch_extract.py"):
         ("chapter_book_stem", "core_stem"),
-    os.path.join("paper-summarizer", "scripts", "paper_scan.py"):
+    os.path.join("paper-summarize", "scripts", "paper_scan.py"):
         ("chapter_book_stem", "core_stem", "looks_canonical"),
 }
 
@@ -2797,7 +2802,7 @@ def _check_naming_claims(rep, check, canon):
 def check_source_filename(rep, conv):
     """One implementation of the source-filename rule, and both skills use it.
 
-    pdf-organizer writes these names and pdf-figure-extractor reads them to
+    pdf-organize writes these names and fig-extract reads them to
     tell a book's chapters from the book.  The rule had two homes and they
     disagreed about where a `_src` tail sits -- in both directions at once, so
     no chapter name satisfied both consumers.  One choice re-renamed every
@@ -3355,7 +3360,7 @@ def check_shell_quoting(rep, conv):
     """§1b rule 3: a path/filename/URL placeholder is written inside `'…'`.
 
     This is the one §1b rule with no mechanical guard, and it drifted in all
-    five skills -- including pdf-organizer, which §1b itself names as "the
+    five skills -- including pdf-organize, which §1b itself names as "the
     model for it".  The rule exists because the model copies the template it
     is shown: a documented `awk '…' <cleaned-note>.md` teaches the unquoted
     form, and the values that reach these command lines are filenames off the
@@ -3477,17 +3482,17 @@ def check_figure_naming(rep, conv):
                      "CONVENTIONS.md §8a publishes %s"
                      % (sorted(produced), sorted(clipping_exts)))
         else:
-            rep.ok(check, "clipping-processor's %d output extensions match "
+            rep.ok(check, "clip-clean's %d output extensions match "
                    "CONVENTIONS.md §8a" % len(clipping_exts))
         missed = [ext for ext in sorted(clipping_exts)
                   if not scanner.EMB.fullmatch("![[X_fig_1.%s]]" % ext)
                   or not scanner.IMG_EMBED.search("![[X_fig_1.%s]]" % ext)]
         if missed:
-            rep.fail(check, "wiki-lint does not recognize clipping-processor "
+            rep.fail(check, "wiki-lint does not recognize clip-clean "
                      "output extension(s) as local image embeds: %s"
                      % ", ".join(missed))
         else:
-            rep.ok(check, "wiki-lint recognizes all %d clipping-processor "
+            rep.ok(check, "wiki-lint recognizes all %d clip-clean "
                    "output extensions" % len(clipping_exts))
 
     producers = _parse_producer_table(conv)
@@ -3596,7 +3601,7 @@ def check_figure_naming(rep, conv):
             rep.fail(check,
                      "%s pins an extension onto the consumer glob (`%s`). "
                      "CONVENTIONS.md §8a: match `%s` and accept ANY extension "
-                     "-- PDFs give .png, and clipping-processor can emit "
+                     "-- PDFs give .png, and clip-clean can emit "
                      ".png/.jpg/.gif/.webp/.svg/.avif/.bmp/.tiff/.ico, "
                      "and a pinned extension drops every one of the others "
                      "silently."
@@ -3741,7 +3746,7 @@ def check_figure_naming(rep, conv):
     #      PDF embeds are exempt (§6's legacy PDF-path notes).
     n_embeds = 0
     for skill, path, text in walk_skill_files():
-        if not path.endswith(".md") or skill == "clipping-processor":
+        if not path.endswith(".md") or skill == "clip-clean":
             continue
         lines = text.splitlines()
         for m in FIG_EMBED_RE.finditer(text):
@@ -3892,7 +3897,7 @@ def _list_slice_of(text, off, keys, members):
 
     ``maximal_runs`` returns a *maximal run of members*, so a longer list that
     merely contains the schema's field names -- `vault_index.py`'s per-entry
-    index record, `slug, path, relpath, title, type, …, parents, is_stub, …` --
+    index record, `slug, path, relpath, title, type, …, parents, …` --
     arrives here looking exactly like a nine-field schema statement with `read`
     dropped.  It is not one, and demanding completeness of it reports the wrong
     file.  The test is the one :func:`enum_statements` already uses for the
@@ -4373,7 +4378,7 @@ def check_yaml_examples(rep, conv):
                 continue
             # A source-note example without `format:` is the *raw* Web Clipper
             # capture, which several files legitimately show as input.  The
-            # `format:` key is precisely what clipping-processor adds, so its
+            # `format:` key is precisely what clip-clean adds, so its
             # presence is what marks a fence as this plugin's own output.
             if name == "source-note" and "format" not in keys:
                 continue
@@ -4458,6 +4463,13 @@ def check_yaml_examples(rep, conv):
 
             # tags: values are enum members, `#`-prefixed
             f = by.get("tags")
+            if name == "wiki-entry" and f:
+                tag_values = [item.strip('"').strip() for item in f[2]]
+                if not tag_values:
+                    bad("Wiki `tags:` must be nonempty; use `#misc` only "
+                        "when no specific discipline fits (§3)", f)
+                elif "#misc" in tag_values and len(tag_values) != 1:
+                    bad("`#misc` must be the sole Wiki tag (§3)", f)
             for item in (f[2] if f else []):
                 inner = item.strip('"').strip()
                 if _is_placeholder(inner):
@@ -4479,12 +4491,11 @@ def check_yaml_examples(rep, conv):
             f = by.get("sources")
             for item in (f[2] if f and name == "wiki-entry" else []):
                 inner = item.strip('"').strip()
-                if _is_placeholder(inner) or inner == "stub":
+                if _is_placeholder(inner):
                     continue
                 mm = re.match(r"^\[\[([^\]]+)\]\]$", inner)
                 if not mm:
-                    bad("`sources:` item %s is not a quoted wikilink, and is "
-                        "not the literal \"stub\" (§7)" % item, f)
+                    bad("`sources:` item %s is not a quoted wikilink (§7)" % item, f)
                     continue
                 target = mm.group(1)
                 if target.endswith(".md"):
@@ -4838,7 +4849,7 @@ SENT_SPLIT = re.compile(r"(?<=[.:;!?])\s+|\n")
 BACKTICK_NAME = re.compile(r"`([a-z][a-z0-9]*(?:-[a-z0-9]+)+)`")
 #: A backticked kebab name is being used as the name of a *skill* when its
 #: sentence talks about skills, or when it sits in one of these frames.  The
-#: sentence test alone misses "named in the `pdf-organizer` convention"; the
+#: sentence test alone misses "named in the `pdf-organize` convention"; the
 #: frames alone would miss a lot.  Both together are approximate but cheap, and
 #: a miss costs a check, not a false alarm.
 SKILL_FRAME = re.compile(
@@ -5080,7 +5091,7 @@ def _check_ownership_split(rep, check, conv, skills, texts):
             n_files += 1
             for off, sent in _soft_sentences(text):
                 # "this skill" means *this* skill.  Read in every skill's
-                # files, it made pdf-organizer's "A PDF basename this skill
+                # files, it made pdf-organize's "A PDF basename this skill
                 # produces is unique across the whole vault" a wiki-build
                 # ownership claim, and the check then leaned on an unrelated
                 # "not" three clauses later to let it through.
@@ -5166,11 +5177,11 @@ DECORATED_SKILL = re.compile(
 BACKTICKED_SKILL = re.compile(r"`([a-z][a-z0-9]*(?:-[a-z0-9]+)+)`")
 
 #: A trailing extension makes the token a filename, not a skill name
-#: (`wiki-builder-suggestions.md`, `machine-learning-moc.md`).
+#: (`wiki-builder-suggestions.md`, `MOCs/machine-learning.md`).
 FILENAME_TAIL = re.compile(r"\.[a-z0-9]{1,5}\b")
 
-#: A backticked name used as an *agent*: it owns something ("`pdf-organizer`'s
-#: output"), or it acts ("`pdf-organizer` renames every file it processes").
+#: A backticked name used as an *agent*: it owns something ("`pdf-organize`'s
+#: output"), or it acts ("`pdf-organize` renames every file it processes").
 #: Only a skill is written about that way, and this is the exact shape of the
 #: two references that named an absent skill without ever saying "skill" --
 #: which is why the sentence heuristic missed them both.
@@ -5217,7 +5228,7 @@ def _loose_frame_applies(sent, roster):
     return len(spans) <= 1 or any(s in roster for s in spans)
 
 #: Lines that route work with an arrow -- README's "figure images ->
-#: pdf-figure-extractor" and the pipeline diagram.
+#: fig-extract" and the pipeline diagram.
 ARROW_ROUTE = re.compile(r"(?:->|→|▶)\s*\**`?([a-z][a-z0-9]*(?:-[a-z0-9]+)+)")
 
 #: A markdown table: a contiguous run of lines starting with `|`.
@@ -6166,22 +6177,22 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/slugify.py": 74,  # device-name restrictions removed
     "shared/scripts/vault_artifacts.py": 39,
     "shared/scripts/yaml_scalars.py": 8,
-    "skills/clipping-processor/scripts/dedup_index.py": 149,
-    "skills/clipping-processor/scripts/fetch_images.py": 466,
-    "skills/clipping-processor/scripts/slug.py": 133,  # device-name guards removed
-    "skills/paper-summarizer/scripts/note_lint.py": 203,
-    "skills/paper-summarizer/scripts/paper_scan.py": 144,
-    "skills/paper-summarizer/scripts/paper_text.py": 49,
-    "skills/pdf-figure-extractor/scripts/auto_fig_bbox.py": 338,
-    "skills/pdf-figure-extractor/scripts/batch_extract.py": 332,
-    "skills/pdf-figure-extractor/scripts/extract_figures.py": 173,
-    "skills/pdf-figure-extractor/scripts/render_page.py": 66,
-    "skills/pdf-organizer/scripts/organize.py": 260,
+    "skills/clip-clean/scripts/dedup_index.py": 149,
+    "skills/clip-clean/scripts/fetch_images.py": 466,
+    "skills/clip-clean/scripts/slug.py": 133,  # device-name guards removed
+    "skills/paper-summarize/scripts/note_lint.py": 203,
+    "skills/paper-summarize/scripts/paper_scan.py": 144,
+    "skills/paper-summarize/scripts/paper_text.py": 49,
+    "skills/fig-extract/scripts/auto_fig_bbox.py": 338,
+    "skills/fig-extract/scripts/batch_extract.py": 332,
+    "skills/fig-extract/scripts/extract_figures.py": 173,
+    "skills/fig-extract/scripts/render_page.py": 66,
+    "skills/pdf-organize/scripts/organize.py": 260,
     "skills/wiki-add/scripts/backlog.py": 28,
     "skills/wiki-build/scripts/find_collisions.py": 67,
-    "skills/wiki-build/scripts/lint_entry.py": 309,
-    "skills/wiki-build/scripts/vault_index.py": 78,
-    "skills/wiki-lint/scripts/scan_vault.py": 374,
+    "skills/wiki-build/scripts/lint_entry.py": 313,
+    "skills/wiki-build/scripts/vault_index.py": 79,
+    "skills/wiki-lint/scripts/scan_vault.py": 437,
 }
 
 
@@ -6319,7 +6330,7 @@ def check_self_test(rep, conv):
     the run has to end at exit 0 having reported a complete, all-passing tally
     of at least :data:`SELFTEST_MIN_CASES` cases.
 
-    The four pdf-figure-extractor suites REQUIRE PyMuPDF: without it they exit
+    The four fig-extract suites REQUIRE PyMuPDF: without it they exit
     non-zero before running a case, and this check FAILs them for it. That is
     the honest report -- they are not testing anything in that environment --
     but it does mean this harness needs the imaging libraries installed, and
@@ -6949,28 +6960,28 @@ def check_note_headings(rep, conv):
     with note_lint.py's ROLES and generic-heading rejection set.
     """
     check = "note-headings"
-    skill = os.path.join(SKILLS_DIR, "paper-summarizer", "SKILL.md")
-    format_doc = os.path.join(SKILLS_DIR, "paper-summarizer", "references",
+    skill = os.path.join(SKILLS_DIR, "paper-summarize", "SKILL.md")
+    format_doc = os.path.join(SKILLS_DIR, "paper-summarize", "references",
                               "note-format.md")
-    lint = os.path.join(SKILLS_DIR, "paper-summarizer", "scripts", "note_lint.py")
+    lint = os.path.join(SKILLS_DIR, "paper-summarize", "scripts", "note_lint.py")
     if not os.path.isfile(skill):
-        rep.ok(check, "paper-summarizer is not installed; nothing to check")
+        rep.ok(check, "paper-summarize is not installed; nothing to check")
         rep.saw(check, "section roles stated in both places", 0)
         return
     if not os.path.isfile(lint):
-        rep.fail(check, "paper-summarizer/SKILL.md is here but "
+        rep.fail(check, "paper-summarize/SKILL.md is here but "
                         "scripts/note_lint.py is not, so the six section roles "
                         "are stated once and enforced by nothing", rel(skill))
         return
     if not os.path.isfile(format_doc):
-        rep.fail(check, "paper-summarizer is installed but its note-format.md "
+        rep.fail(check, "paper-summarize is installed but its note-format.md "
                         "contract is missing; the section roles are unchecked",
                  rel(format_doc))
         return
     stated = canonical_block(read(format_doc), "summary-note:roles", required=False)
     stated = [l.strip() for l in stated if l.strip()]
     if not stated:
-        rep.fail(check, "paper-summarizer/references/note-format.md has no "
+        rep.fail(check, "paper-summarize/references/note-format.md has no "
                         "`canonical:summary-note:roles` block, so the section roles "
                         "note_lint.py enforces are stated in only one place",
                  rel(format_doc))
@@ -7233,35 +7244,34 @@ def check_equation_policy(rep, conv):
 def check_moc_placement(rep, conv):
     """§3's MOC location and naming, restated only in agreeing forms.
 
-    §3: the MOC file is `<discipline-slug>-moc.md` in the VAULT ROOT.  A
+    §3: the MOC file is `MOCs/<discipline-slug>.md`. A
     restatement that files it under `Wiki/` sends Task 3's writes into the
     entry folder, where the scanner reads each MOC as a malformed entry on
     every later run.
     """
     check = "moc-placement"
-    if not re.search(r"-moc\.md", conv) \
-            or not re.search(r"-moc(?:\.md|\]\])?`?[^.\n]{0,120}vault root|"
-                             r"vault root[^.\n]{0,160}-moc", conv):
+    if not re.search(r"MOCs/(?:<discipline(?:-slug)?>|machine-learning)\.md", conv) \
+            or "[[MOCs/machine-learning]]" not in conv:
         rep.fail(check, "CONVENTIONS.md §3 no longer states the MOC file "
-                        "shape (`<discipline>-moc.md`) in the vault root -- "
+                        "shape (`MOCs/<discipline>.md`) and qualified root link -- "
                         "the location every restatement is held to",
                  rel(CONVENTIONS))
     else:
-        rep.ok(check, "§3 states `<discipline>-moc.md`, vault root",
+        rep.ok(check, "§3 states `MOCs/<discipline>.md` and qualified root links",
                rel(CONVENTIONS))
     stated = 0
     for skill, path, text in walk_skill_files():
-        if re.search(r"-moc(?:\.md|\]\])", text):
+        if re.search(r"MOCs/(?:<discipline(?:-slug)?>|machine-learning)\.md", text):
             stated += 1
         for m in re.finditer(r"Wiki/[^\s`\]]*-moc", text):
             rep.fail(check,
                      "%s places a MOC under `Wiki/` (\"%s\") -- §3 puts MOC "
-                     "files in the vault ROOT; a MOC written into Wiki/ is "
+                     "files in MOCs/; a MOC written into Wiki/ is "
                      "scanned as a malformed entry on every later run"
                      % (rel(path), m.group(0)), at(path, m.start(), text))
-    rep.saw(check, "skill files naming the -moc shape", stated)
+    rep.saw(check, "skill files naming the MOCs/ shape", stated)
     if not stated:
-        rep.fail(check, "no skill file states the `-moc` naming at all -- "
+        rep.fail(check, "no skill file states the `MOCs/` naming at all -- "
                         "the shape §3 defines has no consumer statement left")
 
 
@@ -7439,7 +7449,7 @@ def check_review_before_publication(rep, conv):
         (CONVENTIONS, conv,
          "Content workflows keep working drafts private through their final lint"),
         (safe_path, None,
-         "A working draft may live in any approved scratch location."),
+         "A working draft belongs in the current run's owned `<scratch>` directory."),
         (builder_path, None,
          "public `Wiki/` tree must contain either the prior reviewed version"),
         (builder_path, None, "private **combined review tree**"),
@@ -7526,9 +7536,9 @@ def check_safe_write_programmatic_api(rep, _conv):
         "builder": os.path.join(SKILLS_DIR, "wiki-build", "SKILL.md"),
         "linter": os.path.join(SKILLS_DIR, "wiki-lint", "SKILL.md"),
         "clipping": os.path.join(
-            SKILLS_DIR, "clipping-processor", "SKILL.md"),
+            SKILLS_DIR, "clip-clean", "SKILL.md"),
         "paper": os.path.join(
-            SKILLS_DIR, "paper-summarizer", "SKILL.md"),
+            SKILLS_DIR, "paper-summarize", "SKILL.md"),
     }
     try:
         texts = {name: read(path) for name, path in paths.items()}

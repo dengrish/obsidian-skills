@@ -1,133 +1,273 @@
 # Hierarchy — `parents:` and MOCs (Task 3)
 
-**Read this when Task 3 runs** — deriving the per-discipline tree, writing `parents:`, or creating/regenerating any `<discipline-slug>-moc.md`. Also read it whenever the scanner's `hierarchy_diagnostic` is nonempty: its placement, parent-form/state, marker, marked-tree consistency, self-link, and cycle fields describe different states and *Reading `hierarchy_diagnostic` under this rule* gives each one an action.
+Read this before creating or updating MOCs, recomputing `parents:`, or acting
+on `hierarchy_diagnostic`. A MOC is a **fully generated navigation note**: discipline trees live at
+`MOCs/<discipline-slug>.md`, and entries tagged only `#misc` have a flat list in
+`MOCs/misc.md`. Its complete content is a bullet outline derived from the
+current Wiki entries. It contains no ownership
+comments, H1, frontmatter, or separate prose sections.
 
-**The one-line version:** every discipline tree is rooted at that discipline's **MOC note** (`[[<discipline-slug>-moc]]`), which Task 3 creates when missing and names mechanically from the tag; top-level branches take it as their `parents:`; **nothing self-parents, ever**; `parents: []` means unplaced or stub. Rooting is therefore deterministic — two runs over the same vault agree without judgment.
+`parents:` and the MOCs are **two renderings of one hierarchy**. Derive one
+tree per included specific discipline, root it at `[[MOCs/<discipline-slug>]]`, and
+use `[[MOCs/misc]]` as the parent of every misc member. Render complete MOCs
+and parent unions from this one placement plan. A MOC's
+pathname is deterministic; choosing a useful concept hierarchy still requires
+reading the entries. Nothing self-parents.
 
-## Task 3 — Hierarchy: `parents:` and MOCs
+## Scope closure
 
-`parents:` and the MOC are **two renderings of one tree.** Derive a single concept hierarchy per discipline once per run, then use it for both — so an entry's parent(s) and its position(s) in the MOC never disagree.
+Task 3 operates on a closed entry/MOC-group set because a multi-tagged entry
+stores one union of parents, and a retag can move an entry between outputs.
+Groups are the discipline enum values, including the fallback `misc`:
 
-### Scope closure
+1. Seed entries with every requested entry and groups with every named MOC or
+   discipline. Add each entry's current valid discipline tags, including
+   `misc` only when the explicit tag list contains only `"#misc"`. Also retain
+   its prior groups established before an authorized tag change, by existing generated MOC placements, or
+   by its previous parent route to a MOC. Keep this evidence when refreshing
+   the scan after QC; otherwise the old output could retain stale membership.
+2. For every included group, include its MOC and every current member. Include
+   existing entries whose prior placement in that MOC must be removed or
+   changed, then add their current and prior groups.
+3. Repeat until neither entries nor groups change. Multi-tagged entries close
+   all their disciplines together. Retagging from or to `#misc` includes
+   `misc` and the old/new disciplines. Refresh misc, active discipline outputs,
+   and complete parent unions in that authorized closure. If a specific discipline
+   loses its last member, preserve and report its inactive MOC under the
+   rule below rather than rewriting it.
 
-Task 3 is **scope-atomic over a closed entry/discipline set**, because a
-multi-tagged entry stores one union of parents rather than one field per MOC.
-Compute the closure as a fixed point:
+A selected-entry request does not authorize these additional writes. If it
+does not already cover the closure, skip Task 3 for that connected set and
+report the exact groups, entries, and MOCs needed. Proceed when the request
+covers that set or explicitly authorizes expansion. Task 1 and Task 2 may
+still run on the narrower entry set. Never write a partial MOC or only part
+of an entry's parent union.
 
-1. Seed the entry set with every requested full entry. Seed the discipline set
-   with their tags and every named discipline/MOC. An untagged requested entry
-   remains in the closure so its parent union can be recomputed to `[]`.
-2. Include every full entry carrying any included discipline and include that
-   discipline's MOC.
-3. Add every other discipline tag carried by an included multi-tagged entry,
-   then repeat step 2 until no discipline or entry is added.
+Misc membership requires a structurally valid, nonempty tag list containing
+only `"#misc"`. Entries with blank `tags:` or `tags: []` belong in the QC
+repair worklist, without implied placement: inspect the note's disciplinary home in Task 1 and assign supported
+specific tags, or misc if none fits, then refresh the scan. Missing, malformed,
+duplicate, mixed misc/specific, or uncertain tag data must not be blindly
+replaced with the fallback. Structurally unparseable frontmatter cannot
+establish membership, including duplicate keys hidden by quoted or escaped
+spellings. Unrelated field-level QC findings do not disqualify an otherwise
+valid misc tag. Preserve parents and report membership that cannot be
+established safely; every entry follows the same source-backed schema.
 
-The resulting connected discipline/entry set is the smallest scope in which
-every included entry's complete parent union and every corresponding MOC can be
-rendered together. A selected-entry request does not authorize those additional
-writes. If it does not already cover the closure, skip Task 3 for that connected
-set and report the exact disciplines, full entries, and MOCs needed; run it only
-after explicit expansion to that closure. Task 1 and Task 2 may still run on the
-narrower entry set. Never write a partial MOC or only part of an entry's parent
-union.
+A specific discipline with no members follows the inactive preservation rule below.
+For misc, an authorized refresh keeps an existing file and clears its stale
+generated list to empty when no members remain; an explicit request may also
+create an empty `MOCs/misc.md`. Never delete it merely because it is empty.
 
-Scope closure is not a filesystem transaction. If a Task 3 write is
-interrupted, rerun Task 3 over the **same authorized closed set** before calling
-it complete; prior authorization persists for that recovery. Re-derive both
-renderings from current files rather than trying to continue at the next file.
-The rerun repairs any partial MOC/`parents:` state and must satisfy the scoped
-postconditions below.
+## Derive the hierarchy
 
-### Derive the hierarchy
+Build a tree only for an included specific discipline with at least one valid member;
+never create all enum disciplines by default. Closure guarantees that the
+included entries contain the complete set carrying each included tag.
 
-For each **included discipline tag** carried by **≥1 non-stub entry** (the disciplines in use are distinct tag values on full entries, never all 27 enum slugs by default), organize that discipline's included non-stub entries — which closure guarantees is the complete set carrying that tag — with unlinked category terms standing in for subdivisions that have no entry yet. Build the **shallow hierarchy the field conventionally uses** to structure its own knowledge, **rooted at that discipline's own MOC note** (first principle below): e.g. for the `#machine-learning` tag, `[[machine-learning-moc]]` at the root, then supervised / unsupervised / reinforcement learning, then method families; for `#biology`, `[[biology-moc]]`, then the standard subfield breakdown. An entry tagged with **several** included disciplines is organized into **each** of those disciplines' trees (and so appears in each of their MOCs). Principles:
+- **Root at the discipline's MOC.** `#machine-learning` produces
+  `MOCs/machine-learning.md`, linked as `[[MOCs/machine-learning]]`. The MOC is
+  a navigation file outside `Wiki/`, never an entity or a self-linking bullet.
+  No separate anchor entry is required.
+- **An eponymous entry is a branch.** If the discipline's own slug exists
+  as an entry carrying that discipline tag, make it the single top-level
+  bullet and nest the field's branches beneath it. Its parent is still the MOC.
+- **Use at most three bullet levels.** One level is enough for a small field.
+  Group by the field's conceptual taxonomy, not entity `type:` or filenames.
+  An established subdivision uses its existing entry; otherwise use its
+  canonical name as an unlinked category term. Include a category only when
+  it organizes at least one entry.
+- **Place every entry carrying the tag.** Multi-tagged entries appear in
+  every tagged discipline's MOC. Most entries have one home within a field;
+  use multiple placements only for a real conceptual need, once per distinct
+  nearest linked parent.
+- **Keep a useful existing structure.** Read the previous MOC for continuity.
+  Re-derive from the current entries and reorganize when changed coverage
+  warrants it. Keep existing group names, category spellings, and ordering
+  when they still fit. Once the outline follows this contract and matches the
+  current entries, an unchanged hierarchy should yield byte-identical output.
+  Correct existing defects, but do not reorganize for variety.
+- **List entries tagged only `#misc` in misc.** This fallback tag must never
+  coexist with a specific discipline tag. Its MOC is a flat
+  list of exact `[[Wiki/<relative-entry-path>|Canonical Title]]` links, sorted
+  by case/Unicode-normalized canonical title with the exact vault-relative
+  path as a stable tie-breaker. Keep complete canonical labels, including
+  qualifiers. Do not add category terms, nesting, or a special eponymous
+  branch: even an entry named `misc` is an ordinary list member. Every member
+  has exactly `[[MOCs/misc]]` as its parent.
 
-- **Root every tree at the discipline's MOC note — `[[<discipline-slug>-moc]]`.** The root is not an entry and is not *chosen*: it is the discipline's own MOC file in the vault root, named from the tag value with the `#` stripped plus `-moc` (`#machine-learning` → `[[machine-learning-moc]]`). wiki-lint creates a missing file before writing the tree in this same task; there is exactly one per discipline; and its name is derived mechanically from a `discipline_tags` key. That is what makes rooting **deterministic** — two runs over the same vault pick the same root because there is no judgment to make. Once Task 3 writes the tree, the MOC is a real note, so the wikilink resolves and it is a legal `parents:` target. The discipline **tag** remains what it has been since `roots:` was retired: not a note, never a bullet, never a `parents:` value. Every top-level branch of the tree takes the MOC as its parent, and **no entry is ever its own parent** (see *Populate `parents:`*).
-  - **Why not an "anchor entry".** The tree used to be rooted at the discipline's broadest *entry* — `[[machine-learning]]` for `#machine-learning`. In a vault built by this pipeline that entry usually does not exist and cannot be made to exist: wiki-build writes an entry only for an entity a source treats substantively, and no paper treats "machine learning" itself as an entity, while wiki-lint is barred from minting discipline stubs (the category-node principle below; [missing-entry reports](backlogs.md#run-report)). The documented fallback — root at the broadest branches instead — then made **every** broadest branch self-parent, which is exactly the wave of self-links this file's own diagnostic calls an un-rooted tree. The rule and its failure test contradicted each other in the default case, and the deadlock could only be broken by promoting some entry to a de-facto anchor by hand, unrepeatably. Rooting at the MOC dissolves the question: the root always exists, so the fallback never fires and nothing has to be promoted.
-  - **An eponymous entry is a branch, not the root.** If the vault *does* contain a full entry whose slug is exactly the discipline slug (`machine-learning.md` for `#machine-learning` — test `inventory.full_slugs` against the `discipline_tags` key; string equality, not judgment), it is genuinely the discipline's broadest concept: make it the single top-level bullet and nest the field's branches under it. Its own parent is still the MOC. The root is the same either way, so an eponymous entry appearing or disappearing never re-roots the tree.
-- **Shallow — 2–3 levels** under the root. The field's conventional branches (for `#machine-learning` under `[[machine-learning-moc]]`: supervised / unsupervised / reinforcement learning, training styles, core concepts), then method/leaf families. Any thematic **group headers** you add to organize a long MOC ("Learning paradigms", "Core concepts", …) are **unlinked organizational buckets** — never entries, never `parents:` targets; `parents:` skips them to the nearest full entry above, or to the MOC at the root when there is none.
-- **Category nodes are full entries when one exists, otherwise unlinked terms — never minted stubs.** If a well-established subdivision already has a **full** entry, that entry is the node and renders as a link in the MOC. If the subdivision has only a stub, or no entry at all, the node is an **unlinked category term** — the subdivision's canonical, field-standard name, written in the casing its eventual entry's title will use. **No stub is minted to fill a category slot.** The working assumption is that an unlinked term is replaced by a link automatically on a later run, once a real entry for that subdivision exists in the vault (the regenerate-in-place step does this with no special handling). For that hand-off to work, the term's **name** stays its canonical, field-standard form across runs — emit the same name every pass so the future entry associates cleanly. Its **position**, by contrast, may move freely when the tree is reorganized to fit new content (see *Build/maintain the MOC files*); name stability is for the future-entry hand-off, not a freeze on structure, and an unchanged tree still yields an unchanged MOC.
-- **Group by the field's own taxonomy, not by `type:`.** Entity `type` (Concept/Person/Software/…) is orthogonal; the hierarchy is conceptual.
-- **Fit the content that exists *now*, and re-derive each run.** Choose the organization that best fits the *current* set of entries — and re-evaluate it every pass, because the best structure for a growing set changes. The previous MOC's structure is a baseline to improve on, not a mold to preserve: as new entries accumulate, freely restructure the tree (and therefore the MOC and `parents:`) to fit them better. The only brake is the no-op case — if nothing has changed and the structure still fits, leave it (see *Build/maintain the MOC files*).
-- **Multiple parents are allowed.** Most entries have one parent, but an entry that genuinely belongs under two categories gets **both** — and in the MOC it is listed once under each. This happens two ways: two categories **within one discipline** (both parents live in the same MOC), or two **tagged disciplines** (the entry appears in each discipline's MOC, taking its nearest ancestor in each — a real entry where it has one, that tree's MOC where it sits at top level; see *Populate `parents:`*). Keep within-discipline multi-parenting to the rare genuine case; most entries have a single home, so don't manufacture second parents. (Multi-*discipline* placement, by contrast, is simply driven by the entry's `tags:` — an entry with two tags is placed in two MOCs as a matter of course.)
-- Entries with **blank `tags:`** have no disciplinary home and so no MOC placement — list them in the report under *unplaced entries* rather than forcing them into a tree.
+## Populate `parents:`
 
-### Populate `parents:`
+For every included entry, collect the nearest linked ancestor above each
+of its placements in every tagged discipline. Skip unlinked category terms.
+An ancestor is either a broader Wiki entry or, for a top-level branch,
+that discipline's MOC. For example, `clustering` → unlinked “Centroid methods”
+→ `k-means` gives `k-means` the parent `[[clustering]]`; a top-level
+`clustering` has the parent `[[MOCs/machine-learning]]`.
 
-`parents:` is a list of double-quoted wikilinks to the **nearest linked ancestor(s) above this entry in its discipline tree(s)** — along each branch the entry sits under, the closest ancestor that is a real note, skipping any unlinked-term levels and group headers in between. Two kinds of note qualify, and only two: a **full entry** that is a broader category (the IS-A / part-of relation the field uses), and, when there is no such entry above the branch, the tree's **root — the discipline's MOC note**. So if the tree is real `clustering` → unlinked "Centroid Methods" → real `k-means`, then `k-means`'s parent is `[[clustering]]` (the placeholder level is skipped), not "Centroid Methods" (which is not an entry and cannot be a wikilink); and `clustering`, if it is a top-level branch, has `parents: ["[[machine-learning-moc]]"]`. **The discipline *tag* is still never a `parents:` value** — it is not a note. The MOC is: it is a real file wiki-lint writes, so the link resolves.
+Take the complete union across trees. A multi-tagged entry can have a broader
+entry in one field and a MOC parent in another. Recompute stale, self-linked,
+or cyclic parents from the derived trees inside the authorized closure;
+preserve and report fields outside it. Every entry tagged only `#misc` appears
+once in `MOCs/misc.md` and receives `[[MOCs/misc]]`, with no other parent.
 
-**Form: a populated `parents:` is a block-form list, one double-quoted wikilink per line; an entry with no parents gets `parents: []`, on the one line.** Never leave the key bare. (The compact `parents: ["[[machine-learning-moc]]"]` spellings elsewhere in this file name the *value*, not the layout.) The vault pins the property as `multitext`, and a bare `parents:` is YAML null rather than an empty list — Obsidian renders it as an empty *text* field, so the type the vault declares and the value on disk disagree. `[]` is the only spelling that is both a valid empty list and visibly one, and since this is the field wiki-lint owns, emitting it is this task's job; a bare key found on an existing entry is normalized in Task 1 (`item2/parents-null`).
+Write populated parents as a block list with one double-quoted wikilink per
+line. `parents: []` is the producer handoff before hierarchy maintenance, not a
+completed placement for a valid entry. Preserve unknown relationships until
+their QC or scope blocker is resolved; never use a bare YAML-null key.
+Discipline tags and unlinked categories are never parent targets.
 
-**Nothing self-parents. Every placed entry points strictly upward.** There is no self-link convention any more, in any discipline: a top-level branch points at its MOC, everything below points at the nearest broader full entry, and `parents:` is empty — `[]` — only for an **unplaced** entry (blank `tags:`, no tree) or a **stub**. This replaces the old rule, under which the discipline's broadest *entry* was the root and marked itself with `parents: ["[[<own-slug>]]"]`. That rule was unsatisfiable in the common case — the anchor entry it required usually does not exist and cannot be minted (*Derive the hierarchy*, "Why not an anchor entry") — and its fallback produced exactly the wave of self-links it called a defect. Rooting at the MOC makes the correct self-parent count **zero, everywhere**, which is both easier to reach and easier to check.
+**Use unambiguous paths.** Every MOC root link is extensionless and qualified:
+`[[MOCs/<discipline-slug>]]` or `[[MOCs/misc]]`. Every generated tree entry link uses the exact
+extensionless vault-relative Wiki path, such as
+`[[Wiki/methods/k-means|K-means]]`, with the actual prefix under folder
+overrides. Entry-valued parents may use a slug only when it identifies one
+owner; qualify them when a MOC or another note shares the basename.
 
-**Reading `hierarchy_diagnostic` under this rule.** The object describes the hierarchy the vault already carries; it is evidence, never write authorization. Read every field before deriving Task 3:
-  - **`placement_gaps` checks placement per tagged discipline.** Each record names the slug plus `missing_disciplines` and `represented_disciplines`. A valid parent in one tree does not hide a missing edge in another: a machine-learning/statistics entry placed only in the ML tree still has a statistics gap. A wrong-discipline root represents none of the required disciplines. `placed_unparented` is the backward-compatible sorted slug projection of this list, despite its older all-or-nothing name. A note just written by wiki-build normally appears here until wiki-lint completes Task 3; self, missing, ambiguous, or stub edges represent no discipline. Recompute an included entry's complete union from the derived trees. Preserve and report an out-of-scope entry with its missing/represented disciplines.
-  - **`unresolved_parents` itemizes unusable raw edges** with `missing`, `ambiguous`, `stub`, or `unparsed` as the reason. `unparsed` means a real Wiki file owns the target name and therefore outranks an alias, but cannot act as a hierarchy node until its own item-0/item-1 problem is repaired. Do not patch the spelling by guess. Recompute the complete parent union only inside an authorized closure; otherwise report the raw parent and reason unchanged.
-  - **`parent_state_findings` catches impossible populated states.** A `stub-parented` legacy stub and an `untagged-parented` full entry both belong at `parents: []`. Clear them only as part of Task 3 over an authorized closure, so the same run also verifies that no tag/MOC placement should replace the stale edge.
-  - **`moc_marker_states` governs whether a tree region is writable.** `missing` or `empty` can be initialized; `marked` has the unique ordered marker pair. `legacy-unmarked` needs authorization for the exact legacy tree span, and `malformed-marker` needs authorization for the marker correction. `unreadable` carries the path and read `error`; it also covers a leaf symlink or any other non-regular occupant at the MOC pathname. It blocks the entire connected closure: preserve every included MOC and complete `parents:` union until the pathname is a readable regular file. Authorization cannot substitute for unreadable bytes or make writing through a link safe.
-  - **`moc_consistency_findings` checks only uniquely marked owned regions.** It reports malformed bullet lines/indentation, depth beyond three levels, unresolved or noncanonical targets/labels, linked stubs, wrong-discipline links, missing tagged entries, duplicate same-parent placements, an invalid eponymous-root shape, and a guarded `parent-union-mismatch`. Treat the list as a worklist for re-deriving the single tree, never as permission to patch individual lines. Exact union comparison runs only when every valid tagged MOC for an entry is marked and structurally parseable and the entry has a usable placement in each; an unresolved, stub, or wrong-discipline linked ancestor blocks inference below that branch rather than being skipped. A second occurrence of the same entry under an unsafe ancestor blocks union inference too; one safe placement cannot hide it.
-  - **Any self-parented slug is stale** — written by a pre-MOC-root run, an interrupted run, or a hand edit. Recompute and overwrite it when its discipline belongs to the authorized closure. A finding outside that closure is reported and preserved; the scan does not widen write scope.
-  - **`parent_cycles` entries are the same staleness in a longer loop** — A parents B and B parents A, so neither has a path to a MOC root. Recompute every included member from the single derived tree, never by hand-picking a "winner"; preserve fields on members outside the closure. Re-scan to learn whether that breaks the loop or leaves a residual out-of-scope cycle, and report any residual without widening scope.
-  - **After a completed scoped run, the invariant is exact within its closure:** no included entry has a placement gap, unresolved parent, invalid parent state, self-parent, or parent cycle; every included MOC is `marked`; `moc_consistency_findings` has no included record; and every included parent union matches the included MOCs. Global collections may still name skipped disciplines after a narrowed run. All hierarchy defect/worklist collections must be globally empty only after a full-vault Task 3 pass. Any in-closure finding requires rerunning the same closure before declaring completion.
-  - A discipline **absent** from `per_discipline` has zero self-parents. On a never-linted vault that can coexist with many entries in `placed_unparented`; the empty builder-owned `parents: []` is valid handoff state, not completed hierarchy placement.
+A recognized, readable canonical MOC (a discipline or misc) with sole filename ownership
+outranks a Wiki alias; qualify an existing bare link to that MOC while keeping
+its label and anchor. Unknown MOC names receive no automatic qualification:
+preserve and report bare or explicit navigation as `item10/moc`. A real Wiki
+file and MOC sharing a basename, including an unknown MOC name, make the bare
+target ambiguous. Preserve it until the intended owner is established.
 
-**Multi-tagged entries take the union.** An entry's `parents:` is the **union** of its nearest linked ancestor in each of its discipline trees — a real full entry in the trees where it has one, that tree's MOC in the trees where it sits at top level. A dual-tagged entry that is a top-level branch in one discipline and nested in the other therefore carries both: e.g. `cross-validation` tagged `#machine-learning` + `#statistics`, top-level in ML and under `[[bootstrap-resampling]]` in statistics, gets `parents: ["[[machine-learning-moc]]", "[[bootstrap-resampling]]"]`. The union is never empty for a placed entry, because every tree has a root that is a real note. **Most placed entries have one parent; some have two or more** — an entry genuinely under two categories (within one discipline or across two tagged disciplines). Every `parents:` item resolves to a real note: a broader full entry, or a discipline MOC. Format and quoting: double-quoted wikilinks, same form as any wikilink list. Within an authorized closed set, recompute and overwrite the complete union; preserve nothing stale there, and write `[]` where the recomputed value is empty rather than emptying the key. Outside that set, preserve `parents:` and report any diagnostic finding instead of treating field ownership as scope authorization.
+## Build or maintain the MOC files
 
-**Stubs and `parents:`.** Neither skill creates stubs any more; the only stubs this task meets are **legacy** ones already in the vault. A legacy stub is always a **leaf** — a placeholder with no children — and keeps `parents:` **empty, written `parents: []`** (its disciplinary tie is carried by `tags:`, which is always ≥1 on a stub). wiki-lint never writes a populated `parents:` on a stub: there are no interior stubs to give a position, because category slots are filled by unlinked terms rather than minted stubs, and discipline stubs no longer exist at all. A **pre-existing** stub that happens to sit at a category position is treated the same way — it stays an empty-`parents:` leaf, renders in the MOC as its plain-text term (not a link), and re-links the moment it is promoted to a full entry — at which point it takes its nearest linked ancestor as parent, which is the discipline's MOC if it is a top-level branch.
+The **whole recognized discipline or misc MOC belongs to Task 3**. Within an authorized
+closure, regenerate its complete content from the derived placement plan and
+publish it through the shared safe-write protocol. Old marker comments,
+frontmatter, headings, and prose are obsolete generated formatting and are
+removed during regeneration. No marker pair, tree-span identification, or
+separate formatting approval is required. Whole-note ownership does not
+extend to unknown files in `MOCs/`, other vault notes, or suggestion logs.
 
-### Build/maintain the MOC files
-
-One MOC per discipline **tag** that has ≥1 non-stub entry, at `<vault-root>/<discipline-slug>-moc.md`, where `<discipline-slug>` is the tag value with the `#` stripped (`#machine-learning` → `machine-learning-moc.md`).
-
-A discipline containing only legacy stubs gets no new MOC; report that state.
-Preserve any existing MOC under the zero-full-entry rule below.
-
-The generated tree has one stable owned region, delimited by these exact lines.
-The marker spelling is a persistent vault format: retain it for existing and
-new MOCs even though the skill is now named `wiki-lint`.
+A discipline MOC is a nested bullet list, for example:
 
 ```markdown
-<!-- wiki-linter:moc-tree:start -->
-- [[broad-branch|Broad branch]]
-  - [[leaf|Leaf]]
-<!-- wiki-linter:moc-tree:end -->
+- [[Wiki/machine-learning|Machine learning]]
+  - Learning paradigms
+    - [[Wiki/supervised-learning|Supervised learning]]
+    - [[Wiki/reinforcement-learning|Reinforcement learning]]
+  - [[Wiki/generalization|Generalization]]
 ```
 
-The example bullets illustrate the region; emit the derived hierarchy instead.
-The marker lines are not bullets and are never nested. A writable existing MOC
-has **exactly one unindented start marker and one unindented end marker, in that
-order**. Replace only the bytes between that unique pair; preserve the markers
-and every byte outside them. Never select a "first valid pair" from a file that
-contains extras. A missing counterpart, duplicate marker, reversed order, or
-indented/nested marker makes ownership ambiguous and is report-only until the
-user approves the intended region or marker correction.
+For discipline trees, use two spaces per level. Each bullet is either a piped entry link with its
+canonical readable title or an unlinked category term. There are no trailing
+descriptions, marker comments, H1, or frontmatter. Drop a trailing title
+parenthetical that repeats this discipline's name, but retain a finer
+qualifier: `[[Wiki/clustering-machine-learning|Clustering]]` is suitable in the
+machine-learning MOC, while `[[Wiki/pruning-decision-trees|Pruning (decision trees)]]`
+keeps the qualifier that distinguishes it from pruning neural networks.
+The link target always retains the entry path and slug.
 
-**Legacy migration and malformed markers are separate states.** A missing or
-empty MOC can be created directly with one marked region. A nonempty MOC with
-**no marker line at all** is legacy-unmarked; its bullets may mix generated and
-user content, so do not infer a span from indentation or link coverage. Because
-multi-tagged entries couple the included disciplines, preserve **every MOC and
-`parents:` value in that connected closure**, report the blocking
-legacy-unmarked MOC, and prepare the proposed marked tree. Apply migration only
-after the user identifies or approves the exact legacy tree span: replace that
-span with the marked region and preserve every line outside it byte-for-byte.
-Then write `parents:` from the same tree. A nonempty file containing any marker
-but lacking the unique ordered pair is **malformed-marker state**, not a legacy
-MOC: report the exact missing/duplicate/reversed/indented condition and preserve
-both renderings throughout the connected closure until the user approves the
-correction. Once either one-time
-repair succeeds, future runs use the unique marker pair without further
-approval.
+**Preflight paths before writing.** `MOCs/` must be a real directory under the
+selected vault; create it only when absent. Reject a non-directory occupant,
+directory or leaf symlink, unreadable path, case/NFC-equivalent folder or file
+collision, and duplicate canonical/legacy MOC ownership. Inventory existing
+canonical and legacy paths before initializing a missing file. A legacy owner
+requires the layout migration below; never silently create a second MOC.
+Preserve the entire connected closure when ownership or readability is unsafe.
 
-- **The MOC file *is* the root of its tree**, so it carries no bullet for itself and never links to itself. Its **top-level bullets are the discipline's broadest branches** — or, in the rare vault that has an eponymous full entry (`machine-learning.md` for `#machine-learning`), that one entry as the single top-level bullet with the field's branches nested beneath it. Either way the root is the file, and every top-level bullet's `parents:` is `[[<discipline-slug>-moc]]`.
-- **Read before you write, and replace only the owned region.** An MOC lives in the vault root, is an ordinary note the user opens, and will accumulate their own notes above or below the generated hierarchy. **Never call a whole-file write with only the regenerated tree** — the [backlog preservation rule](backlogs.md#persisting-to-the-vault-logs) applies here too, and for the same reason. Read the file, follow the marker/migration protocol above, and after writing confirm every byte outside the marker pair is unchanged. A missing or empty file is the only case where the whole content may be the marked region.
-- **Content:** inside the markers, render the hierarchy as a **nested bullet list**; user content lives outside the markers and is preserved without being counted as tree drift. **No `# <Discipline>` heading is generated**: Obsidian already shows the note's filename (`<discipline-slug>-moc`) as its title, so an H1 would just duplicate it. Each bullet is one of two things: a **piped wikilink** `[[slug|Title]]` when a full entry exists for that node (Title = the entry's canonical title for readability; no trailing description, per the user's call — but **drop a trailing disambiguation parenthetical that names this discipline**, since the MOC's scope already supplies it: in `machine-learning-moc.md` write `[[clustering-machine-learning|Clustering]]`, not `…|Clustering (machine learning)]]`. The link **target keeps the full slug** (`clustering-machine-learning`); only the visible label is shortened. A *finer* within-discipline qualifier is **kept** — `[[pruning-decision-trees|Pruning (decision trees)]]` stays, so it doesn't collapse to a bare `Pruning` that collides with `Pruning (neural networks)` in the same MOC.), or an **unlinked category term** — plain text, the subdivision's canonical name — when the node is a structural category that has no full entry yet (a placeholder awaiting content, which becomes a link on a future run automatically).
-- **Every full entry appears, as a link.** An **unlinked category term** appears only when it is needed to structure the tree — i.e. its subtree contains ≥1 full entry; an empty placeholder that organizes nothing is omitted. **Stubs are never links in the MOC:** a leaf stub does not appear at all, and a pre-existing stub sitting at a needed category position appears as its plain-text term (re-linking when promoted to a full entry).
-- **No frontmatter** by default — a MOC is navigation, not a knowledge node. (If the user later wants minimal frontmatter, add it then.) Being a `parents:` target does not change this: the root of a tree needs to be a note the link resolves to, not an entry with a schema.
-- **MOCs are excluded from linting and from each other's listings** automatically, since they live in the vault root and the linter only walks `Wiki/`. Pointing `parents:` at one does not draw it back in: the scanner's dangling-link check (`item10/dangling`) reads body prose and the Related footer only — never `parents:` — and wiki-build's orphan audit excludes `parents:` for the same reason, so a `[[<discipline-slug>-moc]]` parent is never mistaken for a broken link by either skill.
-- **Write the MOC in the same task as the `parents:` values it roots.** The MOC file is what makes `[[<discipline-slug>-moc]]` resolve, so a discipline's MOC must exist by the end of a completed Task 3 — on a first run it is created here, before or alongside the `parents:` writes. A discipline with ≥1 non-stub entry always gets its MOC once its scope and any legacy migration are authorized. If scope or marker/migration state blocks any included MOC, preserve all MOCs and complete parent unions in that connected closure and report the whole closure as skipped; a partial discipline write would break multi-tagged entries even if that one MOC stayed aligned locally.
-- **Maintain in place — and reorganize as content grows.** If the MOC exists, regenerate it from the discipline's tree **re-derived from the current full set of entries**. The existing MOC is a **starting point, not a ceiling**: an organization that fit ten entries often no longer fits forty, so restructuring may introduce, rename, merge, or dissolve thematic group headers and re-bucket, deepen, or flatten branches **within the three-level tree cap**. Two things bound this freedom: (a) **re-derive the single tree and render both sides from it** — `parents:` is re-rendered from the same reorganized tree, so a structural change cascades into the `parents:` of the entries it moves and the two stay consistent (the *Consistency contract*; expect a reorg to rewrite those entries' `parents:`), and the rooting rules still hold (the MOC is the root, branches point up at it, nothing self-parents) — note that a reorg can move entries between levels but **never** changes the root, so it never triggers the vault-wide re-parenting the old anchor model could; (b) **don't reshuffle a no-op** — when the content has not changed and the existing structure still fits it, keep it (existing group headers and category-term spellings included) so an unchanged discipline yields an unchanged MOC and runs don't churn on bucketing or naming variation alone. Reorganize because the *content* now warrants a better fit, not for variety. If a discipline drops to zero non-stub entries, note it in the report (don't silently delete an existing MOC unless the user asked).
+Before introducing a new MOC basename, inspect links to any Wiki entry sharing
+it. Qualify only references whose prior entry owner is proven, within the
+authorized reference scope, so creation does not redirect them to navigation.
+Preserve already ambiguous targets and report any required out-of-scope repair.
 
-### Consistency contract
+Read and snapshot the existing MOC's complete bytes, identity, and permissions
+when deriving the replacement. Compare complete output bytes and skip a no-op.
+Create a missing file exclusively; conditionally replace an existing file only
+against that original snapshot. Whole-note ownership never authorizes replacing
+a later editor save. Publish and verify the MOC and corresponding parents in
+the same task. If a path changes or a write is interrupted, report the actual
+state and re-read/re-derive the same authorized closure before retrying; the
+per-file guards do not make the group transactional.
 
-The MOC is the fuller picture (links for full entries, plain-text terms for not-yet-written categories); `parents:` records only the **realized spine** of that same tree. So the contract is: after Task 3 completes an authorized closure, for every **full entry** shown in any included MOC, its complete `parents:` union equals the **nearest linked ancestor(s)** above it across all included MOCs — the closest ancestor bullet that is a wikilink along each branch, skipping any unlinked-term levels (and any group headers) between them. **The root of each MOC is the MOC file itself**, which is why a top-level bullet has no linked ancestor bullet above it: its nearest linked ancestor is the file, so its `parents:` is `[[<discipline-slug>-moc]]`. **No entry is a root and none self-parents** — the discipline *tag*, shown only in the filename, is still not a note and still cannot be a parent, but the MOC note is. A **multi-parent entry is listed once under each of its parents** in the MOC, so it has one ancestor position per parent and the two sides stay in correspondence. A **multi-tagged entry is checked once per included MOC it appears in**; its full `parents:` is the union of nearest-linked-ancestor(s) across those MOCs — a real entry in the MOCs where it is nested, that MOC itself in the MOCs where it sits at top level. (Unlinked category terms and leaf stubs have nothing to check: terms are not entries, and every stub's `parents:` is empty.) The only entry with a truly **empty** `parents: []` is an **unplaced** one (blank `tags:`, no tree) or a stub. If an included full entry's `parents:` and its nearest linked MOC ancestors disagree, the derivation was applied inconsistently — rerun that same closure and recompute both renderings from the single tree. Step 0 now checks this mechanically for fully readable, uniquely marked tagged MOCs; it deliberately suppresses exact-union inference when any participating tree or branch is incomplete.
+**Inactive discipline MOCs.** If a discipline has zero valid members, preserve its
+existing MOC byte-for-byte and report it as inactive, including stale links or
+obsolete formatting. Do not create an empty replacement or delete the file
+unless cleanup is explicitly requested. An authorized layout migration may
+still move an inactive MOC while preserving its content. These preserved
+findings do not prevent the active hierarchy from completing, but must not be
+described as repaired. **Misc is different:** refresh its entire list from all
+entries tagged only `#misc` in the authorized misc closure. If that list is empty,
+clear an existing misc file to an empty file (no heading or comment) and keep it.
+An explicit request can create empty misc; never apply the inactive-discipline
+preservation rule to retain stale misc members.
+
+## Migrate the legacy layout
+
+The former path is `<vault>/<discipline-slug>-moc.md`; the canonical path is
+`<vault>/MOCs/<discipline-slug>.md`. A request to migrate or reorganize MOCs into
+this layout authorizes the move and its proven reference repairs. Ordinary
+lint reports existing legacy owners and proposed mappings; installing a new
+plugin version alone does not authorize moving vault files.
+
+1. Inventory old and new paths, including portable equivalents. Snapshot the
+   complete old file. If both paths already exist, preserve both and report
+   duplicate ownership; equal bytes do not establish one owner.
+2. Before introducing the new basename, record affected bare entry-link owners.
+   Qualify proven Wiki destinations as needed. Identify actual links to the
+   exact old MOC in the authorized reference scope, including parents,
+   body/navigation links, transclusions, and relative Markdown links. Retarget
+   them while retaining labels, heading/block anchors, and surrounding text.
+   Check relative links inside the moved note too. Never replace matching
+   text in code, examples, URLs, or unrelated notes or guess ambiguous owners.
+   A required reference repair outside scope is a reported blocker.
+3. Publish the destination exclusively and conditionally update snapshotted
+   inbound files. In an authorized active Task 3 closure, regenerate the whole
+   MOC and parents together, removing obsolete marker/prose formatting. For a
+   path-only move or inactive MOC, preserve content except proven reference
+   adjustments; migration does not expand the hierarchy scope.
+4. Verify the destination and every changed reference before conditionally
+   removing the exact snapshotted old pathname. A later occupant survives.
+   If interrupted, recover the authorized mapping/closure from current files
+   and recorded snapshots; never overwrite either path to force completion.
+
+## Read diagnostics and verify completion
+
+`hierarchy_diagnostic` describes current files; it never grants write scope.
+
+- `placement_gaps` records missing and represented disciplines per entry;
+  `placed_unparented` is its compatibility slug projection. Recompute included
+  entries' complete unions; preserve out-of-scope findings.
+- `unresolved_parents` uses `missing`, `ambiguous`, `unparsed`,
+  `unreadable`, `legacy-moc`, or `noncanonical-moc`. A real Wiki file outranks
+  an alias even when unparsed. An old root MOC cannot supply a canonical root,
+  and a real `MOCs/<unknown>.md` outside the discipline enum is
+  `noncanonical-moc` and cannot be a recognized root. Preserve uncertain targets; fix relationships
+  only inside the authorized closure.
+- `parent_state_findings` uses `misc-parent-mismatch` when an entry tagged only `#misc`
+  has a populated parent field that is not exactly `MOCs/misc`. Empty parents
+  already produce a misc placement gap. Recompute only where valid membership
+  and the authorized closure establish the complete parent union.
+- `moc_inventory_findings` and `legacy_moc_states` establish path ownership,
+  including unsafe/noncanonical paths, duplicates, legacy locations, unknown
+  MOC names, and inactive canonical MOCs. Whole-note ownership applies only
+  after a recognized discipline or misc pathname has a unique safe owner.
+- `moc_file_states` is `missing`, `empty`, `readable`, or `unreadable`.
+  Missing/empty active files can be initialized; readable recognized files
+  can be regenerated completely. `unreadable` carries the path and error and
+  blocks the connected closure, including unsafe filesystem ownership.
+- `moc_consistency_findings` validates the **whole file**: bullet structure,
+  depth, canonical targets/labels, entry coverage, duplicate placements,
+  wrong-group links, discipline eponymous-root shape, misc list order/flatness, and parent-union
+  consistency. A `legacy-markers` finding identifies obsolete marker comments; standalone
+  old marker lines may be skipped for inference, but remain a repair finding.
+  Other prose, headings, fences, or frontmatter are malformed outline lines.
+  Exact union comparison requires every expected group MOC to be readable/empty and
+  structurally parseable with usable placements; any unsafe linked ancestor
+  or occurrence blocks inference, even if another occurrence is usable.
+- `self_parented` and `parent_cycles` identify edges to recompute from the
+  derived hierarchy. An empty `per_discipline` collection alone is not proof
+  of completed placement.
+
+After a completed closure, every included entry with valid membership has no placement gap,
+unresolved/invalid parent, self-parent, or cycle. Every active included MOC is
+readable (or empty misc with zero members), contains only the complete generated
+outline, and has no consistency finding. Each included entry's parents exactly
+match its nearest linked ancestors across its discipline MOCs or `[[MOCs/misc]]`. Re-scan to verify these conditions. After a
+full-vault pass they hold for all active disciplines, misc, and requested entries;
+inactive discipline MOCs and skipped closures remain explicitly reported and
+preserved.
+Any remaining active in-closure finding requires re-deriving that same closure
+before declaring completion.

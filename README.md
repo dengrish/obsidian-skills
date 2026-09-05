@@ -11,10 +11,10 @@ Choose by the requested result, not just the input's file type.
 
 | Requested result | Skill | Main input and output |
 |---|---|---|
-| Rename, file or split PDFs | [pdf-organizer](skills/pdf-organizer/SKILL.md) | PDFs → organized PDFs and chapter files |
-| Extract figure images | [pdf-figure-extractor](skills/pdf-figure-extractor/SKILL.md) | PDFs → cropped PNGs in `Sources/Images/` |
-| Explain a paper, chapter, report, standard or publication notice | [paper-summarizer](skills/paper-summarizer/SKILL.md) | PDF → reading note in `Articles/` |
-| Clean Web Clipper captures | [clipping-processor](skills/clipping-processor/SKILL.md) | raw capture → cleaned note in `Articles/` |
+| Rename, file or split PDFs | [pdf-organize](skills/pdf-organize/SKILL.md) | PDFs → organized PDFs and chapter files |
+| Extract figure images | [fig-extract](skills/fig-extract/SKILL.md) | PDFs → cropped PNGs in `Sources/Images/` |
+| Explain a paper, chapter, report, standard or publication notice | [paper-summarize](skills/paper-summarize/SKILL.md) | PDF → reading note in `Articles/` |
+| Clean Web Clipper captures | [clip-clean](skills/clip-clean/SKILL.md) | raw capture → cleaned note in `Articles/` |
 | Build or enrich wiki entries from new evidence | [wiki-build](skills/wiki-build/SKILL.md) | PDF or URL-origin source note → entries in `Wiki/` |
 | Research and add missing requested topics | [wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md` → durable sources and new requested entries only |
 | Audit, correct or explicitly refactor existing wiki entries | [wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources or an exact producer mapping → scoped repairs, links, parents and MOCs |
@@ -29,12 +29,12 @@ and left in place.
 The routes branch; a document does not have to pass through every skill.
 
 ```text
-Inbox/*.pdf → pdf-organizer → Sources/PDFs/
-                                ├─ pdf-figure-extractor → Sources/Images/
-                                ├─ paper-summarizer → Articles/ reading note
+Inbox/*.pdf → pdf-organize → Sources/PDFs/
+                                ├─ fig-extract → Sources/Images/
+                                ├─ paper-summarize → Articles/ reading note
                                 └─ wiki-build → Wiki/
 
-Inbox/*.md → clipping-processor → Articles/ cleaned clipping
+Inbox/*.md → clip-clean → Articles/ cleaned clipping
                                      └─ wiki-build → Wiki/
 
 add-to-wiki.md → wiki-add → durable sources → missing requested entries in Wiki/
@@ -42,19 +42,19 @@ add-to-wiki.md → wiki-add → durable sources → missing requested entries in
 Existing Wiki/ → wiki-lint → entry repairs, links, parents, MOCs and proposals
 ```
 
-Figure extraction supplies images to paper-summarizer and wiki-build.
-Both paper-summarizer and wiki-build read the **original PDF**; the summary
+Figure extraction supplies images to paper-summarize and wiki-build.
+Both paper-summarize and wiki-build read the **original PDF**; the summary
 is a finished reading note, not a source for wiki-build. A cleaned clipping
 is itself the source and can be used directly. wiki-add can reuse existing
-sources, acquire PDFs through pdf-organizer, or save a clearly marked,
+sources, acquire PDFs through pdf-organize, or save a clearly marked,
 agent-written research extract for each web page in `Articles/`; these extracts
 are durable evidence, not full-text captures or multi-page summaries. Its
 [research guide](skills/wiki-add/references/research.md) owns that procedure.
 
 **Organize PDFs before deriving filenames and links from them.** Later renames
 must carry the dependent notes, figures, references and sidecars together,
-using pdf-organizer's reviewed plan and any required authorization. The
-[source-filename contract](shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organizer-runs-first)
+using pdf-organize's reviewed plan and any required authorization. The
+[source-filename contract](shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first)
 defines that boundary. A summary is not required before building wiki entries,
 and wiki-lint can run independently of any source-processing task.
 
@@ -67,8 +67,8 @@ cites or carry out an explicitly requested structural or producer-mapped
 repair. Enriching an existing entry with new-source evidence still belongs to
 wiki-build.
 
-wiki-add is the queue-first, create-only route. An existing requested identity,
-including a stub, is skipped without auditing or editing it. New entries use
+wiki-add is the queue-first, create-only route. An existing requested identity
+is skipped without auditing or editing it. New entries use
 builder's writing rules with `parents: []` and `read: false`, but wiki-add never
 adds an unrequested entity to satisfy a builder audit. It checks off only
 successfully published or already-existing queue items; uncertain or blocked
@@ -84,8 +84,13 @@ without filesystem access cannot run the vault workflow.
 
 Use `obsidian:wiki-build` and `obsidian:wiki-lint` for the renamed Wiki skills.
 These replace `obsidian:wiki-builder` and `obsidian:wiki-linter`; update explicit
-invocations after upgrading. Existing vault filenames and MOC markers stay
-unchanged, so no vault migration is needed.
+invocations after upgrading. Suggestion-log names stay unchanged. MOCs are
+fully generated nested outlines without marker comments. The current MOC
+layout is `MOCs/<discipline>.md`; existing
+root `<discipline>-moc.md` files need an explicitly requested
+[layout migration](skills/wiki-lint/references/hierarchy.md#migrate-the-legacy-layout),
+which updates only proven reference targets and honors the authorized
+hierarchy scope.
 
 | Purpose | Codex | Claude Code |
 |---|---|---|
@@ -135,8 +140,10 @@ it and any per-run path overrides through [RUNTIME.md](shared/RUNTIME.md).
 │   │   └── <Work>/           a split book's chapter PDFs
 │   └── Images/               flat folder for extracted/downloaded images
 ├── Wiki/                     entity notes, scanned recursively
+├── MOCs/                     generated navigation outlines
+│   ├── <discipline>.md       e.g. machine-learning.md (no -moc suffix)
+│   └── misc.md               Wiki entries tagged #misc
 ├── add-to-wiki.md            wiki-add's requested-topic queue
-├── <discipline>-moc.md       maps of content at the vault root
 └── *-suggestions.md          the linter's three proposal logs
 ```
 
@@ -146,12 +153,30 @@ All three source-note producers share `Articles/`: `sources:` item 1 identifies
 the origin used for deduplication, and a body marker distinguishes wiki-add's
 research extracts from full-text clippings. wiki-add reuses suitable existing
 source notes and images without overwriting them. MOCs, proposal logs and the
-topic queue stay outside `Wiki/` so they are not treated as entries.
+topic queue stay outside `Wiki/` so they are not treated as entries. MOC
+links and root parents use `[[MOCs/<discipline>]]`, so a same-named entity
+can coexist in `Wiki/`. Generated outline links use qualified entry paths
+such as `[[Wiki/machine-learning|Machine learning]]`. Each recognized discipline
+MOC is generated as a whole note: a nested bullet outline without marker
+comments, H1, or frontmatter. Task 3 reads the existing outline for continuity,
+regenerates from current entries, and skips unchanged output. Obsolete MOC
+markers or prose need no separate formatting approval; safe snapshots still
+protect later edits and unrelated files. Wiki entries require a nonempty tag list. When no specific discipline fits,
+use `"#misc"` alone; these entries appear alphabetically by title in
+`MOCs/misc.md` with parent `[[MOCs/misc]]`. Blank, missing, malformed, or mixed
+misc/specific tags remain QC errors until resolved. New entries from wiki-build/wiki-add still start with
+`parents: []`; wiki-lint supplies their hierarchy placement.
+
+Workflow scratch lives in a hidden `.obsidian-skills-tmp-<unique-id>` directory
+outside the vault, never a visible `_to_delete` folder. Skills clean their own
+ordinary temporary material when no longer needed and report anything retained
+for review, retry, or guarded-write recovery. Same-filesystem publication
+staging keeps its separate safety rules; see [runtime guidance](shared/RUNTIME.md#one-owned-scratch-directory-per-run).
 
 No skill discards user content. An authorized reprocess or refactor may
 conditionally remove an obsolete path only after its replacement and dependent
 references are safely published and verified; a later occupant always survives.
-pdf-organizer may rename or move PDFs in its authorized scope but never
+pdf-organize may rename or move PDFs in its authorized scope but never
 overwrite another file. Unrelated folders and legacy notes remain untouched.
 The full path/ownership table is in
 [conventions §1](shared/CONVENTIONS.md#1-vault-folder-layout).

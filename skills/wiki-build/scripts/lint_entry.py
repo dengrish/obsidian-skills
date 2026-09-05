@@ -33,7 +33,8 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
   7   7-description           one sentence, <= 110 chars (count reported),
                               plain text, no LaTeX/Markdown/HTML,
                               capitalised, ends "."
-  8   8-tags                  #-prefixed, double-quoted, in the 27-slug enum
+  8   8-tags                  nonempty, #-prefixed, double-quoted, in the
+                              28-slug enum; #misc is a sole fallback tag
   9   9-body-structure        body starts immediately with prose; body headings
                               use plain-text ATX `##`, never Setext
   9   9-person-event-date     Person/Event opener has a date parenthetical in
@@ -77,7 +78,7 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               parenthetical -- whose slug is missing from
                               aliases: (warning: the same-entity test and the
                               cross-domain carve-out stay with the executing agent)
-  19  19-flashcards          `## Flashcards` present on every full entry,
+  19  19-flashcards          `## Flashcards` present on every entry,
                               preceded by a `---` separator, holding exactly
                               one card; line 1 one capitalized, period-ended
                               sentence with inline LaTeX as its only markup;
@@ -91,9 +92,6 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               $...$) for that card's own line-3 answer and
                               counterpart; entry aliases join the search only
                               for the canonical/base/math-plain primary card
-  --  stub-*                  stub structural rules: one-sentence body, no
-                              Related footer, no images, no Flashcards,
-                              sources: ["stub"], >=1 tag
   18  18-alias-collision      across a folder, no two entries share an alias
   18  18-alias-duplicate      the same alias listed twice within one entry
   18  18-alias-form           every alias is itself in slug form (warning)
@@ -119,12 +117,12 @@ CLI:
       [--compact]                       compact JSON
 
 Output: {root, entries:[{file, findings:[{item, severity, message,
-evidence}], is_stub, title, aliases, description_chars}], alias_collisions[],
+evidence}], title, aliases, description_chars}], alias_collisions[],
 summary, problems[]}.  ``18-alias-collision`` only has meaning in folder
 scope; ``18-alias-form`` (each alias is itself in slug form) is a warning.
 
 A populated ``parents:`` is deliberately NOT flagged -- wiki-lint writes
-that field on every full entry, so a value there is the expected steady
+that field on every entry, so a value there is the expected steady
 state.  Its quoting is covered by ``2-quoting`` and its presence by
 ``2-field-order``.
 
@@ -146,7 +144,7 @@ exists to hold.
 omit the key; legacy entries in the vault still carry it, populated.  It gets
 the same treatment as a populated ``parents:`` -- NO finding at any severity:
 it is absent from ``MANDATORY_KEYS`` (never required), absent from
-``NEVER_QUOTED`` (its value is never inspected), and there is no enum or stub
+``NEVER_QUOTED`` (its value is never inspected), and there is no enum
 check for it.  It stays in ``vault_index.SCHEMA_ORDER`` on purpose, so that a
 legacy entry carrying it in its historical slot is neither reported as an
 out-of-order key nor as an unknown one.
@@ -287,7 +285,7 @@ TAG_ENUM = [
     "psychology", "sociology", "anthropology", "economics", "finance",
     "political-science", "linguistics", "history", "philosophy",
     "literature", "law", "business", "entrepreneurship", "education", "architecture", "art",
-    "music", "machine-learning",
+    "music", "machine-learning", "misc",
 ]
 
 PLAIN_OR_DOUBLE_SCALARS = ["title", "description"]
@@ -392,8 +390,8 @@ def source_stem(item):
     stable across filesystems that alias those spellings and ones that can
     store both.
 
-    ``("", "")`` when the item carries no extension at all -- the ``"stub"``
-    marker, or a malformed item whose missing extension is item 4's own
+    ``("", "")`` when the item carries no extension at all -- a plain text
+    value, or a malformed item whose missing extension is item 4's own
     finding rather than this one's.
     """
     inner = (item or "").strip()
@@ -485,7 +483,7 @@ def _check_field_order(fm, findings):
     # YAML null, and the vault pins the property as multitext, so Obsidian
     # renders it as an empty TEXT field -- the declared type and the value on
     # disk disagree (CONVENTIONS.md 2a; scan_vault emits item2/parents-null
-    # for the same fault).  `tags:` is the one key where blank is legal.
+    # for the same fault). Tag presence and membership are checked by item 8.
     parents = fm.get("parents")
     if parents is not None and parents.kind == "blank":
         findings.append(_f(
@@ -598,8 +596,14 @@ def _check_read(fm, findings):
 def _check_sources(fm, findings):
     """Item 4: a list of complete local-source wikilinks with physical pages."""
     field = fm.get("sources")
-    if field is None or not field.values:
-        return  # Missing/empty sources are already reported by the structure check.
+    if field is None:
+        return  # The mandatory-key check already reports a missing field.
+    if not any(value not in (None, "") for value in field.values):
+        findings.append(_f(
+            "2-field-order", "error",
+            "sources: is empty; it must hold at least one item"))
+    if not field.values:
+        return
     if not field.is_list:
         findings.append(_f(
             "4-sources", "error", "sources: must be a list, not a scalar",
@@ -617,8 +621,6 @@ def _check_sources(fm, findings):
             findings.append(_f("4-sources", "error", "sources: contains a null or invalid item",
                                {"line": line}))
             continue
-        if value == "stub":
-            continue  # _check_stub_sources enforces the legacy sole-marker rule.
         if re.fullmatch(r"\[\[[^\[\]\r\n|#]+\.(?i:pdf)#page=[1-9][0-9]*\]\]", value):
             continue
         if re.fullmatch(r"\[\[[^\[\]\r\n|#]+\.(?i:md)\]\]", value):
@@ -867,10 +869,8 @@ _RELATED_RENDERED_RE = re.compile(
     r"^ {0,3}(?:>[ \t]*)?\*\*Related:\*\*(?:[ \t]*.*)?$")
 
 
-def _check_related_footer(sections, findings, is_stub):
+def _check_related_footer(sections, findings):
     """Require one canonical terminal footer without hiding malformed forms."""
-    if is_stub:
-        return
     visible = sections.get("visible_lines", sections["lines"])
     masked = strip_fenced("\n".join(visible)).split("\n")
     indexes = [index for index, line in enumerate(masked)
@@ -878,7 +878,7 @@ def _check_related_footer(sections, findings, is_stub):
     if not indexes:
         findings.append(_f(
             "11-related-footer", "error",
-            "full entry has no `**Related:**` footer before Flashcards"))
+            "entry has no `**Related:**` footer before Flashcards"))
         return
     if len(indexes) > 1:
         findings.append(_f(
@@ -936,7 +936,7 @@ def _check_related_footer(sections, findings, is_stub):
             "body content appears after the Related footer; it must be terminal"))
 
 
-def _check_tags(fm, findings, is_stub):
+def _check_tags(fm, findings):
     field = fm.get("tags")
     if field is None:
         return
@@ -944,8 +944,8 @@ def _check_tags(fm, findings, is_stub):
         findings.append(_f(
             "8-tags", "error",
             "tags: must be a block-form list (one double-quoted tag per `-` "
-            "line); a full entry with no disciplinary home uses a blank "
-            "`tags:` key, not scalar or flow-list syntax",
+            "line), including the sole #misc fallback when no specific "
+            "discipline applies; do not use scalar or flow-list syntax",
             {"line": field.line, "kind": field.kind}))
     values = [v for v in field.values if v not in (None, "")]
     # An unquoted # tag is a comment, not a parsed value. Its original text
@@ -958,11 +958,18 @@ def _check_tags(fm, findings, is_stub):
                 "silently lost; write - \"%s\"" % (raw, raw),
                 {"line": line, "raw": raw}))
     if not values:
-        if is_stub:
-            findings.append(_f("8-tags", "error",
-                               "stubs always get at least one tag -- blank tags: "
-                               "is not allowed on a stub"))
+        findings.append(_f(
+            "8-tags", "error",
+            "tags: must contain at least one valid discipline tag; use #misc "
+            "only when no specific discipline applies",
+            {"line": field.line}))
         return
+    if "#misc" in values and (len(values) != 1 or len(field.values) != 1):
+        findings.append(_f(
+            "8-tags", "error",
+            "#misc must be the sole tag; use specific discipline tags "
+            "without the fallback when they apply",
+            {"line": field.line, "values": values}))
     for raw, value, line in zip(field.raw_items, field.values, field.item_lines):
         if not isinstance(value, str) or not value:
             continue
@@ -975,7 +982,8 @@ def _check_tags(fm, findings, is_stub):
         if slug not in TAG_ENUM:
             findings.append(_f(
                 "8-tags", "error",
-                "tag #%s is not one of the 27 valid discipline slugs" % slug,
+                "tag #%s is not one of the %d valid discipline slugs"
+                % (slug, len(TAG_ENUM)),
                 {"line": line, "value": value, "enum": TAG_ENUM}))
 
 
@@ -1256,7 +1264,7 @@ def _check_alias_completeness(fm, sections, findings, filename):
 # entries that still carry it are left alone -- nothing strips it and nothing
 # flags it, at any severity.  So there is no presence check (it is out of
 # MANDATORY_KEYS), no quoting check (out of NEVER_QUOTED), no enum check, and
-# no stub-must-be-blank check.  The key is still listed in
+# no value-validation check.  The key is still listed in
 # vault_index.SCHEMA_ORDER, which is what keeps _check_field_order from
 # reporting a legacy `importance:` as an unknown or misplaced key.
 
@@ -2021,8 +2029,8 @@ def _flashcard_line3_fault(line3, fm, sections):
     return None
 
 
-def _check_flashcards_present(fm, sections, findings, is_stub):
-    """Item 19's PRESENCE half: every full entry carries `## Flashcards`.
+def _check_flashcards_present(fm, sections, findings):
+    """Item 19's PRESENCE half: every entry carries `## Flashcards`.
 
     The leak scan below is item 19's other half and it only runs when a
     Flashcards section exists -- so an entry with no section at all passed the
@@ -2030,16 +2038,13 @@ def _check_flashcards_present(fm, sections, findings, is_stub):
     reader cannot see by looking at the entry (nothing is wrong; something is
     missing).  SKILL.md's script table claims item 19; the three clauses
     checked here are exactly its mechanical ones -- present, preceded by a
-    `---` separator of its own, at least one card.  The stub direction (a stub
-    must NOT have one) is `stub-no-flashcards`.
+    `---` separator of its own, at least one card.
     """
-    if is_stub:
-        return
     if sections["flashcards_index"] is None:
         findings.append(_f(
             "19-flashcards", "error",
-            "full entry has no `## Flashcards` section -- item 19 requires one "
-            "on every full entry, after the Related footer, preceded by a "
+            "entry has no `## Flashcards` section -- item 19 requires one "
+            "on every entry, after the Related footer, preceded by a "
             "`---` separator line, holding at least one card"))
         return
     # A tolerated heading spelling (### level, extra/leading spaces) is a
@@ -2159,8 +2164,8 @@ def _check_flashcards_present(fm, sections, findings, is_stub):
                     {"card": card_no, "line3": line3[:60], "title": title}))
 
 
-def _check_flashcard_leak(fm, sections, findings, is_stub):
-    if is_stub or sections["flashcards_index"] is None:
+def _check_flashcard_leak(fm, sections, findings):
+    if sections["flashcards_index"] is None:
         return
     title = fm.scalar("title")
     if not title:
@@ -2209,76 +2214,11 @@ def _check_flashcard_leak(fm, sections, findings, is_stub):
                  "line1": line1}))
 
 
-def _check_stub_structure(fm, sections, findings, is_stub):
-    if not is_stub:
-        return
-    body_text = "\n".join(sections["lines"])
-    prose = "\n".join(sections["prose_lines"]).strip()
-
-    paragraphs = [p for p in re.split(r"\n\s*\n", prose) if p.strip()]
-    if len(paragraphs) > 1:
-        findings.append(_f(
-            "stub-one-sentence-body", "error",
-            "a stub body is one sentence; found %d paragraphs" % len(paragraphs),
-            {"paragraphs": len(paragraphs)}))
-    elif paragraphs:
-        n = count_sentences(paragraphs[0])
-        if n > 1:
-            findings.append(_f(
-                "stub-one-sentence-body", "warning",
-                "a stub body is one sentence; found roughly %d" % n,
-                {"body": paragraphs[0][:300]}))
-    else:
-        findings.append(_f("stub-one-sentence-body", "error",
-                           "stub has no body sentence"))
-
-    if sections["related_index"] is not None:
-        findings.append(_f("stub-no-related", "error",
-                           "stubs carry no **Related:** footer",
-                           {"line": (fm.body_start_line
-                                     + sections["related_index"]),
-                            "text": sections["related_line"][:160]}))
-    # A syntax sample inside inline/fenced/indented code is not an image.
-    # Read the same listing-masked body as the linter's stub check.
-    masked_stub_body = strip_code(body_text)
-    stub_images = re.findall(r"!\[\[[^\]\n]+\]\]", masked_stub_body)
-    stub_images.extend(
-        masked_stub_body[start:end]
-        for start, end, _destination in _markdown_image_spans(masked_stub_body))
-    if stub_images:
-        findings.append(_f("stub-no-images", "error",
-                           "stubs never carry images",
-                           {"embeds": stub_images}))
-    if sections["flashcards_index"] is not None:
-        findings.append(_f("stub-no-flashcards", "error",
-                           "stubs have no ## Flashcards section"))
-
-
-def _check_stub_sources(fm, findings):
-    """Report a sources: list that mixes the stub marker with real wikilinks."""
-    field = fm.get("sources")
-    if field is None:
-        # A missing key is already _check_field_order's MANDATORY_KEYS
-        # finding; reporting it here too made one fault two findings.
-        return False
-    values = [v for v in field.values if v not in (None, "")]
-    if not values:
-        findings.append(_f("2-field-order", "error", "sources: is empty; it must "
-                                                     "hold at least one item"))
-        return False
-    if "stub" in values and len(values) > 1:
-        findings.append(_f(
-            "stub-sources-marker", "error",
-            'the literal "stub" marker must be the SOLE sources: item -- on '
-            "promotion it is replaced by the real source, never appended",
-            {"sources": values}))
-    return values == ["stub"]
-
 
 def _check_source_duplicates(fm, findings):
     """Item 4: no two ``sources:`` items may name the same document.
 
-    ``paper-summarizer`` writes a note into ``Articles/`` for every PDF it
+    ``paper-summarize`` writes a note into ``Articles/`` for every PDF it
     summarises, named after that PDF's stem, so one document sits in the vault
     under two names -- ``Sources/PDFs/X.pdf`` and ``Articles/X.md`` -- and
     both are legal ``sources:`` values. However, an independent web clipping
@@ -2330,7 +2270,7 @@ def lint_text(text, filename):
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     findings = []
     result = {"file": os.path.abspath(filename), "findings": findings,
-              "is_stub": False, "title": None, "aliases": [],
+              "title": None, "aliases": [],
               "description_chars": None}
 
     fm = parse_frontmatter(text)
@@ -2342,8 +2282,6 @@ def lint_text(text, filename):
     desc = fm.scalar("description")
     result["description_chars"] = len(desc) if desc else 0
 
-    is_stub = _check_stub_sources(fm, findings)
-    result["is_stub"] = is_stub
     sections = split_sections(fm.body)
 
     _check_field_order(fm, findings)
@@ -2355,27 +2293,25 @@ def lint_text(text, filename):
     _check_source_duplicates(fm, findings)
     _check_slug(fm, findings, filename)
     _check_description(fm, findings, title=result["title"])
-    _check_tags(fm, findings, is_stub)
+    _check_tags(fm, findings)
     _check_aliases(fm, findings, filename)
     _check_alias_completeness(fm, sections, findings, filename)
     _check_body_structure(fm, sections, findings)
-    _check_related_footer(sections, findings, is_stub)
+    _check_related_footer(sections, findings)
     _check_table_cell_wikilinks(fm, sections, findings)
     _check_redundant_piped_wikilinks(sections, findings)
     _check_duplicate_wikilinks(sections, findings)
     _check_integrated_wikilinks(fm, sections, findings)
     _check_person_event_date(fm, sections, findings)
-    if not is_stub:
-        _check_image_captions(fm, sections, findings)
-        _check_equation_coverage_candidates(fm, sections, findings)
+    _check_image_captions(fm, sections, findings)
+    _check_equation_coverage_candidates(fm, sections, findings)
     _check_literal_dollars("\n".join(sections["prose_lines"]), findings)
     _check_unicode_math(fm, sections, findings)
     _check_table_captions(fm, sections, findings)
     _check_bold_opener(fm, sections, findings)
     _check_code_typography(sections, findings)
-    _check_flashcards_present(fm, sections, findings, is_stub)
-    _check_flashcard_leak(fm, sections, findings, is_stub)
-    _check_stub_structure(fm, sections, findings, is_stub)
+    _check_flashcards_present(fm, sections, findings)
+    _check_flashcard_leak(fm, sections, findings)
     return result
 
 
@@ -2423,7 +2359,7 @@ def lint_file(path):
                            "file is not valid UTF-8 (%s); linted with "
                            "replacement characters" % exc))
     except Exception as exc:
-        return {"file": abspath, "is_stub": False, "title": None, "aliases": [],
+        return {"file": abspath, "title": None, "aliases": [],
                 "description_chars": None,
                 "findings": [_f("0-unreadable", "error",
                                 "could not read file: %s: %s"
@@ -2436,7 +2372,7 @@ def lint_file(path):
         result["findings"] = preamble + result["findings"]
         return result
     except Exception as exc:  # a malformed entry is a finding, never a crash
-        return {"file": abspath, "is_stub": False, "title": None, "aliases": [],
+        return {"file": abspath, "title": None, "aliases": [],
                 "description_chars": None,
                 "findings": [_f("0-lint-error", "error",
                                 "internal error while linting: %s: %s"
@@ -2735,7 +2671,6 @@ def lint_path(target, severity_floor=None):
     report["entries"] = results
     report["summary"] = {
         "files": len(results),
-        "stubs": sum(1 for r in results if r["is_stub"]),
         "files_with_findings": sum(1 for r in results if r["findings"]),
         "findings": total,
         "by_severity": dict(sorted(by_severity.items())),
@@ -2791,14 +2726,14 @@ def _st_good():
         'ROC curve\n')
 
 
-def _st_stub():
-    """A schema-clean STUB, which is structurally a different entry."""
+def _st_precision():
+    """A complete second entry for link and folder-level checks."""
     return (
         '---\n'
         'title: "Precision"\n'
         'type: Concept\n'
         'sources:\n'
-        '  - "stub"\n'
+        '  - "[[Doe_X_2025.pdf#page=2]]"\n'
         'created: 2026-01-01\n'
         'updated: 2026-01-02\n'
         'description: "Precision is the share of predicted positives that are '
@@ -2808,7 +2743,9 @@ def _st_stub():
         'parents: []\n'
         'read: false\n'
         '---\n'
-        '**Precision** is the share of predicted positives that are correct.\n')
+        '**Precision** is the share of predicted positives that are correct.\n'
+        '\n**Related:**\n\n---\n\n## Flashcards\n\n'
+        'The share of predicted positive cases that are correct.\n??\nPrecision\n')
 
 
 def _st_items(result):
@@ -2826,7 +2763,7 @@ def run_self_test():
         cases.append((label, got == want, got, want))
 
     good = _st_good()
-    stub = _st_stub()
+    precision = _st_precision()
 
     def mutate(old, new, base=None):
         base = good if base is None else base
@@ -2869,8 +2806,19 @@ def run_self_test():
               items(duplicated), [])
     check("CRLF and LF entries have the same lint result",
           items(good.replace("\n", "\r\n")), [])
-    check("the clean STUB produces no finding either",
-          items(stub, "precision.md"), [])
+    check("the complete second entry passes ordinary validation",
+          items(precision, "precision.md"), [])
+    check("empty source lists retain their mandatory-provenance finding",
+          [items(mutate('sources:\n  - "[[Doe_X_2025.pdf#page=2]]"\n', replacement))
+           for replacement in ("sources:\n", "sources: []\n")],
+          [["2-field-order"], ["2-field-order"]])
+    check("plain placeholder provenance fails the ordinary source rule",
+          items(mutate("[[Doe_X_2025.pdf#page=2]]", "placeholder")),
+          ["4-sources"])
+    check("invalid provenance does not waive the normal footer and card requirements",
+          items(mutate("[[Doe_X_2025.pdf#page=2]]", "placeholder")
+                .split("\n**Related:**", 1)[0] + "\n"),
+          ["11-related-footer", "19-flashcards", "4-sources"])
     check("numeric inline math is not mistaken for currency",
           [_literal_dollar_count(value) for value in (
               r"The rank satisfies $1 \le k \le m$.",
@@ -3170,7 +3118,7 @@ def run_self_test():
                        '  - "[[Doe_X_2025.pdf#page=2]]"\n  - "[[Zed_Blog_2023.md]]"\n')),
           [])
     check("source_stem folds case/NFC and strips wrapper, pipe, anchor, folder",
-          [source_stem(s) for s in ('"stub"', "[[Sources/PDFs/Doe_X_2025.pdf#page=2]]",
+          [source_stem(s) for s in ('"placeholder"', "[[Sources/PDFs/Doe_X_2025.pdf#page=2]]",
                                     "[[doe_x_2025.md|label]]")],
           [("", ""), ("doe_x_2025", "pdf"), ("doe_x_2025", "md")])
 
@@ -3284,7 +3232,7 @@ def run_self_test():
     # -- item 8: tags ------------------------------------------------------
     check("a tag with no # prefix",
           items(mutate('  - "#statistics"', '  - "statistics"')), ["8-tags"])
-    check("a tag outside the 27-slug enum",
+    check("a tag outside the discipline enum",
           items(mutate('  - "#statistics"', '  - "#astrology"')), ["8-tags"])
     check("a flow-form tags list is rejected even when its value is valid",
           items(mutate('tags:\n  - "#statistics"\n',
@@ -3292,12 +3240,29 @@ def run_self_test():
     check("a scalar tags value is rejected even when its value is valid",
           items(mutate('tags:\n  - "#statistics"\n',
                        'tags: "#statistics"\n')), ["8-tags"])
-    check("a blank tags: key remains valid on a full entry",
-          items(mutate('tags:\n  - "#statistics"\n', "tags:\n")), [])
-    check("a stub with blank tags: (the one field where a stub is stricter)",
-          items(mutate('tags:\n  - "#statistics"\n', "tags:\n", base=stub),
-                "precision.md"),
-          ["8-tags"])
+    check("blank and empty-list tags require a discipline or fallback",
+          [items(mutate('tags:\n  - "#statistics"\n', replacement))
+           for replacement in ("tags:\n", "tags: []\n")],
+          [["8-tags"], ["8-tags"]])
+    check("the sole misc fallback is a valid discipline tag",
+          items(mutate('  - "#statistics"', '  - "#misc"')), [])
+    check("misc cannot coexist with a specific discipline or duplicate itself",
+          [items(mutate('  - "#statistics"', replacement))
+           for replacement in ('  - "#misc"\n  - "#statistics"',
+                               '  - "#statistics"\n  - "#misc"',
+                               '  - "#misc"\n  - "#misc"')],
+          [["8-tags"]] * 3)
+    check("multiple specific disciplines remain valid without misc",
+          items(mutate('  - "#statistics"',
+                       '  - "#statistics"\n  - "#mathematics"')), [])
+    check("missing tags remain a mandatory-field error",
+          items(mutate('tags:\n  - "#statistics"\n', "")),
+          ["2-field-order"])
+    check("null and scalar tag values remain tag errors",
+          ["8-tags" in items(mutate('tags:\n  - "#statistics"\n', replacement))
+           for replacement in ("tags: null\n", 'tags: ""\n',
+                               'tags: "#misc"\n', "tags:\n  - null\n")],
+          [True] * 4)
 
     # -- item 10: duplicate wikilinks --------------------------------------
     check("the same target linked twice in prose, under two labels",
@@ -3518,7 +3483,7 @@ def run_self_test():
                        "```text\n[CLS] .csv\n```\n")), [])
 
     # -- item 19: presence, then the answer leak ---------------------------
-    check("a full entry with NO ## Flashcards section",
+    check("a entry with NO ## Flashcards section",
           items(mutate("\n---\n\n## Flashcards\n\nThe plot tracing the "
                        "trade-off between two error rates as a decision "
                        "threshold moves.\n??\nROC curve\n", "")),
@@ -3773,45 +3738,6 @@ def run_self_test():
                 .replace("\nROC curve\n", "\nVariance\n"),
                 "variance.md"), [])
 
-    # -- stub structure ----------------------------------------------------
-    check("a stub with a Related footer",
-          items(mutate("correct.\n", "correct.\n\n**Related:** [[roc-curve|ROC curve]]\n",
-                       base=stub), "precision.md"), ["stub-no-related"])
-    check("a stub with an image (which is also a second block, hence both)",
-          items(mutate("correct.\n", "correct.\n\n![[figure.png]]\n", base=stub),
-                "precision.md"), ["stub-no-images", "stub-one-sentence-body"])
-    check("a stub with Markdown image syntax is also rejected",
-          items(mutate("correct.\n", "correct with ![alt](figure.png).\n", base=stub),
-                "precision.md"), ["stub-no-images"])
-    check("escaped Markdown image syntax remains literal text in a stub",
-          items(mutate("correct.\n", r"correct while showing \![alt](figure.png)." + "\n",
-                       base=stub), "precision.md"), [])
-    check("image syntax shown in inline code is not a stub image",
-          items(mutate("correct.\n", "correct while showing `![[figure.png]]` syntax.\n",
-                       base=stub), "precision.md"), [])
-    check("a stub with a Flashcards section",
-          items(mutate("correct.\n",
-                       "correct.\n\n---\n\n## Flashcards\n\nDef.\n??\nPrecision\n",
-                       base=stub), "precision.md"), ["stub-no-flashcards"])
-    check("a stub body of two paragraphs",
-          items(mutate("correct.\n", "correct.\n\nA second paragraph.\n", base=stub),
-                "precision.md"), ["stub-one-sentence-body"])
-    check("a Person stub's initials and lifespan do not read as extra sentences",
-          items(mutate('title: "Precision"', 'title: "A. M. Turing"', base=stub)
-                .replace("type: Concept", "type: Person")
-                .replace("**Precision** is the share of predicted positives "
-                         "that are correct.",
-                         "**A. M. Turing** (1912–1954) was a "
-                         "mathematician, e.g. of computability.")
-                .replace('description: "Precision is the share of predicted '
-                         'positives that are correct."',
-                         'description: "A. M. Turing was a mathematician."'),
-                "a-m-turing.md"), [])
-    check('the "stub" marker beside a real source',
-          items(mutate('  - "stub"\n', '  - "stub"\n  - "[[Doe_X_2025.pdf#page=2]]"\n',
-                       base=stub), "precision.md"),
-          ["11-related-footer", "19-flashcards", "stub-sources-marker"])
-
     # -- item 9: structure plus semantic body review -----------------------
     check("the body starts immediately after frontmatter",
           items(mutate("read: false\n---\nA **ROC curve**",
@@ -3881,7 +3807,7 @@ def run_self_test():
           (["9-person-event-date"], ["9-person-event-date"],
            ["9-person-event-date"],
            ["9-person-event-date"]))
-    check("a long, well-scoped full-entry sentence has no length finding",
+    check("a long, well-scoped entry sentence has no length finding",
           items(mutate("A **ROC curve** plots the trade-off between two error "
                        "rates as a decision threshold moves.\n",
                        "A **ROC curve** plots the trade-off between false "
@@ -3891,17 +3817,8 @@ def run_self_test():
                        "ranking behaviour, and the classifier's error profile "
                        "in one clear scoped statement.\n")),
           [])
-    check("a long one-sentence legacy stub still follows its own shape rule",
-          items(mutate("**Precision** is the share of predicted positives "
-                       "that are correct.",
-                       "**Precision** is the share of predicted positives "
-                       "that are correct when a classifier's positive calls "
-                       "are compared against labels across all operating "
-                       "thresholds used in the evaluation.", base=stub),
-                "precision.md"),
-          [])
-    # Sentence boundaries remain relevant only to the legacy stub's required
-    # one-sentence shape. A possessive must end a sentence; an initial must not.
+    # Descriptions and flashcard definitions still require one sentence.
+    # A possessive must end a sentence; an initial must not.
     check("a possessive before the period separates two sentences",
           count_sentences("One belongs to the predictor's. Another follows."), 2)
     check("...and a genuine initial still does not split (B. F. Skinner)",
@@ -3979,12 +3896,6 @@ def run_self_test():
               mutate("The plot tracing the trade-off between two error rates "
                      "as a decision threshold moves.",
                      "It is the square root of variance.")), False)
-    check("legacy stubs do not acquire equations",
-          "12-equation-coverage-candidate" in items(
-              mutate("**Precision** is the share of predicted positives that "
-                     "are correct.",
-                     "**Precision** is defined as the square root of variance.",
-                     base=stub), "precision.md"), False)
     check("equation wording shown in inline or fenced code is not asserted prose",
           "12-equation-coverage-candidate" in items(mutate(
               "A **ROC curve** plots the trade-off between two error rates as "
@@ -4198,7 +4109,7 @@ def run_self_test():
                          "characteristic*, plots the trade-off")),
           [])
     check("a Person opener's date parenthetical is not an alias candidate",
-          items(mutate('title: "Precision"', 'title: "A. M. Turing"', base=stub)
+          items(mutate('title: "Precision"', 'title: "A. M. Turing"', base=precision)
                 .replace("type: Concept", "type: Person")
                 .replace("**Precision** is the share of predicted positives "
                          "that are correct.",
@@ -4206,7 +4117,8 @@ def run_self_test():
                          "mathematician, e.g. of computability.")
                 .replace('description: "Precision is the share of predicted '
                          'positives that are correct."',
-                         'description: "A. M. Turing was a mathematician."'),
+                         'description: "A. M. Turing was a mathematician."')
+                .replace("\nPrecision\n", "\nA. M. Turing\n"),
                 "a-m-turing.md"), [])
     check("the cue catches 'which many people call *X*'",
           [c for c, _w in _alias_candidates(split_sections(
@@ -4308,7 +4220,7 @@ def run_self_test():
                         .replace("\nROC curve\n", "\n%s\n" % title))
 
         put("roc-curve.md", good)
-        put("precision.md", stub)
+        put("precision.md", precision)
         # a second entry claiming the same alias, in a different CASE
         put("sub/sensitivity.md",
             good.replace('title: "ROC curve"', 'title: "Sensitivity"')
@@ -4370,7 +4282,6 @@ def run_self_test():
         report = lint_path(wiki)
         check("lint_path walks the folder recursively",
               report["summary"]["files"], 12)
-        check("...and counts the stubs", report["summary"]["stubs"], 1)
         check("an alias claimed by two entries is a folder-scope collision",
               [c["alias"] for c in report["alias_collisions"]], ["auroc"])
         check("...compared case-folded, and reported on BOTH entries",

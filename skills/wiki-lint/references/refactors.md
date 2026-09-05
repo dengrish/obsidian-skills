@@ -44,8 +44,8 @@ complete-reference-rewrite gate.
 ## Build the refactored entries
 
 - Apply wiki-build's current field, prose, equation, media, link, and
-  flashcard rules. Every result is a full atomic entry; no bridge stub or
-  temporary redirect is created.
+  flashcard rules. Every result is a source-backed atomic entry; no temporary redirect is
+  created.
 - A split moves each verified claim, equation, exhibit, and citation to its
   canonical owner. Leave enough concise relationship prose and wikilinks for
   orientation, without duplicating the full explanation across the results.

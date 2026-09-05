@@ -1,6 +1,6 @@
 # Flashcards — when a card may be rewritten (Task 1, item 19)
 
-**Read this whenever a card may be added or changed** — on any `item19` finding, and on every full entry when Task 1 runs a definition review. It is the judgment layer on top of item 19's mechanical floor (`references/qc-items.md`); the targeted coverage repair and rewrite bars below govern existing cards.
+**Read this whenever a card may be added or changed** — on any `item19` finding, and on every entry when Task 1 runs a definition review. It is the judgment layer on top of item 19's mechanical floor (`references/qc-items.md`); the targeted coverage repair and rewrite bars below govern existing cards.
 
 ## Flashcard definition review (item 19)
 
