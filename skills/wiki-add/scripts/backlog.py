@@ -19,7 +19,7 @@ import stat
 import sys
 import tempfile
 
-_OBSIDIAN_SHARED_MODULES = ('atomic_move',)
+_OBSIDIAN_SHARED_MODULES = ('atomic_move', 'entry_structure', 'markdown_tables')
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
@@ -59,6 +59,7 @@ if _here != _shared:
 # --- end bootstrap ---
 
 import atomic_move
+from entry_structure import mask_body_comments
 
 SCHEMA = "obsidian-wiki-add-backlog-v1"
 LIST = re.compile(r"^([-+*]|[0-9]{1,9}[.)])([ \t]+)(.*)$")
@@ -82,9 +83,11 @@ def absolute_leaf(path):
 def read_stable(path):
     """Bind exact bytes to the shared stable regular-file publication token."""
     expected = atomic_move.regular_file_snapshot(path)
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     with os.fdopen(os.open(path, flags), "rb") as handle:
         opened = os.fstat(handle.fileno())
+        if not stat.S_ISREG(opened.st_mode):
+            raise Conflict("file changed to a non-regular file: %s" % path)
         data = handle.read()
         identity = (opened.st_dev, opened.st_ino, stat.S_IFMT(opened.st_mode))
     if (identity != expected.identity or digest(data) != expected.digest
@@ -107,6 +110,15 @@ def parse_queue(data):
     items, reports = [], []
     completed = 0
     frontmatter = bool(lines and lines[0].lstrip("\ufeff").strip() == "---")
+    body_at = 0
+    if frontmatter:
+        body_at = next((i + 1 for i, line in enumerate(lines[1:], 1)
+                        if line.strip() in ("---", "...")), len(lines))
+    # The shared Markdown view distinguishes real comments from literal
+    # delimiters in inline/fenced code, including soft-wrapped code spans.
+    # Keep YAML outside that view and retain the raw text for exact patches.
+    comment_lines = lines[:body_at] + mask_body_comments(
+        "".join(lines[body_at:])).splitlines(keepends=True)
     fence, comment, parent, offset = None, False, None, 0
     for number, raw in enumerate(lines, 1):
         start = offset
@@ -125,19 +137,24 @@ def parse_queue(data):
         # them become syntax. Keep the visible part of an inline request.
         visible = []
         cursor = 0
+        comment_view = comment_lines[number - 1].rstrip("\r\n")
         while cursor < len(line):
             if comment:
-                end = line.find("-->", cursor)
+                end = line.find(comment, cursor)
                 if end < 0:
                     break
-                comment, cursor = False, end + 3
+                cursor, comment = end + len(comment), False
             else:
-                begin = line.find("<!--", cursor)
-                if begin < 0:
+                opening = next((m for m in re.finditer(r"<!--|%%", line[cursor:])
+                                if not comment_view[cursor + m.start():
+                                                    cursor + m.end()].strip()), None)
+                if opening is None:
                     visible.append(line[cursor:])
                     break
+                begin = cursor + opening.start()
                 visible.append(line[cursor:begin])
-                comment, cursor = True, begin + 4
+                comment = "-->" if opening[0] == "<!--" else "%%"
+                cursor = begin + len(opening[0])
         clean = "".join(visible)
         # A comment before/in the list marker is not a flush-left request.
         original_match = LIST.match(line)
@@ -145,7 +162,7 @@ def parse_queue(data):
                               not clean.startswith(original_match[1] + original_match[2])):
             continue
         opening = FENCE.match(clean)
-        if opening:
+        if opening and not (opening[1][0] == "`" and "`" in opening[2]):
             fence = (opening[1][0], len(opening[1]))
             parent = None
             continue
@@ -323,6 +340,26 @@ def run_self_tests():
         entry = wiki / "topic.md"
         entry.write_bytes(b"---\ntitle: Topic\n---\nTopic body.\n")
 
+        fifo_path = root / "fifo-race.md"
+        fifo_path.write_bytes(b"- [ ] Before swap\n")
+        fifo_token = atomic_move.regular_file_snapshot(fifo_path)
+        real_open = os.open
+
+        def swap_to_fifo(path, flags, *args, **kwargs):
+            if os.fspath(path) == str(fifo_path):
+                if not flags & os.O_NONBLOCK:
+                    raise AssertionError("would block waiting for a FIFO writer")
+                fifo_path.unlink()
+                os.mkfifo(fifo_path)
+            return real_open(path, flags, *args, **kwargs)
+
+        with mock.patch.object(atomic_move, "regular_file_snapshot", return_value=fifo_token), \
+                mock.patch.object(os, "open", side_effect=swap_to_fifo):
+            fifo_refused = raises(Conflict, lambda: read_stable(fifo_path))
+        check("a regular queue swapped to a FIFO is refused without waiting for a writer",
+              fifo_refused)
+        fifo_path.unlink()
+
         fixture = (
             b"---\r\ntitle: Queue\r\n---\r\n"
             b"- [ ] Alpha\r\n"
@@ -354,6 +391,30 @@ def run_self_tests():
               (counts["report_only"], len(reports)), (3, 3))
         check("Unicode survives inventory text exactly",
               parsed[1]["text"], "Beta \u2014 caf\u00e9")
+
+        literal_queue = (
+            b'- [ ] Explain `<!--` in HTML\r\n'
+            b'```\r\n-->\r\n- [ ] Not a request\r\n```\r\n'
+            b'- [ ] Next real topic\r\n')
+        literal_items, literal_reports, _ = parse_queue(literal_queue)
+        check("literal inline comment syntax cannot expose fenced requests",
+              ([item["text"] for item in literal_items], literal_reports),
+              (["Explain `<!--` in HTML", "Next real topic"], []))
+        soft_items, soft_reports, _ = parse_queue(
+            b'- [ ] Explain ``code\n  <!-- literal -->``\n'
+            b'%%\n- [ ] Hidden Obsidian comment\n%%\n'
+            b'- [ ] Visible <!-- real comment -->topic\n')
+        check("soft-wrapped code stays literal and both comment forms hide requests",
+              ([item["text"] for item in soft_items],
+               soft_items[0]["context_lines"], soft_reports),
+              (["Explain ``code", "Visible topic"], ["  <!-- literal -->``"], []))
+        literal_path = root / "literal-queue.md"
+        literal_path.write_bytes(literal_queue)
+        literal_snapshot = root / "literal.json"
+        literal_scan = save_scan(literal_path, literal_snapshot)
+        complete(literal_snapshot, literal_scan["items"][0]["id"], wiki, entry)
+        check("literal-code completion preserves fenced examples and all other bytes",
+              literal_path.read_bytes(), literal_queue.replace(b"- [ ]", b"- [x]", 1))
 
         # One CRLF queue without a final newline covers both patch forms and
         # proves that a fresh scan, rather than a stale item id, is required.

@@ -115,7 +115,7 @@ def _escaped_at(text, offset):
     return (offset - start) % 2 == 1
 
 
-def mask_body_comments(text, *, mask_code=False):
+def mask_body_comments(text, *, mask_code=False, mask_unclosed_comments=True):
     """Blank HTML/Obsidian comments, retaining every character/line offset.
 
     Use only for the read-only explanatory-body view, never for flashcard
@@ -123,6 +123,10 @@ def mask_body_comments(text, *, mask_code=False):
     Comment delimiters shown in code are literal. Parse comments before code
     masking so a fence shown *inside* a comment cannot hide later visible prose.
     Link inventories may additionally blank those code spans with mask_code.
+    By default an unfinished comment hides the rest of the rendered body.
+    Dependency-retirement checks can set mask_unclosed_comments=False to keep
+    an unmatched opener and its text visible, while still masking actual code
+    and any independently closed comments.
     """
     text = text or ""
     chars = list(text)
@@ -203,6 +207,9 @@ def mask_body_comments(text, *, mask_code=False):
         if opener and not _escaped_at(text, index):
             closer = "-->" if opener == "<!--" else "%%"
             end = text.find(closer, index + len(opener))
+            if end < 0 and not mask_unclosed_comments:
+                index += len(opener)
+                continue
             # An unfinished body comment hides the remaining rendered body.
             end = len(text) if end < 0 else end + len(closer)
             blank(index, end)
@@ -1318,6 +1325,34 @@ def run_self_test(verbose=False):
             (len(masked), [i for i, c in enumerate(masked) if c == "\n"],
              "[[hidden]]" in masked, masked.endswith("Visible after [[real]].")),
             (len(source), [i for i, c in enumerate(source) if c == "\n"], False, True)))
+        helper_cases.append((
+            "conservative dependency mode still hides closed comments: " + opening,
+            mask_body_comments(source, mask_unclosed_comments=False), masked))
+        source = "Visible before.\n" + opening + "\n[[dependency]]\n"
+        helper_cases.append((
+            "unfinished comments retain the existing hidden-body default: " + opening,
+            mask_body_comments(source),
+            "Visible before.\n" + " " * len(opening) + "\n" +
+            " " * len("[[dependency]]") + "\n"))
+        helper_cases.append((
+            "conservative dependency mode retains unfinished comments: " + opening,
+            mask_body_comments(source, mask_code=True, mask_unclosed_comments=False),
+            source))
+        source = "The opener is `" + opening + "`.\n\n![[dependency.png]]\n\nThe closer is `" + closing + "`."
+        masked = mask_body_comments(
+            source, mask_code=True, mask_unclosed_comments=False)
+        helper_cases.append((
+            "literal comment delimiters cannot consume an intervening dependency: " + opening,
+            (len(masked), [i for i, c in enumerate(masked) if c == "\n"],
+             "![[dependency.png]]" in masked, opening in masked, closing in masked),
+            (len(source), [i for i, c in enumerate(source) if c == "\n"], True, False, False)))
+        source = opening + " [[dependency]] `[[literal]]`"
+        masked = mask_body_comments(
+            source, mask_code=True, mask_unclosed_comments=False)
+        helper_cases.append((
+            "conservative unfinished comments still mask confirmed inline code: " + opening,
+            (opening in masked, "[[dependency]]" in masked, "[[literal]]" in masked),
+            (True, True, False)))
         for code in ("`" + opening + "`", "``" + opening + "``",
                      "```text\n" + opening + "\n```",
                      "    " + opening):

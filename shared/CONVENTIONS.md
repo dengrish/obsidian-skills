@@ -1029,12 +1029,17 @@ cleanup.** Removing an alias can redirect every inbound wikilink that resolves
 through it. wiki-build reports one it can disprove from the active source;
 wiki-lint owns vault-wide discovery and the proposal record. Neither removes
 it during ordinary generation or lint. An approved removal first identifies the
-canonical owner, then finds and rewrites every inbound entry-link surface that
-resolves through the alias: Wiki body prose and Related footers, entry
-frontmatter such as `parents:`, and recognized MOCs in `MOCs/` (plus legacy
-root MOCs during migration). Preserve display labels,
-headings, and block anchors. Do not rewrite `sources:`, image embeds, or
-suggestion-log examples merely because their text matches the alias. Verify
+canonical owner, then finds and rewrites every real inbound reference that
+resolves through the alias across vault Markdown: wikilinks, note transclusions,
+relative Markdown links, and entry frontmatter such as `parents:`, including
+owners outside `Wiki/` and MOCs. Preserve display labels, headings, and block
+anchors. Do not rewrite source evidence, image embeds, code, or suggestion-log
+examples merely because their text matches the alias. A real resolving link
+in such a file still belongs in the dependency inventory. The Wiki scanner
+does not inspect every reference form, so a clean scan alone cannot establish
+that the inventory is complete. If an actual owner is outside the authorized
+write scope, retain the alias until that dependency can be repaired; existing
+authorization for those repairs does not need a second approval. Verify
 that no ambiguous owner or inbound alias-target link remains, and only then
 delete the alias. A duplicate spelling inside one entry is a format defect,
 not this semantic-removal case.
@@ -1058,12 +1063,17 @@ human review.
    `read:`. Keep the old slug as an alias only when it is still a valid
    same-entity name; a proven wrong or misleading name is not retained merely
    to make old links resolve.
-3. Inventory every resolving entry-link surface for the old filename or its
-   aliases: Wiki body and Related links, `parents:`, and every affected MOC.
-   Rewrite only links that resolve to this exact owner, preserving display
-   labels, headings, block anchors, and surrounding bytes. Do not rewrite
-   `sources:`, image embeds, external URLs, code, or suggestion-log examples
-   because their text happens to match.
+3. Inventory every real resolving reference for the old filename or its
+   aliases across vault Markdown, including wikilinks, note transclusions,
+   relative Markdown links, `parents:`, and every affected MOC. Include owners
+   outside `Wiki/`; a clean Wiki scan does not cover all these surfaces.
+   Rewrite only references that resolve to this exact owner, preserving
+   display labels, headings, block anchors, and surrounding bytes. Do not
+   rewrite source evidence, image embeds, external URLs, code, or suggestion-log
+   examples because their text happens to match. Actual resolving references
+   in these files remain dependencies. An owner outside the authorized write
+   scope blocks retirement of the old target; do not widen an explicit scope
+   restriction or seek renewed approval for already-authorized repairs.
 4. Stage all complete bytes privately outside recursively scanned folders and
    on each target's filesystem. Publish the destination entry exclusively,
    conditionally replace every snapshotted inbound/hierarchy file, and rebuild
@@ -1236,7 +1246,10 @@ source-figure inventories in §§1a and 8a), and `yaml_scalars.py` (§2).
 `yaml_scalars.py` decodes the single-line scalar values used in frontmatter:
 YAML double-quote escapes, doubled apostrophes in single quotes, trailing
 comments and bare null values. It is not a document parser. Callers still
-validate fences, list structure, field types and schema-specific quoting;
+validate fences, field types and schema-specific quoting. Its
+`parse_source_fields` helper reads the supported origin mapping and validates
+the complete current list, decoding keys before rejecting ambiguous ownership.
+An empty current `sources` never falls through to legacy `source`;
 unsupported or malformed input must be reported rather than supplying a
 guessed title or source identity. Reading a valid alternative YAML spelling
 does not change the canonical output forms in §2.

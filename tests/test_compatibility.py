@@ -901,6 +901,44 @@ read: false
                 self.assertEqual(builder.source_stem(item),
                                  linter.source_stem(item))
 
+    def test_source_note_consumers_agree_on_origin_ownership(self):
+        clipping = load(
+            "compat_clipping_origin", ROOT / "skills/clipping-clean/scripts/dedup_index.py")
+        paper = load(
+            "compat_paper_origin", ROOT / "skills/paper-summarize/scripts/paper_scan.py")
+        organizer = load(
+            "compat_organizer_origin", ROOT / "skills/pdf-organize/scripts/organize.py")
+        pdf = "[[Doe_Study_2025.pdf]]"
+        url = "https://example.org/observed#section"
+        cases = (
+            (f'sources:\n  - "{url}"\nsource: "{pdf}"', url),
+            (f'"sources": ["{url}"]', url),
+            (f'"so\\u0075rces": ["{pdf}"]', pdf),
+            (f"'sources':\n- '{pdf}' # origin", pdf),
+            (f'tags:\n- "#misc"\nsources:\n- "{pdf}"', pdf),
+            (f'"sources": ["{url}"]\nsources:\n  - "{pdf}"', None),
+            (f'"sources": ["{url}"]\nsource: "{pdf}"', url),
+            (f'sources: "{url}"\nsource: "{pdf}"', None),
+            (f'sources: []\nsource: "{pdf}"', None),
+            (f'sources:\n  - "{pdf}"\n  - [nested]', None),
+            (f'sources:\n  - "{pdf}"\n  - null', None),
+            (f'"source": "{url}"\nsource: "{pdf}"', None),
+            (f'? sources\n: ["{url}"]\nsource: "{pdf}"', None),
+            (f'<<: *other\nsource: "{pdf}"', None),
+            (f'source: "{pdf}"', pdf),
+        )
+        with tempfile.TemporaryDirectory(prefix="obsidian-origin-readers-") as tmp:
+            note = Path(tmp) / "note.md"
+            for metadata, expected in cases:
+                with self.subTest(metadata=metadata):
+                    note.write_text(
+                        "---\n" + metadata + "\n---\nOrdinary note body.\n",
+                        encoding="utf-8")
+                    self.assertEqual(clipping.read_source(note), expected)
+                    self.assertEqual(paper.note_source(note), expected)
+                    self.assertEqual(
+                        organizer._note_is_about(note, "Doe_Study_2025"), expected == pdf)
+
     def test_heading_contract_requires_its_reference_and_ordered_examples(self):
         conventions = load("convention_heading_contract", ROOT / "tests/test_conventions.py")
         format_path = ROOT / "skills/paper-summarize/references/note-format.md"

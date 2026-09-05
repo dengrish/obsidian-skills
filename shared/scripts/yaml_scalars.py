@@ -158,6 +158,102 @@ def parse_scalar(raw):
     raise ValueError("unterminated quoted YAML scalar")
 
 
+def parse_source_fields(frontmatter_lines):
+    """Read unambiguous top-level source fields from a closed YAML block.
+
+    Callers supply only the lines between verified fences and own full-file
+    UTF-8 decoding. Current ``sources`` remains present even when empty/null,
+    so it can never fall through to stale legacy ``source`` metadata. Decode
+    keys before checking duplicates and validate every current list member.
+    This deliberately rejects unsupported root mapping forms; it is not a
+    general YAML parser or a validator for unrelated metadata schemas.
+    """
+    result, active, item_indent, have_key = {}, None, None, False
+    other_block = False
+
+    def member(raw):
+        value, _ = parse_scalar(raw)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("sources contains an empty or null item")
+        return value
+
+    def key_value(line):
+        # A key's colon can be quoted or escaped; a regex that recognizes
+        # only bare source spellings silently assigns the wrong owner.
+        quote, index = None, 0
+        while index < len(line):
+            ch = line[index]
+            if quote:
+                if quote == '"' and ch == "\\":
+                    index += 2
+                    continue
+                if ch == quote:
+                    if quote == "'" and line[index:index + 2] == "''":
+                        index += 2
+                        continue
+                    quote = None
+            elif index == 0 and ch in "\"'":
+                quote = ch
+            elif ch == ":" and (index + 1 == len(line)
+                                or line[index + 1] in " \t"):
+                key, _ = parse_scalar(line[:index])
+                if not isinstance(key, str) or not key:
+                    raise ValueError("invalid frontmatter mapping key")
+                return key.casefold(), line[index + 1:]
+            index += 1
+        raise ValueError("unsupported or malformed frontmatter mapping")
+
+    for raw in frontmatter_lines:
+        if not isinstance(raw, str):
+            raise ValueError("expected frontmatter text lines")
+        line = raw.rstrip("\r\n")
+        if not line.strip() or line.lstrip(" \t").startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" \t"))
+        item = re.match(r"^[ \t]*-[ \t]+(.*)$", line)
+        if active == "sources-block" and item:
+            if "\t" in line[:indent] or (item_indent is not None and indent != item_indent):
+                raise ValueError("inconsistent sources list indentation")
+            item_indent = indent
+            result["sources"].append(member(item[1]))
+            continue
+        if other_block and item:
+            # YAML serializers often emit indentless tags/authors lists.
+            # They belong to that unrelated empty-valued mapping key.
+            continue
+        if indent:
+            if active is not None or not have_key:
+                raise ValueError("unsupported continuation of a source field")
+            # Nested values of unrelated metadata cannot define a root origin.
+            continue
+        active, item_indent, other_block = None, None, False
+        if line.startswith(("?", ":", "{", "[", "&", "*", "!", "%")):
+            raise ValueError("unsupported explicit, merged or flow root mapping")
+        key, raw_value = key_value(line)
+        have_key = True
+        if key == "<<":
+            raise ValueError("merged source ownership is unsupported")
+        if key not in ("source", "sources"):
+            other_block = not strip_comment(raw_value).strip(" \t")
+            continue
+        if key in result:
+            raise ValueError("duplicate source field: " + key)
+        value = strip_comment(raw_value).strip(" \t")
+        if key == "source":
+            result[key] = parse_scalar(raw_value)[0]
+            active = "source-scalar"
+        elif not value:
+            result[key], active = [], "sources-block"
+        elif value.startswith("[") and value.endswith("]"):
+            result[key] = [member(part) for part in split_flow(value[1:-1])]
+            active = "sources-flow"
+        elif parse_scalar(raw_value)[0] is None:
+            result[key], active = None, "sources-null"
+        else:
+            raise ValueError("sources must be a string list or null")
+    return result
+
+
 def self_test():
     import io
     import unittest
@@ -237,6 +333,53 @@ def self_test():
             for inner in (",", '"a",', ',"a"', '"a",,"b"'):
                 with self.subTest(inner=inner), self.assertRaises(ValueError):
                     split_flow(inner)
+
+        def test_source_fields_decode_keys_before_ownership(self):
+            self.assertEqual(parse_source_fields([
+                r'"sour\u0063es": ["https://example.invalid/right", "[[raw]]"]',
+                'source: "https://example.invalid/stale"']),
+                {"sources": ["https://example.invalid/right", "[[raw]]"],
+                 "source": "https://example.invalid/stale"})
+            for value in ("", "[]", "null"):
+                with self.subTest(value=value):
+                    self.assertIn("sources", parse_source_fields([
+                        "'sources': " + value, "source: https://example.invalid/stale"]))
+
+        def test_source_fields_keep_supported_metadata_and_list_forms(self):
+            self.assertEqual(parse_source_fields([
+                'title: A title', 'tags: []', 'description: |',
+                '  source: not an origin', 'sources:', '# origin follows',
+                '- https://example.invalid/right # verified',
+                "- '[[Raw O''Reilly]]'", 'source: null']),
+                {"sources": ["https://example.invalid/right", "[[Raw O'Reilly]]"],
+                 "source": None})
+            self.assertEqual(parse_source_fields(["source: 'legacy'", "tags:",
+                                                 '  - "#misc"']), {"source": "legacy"})
+            self.assertEqual(parse_source_fields(["tags:", '- "#misc"',
+                                                 "sources:", "- https://example.invalid/right"]),
+                             {"sources": ["https://example.invalid/right"]})
+
+        def test_source_fields_reject_ambiguous_or_malformed_claims(self):
+            cases = [
+                ['"sources": []', 'sources: []'],
+                [r'"sour\u0063es": []', "'sources': []"],
+                ['source: one', '"source": two'],
+                ['sources: wrong', 'source: stale'],
+                ['sources:', '  - https://example.invalid/right', '  - null'],
+                ['sources:', '  - https://example.invalid/right', '  - ""'],
+                ['sources:', '  - https://example.invalid/right', '  - [nested]'],
+                ['sources:', '  - https://example.invalid/right', '    continuation'],
+                ['sources:', '  - https://example.invalid/right', '   - wrong-indent'],
+                ['sources: [https://example.invalid/right, null]'],
+                ['sources: [https://example.invalid/right, "unclosed]'],
+                ['sources: []', '? sources', ': [hidden]'],
+                ['source: stale', '<<: *defaults'],
+                ['source: stale', '{sources: [hidden]}'],
+                ['source: stale', '"sources" missing-colon'],
+            ]
+            for lines in cases:
+                with self.subTest(lines=lines), self.assertRaises(ValueError):
+                    parse_source_fields(lines)
 
     output = io.StringIO()
     result = unittest.TextTestRunner(stream=output).run(

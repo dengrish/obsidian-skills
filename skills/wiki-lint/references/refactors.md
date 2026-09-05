@@ -28,12 +28,19 @@ affected entry and supported by its durable source.
    definable subjects, each with source-supported substance. A merge needs one
    entity under alternate names, not merely related concepts. Inherent
    mechanisms, stages, conditions, and limitations remain with their subject.
-3. Inventory every resolving surface for a slug that may disappear: body and
-   Related links, aliases, `parents:`, and all affected MOCs. Inspect each
-   inbound link in context. A split can send different references to different
-   targets; an ambiguous reference remains unchanged and prevents deletion of
-   the old entry. Never rewrite `sources:`, image embeds, external URLs, code,
-   or suggestion-log text merely because a token matches.
+3. Inventory every live reference to a slug or alias that may disappear across
+   all vault Markdown, including body/Related links, `parents:`, MOCs, note
+   transclusions, and relative Markdown links. Resolve each destination from
+   its owning note, retaining path qualification and heading/block anchors.
+   The entry scanner omits some of these surfaces, so scanner silence cannot
+   prove that no inbound references remain. A split can send different
+   references to different targets; an ambiguous reference remains unchanged
+   and prevents deletion of the old entry. Preserve code/examples, independent
+   source origins, distinct targets, image embeds, and literal suggestion-log examples;
+   token equality never authorizes a rewrite. If an actual dependency owner is
+   outside explicit write scope, report that blocker and retain the old entry.
+   Existing authorization that covers the refactor and its dependencies needs
+   no additional approval.
 
 Pure retitles use the dedicated
 [entry-retitle protocol](../../../shared/CONVENTIONS.md#retitling-an-existing-wiki-entry),
@@ -77,8 +84,10 @@ filesystem transaction, so order prevents a disappearing target:
    entries from the exact snapshots used to plan them.
 2. Rewrite each inspected inbound link, then run Task 3 over the complete
    connected hierarchy closure so `parents:` and MOCs come from one tree.
-3. Re-scan and verify that every changed link resolves, every moved claim keeps
-   a valid source, and no obsolete slug remains referenced.
+3. Re-scan and independently refresh the complete live-reference inventory.
+   Verify that every changed link or transclusion resolves with its retained
+   anchor, every moved claim keeps a valid source, and no obsolete destination
+   remains referenced; the Wiki scan alone cannot establish this postcondition.
 4. Only then conditionally remove an obsolete entry. Every substantive claim,
    equation, exhibit, card (including its scheduling attachments and block ID),
    citation, and user-owned metadata value must either survive in an identified

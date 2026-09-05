@@ -1250,7 +1250,11 @@ def _check_citations(note, body_start, captions, fenced, source=None):
             # The citation must point at *this* note's PDF. A link left over
             # from the previous note of a batch resolves fine in Obsidian and
             # sends the reader into a different paper.
-            base = target.split("#")[0].rstrip().split("/")[-1]
+            base = target.split("#")[0].rstrip()
+            if "/" in base or "\\" in base:
+                note.fail(n + 1, "page citation must use this note's bare source "
+                                 "PDF filename, without a folder or path; a "
+                                 "matching basename cannot verify a qualified target")
             if not base.lower().endswith(".pdf"):
                 note.fail(n + 1, "page citation target %r does not name a .pdf"
                                  % base)
@@ -1389,6 +1393,18 @@ def _cases():
          _mutate("#page=5|5", "#page=0|0"), "physical pages starting at 1"),
         ("negative page cannot evade citation validation",
          _mutate("#page=5|5", "#page=-1|-1"), "physical pages starting at 1"),
+        ("a nonexistent folder cannot pass a citation's basename check",
+         _mutate("[[Doe_X_2025.pdf#page=5", "[[Wrong/Doe_X_2025.pdf#page=5"),
+         "bare source PDF filename"),
+        ("a canonical-folder citation still uses the bare source spelling",
+         _mutate("[[Doe_X_2025.pdf#page=5", "[[Sources/PDFs/Doe_X_2025.pdf#page=5"),
+         "bare source PDF filename"),
+        ("relative citation paths cannot stand in for an origin",
+         _mutate("[[Doe_X_2025.pdf#page=5", "[[../Doe_X_2025.pdf#page=5"),
+         "bare source PDF filename"),
+        ("backslash citation paths cannot stand in for an origin",
+         _mutate("[[Doe_X_2025.pdf#page=5", "[[Wrong\\Doe_X_2025.pdf#page=5"),
+         "bare source PDF filename"),
         ("a word is not a physical page",
          _mutate("#page=5|5", "#page=five|5"), "physical pages starting at 1"),
         ("sources require the actual YAML list marker",

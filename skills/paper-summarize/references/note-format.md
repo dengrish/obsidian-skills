@@ -264,8 +264,9 @@ full stop without a space:
 …enrolled 219 of a planned 220.<sup>[[Doe_GutMicrobiome_2025.pdf#page=3|3]]</sup>
 ```
 
-The display text is digits only and equals the target page; the target is this
-note's own `sources:` PDF. Cite load-bearing basis/approach, main-contribution,
+The display text is digits only and equals the target page; the target uses
+this note's own bare `sources:` PDF filename, with no folder or relative path.
+A matching basename alone cannot verify a path-qualified citation. Cite load-bearing basis/approach, main-contribution,
 harms/null, limitation and availability passages as applicable, not every
 sentence. Pages come from the recorded claim set and are independently checked
 against the source before publication.

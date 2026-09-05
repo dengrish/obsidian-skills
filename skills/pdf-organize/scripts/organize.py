@@ -69,7 +69,9 @@ from urllib.parse import quote, unquote
 
 _OBSIDIAN_SHARED_MODULES = (
     'atomic_move',
+    'entry_structure',
     'figure_state',
+    'markdown_tables',
     'naming',
     'vault_artifacts',
     'yaml_scalars',
@@ -136,7 +138,8 @@ from atomic_move import (LinkUnavailable, MoveIncomplete, PublicationConflict,
                          remove_expected, replace_expected,
                          set_private_mode)  # noqa: E402
 from vault_artifacts import inventory_source_figures  # noqa: E402
-from yaml_scalars import parse_scalar, strip_comment  # noqa: E402
+from yaml_scalars import parse_scalar, parse_source_fields, split_flow, strip_comment  # noqa: E402
+from entry_structure import mask_body_comments, mask_escaped_wikilinks  # noqa: E402
 
 #: Folders never walked: VCS and editor state, and the trash, whose contents
 #: are deleted notes that must not resurrect a "still referenced" verdict.
@@ -343,11 +346,9 @@ NOTE_DIRS = (("Articles",),)
 #: scalar meant a current-schema note matched nothing, fell through to the
 #: claimed-by-default branch, and a CLIPPING sharing a stem with the PDF was
 #: renamed with it -- the exact failure `_note_is_about` exists to prevent.
-#: All three anchored at the START of a frontmatter line -- not indented, so
-#: a nested key under some other key cannot win over the real one.
-_SOURCES_KEY = re.compile(r"\Asources\s*:\s*\Z", re.I)
+#: Shared source parsing recognizes only top-level fields, so a nested key
+#: under some other key cannot win over the real one.
 _SOURCES_ITEM = re.compile(r"\A[ \t]*-(?:[ \t]+(.*))?\Z")
-_SOURCE_LINE = re.compile(r"\Asource\s*:\s*(.*)\Z", re.I)
 
 #: The document a `source:` wikilink names.  Obsidian resolves by basename, so
 #: only the last path segment matters.
@@ -391,33 +392,52 @@ def _quoted_source_spans(text):
                 if _frontmatter_fence(lines[i])), None)
     if end is None:
         return
+    def scalar_span(encoded, offset):
+        try:
+            value, style = parse_scalar(encoded)
+        except ValueError:
+            return
+        if style in ("single", "double"):
+            clean = strip_comment(encoded)
+            left = len(clean) - len(clean.lstrip(" \t"))
+            yield offset + left, offset + len(clean), value, style
+
     position = start + len(lines[0])
     in_sources = False
     for line in lines[1:end]:
         raw = line.rstrip("\r\n")
-        scalar = None
-        if raw.strip() and not raw.lstrip().startswith("#"):
-            if in_sources:
-                scalar = _SOURCES_ITEM.match(raw)
-                if scalar is None:
-                    in_sources = False
-            if scalar is None:
-                if _SOURCES_KEY.match(strip_comment(raw)):
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            position += len(line)
+            continue
+        item = _SOURCES_ITEM.match(raw) if in_sources else None
+        if item and item.group(1) is not None:
+            yield from scalar_span(item.group(1), position + item.start(1))
+        else:
+            in_sources = False
+            try:
+                fields = parse_source_fields([raw])
+            except ValueError:
+                fields = {}
+            if fields:
+                # A decoded source/source(s) key cannot itself contain a
+                # colon. Preserve its exact quoted/escaped spelling and use
+                # the shared parser to identify its value, not a bare-key regex.
+                value_at = raw.index(":") + 1
+                encoded = raw[value_at:]
+                clean = strip_comment(encoded).strip(" \t")
+                if "source" in fields:
+                    yield from scalar_span(encoded, position + value_at)
+                elif not clean:
                     in_sources = True
-                else:
-                    scalar = _SOURCE_LINE.match(raw)
-            if scalar and scalar.group(1) is not None:
-                encoded = scalar.group(1)
-                try:
-                    value, style = parse_scalar(encoded)
-                except ValueError:
-                    pass
-                else:
-                    if style in ("single", "double"):
-                        clean = strip_comment(encoded)
-                        left = len(clean) - len(clean.lstrip())
-                        offset = position + scalar.start(1)
-                        yield offset + left, offset + len(clean), value, style
+                elif clean.startswith("[") and clean.endswith("]"):
+                    # split_flow preserves each encoded item. Locate them in
+                    # order so only changed scalar spans are re-encoded; commas,
+                    # spacing, key spelling, and comments remain byte-exact.
+                    cursor = value_at + encoded.index("[") + 1
+                    for part in split_flow(clean[1:-1]):
+                        scalar_at = raw.index(part, cursor)
+                        yield from scalar_span(part, position + scalar_at)
+                        cursor = scalar_at + len(part)
         position += len(line)
 
 
@@ -425,7 +445,7 @@ _MARKDOWN_DESTINATION = re.compile(
     r"\]\([ \t]*(?:<(?P<angle>[^<>\r\n]+)>|(?P<bare>[^\s()<>]+))")
 
 
-def _markdown_text_parts(text):
+def _decoded_markdown_parts(text):
     """Decode local inline-link paths once, preserving their original spelling.
 
     Obsidian's Markdown links encode spaces and punctuation in PDF filenames.
@@ -458,14 +478,54 @@ def _markdown_text_parts(text):
     yield text[position:], text[position:], None
 
 
+def _markdown_text_parts(text):
+    """Keep literal examples/comments out of both repair and dependency checks."""
+    visible = mask_escaped_wikilinks(mask_body_comments(
+        text, mask_code=True, mask_unclosed_comments=False))
+    position = 0
+    # The shared masker preserves offsets and replaces protected content with
+    # whitespace. Keep each such complete run as original bytes but an empty
+    # reference view; ordinary surrounding whitespace needs no transformation.
+    for match in re.finditer(r"\s+", visible):
+        start, end = match.span()
+        if text[start:end] == match.group(0):
+            continue
+        yield from _decoded_markdown_parts(text[position:start])
+        yield text[start:end], "", None
+        position = end
+    yield from _decoded_markdown_parts(text[position:])
+
+
 def _source_text_parts(text):
     """Yield (original, decoded, style) chunks for one-pass link operations."""
+    # YAML strings can contain Markdown comment/code delimiters literally.
+    # Verify the complete metadata block before decoding any source scalar,
+    # and never let its strings establish masking state for the body. A
+    # malformed block remains Markdown, including any fenced source examples.
+    start = len(text) - len(text.lstrip("\ufeff \t\r\n"))
+    lines = text[start:].splitlines(keepends=True)
+    end = (next((i for i in range(1, len(lines))
+                 if _frontmatter_fence(lines[i])), None)
+           if lines and _frontmatter_fence(lines[0]) else None)
+    if end is None:
+        yield from _markdown_text_parts(text)
+        return
+    try:
+        parse_source_fields(lines[1:end])
+    except ValueError:
+        yield from _markdown_text_parts(text)
+        return
+    body_start = start + sum(map(len, lines[:end + 1]))
+    frontmatter = text[:body_start]
     position = 0
-    for start, end, value, style in _quoted_source_spans(text):
-        yield from _markdown_text_parts(text[position:start])
+    for start, end, value, style in _quoted_source_spans(frontmatter):
+        yield from _decoded_markdown_parts(text[position:start])
         yield text[start:end], value, style
         position = end
-    yield from _markdown_text_parts(text[position:])
+    yield from _decoded_markdown_parts(text[position:body_start])
+    # Mask one complete body, not fragments split around decoded YAML values:
+    # a protected span may cross several such fragments.
+    yield from _markdown_text_parts(text[body_start:])
 
 
 def _map_source_text(text, transform):
@@ -549,29 +609,12 @@ def _note_is_about(path, stem):
                     if _frontmatter_fence(lines[i])), None)
         if end is None:
             return False
-        source_values, sources_values = [], []
-        sources_count, pending = 0, False
-        for raw in lines[1:end]:
-            if not raw.strip() or raw.lstrip().startswith("#"):
-                continue
-            if pending:
-                pending = False
-                item = _SOURCES_ITEM.match(raw)
-                if item:
-                    sources_values.append(parse_scalar(item.group(1))[0])
-                    continue
-            if re.match(r"\Asources\s*:", raw, re.I):
-                sources_count += 1
-                pending = bool(_SOURCES_KEY.match(strip_comment(raw)))
-                continue
-            source = _SOURCE_LINE.match(raw)
-            if source:
-                source_values.append(parse_scalar(source.group(1))[0])
-        if sources_count:
-            return (sources_count == 1 and len(sources_values) == 1
-                    and _named(sources_values[0]))
-        if source_values:
-            return len(source_values) == 1 and _named(source_values[0])
+        fields = parse_source_fields(lines[1:end])
+        if "sources" in fields:
+            sources = fields["sources"]
+            return bool(sources) and _named(sources[0])
+        if "source" in fields:
+            return _named(fields["source"])
         return _legacy("\n".join(lines[end + 1:]))
     except (OSError, UnicodeError, ValueError):
         return False
@@ -1144,7 +1187,8 @@ def references(vault, names, dirs=None, directory_names=()):
             if not stat.S_ISREG(occupant.st_mode):
                 raise InventoryFailed(
                     "leaf Markdown path %r is not a regular file" % md)
-            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0))
             descriptor = os.open(md, flags)
             with os.fdopen(descriptor, "r", encoding="utf-8",
                            errors="replace") as fh:
@@ -1602,7 +1646,7 @@ def _stable_file_snapshot(path):
     before = os.lstat(path)
     if not stat.S_ISREG(before.st_mode):
         raise StaleRenamePlan("%s is not a regular file" % path)
-    flags = os.O_RDONLY
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     try:
@@ -1659,7 +1703,8 @@ def _read_snapshot(path):
             "%s is a leaf symlink; refusing to read or rewrite its target" % path)
     if not stat.S_ISREG(entry.st_mode):
         raise StaleRenamePlan("%s is not a regular file" % path)
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+             | getattr(os, "O_NONBLOCK", 0))
     descriptor = os.open(path, flags)
     with os.fdopen(descriptor, "r", encoding="utf-8", newline="") as fh:
         before = os.fstat(fh.fileno())
@@ -3133,6 +3178,7 @@ def _selftest():
     `python3 organize.py selftest`.
     """
     import tempfile as _tf
+    from pathlib import Path
 
     cases = []
     _test_workspace = _tf.TemporaryDirectory(prefix="organize-selftest-")
@@ -4992,6 +5038,162 @@ def _selftest():
                 with open(_other, "rb") as _fh:
                     check("encoded-link repair leaves same-basename foreign PDFs intact",
                           _fh.read(), b"a different PDF")
+
+    # A pathname can become a FIFO after lstat but before open. Nonblocking
+    # open lets the descriptor's regular-file guard reject it without waiting
+    # indefinitely for a writer. Exercise the real FIFO, but fail safely if
+    # a future regression removes the flag instead of hanging the self-test.
+    if hasattr(os, "mkfifo") and hasattr(os, "O_NONBLOCK"):
+        for _reader in (lambda p: _read_snapshot(p),
+                        lambda p: _stable_file_snapshot(p),
+                        lambda p: references(os.path.dirname(p), {"Doe_Old_2025.pdf"})):
+            with _tf.TemporaryDirectory(prefix="org-fifo-snapshot-test-") as _v:
+                _victim = _put(_v, "note.md", "[[Doe_Old_2025.pdf]]\n")
+                _open = os.open
+
+                def _swap_fifo(path, flags, *args, **kwargs):
+                    if os.fspath(path) == _victim:
+                        if not flags & os.O_NONBLOCK:
+                            raise AssertionError("snapshot open could block on a FIFO")
+                        os.unlink(path)
+                        os.mkfifo(path)
+                    return _open(path, flags, *args, **kwargs)
+
+                _refused = False
+                try:
+                    with patch.object(os, "open", side_effect=_swap_fifo):
+                        _reader(_victim)
+                except (StaleRenamePlan, InventoryFailed):
+                    _refused = True
+                check("a FIFO swapped at descriptor open is rejected without blocking",
+                      _refused, True)
+
+    # A rename repairs live navigation, including a Reviews log's evidence
+    # links, but must preserve literal historical examples in every note.
+    with _tf.TemporaryDirectory(prefix="org-literal-reference-test-") as _v:
+        _old, _new = "Doe_Old_2025.pdf", "Doe_New_2025.pdf"
+        _pdf = _put(_v, "Sources/PDFs/" + _old, b"original PDF bytes")
+        _examples = (
+            "`[[" + _old + "]]`\n\n"
+            "```markdown\n[[" + _old + "]]\n```\n\n"
+            "    [[" + _old + "]]\n\n"
+            "<!-- [[" + _old + "]] -->\n"
+            "%% [[" + _old + "]] %%\n"
+            "\\[[" + _old + "]]\n")
+        _live = "[PDF](../Sources/PDFs/" + _old + ") and [[" + _old + "#page=1]]\n"
+        _notes = [_put(_v, _name, _examples + _live) for _name in (
+            "Reviews/figure-extract-suggestions.md",
+            "Reviews/independent-issues.md", "Articles/unrelated.md")]
+        _literal_only = _put(_v, "Reviews/literal-only.md", _examples)
+        check("literal examples are excluded from dependency discovery",
+              set(references(_v, {_old})), set(_notes))
+        _result = rename_all(_v, _pdf, _new, apply=True)
+        check("a rename preserves literal examples and repairs live log links",
+              (_result[2], [Path(_note).read_text(encoding="utf-8") for _note in _notes]),
+              ([], [_examples + _live.replace(_old, _new)] * len(_notes)))
+        check("literal-only evidence remains byte-for-byte unchanged",
+              Path(_literal_only).read_text(encoding="utf-8"), _examples)
+        check("historical examples do not become unresolved live dependencies",
+              references(_v, {_old}), {})
+
+    # Metadata strings are not body comments. Conversely, a source-shaped
+    # line in a fenced example cannot become metadata by being decoded first.
+    _old, _new = "Doe_Old_2025.pdf", "Doe_New_2025.pdf"
+    _source = '"sources": ["[[\\x44oe_Old_2025.pdf]]"]\n'
+    _example = "```yaml\n" + _source + "```\n"
+    _link = "[[" + _old + "]]\n"
+    for _label, _text, _expected, _has_ref in (
+            ("literal metadata comment opener cannot hide a live body link",
+             '---\ndescription: "<!--"\n---\n' + _link + "-->\n",
+             '---\ndescription: "<!--"\n---\n' + _link.replace(_old, _new) + "-->\n",
+             True),
+            ("metadata after a decoded source cannot hide body references",
+             "---\n" + _source + 'description: "<!--"\n---\n' + _link,
+             "---\n" + _source.replace("\\x44oe_Old_2025.pdf", _new) +
+             'description: "<!--"\n---\n' + _link.replace(_old, _new), True),
+            ("metadata comment-like values cannot mask an actual origin",
+             '---\ndescription: "%% <!-- `"\n' + _source + "---\n",
+             '---\ndescription: "%% <!-- `"\n' +
+             _source.replace("\\x44oe_Old_2025.pdf", _new) + "---\n", True),
+            ("fenced source examples inside malformed metadata stay literal",
+             "---\n" + _example + "---\n",
+             "---\n" + _example + "---\n", False),
+            ("a verified origin does not expose a fenced body source example",
+             "---\n" + _source + "---\n" + _example,
+             "---\n" + _source.replace("\\x44oe_Old_2025.pdf", _new) +
+             "---\n" + _example, True),
+            ("unclosed HTML comments retain retirement dependencies",
+             "<!-- " + _link + "-->\n<!-- unfinished\n" + _example + _link,
+             "<!-- " + _link + "-->\n<!-- unfinished\n" + _example +
+             _link.replace(_old, _new), True),
+            ("unclosed Obsidian comments retain retirement dependencies",
+             "%% " + _link + "%%\n%% unfinished\n" + _example + _link,
+             "%% " + _link + "%%\n%% unfinished\n" + _example +
+             _link.replace(_old, _new), True)):
+        check(_label,
+              (references_in_text(_text, {_old: _new}, {}),
+               rewrite_text(_text, {_old: _new}, {})),
+              (_has_ref, _expected))
+
+    with _tf.TemporaryDirectory(prefix="org-metadata-mask-test-") as _v:
+        _pdf = _put(_v, "Sources/PDFs/" + _old, b"original PDF bytes")
+        _body = ("---\n" + _source + 'description: "<!--"\n---\n' +
+                 _example + _link)
+        _note = _put(_v, "Articles/" + _old[:-4] + ".md", _body)
+        _literal = _put(_v, "Reviews/fenced-evidence.md",
+                        "---\n" + _example + "---\n")
+        _unclosed = _put(_v, "Reviews/open-comment.md", "<!-- unfinished\n" + _link)
+        check("complete vault inventory separates metadata and literal examples",
+              set(references(_v, {_old})), {_note, _unclosed})
+        _result = rename_all(_v, _pdf, _new, apply=True)
+        check("rename repairs origin and body while preserving fenced evidence",
+              (_result[2],
+               Path(_v, "Articles", _new[:-4] + ".md").read_text(encoding="utf-8"),
+               Path(_literal).read_text(encoding="utf-8"),
+               Path(_unclosed).read_text(encoding="utf-8"), references(_v, {_old})),
+              ([], "---\n" + _source.replace("\\x44oe_Old_2025.pdf", _new) +
+               'description: "<!--"\n---\n' + _example + _link.replace(_old, _new),
+               "---\n" + _example + "---\n",
+               "<!-- unfinished\n" + _link.replace(_old, _new), {}))
+
+    for _fields, _owned in (
+            ('"sources": ["[[\\x44oe_Study_2025.pdf]]"]\n', True),
+            ('"sour\\u0063es":\n- "[[Doe_Study_2025.pdf]]"\n', True),
+            ('\'source\': "[[Doe_Study_2025.pdf]]"\n', True),
+            ('"sources": ["https://example.org/foreign"]\n'
+             'sources:\n- "[[Doe_Study_2025.pdf]]"\n', False),
+            ('"sour\\u0063es": ["https://example.org/foreign"]\n'
+             'source: "[[Doe_Study_2025.pdf]]"\n', False),
+            ('"sources": []\nsource: "[[Doe_Study_2025.pdf]]"\n', False),
+            ('"source": "https://example.org/foreign"\n'
+             'source: "[[Doe_Study_2025.pdf]]"\n', False),
+            ('sources:\n- "[[Doe_Study_2025.pdf]]"\n- "unclosed\n', False),
+            ('? sources\n: ["https://example.org/foreign"]\n'
+             'source: "[[Doe_Study_2025.pdf]]"\n', False)):
+        with _tf.TemporaryDirectory(prefix="org-decoded-origin-test-") as _v:
+            _note = _put(_v, "Articles/Doe_Study_2025.md", "---\n" + _fields +
+                         "---\n![[Doe_Study_2025.pdf]]\n")
+            check("decoded source keys establish ownership without unsafe fallback",
+                  _note_is_about(_note, "Doe_Study_2025"), _owned)
+
+    for _fields in (
+            '"sources": ["[[\\x44oe_Study_2025.pdf]]", "https://doi.org/10.1/x"] # origin\n',
+            '"sour\\u0063es": # origin\n- "[[\\x44oe_Study_2025.pdf]]"\n',
+            '\'source\': "[[\\x44oe_Study_2025.pdf]]" # origin\n'):
+        with _tf.TemporaryDirectory(prefix="org-decoded-repair-test-") as _v:
+            _pdf = _put(_v, "Sources/PDFs/Doe_Study_2025.pdf", b"PDF bytes")
+            _body = "---\n" + _fields + "---\nSummary text.\n"
+            _note = _put(_v, "Articles/Doe_Study_2025.md", _body)
+            check("decoded quoted source keys are visible to dependency discovery",
+                  set(references(_v, {"Doe_Study_2025.pdf"})), {_note})
+            _moves, _edits, _blockers = rename_all(
+                _v, _pdf, "Doe_Renamed_2025.pdf", apply=True)
+            _new_note = os.path.join(_v, "Articles/Doe_Renamed_2025.md")
+            check("renaming a quoted/flow source carries and repairs the owned note",
+                  (_blockers, Path(_new_note).read_text(encoding="utf-8")),
+                  ([], _body.replace("\\x44oe_Study_2025.pdf", "Doe_Renamed_2025.pdf")))
+            check("the repaired quoted/flow source retains its producer ownership",
+                  _note_is_about(_new_note, "Doe_Renamed_2025"), True)
 
     for _legacy_first in (False, True):
         with _tf.TemporaryDirectory(prefix="org-source-precedence-test-") as _v:

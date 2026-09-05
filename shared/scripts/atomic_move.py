@@ -181,7 +181,9 @@ def regular_file_snapshot(path):
             errno.EINVAL, "snapshot target is a symlink or "
             "non-regular file", path)
 
-    flags = os.O_RDONLY
+    # A regular path can become a FIFO between lstat and open. Nonblocking
+    # open lets the handle-type check reject that replacement without hanging.
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     descriptor = os.open(path, flags)
@@ -1267,6 +1269,34 @@ def run_self_test():
             symlink_refused = True
         check("the public snapshot refuses a leaf symlink", symlink_refused,
               True)
+
+        snapshot_fifo = put(folder, "public-snapshot-fifo-race", b"before")
+        real_open = os.open
+        fifo_open_flags = []
+
+        def swap_snapshot_for_fifo(path, flags, *args, **kwargs):
+            if os.fspath(path) == snapshot_fifo:
+                os.unlink(snapshot_fifo)
+                os.mkfifo(snapshot_fifo)
+                fifo_open_flags.append(flags)
+                # Keep this regression bounded even if the guard is removed.
+                # The assertion below still checks the caller supplied it.
+                flags |= os.O_NONBLOCK
+            return real_open(path, flags, *args, **kwargs)
+
+        os.open = swap_snapshot_for_fifo
+        try:
+            try:
+                regular_file_snapshot(snapshot_fifo)
+                fifo_refused = False
+            except OSError:
+                fifo_refused = True
+        finally:
+            os.open = real_open
+        check("the public snapshot rejects a FIFO swap without blocking",
+              (fifo_refused, bool(fifo_open_flags[0] & os.O_NONBLOCK),
+               stat.S_ISFIFO(os.lstat(snapshot_fifo).st_mode)),
+              (True, True, True))
 
         snapshot_race = put(folder, "public-snapshot-race", b"before")
         real_lstat = os.lstat

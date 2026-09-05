@@ -23,7 +23,10 @@ folder recursively. Keep this **processing scope** separate from the read-only
 inventory: scan the whole configured `Sources/PDFs/` tree so basename conflicts
 and books beside their chapter folders remain visible, then process only rows
 inside the requested scope, in path order. An inventory row outside that scope
-is never authorization to summarize it. The shared walker follows directory
+is never authorization to summarize it. With canonical `Sources/Images/`
+output, the helper also checks each selected PDF's basename across the whole
+vault, including `Inbox/`; a smaller source selection cannot bypass this
+uniqueness guard. The shared walker follows directory
 symlinks under their logical vault paths, but an unreadable subtree, changed
 directory, or ancestor cycle makes the inventory incomplete and blocks the run.
 Organization precedes summaries:
@@ -51,7 +54,9 @@ still occupies the intended note identity. **The first current `sources:` item
 establishes origin**, not the filename alone. A quoted PDF wikilink identifies
 this skill's note; a URL identifies a clipping. Legacy `source:` is read only if
 `sources:` is absent. Empty, malformed or duplicate current keys cannot
-establish ownership, and multiple portable-equivalent basenames are a collision.
+establish ownership, including quoted/escaped duplicate keys. Readable
+single-line flow lists are accepted for existing ownership; new notes retain
+the canonical block form. Multiple portable-equivalent basenames are a collision.
 
 | Scan result | Action |
 |---|---|

@@ -188,7 +188,7 @@ from naming import (chapter_book_stem, chapter_parts, core_stem,
 from figure_state import (MANIFEST_FILE, REVIEW_FILE, write_manifest,
                           write_review, figure_identity, manifest_key,
                           check_manifest_writable, parse_reviewed, read_sidecar,
-                          read_manifest_snapshot)  # noqa: E402
+                          read_manifest_snapshot, file_digest)  # noqa: E402
 from vault_artifacts import (inventory_pdfs, inventory_source_figures,
                              output_vault_root,
                              source_stem_groups,
@@ -550,7 +550,8 @@ def _legacy_png_snapshot(path):
     except ImportError:
         sys.exit("Pillow is required to verify legacy PNGs before recording "
                  "ownership. Use the Python environment from shared/RUNTIME.md.")
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+             | getattr(os, "O_NONBLOCK", 0))
     try:
         at_name_before = os.stat(path, follow_symlinks=False)
         if not stat.S_ISREG(at_name_before.st_mode):
@@ -653,6 +654,10 @@ def adopt_legacy_files(out_dir, entries, eligible_stems, manifest,
             raise ValueError(
                 "--adopt-legacy %r is ambiguous under portable filename "
                 "identity; expected exactly %s" % (entry, path))
+        conflict = _figure_slot_conflict(out_dir, stem, suffix, path)
+        if conflict is not None:
+            raise ValueError("--adopt-legacy %r refused: %s" %
+                             (entry, conflict[1]))
         try:
             snapshot = _legacy_png_snapshot(path)
         except (OSError, ValueError) as exc:
@@ -670,6 +675,10 @@ def revalidate_legacy_adoptions(adoptions, manifest):
     stable = True
     for path, filename, expected in adoptions:
         try:
+            stem, _marker, suffix = os.path.splitext(filename)[0].rpartition("_fig_")
+            conflict = _figure_slot_conflict(path.parent, stem, suffix, path)
+            if conflict is not None:
+                raise ValueError(conflict[1])
             current = _legacy_png_snapshot(path)
         except (OSError, ValueError) as exc:
             current = None
@@ -776,11 +785,8 @@ def page_has_text(page):
 
 
 def _sha256(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    """Hash a regular crop through the shared stable, no-follow reader."""
+    return file_digest(path)
 
 
 def _foreign_occupant(manifest, out_path):
@@ -3209,6 +3215,61 @@ def run_self_test():
             if kind != "valid":
                 ok("invalid explicit adoptions are reported before extraction",
                    "--adopt-legacy" in se and "No sidecar or figure was written" in se)
+
+        for prior_manifest in (False, True):
+            ambiguous_out = Path(tmp) / ("legacy-ambiguous-" + str(prior_manifest))
+            ambiguous_out.mkdir()
+            for extension in ("png", "jpg"):
+                Image.new("RGB", (30, 20), (40, 90, 150)).save(
+                    ambiguous_out / ("Doe_Legacy_2025_fig_1." + extension))
+            if prior_manifest:
+                write_manifest(ambiguous_out / MANIFEST_FILE,
+                               {"Other_Study_2025_fig_1.png": "a" * 64})
+            before = {path.name: path.read_bytes() for path in ambiguous_out.iterdir()}
+            code, so, se = run([
+                "--src", str(legacy_pdf), "--out", str(ambiguous_out),
+                "--adopt-legacy", "Doe_Legacy_2025:1", "--dpi", "72"])
+            ok("an extension-twin slot refuses adoption before any claim is saved",
+               code == 1 and "portable figure slot" in se)
+            check("refused ambiguous adoption preserves files and prior ownership",
+                  {path.name: path.read_bytes() for path in ambiguous_out.iterdir()}, before)
+
+        late_out = Path(tmp) / "legacy-late-slot-conflict"
+        late_out.mkdir()
+        Image.new("RGB", (30, 20), (40, 90, 150)).save(
+            late_out / "Doe_Legacy_2025_fig_1.png")
+        prior_record = {"Other_Study_2025_fig_1.png": "a" * 64}
+        pending_manifest = dict(prior_record)
+        pending_adoptions = adopt_legacy_files(
+            late_out, ["Doe_Legacy_2025:1"], {"Doe_Legacy_2025"},
+            pending_manifest, True)
+        Image.new("RGB", (30, 20), (90, 40, 150)).save(
+            late_out / "Doe_Legacy_2025_fig_1.jpg")
+        with contextlib.redirect_stderr(io.StringIO()):
+            stable = revalidate_legacy_adoptions(pending_adoptions, pending_manifest)
+        check("a late extension twin drops only the pending adoption claim",
+              (stable, pending_manifest), (False, prior_record))
+
+        if hasattr(os, "mkfifo") and hasattr(os, "O_NONBLOCK"):
+            fifo_png = Path(tmp) / "legacy-fifo-swap.png"
+            Image.new("RGB", (30, 20), (40, 90, 150)).save(fifo_png)
+            original_open = os.open
+
+            def swap_fifo(path, flags, *args, **kwargs):
+                if os.fspath(path) == str(fifo_png):
+                    if not flags & os.O_NONBLOCK:
+                        raise AssertionError("PNG snapshot open could block on a FIFO")
+                    os.unlink(path)
+                    os.mkfifo(path)
+                return original_open(path, flags, *args, **kwargs)
+
+            refused = False
+            try:
+                with mock.patch.object(os, "open", side_effect=swap_fifo):
+                    _legacy_png_snapshot(fifo_png)
+            except ValueError:
+                refused = True
+            ok("legacy PNG validation rejects a late FIFO without blocking", refused)
 
         warning_png = Path(tmp) / "legacy-decompression-warning.png"
         Image.new("RGB", (100, 100), (40, 90, 150)).save(

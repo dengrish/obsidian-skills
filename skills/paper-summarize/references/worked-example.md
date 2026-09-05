@@ -113,9 +113,9 @@ The authors conclude that encapsulated transplant should be offered after a seco
 - Absolute recurrence rates sit beside the risk ratio. Harms and the uncertain
   quality-of-life result remain visible beside the benefit; a null is not
   written as equivalence.
-- Two of four figures are selected, with one rebuilt primary-outcome table.
-  The participant-flow and underpowered subgroup figures do not earn space.
-  The table caption discloses omitted secondary/subgroup rows.
+- Two of four figures are selected. The participant-flow and underpowered
+  subgroup figures do not earn space. The primary comparison fits in prose,
+  so this note does not repeat it in a table.
 - The title page supplies only `2025`, so the note pads month/day to `01` and
   the report records that choice. The DOI is included because the fictional
   document prints it; neither date nor URL requires outside lookup.

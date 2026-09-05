@@ -292,6 +292,16 @@ Do not rewrite a clear passage merely to make the wording different.
 
 **Wikilinks in body prose and the Related footer use the piped form `[[slug|Display Label]]` when the display label differs from the slug, and the bare form `[[slug]]` when the display label would equal the slug.** The slug is the filename without `.md`; the display label is the natural casing for the context. The piped form keeps filenames URL-safe while preserving canonical, readable text in the rendered note; the bare form drops the pipe when there's nothing to disambiguate. Obsidian renders `[[overfitting]]` and `[[overfitting|overfitting]]` identically, so when target and label match the pipe is noise. **The test:** mentally render both forms; if they look identical, drop the pipe. The pipe IS needed when the label differs from the slug — by case (`[[mnist|MNIST]]`), by spacing (`[[k-nearest-neighbors|k-nearest neighbors]]`), by alias resolution (`[[recall|TPR]]`), or any other rendering difference. (The Related footer overrides this in one direction — see §2.)
 
+Use the actual extensionless vault-relative Wiki path when the bare filename
+has another real owner, including a MOC: `[[Wiki/statistics|Statistics]]` links
+the entry while `[[MOCs/statistics]]` navigates to its MOC. Apply folder
+overrides and intended public paths, not scratch-tree paths. Inspect real MOC
+ownership separately from the Wiki-only index, and preserve required path
+qualification when canonicalizing an existing link. A bare Wiki/MOC collision
+stays ambiguous until its intended owner is established; never guess from an
+alias or drop it as a dangler. Existing MOC navigation remains outside this
+skill's entry-link creation/pruning scope.
+
 Hidden HTML (`<!-- … -->`) and Obsidian (`%% … %%`) comments are editor annotations, not rendered body prose or link candidates. Preserve them; do not treat their headings, template footers, or links as live entry structure. Escaped wikilink examples are literal text. Code samples likewise remain outside linking and orphan checks. Flashcard content and recognized review attachments keep their separate card-format rules.
 
 **First occurrence only in body prose.** Mentions of **other** entities that have wiki entries are wrapped inline — **first occurrence only** (subsequent mentions of the same entity in body prose stay bare text, matching standard wiki convention). **Possessive and partitive references count as mentions.** A body that says "scikit-learn transformers" or "Obama's first term" or "Python's `dict`" is mentioning the entity — wikilink the first such occurrence: `[[scikit-learn]] transformers`, `[[barack-obama|Obama]]'s first term`, `[[python|Python]]'s \`dict\``. The rule's intuition is *any naming of the entity*, not just "the entity as a standalone noun phrase." Entities mentioned inside LaTeX math (e.g., `$\Delta\text{NDCG}$`) can't be wikilinked from inside the math, so the first **prose** occurrence outside math gets the wikilink.
@@ -322,7 +332,7 @@ Display-label casing follows standard English:
 
 **A bare list of names is not a trigger, however major the names are.** A `Gradient boosting` entry ending "popular implementations include XGBoost, CatBoost, and LightGBM" teaches the reader nothing about any of the three, so all three stay bare text. Naming a thing is not teaching about it, and only the second earns a node. What flips such a list into trigger territory is the source going on to say *how* one of them differs: "CatBoost handles categorical features with ordered target statistics rather than one-hot encoding" is mechanism, and that name earns a node. The rule generalizes: if the body text would *teach the reader about* the named entity rather than merely acknowledge it, the entity deserves a navigable node, and step 2 (or the missed-entity audit) creates its entry.
 
-**Every wikilink target in body prose and the Related footer must be a real file in `Wiki/`** — an entry that already existed, or one this run writes. An entity worth linking that has no entry either becomes an entry (the positive trigger above) or stays bare text; **no placeholder files, ever**. Frontmatter wikilinks in `parents:` follow their own field definition. Update or create the `**Related:**` footer per §2; the footer names only targets that exist.
+**Every entry wikilink target in body prose and the Related footer must be a real file in `Wiki/`** — an entry that already existed, or one this run writes. An entity worth linking that has no entry either becomes an entry (the positive trigger above) or stays bare text; **no placeholder files, ever**. Existing MOC navigation keeps the separate preservation rule above. Frontmatter wikilinks in `parents:` follow their own field definition. Update or create the `**Related:**` footer per §2; new footer links name only entries that exist.
 
 ### Cross-domain term disambiguation
 

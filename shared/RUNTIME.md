@@ -43,8 +43,11 @@ notes, images and requested Wiki identities are reused or skipped without edits.
 - `<vault>` is the vault explicitly selected by the user or already established
   in the task. Otherwise use the current workspace, or an ancestor of the
   named input, only when it is unambiguously an Obsidian vault (for example,
-  it contains `.obsidian/`). If several vaults qualify or none does, ask which
-  vault to use before writing. Never create a vault at a remembered home path.
+  it contains `.obsidian/`). For a workflow that needs vault outputs, ask which
+  vault to use if several qualify or none does. Workflows that explicitly
+  support standalone PDF input/output paths may run without a vault; keep those
+  paths and do not select or create a vault solely for suggestion logs. Never
+  create a vault at a remembered home path.
 - wiki-lint writes discipline navigation notes to `<vault>/MOCs/<discipline>.md`
   and links them as `[[MOCs/<discipline>]]`. Each specific-discipline MOC
   is a fully generated nested outline; `MOCs/misc.md` is the flat title-ordered

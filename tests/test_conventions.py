@@ -6160,39 +6160,39 @@ SELFTEST_TALLY = re.compile(
 #: fails.  Lowering a number here is a deliberate, reviewable statement that
 #: cases went away; a script with no line is checked for a clean tally only.
 SELFTEST_MIN_CASES = {
-    # Re-tuned to the exact tallies of 2026-09-03. Raising after growth is the
+    # Updated after the full review of 2026-09-05. Raising after growth is the
     # mirror duty of the "lowering is a deliberate, reviewable statement" rule
     # below: new regression cases must not disappear with the harness green.
-    "shared/scripts/atomic_move.py": 31,
+    "shared/scripts/atomic_move.py": 32,
     "shared/scripts/code_typography.py": 16,
     "shared/scripts/equation_coverage.py": 160,
-    "shared/scripts/figure_state.py": 8,
+    "shared/scripts/figure_state.py": 10,
     "shared/scripts/introduced_aliases.py": 23,
     "shared/scripts/markdown_tables.py": 40,
     "shared/scripts/naming.py": 191,
     "shared/scripts/organism_names.py": 29,
-    "shared/scripts/entry_structure.py": 108,
+    "shared/scripts/entry_structure.py": 138,
     "shared/scripts/plugin_paths.py": 110,
     "shared/scripts/plurals.py": 251,
     "shared/scripts/slugify.py": 74,  # device-name restrictions removed
     "shared/scripts/vault_artifacts.py": 39,
-    "shared/scripts/yaml_scalars.py": 8,
-    "skills/clipping-clean/scripts/dedup_index.py": 149,
-    "skills/clipping-clean/scripts/fetch_images.py": 466,
+    "shared/scripts/yaml_scalars.py": 12,
+    "skills/clipping-clean/scripts/dedup_index.py": 161,
+    "skills/clipping-clean/scripts/fetch_images.py": 551,
     "skills/clipping-clean/scripts/slug.py": 133,  # device-name guards removed
-    "skills/paper-summarize/scripts/note_lint.py": 203,
-    "skills/paper-summarize/scripts/paper_scan.py": 144,
+    "skills/paper-summarize/scripts/note_lint.py": 227,
+    "skills/paper-summarize/scripts/paper_scan.py": 158,
     "skills/paper-summarize/scripts/paper_text.py": 49,
-    "skills/figure-extract/scripts/auto_fig_bbox.py": 338,
-    "skills/figure-extract/scripts/batch_extract.py": 332,
-    "skills/figure-extract/scripts/extract_figures.py": 173,
+    "skills/figure-extract/scripts/auto_fig_bbox.py": 346,
+    "skills/figure-extract/scripts/batch_extract.py": 353,
+    "skills/figure-extract/scripts/extract_figures.py": 182,
     "skills/figure-extract/scripts/render_page.py": 66,
-    "skills/pdf-organize/scripts/organize.py": 260,
-    "skills/wiki-add/scripts/backlog.py": 28,
+    "skills/pdf-organize/scripts/organize.py": 319,
+    "skills/wiki-add/scripts/backlog.py": 32,
     "skills/wiki-build/scripts/find_collisions.py": 67,
-    "skills/wiki-build/scripts/lint_entry.py": 313,
+    "skills/wiki-build/scripts/lint_entry.py": 319,
     "skills/wiki-build/scripts/vault_index.py": 79,
-    "skills/wiki-lint/scripts/scan_vault.py": 437,
+    "skills/wiki-lint/scripts/scan_vault.py": 454,
 }
 
 

@@ -174,7 +174,8 @@ import warnings
 import xml.etree.ElementTree as ET
 import zipfile
 
-_OBSIDIAN_SHARED_MODULES = ("atomic_move", "figure_state", "yaml_scalars")
+_OBSIDIAN_SHARED_MODULES = (
+    "atomic_move", "entry_structure", "figure_state", "markdown_tables", "yaml_scalars")
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
@@ -218,6 +219,8 @@ from atomic_move import (LinkUnavailable, MoveIncomplete, PublicationConflict, f
                          replace_expected, publish_new, set_private_mode)
 from dedup_index import normalize_url, read_source
 from figure_state import MANIFEST_FILE, read_manifest
+from yaml_scalars import parse_source_fields
+from entry_structure import mask_body_comments
 
 
 def _name_key(name):
@@ -943,7 +946,7 @@ def _stable_regular_snapshot(path, copy_to=None, copy_mode=None):
     if not stat.S_ISREG(before.st_mode):
         raise OSError(errno.EINVAL, "%r is a symlink or non-regular file" % path,
                       path)
-    flags = os.O_RDONLY | os.O_NOFOLLOW
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
     try:
         descriptor = os.open(path, flags)
     except OSError as exc:
@@ -953,6 +956,7 @@ def _stable_regular_snapshot(path, copy_to=None, copy_mode=None):
 
     digest = hashlib.sha256()
     destination = None
+    created = None
     try:
         with os.fdopen(descriptor, "rb") as source:
             opened_before = os.fstat(source.fileno())
@@ -964,6 +968,9 @@ def _stable_regular_snapshot(path, copy_to=None, copy_mode=None):
                               path)
             if copy_to is not None:
                 destination = open(copy_to, "xb")
+                opened_copy = os.fstat(destination.fileno())
+                created = (opened_copy.st_dev, opened_copy.st_ino,
+                           stat.S_IFMT(opened_copy.st_mode))
             try:
                 while True:
                     chunk = source.read(CHUNK)
@@ -981,21 +988,14 @@ def _stable_regular_snapshot(path, copy_to=None, copy_mode=None):
                 if destination is not None:
                     destination.close()
     except Exception:
-        if copy_to is not None:
-            try:
-                os.unlink(copy_to)
-            except OSError:
-                pass
+        # This pathname may predate our exclusive create or have been replaced
+        # by another writer. Leave it to the caller's owned-stage cleanup;
+        # failure must never unlink an unverified scratch occupant.
         raise
 
     try:
         after = os.lstat(path)
     except OSError as exc:
-        if copy_to is not None:
-            try:
-                os.unlink(copy_to)
-            except OSError:
-                pass
         raise OSError(getattr(exc, "errno", None) or errno.EIO,
                       "%r changed while it was read (%s)" % (path, exc),
                       path) from exc
@@ -1006,11 +1006,6 @@ def _stable_regular_snapshot(path, copy_to=None, copy_mode=None):
     )
     if not (stable(before) == stable(opened_before)
             == stable(opened_after) == stable(after)):
-        if copy_to is not None:
-            try:
-                os.unlink(copy_to)
-            except OSError:
-                pass
         raise OSError(errno.EBUSY,
                       "%r changed while its bytes were copied" % path, path)
     snapshot = (
@@ -1019,7 +1014,7 @@ def _stable_regular_snapshot(path, copy_to=None, copy_mode=None):
     )
     if copy_to is not None:
         staged = _stable_regular_snapshot(copy_to)
-        if (staged[1], staged[3]) != (snapshot[1], snapshot[3]):
+        if staged[0] != created or (staged[1], staged[3]) != (snapshot[1], snapshot[3]):
             raise OSError(errno.EIO, "staged bytes do not match %r" % path,
                           copy_to)
     return snapshot
@@ -1057,40 +1052,15 @@ def _has_current_sources_key(text):
     opening = next((index for index, line in enumerate(lines) if line.strip()), None)
     if opening is None or not _frontmatter_fence(lines[opening]):
         return False
-    count = 0
+    frontmatter = []
     for line in lines[opening + 1:]:
         if _frontmatter_fence(line):
-            return count == 1
-        if re.match(r"\Asources\s*:", line, re.IGNORECASE):
-            count += 1
+            try:
+                return "sources" in parse_source_fields(frontmatter)
+            except ValueError:
+                return False
+        frontmatter.append(line)
     return False
-
-
-def _mask_span(text, opening, closing, *, mask_unclosed=True):
-    """Blank delimited spans without changing lines or surrounding text.
-
-    Ownership evidence is conservative and masks an unclosed region to EOF.
-    Dependency retirement is conservative in the other direction: an unmatched
-    delimiter is malformed rather than proof that later links are inert, so
-    callers can leave it visible with ``mask_unclosed=False``.
-    """
-    chars = list(text)
-    cursor = 0
-    while True:
-        start = text.find(opening, cursor)
-        if start < 0:
-            break
-        end = text.find(closing, start + len(opening))
-        if end < 0 and not mask_unclosed:
-            break
-        stop = len(text) if end < 0 else end + len(closing)
-        for index in range(start, stop):
-            if chars[index] not in "\r\n":
-                chars[index] = " "
-        if end < 0:
-            break
-        cursor = stop
-    return "".join(chars)
 
 
 def _mask_inline_code(text, *, mask_unclosed=True):
@@ -1174,7 +1144,7 @@ def _rendered_embed_basenames(body):
     shared-folder file based on inert source text.
     """
     visible = _mask_inline_code(_mask_html_literal_blocks(
-        _mask_span(_mask_span(body, "<!--", "-->"), "%%", "%%")))
+        mask_body_comments(body, mask_code=True)))
     out = []
     fence = None
     for line in visible.splitlines(keepends=True):
@@ -1217,10 +1187,18 @@ _HTML_REFERENCE_TARGET = re.compile(
 
 def _visible_markdown(text):
     """Mask literal/comment regions while retaining rendered link syntax."""
-    visible = _mask_inline_code(_mask_html_literal_blocks(
-        _mask_span(_mask_span(text, "<!--", "-->", mask_unclosed=False),
-                   "%%", "%%", mask_unclosed=False), mask_unclosed=False),
-        mask_unclosed=False)
+    body = _body_after_frontmatter(text)
+    prefix = text[:len(text) - len(body)] if body is not None else ""
+    body = text if body is None else body
+    # A partial/existing MOC can begin with an indented list item. For this
+    # retirement inventory, indentation is never proof that such links are
+    # inert code; flatten only list-marker indentation in this read-only view.
+    body = re.sub(r"(?m)^[ \t]+(?=(?:[-*+]|\d{1,9}[.)])[ \t]+)", "", body)
+    # YAML strings do not open Markdown comments. Keep their raw references
+    # visible, and use the shared code-aware lexer only for the body. An
+    # unresolved comment is not evidence that an old dependency disappeared.
+    visible = _mask_html_literal_blocks(mask_body_comments(
+        body, mask_code=True, mask_unclosed_comments=False), mask_unclosed=False)
     lines = visible.splitlines(keepends=True)
     out = []
     fence = None
@@ -1243,7 +1221,7 @@ def _visible_markdown(text):
         # MOCs use nested list indentation of four or more spaces; dependency
         # retirement must fail closed and see links in those list items.
         out.append(line)
-    return "".join(out)
+    return prefix + "".join(out)
 
 
 def _local_target_basename(target, *, wikilink=False):
@@ -1308,8 +1286,13 @@ def _stable_markdown_text(path):
     target_before = os.stat(path)
     if not stat.S_ISREG(target_before.st_mode):
         raise ValueError("not a regular Markdown file")
-    with open(path, "rb") as source:
+    # Read aliases for dependency discovery, but never wait on a FIFO swapped
+    # in after the path classification. Classify the actual handle first.
+    descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as source:
         opened_before = os.fstat(source.fileno())
+        if not stat.S_ISREG(opened_before.st_mode):
+            raise ValueError("changed to a non-regular Markdown file")
         raw = source.read()
         opened_after = os.fstat(source.fileno())
     entry_after = os.lstat(path)
@@ -3887,6 +3870,21 @@ continues here`
               "<code>unclosed [[Old_Slug_2025]]\n",
               ["Old_Slug_2025_fig_1.png"], "Old_Slug_2025"),
           ["Old_Slug_2025.md", "Old_Slug_2025_fig_1.png"])
+    literal_dependency = (
+        'The HTML opener is `<!--`.\n\n![[Old_Slug_2025_fig_1.png]]\n\n'
+        'The closer is `-->`.\n')
+    check("comment syntax in separate inline examples cannot hide a real dependency",
+          _markdown_dependency_names(literal_dependency,
+              ["Old_Slug_2025_fig_1.png"], "Old_Slug_2025"),
+          ["Old_Slug_2025_fig_1.png"])
+    check("literal comment syntax cannot hide a genuine ownership embed",
+          _rendered_embed_basenames(literal_dependency),
+          frozenset(("Old_Slug_2025_fig_1.png",)))
+    check("YAML comment-like strings cannot hide body dependencies",
+          _markdown_dependency_names(
+              '---\ndescription: "<!--"\n---\n![[Old_Slug_2025_fig_1.png]]\n',
+              ["Old_Slug_2025_fig_1.png"], "Old_Slug_2025"),
+          ["Old_Slug_2025_fig_1.png"])
 
     import shutil
     tmp = tempfile.mkdtemp(prefix="fetch_images_selftest.")
@@ -3974,6 +3972,69 @@ continues here`
         check("stable readers bind the same bytes and metadata",
               (stable_snapshot[1], stable_markdown.endswith("body\n")),
               (__import__("hashlib").sha256(b"stable").hexdigest(), True))
+
+        occupied_copy = touch(os.path.join(tmp, "occupied-copy.bin"), b"another writer")
+        try:
+            _stable_regular_snapshot(snapshot_path, copy_to=occupied_copy)
+            copy_refused = False
+        except FileExistsError:
+            copy_refused = True
+        check("failed exclusive scratch copying preserves a preexisting destination",
+              (copy_refused, open(occupied_copy, "rb").read()
+               if os.path.isfile(occupied_copy) else None), (True, b"another writer"))
+
+        replaced_copy = os.path.join(tmp, "replaced-copy.bin")
+
+        def replace_copy_before_failure(handle, mode):
+            os.unlink(replaced_copy)
+            touch(replaced_copy, b"newer scratch writer")
+            raise OSError("simulated copy failure after another writer won")
+
+        try:
+            with patch.dict(globals(), set_private_mode=replace_copy_before_failure):
+                _stable_regular_snapshot(snapshot_path, copy_to=replaced_copy)
+            replaced_refused = False
+        except OSError:
+            replaced_refused = True
+        check("copy failure cannot delete a newer scratch occupant",
+              (replaced_refused, open(replaced_copy, "rb").read()
+               if os.path.isfile(replaced_copy) else None),
+              (True, b"newer scratch writer"))
+
+        fifo_path = touch(os.path.join(tmp, "snapshot-fifo-race.bin"), b"regular before swap")
+        real_open = os.open
+
+        def swap_snapshot_to_fifo(path, flags, *args, **kwargs):
+            if os.fspath(path) == fifo_path:
+                if not flags & os.O_NONBLOCK:
+                    raise AssertionError("would block waiting for a FIFO writer")
+                os.unlink(fifo_path)
+                os.mkfifo(fifo_path)
+            return real_open(path, flags, *args, **kwargs)
+
+        try:
+            with patch.object(os, "open", side_effect=swap_snapshot_to_fifo):
+                _stable_regular_snapshot(fifo_path)
+            fifo_refused = False
+        except OSError:
+            fifo_refused = True
+        except AssertionError:
+            fifo_refused = False
+        check("a regular image snapshot swapped to a FIFO is refused without waiting",
+              fifo_refused, True)
+        os.unlink(fifo_path)
+        touch(fifo_path, b"regular Markdown before swap")
+        try:
+            with patch.object(os, "open", side_effect=swap_snapshot_to_fifo):
+                _stable_markdown_text(fifo_path)
+            markdown_fifo_refused = False
+        except ValueError:
+            markdown_fifo_refused = True
+        except AssertionError:
+            markdown_fifo_refused = False
+        check("a Markdown dependency swapped to a FIFO is refused without waiting",
+              markdown_fifo_refused, True)
+        os.unlink(fifo_path)
 
         calls = {"count": 0}
 
@@ -4606,6 +4667,25 @@ continues here`
         check("legacy source fallback alone cannot authorize a destructive image action",
               (legacy["ok"], "first current sources item" in
                (legacy["error"] or "")), (False, True))
+        for label, metadata, allowed in (
+                ("quoted current list authorizes its own image",
+                 '"sources": ["https://example.invalid/current"]\n'
+                 'source: https://stale.invalid/\n', True),
+                ("decoded duplicate current keys cannot authorize overwrite",
+                 '"sources": ["https://example.invalid/current"]\n'
+                 'sources: ["https://wrong.invalid/"]\n', False),
+                ("a malformed later member cannot authorize overwrite",
+                 'sources:\n  - https://example.invalid/current\n  - null\n', False)):
+            with open(legacy_owner, "w", encoding="utf-8") as fh:
+                fh.write("---\n" + metadata + "---\n![[Teslo_Cancer_2026_fig_1.png]]\n")
+            with patch.dict(globals(), _fetch_to_path=(
+                    lambda *args, **kwargs: (_ for _ in ()).throw(
+                        AssertionError("unverified owner reached transport")))) if not allowed \
+                    else contextlib.nullcontext():
+                origin_result = download_one(data_url, att, "Teslo_Cancer_2026", 1,
+                                             overwrite=True, owner_note=legacy_owner)
+            check(label, (origin_result["ok"], open(os.path.join(
+                att, "Teslo_Cancer_2026_fig_1.png"), "rb").read()), (allowed, _PNG))
         check("--overwrite is what replaces it",
               download_one(data_url, att, "Teslo_Cancer_2026", 1,
                            overwrite=True,
@@ -5302,6 +5382,19 @@ continues here`
                os.path.realpath(dep_reference) in
                (blocked_dependency[0]["error"] or "")),
               ([False], True, True))
+        old_image_bytes = open(os.path.join(dep_images, dep_names[0]), "rb").read()
+        with open(dep_reference, "w", encoding="utf-8") as fh:
+            fh.write('The opener is `<!--`.\n\n'
+                     '![[Old_Dependency_2025_fig_1.png]]\n\nThe closer is `-->`.\n')
+        literal_blocked = rename_slug(
+            dep_images, "Old_Dependency_2025", "New_Dependency_2026",
+            sources=dep_pdfs, owner_note=dep_owner)
+        check("literal comment examples cannot authorize retiring a still-referenced image",
+              ([row["ok"] for row in literal_blocked],
+               open(os.path.join(dep_images, dep_names[0]), "rb").read()
+               if os.path.isfile(os.path.join(dep_images, dep_names[0])) else None,
+               os.path.lexists(os.path.join(dep_images, "New_Dependency_2026_fig_1.png"))),
+              ([False], old_image_bytes, False))
         with open(dep_reference, "w", encoding="utf-8") as fh:
             fh.write("`[[Old_Dependency_2025]]`\n"
                      "<!-- ![[Old_Dependency_2025_fig_1.png]] -->\n")

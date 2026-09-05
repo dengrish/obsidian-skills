@@ -205,6 +205,16 @@ class WorkflowTests(unittest.TestCase):
         references = self.vault / "Wiki/reference.md"
         references.write_text("[[Doe_Study_2025.md]]\n[[Doe_Study_2025.pdf#page=1]]\n",
                               encoding="utf-8")
+        reviews = self.vault / "Reviews"
+        reviews.mkdir()
+        suggestions = reviews / "figure-extract-suggestions.md"
+        examples = (
+            "Example: `[[Doe_Study_2025.pdf#page=1]]`.\n\n"
+            "```markdown\n![[Doe_Study_2025_fig_1.png]]\n```\n\n"
+            "<!-- [[Doe_Study_2025.md]] -->\n")
+        suggestions.write_text(
+            examples + "Actual evidence: [[Doe_Study_2025.pdf#page=1]].\n",
+            encoding="utf-8")
         self.run_script(organizer, "rename", "--vault", self.vault, pdf,
                         "--to", "Doe_Renamed_2025.pdf", "--apply")
         renamed = self.pdfs / "Doe_Renamed_2025.pdf"
@@ -217,6 +227,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(renamed_note.read_text(encoding="utf-8"),
                          summary_note("Doe_Renamed_2025"))
         self.assertNotIn("Doe_Study_2025", references.read_text(encoding="utf-8"))
+        self.assertEqual(
+            suggestions.read_text(encoding="utf-8"),
+            examples + "Actual evidence: [[Doe_Renamed_2025.pdf#page=1]].\n")
         for filename in (".figure-manifest.tsv", ".figure-review.txt"):
             record = (self.images / filename).read_text(encoding="utf-8")
             self.assertIn("Doe_Renamed_2025", record)
@@ -403,7 +416,8 @@ class WorkflowTests(unittest.TestCase):
         self.make_pdf(source)
         clipping = self.notes / "download.md"
         clipping.write_text(
-            "---\nsources: # capture\n- 'https://example.org/O''Reilly/download.pdf'\n"
+            "---\n\"sources\": # capture\n- 'https://example.org/O''Reilly/download.pdf'\n"
+            'source: "[[download.pdf]]"\n'
             "read: true\n---\n![[download_fig_1.png]]\n*Clipping image.*\n",
             encoding="utf-8")
         figure = self.images / "download_fig_1.png"
@@ -429,7 +443,13 @@ class WorkflowTests(unittest.TestCase):
                         "--vault", self.vault, source,
                         "--to", "Doe_Study_2025.pdf", "--dest", self.pdfs, "--apply")
         self.assertTrue((self.pdfs / "Doe_Study_2025.pdf").is_file())
-        self.assertEqual(digest(clipping), before[clipping])
+        # The URL still owns this clipping; only its separate legacy PDF
+        # reference follows the authorized rename, never the clipping path.
+        self.assertEqual(
+            clipping.read_text(encoding="utf-8"),
+            "---\n\"sources\": # capture\n- 'https://example.org/O''Reilly/download.pdf'\n"
+            'source: "[[Doe_Study_2025.pdf]]"\n'
+            "read: true\n---\n![[download_fig_1.png]]\n*Clipping image.*\n")
         self.assertEqual(digest(relocated), before[figure])
         self.assertEqual(reference.read_text(encoding="utf-8"),
                          f'[[Doe_Study_2025.pdf#page=1]]\n[Publisher]({publisher})\n')
@@ -504,7 +524,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(verdict(note)["status"], "new")
         external = self.vault / "Wiki/clipping-reference.md"
         external.write_text(
-            f'[[{old}|the clipping]]\n![[Sources/Images/{old}_fig_1.png]]\n',
+            'The HTML opener is `<!--`.\n\n'
+            f'[[{old}|the clipping]]\n![[Sources/Images/{old}_fig_1.png]]\n'
+            '\nThe closer is `-->`.\n',
             encoding="utf-8")
         moc_dependency = self.vault / "MOCs/biology.md"
         moc_dependency.parent.mkdir()
@@ -557,7 +579,7 @@ class WorkflowTests(unittest.TestCase):
         # An external dependency rewrite is a separate authorized operation;
         # once the fixture supplies it, the old copies may be retired.
         external.write_text(
-            f'[[{new}|the clipping]]\n![[Sources/Images/{new}_fig_1.png]]\n',
+            external.read_text(encoding="utf-8").replace(old, new),
             encoding="utf-8")
         moc_dependency.write_text(
             f'# Supporting sources\n[[{new}|the clipping]]\n'
@@ -615,6 +637,41 @@ class WorkflowTests(unittest.TestCase):
             "--notes", articles, "--images", images, "--json").stdout)
         self.assertEqual(papers["counts"]["new"], 1)
         self.assertFalse((fresh / "Wiki").exists())
+
+    def test_unreadable_alias_owner_cannot_trigger_link_removal(self):
+        wiki = self.vault / "Wiki"
+        owner = wiki / "hidden-topic.md"
+        owner_bytes = (
+            '---\ntitle: "Hidden topic"\naliases: ["concealed-alias"]\n'
+            '---\nA **hidden topic** illustrates alias resolution.\n').encode("utf-8")
+        owner.write_bytes(owner_bytes)
+        reader = wiki / "reader.md"
+        reader.write_text(
+            '---\ntitle: "Reader"\naliases: []\n---\n'
+            'A **reader** uses [[concealed-alias]] and [[reader]].\n',
+            encoding="utf-8")
+        scan_script = "skills/wiki-lint/scripts/scan_vault.py"
+
+        def report():
+            return json.loads(self.run_script(
+                scan_script, wiki, "--images", self.images).stdout)
+
+        self.assertTrue(any(row["item"] == "item10/alias"
+                            for row in report()["problems"]))
+        # Even readable frontmatter cannot establish aliases if the complete
+        # file cannot be decoded. Do not let that missing owner become a dangler.
+        owner.write_bytes(owner_bytes + b"\xff")
+        blocked = report()
+        self.assertTrue(any(row["item"] == "item0"
+                            and "Alias inventory is incomplete" in row["message"]
+                            for row in blocked["problems"]))
+        self.assertFalse(any(row["item"] in {"item10/dangling", "item10/alias"}
+                             for row in blocked["problems"]))
+        self.assertTrue(any(row["item"] == "item10/self"
+                            for row in blocked["problems"]))
+        owner.write_bytes(owner_bytes)
+        self.assertTrue(any(row["item"] == "item10/alias"
+                            for row in report()["problems"]))
 
     def test_source_to_wiki_entry_index_collision_checks_and_vault_scan(self):
         source = self.pdfs / "Doe_Study_2025.pdf"
@@ -1200,14 +1257,36 @@ A compact definition used only to exercise the shared contract.
             expected = ("item18" if slug in ("scalar-alias", "blank-alias")
                         else "item19")
             self.assertIn(expected, scan_items.get(slug, set()), scan_items.get(slug))
-        self.assertIn("item17/alias-candidate",
-                      scan_items.get("introduced-alias", set()))
+        self.assertNotIn("item17/alias-candidate",
+                         scan_items.get("introduced-alias", set()))
         self.assertIn("item7", scan_items.get("two-sentence-description", set()))
         self.assertIn("item1", scan_items.get("malformed-flow-list", set()))
         self.assertIn("item9", scan_items.get("malformed-person-date", set()))
         self.assertIn("item16", scan_items.get("bare-code-shapes", set()))
         for slug in ("related-anchored", "related-wrong-label"):
             self.assertIn("item11", scan_items.get(slug, set()), scan_items.get(slug))
+        self.assertNotIn("item10/dup",
+                         scan_items.get("duplicate-link-forms", set()))
+        # Local QC remains available with malformed alias metadata, but
+        # cross-entry alias ownership is provisional. Repair those fixture
+        # prerequisites before checking alias additions and canonicalization.
+        for path, before, after in (
+                (scalar_alias, 'aliases: "scalar-alias-name"',
+                 'aliases: ["scalar-alias-name"]'),
+                (blank_alias, "aliases:\n", "aliases: []\n"),
+                (malformed_flow, 'aliases: ["one",, "two"]',
+                 'aliases: ["one", "two"]')):
+            path.write_text(path.read_text(encoding="utf-8").replace(before, after),
+                            encoding="utf-8")
+        repaired_scan = json.loads(self.run_script(
+            "skills/wiki-lint/scripts/scan_vault.py", wiki, "--indent", "0").stdout)
+        self.assertFalse(any("Alias inventory is incomplete" in row["message"]
+                             for row in repaired_scan["problems"]))
+        scan_items = {}
+        for problem in repaired_scan["problems"]:
+            scan_items.setdefault(problem["slug"], set()).add(problem["item"])
+        self.assertIn("item17/alias-candidate",
+                      scan_items.get("introduced-alias", set()))
         self.assertIn("10-duplicate-wikilink",
                       lint_items["duplicate-link-forms"])
         self.assertIn("item10/dup",

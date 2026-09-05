@@ -87,7 +87,7 @@ if _here != _shared:
     _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
-from yaml_scalars import parse_scalar, strip_comment
+from yaml_scalars import parse_source_fields
 
 
 # Tracking parameters carry no page identity: the same article shared by email,
@@ -208,24 +208,6 @@ def normalize_url(url):
     return urlunsplit((scheme, host, path, query, fragment))
 
 
-#: Anchored at column 0: an INDENTED `sources:`/`source:` is nested under some
-#: other key and is not the note's.  Reading one indexes the note under the
-#: wrong URL, which is a dedup miss -- and a dedup miss is a polished note
-#: silently overwritten on the next run.  `sources:` (block-form list, schema
-#: 2b) is the current key; the scalar `source:` is the pre-rename legacy shape,
-#: still read so an unmigrated note stays visible to the duplicate check.
-SOURCES_RE = re.compile(r"\Asources\s*:\s*(.*)\Z", re.IGNORECASE)
-# YAML allows an indentless block sequence at a mapping value; serializers such
-# as PyYAML emit it by default. Requiring indentation hides those saved notes
-# from dedup. A sequence marker still needs whitespace before its scalar.
-_ITEM_RE = re.compile(r"\A[ \t]*-[ \t]+(.*)\Z")
-SOURCE_RE = re.compile(r"\Asource\s*:\s*(.*)\Z", re.IGNORECASE)
-
-def _yaml_scalar(raw):
-    """Decode a scalar without changing escaped source identities."""
-    return parse_scalar(raw)[0]
-
-
 def _frontmatter_fence(line):
     """True for a column-zero YAML fence, allowing only trailing whitespace.
 
@@ -239,7 +221,7 @@ def _frontmatter_fence(line):
 def read_source(path):
     """Return a note's origin from its YAML frontmatter, or None.
 
-    The origin is the first item of the block-form `sources:` list (schema 2b);
+    The origin is the first item of the `sources:` list (schema 2b);
     a legacy scalar `source:` is read as a fallback so unmigrated notes stay
     indexed.
 
@@ -288,33 +270,14 @@ def read_source(path):
             return None
         if not _frontmatter_fence(first):
             return None
-        found = {}
-        pending = False
+        frontmatter = []
         for raw in lines:
             if _frontmatter_fence(raw):
-                return found.get("sources", found.get("source")) or None
-            if not raw.strip() or raw.lstrip().startswith("#"):
-                continue
-            if pending:
-                pending = False
-                mi = _ITEM_RE.match(raw)
-                if mi:
-                    found["sources"] = _yaml_scalar(mi.group(1))
-                    continue
-            m = SOURCES_RE.match(raw)
-            if m:
+                found = parse_source_fields(frontmatter)
                 if "sources" in found:
-                    return None                # duplicate origin keys are ambiguous
-                found["sources"] = None
-                # A present but unsupported/empty current field must not
-                # manufacture ownership from a stale legacy value.
-                pending = not strip_comment(m.group(1)).strip()
-                continue
-            m = SOURCE_RE.match(raw)
-            if m:
-                if "source" in found:
-                    return None
-                found["source"] = _yaml_scalar(m.group(1))
+                    return (found["sources"] or [None])[0]
+                return found.get("source") or None
+            frontmatter.append(raw)
     except UnicodeError:
         return None
     except (OSError, ValueError):
@@ -687,6 +650,17 @@ def run_self_test():
         for label, body, want in (
                 ("sources list, quoted item",
                  '---\nsources:\n  - "%s"\n---\nbody\n' % URL, URL),
+                ("quoted current key beats stale legacy origin",
+                 '---\n"sources": ["%s"]\nsource: https://stale.invalid/\n---\n'
+                 % URL, URL),
+                ("escaped current key beats stale legacy origin",
+                 '---\n"sour\\u0063es": ["%s"]\nsource: https://stale.invalid/\n---\n'
+                 % URL, URL),
+                ("quoted and bare duplicate current keys are ambiguous",
+                 '---\n"sources": ["%s"]\nsources: ["https://wrong.invalid/"]\n---\n'
+                 % URL, None),
+                ("malformed later member cannot establish ownership",
+                 '---\nsources:\n  - "%s"\n  - [nested]\n---\n' % URL, None),
                 ("sources list, unquoted item",
                  "---\nsources:\n  - %s\n---\n" % URL, URL),
                 ("sources list, indentless quoted item",

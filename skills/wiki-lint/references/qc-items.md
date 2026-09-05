@@ -29,7 +29,7 @@ ownership.
 | Finding or worklist | Action |
 | --- | --- |
 | Ordinary `itemN` | Apply only the determinate, source-independent correction allowed by item N below. Report semantic or ownership uncertainty. |
-| `item0` | Report the unreadable path and error; there is no parsed entry to repair. |
+| `item0` | Report the unreadable path and error; there is no parsed entry to repair. Its unknown aliases suppress dependent link actions until readability is restored and the vault is rescanned; direct-filename checks remain usable. |
 | `item1` | Repair only what the file itself establishes. Never invent title, dates, or review state, and preserve links to the real file. |
 | `item2/read-type` | Normalize a recognizable answer to the equivalent bare boolean. |
 | `item2/type-enum` | Write the exact enum spelling only when the body makes the intended type unambiguous; otherwise preserve and report. |

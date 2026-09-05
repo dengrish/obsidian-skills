@@ -57,12 +57,8 @@ def manifest_key(manifest, filename):
 
 
 def file_digest(path):
-    """Hash a crop without loading the whole rendered image into memory."""
-    digest = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(65536), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    """Hash one stable regular crop through the shared nonblocking reader."""
+    return atomic_move.regular_file_snapshot(path).digest
 
 
 def _fragment(value):
@@ -129,10 +125,21 @@ def _stable_sidecar_bytes(path):
         return b"", _ABSENT_SNAPSHOT
     if not stat.S_ISREG(before.st_mode):
         raise ValueError("%s is not a regular sidecar file" % path)
-    with open(path, "rb") as fh:
-        opened_before = os.fstat(fh.fileno())
-        body = fh.read()
-        opened_after = os.fstat(fh.fileno())
+    descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK
+                         | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        with os.fdopen(descriptor, "rb") as fh:
+            descriptor = None
+            opened_before = os.fstat(fh.fileno())
+            if (not stat.S_ISREG(opened_before.st_mode)
+                    or _snapshot_identity(before) != _snapshot_identity(opened_before)):
+                raise SidecarConflict(
+                    errno.EEXIST, "%s changed while it was read" % path, path)
+            body = fh.read()
+            opened_after = os.fstat(fh.fileno())
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
     try:
         after = os.stat(path, follow_symlinks=False)
     except OSError as exc:
@@ -415,6 +422,31 @@ def self_test():
                     with self.assertRaisesRegex(
                             SidecarConflict, "changed while it was read"):
                         _stable_sidecar_bytes(path)
+
+        def test_crop_and_sidecar_readers_refuse_fifo_swaps_without_blocking(self):
+            with tempfile.TemporaryDirectory() as directory:
+                for reader in (file_digest, _stable_sidecar_bytes):
+                    with self.subTest(reader=reader.__name__):
+                        path = os.path.join(directory, reader.__name__)
+                        with open(path, "wb") as fh:
+                            fh.write(b"original bytes")
+                        real_open = os.open
+                        attempted = []
+
+                        def swap_to_fifo(open_path, flags, *args, **kwargs):
+                            if os.fspath(open_path) == path:
+                                os.unlink(path)
+                                os.mkfifo(path)
+                                attempted.append(flags)
+                                # Keep an accidentally regressed test bounded.
+                                flags |= os.O_NONBLOCK
+                            return real_open(open_path, flags, *args, **kwargs)
+
+                        with mock.patch.object(os, "open", side_effect=swap_to_fifo):
+                            with self.assertRaises(OSError):
+                                reader(path)
+                        self.assertTrue(attempted[0] & os.O_NONBLOCK)
+                        self.assertTrue(stat.S_ISFIFO(os.lstat(path).st_mode))
 
         def test_atomic_write_and_bad_input(self):
             with tempfile.TemporaryDirectory() as directory:

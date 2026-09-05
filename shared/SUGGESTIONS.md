@@ -7,6 +7,11 @@ open items and unrelated content rather than rebuilding a log from a scan.
 Routine skill runs improve their authorized vault outputs, not skill source
 files; record evidence-backed changes to skill behavior here.
 
+Use logs only when the run already has a selected or established vault.
+Standalone PDF workflows with no vault report suggestions in the conversation;
+do not create `Reviews/` beside an external input or ask for a vault solely for
+logging. This does not waive a Wiki or source-note workflow's vault requirement.
+
 ## Destination and attribution
 
 Use `Reviews/<current-skill>-suggestions.md`, with exactly these skill names:
@@ -82,8 +87,8 @@ write, and empty canonical logs are kept rather than deleted.
 ## Publication and setup
 
 A report-only, preview, or no-apply run writes no logs or setup files. On an
-apply-capable run, initialize any missing canonical skill logs so all seven
-exist; create the note-content log when needed. This initialization
+apply-capable run in an established vault, initialize any missing canonical
+skill logs so all seven exist; create the note-content log when needed. This initialization
 does not authorize adding issues to unrelated producer logs.
 
 Use the shared [safe-write protocol](SAFE_WRITES.md): snapshot complete log
@@ -91,6 +96,9 @@ bytes when read, stage the reviewed result privately, publish missing files
 exclusively, and replace only that unchanged snapshot. `Reviews/` must have a
 unique, readable real directory owner; reject directory or leaf symlinks,
 non-regular occupants, and case/Unicode-equivalent ownership collisions.
+Create a missing `Reviews/` directory only after checking its name has no
+other owner. If its path or a log cannot be used safely, preserve the occupant
+and report the blocked log update; complete other independent authorized work.
 Preserve concurrent changes and re-read before retrying; never overwrite newer
 content or blindly append. Scope is limited to recognized logs, not arbitrary
 files under `Reviews/`.

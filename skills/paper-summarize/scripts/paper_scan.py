@@ -107,7 +107,7 @@ import unicodedata
 from naming import chapter_book_stem, core_stem, looks_canonical, stem_of
 from vault_artifacts import (inventory_pdfs, inventory_source_figures,
                              output_vault_root, verify_selected_pdf)
-from yaml_scalars import parse_scalar, strip_comment
+from yaml_scalars import parse_source_fields
 
 #: Figure-label namespaces, ranked so a listing reads main → appendix →
 #: supplementary → Supporting Information → Extended Data.  Longest prefix
@@ -123,31 +123,10 @@ _BIG = 10 ** 9
 STATUSES = ("book", "chapter", "unorganized", "collision", "legacy",
             "done", "new")
 
-#: The note's origin, in either shape it takes on disk.  The CURRENT schema
-#: (CONVENTIONS.md 2b) is a block-form `sources:` list whose item 1 is the
-#: origin; the scalar `source:` is the retired pre-rename shape, still read
-#: as a fallback so an unmigrated note stays recognisable.  Reading only the
-#: scalar turned every note this skill itself writes into a `collision`, so
-#: no paper was ever `done` and the report told the user a foreign note was
-#: in the way.  All three are anchored at column 0, because an INDENTED key
-#: is nested under some other key and is not the note's -- reading one turns
-#: a note that is ours into a `collision` and stops the paper ever being
-#: summarised.  Case-insensitive, and the same two-key logic as
-#: clipping-clean's `dedup_index.read_source`: the two skills read each
-#: other's notes out of one folder and must agree about what is parseable.
-_SOURCES_KEY_RE = re.compile(r"\Asources\s*:\s*(.*)\Z", re.I)
-_SOURCES_ITEM_RE = re.compile(r"\A[ \t]*-[ \t]+(.*)\Z")
-_SOURCE_RE = re.compile(r"\Asource\s*:\s*(.*)\Z", re.I)
-
-
 def _frontmatter_fence(line):
     """True for a column-zero YAML fence with optional trailing whitespace."""
     return line.rstrip(" \t") == "---"
 
-
-def _yaml_scalar(raw):
-    """Decode source scalars using the same rules as clipping dedup."""
-    return parse_scalar(raw)[0]
 
 #: The document a `source:` wikilink names, if it is one at all.  Obsidian
 #: resolves a wikilink by basename, so only the last path segment matters, and
@@ -344,33 +323,15 @@ def note_source(path):
             return None
         if not _frontmatter_fence(first):
             return None
-        found = {}
-        pending = False
+        frontmatter = []
         for raw in lines:
             if _frontmatter_fence(raw):
-                return found.get("sources", found.get("source")) or None
-            if not raw.strip() or raw.lstrip().startswith("#"):
-                continue
-            if pending:
-                pending = False
-                mi = _SOURCES_ITEM_RE.match(raw)
-                if mi:
-                    found["sources"] = _yaml_scalar(mi.group(1))
-                    continue
-            m = _SOURCES_KEY_RE.match(raw)
-            if m:
-                if "sources" in found:
-                    return None                # duplicate origin keys are ambiguous
-                found["sources"] = None
-                # A current field, even when unreadable, takes precedence
-                # over legacy metadata; it cannot authorize a fallback.
-                pending = not strip_comment(m.group(1)).strip()
-                continue
-            m = _SOURCE_RE.match(raw)
-            if m:
-                if "source" in found:
-                    return None
-                found["source"] = _yaml_scalar(m.group(1))
+                fields = parse_source_fields(frontmatter)
+                if "sources" in fields:
+                    sources = fields["sources"]
+                    return sources[0] if sources else None
+                return fields.get("source") or None
+            frontmatter.append(raw)
     except UnicodeError:
         return None
     except (OSError, ValueError):
@@ -561,11 +522,9 @@ def scan(src, notes, images, allow_unorganized=False,
     if include_chapters is None:
         include_chapters = os.path.isfile(src)
     pdfs = find_pdfs(src)
-    selected_gate = None
-    if os.path.isfile(src):
-        vault_root = output_vault_root(images)
-        if vault_root is not None:
-            selected_gate = verify_selected_pdf(vault_root, src)
+    vault_root = output_vault_root(images)
+    vault_inventory = (inventory_pdfs(vault_root)
+                       if vault_root is not None else None)
     stems = [stem_of(p) for p in pdfs]
     books = books_in(stems)
     by_stem = {}
@@ -573,6 +532,9 @@ def scan(src, notes, images, allow_unorganized=False,
         by_stem.setdefault(_name_key(stem), []).append(path)
     rows = []
     for path, stem in zip(pdfs, stems):
+        selected_gate = (verify_selected_pdf(vault_root, path,
+                                             inventory=vault_inventory)
+                         if vault_inventory is not None else None)
         expected_note = os.path.join(notes, stem + ".md")
         note_matches = note_index.get(_name_key(stem + ".md"), [])
         note_conflicts = list(note_matches) if len(note_matches) > 1 else []
@@ -1021,6 +983,23 @@ def run_self_test():
          "[[Doe_Foo_2025.pdf]]"),
         ('---\nsources:\n- "[[\\x44oe_Foo_2025.pdf]]"\n---\n',
          "[[Doe_Foo_2025.pdf]]"),
+        ('---\n"sources": ["[[\\x44oe_Foo_2025.pdf]]"]\n---\n',
+         "[[Doe_Foo_2025.pdf]]"),
+        ('---\n"sour\\u0063es":\n- "[[Doe_Foo_2025.pdf]]"\n---\n',
+         "[[Doe_Foo_2025.pdf]]"),
+        ('---\n\'source\': "[[Doe_Foo_2025.pdf]]"\n---\n',
+         "[[Doe_Foo_2025.pdf]]"),
+        ('---\n"sources": ["https://example.com/foreign"]\n'
+         'sources:\n- "[[Doe_Foo_2025.pdf]]"\n---\n', None),
+        ('---\n"sour\\u0063es": ["https://example.com/foreign"]\n'
+         'source: "[[Doe_Foo_2025.pdf]]"\n---\n',
+         "https://example.com/foreign"),
+        ('---\n"sources": []\nsource: "[[Doe_Foo_2025.pdf]]"\n---\n', None),
+        ('---\n"source": "https://example.com/foreign"\n'
+         'source: "[[Doe_Foo_2025.pdf]]"\n---\n', None),
+        ('---\nsources:\n- "[[Doe_Foo_2025.pdf]]"\n- "unclosed\n---\n', None),
+        ('---\n? sources\n: ["https://example.com/foreign"]\n'
+         'source: "[[Doe_Foo_2025.pdf]]"\n---\n', None),
         ("---\nsource: 'https://example.com/o''brien'\n---\n",
          "https://example.com/o'brien"),
         ('---\nsources:\n  -"[[Doe_Foo_2025.pdf]]"\n---\n', None),
@@ -1553,6 +1532,36 @@ def run_self_test():
             bad += 1
             print("FAIL public scan(): %s -> %r, expected %s"
                   % (stem, actual.get(stem), expected))
+
+    # Folder selection limits processing, not the vault-wide PDF namespace:
+    # a same-basename Inbox PDF makes a Sources/PDFs row just as ambiguous as
+    # it does when that exact source file is selected directly.
+    with tempfile.TemporaryDirectory(dir=_d, prefix="folder-namespace-") as _folder_vault:
+        for _sub in ("Sources/PDFs", "Sources/Images", "Articles", "Inbox"):
+            os.makedirs(os.path.join(_folder_vault, _sub))
+        _selected = os.path.join(_folder_vault, "Sources/PDFs/Doe_Folder_2025.pdf")
+        _outside = os.path.join(_folder_vault, "Inbox/Doe_Folder_2025.pdf")
+        for _file in (_selected, _outside):
+            with open(_file, "wb") as _handle:
+                _handle.write(b"%PDF-1.4\n")
+        with patch(__name__ + ".inventory_pdfs", wraps=inventory_pdfs) as _inventory:
+            _folder_result = scan(os.path.dirname(_selected),
+                                  os.path.join(_folder_vault, "Articles"),
+                                  os.path.join(_folder_vault, "Sources/Images"))
+        _folder_rows = _folder_result["pdfs"]
+        n += 1
+        if (len(_folder_rows) != 1 or _folder_rows[0]["status"] != "collision"
+                or _outside not in _folder_rows[0]["source_conflicts"]
+                or not _folder_rows[0]["source_gate_error"]):
+            bad += 1
+            print("FAIL folder scan ignored an out-of-scope vault PDF collision: %r"
+                  % _folder_rows)
+        n += 1
+        _whole_vault_calls = [call for call in _inventory.call_args_list
+                              if os.fspath(call.args[0]) == _folder_vault]
+        if len(_whole_vault_calls) != 1:
+            bad += 1
+            print("FAIL folder scan did not reuse one whole-vault PDF inventory")
 
     # Real directory enumeration errors must not become clean inventories.
     # The independent integration fixture also exercises these with chmod000.

@@ -15,8 +15,11 @@ it does not independently rename unrelated notes or images.
 
 - An `Articles/` note follows only when its first `sources:` item identifies
   this PDF. Legacy `source:` is a fallback only when the current field is
-  absent. Quoted YAML escapes, comments, and indentless lists are supported;
-  a foreign, missing, malformed, or unreadable origin does not establish
+  absent. Quoted/escaped YAML keys and values, single-line flow lists,
+  comments, and indentless lists are supported on read; duplicate decoded
+  keys and malformed current lists never fall back to a legacy origin.
+  Canonical producers still write the documented block-list form. A
+  foreign, missing, malformed, or unreadable origin does not establish
   ownership. The sole metadata-free legacy exception is a body consisting
   only of an embed of this PDF. Publisher URLs remain external sources.
 - Figure candidates follow the consumer convention
@@ -38,6 +41,13 @@ it does not independently rename unrelated notes or images.
   reconcile the link or establish a regular in-scope note before retrying.
   Local Markdown URL escapes
   are decoded once; a literal percent sequence in a wikilink stays literal.
+  Code examples, escaped wikilinks, and closed HTML/Obsidian comments are literal
+  evidence, not live references: preserve their original bytes. Unclosed
+  comment openers do not hide dependencies from the retirement check. Verified
+  frontmatter is read separately, so a literal comment delimiter in metadata
+  cannot hide its origin or the note's body links. This applies
+  throughout the vault, including `Reviews/` logs. An authorized rename still
+  repairs a log's actual navigation links without changing its issue claims.
   Do not replace this with whole-body substring matching.
 
 The canonical contracts are

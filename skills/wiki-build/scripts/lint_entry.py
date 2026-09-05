@@ -1790,7 +1790,9 @@ def _body_wikilink_occurrences(sections):
             continue
         for target, label in extract_wikilinks(line):
             key = target_key(target)
-            if not key:
+            # Explicit MOC navigation is outside entry-link pruning. The
+            # Wiki-only folder inventory cannot validate or own those notes.
+            if not key or key.startswith("mocs/"):
                 continue
             occurrences.append(
                 {"key": key, "body_line": offset + 1, "target": target,
@@ -2315,8 +2317,8 @@ def lint_text(text, filename):
     return result
 
 
-def lint_file(path):
-    """Lint one file on disk.  Never raises."""
+def lint_file(path, _snapshot_text=None):
+    """Lint one file on disk. Optionally retain its guarded text internally."""
     abspath = os.path.abspath(path)
     preamble = []
     descriptor = None
@@ -2370,6 +2372,9 @@ def lint_file(path):
     try:
         result = lint_text(text, abspath)
         result["findings"] = preamble + result["findings"]
+        if _snapshot_text is not None:
+            # Match lint_text's read-only newline view, including legacy CR.
+            _snapshot_text[abspath] = text.replace("\r\n", "\n").replace("\r", "\n")
         return result
     except Exception as exc:  # a malformed entry is a finding, never a crash
         return {"file": abspath, "title": None, "aliases": [],
@@ -2433,7 +2438,7 @@ def _check_alias_collisions(results):
     return collisions
 
 
-def _recheck_folder_duplicate_wikilinks(results, root):
+def _recheck_folder_duplicate_wikilinks(results, root, snapshot_text):
     """Re-run item 10 with the folder's unambiguous alias ownership.
 
     A single-file lint can normalize ``.md`` and case while preserving paths,
@@ -2513,18 +2518,13 @@ def _recheck_folder_duplicate_wikilinks(results, root):
         return "unresolved-target:" + lookup
 
     for result in results:
-        if any(finding["item"] == "0-unreadable"
-               for finding in result["findings"]):
+        text = snapshot_text.get(result["file"])
+        if text is None:
             continue
-        try:
-            with open(result["file"], "r", encoding="utf-8-sig") as handle:
-                text = handle.read()
-            fm = parse_frontmatter(text)
-            if not fm.found:
-                continue
-            occurrences = _body_wikilink_occurrences(split_sections(fm.body))
-        except (OSError, UnicodeDecodeError):
+        fm = parse_frontmatter(text)
+        if not fm.found:
             continue
+        occurrences = _body_wikilink_occurrences(split_sections(fm.body))
         result["findings"] = [
             finding for finding in result["findings"]
             if finding["item"] != "10-duplicate-wikilink"
@@ -2533,7 +2533,7 @@ def _recheck_folder_duplicate_wikilinks(results, root):
             result["findings"], occurrences, resolve=resolve)
 
 
-def _check_folder_related_labels(results, root):
+def _check_folder_related_labels(results, root, snapshot_text):
     """Item 11: resolve footer targets and require their canonical titles.
 
     This is intentionally folder-only. A single entry cannot know whether a
@@ -2594,17 +2594,13 @@ def _check_folder_related_labels(results, root):
         return next(iter(alias_matches)) if len(alias_matches) == 1 else None
 
     for result in results:
-        if any(finding["item"] == "0-unreadable"
-               for finding in result["findings"]):
+        text = snapshot_text.get(result["file"])
+        if text is None:
             continue
-        try:
-            with open(result["file"], "r", encoding="utf-8-sig") as handle:
-                fm = parse_frontmatter(handle.read())
-            if not fm.found:
-                continue
-            related = split_sections(fm.body)["related_line"] or ""
-        except (OSError, UnicodeDecodeError):
+        fm = parse_frontmatter(text)
+        if not fm.found:
             continue
+        related = split_sections(fm.body)["related_line"] or ""
         for target, display in extract_wikilinks(related):
             owner = resolve(target)
             raw_canonical = titles.get(owner) if owner else None
@@ -2647,11 +2643,14 @@ def lint_path(target, severity_floor=None):
                              "findings": 0, "by_severity": {}, "by_item": {}}
         return report
 
-    results = [lint_file(p) for p in paths]
+    # Cross-file checks consume the exact guarded reads used above. Reopening
+    # a path could follow a later symlink or mix a newer body with old metadata.
+    snapshot_text = {}
+    results = [lint_file(p, _snapshot_text=snapshot_text) for p in paths]
     if folder_mode:
         report["alias_collisions"] = _check_alias_collisions(results)
-        _recheck_folder_duplicate_wikilinks(results, target)
-        _check_folder_related_labels(results, target)
+        _recheck_folder_duplicate_wikilinks(results, target, snapshot_text)
+        _check_folder_related_labels(results, target, snapshot_text)
 
     order = {"error": 0, "warning": 1, "info": 2}
     floor = order.get(severity_floor, 2) if severity_floor else 2
@@ -3287,6 +3286,11 @@ def run_self_test():
                        "decision threshold moves, per [[precision|p]] and "
                        "[[precision^init|q]].\n")),
           ["10-duplicate-wikilink"])
+    check("repeated explicit MOC navigation is not a duplicate entry link",
+          items(mutate("decision threshold moves.\n",
+                       "decision threshold moves; navigation uses "
+                       "[[MOCs/statistics]] and [[mocs/STATISTICS.md#Methods]].\n")),
+          [])
 
     # -- item 16: the bolded opener ----------------------------------------
     check("the opener bolds something other than the title",
@@ -4325,6 +4329,28 @@ def run_self_test():
                if os.path.basename(e["file"]) == "footer-reader.md"
                for f in e["findings"]],
               ["11-related-display"])
+        for newline in ("\r\n", "\r"):
+            for relative in ("sub/reader.md", "sub/footer-reader.md"):
+                with open(os.path.join(wiki, relative), encoding="utf-8") as handle:
+                    original = handle.read()
+                put(relative, original.replace("\n", newline).encode("utf-8"))
+            newline_report = lint_path(wiki)
+            check("folder snapshot checks preserve universal-newline semantics for %r" % newline,
+                  {os.path.basename(e["file"]): [f["item"] for f in e["findings"]]
+                   for e in newline_report["entries"]
+                   if os.path.basename(e["file"]) in {"reader.md", "footer-reader.md"}},
+                  {"reader.md": ["10-duplicate-wikilink"],
+                   "footer-reader.md": ["11-related-display"]})
+        put("sub/moc-reader.md", named_good(
+            "MOC reader", "moc-reader-alias",
+            "MOC reader exercises preserved map navigation.",
+            "**MOC reader** keeps [[MOCs/statistics]] and "
+            "[[MOCs/statistics#Methods|its methods map]]."))
+        check("folder lint preserves repeated explicit MOC navigation too",
+              [f["item"] for e in lint_path(wiki)["entries"]
+               if os.path.basename(e["file"]) == "moc-reader.md"
+               for f in e["findings"]
+               if f["item"] == "10-duplicate-wikilink"], [])
 
         bom = put("bom.md", "﻿" + good.replace('title: "ROC curve"',
                                                     'title: "Bom"')
@@ -4339,6 +4365,41 @@ def run_self_test():
         check("a missing path is a problem, not a traceback",
               lint_path(os.path.join(tmp, "nope"))["problems"] != [], True)
         from unittest.mock import patch
+        race_wiki = os.path.join(tmp, "race-wiki")
+        os.makedirs(race_wiki)
+        race_note = os.path.join(race_wiki, "roc-curve.md")
+        with open(race_note, "w", encoding="utf-8") as handle:
+            handle.write(good)
+        with open(os.path.join(race_wiki, "precision.md"), "w", encoding="utf-8") as handle:
+            handle.write(precision)
+        foreign_note = os.path.join(tmp, "foreign.md")
+        foreign_text = good.replace(
+            "decision threshold moves.",
+            "decision threshold moves. Other bytes contain [[precision]] "
+            "and [[precision]].").replace(
+                "[[precision|Precision]]", "[[precision|Wrong title]]")
+        with open(foreign_note, "w", encoding="utf-8") as handle:
+            handle.write(foreign_text)
+        original_alias_check = _check_alias_collisions
+
+        def swap_after_guarded_reads(results):
+            collisions = original_alias_check(results)
+            os.unlink(race_note)
+            try:
+                os.symlink(foreign_note, race_note)
+            except (OSError, NotImplementedError):
+                with open(race_note, "w", encoding="utf-8") as handle:
+                    handle.write(foreign_text)
+            return collisions
+
+        with patch.dict(globals(), {"_check_alias_collisions": swap_after_guarded_reads}):
+            race_report = lint_path(race_wiki)
+        check("folder checks never reread a changed path or later symlink after the guarded snapshot",
+              [(os.path.basename(entry["file"]), entry["findings"])
+               for entry in race_report["entries"]],
+              [("precision.md", []), ("roc-curve.md", [])])
+        check("folder lint leaves the later path and its foreign target untouched",
+              open(race_note, encoding="utf-8").read(), foreign_text)
         def unreadable_walk(root, followlinks=False, onerror=None):
             if onerror:
                 onerror(PermissionError(13, "permission denied", os.path.join(root, "private")))

@@ -8,7 +8,8 @@ judge — collision candidates (item-5 probes), rename candidates, and backfill
 candidates (Task 2) — plus the Task 3 hierarchy diagnostic.
 
 A file that cannot be read (not UTF-8, dangling symlink, permission error) is
-reported as an `item0` problem and skipped; it never aborts the scan.
+reported as an `item0` problem and skipped; it never aborts the scan. Unknown
+alias ownership suppresses alias-dependent link worklists until a clean rescan.
 
 The scanner mechanizes every deterministic check. The executing agent handles
 the remaining semantic judgments automatically during the wiki-lint run; no user or other human review is required. Nothing here is applied to the vault:
@@ -1514,9 +1515,13 @@ def iter_entry_files(wiki, on_error=None):
         # into it read as dangling -- whose repair would unlink a working
         # reference. `seen_dirs` keeps a symlink loop from walking forever.
         try:
-            key = os.stat(dirpath).st_ino, os.stat(dirpath).st_dev
-        except OSError:
-            key = dirpath
+            directory_stat = os.stat(dirpath)
+            key = directory_stat.st_ino, directory_stat.st_dev
+        except OSError as exc:
+            if on_error is not None:
+                on_error(exc)
+            dirnames[:] = []
+            continue
         if key in seen_dirs:
             dirnames[:] = []
             continue
@@ -1987,6 +1992,10 @@ class _ProblemList(list):
         super().append((slug_value, item, message, self.current_path))
 
 
+class IncompleteWikiInventoryError(OSError):
+    """The entry inventory cannot establish identity or absence safely."""
+
+
 def _entry_physical_key(wiki, path):
     """Exact Wiki-relative filename used only for physical-record identity."""
     return os.path.relpath(path, wiki).replace("\\", "/")
@@ -2019,11 +2028,25 @@ def scan(wiki, images=None):
     # identity. Resolution derives that normalized, extensionless identity only
     # while comparing; physical records must never collapse first.
     path_records = {}
+    alias_inventory_gaps = set()
+    alias_gap_note = (
+        " Alias inventory is incomplete: dangling-link, alias-dependent "
+        "canonicalization/duplicate-removal, alias-addition and backfill "
+        "inferences are suppressed for this scan. Preserve unresolved links; "
+        "safely repair the affected metadata/readability and rescan to resume.")
+    walk_errors = []
     def walk_error(exc):
-        location = os.path.relpath(exc.filename, wiki) if exc.filename else "."
-        problems.append((location, "item0", "unreadable wiki directory: %s" % exc))
+        walk_errors.append(str(exc))
 
     physical_paths = iter_entry_files(wiki, on_error=walk_error)
+    if walk_errors:
+        # An unseen subtree can own any missing filename or alias. No derived
+        # linking or hierarchy worklist is sound from that partial inventory.
+        # Leaf-read failures below are different: their occupied paths remain
+        # inventoried and receive the ordinary report-only item0 finding.
+        raise IncompleteWikiInventoryError(
+            "incomplete Wiki directory inventory; no scan worklists produced: "
+            + "; ".join(walk_errors))
     for path in physical_paths:
         fn = os.path.basename(path)
         sl = fn[:-3]
@@ -2095,6 +2118,7 @@ def scan(wiki, images=None):
                 raise OSError("leaf Markdown path changed while it was read")
         except (OSError, UnicodeDecodeError) as exc:
             problems.append((sl,"item0",f"unreadable: {type(exc).__name__}: {exc}"))
+            alias_inventory_gaps.add((sl, problems.current_path))
             on_disk.add(sl)
             continue
         finally:
@@ -2105,6 +2129,10 @@ def scan(wiki, images=None):
             text, _frontmatter_boundary_bad)
         if fm_raw is None:
             problems.append((sl,"item1","no YAML frontmatter"))
+            # A readable plain note has no Obsidian properties. A possible
+            # but unsupported/unclosed fence cannot establish alias absence.
+            if text.lstrip("\ufeff").startswith("---"):
+                alias_inventory_gaps.add((sl, problems.current_path))
             on_disk.add(sl)
             continue
         for _message in _frontmatter_boundary_bad:
@@ -2142,6 +2170,17 @@ def scan(wiki, images=None):
         aliases_all = (list(fm["aliases"])
                        if aliases_is_list else [])
         aliases = [a for a in aliases_all if isinstance(a, str) and a]
+        alias_key_count = sum(
+            bool((match := FM_KEY.match(line)) and match.group(1) == "aliases")
+            for line in fm_raw.split("\n"))
+        aliases_complete = (
+            not _fm_bad and not _frontmatter_boundary_bad
+            and alias_key_count <= 1
+            and (not aliases_present
+                 or (isinstance(fm.get("aliases"), list)
+                     and all(isinstance(a, str) for a in fm["aliases"]))))
+        if not aliases_complete:
+            alias_inventory_gaps.add((sl, problems.current_path))
         tags_raw = fm.get("tags", []) if isinstance(fm.get("tags"), list) else ([fm["tags"]] if fm.get("tags") else [])
         tags_raw = [t.strip() for t in tags_raw if isinstance(t, str) and t.strip()]  # decoded, non-null tags
         tag_slugs = [t.lstrip("#").strip() for t in tags_raw]          # discipline slugs without the # prefix, for MOC/hierarchy use
@@ -2176,6 +2215,7 @@ def scan(wiki, images=None):
         parents_is_list = isinstance(fm.get("parents"), list)
         parents_all = list(fm.get("parents", [])) if parents_is_list else []
         record = dict(slug=sl, title=title, aliases=aliases,
+                      aliases_complete=aliases_complete,
                       aliases_all=aliases_all,
                       aliases_present=aliases_present,
                       aliases_is_list=aliases_is_list, type=_scalar("type"),
@@ -2228,7 +2268,11 @@ def scan(wiki, images=None):
     # the collision, but item 10 must not choose a rewrite target for it.
     alias_of = {}
     ambiguous_aliases = set()
-    for _sl, _e in sorted(entries.items()):
+    alias_inventory_complete = not alias_inventory_gaps
+    # A skipped file may own any alias, including one otherwise claimed by a
+    # single parsed note. Keep local QC/collision evidence, but do not expose
+    # a partial alias map to link, label, or parent canonicalization.
+    for _sl, _e in (sorted(entries.items()) if alias_inventory_complete else ()):
         for _a in _e["aliases"]:
             _k = fold_name(_a)
             if _k:
@@ -2366,6 +2410,8 @@ def scan(wiki, images=None):
             return None, "legacy-moc"
         if "/" in key:
             return None, "missing"
+        if not alias_inventory_complete:
+            return None, "unparsed"
         if key in ambiguous_aliases:
             return None, "ambiguous"
         if key in alias_of:
@@ -3616,8 +3662,9 @@ def scan(wiki, images=None):
         # The shared detector is exactly the one wiki-build runs on a new or
         # merged entry. It supplies a deterministic candidate; same-entity,
         # cross-domain, and Organism common-name safety remain executing-agent judgments.
-        for _candidate, _where, _candidate_slug in missing_introduced_aliases(
-                strip_code(e["prose"]).split("\n"), title, e["aliases"], sl):
+        for _candidate, _where, _candidate_slug in (missing_introduced_aliases(
+            strip_code(e["prose"]).split("\n"), title, e["aliases"], sl)
+                if alias_inventory_complete else ()):
             problems.append((
                 sl, "item17/alias-candidate",
                 f'the body introduces "{_candidate}" ({_where}) as a name for '
@@ -3771,7 +3818,7 @@ def scan(wiki, images=None):
                                  f'rewrite to "{_replacement}". A new same-named note '
                                  f'creates a file that outranks the alias and steals every '
                                  f'"[[{tgt}]]" in the vault away from "{_own_sl}"'))
-            else:
+            elif alias_inventory_complete:
                 problems.append((sl,"item10/dangling",f'wikilink target "{tgt}" does not resolve'))
         # Duplicate means one resolved entry, regardless of how the link was
         # spelled.  Paths, ``.md``, case/Unicode variants, and an unambiguous
@@ -3796,6 +3843,10 @@ def scan(wiki, images=None):
             elif status in {"ambiguous", "moc"}:
                 # No safe duplicate-removal action exists until the bare or
                 # partially qualified target identifies one file.
+                continue
+            elif not alias_inventory_complete:
+                # A repeated unresolved spelling can belong to a skipped
+                # note or conflict with a known alias; do not infer removal.
                 continue
             elif key in ambiguous_aliases:
                 # Preserve repeated ambiguous aliases until their owner is
@@ -3998,7 +4049,8 @@ def scan(wiki, images=None):
                     and target_key not in ambiguous_aliases
                     and target_key in alias_of):
                 target_record = entries.get(alias_of[target_key][0])
-            if target_record is not None and disp:
+            if (target_record is not None and disp
+                    and target_record.get("aliases_complete", False)):
                 target_slug = target_record["slug"]
                 # The deliberately loose token floor below must accept
                 # qualified bare terms and inflections, but that same looseness
@@ -4175,7 +4227,8 @@ def scan(wiki, images=None):
     # surfaced by COMMON_NOUNS and item 5's bare-slug check.
     bare_noun_alias = {s for s in _alias_surf - _title_surf
                        if re.fullmatch(r"[a-z]+", s)}
-    backfill = build_backfill(entries, surf_map, _moc_basename_owners)
+    backfill = (build_backfill(entries, surf_map, _moc_basename_owners)
+                if alias_inventory_complete else [])
 
     # Exact normalized sentence overlap is a cross-entry ownership candidate,
     # not an automatic deletion. It caught a full optimization sentence copied
@@ -4217,6 +4270,20 @@ def scan(wiki, images=None):
     untagged_entries = [sl for sl, e in entries.items() if e["tags_valid_empty"]]
 
     # ---- problem tally by checklist item ----
+    # Explain the conservative gate on each affected path's existing QC row,
+    # without introducing a public schema flag or a second repair worklist.
+    unexplained_alias_gaps = set(alias_inventory_gaps)
+    for i, (sl, item, message, path) in enumerate(problems):
+        if ((sl, path) in unexplained_alias_gaps
+                and item in {"item0", "item1", "item2", "item18"}):
+            problems[i] = (sl, item, message + alias_gap_note, path)
+            unexplained_alias_gaps.remove((sl, path))
+    for sl, path in sorted(unexplained_alias_gaps):
+        problems.current_path = path
+        problems.append((sl, "item18", "aliases: could not be fully inventoried."
+                         + alias_gap_note))
+    problems.current_path = ""
+
     # The share of entries affected is the recurrence signal for wiki-build-improvement
     # proposals — see references/backlogs.md.
     tally = {}                                   # item -> [issue_count, set_of_entries]
@@ -4428,6 +4495,19 @@ def scan(wiki, images=None):
                 _moc_add(
                     _moc_state, "malformed-line",
                     "linked tree bullets must contain exactly one whole-line wikilink",
+                    line=_line_no)
+            elif _link is None and (
+                    re.match(r"(?:`{3,}|~{3,})", _content)
+                    or any(token in _content for token in ("<!--", "-->", "%%"))):
+                # A list bullet can open a fenced block or comment too. It is
+                # not a visible category, and its children cannot establish a
+                # navigation placement through text that renders as code or is
+                # hidden from the reader.
+                _tree["structurally_parseable"] = False
+                _node_safe = False
+                _moc_add(
+                    _moc_state, "malformed-line",
+                    "unlinked category bullets cannot contain code fences or comment delimiters",
                     line=_line_no)
             elif _link is not None:
                 _raw_target = _link.group(1)
@@ -5112,6 +5192,69 @@ def run_self_test():
         check("the ambiguous alias remains report-only instead",
               _st_msg(res, "alias-reader", "item10/ambiguous").count(
                   "claimed as an alias by multiple entries"), 2)
+
+        # A known pathname does not establish an unreadable file's aliases.
+        # The same uncertainty applies to valid YAML keys this small parser
+        # does not support; neither case may turn a working alias into a prune.
+        from unittest.mock import patch
+        v_gap = os.path.join(tmp, "v2-alias-inventory-gap")
+        hidden_text = _st_entry(
+            "Hidden owner", "**Hidden owner** is a worked example.",
+            aliases=('"hidden-alias"', '"shared-alias"'))
+        hidden_path = _st_write(v_gap, "hidden-owner.md", hidden_text)
+        _st_write(v_gap, "known-owner.md", _st_entry(
+            "Known owner", "**Known owner** is a worked example.",
+            aliases=('"known-alias"', '"shared-alias"'), type_="Invalid"))
+        _st_write(v_gap, "alias-reader.md", _st_entry(
+            "Alias reader", "**Alias reader** uses [[hidden-alias|Hidden owner]], "
+            "[[known-alias|Known owner]], [[shared-alias|Shared]], "
+            "[[shared-alias|Shared]], [[reader-alias|Alias reader]] and [[ghost]].",
+            aliases=('"reader-alias"',), related="[[known-alias]]",
+            parents=('"[[known-alias]]"',)))
+        _st_write(v_gap, "file-reader.md", _st_entry(
+            "File reader", "**File reader** uses [[KNOWN-OWNER|Known owner]] "
+            "and [[known-owner|Known owner]].", related="[[known-owner]]"))
+        _st_write(v_gap, "bare-reader.md", _st_entry(
+            "Bare reader", "**Bare reader** uses Known owner in a comparison."))
+        real_open = os.open
+        def deny_alias_owner(path, *args, **kwargs):
+            if os.fspath(path) == hidden_path:
+                raise PermissionError(13, "synthetic denied read", hidden_path)
+            return real_open(path, *args, **kwargs)
+        with patch.object(os, "open", deny_alias_owner):
+            unreadable_alias_res = scan(v_gap)
+        _st_write(v_gap, "hidden-owner.md", hidden_text.replace('aliases:', '"aliases":'))
+        quoted_alias_res = scan(v_gap)
+        for label, gap_res, gap_item in (
+                ("unreadable owner", unreadable_alias_res, "item0"),
+                ("quoted alias key", quoted_alias_res, "item1")):
+            check(label + " explains suppressed alias actions without aborting local QC",
+                  ("Alias inventory is incomplete" in _st_msg(
+                      gap_res, "hidden-owner", gap_item),
+                   "item2/type-enum" in _st_keys(gap_res, "known-owner")),
+                  (True, True))
+            check(label + " cannot imply a dangling, canonical, self, duplicate or Related alias repair",
+                  [key for key in _st_keys(gap_res, "alias-reader")
+                   if key.startswith("item10/") or key == "item11"], [])
+            check(label + " retains direct filename case, duplicate and Related checks",
+                  [key for key in _st_keys(gap_res, "file-reader")
+                   if key.startswith("item10/") or key == "item11"],
+                  ["item10/case", "item10/dup", "item11"])
+            check(label + " suppresses backfill and alias-parent canonicalization",
+                  (gap_res["backfill_candidates"],
+                   "resolves to" in _st_msg(gap_res, "alias-reader", "item2/parents-form"),
+                   [(row["target"], row["reason"])
+                    for row in gap_res["hierarchy_diagnostic"]["unresolved_parents"]
+                    if row["slug"] == "alias-reader"]),
+                  ([], False, [("known-alias", "unparsed")]))
+        _st_write(v_gap, "hidden-owner.md", hidden_text)
+        repaired_alias_res = scan(v_gap)
+        check("repair and rescan restore ordinary alias resolution, including real ambiguity",
+              {"item10/alias", "item10/ambiguous", "item10/self", "item10/dangling", "item11"}
+              <= set(_st_keys(repaired_alias_res, "alias-reader")), True)
+        check("repair and rescan restore backfill despite unrelated field-value QC",
+              any(row["slug"] == "bare-reader" and row["target"] == "known-owner"
+                  for row in repaired_alias_res["backfill_candidates"]), True)
 
         # A duplicate portable basename is one resolution identity, but each
         # physical file still has its own body and must receive local QC. The
@@ -6327,6 +6470,26 @@ def run_self_test():
                open(os.path.join(vr, "MOCs/statistics.md"), encoding="utf-8").read()),
               ([], True, _plain_tree))
 
+        for _name, _opening, _closing in (
+                ("backtick fence", "```markdown", "```"),
+                ("tilde fence", "~~~", "~~~"),
+                ("HTML comment", "<!--", "-->"),
+                ("Obsidian comment", "%%", "%%")):
+            _hidden_tree = ("- " + _opening + "\n"
+                            + "".join("  " + line + "\n"
+                                      for line in _plain_tree.splitlines())
+                            + "- " + _closing + "\n")
+            _st_write(vr, "MOCs/statistics.md", _hidden_tree)
+            res = scan(v)
+            check("a %s inside category bullets cannot appear to be a clean MOC" % _name,
+                  [(x["kind"], x.get("line"))
+                   for x in res["hierarchy_diagnostic"]["moc_consistency_findings"]],
+                  [("malformed-line", 1), ("malformed-line", 5)])
+        _st_write(vr, "MOCs/statistics.md", "- Visible category\n"
+                  + "".join("  " + line + "\n" for line in _plain_tree.splitlines()))
+        check("ordinary unlinked categories still support complete MOC placement",
+              scan(v)["hierarchy_diagnostic"]["moc_consistency_findings"], [])
+
         # Fail closed without walking a linked directory or arbitrarily
         # choosing a portable directory/leaf collision. Injected listings make
         # the collision cases testable on case-insensitive filesystems too.
@@ -6604,7 +6767,7 @@ def run_self_test():
                [(row["target"], row["reason"])
                 for row in res["hierarchy_diagnostic"]["unresolved_parents"]
                 if row["slug"] == "valid-block"]),
-              ([], [("misc-moc", "missing")]))
+              ([], [("misc-moc", "unparsed")]))
 
         # ------------------------------------------------------------------
         # 7. rename candidates -- `target_exists` is the ONLY thing standing
@@ -7164,6 +7327,13 @@ def run_self_test():
               _st_keys(res, "four-dash"), ["item1"])
         check("a `--- text` closing fence is item1, not a clean entry",
               _st_keys(res, "fence-text"), ["item1"])
+        # Restore readable metadata before asserting absence/alias-dependent
+        # link results; the malformed-fence cases above suppress those results.
+        for name in ("four-dash", "fence-text"):
+            _st_write(v, name + ".md", _st_entry(
+                name.replace("-", " ").capitalize(),
+                "**%s** is a worked example." % name.replace("-", " ").capitalize()))
+        res = scan(v)
         check("fenced Related/Flashcards samples produce no phantom section "
               "findings, and prose past the fence is still scanned",
               (_st_msg(res, "sw-listing", "item10/dangling""").count("does not resolve"),
@@ -7429,10 +7599,53 @@ def run_self_test():
                 onerror(PermissionError(13, "permission denied", os.path.join(root, "private")))
             return iter(())
         with patch.object(os, "walk", unreadable_walk):
-            inaccessible = scan(v)
-        check("an unreadable directory is reported even with no readable entries",
-              any(p['item'] == 'item0' and 'directory' in p['message']
-                  for p in inaccessible['problems']), True)
+            try:
+                scan(v)
+                inaccessible_error = ""
+            except IncompleteWikiInventoryError as exc:
+                inaccessible_error = str(exc)
+        check("an unreadable directory blocks the scan rather than yielding partial worklists",
+              "incomplete Wiki directory inventory" in inaccessible_error, True)
+
+        _st_write(v, "private/hidden-topic.md", _st_entry(
+            "Hidden topic", "**Hidden topic** is a worked example."))
+        _st_write(v, "reader-with-hidden-target.md", _st_entry(
+            "Reader with hidden target",
+            "**Reader with hidden target** uses [[hidden-topic|Hidden topic]]."))
+
+        def partial_walk(root, followlinks=False, onerror=None):
+            if onerror:
+                onerror(PermissionError(13, "permission denied", os.path.join(root, "private")))
+            return iter([(root, [], ["reader-with-hidden-target.md"])])
+
+        import contextlib
+        import io
+        old_report = os.path.join(tmp, "prior-scan.json")
+        with open(old_report, "w", encoding="utf-8") as handle:
+            handle.write("prior report must not be replaced")
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch.object(os, "walk", partial_walk), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            incomplete_status = main([v, "--out", old_report])
+        check("partial CLI inventory exits nonzero without prescribing removal of a hidden real entry",
+              (incomplete_status, stdout.getvalue(),
+               "incomplete Wiki directory inventory" in stderr.getvalue(),
+               open(old_report, encoding="utf-8").read()),
+              (1, "", True, "prior report must not be replaced"))
+
+        real_stat = os.stat
+        def missing_directory_identity(path, *args, **kwargs):
+            if os.path.abspath(path) == os.path.join(v, "private"):
+                raise PermissionError(13, "directory identity unavailable", path)
+            return real_stat(path, *args, **kwargs)
+
+        with patch.object(os, "stat", side_effect=missing_directory_identity):
+            try:
+                scan(v)
+                identity_error = ""
+            except IncompleteWikiInventoryError as exc:
+                identity_error = str(exc)
+        check("a missing directory identity cannot fall back to unsafe path-based loop detection",
+              "directory identity unavailable" in identity_error, True)
 
         v = os.path.join(tmp, "v17-ambiguous-links")
         for name in ('first', 'second'):
@@ -7892,6 +8105,17 @@ def run_self_test():
                "item19" in _st_keys(res, "scalar-bound-card")), (True, True))
         check("a bare aliases key is not an empty list",
               "must be a list" in _st_msg(res, "blank-alias", "item18"), True)
+        # Keep the scalar-shape diagnostics above, then establish the complete
+        # alias inventory needed by the independent link/backfill cases below.
+        for name, alias in (("scalar-alias", "scalar-alias-name"),
+                            ("scalar-bound-card", "sbc")):
+            path = os.path.join(v, name + ".md")
+            with open(path, encoding="utf-8") as fh:
+                repaired = fh.read().replace(
+                    'aliases: "' + alias + '"\n',
+                    'aliases:\n  - "' + alias + '"\n')
+            _st_write(v, name + ".md", repaired)
+        link_res = scan(v)
         check("an explicitly empty flow aliases list has list shape",
               "item18" in _st_keys(res, "empty-flow-alias"), False)
         check("a mathematical title's plain form may be the description subject",
@@ -7927,7 +8151,7 @@ def run_self_test():
               _st_keys(res, "common-name-reader").count("item18"), 1)
         check("a uniquely bound Organism common name enters backfill without becoming an alias",
               [(b["target"], b["surface"], b["organism_common_name"])
-               for b in res["backfill_candidates"]
+               for b in link_res["backfill_candidates"]
                if b["slug"] == "common-name-backfill-reader"],
               [("mus-musculus", "mouse", True)])
         common_name_entry = {
@@ -7954,7 +8178,7 @@ def run_self_test():
         check("anchors and vault paths cannot hide bare Related links",
               _st_keys(res, "related-anchored").count("item11"), 2)
         check("a resolving alias target cannot hide a bare Related link",
-              "Canonical target" in _st_msg(res, "related-alias", "item11"), True)
+              "Canonical target" in _st_msg(link_res, "related-alias", "item11"), True)
         check("a Related display label must equal the target's canonical title",
               "canonical title"
               in _st_msg(res, "related-wrong-label", "item11"), True)
@@ -8582,7 +8806,12 @@ def main(argv=None):
     if args.images is not None and not os.path.isdir(args.images):
         ap.error("--images is not a directory: %s. No embed was checked; this is "
                  "not a vault with no images." % args.images)
-    text = json.dumps(scan(args.wiki, args.images), ensure_ascii=False,
+    try:
+        report = scan(args.wiki, args.images)
+    except IncompleteWikiInventoryError as exc:
+        print("scan blocked: %s" % exc, file=sys.stderr)
+        return 1
+    text = json.dumps(report, ensure_ascii=False,
                       indent=(args.indent or None))
     if args.out:
         with open(args.out, "w", encoding="utf-8") as fh:
