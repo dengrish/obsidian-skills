@@ -9,11 +9,11 @@ in the request is sufficient. This protocol requires no separate human review.
 A correction confined to one named entry and supported only by sources it
 already cites uses [source-backed correction](source-backed-corrections.md), not
 this structural protocol. Evidence from a source new to the target belongs to
-`wiki-builder` unless the authorized operation necessarily redistributes
+`wiki-build` unless the authorized operation necessarily redistributes
 existing content across entries.
 
 This is maintenance of existing knowledge, not a second extraction route.
-`wiki-builder` still owns turning a new source into new candidates. A refactor
+`wiki-build` still owns turning a new source into new candidates. A refactor
 may create a split note only for a subject already substantively present in the
 affected entry and supported by its durable source.
 
@@ -43,7 +43,7 @@ complete-reference-rewrite gate.
 
 ## Build the refactored entries
 
-- Apply wiki-builder's current field, prose, equation, media, link, and
+- Apply wiki-build's current field, prose, equation, media, link, and
   flashcard rules. Every result is a full atomic entry; no bridge stub or
   temporary redirect is created.
 - A split moves each verified claim, equation, exhibit, and citation to its

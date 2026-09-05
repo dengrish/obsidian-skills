@@ -163,8 +163,8 @@ never moved, deleted or rewritten, including after a successful reprocess.
    named recovery path.
 6. Do not finalize while prepare reports blockers. If every blocker is a Wiki
    entry or recognized root MOC and the dependency rewrite is authorized, pass
-   the exact prepare report and mapping to `wiki-linter`'s
-   [producer-mapped dependency repair](../../wiki-linter/references/external-artifact-repair.md).
+   the exact prepare report and mapping to `wiki-lint`'s
+   [producer-mapped dependency repair](../../wiki-lint/references/external-artifact-repair.md).
    The old and new images both resolve while it works. Foreign Markdown,
    unreadable files, an incomplete scan, or an unauthorized rewrite remain
    blockers; leave both versions in place and report the pending handoff.

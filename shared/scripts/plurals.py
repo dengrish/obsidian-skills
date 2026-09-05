@@ -2,14 +2,14 @@
 """Canonical English inflection and light collision-stem helpers.
 
 Two skills ask the same question and must not answer it differently.
-`wiki-builder` probes a *candidate* title against the vault (`SKILL.md` step 3,
-probes (c), (e), and (f)); `wiki-linter` sweeps the *whole vault* for near-duplicate
-pairs, and CONVENTIONS.md §9 gives whole-vault dedup detection to wiki-linter
+`wiki-build` probes a *candidate* title against the vault (`SKILL.md` step 3,
+probes (c), (e), and (f)); `wiki-lint` sweeps the *whole vault* for near-duplicate
+pairs, and CONVENTIONS.md §9 gives whole-vault dedup detection to wiki-lint
 alone. Both rest on one fact — which two word forms are the same word — and
 until this module existed each held its own copy: `singularize()` in
-`wiki-builder/scripts/find_collisions.py`, with its irregular tables and its
+`wiki-build/scripts/find_collisions.py`, with its irregular tables and its
 length floors, and a three-rule regular-plural stripper called `singular()` in
-`wiki-linter/scripts/scan_vault.py`. The two disagreed on every irregular:
+`wiki-lint/scripts/scan_vault.py`. The two disagreed on every irregular:
 
     token        find_collisions   scan_vault
     hypotheses   hypothesis        hypothes
@@ -20,8 +20,8 @@ length floors, and a three-rule regular-plural stripper called `singular()` in
     axes         axis              ax
     series       series            sery
 
-so `hypothesis-testing` / `testing-hypotheses` fired for wiki-builder, probing
-one new candidate against the vault, and *not* for wiki-linter's sweep — and
+so `hypothesis-testing` / `testing-hypotheses` fired for wiki-build, probing
+one new candidate against the vault, and *not* for wiki-lint's sweep — and
 the sweep is the only thing that ever looks at a pair already sitting in the
 vault, so a pair that got in was seen by nobody, forever. Nothing raises; the
 vault simply keeps two entries for one concept. CONVENTIONS.md §4a is the
@@ -217,7 +217,7 @@ def plural_key(slug):
 def wordorder_key_singular(slug):
     """Probe (e) key with each token singularised first.
 
-    wiki-builder's SKILL.md states probe (e) as a pure token sort and then gives
+    wiki-build's SKILL.md states probe (e) as a pure token sort and then gives
     ``weight-tying`` vs ``tying-weights.md`` as its worked example, claiming
     "both produce [tying, weight] after sort".  They do not -- ``weights`` does
     not sort to ``weight``.  Probe (e) is therefore run on both the raw and the
@@ -245,8 +245,8 @@ def real_permutation(slug_a, slug_b):
 
 
 # Probe (f)'s light morphology is shared for the same reason as the plural and
-# word-order keys above: wiki-builder tests an incoming candidate, while
-# wiki-linter is the only process that sees a pair already present in a vault.
+# word-order keys above: wiki-build tests an incoming candidate, while
+# wiki-lint is the only process that sees a pair already present in a vault.
 # A copied suffix table lets the two worklists silently disagree. Ordered
 # longest-first so ``ization`` wins over ``ation`` and ``ion``.
 _STEM_SUFFIXES = [
@@ -346,8 +346,8 @@ UNCHANGED = ["gene", "curve", "class", "matrix", "hypothesis", "analysis",
              "proof", "safe"]
 
 #: Slug-level cases: `(slug_a, slug_b, probe-c pair?, probe-e permutation?)`.
-#: The first row is the pair that went unreported for wiki-linter and reported
-#: for wiki-builder -- the whole reason this module exists.
+#: The first row is the pair that went unreported for wiki-lint and reported
+#: for wiki-build -- the whole reason this module exists.
 SLUG_CASES = [
     ("hypothesis-testing", "testing-hypotheses", False, True),
     ("weight-tying",       "tying-weights",      False, True),

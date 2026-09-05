@@ -46,7 +46,7 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               Related footer is exempt).  This is item 10's
                               MECHANICAL HALF ONLY -- whether every target
                               resolves is a whole-VAULT question and belongs
-                              to wiki-linter's scanner (CONVENTIONS.md §9),
+                              to wiki-lint's scanner (CONVENTIONS.md §9),
                               which already carries the four carve-outs that
                               make the answer safe to act on
       10-table-cell-wikilink  rendered wikilink occurs inside a Markdown
@@ -123,7 +123,7 @@ evidence}], is_stub, title, aliases, description_chars}], alias_collisions[],
 summary, problems[]}.  ``18-alias-collision`` only has meaning in folder
 scope; ``18-alias-form`` (each alias is itself in slug form) is a warning.
 
-A populated ``parents:`` is deliberately NOT flagged -- wiki-linter writes
+A populated ``parents:`` is deliberately NOT flagged -- wiki-lint writes
 that field on every full entry, so a value there is the expected steady
 state.  Its quoting is covered by ``2-quoting`` and its presence by
 ``2-field-order``.
@@ -270,7 +270,7 @@ OPTIONAL_KEYS = ["aliases"]
 
 # Obsidian's own appearance/publish properties are outside the wiki-entry
 # schema, but they are user configuration rather than stacked-merge debris.
-# A merge must preserve them exactly; wiki-linter reports the same set under a
+# A merge must preserve them exactly; wiki-lint reports the same set under a
 # report-only key.  Keep this list in parity with scan_vault.OBSIDIAN_KEYS.
 OBSIDIAN_KEYS = {"cssclasses", "cssclass", "publish", "permalink", "cover",
                  "image", "banner", "icon"}
@@ -408,7 +408,7 @@ def source_stem(item):
     # NFC as well as case: one document may be spelled NFD on disk and NFC in a
     # note. Raw strings would miss the ``4-duplicate-source`` pair and make the
     # result host-dependent. CONVENTIONS.md 7 requires this to agree exactly
-    # with wiki-linter's scan_vault.source_stem(); keep the two lines identical.
+    # with wiki-lint's scan_vault.source_stem(); keep the two lines identical.
     return (unicodedata.normalize("NFC", stem.strip()).lower(),
             unicodedata.normalize("NFC", ext.strip()).lower())
 
@@ -803,7 +803,7 @@ def _check_description(fm, findings, title=None):
 def _check_body_structure(fm, sections, findings):
     """Item 9's deterministic entry-opening and heading floor.
 
-    wiki-linter applies these same source-independent assertions vault-wide.
+    wiki-lint applies these same source-independent assertions vault-wide.
     Catching them here prevents a builder run from publishing a note that the
     next maintenance pass must immediately repair.
     """
@@ -1262,7 +1262,7 @@ def _check_alias_completeness(fm, sections, findings, filename):
 
 
 # NOTE: there is deliberately no _check_parents.  A populated `parents:` is the
-# expected steady state -- wiki-linter's Task 3 writes that field on every full
+# expected steady state -- wiki-lint's Task 3 writes that field on every full
 # entry -- so flagging it fired on the whole vault after a single lint pass.  It
 # was redundant anyway: `parents` is in QUOTED_LIST_FIELDS, so _check_quoting
 # already reports an unquoted item, and it is in MANDATORY_KEYS, so
@@ -1856,7 +1856,7 @@ def _check_bold_opener(fm, sections, findings):
         return
     # The opener is the first PARAGRAPH, not the first line: reading one line
     # made a hard-wrapped opening sentence whose bold lands on line 2 report
-    # "the opening sentence has no bolded span".  (wiki-linter's scanner has
+    # "the opening sentence has no bolded span".  (wiki-lint's scanner has
     # always compared against `prose.split("\n\n", 1)[0]`.)
     block = []
     for line in sections["prose_lines"]:
@@ -4482,7 +4482,7 @@ def run_self_test():
 def _build_parser():
     p = argparse.ArgumentParser(
         prog="lint_entry.py",
-        description="Mechanical Quality Checklist checks for wiki-builder "
+        description="Mechanical Quality Checklist checks for wiki-build "
                     "entries (stdlib only). Findings do not set the exit "
                     "status; invocation and report-write failures do.",
         epilog="example: lint_entry.py ~/Vault/Wiki --severity error",

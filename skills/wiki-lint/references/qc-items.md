@@ -1,9 +1,9 @@
 # QC items — source-independent enforcement (Task 1)
 
 **Read this before Task 1 fixes any entry.** The numbered acceptance rules
-come from wiki-builder's [Quality Checklist](../../wiki-builder/SKILL.md#quality-checklist)
+come from wiki-build's [Quality Checklist](../../wiki-build/SKILL.md#quality-checklist)
 and the canonical guides it links. This file does not duplicate those guides in full. It
-owns wiki-linter's finding-to-action rules, source-independent review, and
+owns wiki-lint's finding-to-action rules, source-independent review, and
 repair boundaries.
 
 All semantic-review instructions here are carried out autonomously by the executing agent.
@@ -37,7 +37,7 @@ ownership.
 | `item2/parents-null` | Write `parents: []`; this changes only the spelling of an already empty value. |
 | `item2/parents-form` | Preserve usable targets while normalizing representation and unambiguous target spelling. Re-derive invalid relationships only in Task 3's authorized closure. |
 | `item2/obsidian-key` | Report and preserve exactly; it is valid user configuration. |
-| `item3`, `item3/report-only` | Report date problems; wiki-linter writes neither date. |
+| `item3`, `item3/report-only` | Report date problems; wiki-lint writes neither date. |
 | `item4/source-identity` | Establish provenance under item 4 before removing anything; preserve independent or uncertain citations. |
 | `item9/imperative-link` | Integrate the link only when adjacent prose already states the relationship and the edit adds no claim; otherwise report a source-backed proposal. |
 | `item9/duplicate-sentence` | This is a cross-entry ownership candidate. Preserve both copies and report the pair and likely owner unless the request explicitly names the consolidation or redistribution operation, or the affected entries and intended outcome. Normalized similarity alone never authorizes deletion. |
@@ -72,15 +72,15 @@ for its mechanical coverage; do not infer permission from a scanner message.
 
 ### 1. Valid YAML
 
-Apply builder [item 1](../../wiki-builder/SKILL.md#quality-checklist) and the
-[frontmatter guide](../../wiki-builder/references/writing.md#1-frontmatter-fields).
+Apply builder [item 1](../../wiki-build/SKILL.md#quality-checklist) and the
+[frontmatter guide](../../wiki-build/references/writing.md#1-frontmatter-fields).
 The opening fence is on file line 1; a BOM is tolerated, a leading blank is not.
 Flow lists may be empty only as `[]`; leading, middle, or trailing empty
 elements are invalid. Repair only values the file unambiguously establishes.
 
 ### 2. Field order and quoting
 
-Apply the canonical [fields and quoting](../../wiki-builder/references/writing.md#1-frontmatter-fields).
+Apply the canonical [fields and quoting](../../wiki-build/references/writing.md#1-frontmatter-fields).
 Schema order is `title`, `type`, `aliases`, `sources`, `created`, `updated`, `description`, `tags`, `parents`, `read`.
 Only `aliases` is optional; the other nine keys are required. Recover a
 missing or valueless title only from one unambiguous canonical name evidenced
@@ -113,14 +113,14 @@ not contain.
 ### 3. Dates
 
 Require valid `YYYY-MM-DD` dates with `created <= updated`, as builder
-[item 3](../../wiki-builder/SKILL.md#quality-checklist) defines. The linter
+[item 3](../../wiki-build/SKILL.md#quality-checklist) defines. The linter
 writes neither field. Report invalid values, impossible ordering, and any
 history-dependent question; do not guess which date is wrong or try to make
 `updated:` equal a presumed merge date.
 
 ### 4. Sources
 
-Use the canonical [source format](../../wiki-builder/references/writing.md#sources).
+Use the canonical [source format](../../wiki-build/references/writing.md#sources).
 Remove an exact repeated list item. A same-stem PDF/Markdown pair remains
 `item4/source-identity` until decoded `sources:` or legacy `source:` in the
 Markdown note proves that it summarizes that PDF. Only then keep the anchored
@@ -130,7 +130,7 @@ page-anchor form; the physical page's factual correctness needs the source.
 
 ### 5. Filename, collision, and disambiguation
 
-Apply the canonical [naming rules](../../wiki-builder/references/writing.md#3-wikilinks-and-naming).
+Apply the canonical [naming rules](../../wiki-build/references/writing.md#3-wikilinks-and-naming).
 A title/filename mismatch is a rename proposal, never an automatic rewrite.
 If the proposed slug is occupied, preserve both files and report their paths
 as an unresolved duplicate/disambiguation proposal; the lint run still completes.
@@ -145,7 +145,7 @@ entry.
 
 ### 6. Type and API surface
 
-Apply [API surface](../../wiki-builder/references/api-surface.md) in full.
+Apply [API surface](../../wiki-build/references/api-surface.md) in full.
 Non-`Software` entries permit no API identifiers, fenced code, Python literals
 in code form, implementation signposts, recipes, or identifier catalogs.
 `Software` may retain identifiers only when they explain an artifact-wide
@@ -156,7 +156,7 @@ trim substantive prose from an existing `Software` entry.
 
 ### 7. Description
 
-Apply the canonical [description rule](../../wiki-builder/references/writing.md#description)
+Apply the canonical [description rule](../../wiki-build/references/writing.md#description)
 to full entries and legacy stubs. Besides the scanner's form checks, review the
 grammatical subject, current-status tense, precise phrasing, and mathematical
 completeness. Repair awkward wording or empty framing only when it is a
@@ -167,8 +167,8 @@ wording; otherwise report a source-backed proposal.
 
 ### 8. Tags
 
-Use the shared discipline enum plus the canonical [tag rule](../../wiki-builder/references/writing.md#tags)
-and [calibration](../../wiki-builder/references/calibration.md). Apply
+Use the shared discipline enum plus the canonical [tag rule](../../wiki-build/references/writing.md#tags)
+and [calibration](../../wiki-build/references/calibration.md). Apply
 unambiguous format fixes: block-list form, `#`, double quotes, exact enum case,
 safe abbreviation expansion, wikilink-to-tag conversion for a known enum
 member, and duplicate removal after canonicalization.
@@ -181,9 +181,9 @@ consistent existing-vault evidence, never a mere majority or weak neighbor.
 
 ### 9. Body structure, coherence, flow, and scope
 
-Apply builder [item 9](../../wiki-builder/SKILL.md#quality-checklist), the
-[body guide](../../wiki-builder/references/writing.md#2-the-body), and the
-[Person/Event date forms](../../wiki-builder/references/rare-types.md#dates-in-the-opener-person-and-event).
+Apply builder [item 9](../../wiki-build/SKILL.md#quality-checklist), the
+[body guide](../../wiki-build/references/writing.md#2-the-body), and the
+[Person/Event date forms](../../wiki-build/references/rare-types.md#dates-in-the-opener-person-and-event).
 There is no body sentence, paragraph, word, or heading-count target.
 
 **Coherence review.** Compare the title and qualifier with the description,
@@ -194,7 +194,7 @@ source-backed proposal. A neighbor conflict may expose a wrong link, duplicate,
 or split candidate; it does not authorize cross-entry redistribution.
 
 **Editorial and ownership review.** Apply the shared
-[prose principles](../../wiki-builder/references/writing.md#prose-principles)
+[prose principles](../../wiki-build/references/writing.md#prose-principles)
 to phrasing, sentence clarity, paragraph focus, transitions, and succinctness.
 Judge a concrete defect, not a preference for different wording. Inspect
 equation lead-ins and paragraph endings as well as the opening sentences.
@@ -234,7 +234,7 @@ may change only under their own authorized checks, recorded separately.
 During ordinary lint, editorial changes never advance dates or reset review state.
 
 Compare protected content before and after the edit and apply the shared
-[editorial reread](../../wiki-builder/references/writing.md#editorial-reread)
+[editorial reread](../../wiki-build/references/writing.md#editorial-reread)
 to the finished passage. Repair any regression and re-run the per-entry lint
 before publication. Leave conforming prose untouched and report the defect and
 repair for each changed entry; there is no shortening quota or human sign-off.
@@ -254,7 +254,7 @@ content could destroy substantive work.
 
 ### 10. Wikilinks
 
-Apply the canonical [link rules](../../wiki-builder/references/writing.md#link-form).
+Apply the canonical [link rules](../../wiki-build/references/writing.md#link-form).
 Judge first occurrence by resolved entry, not raw spelling; a real file outranks
 an alias, while ambiguous basename or alias ownership stays unresolved. In
 Task 1, canonicalize unambiguous case, Unicode, path, `.md`, or alias variants
@@ -272,7 +272,7 @@ before disputing a finding or treating literal sample syntax as a link.
 
 ### 11. Related footer
 
-Use the canonical [Related footer](../../wiki-builder/references/writing.md#the-related-footer).
+Use the canonical [Related footer](../../wiki-build/references/writing.md#the-related-footer).
 Keep one ` · `-separated line and pipe every target to its canonical title,
 with no slug-equal exception, including all-lowercase titles. Converting a bare
 footer link to that form is determinate; inherited excess is reported rather
@@ -280,11 +280,11 @@ than pruned.
 
 ### 12. Equations, images, and tables
 
-The equation clauses are owned by `wiki-builder/references/equations.md`; apply
-that [canonical policy](../../wiki-builder/references/equations.md) rather than
+The equation clauses are owned by `wiki-build/references/equations.md`; apply
+that [canonical policy](../../wiki-build/references/equations.md) rather than
 reconstructing it from scanner output. Apply the separate canonical
-[media rules](../../wiki-builder/references/media.md) to existing exhibits.
-The adjacent [body math typography](../../wiki-builder/references/writing.md#prose-principles)
+[media rules](../../wiki-build/references/media.md) to existing exhibits.
+The adjacent [body math typography](../../wiki-build/references/writing.md#prose-principles)
 still governs plain quantities and escaped literal dollars. It also keeps
 Greek-letter unit symbols in inline LaTeX: `10 $\mu\mathrm{m}$`, rather than
 raw `10 μm` or `10 µm`; descriptions retain their separate plain-Unicode
@@ -340,7 +340,7 @@ notation change under item 12 in the run report.
 ### 13. Merge integrity
 
 In a source-independent run, apply only the structural floor of builder
-[item 13](../../wiki-builder/SKILL.md#quality-checklist): one opener and no
+[item 13](../../wiki-build/SKILL.md#quality-checklist): one opener and no
 stacked-body scars such as duplicated openings, stray frontmatter keys,
 unexpected `---` fences, or standalone digit lines. Listings are excluded; a
 schema-shaped line inside a `Software` example is not a repair target. Actual
@@ -348,7 +348,7 @@ source-merge integrity is not applicable without a merge.
 
 ### 14. Self-containment
 
-Apply [prose principle 5](../../wiki-builder/references/writing.md#prose-principles).
+Apply [prose principle 5](../../wiki-build/references/writing.md#prose-principles).
 Re-subject source-meta prose on the entity, or name people directly, only when
 the surrounding sentence makes the replacement unambiguous without changing
 claim, attribution, or certainty. Otherwise preserve and propose a
@@ -358,7 +358,7 @@ authors” do not.
 
 ### 15. Example discipline
 
-Apply builder [item 15](../../wiki-builder/SKILL.md#quality-checklist) during
+Apply builder [item 15](../../wiki-build/SKILL.md#quality-checklist) during
 semantic review. Identify an unnecessary, tangential, repetitive, or overly
 long example by purpose, never by sentence or note length. Trimming substantive
 example content or verifying its values needs the source, so record a specific
@@ -368,7 +368,7 @@ API catalogs belong to item 6.
 
 ### 16. Bold, italic, and code typography
 
-Apply the canonical [emphasis rules](../../wiki-builder/references/flashcards-and-emphasis.md#5-bold-and-italic).
+Apply the canonical [emphasis rules](../../wiki-build/references/flashcards-and-emphasis.md#5-bold-and-italic).
 Fix unenumerated bold, emphasis wrapped around links/math/code, and missing
 backticks on literal extensions or `[CLS]`/`[MASK]`/`[SEP]`/`[IMG]` tokens.
 The scanner recognizes a conservative extension list; review uncommon literal
@@ -385,7 +385,7 @@ creating a recurring finding.
 
 ### 17. Alias identity and completeness
 
-Use the canonical [alias rule](../../wiki-builder/references/writing.md#aliases).
+Use the canonical [alias rule](../../wiki-build/references/writing.md#aliases).
 The note body itself can establish a missing alternate name for its subject;
 add its slug only after the same-entity, own-slug, cross-domain, Organism
 common-name, and whole-vault collision gates. A semantic-invalid existing alias
@@ -394,8 +394,8 @@ owner plus complete inbound rewrite.
 
 ### 18. Alias form, collisions, and display labels
 
-Apply builder [item 18](../../wiki-builder/SKILL.md#quality-checklist) and the
-canonical [display-label rule](../../wiki-builder/references/writing.md#display-label-casing).
+Apply builder [item 18](../../wiki-build/SKILL.md#quality-checklist) and the
+canonical [display-label rule](../../wiki-build/references/writing.md#display-label-casing).
 Normalize determinate alias form and duplicates; report cross-entry ownership
 conflicts. Never auto-retarget a display whose exact surface belongs to another
 entry. Preserve the three deliberate display-label carve-outs: a
@@ -405,7 +405,7 @@ merely to silence a display-label finding.
 
 ### 19. Flashcards
 
-Apply the canonical [card format](../../wiki-builder/references/flashcards-and-emphasis.md#4-flashcards)
+Apply the canonical [card format](../../wiki-build/references/flashcards-and-emphasis.md#4-flashcards)
 and the linter's [bidirectional definition review](flashcards.md). Every full
 entry has one card after the Related footer and separator; stubs have none. A
 variant Flashcards heading is repaired in place rather than duplicated.
@@ -418,7 +418,7 @@ The scanner checks each card's contiguous definition / cue / answer content.
 Line 1 is a self-contained, capitalized, period-ended sentence with inline
 LaTeX as its only markup; it must neither expose nor semantically reconstruct
 the answer. The agent checks every card against the canonical
-[line-1 equation-coverage rule](../../wiki-builder/references/flashcards-and-emphasis.md#line-1-equation-coverage),
+[line-1 equation-coverage rule](../../wiki-build/references/flashcards-and-emphasis.md#line-1-equation-coverage),
 even when its prose is accurate or the scanner is silent; the targeted repair
 and history limits are defined in [flashcard maintenance](flashcards.md).
 Line 2 is `??` or

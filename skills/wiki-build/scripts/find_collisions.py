@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""find_collisions.py -- run wiki-builder's collision probes over candidates.
+"""find_collisions.py -- run wiki-build's collision probes over candidates.
 
 Runs the collision workflow described in references/merge.md. Every probe
 compares candidates with existing slugs and aliases, and with other candidates
@@ -29,7 +29,7 @@ VERDICTS
 Candidate-to-candidate matches carry ``matched_via: "candidate"`` and also
 appear in ``candidate_collisions``. Review them before writing either entry.
 Probes (f) and (g) are enabled by default and can be disabled independently.
-The token-superset probe is deliberately absent from wiki-linter's whole-vault
+The token-superset probe is deliberately absent from wiki-lint's whole-vault
 sweep, where qualified terms alongside broader concepts are often intentional.
 
 Module use:
@@ -112,10 +112,10 @@ if _here != _shared:
 
 from slugify import SlugError, mu_variants, slug_stem  # noqa: E402
 # NO SINGULARISER LIVES HERE.  Probes (c) and (e) both turn on which two word
-# forms are the same word, and wiki-linter's whole-vault sweep turns on the
-# same fact -- CONVENTIONS.md §9 gives that sweep to wiki-linter alone, so a
+# forms are the same word, and wiki-lint's whole-vault sweep turns on the
+# same fact -- CONVENTIONS.md §9 gives that sweep to wiki-lint alone, so a
 # near-duplicate pair already sitting in the vault is seen by nothing else.
-# The tables below used to live in this file and wiki-linter carried a
+# The tables below used to live in this file and wiki-lint carried a
 # three-rule stripper of its own, which answered "hypotheses" with "hypothes":
 # `hypothesis-testing` / `testing-hypotheses` fired here and nowhere else, and
 # a pair that got into the vault was reported by nobody.  One implementation,
@@ -390,7 +390,7 @@ def _probe_pair(keys, other_slug, use_stem=True, use_superset=True):
             and real_permutation(other_slug, slug)):
         # Only a genuine permutation -- if the singularised token SEQUENCES are
         # identical this is a pure plural pair that probe (c) already caught.
-        # The guard is `plurals.real_permutation` because wiki-linter's sweep
+        # The guard is `plurals.real_permutation` because wiki-lint's sweep
         # has to draw the same line: a pair the two skills classify differently
         # is one worklist item under two names.
         fired.append("e-word-order-permutation")
@@ -957,7 +957,7 @@ def _load_titles(path):
 def _build_parser():
     p = argparse.ArgumentParser(
         prog="find_collisions.py",
-        description="Run wiki-builder's collision probes for candidate titles "
+        description="Run wiki-build's collision probes for candidate titles "
                     "against a vault index (stdlib only).",
         epilog='example: find_collisions.py --index /tmp/index.json '
                '--titles /tmp/candidates.json',

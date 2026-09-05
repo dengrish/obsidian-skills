@@ -18,13 +18,13 @@ do not bypass access controls or invent missing content.
 
 Track which source and section/page supports each claim. Preserve uncertainty,
 units, mathematical conditions and attribution. For priority/superlative claims
-such as “first” or “best,” follow the builder's [verification gate](../../wiki-builder/SKILL.md#7-review-and-report):
+such as “first” or “best,” follow the builder's [verification gate](../../wiki-build/SKILL.md#7-review-and-report):
 independent reliable support or narrow attribution, otherwise omit. Do not add
 unrelated claims to justify another source or image.
 
 ## Reuse before acquiring
 
-Inspect current source ownership using the builder's [source-intake rules](../../wiki-builder/references/source-intake.md).
+Inspect current source ownership using the builder's [source-intake rules](../../wiki-build/references/source-intake.md).
 For a webpage, use the clipping producer's complete URL index:
 
 ```bash
@@ -117,7 +117,7 @@ different source, or defer.
 
 Before citation, use `shared/scripts/naming.py canonical` and
 `shared/scripts/vault_artifacts.py pdfs --vault ... --selected ...` under the
-builder's [PDF intake gate](../../wiki-builder/SKILL.md#1-read-the-source).
+builder's [PDF intake gate](../../wiki-build/SKILL.md#1-read-the-source).
 Require one portable-basename owner and a complete readable inventory. Cite
 the actual filename with a positive physical `#page=N` introduction locator.
 Web extracts instead use their actual Markdown filename without an anchor.
@@ -126,7 +126,7 @@ Wiki `sources:` never contains a bare web URL or a fabricated local filename.
 
 ## Optional images and publication order
 
-Use the builder's [media rules](../../wiki-builder/references/media.md) for
+Use the builder's [media rules](../../wiki-build/references/media.md) for
 selection, inventory, source identity, embeds and captions. Usually no image
 or one focused figure suffices. Use only a real, inspected source asset whose
 reuse is permitted; retain required attribution/license information in its

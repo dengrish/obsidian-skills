@@ -285,7 +285,7 @@ rewrite needs no image handoff.
 
 For a changed slug, both owner notes must be public before prepare. Keep its
 exact image mapping and dependency report; repair dependencies only under the
-authorization and `wiki-linter` scope defined in that procedure. Finalize only
+authorization and `wiki-lint` scope defined in that procedure. Finalize only
 after the unchanged dependency re-probe returns `ok: true`, then conditionally
 retire the exact old note. Keep both resolving versions while blockers remain.
 Never substitute manual copies, the legacy immediate phase, or unchecked
@@ -308,6 +308,6 @@ skips to a count and filenames. Report:
 - Duplicate escapes or ownership collisions, with URLs/paths; unindexable notes.
 - Approved reprocessing: regenerated fields, any legacy migration, old → new filenames and any unresolved inbound links.
 
-The polished clipping may later be a source for `wiki-builder`; this run writes
+The polished clipping may later be a source for `wiki-build`; this run writes
 no wiki entries and no wiki-state field. [Edge-case navigation](references/edge-cases.md)
 points to the owning procedure for uncommon inputs without adding another rule set.

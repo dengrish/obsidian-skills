@@ -55,25 +55,29 @@ override paths per-request, for that run only.
 | Path | Holds | Written by | Read by |
 |---|---|---|---|
 | `Inbox/` | **everything new, unsorted** — Web Clipper `.md` captures and dropped-in documents alike. The **file extension is the dispatch**, and it is the whole of it: `.md` to one skill, `.pdf` to the other, **anything else to neither** | the user, the user's clipper | clipping-processor (`.md` only), pdf-organizer (`.pdf` only) |
-| `Articles/` | **flat**; notes *about* a document — cleaned clippings, PDF reading notes and marked research extracts, one schema (§2b), with origin identified by `sources:` item 1 | clipping-processor, paper-summarizer, wiki-add (new research extracts only); pdf-organizer repairs source references during an authorized PDF rename | wiki-builder, wiki-add (source reuse), clipping-processor (dedup index), paper-summarizer (dedup and collision check), pdf-organizer (authorized rename preflight), wiki-linter (exact producer-mapped dependency repair only) |
-| `Sources/PDFs/` | organized source documents, recursive. Everything pdf-organizer produces lands here — but the user may also drop a file in directly, so every derived-content consumer checks the canonical stem before deriving files or references (§1a) | pdf-organizer (renames an `Inbox/` file **and moves it here**; also organizes wiki-add acquisitions), the user | pdf-figure-extractor, paper-summarizer, wiki-builder, wiki-add |
-| `Sources/PDFs/<Work>/` | book-chapter PDFs, e.g. `Sources/PDFs/Prince_UDL_2026/`. The folder is what pdf-organizer creates when it splits a book. paper-summarizer's batch **scans** it — a book is only recognisable as one when a chapter turns up beside it — and then **skips** every chapter it finds, so a sweep never becomes a book's worth of summaries | pdf-organizer, the user | pdf-figure-extractor, paper-summarizer (scans, skips), wiki-builder, wiki-add |
-| `Sources/Images/` | **flat**; every figure and downloaded image, all extensions, whatever it came from | pdf-figure-extractor, clipping-processor, wiki-add (new research images only); **pdf-organizer** renames in place only within an approved source rename (§1a) | wiki-builder, wiki-add, paper-summarizer, clipping-processor (its `rename` path re-reads the folder — §8a), wiki-linter (with `--images`, validates embeds and reports nested/staging residue without opening or deleting files) |
-| `Wiki/` | wiki entries, one `.md` per entity (walked **recursively**) | wiki-builder, wiki-add (missing requested entries only), wiki-linter | wiki-builder, wiki-add, wiki-linter |
+| `Articles/` | **flat**; notes *about* a document — cleaned clippings, PDF reading notes and marked research extracts, one schema (§2b), with origin identified by `sources:` item 1 | clipping-processor, paper-summarizer, wiki-add (new research extracts only); pdf-organizer repairs source references during an authorized PDF rename | wiki-build, wiki-add (source reuse), clipping-processor (dedup index), paper-summarizer (dedup and collision check), pdf-organizer (authorized rename preflight), wiki-lint (exact producer-mapped dependency repair only) |
+| `Sources/PDFs/` | organized source documents, recursive. Everything pdf-organizer produces lands here — but the user may also drop a file in directly, so every derived-content consumer checks the canonical stem before deriving files or references (§1a) | pdf-organizer (renames an `Inbox/` file **and moves it here**; also organizes wiki-add acquisitions), the user | pdf-figure-extractor, paper-summarizer, wiki-build, wiki-add |
+| `Sources/PDFs/<Work>/` | book-chapter PDFs, e.g. `Sources/PDFs/Prince_UDL_2026/`. The folder is what pdf-organizer creates when it splits a book. paper-summarizer's batch **scans** it — a book is only recognisable as one when a chapter turns up beside it — and then **skips** every chapter it finds, so a sweep never becomes a book's worth of summaries | pdf-organizer, the user | pdf-figure-extractor, paper-summarizer (scans, skips), wiki-build, wiki-add |
+| `Sources/Images/` | **flat**; every figure and downloaded image, all extensions, whatever it came from | pdf-figure-extractor, clipping-processor, wiki-add (new research images only); **pdf-organizer** renames in place only within an approved source rename (§1a) | wiki-build, wiki-add, paper-summarizer, clipping-processor (its `rename` path re-reads the folder — §8a), wiki-lint (with `--images`, validates embeds and reports nested/staging residue without opening or deleting files) |
+| `Wiki/` | wiki entries, one `.md` per entity (walked **recursively**) | wiki-build, wiki-add (missing requested entries only), wiki-lint | wiki-build, wiki-add, wiki-lint |
 | `add-to-wiki.md` at the *vault root* | requested-topic queue | the user; wiki-add checks off successful or already-existing items only | wiki-add |
-| *vault root* | `<discipline>-moc.md`, `wiki-builder-suggestions.md`, `wiki-linter-suggestions.md`, `wiki-notes-suggestions.md` | wiki-linter | wiki-linter (reads each artifact before an in-place update) |
+| *vault root* | `<discipline>-moc.md`, `wiki-builder-suggestions.md`, `wiki-linter-suggestions.md`, `wiki-notes-suggestions.md` | wiki-lint | wiki-lint (reads each artifact before an in-place update) |
+
+The suggestion-log filenames retain their original spellings across skill
+renames. Continue using those files; do not create parallel logs named after
+the new skill names or rename existing vault artifacts as part of an upgrade.
 
 **Source routes.** Choose the skill by the requested result; these are not
 seven mandatory stages. For PDFs, organize the filename before creating derived
 files (§1a). Figure extraction supplies images to either paper-summarizer or
-wiki-builder. Those two skills independently read the PDF: the summary is a
-finished reading note, never an intermediate source for wiki-builder. A web
+wiki-build. Those two skills independently read the PDF: the summary is a
+finished reading note, never an intermediate source for wiki-build. A web
 capture follows clipping-processor into `Articles/`, and that cleaned note
-can become a wiki-builder source. A source-first contribution, including an
+can become a wiki-build source. A source-first contribution, including an
 explicit candidate-specific synthesis from several sources, belongs to
-wiki-builder. A correction confined to one entry and supported only by sources
-it already cites belongs to wiki-linter's source-backed correction mode;
-ordinary wiki-linter maintenance needs no source.
+wiki-build. A correction confined to one entry and supported only by sources
+it already cites belongs to wiki-lint's source-backed correction mode;
+ordinary wiki-lint maintenance needs no source.
 
 **Queue route.** wiki-add consumes vault-root `add-to-wiki.md` and creates only
 missing requested topics under builder's entry-writing rules. An existing
@@ -85,14 +89,14 @@ marked research extracts in `Articles/` (§2b). Apply naming, deduplication, ima
 provenance and safe publication before creating entries. Existing source notes
 and images are never overwritten. Only successful or already-existing queue
 items are checked off; unresolved items remain unchecked. This queue-first
-route does not change wiki-builder's ordinary source-first extraction or
-wiki-linter's maintenance scope.
+route does not change wiki-build's ordinary source-first extraction or
+wiki-lint's maintenance scope.
 
-An interrupted or partial wiki-builder run is resumed by **wiki-builder** with
-explicit resume/re-run intent; wiki-linter can repair only the
+An interrupted or partial wiki-build run is resumed by **wiki-build** with
+explicit resume/re-run intent; wiki-lint can repair only the
 source-independent residue it owns and cannot finish extraction or a source
 merge.
-An interrupted wiki-linter hierarchy write is recovered by rerunning Task 3
+An interrupted wiki-lint hierarchy write is recovered by rerunning Task 3
 over the same previously authorized transitive discipline/entry/MOC closure;
 its multi-file writes are not treated as a transaction or resumed at the next
 filename.
@@ -114,11 +118,11 @@ nothing. The frontmatter does:
   described in §2b distinguishes an agent-written extract from a full-text
   clipping; clipping-processor must not reprocess a marked extract as a capture.
 - **`sources:` item 1 is a `"[[Name.pdf]]"` wikilink** → a summary of that PDF. The
-  **PDF** is the source; wiki-builder reads the PDF and cites
+  **PDF** is the source; wiki-build reads the PDF and cites
   `[[Name.pdf#page=N]]` (§7), because only a PDF has pages and because this
   note is a restatement of the paper rather than the paper.
 
-Every consumer of the folder branches on that one item: wiki-builder's step 1,
+Every consumer of the folder branches on that one item: wiki-build's step 1,
 clipping-processor's dedup index (a wikilink in `sources:` item 1 is another
 skill's note, not a defect), wiki-add's source reuse, and paper-summarizer's
 collision check. A URL-origin note remains a URL dedup match whether it is a
@@ -139,7 +143,7 @@ equivalent basenames have no arbitrary owner.
   to `Sources/PDFs/` is a move, and it carries every name derived from that
   file with it (§1a).
 - **The vault root is not `Wiki/`.** MOCs, the three suggestion logs and
-  `add-to-wiki.md` live in the root precisely so that wiki-linter — which walks
+  `add-to-wiki.md` live in the root precisely so that wiki-lint — which walks
   only `Wiki/` — never lints them, never lists a MOC inside another MOC, and never treats a
   suggestion log or queue as an entry. Passing the vault root where `Wiki/` is
   expected breaks these exclusions.
@@ -155,10 +159,10 @@ because the user selected the vault root.
 **Depended on by:** all seven skills. `Sources/Images/` is shared across the
 plugin; pdf-organizer reaches it only on the rename path above, where it is the
 one skill that moves a file another skill wrote.
-`Articles/` is outside wiki-linter's ordinary scan and maintenance scope. Its
+`Articles/` is outside wiki-lint's ordinary scan and maintenance scope. Its
 producers enforce their own notes' schema and quality; paper-summarizer also
 runs `note_lint.py` before publication. The sole exception is an exact
-producer-mapped dependency repair: wiki-linter may inspect the reported old and
+producer-mapped dependency repair: wiki-lint may inspect the reported old and
 new clipping-note paths as ownership evidence, but it neither edits nor lints
 those notes.
 
@@ -232,9 +236,9 @@ re-renames it, but a vault already holding those files still gets its book
 skipped rather than every figure written twice while the name is being fixed.
 
 **PDF consumers check canonical stems before deriving files or references** —
-pdf-figure-extractor, paper-summarizer, wiki-builder and wiki-add all key durable
+pdf-figure-extractor, paper-summarizer, wiki-build and wiki-add all key durable
 output to the source's name. pdf-figure-extractor and paper-summarizer expose
-`--allow-unorganized` for a deliberate one-off and state its cost. wiki-builder
+`--allow-unorganized` for a deliberate one-off and state its cost. wiki-build
 has no override and routes the PDF through pdf-organizer before restarting
 source resolution. wiki-add also has no override, but organizes only its newly
 acquired PDFs; it cannot rename an existing source or its dependencies. Reuse a
@@ -273,19 +277,19 @@ is cheap; the failure it prevents is invisible.
 output, and the later audits cannot detect every break.** Three skills key
 their output to a source's on-disk name:
 
-- wiki-builder records `"[[Name.pdf#page=N]]"` in `sources:` and
+- wiki-build records `"[[Name.pdf#page=N]]"` in `sources:` and
   **excludes `sources:` from its orphan audit** (§7, §9). Its processed-source
   check uses decoded frontmatter through `vault_index.py` (§7), so stale
   source names can also hide prior coverage;
 - pdf-figure-extractor names every figure `[pdf_stem]_fig_<N>.png` (§8), and
-  wiki-builder finds figures by globbing that stem — rename the PDF and the
+  wiki-build finds figures by globbing that stem — rename the PDF and the
   figures are still on disk under the old stem, invisible to every consumer;
 - paper-summarizer writes `"[[name.pdf]]"` as `sources:` item 1 of every summary
   note, embeds that PDF's figures by the same stem, and names the note itself
   after the PDF's basename — three references to one string, all of which break
   together.
 
-**One half of that is now detectable, and only one.** wiki-linter's scanner run
+**One half of that is now detectable, and only one.** wiki-lint's scanner run
 with `--images` compares every `![[…]]` embed in `Wiki/` against the names in
 `Sources/Images/` and reports **`item12/missing-image`** for one that is not
 there — which is exactly the figure-embed half of the hazard above, after the
@@ -311,7 +315,7 @@ file move alone does not establish that all references moved.
 **Depended on by:** paper-summarizer (the bare `[[name.pdf]]` source link and
 its note-naming rule both assume (1); `scripts/paper_scan.py` imports
 `naming.py` to refuse an unorganized stem and to skip a split book),
-wiki-builder (`sources:` and the figure
+wiki-build (`sources:` and the figure
 glob), pdf-figure-extractor (the `[pdf_stem]` key; imports `naming.py` to tell a
 book from its chapters and to refuse an unorganized stem), pdf-organizer
 (provides (1) and imports `naming.py` for the same shape; its own run order is
@@ -395,7 +399,7 @@ filesystem permissions, over a vault they are trusted to rewrite.
 **Depended on by:** every skill that passes untrusted values to commands or
 host tools — clipping-processor (page titles, authors and image URLs),
 wiki-add (queue topics, research metadata, URLs and source paths),
-wiki-builder (source filenames and verification needles),
+wiki-build (source filenames and verification needles),
 pdf-figure-extractor (`ocrmypdf` on a user path), paper-summarizer
 (every path it passes to its two scripts, and every verification needle, which
 is text lifted straight off a paper), pdf-organizer (which states the rule for
@@ -426,7 +430,7 @@ entities. It can never decide:
   fixed by the scripts;
 - **whether to overwrite, delete, rename or skip** anything. Those are the
   user's calls and the skills' own refusals (§1a's collision rules,
-  clipping-processor's dedup gate, wiki-linter proposing renames rather than
+  clipping-processor's dedup gate, wiki-lint proposing renames rather than
   applying them). A document asking to be treated as a duplicate, or as
   already-processed, does not make it one;
 - **what commands to run**, ever, and see §1b for why its text must not reach
@@ -445,7 +449,7 @@ body text per the body-cleaning rules, on the merits.
 
 **Depended on by:** clipping-processor (fetches the live page and reads the
 clipped body), wiki-add (researches requested topics without following source
-instructions), wiki-builder (reads whole source documents to extract entities),
+instructions), wiki-build (reads whole source documents to extract entities),
 paper-summarizer (reads a paper end to end and restates its claims — the skill
 in this plugin that reproduces the most untrusted text into the vault),
 pdf-organizer (reads a PDF's own text to choose its filename and chapter
@@ -479,7 +483,7 @@ before retrying.
 
 **Depended on by:** all seven skills. pdf-organizer, pdf-figure-extractor and
 clipping-processor implement the same guarantees in their shipped helpers;
-paper-summarizer, wiki-builder, wiki-add and wiki-linter apply them when
+paper-summarizer, wiki-build, wiki-add and wiki-lint apply them when
 publishing notes, entries, queue checkoffs, logs, parents, and MOCs.
 
 ---
@@ -538,12 +542,12 @@ read: false
 - `description` is ≤ 110 characters, entity as grammatical subject, plain text
   (no LaTeX, no markdown, no wikilinks).
 - `created` never changes. `updated` equals `created` on creation and is bumped
-  to today whenever a wiki-builder run changes the entry, including a
+  to today whenever a wiki-build run changes the entry, including a
   source-no-op merge whose independent QC or metadata work changes the file. A
-  byte-unchanged source-no-op keeps the old date. wiki-linter's ordinary lint
+  byte-unchanged source-no-op keeps the old date. wiki-lint's ordinary lint
   tasks and producer-mapped dependency repairs preserve both dates; an
   explicitly requested source-backed correction, split, or merge follows
-  wiki-builder's creation and body-change rules for entries it substantively
+  wiki-build's creation and body-change rules for entries it substantively
   rewrites or creates.
 - **`read` is a boolean, written `read: false` on creation.** It is the user's
   review checkbox (`.obsidian/types.json` pins it as `checkbox`), and §2d is
@@ -574,18 +578,18 @@ required key and not an unexpected one — exactly the treatment a populated
 
 **Body math has a canonical home too.** The vault-wide equation policy —
 coverage from the note's own prose, display form, notation, normalization —
-lives in `wiki-builder/references/equations.md`, and wiki-linter enforces it
+lives in `wiki-build/references/equations.md`, and wiki-lint enforces it
 vault-wide under its QC item 12. Both Wiki validators import the conservative
 `shared/scripts/equation_coverage.py` candidate floor; the executing agent
 still performs the complete semantic coverage review. Section 2d records what
 that enforcement may and may not write.
 
-**Depended on by:** wiki-builder (writes it), wiki-linter (validates and fixes
+**Depended on by:** wiki-build (writes it), wiki-lint (validates and fixes
 it; owns `parents:`, writes neither date), wiki-add (creates requested entries
 with `parents: []` and `read: false` using builder's rules and validators,
 without editing existing entries). The two validator owners bundle scripts
-carrying the field order as a constant — `wiki-builder/scripts/vault_index.py` (`SCHEMA_ORDER`)
-and `wiki-linter/scripts/scan_vault.py` (`CANON`) — and both include
+carrying the field order as a constant — `wiki-build/scripts/vault_index.py` (`SCHEMA_ORDER`)
+and `wiki-lint/scripts/scan_vault.py` (`CANON`) — and both include
 `importance` in that constant so a legacy entry is not misreported.
 
 ### 2b. Source note — a note *about* a document
@@ -721,7 +725,7 @@ its existing-source boundary remains read-only.
 strips the two retired keys on any note it rewrites), paper-summarizer (writes
 it for a summary note, and is the only producer whose `sources` opens with a
 wikilink and may carry a second, printed-origin URL item), wiki-add (writes new
-research extracts and reuses existing sources without edits), wiki-builder
+research extracts and reuses existing sources without edits), wiki-build
 (reads a URL-origin clipping or marked research extract as a source; that note's
 filename stem is the source stem of §8 — but a **summary** note in the same
 folder is not an input to it, distinguished by `sources:` item 1 as §1 requires).
@@ -770,9 +774,9 @@ pins it as `checkbox`, so the value is a bare YAML boolean.
 |---|---|---|
 | clipping-processor | `false`, on creation only | a new cleaned clipping note |
 | paper-summarizer | `false`, on creation only | a new summary note in `Articles/` |
-| wiki-builder | `false`, on creation; `false` again on a **body-content revision** | see the reset rule below |
+| wiki-build | `false`, on creation; `false` again on a **body-content revision** | see the reset rule below |
 | wiki-add | `false`, on creation only | a new requested entry or research extract; existing notes are never edited |
-| wiki-linter | only a meaning-preserving spelling repair | a recognized boolean spelling becomes the bare boolean it already means (`item2/read-type`); never invent, clear or set the user's review state |
+| wiki-lint | only a meaning-preserving spelling repair | a recognized boolean spelling becomes the bare boolean it already means (`item2/read-type`); never invent, clear or set the user's review state |
 | the user | `true`, whenever they have read it | this is the point of the field |
 
 **The linter preserves the meaning of `read:`.** It may normalize recognizable
@@ -792,7 +796,7 @@ These cases are **report-only**, with the note and the value found named under
 None contains a known boolean answer to preserve. Do not substitute `false`
 or `true`, even during otherwise mechanical frontmatter repairs.
 
-**The reset rule — body content only.** wiki-builder sets `read: false` on an
+**The reset rule — body content only.** wiki-build sets `read: false` on an
 existing entry when, and only when, **the merge adds content to the body** — new
 prose, a new paragraph, a new image or table, a rewritten explanation, or a stub
 promoted to a full entry (whose body is rewritten from scratch). It does **not**
@@ -811,13 +815,13 @@ checkbox, while a false non-reset is caught the next time they open the note.
 Say which way a close call went in the run report.
 
 **Two localized ordinary-lint edits can add body content, and the rule for them lives here.**
-wiki-linter may copy a missing Person/Event date into the required opener only
+wiki-lint may copy a missing Person/Event date into the required opener only
 when that exact date is already stated elsewhere in the entry, or typeset a
 calculation the note's own prose already states under item 12 (the equation policy's home is
-`wiki-builder/references/equations.md`). Even then the linter writes neither
+`wiki-build/references/equations.md`). Even then the linter writes neither
 `read:` nor `updated:`. For either case, it reports the insertion under *Notes for the user*,
 naming every entry whose `read: true` now predates the added date or equation,
-and the checkbox stays the user's to clear. wiki-builder's own merge pass is
+and the checkbox stays the user's to clear. wiki-build's own merge pass is
 the contrast: any newly added unread body content resets `read: false`, whether
 it came from the active source or from the builder's independent QC. An
 explicit source-backed linter correction or refactor uses that same
@@ -828,11 +832,11 @@ The reset rule requires judgment about body substance. Scripts check the
 field's presence, type and position, but cannot decide whether new reading
 has been added.
 
-**Depended on by:** wiki-builder (creates and resets), clipping-processor
+**Depended on by:** wiki-build (creates and resets), clipping-processor
 (creates), paper-summarizer (creates, and carries the existing value across on a
 rewrite — regenerating a summary is not new reading for the user to do),
 wiki-add (creates only),
-wiki-linter (ordinary lint validates presence, type and position and only
+wiki-lint (ordinary lint validates presence, type and position and only
 re-spells a recognizable wrongly typed value; explicit source-backed
 correction or refactor may reset a substantively rewritten retained entry,
 and refactor may create a split entry, under the builder rule above; neither
@@ -903,8 +907,8 @@ tags:
   plus `-moc.md`, in the **vault root** (`#machine-learning` →
   `machine-learning-moc.md`).
 
-**Depended on by:** wiki-builder (assigns them, and its `scripts/lint_entry.py`
-carries the list as `TAG_ENUM`), wiki-linter (validates and format-fixes them,
+**Depended on by:** wiki-build (assigns them, and its `scripts/lint_entry.py`
+carries the list as `TAG_ENUM`), wiki-lint (validates and format-fixes them,
 derives MOCs and the hierarchy from them; `scripts/scan_vault.py` carries the
 list as `VALID_TAGS` plus safe abbreviation expansions in `TAG_ALIASES`),
 clipping-processor (assigns them to cleaned notes), paper-summarizer (assigns
@@ -969,8 +973,8 @@ the **full** title including any parenthetical (`Feature (machine learning)` →
 body opener, the description subject and the flashcard answer use. `C`, `C++`,
 `C#` and `C*` produce four distinct slugs, not one.
 
-**Depended on by:** wiki-builder (names every entry; `scripts/find_collisions.py`
-and `scripts/lint_entry.py` import it), wiki-linter (recomputes a slug from
+**Depended on by:** wiki-build (names every entry; `scripts/find_collisions.py`
+and `scripts/lint_entry.py` import it), wiki-lint (recomputes a slug from
 `title:` to propose renames — `scripts/scan_vault.py` imports it too, and wraps
 `slug_stem` in a `slug()` that returns `""` where the canonical module raises
 `SlugError`). **A slug this file computes differently from the one
@@ -989,8 +993,8 @@ slugs identically to the filename is redundant — omit it.
 
 **A semantic-invalid alias is a refactoring proposal, not a routine list
 cleanup.** Removing an alias can redirect every inbound wikilink that resolves
-through it. wiki-builder reports one it can disprove from the active source;
-wiki-linter owns vault-wide discovery and the proposal record. Neither removes
+through it. wiki-build reports one it can disprove from the active source;
+wiki-lint owns vault-wide discovery and the proposal record. Neither removes
 it during ordinary generation or lint. An approved removal first identifies the
 canonical owner, then finds and rewrites every inbound entry-link surface that
 resolves through the alias: Wiki body prose and Related footers, entry
@@ -1004,7 +1008,7 @@ not this semantic-removal case.
 #### Retitling an existing Wiki entry
 
 A title or slug correction is a whole-entry rename, not an alias-list edit.
-Routine wiki-builder and wiki-linter runs propose it with the intended title,
+Routine wiki-build and wiki-lint runs propose it with the intended title,
 slug, inbound-reference count, and collision risk. A request that explicitly
 authorizes that retitle activates this protocol; it does not require a second
 human review.
@@ -1069,8 +1073,8 @@ Title_Case_Underscored is for notes about sources. What connects them is §8 —
 a source note's stem *is* the source stem the figure glob keys to, whether that
 stem was derived from a web page's metadata or inherited from a PDF.
 
-**Depended on by:** clipping-processor and paper-summarizer (4c); wiki-builder
-and wiki-linter (4a, 4b); wiki-add (4a, 4b and the existing URL-origin rule in 4c).
+**Depended on by:** clipping-processor and paper-summarizer (4c); wiki-build
+and wiki-lint (4a, 4b); wiki-add (4a, 4b and the existing URL-origin rule in 4c).
 
 ---
 
@@ -1174,7 +1178,7 @@ work around it by pasting a second copy of the algorithm.
 Diagnose an install with:
 
 ```bash
-python3 shared/scripts/plugin_paths.py --from skills/wiki-linter/scripts/scan_vault.py
+python3 shared/scripts/plugin_paths.py --from skills/wiki-lint/scripts/scan_vault.py
 ```
 
 **Depended on by:** every skill script importing a shared module. Each carries
@@ -1239,10 +1243,10 @@ Rules that hold everywhere:
 - **No wikilinks in image captions, table captions, or table cells.**
 - **Every target must be a real file in `Wiki/`.** No target, no link: an
   entity with no entry stays bare text — no skill creates stubs any more.
-  wiki-builder either writes the full entry or defers the entity (report-only);
+  wiki-build either writes the full entry or defers the entity (report-only);
   wiki-add creates only requested missing entities, so any unrequested missing
   target stays bare text;
-  wiki-linter drops danglers to bare text and surfaces missing-entry
+  wiki-lint drops danglers to bare text and surfaces missing-entry
   candidates, then backfills the link once a real entry exists.
 - **Display labels are plain text** — no LaTeX, no bold/italic, no backticks.
 - **`tags:` values are never wikilinks** (§3) and `sources:` points at documents,
@@ -1264,9 +1268,9 @@ unambiguous alias is stronger evidence of a target conflict than token overlap
 with the selected target: review the target and the sentence rather than
 silently blessing or retargeting the link.
 
-**Depended on by:** wiki-builder (writes links inside its own entries),
+**Depended on by:** wiki-build (writes links inside its own entries),
 wiki-add (links only inside its new requested entries),
-wiki-linter (owns them vault-wide — §9), clipping-processor (`![[…]]` image
+wiki-lint (owns them vault-wide — §9), clipping-processor (`![[…]]` image
 embeds; the `![[file.pdf]]` embed row's only dependents are the legacy notes an
 older producer left, §1), pdf-organizer (renaming a file changes
 what every `[[…]]` naming it resolves to — §1a).
@@ -1284,7 +1288,7 @@ filename, extension included** — not a slug, never invented, never renamed.
 - **Markdown note:** `"[[Author_Title_Year.md]]"` — never an anchor.
 - **Legacy stub marker:** the literal string `"stub"`, quoted, as the sole
   item — identifies a stub created by an earlier version (no skill writes
-  new stubs). It is *replaced* (not appended to) when wiki-builder promotes
+  new stubs). It is *replaced* (not appended to) when wiki-build promotes
   the stub.
 
 **`N` is the physical page** — the 1-indexed position within the PDF file, what
@@ -1321,24 +1325,24 @@ several distinct PDFs or clippings remain separate sources. Filename matching
 does not replace the origin check.
 
 **A `sources:` item is a name, not a link maintained by ordinary lint.** The
-wiki-linter checks its *format*, and the orphan audits of §9 skip `sources:`
+wiki-lint checks its *format*, and the orphan audits of §9 skip `sources:`
 entirely. It rewrites a filename there only in the narrow producer-mapped
 dependency mode: the producer must supply an exact old → new `Articles/` note
 mapping, a complete dependency report and its unchanged re-probe command, and
 the rewrite may touch only a reported reference proven to resolve to that note.
 Outside that mode, an item naming a file that has since been renamed or removed
-is outside wiki-linter's audits. §1a's ordering and the approved pdf-organizer
+is outside wiki-lint's audits. §1a's ordering and the approved pdf-organizer
 rename workflow keep PDF references aligned; clipping-processor's guarded
 changed-slug workflow uses the producer-mapped exception before retiring an old
 clipping note path.
 
-**Depended on by:** wiki-builder (writes them; checks decoded frontmatter
+**Depended on by:** wiki-build (writes them; checks decoded frontmatter
 sources through `scripts/vault_index.py` to decide whether a source was already
 processed). Query the PDF and a **verified summary-note representation**
 together; omit the Markdown argument if its origin has not been established:
 
 ```bash
-python3 '<plugin>/skills/wiki-builder/scripts/vault_index.py' '<coverage-tree>' \
+python3 '<plugin>/skills/wiki-build/scripts/vault_index.py' '<coverage-tree>' \
   --source '<name>.pdf' --source '<name>.md' -o '<run-temp>/wiki-index.json'
 ```
 
@@ -1357,15 +1361,15 @@ Also depended on by
 wiki-add (cites durable local sources using these forms; prior coverage of a
 source does not skip a missing requested topic, and an existing topic is still
 left untouched),
-wiki-linter (checks the format; only its exact producer-mapped dependency mode
+wiki-lint (checks the format; only its exact producer-mapped dependency mode
 rewrites a reported clipping-note filename),
 clipping-processor (its cleaned notes are markdown sources), paper-summarizer
 (its notes put the same wikilink form in `sources:` item 1, and are the `.md` half of
 the pair above), pdf-organizer (§1a).
 
 The same-stem candidate check above is mechanized on **both** sides —
-`wiki-builder/scripts/lint_entry.py` as `4-duplicate-source` and
-`wiki-linter/scripts/scan_vault.py` as `item4`. Their differential tests require
+`wiki-build/scripts/lint_entry.py` as `4-duplicate-source` and
+`wiki-lint/scripts/scan_vault.py` as `item4`. Their differential tests require
 the two public checks to agree on the same corpus; the *form* half of item 4
 (extension present, anchor shape) is the scanner's alone. Neither report
 authorizes deletion without the provenance check above.
@@ -1411,7 +1415,7 @@ portable-equivalent names and recognizable staging residue; an unreadable
 scope never proves absence. Read the complete JSON and do not consume
 `blocked_matches`.
 
-wiki-linter's whole-folder image index keeps the same portable identity for
+wiki-lint's whole-folder image index keeps the same portable identity for
 embed existence while preserving every path in a report-only
 `portable-name-collision` group. Thus an ambiguous basename remains present
 for missing-image checks without hiding the ambiguity or authorizing cleanup.
@@ -1438,7 +1442,7 @@ differ only in where the number comes from:
 copying their algorithms into another skill.
 
 **`pdf_stem` is the source PDF's on-disk stem, `_src` suffix included** — not
-the markdown note's stem. wiki-builder globs `Sources/Images/[source_stem]_fig*`
+the markdown note's stem. wiki-build globs `Sources/Images/[source_stem]_fig*`
 using the on-disk name of the file it was handed, so a figure filed under the
 markdown stem is invisible to it.
 
@@ -1474,7 +1478,7 @@ Shared sub-rules:
   overrides; web-image downloads preserve the source image's bytes.
 - **The URL-origin note's stem *is* the source stem.** `Teslo_Pancreatic_Cancer_2026.md`
   → `Teslo_Pancreatic_Cancer_2026_fig_1.webp`. Same string, same casing. This is
-  what lets wiki-builder find a clipping's or research extract's images when it
+  what lets wiki-build find a clipping's or research extract's images when it
   processes that note as a source. Don't diverge from it.
 - **Captions sit immediately below the image embed**, italic, with no blank
   line between. Wiki and summary writers add explanatory captions under their
@@ -1585,7 +1589,7 @@ is a reading compatibility rule, not another permitted producer convention.
 **Depended on by:** pdf-figure-extractor (produces), clipping-processor
 (**produces and consumes** — its `rename` path re-reads `Sources/Images/`
 through 8a's loose glob to carry a note's whole figure set across a slug
-change), wiki-builder (consumes — the
+change), wiki-build (consumes — the
 figure selection and unused-figure accounting both walk 8a),
 wiki-add (produces new research images and consumes suitable existing images;
 uses pdf-figure-extractor for PDF crops),
@@ -1594,7 +1598,7 @@ paper-summarizer (consumes —
 has no figure-writing code of its own: it never crops or renames one, and the
 only way a file appears under its run is its step 1 invoking
 pdf-figure-extractor unmodified, which leaves that skill the sole PDF-crop
-producer), wiki-linter (checks embeds and reports flat-folder or
+producer), wiki-lint (checks embeds and reports flat-folder or
 unfinished-artifact violations without moving/deleting them),
 pdf-organizer (renaming a PDF orphans the figures already keyed to its old
 stem — §1a).
@@ -1604,8 +1608,8 @@ stem — §1a).
 ## 9. Ownership split for linking
 
 Linking is split by **workflow and reach**: wiki-add creates requested missing
-entries, wiki-builder extracts or merges new evidence from selected sources,
-and wiki-linter maintains existing links within its authorized scope.
+entries, wiki-build extracts or merges new evidence from selected sources,
+and wiki-lint maintains existing links within its authorized scope.
 
 ### wiki-add — inside new requested entries only
 
@@ -1623,7 +1627,7 @@ them. If a proposed target will not exist, leave its mention as plain text and
 omit it from Related. The full queue procedure lives in
 [wiki-add](../skills/wiki-add/SKILL.md); this section does not expand its scope.
 
-### wiki-builder — inside the entries it writes, and nowhere else
+### wiki-build — inside the entries it writes, and nowhere else
 
 Processing a source, it wikilinks within the entry bodies it creates or merges
 and builds each one's `**Related:**` footer — linking only targets that exist.
@@ -1650,7 +1654,7 @@ stops there.
 **Its guarantee is narrow and complete:** no dangling link ships *from this run*.
 Not that the vault contains none.
 
-### wiki-linter — everything vault-wide and retroactive
+### wiki-lint — everything vault-wide and retroactive
 
 Its ownership and reach are vault-wide and retroactive rather than tied to one
 source document. Each run still honors the task and entry scope the user
@@ -1658,7 +1662,7 @@ requested; hierarchy work expands only through its separately authorized scope
 closure. Within that scope, the retroactive and cross-entry surface is its
 alone:
 
-**An ordinary wiki-linter run is autonomous.** The scanner supplies the
+**An ordinary wiki-lint run is autonomous.** The scanner supplies the
 deterministic inventory and findings, and the executing agent performs the
 remaining semantic checks and applies the skill's authorized repairs. The user
 or another human is never required to read every note, validate the agent's
@@ -1670,23 +1674,23 @@ authorization without a second human review. An unapplied proposal does not
 make the current lint run incomplete.
 
 - **Backfill** a bare-text mention of an existing entry, anywhere, including in
-  entries a wiki-builder run passed over.
+  entries a wiki-build run passed over.
 - **Prune, all three kinds** — removing a self-link, dropping a *resolving*
   link too weak to keep, and de-duplicating a target linked twice in one body.
   This is the one deliberate
-  suspension of wiki-builder's additive-only footer rule, and it applies only to
+  suspension of wiki-build's additive-only footer rule, and it applies only to
   body-prose and Related-footer links: `tags:`, `sources:` and `parents:` are
   never pruned by this mechanism.
 - **Repair orphans inherited from earlier runs.** Assume the vault has *not*
   been swept.
 - **`parents:`, the MOCs, whole-vault dedup detection, and cross-entry QC** —
-  the things wiki-builder structurally cannot do, because it sees one source at
+  the things wiki-build structurally cannot do, because it sees one source at
   a time and cannot know about entries that do not exist yet.
 
 It **proposes renames, splits, and duplicate merges during routine lint; it
 never applies them unasked**. A named entry may be corrected from sources it
 already cites under the source-backed correction protocol; a new source routes
-to wiki-builder. An explicitly requested structural refactor is executed under
+to wiki-build. An explicitly requested structural refactor is executed under
 the refactor protocol, closing every affected reference and hierarchy surface.
 An approved rename rewrites every reference everywhere, including the MOCs. A
 producer-mapped external-artifact repair is narrower: it rewrites only exact
@@ -1697,7 +1701,7 @@ of `read:`. The only permitted review-field edit is §2d's spelling normalizatio
 unknown or absent review state is reported, not supplied. The run report is
 the audit trail. Routine lint creates no entries: an unresolved target becomes
 plain text and, when it looks like a real gap, a missing-entry candidate for
-a later wiki-builder run. Explicit source-backed refactor mode may create a
+a later wiki-build run. Explicit source-backed refactor mode may create a
 full split entry only from a subject and durable evidence already in its
 authorized scope.
 
@@ -1707,10 +1711,10 @@ Formatting repair does not authorize a new relationship or an identity guess.
 
 ### Why the split is drawn here
 
-**The retrospective linking bar has one home: wiki-linter.** This prevents a
+**The retrospective linking bar has one home: wiki-lint.** This prevents a
 later source integration from restoring a weak link merely because the merge
 rephrased its sentence. A merged entry is in both skills' scopes, so
-**wiki-builder's link provenance is the active source's contribution, not which
+**wiki-build's link provenance is the active source's contribution, not which
 sentences happened to be rewritten**:
 
 - **Body prose:** wrap a first occurrence when the active source introduces the
@@ -1722,22 +1726,22 @@ sentences happened to be rewritten**:
   for targets the new source's own text introduces — not for a target whose
   only support is a pre-existing bare mention.
 - **New evidence after a prune:** a later source may genuinely introduce a new
-  substantive relationship to the same target. wiki-builder may then link that
-  source-backed relationship and report it; wiki-linter judges the resulting
+  substantive relationship to the same target. wiki-build may then link that
+  source-backed relationship and report it; wiki-lint judges the resulting
   link on its next retrospective pass. Sentence rewriting alone is never that
   evidence.
 - **A pre-existing bare mention that genuinely should be linked** is
-  wiki-linter's to backfill, under wiki-linter's bar, on its next pass. That is
+  wiki-lint's to backfill, under wiki-lint's bar, on its next pass. That is
   the same answer §9 gives everywhere else, and it is now the answer inside a
   merged entry too.
 
-Shared schemas, naming and link forms are defined in this file. wiki-builder's
+Shared schemas, naming and link forms are defined in this file. wiki-build's
 references own entry prose, the Related-footer and Flashcards formats, and
 legacy-stub structure. wiki-add applies them to new requested entries, and
-wiki-linter applies them with its documented maintenance permissions; neither
+wiki-lint applies them with its documented maintenance permissions; neither
 creates a competing writing standard.
 
-**Depended on by:** wiki-builder, wiki-add, wiki-linter. Getting this wrong does
+**Depended on by:** wiki-build, wiki-add, wiki-lint. Getting this wrong does
 not produce a wrong entry; it produces perpetual churn across the whole vault.
 
 ---
@@ -1774,7 +1778,7 @@ line reads like a fix. The shape is per block, not per section:
 
 | Block | Key shape |
 |---|---|
-| `canonical:slug-duplicates` | repo-relative file path — `skills/wiki-builder/references/writing.md` |
+| `canonical:slug-duplicates` | repo-relative file path — `skills/wiki-build/references/writing.md` |
 | `canonical:pending-figure-text` | repo-relative file path |
 | `canonical:pending-frontmatter` | repo-relative file path |
 | `canonical:pending-skill-edits` | the path **and** the pointer it holds, `<path> :: <token>` |

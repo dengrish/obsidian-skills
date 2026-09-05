@@ -649,31 +649,39 @@ An untreated experimental specimen prepared and measured like the treated group 
 ??
 Control sample
 ''', encoding="utf-8")
+        # Freeze the existing vault format independently of scanner constants:
+        # renaming the skill must still recognize previously managed MOCs.
         (self.vault / "biology-moc.md").write_text(
-            "- [[control-sample|Control sample]]\n", encoding="utf-8")
+            "<!-- wiki-linter:moc-tree:start -->\n"
+            "- [[control-sample|Control sample]]\n"
+            "<!-- wiki-linter:moc-tree:end -->\n", encoding="utf-8")
         index = self.vault / "index.json"
-        self.run_script("skills/wiki-builder/scripts/vault_index.py", wiki, "-o", index)
+        self.run_script("skills/wiki-build/scripts/vault_index.py", wiki, "-o", index)
         self.assertEqual(
             json.loads(index.read_text(encoding="utf-8"))["entry_count"], 1)
         candidates = self.vault / "candidates.json"
         candidates.write_text(
             json.dumps(["Control sample", "Unrelated device"]), encoding="utf-8")
         collisions = json.loads(self.run_script(
-            "skills/wiki-builder/scripts/find_collisions.py", "--index", index,
+            "skills/wiki-build/scripts/find_collisions.py", "--index", index,
             "--titles", candidates).stdout)
         self.assertEqual([r["verdict"] for r in collisions["results"]], ["merge", "create"])
         lint = self.vault / "lint.json"
-        self.run_script("skills/wiki-builder/scripts/lint_entry.py", wiki, "-o", lint)
+        self.run_script("skills/wiki-build/scripts/lint_entry.py", wiki, "-o", lint)
         self.assertTrue(
             json.loads(lint.read_text(encoding="utf-8"))["summary"]["clean"])
         scan = self.vault / "scan.json"
-        self.run_script("skills/wiki-linter/scripts/scan_vault.py", wiki,
+        self.run_script("skills/wiki-lint/scripts/scan_vault.py", wiki,
                         "--images", self.images, "--out", scan)
         report = json.loads(scan.read_text(encoding="utf-8"))
         self.assertEqual(report["problems"], [])
         self.assertEqual(report["backfill_candidates"], [])
         for key in ("self_parented", "parent_cycles"):
             self.assertEqual(report["hierarchy_diagnostic"][key], [])
+        marker_states = {row["discipline"]: row["state"] for row in
+                         report["hierarchy_diagnostic"]["moc_marker_states"]}
+        self.assertEqual(marker_states["biology"], "marked")
+        self.assertEqual(report["hierarchy_diagnostic"]["moc_consistency_findings"], [])
 
     def test_topic_queue_reuses_sources_and_checks_off_only_public_entries(self):
         wiki = self.vault / "Wiki"
@@ -735,7 +743,7 @@ Geometric mean <!--SR:!2026-09-05,7,250--> ^saved-card
         original_source = source.read_bytes()
         scratch = Path(self.scratch.name)
         index = scratch / "topic-index.json"
-        self.run_script("skills/wiki-builder/scripts/vault_index.py", wiki,
+        self.run_script("skills/wiki-build/scripts/vault_index.py", wiki,
                         "--source", source.name, "-o", index)
         inventory = json.loads(index.read_text(encoding="utf-8"))
         self.assertTrue(inventory["source_matches"])
@@ -743,7 +751,7 @@ Geometric mean <!--SR:!2026-09-05,7,250--> ^saved-card
         candidates.write_text(json.dumps(["Geometric average", "Arithmetic mean"]),
                               encoding="utf-8")
         collisions = json.loads(self.run_script(
-            "skills/wiki-builder/scripts/find_collisions.py", "--index", index,
+            "skills/wiki-build/scripts/find_collisions.py", "--index", index,
             "--titles", candidates).stdout)
         self.assertEqual([row["verdict"] for row in collisions["results"]],
                          ["merge", "create"])
@@ -802,7 +810,7 @@ The sum divided by the count, $n^{-1}\sum_{i=1}^{n}x_i$, for $n\ge1$ observation
 Arithmetic mean
 ''', encoding="utf-8")
         lint = scratch / "topic-entry-lint.json"
-        self.run_script("skills/wiki-builder/scripts/lint_entry.py", created, "-o", lint)
+        self.run_script("skills/wiki-build/scripts/lint_entry.py", created, "-o", lint)
         self.assertTrue(json.loads(lint.read_text(encoding="utf-8"))["summary"]["clean"])
         self.run_script(helper, "complete", "--snapshot", second,
                         "--item", item["id"], "--wiki", wiki, "--entry", created)
@@ -1015,7 +1023,7 @@ A compact definition used only to exercise the shared contract.
             "ambiguous because a root file has the same basename.")
 
         lint = json.loads(self.run_script(
-            "skills/wiki-builder/scripts/lint_entry.py", wiki, "--compact").stdout)
+            "skills/wiki-build/scripts/lint_entry.py", wiki, "--compact").stdout)
         lint_items = {
             Path(entry["file"]).stem: {finding["item"] for finding in entry["findings"]}
             for entry in lint["entries"]
@@ -1046,7 +1054,7 @@ A compact definition used only to exercise the shared contract.
         self.assertIn("16-code-typography", lint_items["bare-code-shapes"])
 
         scan = json.loads(self.run_script(
-            "skills/wiki-linter/scripts/scan_vault.py", wiki, "--indent", "0").stdout)
+            "skills/wiki-lint/scripts/scan_vault.py", wiki, "--indent", "0").stdout)
         scan_items = {}
         for problem in scan["problems"]:
             scan_items.setdefault(problem["slug"], set()).add(problem["item"])
@@ -1088,7 +1096,7 @@ A compact definition used only to exercise the shared contract.
                       scan_items.get("ambiguous-path-links", set()))
 
         index = json.loads(self.run_script(
-            "skills/wiki-builder/scripts/vault_index.py", wiki,
+            "skills/wiki-build/scripts/vault_index.py", wiki,
             "--source", "LeadingZero.pdf").stdout)
         self.assertNotIn("alignment-sample",
                          {match["slug"] for match in index["source_matches"]})
@@ -1107,8 +1115,8 @@ A compact definition used only to exercise the shared contract.
                     return ast.literal_eval(node.value)
             self.fail(f"{relative} has no literal assignment for {name}")
 
-        builder = "skills/wiki-builder/scripts/lint_entry.py"
-        linter = "skills/wiki-linter/scripts/scan_vault.py"
+        builder = "skills/wiki-build/scripts/lint_entry.py"
+        linter = "skills/wiki-lint/scripts/scan_vault.py"
         self.assertEqual(literal(builder, "OBSIDIAN_KEYS"),
                          literal(linter, "OBSIDIAN_KEYS"))
         self.assertEqual(literal(builder, "TYPE_ENUM"),
@@ -1150,14 +1158,14 @@ Synthetic deviation
         entry.write_text(equationless, encoding="utf-8")
 
         builder = json.loads(self.run_script(
-            "skills/wiki-builder/scripts/lint_entry.py", entry,
+            "skills/wiki-build/scripts/lint_entry.py", entry,
             "--compact").stdout)
         builder_items = {finding["item"]
                          for finding in builder["entries"][0]["findings"]}
         self.assertIn("12-equation-coverage-candidate", builder_items)
 
         scanner = json.loads(self.run_script(
-            "skills/wiki-linter/scripts/scan_vault.py", self.vault / "Wiki",
+            "skills/wiki-lint/scripts/scan_vault.py", self.vault / "Wiki",
             "--indent", "0").stdout)
         scanner_items = {problem["item"] for problem in scanner["problems"]
                          if problem["slug"] == "synthetic-deviation"}
@@ -1169,13 +1177,13 @@ Synthetic deviation
             "\\sigma = \\sqrt{\\operatorname{Var}(X)}\n$$\n"),
             encoding="utf-8")
         builder = json.loads(self.run_script(
-            "skills/wiki-builder/scripts/lint_entry.py", entry,
+            "skills/wiki-build/scripts/lint_entry.py", entry,
             "--compact").stdout)
         self.assertNotIn(
             "12-equation-coverage-candidate",
             {finding["item"] for finding in builder["entries"][0]["findings"]})
         scanner = json.loads(self.run_script(
-            "skills/wiki-linter/scripts/scan_vault.py", self.vault / "Wiki",
+            "skills/wiki-lint/scripts/scan_vault.py", self.vault / "Wiki",
             "--indent", "0").stdout)
         self.assertNotIn(
             "item12/equation-coverage-candidate",
@@ -1188,13 +1196,13 @@ Synthetic deviation
             "f(x) = \\sqrt{x} + \\operatorname{Var}(Y)\n$$\n"),
             encoding="utf-8")
         builder = json.loads(self.run_script(
-            "skills/wiki-builder/scripts/lint_entry.py", entry,
+            "skills/wiki-build/scripts/lint_entry.py", entry,
             "--compact").stdout)
         self.assertIn(
             "12-equation-coverage-candidate",
             {finding["item"] for finding in builder["entries"][0]["findings"]})
         scanner = json.loads(self.run_script(
-            "skills/wiki-linter/scripts/scan_vault.py", self.vault / "Wiki",
+            "skills/wiki-lint/scripts/scan_vault.py", self.vault / "Wiki",
             "--indent", "0").stdout)
         self.assertIn(
             "item12/equation-coverage-candidate",
@@ -1208,13 +1216,13 @@ Synthetic deviation
             "\\sum_i (x_i - \\mu)^2}\n$$\n"),
             encoding="utf-8")
         builder = json.loads(self.run_script(
-            "skills/wiki-builder/scripts/lint_entry.py", entry,
+            "skills/wiki-build/scripts/lint_entry.py", entry,
             "--compact").stdout)
         self.assertNotIn(
             "12-equation-coverage-candidate",
             {finding["item"] for finding in builder["entries"][0]["findings"]})
         scanner = json.loads(self.run_script(
-            "skills/wiki-linter/scripts/scan_vault.py", self.vault / "Wiki",
+            "skills/wiki-lint/scripts/scan_vault.py", self.vault / "Wiki",
             "--indent", "0").stdout)
         self.assertNotIn(
             "item12/equation-coverage-candidate",

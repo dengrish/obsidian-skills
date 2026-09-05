@@ -187,7 +187,7 @@ DEFAULT_ACRONYMS = {
 # Filenames are an allowlist, not a blocklist. `#`, `$`, `&`, `%`, `@` and `+`
 # used to survive a blocklist that only named the punctuation someone thought
 # of; `#` is the one that breaks things, because `[[C#_And_F#_2020]]` parses in
-# Obsidian as a heading anchor, so wiki-builder's `sources:` link to that note
+# Obsidian as a heading anchor, so wiki-build's `sources:` link to that note
 # silently resolves to nothing. Keep letters, digits and `_`; drop everything
 # else — hyphens included, per "Smith-Jones -> SmithJones". `isalnum` is
 # Unicode-aware on purpose, so an accented surname survives (Müller, not Mller).

@@ -34,7 +34,7 @@ The comma-flip for surname-first names applies **only within a single author's n
 - "Smith, John" → surname-first, flip to "John Smith" → `Smith`
 - "Martin Luther King, Jr." → suffix after comma, not surname-first → `King`
 - "Mary Smith-Jones" → `SmithJones` (hyphens dropped, casing kept)
-- Two or more authors → just the **first author's** surname, nothing appended: "Teslo and Smith" → `Teslo`; "Buck, Carlsmith, and Greenblatt" → `Buck`. (No `_etal` — the first surname already identifies the work, and the full author list lives in the YAML for search and wiki-builder. An `_etal` marker would only add noise.)
+- Two or more authors → just the **first author's** surname, nothing appended: "Teslo and Smith" → `Teslo`; "Buck, Carlsmith, and Greenblatt" → `Buck`. (No `_etal` — the first surname already identifies the work, and the full author list lives in the YAML for search and wiki-build. An `_etal` marker would only add noise.)
 - No clean human author ("Editorial Team", "Anonymous", a publication account, blank) → drop the author segment entirely; slug becomes `<short_topic>_<year-or-nd>.md`.
 
 ## Short topic segment
@@ -66,6 +66,6 @@ a publication year, pass `--undated`: the segment is `nd` and frontmatter is
 
 Other punctuation (`:`, `,`, `?`, `'`, `"`, `—`, `–`) is removed, not replaced.
 
-The **image filename slug is the same string as the note filename** (case preserved), with `_fig_<N>.<ext>` appended: `Teslo_Pancreatic_Cancer_2026.md` → `Teslo_Pancreatic_Cancer_2026_fig_<N>.<ext>`. Keeping the casing consistent makes the note ↔ image relationship visually obvious when scanning the Sources/Images folder — and it is also exactly the `[source_stem]_fig_<N>` pattern `wiki-builder` looks up in `Sources/Images/` when the cleaned note is later processed as a source, since the note's filename stem *is* the source stem. Don't diverge from it.
+The **image filename slug is the same string as the note filename** (case preserved), with `_fig_<N>.<ext>` appended: `Teslo_Pancreatic_Cancer_2026.md` → `Teslo_Pancreatic_Cancer_2026_fig_<N>.<ext>`. Keeping the casing consistent makes the note ↔ image relationship visually obvious when scanning the Sources/Images folder — and it is also exactly the `[source_stem]_fig_<N>` pattern `wiki-build` looks up in `Sources/Images/` when the cleaned note is later processed as a source, since the note's filename stem *is* the source stem. Don't diverge from it.
 
 Use the **corrected** author and title from [metadata verification](metadata-verification.md), so the slug reflects the verified metadata — this is why getting source verification right matters for findability, not just for the YAML.

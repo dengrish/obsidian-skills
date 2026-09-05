@@ -3393,7 +3393,7 @@ def _selftest():
     #      other keyed name is renamed in its own home, because that home is
     #      where its consumer looks.  A figure moved into Sources/PDFs/ beside
     #      the document would be invisible to every `Sources/Images/` glob, and
-    #      a note moved out of Articles/ invisible to wiki-builder -- both
+    #      a note moved out of Articles/ invisible to wiki-build -- both
     #      silent.  The destination is also created on demand, which is the
     #      first-run case for a vault that has never had one.
     _dv = _make_fixture_dir()

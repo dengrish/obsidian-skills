@@ -417,7 +417,7 @@ def _report_url(url, limit=200):
 
 #: Every canonical extension this producer can return. CONVENTIONS.md §8a
 #: publishes the same set; the convention harness compares them and verifies
-#: wiki-linter recognizes every one as an image embed.
+#: wiki-lint recognizes every one as an image embed.
 OUTPUT_EXTENSIONS = frozenset((
     "png", "jpg", "gif", "webp", "svg", "avif", "bmp", "tiff", "ico",
 ))
@@ -1792,7 +1792,7 @@ def validate_slug(slug, what="--slug"):
                          "filename stem, not a path")
     # `.` passed every check above and named no note: it wrote `._fig_1.png`,
     # a dotfile Obsidian does not show, this plugin's `Sources/Images` sweeps do
-    # not glob, and wiki-builder's unused-figure diagnostic never sees. The
+    # not glob, and wiki-build's unused-figure diagnostic never sees. The
     # download reported ok and the figure was gone.
     if slug.startswith((".", " ")):
         raise ValueError(f"{what} starts with a dot or space: {slug!r} — that "

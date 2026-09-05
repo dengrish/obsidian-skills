@@ -3,7 +3,7 @@
 Read this only when the user asks to correct one named existing entry from
 sources that entry already cites. A generic lint request does not
 activate this mode. A source not already cited by the target is a new
-contribution and belongs to `wiki-builder`; a split, merge, retitle, deletion,
+contribution and belongs to `wiki-build`; a split, merge, retitle, deletion,
 or cross-entry redistribution uses [source-backed refactors](refactors.md).
 
 ## Establish the evidence and scope

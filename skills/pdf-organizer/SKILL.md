@@ -21,8 +21,8 @@ standard library.
 
 This skill changes PDF names and locations and creates chapter PDFs. For
 figure images use `pdf-figure-extractor`; for a document explanation or reading
-note use `paper-summarizer`; for new wiki entries use `wiki-builder`; for
-existing wiki maintenance use `wiki-linter`. A bare PDF with no stated deliverable needs
+note use `paper-summarizer`; for new wiki entries use `wiki-build`; for
+existing wiki maintenance use `wiki-lint`. A bare PDF with no stated deliverable needs
 routing clarification, not an automatic chain of all these skills.
 
 - For a vault-wide request, enumerate only `Inbox/` and `Sources/PDFs/`,

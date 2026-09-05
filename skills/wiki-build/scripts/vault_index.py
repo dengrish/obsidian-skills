@@ -2,13 +2,13 @@
 # -*- coding: utf-8 -*-
 """vault_index.py -- walk a wiki folder and emit a JSON index of every entry.
 
-wiki-builder's source-coverage and collision checks need a slug -> {title,
+wiki-build's source-coverage and collision checks need a slug -> {title,
 aliases, sources, tags, ...} index. This walks the folder RECURSIVELY
 (``**/*.md``) and reads each entry's frontmatter and wikilinks.
 
 Also the home of the hand-rolled frontmatter parser shared with
 ``lint_entry.py`` -- Python 3 standard library only, no pyyaml.  The parser
-covers exactly the subset wiki-builder writes:
+covers exactly the subset wiki-build writes:
 
     key: "scalar"          scalar, quoted or bare (read: is a bare boolean)
     key:                   blank value (tags; a legacy bare parents:)

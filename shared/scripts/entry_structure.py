@@ -3,7 +3,7 @@
 
 These helpers deliberately inspect placement and spelling, not factual
 correctness.  A Person/Event date is structurally valid only when a
-parenthetical in one of wiki-builder's documented forms immediately follows
+parenthetical in one of wiki-build's documented forms immediately follows
 the first outer-bold subject; a year later in the sentence may describe
 something else.
 
@@ -391,7 +391,7 @@ def math_title_plain_text(text):
 _BOLD_OUTER_RE = re.compile(
     r"(?<!\*)\*\*((?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)\*\*(?!\*)")
 
-# The forms below mirror wiki-builder/references/rare-types.md. Historical
+# The forms below mirror wiki-build/references/rare-types.md. Historical
 # years are not zero-padded: the BCE/CE rule explicitly needs values below
 # 1000, so ``YYYY`` in the prose guide denotes a year rather than four literal
 # digits. Exact ranges use an unspaced en dash; circa/unknown-bound ranges use
@@ -414,7 +414,7 @@ _EVENT_DATE_RE = re.compile(
     rf"{_CIRCA_RANGE}|{_PARTIAL_RANGE}|(?:annual|ongoing), since {_YEAR})")
 
 
-# Sentence-shape checks are shared because wiki-builder and wiki-linter apply
+# Sentence-shape checks are shared because wiki-build and wiki-lint apply
 # the same floor to descriptions, legacy stubs, and flashcard definitions.  A
 # duplicated implementation previously disagreed on quoted sentence endings:
 # ``... called them \"cells.\"`` was valid prose but the linter looked only at
@@ -485,7 +485,7 @@ def body_opens_with_prose(text):
     Keep its original indentation: four spaces or a tab make an indented code
     block, and calling ``lstrip`` before this decision turns that listing into
     apparent prose.  This is the shared item-9 structural floor used by both
-    wiki-builder and wiki-linter; sentence quality remains an agent review.
+    wiki-build and wiki-lint; sentence quality remains an agent review.
     """
     lines = (text or "").split("\n")
     first_index = next((index for index, line in enumerate(lines)

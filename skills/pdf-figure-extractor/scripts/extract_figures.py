@@ -60,7 +60,7 @@ Usage:
     python3 extract_figures.py --test
 
 `--stem` is the source PDF's on-disk filename stem (including any `_src`
-suffix it carries) — that is what `wiki-builder` globs for when it looks up
+suffix it carries) — that is what `wiki-build` globs for when it looks up
 `Sources/Images/[source_stem]_fig*`.
 """
 import argparse

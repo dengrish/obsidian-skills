@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Whole-vault scanner for the wiki-linter skill — Step 0, "Inventory the vault".
+"""Whole-vault scanner for the wiki-lint skill — Step 0, "Inventory the vault".
 
-Parses every `Wiki/**/*.md` entry once (recursively, like wiki-builder's
+Parses every `Wiki/**/*.md` entry once (recursively, like wiki-build's
 vault_index.py) and emits a single JSON object: the vault inventory, the
 deterministic QC violations ("problems"), and the three worklists the executing agent must
 judge — collision candidates (item-5 probes), rename candidates, and backfill
@@ -11,7 +11,7 @@ A file that cannot be read (not UTF-8, dangling symlink, permission error) is
 reported as an `item0` problem and skipped; it never aborts the scan.
 
 The scanner mechanizes every deterministic check. The executing agent handles
-the remaining semantic judgments automatically during the wiki-linter run; no user or other human review is required. Nothing here is applied to the vault:
+the remaining semantic judgments automatically during the wiki-lint run; no user or other human review is required. Nothing here is applied to the vault:
 the candidate lists are worklists, not auto-fixes. See
 references/scanner.md for the field-by-field output contract and for what the
 scanner deliberately does not check.
@@ -51,7 +51,7 @@ def fold_name(s):
     return unicodedata.normalize("NFC", s or "").casefold()
 
 
-# Disciplines are the fixed 27-tag enum (VALID_TAGS below), not self-rooted notes — wiki-builder
+# Disciplines are the fixed 27-tag enum (VALID_TAGS below), not self-rooted notes — wiki-build
 # replaced roots: (a wikilink to a discipline note) with tags: (#-prefixed discipline slugs). See below.
 
 # ===========================================================================
@@ -129,11 +129,11 @@ from yaml_scalars import parse_scalar, split_flow, strip_comment  # noqa: E402
 # ===========================================================================
 # NO SINGULARIZER LIVES HERE EITHER, and for the same reason.  The item-5
 # `plural` and `word-order-singular` probes turn on which two word forms are
-# the same word; wiki-builder's find_collisions.py probes (c) and (e) turn on
+# the same word; wiki-build's find_collisions.py probes (c) and (e) turn on
 # the same fact.  This file used to carry a three-rule regular-plural stripper
-# of its own, which answered "hypotheses" with "hypothes" where wiki-builder
+# of its own, which answered "hypotheses" with "hypothes" where wiki-build
 # answered "hypothesis" -- so `hypothesis-testing` / `testing-hypotheses` was
-# caught when wiki-builder probed a NEW candidate against the vault and missed
+# caught when wiki-build probed a NEW candidate against the vault and missed
 # by the sweep here.  CONVENTIONS.md §9 gives whole-vault dedup detection to
 # this skill alone, so a pair already sitting in the vault was reported by
 # nobody at all.  `python3 shared/scripts/plurals.py --test` is the
@@ -197,7 +197,7 @@ def slug(title):
         return ""
 
 
-# The explicit mechanical floor in wiki-builder/references/writing.md,
+# The explicit mechanical floor in wiki-build/references/writing.md,
 # Cross-domain term disambiguation.  The prose rule remains broader (dictionary
 # and drafting tests catch terms outside a finite set); every term it names
 # explicitly must at least be guarded here, both from a bare filename and from
@@ -771,8 +771,8 @@ def markdown_image_line(line):
 #: `![[Doe_X_2025_fig_3.png]]`, with an optional `|width` display pipe. This is
 #: the `--images` existence check's reader. Markdown `![](…)` embeds are
 #: deliberately NOT here: a remote one is `item12/remote-image` (report-only,
-#: and the form wiki-builder mandates for a URL), and a local one is not a form
-#: wiki-builder writes.
+#: and the form wiki-build mandates for a URL), and a local one is not a form
+#: wiki-build writes.
 IMG_EMBED = re.compile(
     r"!\[\[([^\]|\n]+\.(?:png|jpe?g|gif|svg|webp|tiff?|bmp|avif|ico))(?:\|[^\]\n]*)?\]\]", re.I)
 
@@ -938,7 +938,7 @@ def has_block_items(fm_raw, key):
 def parse_fm(fm, bad=None):
     """Frontmatter -> {key: str | [str]}.
 
-    Handles the three list spellings wiki-builder writes: block form, flow form
+    Handles the three list spellings wiki-build writes: block form, flow form
     (`sources: ["stub"]`) and blank.  Flow form used to fall through to the
     scalar branch, so `sources: ["stub"]` parsed as the STRING `["stub"]` — no
     entry written that way was ever recognised as a stub, and a flow-form
@@ -1015,7 +1015,7 @@ def source_stem(item):
     if not dot: return "", ""
     # NFC as well as case: one document may be spelled NFD on disk and NFC in a
     # note. Raw strings would miss the item4 pair and make results host-dependent.
-    # §7 requires this to agree exactly with wiki-builder's
+    # §7 requires this to agree exactly with wiki-build's
     # lint_entry.source_stem(); keep the two lines identical.
     return (unicodedata.normalize("NFC", stem.strip()).lower(),
             unicodedata.normalize("NFC", ext.strip()).lower())
@@ -1106,7 +1106,7 @@ def regions(body):
     flash_head = lines[flash_i] if flash_i is not None else ""
     return visible_body[:cut], rel, (body[fc:] if fc != -1 else ""), fc, flash_head
 
-# `importance` is a LEGACY key — removed from wiki-builder's schema, never written on a new entry,
+# `importance` is a LEGACY key — removed from wiki-build's schema, never written on a new entry,
 # but still present (populated) on every entry generated before the removal. Nothing strips it and
 # nothing flags it. It stays in CANON so a legacy entry carrying it in its historical slot is not
 # reported as an "unexpected frontmatter key" or as out of schema order; it is deliberately absent
@@ -1115,7 +1115,7 @@ CANON = ["title","type","aliases","sources","created","updated","description","t
 
 #: The keys that must be PRESENT on every entry, stub included — CANON minus
 #: the one optional key (`aliases`) and the retired one (`importance`).  This
-#: is wiki-builder's `lint_entry.MANDATORY_KEYS`, in the same order and with
+#: is wiki-build's `lint_entry.MANDATORY_KEYS`, in the same order and with
 #: the same members; the two lists say the same thing about the same schema and
 #: a vault-wide run must not report fewer missing keys than a single-file lint.
 #: Only four of the nine used to be checked here, so an entry with no `title:`
@@ -1502,7 +1502,7 @@ def iter_entry_files(wiki, on_error=None):
 
     `os.listdir` was flat, so an entry filed in `Wiki/sub/` was invisible to the
     whole scan — and every wikilink pointing at it was reported as dangling.
-    wiki-builder's vault_index.py has always walked recursively; this matches it.
+    wiki-build's vault_index.py has always walked recursively; this matches it.
     """
     out = []
     seen_dirs = set()
@@ -1669,6 +1669,7 @@ def image_index(images):
     return (None if walk_failed else names), findings
 
 
+# Persistent vault format; a skill rename must not orphan existing MOC regions.
 MOC_TREE_START = "<!-- wiki-linter:moc-tree:start -->"
 MOC_TREE_END = "<!-- wiki-linter:moc-tree:end -->"
 
@@ -2104,7 +2105,7 @@ def scan(wiki, images=None):
     # fold_name(alias) -> (owning slug, the alias as spelled). Obsidian
     # resolves [[tpr]] to the entry whose `aliases:` carries "tpr" when no FILE
     # answers to that name -- references/writing.md calls an alias an
-    # alternative slug, and wiki-builder's find_collisions.build_targets probes
+    # alternative slug, and wiki-build's find_collisions.build_targets probes
     # aliases for exactly that reason. A file always wins over an alias, so
     # this is consulted only after the slug and on-disk lookups, and it is not
     # a fallback for them. Keep ambiguous owners separate: item 18 reports
@@ -2567,7 +2568,7 @@ def scan(wiki, images=None):
                 return datetime.datetime.strptime(d, "%Y-%m-%d").date()
             except (ValueError, TypeError):
                 return None
-        # created > updated is REPORT-ONLY, not a fixable violation: wiki-linter never writes created:/updated:
+        # created > updated is REPORT-ONLY, not a fixable violation: wiki-lint never writes created:/updated:
         # (see Dates), so filing it as a lint problem would re-report the same entries forever with nothing the
         # linter can do. Its own item key routes it to the nonblocking report-only bucket instead.
         # Compared as DATES, never as strings — the strings are only interchangeable
@@ -2676,7 +2677,7 @@ def scan(wiki, images=None):
             if len(idtoks) >= 1:
                 problems.append((sl,"item6",f'{len(idtoks)} backticked identifier(s) (cap is 0 in a non-Software entry; Software may retain only artifact-wide design/interface API, never a usage catalog): {", ".join(idtoks[:6])}'))
         # ---- item 7: description length + presence (FULL ENTRIES AND STUBS) ----
-        # Item 7 is NOT on the stub exemption list: wiki-builder's stub format carries a real
+        # Item 7 is NOT on the stub exemption list: wiki-build's stub format carries a real
         # description ("Description follows the description field definition"), so the ≤110 cap, the
         # entity-as-subject form and the plain-text rule all apply to a stub exactly as to a full entry.
         # This block used to sit behind `if not is_stub:`, which silently exempted every stub.
@@ -2740,7 +2741,7 @@ def scan(wiki, images=None):
                              'no disciplinary home uses a blank `tags:` key'))
         if not e_tags_raw:
             if is_stub:
-                problems.append((sl,"item8","stub has blank tags: — every legacy stub needs ≥1 discipline tag; inherit one only from strong local evidence (wiki-builder SKILL.md, Stubs (legacy))"))
+                problems.append((sl,"item8","stub has blank tags: — every legacy stub needs ≥1 discipline tag; inherit one only from strong local evidence (wiki-build SKILL.md, Stubs (legacy))"))
             # blank tags: on a FULL entry is valid (no discipline genuinely applies) — not a violation
         for t in e_tags_raw:
             inner = t.strip()
@@ -2780,7 +2781,7 @@ def scan(wiki, images=None):
         # The scanner has no body-length, paragraph-flow, or atomicity check. The structural
         # floor still applies to stubs: prose starts immediately after the
         # frontmatter, and Person/Event stubs carry the date parenthetical after
-        # the bolded subject (wiki-builder's SKILL.md, Stubs (legacy)). All three
+        # the bolded subject (wiki-build's SKILL.md, Stubs (legacy)). All three
         # checks below therefore run on stubs too; this block once sat behind
         # `if not is_stub:`, which dropped rules the stub format requires.
         if e["blank_after"]:
@@ -2796,7 +2797,7 @@ def scan(wiki, images=None):
             elif date_status == "malformed":
                 problems.append((sl,"item9",f'{e["type"]} opener date parenthetical '
                                              f'is not one of the exact forms in '
-                                             f'wiki-builder/references/rare-types.md '
+                                             f'wiki-build/references/rare-types.md '
                                              f'(including qualifier punctuation and '
                                              f'en-dash spacing)'))
         for line_no, cue_line in navigation_only_link_lines(e["prose"]):
@@ -2899,7 +2900,7 @@ def scan(wiki, images=None):
                     f"(kind(s): {_kinds}; prose line(s) {_lines}) — executing "
                     "agent: verify the definition in context, bind every "
                     "symbol nearby, and typeset only the stated relationship "
-                    "under wiki-builder/references/equations.md; a "
+                    "under wiki-build/references/equations.md; a "
                     "square-root-of-variance cue never authorizes inferring a "
                     "population or sample denominator"))
             _equation_form_candidates = \
@@ -2914,18 +2915,18 @@ def scan(wiki, images=None):
                     "display math has content on the same line as its `$$` "
                     f"delimiters (prose line(s) {_lines}) — keep the existing "
                     "equation and put each delimiter on its own line"))
-            # Remote ![](http…) embeds are REPORT-ONLY, not a violation. wiki-builder MANDATES this exact
+            # Remote ![](http…) embeds are REPORT-ONLY, not a violation. wiki-build MANDATES this exact
             # form for an external URL coming from a markdown source's clipping ("use standard markdown
             # image syntax ![alt](https://...) since wikilinks don't handle remote URLs" —
-            # wiki-builder references/media.md), because an Obsidian wikilink cannot address a remote URL.
+            # wiki-build references/media.md), because an Obsidian wikilink cannot address a remote URL.
             # Filing it as an ordinary itemN problem made the linter "fix in place" a working image into
-            # ![[Sources/Images/…]] — a path form wiki-builder does not use either (it embeds a BARE basename,
+            # ![[Sources/Images/…]] — a path form wiki-build does not use either (it embeds a BARE basename,
             # ![[Name_fig_3.png]]) — which resolves to nothing and throws the URL away. Its own item key
             # routes it to the run report instead. DO NOT re-file this as item12.
             for _start, _end, url in markdown_image_spans(strip_code(e["body"])):
                 if not re.match(r"https?://", url, re.IGNORECASE):
                     continue
-                problems.append((sl,"item12/remote-image",f'remote image embed ![]({url[:50]}…) — VALID, DO NOT REWRITE (wiki-builder mandates markdown syntax for remote URLs); report only, as a candidate for localizing by re-running clipping-processor on the source clipping'))
+                problems.append((sl,"item12/remote-image",f'remote image embed ![]({url[:50]}…) — VALID, DO NOT REWRITE (wiki-build mandates markdown syntax for remote URLs); report only, as a candidate for localizing by re-running clipping-processor on the source clipping'))
             # Image embeds need an italic *caption* on the very next line. Read
             # embed positions from listing-masked text so syntax samples in
             # fenced/indented code do not prescribe a caption edit; read the
@@ -3076,9 +3077,9 @@ def scan(wiki, images=None):
             if re.match(r"^\s*\*(?!\*).*\*\s*$", ln):              # caption line (whole-line italic) — item-12 owns it
                 continue
             # bullet term-anchor line: legit. The bolded anchor may be followed by a short parenthetical or
-            # bracketed qualifier (optionally italicized) before the delimiter — wiki-builder's own canonical
+            # bracketed qualifier (optionally italicized) before the delimiter — wiki-build's own canonical
             # definition bullet is `- **True positives** (TP) — positives correctly predicted as positive`,
-            # which a dash-must-follow-the-`**` pattern wrongly flagged as unenumerated bold (and wiki-builder
+            # which a dash-must-follow-the-`**` pattern wrongly flagged as unenumerated bold (and wiki-build
             # re-emitted it every run). Prose after the anchor with no delimiter is still flagged.
             if re.match(r"^\s*[-*]\s+\*\*[^*\n]+\*\*(?:\s*[*_]?[\(\[][^)\]\n]{1,60}[\)\]][*_]?)*\s*[—–:\-]", ln):
                 continue
@@ -3448,7 +3449,7 @@ def scan(wiki, images=None):
                     "source-meta phrasing uses bare `the author(s)` rather than "
                     "naming an existing Work entry"))
         # ---- item 17: names introduced for this subject but absent in aliases ----
-        # The shared detector is exactly the one wiki-builder runs on a new or
+        # The shared detector is exactly the one wiki-build runs on a new or
         # merged entry. It supplies a deterministic candidate; same-entity,
         # cross-domain, and Organism common-name safety remain executing-agent judgments.
         for _candidate, _where, _candidate_slug in missing_introduced_aliases(
@@ -3810,11 +3811,11 @@ def scan(wiki, images=None):
                 continue
             # Display label is valid when, for some title/alias form, the label's tokens are a SUBSET of the form
             # (inflection/truncation tolerant) — this accepts the bare display of a cross-domain qualified link,
-            # [[information-entropy|entropy]], which wiki-builder MANDATES and FORBIDS as an alias so it can never be
+            # [[information-entropy|entropy]], which wiki-build MANDATES and FORBIDS as an alias so it can never be
             # in a surface set — OR a SUPERSET of the form, i.e. the label contains all the form's tokens plus extras,
             # which accepts a more-specific display that prepends a qualifier, [[neural-network|deep neural networks]].
             # An exact-match check false-flagged both (108-of-110 false positives on a real run); "fixing" the bare
-            # case by adding the bare alias is exactly the silent cross-domain collision wiki-builder exists to prevent.
+            # case by adding the bare alias is exactly the silent cross-domain collision wiki-build exists to prevent.
             # Do NOT re-tighten to exact match, and do NOT add a single-token-strict-subset guard (re-flags bare terms).
             # Still flags a label that is neither subset nor superset of any form (a wrong target / invented label).
             target_key = entry_link_key(tgt)
@@ -3926,13 +3927,13 @@ def scan(wiki, images=None):
     group_probe(lambda s: s.replace("-",""), "hyphenation")
     group_probe(lambda s: "-".join(sorted(s.split("-"))), "word-order")
     # The sort above is a PURE token sort, so it cannot see `weight-tying` ~ `tying-weights`:
-    # `weights` does not sort to `weight`. wiki-builder/references/merge.md describes the
-    # singularized comparison, and wiki-builder's find_collisions.py runs probe
+    # `weights` does not sort to `weight`. wiki-build/references/merge.md describes the
+    # singularized comparison, and wiki-build's find_collisions.py runs probe
     # (e) twice for it (`wordorder_key` AND `wordorder_key_singular`). CONVENTIONS §9 gives
-    # whole-vault duplicate detection to wiki-linter alone — wiki-builder only probes the
+    # whole-vault duplicate detection to wiki-lint alone — wiki-build only probes the
     # candidates of the source in front of it — so a pair already sitting in the vault is seen
     # by NOBODY unless this scanner runs the singularized half too. The key function is
-    # shared/scripts/plurals.py's, the same one wiki-builder calls, so there is nothing left
+    # shared/scripts/plurals.py's, the same one wiki-build calls, so there is nothing left
     # here to drift from it.
     #
     # `real_permutation` is that module's guard, not a copy of it: this probe fires only on a
@@ -3948,7 +3949,7 @@ def scan(wiki, images=None):
             if alt != sl and alt in entries:
                 collisions.append((sl, alt, "µ-variant", f"{sl}~{alt}"))
     # Probe (f), light stem morphology, is the last whole-key probe in
-    # wiki-builder.  It only adds a signal when none of the earlier probes
+    # wiki-build.  It only adds a signal when none of the earlier probes
     # already covered the pair, so a plural such as roc-curve/roc-curves keeps
     # the more precise `plural` label instead of acquiring a second finding.
     # The key itself lives in shared/scripts/plurals.py and is therefore
@@ -4050,7 +4051,7 @@ def scan(wiki, images=None):
                      if not e["is_stub"] and not e["tag_slugs"] and "tags" in e["key_order"]]
 
     # ---- problem tally by checklist item ----
-    # The share of entries affected is the recurrence signal for wiki-builder-improvement
+    # The share of entries affected is the recurrence signal for wiki-build-improvement
     # proposals — see references/backlogs.md.
     tally = {}                                   # item -> [issue_count, set_of_entries]
     for sl,item,_message,_path in problems:
@@ -5404,7 +5405,7 @@ def run_self_test():
               [(c["a"], c["b"], c["probe"]) for c in res4b["collision_candidates"]],
               [("roc-curve", "roc-curves", "plural")])
 
-        # Probe (f) uses the exact same shared stem key as wiki-builder, and it
+        # Probe (f) uses the exact same shared stem key as wiki-build, and it
         # runs only after the more specific probes have had first claim.
         v = os.path.join(tmp, "v4c")
         for name, title in (("masked-language-model", "Masked language model"),
@@ -7913,7 +7914,7 @@ def main(argv=None):
             pass
     ap = argparse.ArgumentParser(
         prog="scan_vault.py",
-        description="Scan a wiki-builder vault and emit the wiki-linter Step 0 inventory as JSON.")
+        description="Scan a wiki-build vault and emit the wiki-lint Step 0 inventory as JSON.")
     ap.add_argument("wiki", nargs="?",
                     help="path to the vault's Wiki/ folder (walked recursively; "
                          "entries in subfolders are scanned too)")

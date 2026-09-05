@@ -845,7 +845,7 @@ def sentences(text):
         # A single-letter initial is not a sentence end: `B. F. Skinner` split
         # into three "sentences" because `F.` starts with a capital — phantom
         # sentences that pushed a conforming paragraph over the 6-sentence
-        # cap.  wiki-builder's lint_entry guards this exact shape
+        # cap.  wiki-build's lint_entry guards this exact shape
         # (`_INITIAL_RE`, "the false positive that mattered"); the two
         # splitters must agree on it.
         if len(bare) == 2 and bare[0].isalpha() and bare[1] == ".":

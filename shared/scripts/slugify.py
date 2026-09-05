@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""slugify.py -- wiki-builder's canonical title -> filename slug algorithm.
+"""slugify.py -- wiki-build's canonical title -> filename slug algorithm.
 
 Implements SKILL.md "Filenames and Wikilinks" (preprocessing pass + main
 pipeline) exactly, including the three special-character rules spelled out
@@ -488,7 +488,7 @@ def run_self_test():
 def _build_parser():
     p = argparse.ArgumentParser(
         prog="slugify.py",
-        description="wiki-builder title -> filename slug algorithm (stdlib only).",
+        description="wiki-build title -> filename slug algorithm (stdlib only).",
         epilog='example: slugify.py "ROC curve"  ->  {"slug": "roc-curve", ...}',
     )
     p.add_argument("title", nargs="?", help="entity title to slug")

@@ -11,7 +11,7 @@ activate this mode, and it never combines all thin mentions by default.
    identity, and prior-coverage checks. Re-run intent applies only to this
    candidate; do not reopen unrelated entities from an already-processed source.
    If every source is already cited by an existing target and the request is to
-   correct that target, use wiki-linter's source-backed correction mode instead.
+   correct that target, use wiki-lint's source-backed correction mode instead.
 2. Prove that every passage names the same contextually resolved entity. An
    ambiguous surface, homonym, or two related concepts cannot be joined to make
    the substance test pass.

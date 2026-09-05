@@ -14,7 +14,7 @@ appears, any `_src` suffix included) and <N> can be:
                                     "Supplementary Figure 1", "Extended Data Figure 1")
   - appendix letter:  A-1, A1      (source captions like "Figure A.1", "Figure A1")
 
-That name is the interface `wiki-builder` globs for (`Sources/Images/
+That name is the interface `wiki-build` globs for (`Sources/Images/
 [source_stem]_fig*`). Changing it here breaks that lookup silently — entries
 get no images and the unused-figure diagnostic stays quiet, because it walks
 the same pattern.

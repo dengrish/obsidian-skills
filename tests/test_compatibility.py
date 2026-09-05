@@ -200,7 +200,7 @@ class CompatibilityTests(unittest.TestCase):
         skills = sorted(claude_skills.glob("*/SKILL.md"))
         self.assertEqual({path.parent.name for path in skills}, {
             "clipping-processor", "paper-summarizer", "pdf-figure-extractor",
-            "pdf-organizer", "wiki-add", "wiki-builder", "wiki-linter",
+            "pdf-organizer", "wiki-add", "wiki-build", "wiki-lint",
         })
         for path in skills:
             self.assertTrue((path.parent / "../../shared/RUNTIME.md").resolve().is_file())
@@ -369,13 +369,13 @@ class CompatibilityTests(unittest.TestCase):
         atomic = load("atomic_move_changed_read", ROOT / "shared/scripts/atomic_move.py")
         index = load(
             "vault_index_changed_read",
-            ROOT / "skills/wiki-builder/scripts/vault_index.py")
+            ROOT / "skills/wiki-build/scripts/vault_index.py")
         lint = load(
             "lint_entry_changed_read",
-            ROOT / "skills/wiki-builder/scripts/lint_entry.py")
+            ROOT / "skills/wiki-build/scripts/lint_entry.py")
         scan = load(
             "scan_vault_changed_read",
-            ROOT / "skills/wiki-linter/scripts/scan_vault.py")
+            ROOT / "skills/wiki-lint/scripts/scan_vault.py")
 
         def changing_fstat(path):
             real_fstat = os.fstat
@@ -843,7 +843,7 @@ read: false
         report = conventions.Report()
         with patch.object(
                 conventions, "walk_skill_files",
-                return_value=[("wiki-builder", "fixture.md", example)]):
+                return_value=[("wiki-build", "fixture.md", example)]):
             conventions.check_yaml_examples(report, canonical)
         failures = [row[3] for row in report.by_status("FAIL")
                     if row[0] == "yaml-example"]
@@ -887,10 +887,10 @@ read: false
     def test_builder_and_linter_share_source_identity(self):
         builder = load(
             "compat_builder_source_identity",
-            ROOT / "skills/wiki-builder/scripts/lint_entry.py")
+            ROOT / "skills/wiki-build/scripts/lint_entry.py")
         linter = load(
             "compat_linter_source_identity",
-            ROOT / "skills/wiki-linter/scripts/scan_vault.py")
+            ROOT / "skills/wiki-lint/scripts/scan_vault.py")
         cases = (
             "stub",
             "[[Doe_Study_2025.pdf#page=7]]",
@@ -954,7 +954,7 @@ read: false
         for skill, caption, expected in (
             ("clipping-processor", "", 0),
             ("paper-summarizer", "", 1),
-            ("wiki-builder", "*The study design.*", 0),
+            ("wiki-build", "*The study design.*", 0),
         ):
             with self.subTest(skill=skill, caption=bool(caption)):
                 text = "`[source_stem]_fig*`\n\n![[Doe_Study_2025_fig_1.png]]\n" + caption + "\n"

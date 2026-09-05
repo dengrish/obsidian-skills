@@ -50,7 +50,7 @@ The reason must describe this figure's contribution, not merely say that the not
 
 ## Placement and embed syntax
 
-**Embed syntax.** Use Obsidian's image-embed wikilink form: `![[Burges_LearningToRank_2010_fig_3.png]]` for `Sources/Images/`-based images (Obsidian resolves the basename across the vault). For external URLs from a markdown source's clipping, use standard markdown image syntax `![alt](https://...)` since wikilinks don't handle remote URLs — the `alt` slot is plain alt-text (typically left empty or filled with a brief identifier), **not** the wiki-builder caption. **The italic-caption-on-next-line rule (see *Captions* below) applies uniformly to both embed forms** — wikilink and markdown — so every image embed, however written, has its `*caption*` line directly below it.
+**Embed syntax.** Use Obsidian's image-embed wikilink form: `![[Burges_LearningToRank_2010_fig_3.png]]` for `Sources/Images/`-based images (Obsidian resolves the basename across the vault). For external URLs from a markdown source's clipping, use standard markdown image syntax `![alt](https://...)` since wikilinks don't handle remote URLs — the `alt` slot is plain alt-text (typically left empty or filled with a brief identifier), **not** the wiki-build caption. **The italic-caption-on-next-line rule (see *Captions* below) applies uniformly to both embed forms** — wikilink and markdown — so every image embed, however written, has its `*caption*` line directly below it.
 
 **Placement: inline, on the line immediately after the sentence or paragraph the image illustrates.** Placement is determined by the image's motivating prose, not by a fixed slot.
 

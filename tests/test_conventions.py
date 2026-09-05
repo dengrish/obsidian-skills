@@ -127,7 +127,7 @@ NAMING = os.path.join(SHARED_DIR, "scripts", "naming.py")
 FETCH_IMAGES = os.path.join(
     SKILLS_DIR, "clipping-processor", "scripts", "fetch_images.py")
 SCAN_VAULT = os.path.join(
-    SKILLS_DIR, "wiki-linter", "scripts", "scan_vault.py")
+    SKILLS_DIR, "wiki-lint", "scripts", "scan_vault.py")
 
 TEXT_EXT = (".md", ".py")
 
@@ -813,7 +813,7 @@ CANONICAL_SLUG_API = {"slugify", "slug_stem", "base_term", "mu_variants",
 #: them.  §4a publishes these for ONE module and it is not in a skill: a skill
 #: that owns the name owns the import path `import slugify` resolves to, and
 #: whether its answer happens to agree today is beside the point.  `slug` is
-#: absent on purpose -- wiki-linter's `slug()` is the §4a-blessed delegating
+#: absent on purpose -- wiki-lint's `slug()` is the §4a-blessed delegating
 #: wrapper, and it is held to agreement by the behavioural check below.
 FORBIDDEN_SLUG_NAMES = {"slugify", "slug_stem"}
 
@@ -2195,7 +2195,7 @@ def _shared_imported_names(text):
 def _delegates(fn, imported):
     """True when ``fn``'s own source uses a name imported from ``slugify``.
 
-    This is what separates wiki-linter's blessed `slug()` wrapper -- which
+    This is what separates wiki-lint's blessed `slug()` wrapper -- which
     calls `slugify.slug_stem` and merely swallows `SlugError` -- from a
     second implementation.  Delegation is the whole test: a producer that
     agrees today without delegating is a copy, and copies are what diverge.
@@ -3483,11 +3483,11 @@ def check_figure_naming(rep, conv):
                   if not scanner.EMB.fullmatch("![[X_fig_1.%s]]" % ext)
                   or not scanner.IMG_EMBED.search("![[X_fig_1.%s]]" % ext)]
         if missed:
-            rep.fail(check, "wiki-linter does not recognize clipping-processor "
+            rep.fail(check, "wiki-lint does not recognize clipping-processor "
                      "output extension(s) as local image embeds: %s"
                      % ", ".join(missed))
         else:
-            rep.ok(check, "wiki-linter recognizes all %d clipping-processor "
+            rep.ok(check, "wiki-lint recognizes all %d clipping-processor "
                    "output extensions" % len(clipping_exts))
 
     producers = _parse_producer_table(conv)
@@ -3526,7 +3526,7 @@ def check_figure_naming(rep, conv):
                      "canonical:figure-glob globs `[%s]_fig*`, but §8 keys every "
                      "figure to the source *stem*. `%s` is a different naming "
                      "rule (§4a's entry slug is the one that bites: a figure "
-                     "filed under a slug is invisible to wiki-builder's glob, "
+                     "filed under a slug is invisible to wiki-build's glob, "
                      "and the unused-figure diagnostic walks the same pattern)."
                      % (glob_stem, glob_stem), rel(CONVENTIONS))
         elif spelled not in section:
@@ -3716,7 +3716,7 @@ def check_figure_naming(rep, conv):
     #      PDF's on-disk stem or the cleaned note's, which §4c makes
     #      Title_Case_Underscored.  A kebab-lowercase stem is a *wiki-entry*
     #      slug (§4a), the other naming rule entirely, and a figure filed
-    #      under it is invisible to wiki-builder's glob: total, silent loss.
+    #      under it is invisible to wiki-build's glob: total, silent loss.
     n_stems = 0
     for skill, path, text in walk_skill_files():
         for m in FIG_CONCRETE_STEM_RE.finditer(text):
@@ -3728,7 +3728,7 @@ def check_figure_naming(rep, conv):
                          "kebab-lowercase wiki-entry slug (§4a), not a source "
                          "stem. §8b keys every figure to the SOURCE stem and "
                          "§4c makes that Title_Case_Underscored -- "
-                         "wiki-builder globs the source stem, so a figure "
+                         "wiki-build globs the source stem, so a figure "
                          "filed under a slug is invisible to it, and the "
                          "unused-figure diagnostic walks the same pattern."
                          % (rel(path), text[m.start():m.end()], stem),
@@ -4625,8 +4625,8 @@ def check_yaml_examples(rep, conv):
                       "double-quoted (§2a/§3)" % n_items)
 
     # §6: EVERY `**Related:**` footer link is piped, even when slug-equal.
-    # An unpiped example teaches the bare form, and wiki-linter then "fixes"
-    # what wiki-builder wrote, run after run.
+    # An unpiped example teaches the bare form, and wiki-lint then "fixes"
+    # what wiki-build wrote, run after run.
     n_rel = 0
     for path, text in walk_plugin_files():
         if not path.endswith(".md"):
@@ -5056,11 +5056,11 @@ OWNERSHIP_NEGATION_REACH = 60
 
 
 def _check_ownership_split(rep, check, conv, skills, texts):
-    """§9: the linking bar has exactly one home, and it is not wiki-builder's.
+    """§9: the linking bar has exactly one home, and it is not wiki-build's.
 
-    §9 says in as many words: "If wiki-builder's files still say anything
+    §9 says in as many words: "If wiki-build's files still say anything
     about vault-wide or retroactive linking, that text is stale."  Nothing
-    checked it, and a claim like "wiki-builder backfills links vault-wide" is
+    checked it, and a claim like "wiki-build backfills links vault-wide" is
     a contract fiction that no path or field pattern can see -- it names no
     artifact, only a behaviour.
     """
@@ -5081,7 +5081,7 @@ def _check_ownership_split(rep, check, conv, skills, texts):
             for off, sent in _soft_sentences(text):
                 # "this skill" means *this* skill.  Read in every skill's
                 # files, it made pdf-organizer's "A PDF basename this skill
-                # produces is unique across the whole vault" a wiki-builder
+                # produces is unique across the whole vault" a wiki-build
                 # ownership claim, and the check then leaned on an unrelated
                 # "not" three clauses later to let it through.
                 if scoped not in sent and not (
@@ -5321,7 +5321,7 @@ def _tables(text):
 def _list_elements(scope):
     """Bare comma/`and`-separated elements of an enumeration.
 
-    Parentheticals are stripped first ("wiki-builder (consumes -- ... and
+    Parentheticals are stripped first ("wiki-build (consumes -- ... and
     ...)"), so a qualifier cannot split its own element or contribute one.
     Only elements that are *exactly* a skill-shaped token are returned; a
     phrase is prose, not a list of skills.
@@ -5346,7 +5346,7 @@ def _roster_candidates(text, roster, tag_values):
     # (a) backticked, in a sentence about skills, in a routing frame, or
     #     beside a backticked real skill.  That last one is what catches the
     #     shape the sentence heuristic alone misses -- "the interface
-    #     `wiki-builder` globs for, and the name `<gone>` writes" -- which is
+    #     `wiki-build` globs for, and the name `<gone>` writes" -- which is
     #     how three script docstrings kept naming a removed skill.
     #     The two signals get different scopes on purpose.  "This sentence is
     #     about skills" is weak evidence, so it is read per line -- widened, it
@@ -5521,7 +5521,7 @@ PATH_REF = re.compile(
 #: Everything else a file can point at inside the plugin: `skills/…`,
 #: `shared/…`, `<skill>/SKILL.md`, and any bundled file whose name is not
 #: lowercase.  `PATH_REF` alone only sees a `references/` or `scripts/`
-#: component made of lowercase characters, so `skills/wiki-linter/RULEBOOK.md`
+#: component made of lowercase characters, so `skills/wiki-lint/RULEBOOK.md`
 #: -- a pointer at a file that does not exist -- was simply not a path to it.
 PLUGIN_PATH_REF = re.compile(
     r"`((?:skills|shared|tests|tools)/[A-Za-z0-9_./-]+\.(?:md|py)|"
@@ -5676,7 +5676,7 @@ def _resolve_ref(skill, token, nearby_skills=(), source_path=None):
         cands.append(os.path.join(SKILLS_DIR, token))   # <skill>/SKILL.md
     cands.append(os.path.join(ROOT, token))   # shared/scripts/x.py
     # A bare `references/x.md` naming its owning skill in the same breath --
-    # "`references/pdf-path.md` in that skill", "wiki-builder references/media.md"
+    # "`references/pdf-path.md` in that skill", "wiki-build references/media.md"
     # -- resolves against that skill.  Only skills named nearby are tried, so
     # this does not degrade into "exists anywhere".
     for other in nearby_skills:
@@ -5887,7 +5887,7 @@ def check_scripts_run(rep, conv):
     """Every bundled script parses and imports.
 
     CONVENTIONS.md §10a records the exact regression this catches: two
-    wiki-builder scripts did `sys.path.insert(...)` then
+    wiki-build scripts did `sys.path.insert(...)` then
     `from slugify import …`, and after the module moved to `shared/scripts/`
     **both scripts failed at import**.  Every text-level check in this file
     passed the whole time -- the files said all the right things; they just
@@ -6178,10 +6178,10 @@ SELFTEST_MIN_CASES = {
     "skills/pdf-figure-extractor/scripts/render_page.py": 66,
     "skills/pdf-organizer/scripts/organize.py": 260,
     "skills/wiki-add/scripts/backlog.py": 28,
-    "skills/wiki-builder/scripts/find_collisions.py": 67,
-    "skills/wiki-builder/scripts/lint_entry.py": 309,
-    "skills/wiki-builder/scripts/vault_index.py": 78,
-    "skills/wiki-linter/scripts/scan_vault.py": 374,
+    "skills/wiki-build/scripts/find_collisions.py": 67,
+    "skills/wiki-build/scripts/lint_entry.py": 309,
+    "skills/wiki-build/scripts/vault_index.py": 78,
+    "skills/wiki-lint/scripts/scan_vault.py": 374,
 }
 
 
@@ -6649,7 +6649,7 @@ def check_bootstrap(rep, conv):
     rep.saw(check, "skill scripts importing a shared module", n_importers)
 
     # And the resolver itself must work from a skill-script vantage point.
-    probe = os.path.join(SKILLS_DIR, "wiki-linter", "scripts", "scan_vault.py")
+    probe = os.path.join(SKILLS_DIR, "wiki-lint", "scripts", "scan_vault.py")
     if os.path.isfile(probe):
         info = pp.describe(start=probe)
         if info["ok"] and not info["co_located_fallback"]:
@@ -7110,23 +7110,23 @@ def check_note_headings(rep, conv):
 def check_equation_policy(rep, conv):
     """The equation policy and its shared mechanical floor stay aligned.
 
-    wiki-builder/references/equations.md owns the policy; CONVENTIONS §2d
-    records it; wiki-linter's qc-items item 12 restates it. The builder lint
+    wiki-build/references/equations.md owns the policy; CONVENTIONS §2d
+    records it; wiki-lint's qc-items item 12 restates it. The builder lint
     and linter scanner also import one conservative candidate detector, whose
     public finding key is documented by the scanner contract. The one live
     contradiction the 2026-08-20 review found was exactly in this policy seam.
     """
     check = "equation-policy"
-    eq_path = os.path.join(SKILLS_DIR, "wiki-builder", "references",
+    eq_path = os.path.join(SKILLS_DIR, "wiki-build", "references",
                            "equations.md")
-    qc_path = os.path.join(SKILLS_DIR, "wiki-linter", "references",
+    qc_path = os.path.join(SKILLS_DIR, "wiki-lint", "references",
                            "qc-items.md")
     builder_lint_path = os.path.join(
-        SKILLS_DIR, "wiki-builder", "scripts", "lint_entry.py")
+        SKILLS_DIR, "wiki-build", "scripts", "lint_entry.py")
     scanner_path = os.path.join(
-        SKILLS_DIR, "wiki-linter", "scripts", "scan_vault.py")
+        SKILLS_DIR, "wiki-lint", "scripts", "scan_vault.py")
     scanner_ref_path = os.path.join(
-        SKILLS_DIR, "wiki-linter", "references", "scanner.md")
+        SKILLS_DIR, "wiki-lint", "references", "scanner.md")
     try:
         eq, qc = read(eq_path), read(qc_path)
         builder_lint = read(builder_lint_path)
@@ -7137,8 +7137,8 @@ def check_equation_policy(rep, conv):
         return
 
     pins = [
-        (CONVENTIONS, conv, r"wiki-builder/references/equations\.md",
-         "CONVENTIONS.md no longer names `wiki-builder/references/"
+        (CONVENTIONS, conv, r"wiki-build/references/equations\.md",
+         "CONVENTIONS.md no longer names `wiki-build/references/"
          "equations.md` as the equation policy's home -- the pointer that "
          "makes the policy findable from the canonical layer"),
         (CONVENTIONS, conv,
@@ -7160,7 +7160,7 @@ def check_equation_policy(rep, conv):
         (eq_path, eq, r"\*Notes for the user\*",
          "equations.md no longer routes the linter's insertion notice to "
          "*Notes for the user*"),
-        (qc_path, qc, r"owned by `wiki-builder/references/equations\.md`",
+        (qc_path, qc, r"owned by `wiki-build/references/equations\.md`",
          "qc-items.md item 12 no longer credits equations.md as the owner "
          "of the equation clauses -- the restatement has detached from its "
          "rule of record"),
@@ -7198,12 +7198,12 @@ def check_equation_policy(rep, conv):
         (builder_lint_path, builder_lint,
          r"from equation_coverage import[^\n]*\n\s*"
          r"find_missing_display_equation_candidates",
-         "wiki-builder lint no longer imports the shared equation-coverage "
+         "wiki-build lint no longer imports the shared equation-coverage "
          "candidate detector"),
         (scanner_path, scanner,
          r"from equation_coverage import[^\n]*\n\s*"
          r"find_missing_display_equation_candidates",
-         "wiki-linter scanner no longer imports the shared equation-coverage "
+         "wiki-lint scanner no longer imports the shared equation-coverage "
          "candidate detector"),
     ]
     n = 0
@@ -7279,7 +7279,7 @@ def check_link_rules(rep, conv):
                         "\"always piped, even when slug-equal\" -- the rule "
                         "of record this check holds restatements to",
                  rel(CONVENTIONS))
-    wb = os.path.join(SKILLS_DIR, "wiki-builder", "references", "writing.md")
+    wb = os.path.join(SKILLS_DIR, "wiki-build", "references", "writing.md")
     try:
         wtext = read(wb)
     except OSError:
@@ -7292,7 +7292,7 @@ def check_link_rules(rep, conv):
     else:
         rep.ok(check, "writing.md states §6's footer-pipe rule", rel(wb))
     wl = os.path.join(
-        SKILLS_DIR, "wiki-linter", "references", "link-hygiene.md")
+        SKILLS_DIR, "wiki-lint", "references", "link-hygiene.md")
     try:
         ltext = read(wl)
     except OSError:
@@ -7307,7 +7307,7 @@ def check_link_rules(rep, conv):
             rel(wl),
         )
     else:
-        rep.ok(check, "wiki-linter curates backfilled Related links instead "
+        rep.ok(check, "wiki-lint curates backfilled Related links instead "
                "of copying every accepted body link", rel(wl))
     n_files = 0
     for skill, path, text in walk_skill_files():
@@ -7375,21 +7375,21 @@ def check_physical_page(rep, conv):
 
 
 def check_autonomous_wiki_lint(rep, conv):
-    """wiki-linter's semantic pass belongs to the agent, not a human gate."""
+    """wiki-lint's semantic pass belongs to the agent, not a human gate."""
     check = "autonomous-wiki-lint"
     pins = [
-        (CONVENTIONS, conv, "An ordinary wiki-linter run is autonomous."),
-        (os.path.join(SKILLS_DIR, "wiki-linter", "SKILL.md"), None,
+        (CONVENTIONS, conv, "An ordinary wiki-lint run is autonomous."),
+        (os.path.join(SKILLS_DIR, "wiki-lint", "SKILL.md"), None,
          "This is autonomous agent work"),
-        (os.path.join(SKILLS_DIR, "wiki-linter", "references", "qc-items.md"),
+        (os.path.join(SKILLS_DIR, "wiki-lint", "references", "qc-items.md"),
          None, "carried out autonomously by the executing agent"),
-        (os.path.join(SKILLS_DIR, "wiki-linter", "references", "scanner.md"),
+        (os.path.join(SKILLS_DIR, "wiki-lint", "references", "scanner.md"),
          None, "No user or other human must review"),
-        (os.path.join(SKILLS_DIR, "wiki-linter", "references", "link-hygiene.md"),
+        (os.path.join(SKILLS_DIR, "wiki-lint", "references", "link-hygiene.md"),
          None, "not an approval or review gate"),
-        (os.path.join(SKILLS_DIR, "wiki-linter", "references", "backlogs.md"),
+        (os.path.join(SKILLS_DIR, "wiki-lint", "references", "backlogs.md"),
          None, "not a required review queue"),
-        (os.path.join(SKILLS_DIR, "wiki-linter", "scripts", "scan_vault.py"),
+        (os.path.join(SKILLS_DIR, "wiki-lint", "scripts", "scan_vault.py"),
          None, "no user or other human review is required"),
     ]
     forbidden = (
@@ -7423,18 +7423,18 @@ def check_autonomous_wiki_lint(rep, conv):
     if scanned == len(pins) and not any(
             status == "FAIL" and name == check
             for name, status, _where, _message in rep.results):
-        rep.ok(check, "wiki-linter assigns semantic review to the executing "
+        rep.ok(check, "wiki-lint assigns semantic review to the executing "
                "agent and keeps unresolved evidence nonblocking",
-               rel(os.path.join(SKILLS_DIR, "wiki-linter")))
+               rel(os.path.join(SKILLS_DIR, "wiki-lint")))
 
 
 def check_review_before_publication(rep, conv):
-    """wiki-builder reviews a proposed state before any public Wiki write."""
+    """wiki-build reviews a proposed state before any public Wiki write."""
     check = "review-before-publish"
     safe_path = os.path.join(SHARED_DIR, "SAFE_WRITES.md")
-    builder_path = os.path.join(SKILLS_DIR, "wiki-builder", "SKILL.md")
+    builder_path = os.path.join(SKILLS_DIR, "wiki-build", "SKILL.md")
     review_path = os.path.join(
-        SKILLS_DIR, "wiki-builder", "references", "review.md")
+        SKILLS_DIR, "wiki-build", "references", "review.md")
     pins = [
         (CONVENTIONS, conv,
          "Content workflows keep working drafts private through their final lint"),
@@ -7463,7 +7463,7 @@ def check_review_before_publication(rep, conv):
                      % marker, rel(path))
     builder = texts.get(builder_path, "")
     if "mkdir -p '<wiki-folder>'" in builder:
-        rep.fail(check, "wiki-builder still creates Wiki during collision "
+        rep.fail(check, "wiki-build still creates Wiki during collision "
                  "planning/no-apply", rel(builder_path))
     review_at = builder.find("### 7. Review and report")
     publish_at = builder.find("Publish new slugs with exclusive")
@@ -7474,7 +7474,7 @@ def check_review_before_publication(rep, conv):
     if scanned == len(pins) and not any(
             status == "FAIL" and name == check
             for name, status, _where, _message in rep.results):
-        rep.ok(check, "wiki-builder stages, reviews, and audits the proposed "
+        rep.ok(check, "wiki-build stages, reviews, and audits the proposed "
                "state before guarded public publication", rel(builder_path))
 
 
@@ -7483,9 +7483,9 @@ def check_linter_finding_routes(rep, _conv):
     check = "linter-finding-routes"
     paths = {
         "scanner": os.path.join(
-            SKILLS_DIR, "wiki-linter", "references", "scanner.md"),
+            SKILLS_DIR, "wiki-lint", "references", "scanner.md"),
         "actions": os.path.join(
-            SKILLS_DIR, "wiki-linter", "references", "qc-items.md"),
+            SKILLS_DIR, "wiki-lint", "references", "qc-items.md"),
     }
     try:
         texts = {name: read(path) for name, path in paths.items()}
@@ -7523,8 +7523,8 @@ def check_safe_write_programmatic_api(rep, _conv):
         "safe": os.path.join(SHARED_DIR, "SAFE_WRITES.md"),
         "atomic": os.path.join(
             SHARED_DIR, "scripts", "atomic_move.py"),
-        "builder": os.path.join(SKILLS_DIR, "wiki-builder", "SKILL.md"),
-        "linter": os.path.join(SKILLS_DIR, "wiki-linter", "SKILL.md"),
+        "builder": os.path.join(SKILLS_DIR, "wiki-build", "SKILL.md"),
+        "linter": os.path.join(SKILLS_DIR, "wiki-lint", "SKILL.md"),
         "clipping": os.path.join(
             SKILLS_DIR, "clipping-processor", "SKILL.md"),
         "paper": os.path.join(

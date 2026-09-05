@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared organism-name parsing for wiki-builder and wiki-linter.
+"""Shared organism-name parsing for wiki-build and wiki-lint.
 
 The helpers here provide a conservative mechanical floor.  They distinguish
 scientific, common, and ambiguous Organism titles only when local text supplies

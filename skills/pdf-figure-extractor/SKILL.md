@@ -21,8 +21,8 @@ caption detection or crop logic into a separate script.
 
 The deliverable is **whole-figure PNGs**, not PDF renames, summaries, or wiki
 entries. `paper-summarizer` owns document explanations and reading notes,
-`pdf-organizer` owns source naming and chapter splitting, `wiki-builder` owns
-new wiki entries, `wiki-linter` owns existing wiki maintenance, and `clipping-processor` owns
+`pdf-organizer` owns source naming and chapter splitting, `wiki-build` owns
+new wiki entries, `wiki-lint` owns existing wiki maintenance, and `clipping-processor` owns
 Web Clipper captures. An unspecified “process this PDF” request needs a
 stated deliverable before selecting a workflow.
 

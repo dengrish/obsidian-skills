@@ -15,9 +15,9 @@ Choose by the requested result, not just the input's file type.
 | Extract figure images | [pdf-figure-extractor](skills/pdf-figure-extractor/SKILL.md) | PDFs → cropped PNGs in `Sources/Images/` |
 | Explain a paper, chapter, report, standard or publication notice | [paper-summarizer](skills/paper-summarizer/SKILL.md) | PDF → reading note in `Articles/` |
 | Clean Web Clipper captures | [clipping-processor](skills/clipping-processor/SKILL.md) | raw capture → cleaned note in `Articles/` |
-| Build or enrich wiki entries from new evidence | [wiki-builder](skills/wiki-builder/SKILL.md) | PDF or URL-origin source note → entries in `Wiki/` |
+| Build or enrich wiki entries from new evidence | [wiki-build](skills/wiki-build/SKILL.md) | PDF or URL-origin source note → entries in `Wiki/` |
 | Research and add missing requested topics | [wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md` → durable sources and new requested entries only |
-| Audit, correct or explicitly refactor existing wiki entries | [wiki-linter](skills/wiki-linter/SKILL.md) | existing `Wiki/`, its cited sources or an exact producer mapping → scoped repairs, links, parents and MOCs |
+| Audit, correct or explicitly refactor existing wiki entries | [wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources or an exact producer mapping → scoped repairs, links, parents and MOCs |
 
 A PDF attached without a stated goal has no default workflow; ask what result
 the user wants. An inbox-wide request splits captured `.md` files and `.pdf`
@@ -32,19 +32,19 @@ The routes branch; a document does not have to pass through every skill.
 Inbox/*.pdf → pdf-organizer → Sources/PDFs/
                                 ├─ pdf-figure-extractor → Sources/Images/
                                 ├─ paper-summarizer → Articles/ reading note
-                                └─ wiki-builder → Wiki/
+                                └─ wiki-build → Wiki/
 
 Inbox/*.md → clipping-processor → Articles/ cleaned clipping
-                                     └─ wiki-builder → Wiki/
+                                     └─ wiki-build → Wiki/
 
 add-to-wiki.md → wiki-add → durable sources → missing requested entries in Wiki/
 
-Existing Wiki/ → wiki-linter → entry repairs, links, parents, MOCs and proposals
+Existing Wiki/ → wiki-lint → entry repairs, links, parents, MOCs and proposals
 ```
 
-Figure extraction supplies images to paper-summarizer and wiki-builder.
-Both paper-summarizer and wiki-builder read the **original PDF**; the summary
-is a finished reading note, not a source for wiki-builder. A cleaned clipping
+Figure extraction supplies images to paper-summarizer and wiki-build.
+Both paper-summarizer and wiki-build read the **original PDF**; the summary
+is a finished reading note, not a source for wiki-build. A cleaned clipping
 is itself the source and can be used directly. wiki-add can reuse existing
 sources, acquire PDFs through pdf-organizer, or save a clearly marked,
 agent-written research extract for each web page in `Articles/`; these extracts
@@ -56,23 +56,23 @@ must carry the dependent notes, figures, references and sidecars together,
 using pdf-organizer's reviewed plan and any required authorization. The
 [source-filename contract](shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organizer-runs-first)
 defines that boundary. A summary is not required before building wiki entries,
-and wiki-linter can run independently of any source-processing task.
+and wiki-lint can run independently of any source-processing task.
 
-wiki-builder adds source-supported content only to the entries in its current
-run. wiki-linter owns retrospective work across the existing wiki. Their
+wiki-build adds source-supported content only to the entries in its current
+run. wiki-lint owns retrospective work across the existing wiki. Their
 [linking ownership](shared/CONVENTIONS.md#9-ownership-split-for-linking) prevents
 later source merges from reversing deliberate maintenance decisions.
-For a named existing entry, wiki-linter may correct it from sources it already
+For a named existing entry, wiki-lint may correct it from sources it already
 cites or carry out an explicitly requested structural or producer-mapped
 repair. Enriching an existing entry with new-source evidence still belongs to
-wiki-builder.
+wiki-build.
 
 wiki-add is the queue-first, create-only route. An existing requested identity,
 including a stub, is skipped without auditing or editing it. New entries use
 builder's writing rules with `parents: []` and `read: false`, but wiki-add never
 adds an unrequested entity to satisfy a builder audit. It checks off only
 successfully published or already-existing queue items; uncertain or blocked
-items remain unchecked. Existing-entry enrichment remains wiki-builder's job.
+items remain unchecked. Existing-entry enrichment remains wiki-build's job.
 
 ## Codex and Claude
 
@@ -81,6 +81,11 @@ including their desktop surfaces when local files and shell execution are
 available. This is a skill package, not an Obsidian community plugin or an MCP
 server. Ordinary chats
 without filesystem access cannot run the vault workflow.
+
+Use `obsidian:wiki-build` and `obsidian:wiki-lint` for the renamed Wiki skills.
+These replace `obsidian:wiki-builder` and `obsidian:wiki-linter`; update explicit
+invocations after upgrading. Existing vault filenames and MOC markers stay
+unchanged, so no vault migration is needed.
 
 | Purpose | Codex | Claude Code |
 |---|---|---|

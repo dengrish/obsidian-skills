@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Shared detection of literal prose shapes that require backticks.
 
-wiki-builder permits two code-like shapes in every entry type: bracket special
+wiki-build permits two code-like shapes in every entry type: bracket special
 tokens such as ``[CLS]`` and literal file extensions such as ``.csv``. Both
 must be backticked in running prose. Callers first blank fenced, indented, and
 inline code, then pass the line-preserving result here. Math, link/embed and URL
