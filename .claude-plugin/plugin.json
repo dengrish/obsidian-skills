@@ -1,7 +1,7 @@
 {
   "name": "obsidian",
-  "version": "1.33.28",
-  "description": "Turn PDFs and web clippings into a maintained Obsidian knowledge base: name and file PDFs, split books into chapters, extract figures, create evidence-grounded reading notes for papers, chapters, reports, standards and publication notices, clean clippings, build interlinked wiki entries, and keep the vault linted and navigable.",
+  "version": "1.34.0",
+  "description": "Build and maintain an Obsidian knowledge base: organize PDFs, extract figures, create source reading notes, clean web clippings, research queued topics, create interlinked wiki entries, and maintain links and maps of content.",
   "repository": "https://github.com/dengrish/obsidian-skills",
   "author": {
     "name": "Dennis Grishin"

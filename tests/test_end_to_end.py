@@ -675,6 +675,151 @@ Control sample
         for key in ("self_parented", "parent_cycles"):
             self.assertEqual(report["hierarchy_diagnostic"][key], [])
 
+    def test_topic_queue_reuses_sources_and_checks_off_only_public_entries(self):
+        wiki = self.vault / "Wiki"
+        backlog = self.vault / "add-to-wiki.md"
+        backlog.write_bytes(
+            b"# Topics\r\n\r\n- [ ] Geometric average\r\n"
+            b"- Arithmetic mean\r\n- [ ] Unresolved topic")
+        source = self.notes / "Example_Averages_nd.md"
+        source.write_text('''---
+title: Averages
+format: Article
+sources:
+  - "https://example.org/averages"
+author: []
+published: null
+created: 2026-09-05
+description: Two mathematical averages provide a synthetic workflow fixture.
+tags:
+  - "#mathematics"
+read: false
+---
+<!-- obsidian:wiki-add-research-source -->
+Research extract
+
+This synthetic fixture is an agent-written extract, not captured article text.
+Origin: [Averages](https://example.org/averages), accessed 2026-09-05.
+Section: Definitions. The arithmetic mean divides the sum by the count;
+for positive inputs, the geometric mean is the root of their product.
+''', encoding="utf-8")
+        existing = wiki / "geometric-mean.md"
+        existing.write_text('''---
+title: "Geometric mean"
+type: Concept
+aliases:
+  - "geometric-average"
+sources:
+  - "[[Example_Averages_nd.md]]"
+created: 2025-01-01
+updated: 2025-01-01
+description: "The geometric mean is the root of the product of positive inputs."
+tags:
+  - "#mathematics"
+parents: []
+read: true
+---
+The **geometric mean** of positive inputs is the root of their product.
+
+**Related:**
+
+---
+
+## Flashcards
+
+For positive inputs, the root of their product with degree equal to their count.
+!!
+Geometric mean <!--SR:!2026-09-05,7,250--> ^saved-card
+''', encoding="utf-8")
+        original_entry = existing.read_bytes()
+        original_source = source.read_bytes()
+        scratch = Path(self.scratch.name)
+        index = scratch / "topic-index.json"
+        self.run_script("skills/wiki-builder/scripts/vault_index.py", wiki,
+                        "--source", source.name, "-o", index)
+        inventory = json.loads(index.read_text(encoding="utf-8"))
+        self.assertTrue(inventory["source_matches"])
+        candidates = scratch / "topic-candidates.json"
+        candidates.write_text(json.dumps(["Geometric average", "Arithmetic mean"]),
+                              encoding="utf-8")
+        collisions = json.loads(self.run_script(
+            "skills/wiki-builder/scripts/find_collisions.py", "--index", index,
+            "--titles", candidates).stdout)
+        self.assertEqual([row["verdict"] for row in collisions["results"]],
+                         ["merge", "create"])
+        # The queue workflow interprets the same-owner match as a no-edit
+        # completion, never as permission to take the builder's merge path.
+        helper = "skills/wiki-add/scripts/backlog.py"
+        first = scratch / "topic-snapshot-1.json"
+        self.run_script(helper, "scan", backlog, "--out", first)
+        first_state = json.loads(first.read_text(encoding="utf-8"))
+        self.assertEqual(first_state["counts"]["pending"], 3)
+        self.run_script(helper, "complete", "--snapshot", first,
+                        "--item", first_state["items"][0]["id"],
+                        "--wiki", wiki, "--entry", existing)
+        self.assertEqual(existing.read_bytes(), original_entry)
+        second = scratch / "topic-snapshot-2.json"
+        self.run_script(helper, "scan", backlog, "--out", second)
+        second_state = json.loads(second.read_text(encoding="utf-8"))
+        item = second_state["items"][0]
+        self.assertEqual(item["text"], "Arithmetic mean")
+        created = wiki / "arithmetic-mean.md"
+        before_failed_completion = backlog.read_bytes()
+        self.run_script(helper, "complete", "--snapshot", second,
+                        "--item", item["id"], "--wiki", wiki,
+                        "--entry", created, expected=2)
+        self.assertEqual(backlog.read_bytes(), before_failed_completion)
+        # Establish the reviewed public-entry fixture. The helper does not
+        # write Wiki notes; its evidence gate must see this real file first.
+        created.write_text(r'''---
+title: "Arithmetic mean"
+type: Concept
+sources:
+  - "[[Example_Averages_nd.md]]"
+created: 2026-09-05
+updated: 2026-09-05
+description: "The arithmetic mean is the sum of a nonempty collection of numbers divided by its size."
+tags:
+  - "#mathematics"
+parents: []
+read: false
+---
+The **arithmetic mean** of a nonempty collection is its sum divided by its size.
+For $n\ge1$ observations $x_i$:
+
+$$
+\bar{x}=\frac{1}{n}\sum_{i=1}^{n}x_i
+$$
+
+**Related:**
+
+---
+
+## Flashcards
+
+The sum divided by the count, $n^{-1}\sum_{i=1}^{n}x_i$, for $n\ge1$ observations $x_i$.
+??
+Arithmetic mean
+''', encoding="utf-8")
+        lint = scratch / "topic-entry-lint.json"
+        self.run_script("skills/wiki-builder/scripts/lint_entry.py", created, "-o", lint)
+        self.assertTrue(json.loads(lint.read_text(encoding="utf-8"))["summary"]["clean"])
+        self.run_script(helper, "complete", "--snapshot", second,
+                        "--item", item["id"], "--wiki", wiki, "--entry", created)
+        self.assertEqual(backlog.read_bytes(),
+                         b"# Topics\r\n\r\n- [x] Geometric average\r\n"
+                         b"- [x] Arithmetic mean\r\n- [ ] Unresolved topic")
+        third = scratch / "topic-snapshot-3.json"
+        self.run_script(helper, "scan", backlog, "--out", third)
+        pending = json.loads(third.read_text(encoding="utf-8"))["items"]
+        self.assertEqual([row["text"] for row in pending], ["Unresolved topic"])
+        self.assertEqual(existing.read_bytes(), original_entry)
+        self.assertEqual(source.read_bytes(), original_source)
+        ownership = json.loads(self.run_script(
+            "skills/clipping-processor/scripts/dedup_index.py", self.notes,
+            "--url", "https://example.org/averages").stdout)
+        self.assertEqual(ownership["checked"][0]["status"], "duplicate")
+
     def test_builder_and_linter_share_the_same_entry_contract_floor(self):
         wiki = self.vault / "Wiki"
 

@@ -198,7 +198,10 @@ class CompatibilityTests(unittest.TestCase):
         codex_skills = ROOT / codex["skills"]
         self.assertEqual(claude_skills.resolve(), codex_skills.resolve())
         skills = sorted(claude_skills.glob("*/SKILL.md"))
-        self.assertEqual(len(skills), 6)
+        self.assertEqual({path.parent.name for path in skills}, {
+            "clipping-processor", "paper-summarizer", "pdf-figure-extractor",
+            "pdf-organizer", "wiki-add", "wiki-builder", "wiki-linter",
+        })
         for path in skills:
             self.assertTrue((path.parent / "../../shared/RUNTIME.md").resolve().is_file())
 

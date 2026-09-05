@@ -79,6 +79,12 @@ free slug or reading the link target as a vault-owned entry.
 
 ## Read and classify
 
+For the separate topic-list workflow, [wiki-add](../../wiki-add/SKILL.md)
+owns web acquisition and candidate-specific source reuse. Its marked research
+extracts follow [the research-source contract](../../wiki-add/references/research.md);
+read them as attributed evidence selections, not full captured pages. Their
+use does not replay an ordinary whole-source run or relax its skip/merge rules.
+
 Read the whole source in one pass — extraction needs relationships across sections, not within chunks. PDFs: first pass the `SKILL.md` canonical-name gate, then use the host's available PDF-reading tools, `pdftotext -layout`, or PyMuPDF, rasterizing pages where you need to see figure content (for your comprehension only — embedded figures come from `Sources/Images/`, never from your rasterization). Markdown: read directly. For very long sources, map the headings first, then read in entity-dense passes; keep one source inside one run. Note the canonical on-disk filename, and track **the physical page where each entity is introduced** — each entity gets its own `#page=N`. Sources are real files on disk. A bare URL needs a Web Clipper capture processed by `clipping-processor`; pasted text needs an existing user-named vault file or the user's exact destination before it can support persistent wiki citations.
 
 **Classify the source.** *Primary* = teaching durable knowledge is its main purpose (papers, chapters, reviews, substantive explainers, lecture notes) → the substance test alone gates extraction. *Secondary* = primarily transient signal (news, earnings, announcements, opinion posts) → the durability test applies **in addition**.

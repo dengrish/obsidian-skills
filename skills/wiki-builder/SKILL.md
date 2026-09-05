@@ -7,6 +7,10 @@ description: "Create or enrich interlinked Obsidian wiki entries from new source
 
 Turn one source into full entries for the substantive entities it teaches. Create new entries or integrate the source into existing ones; do not stack source-specific summaries. Work sequentially across a batch of sources.
 
+For researched topics listed in `add-to-wiki.md`, use
+[wiki-add](../wiki-add/SKILL.md). It reuses these entry standards with a
+create-only scope and never merges or audits an existing entry.
+
 **Setup:** read [shared/RUNTIME.md](../../shared/RUNTIME.md) once for the selected vault, host tools, Python, and paths. Use the relevant sections of [shared/CONVENTIONS.md](../../shared/CONVENTIONS.md) at the action points below. `<skill>` means this skill's directory; invoke helpers from that directory, not relative to the vault.
 
 A required helper is usable only when it completes with the documented output.
@@ -33,6 +37,13 @@ For a folder, process sources in deterministic filename order: steps 1–6 per s
 ### 1. Read the source
 
 **Resolve the real source and prior coverage before reading or writing entries.** A source must be a durable file in the vault. A bare URL is not a source file: request its Web Clipper capture and route that capture through `clipping-processor` first. For pasted text, use an existing user-named vault file or obtain the exact destination before saving it; never invent a persistent source filename or publish wiki entries with an unresolvable citation.
+
+The topic-list workflow in `wiki-add` has its own
+[research-source intake](../wiki-add/references/research.md): it may acquire
+durable sources without a manual clipping. A marked research extract is an
+attributed selection of evidence, not a full captured webpage; preserve that
+distinction when reading it. This does not change ordinary builder intake or
+authorize broad extraction from an online search result.
 
 For a Markdown source, read [source intake](references/source-intake.md#resolve-a-markdown-source) and use its validated frontmatter parser. A decoded first origin pointing to a local PDF identifies a PDF/summary pair: resolve the actual PDF and consume it, reporting the substitution. A URL-origin clipping is independent, even if its stem matches a PDF. Inspect legacy `source:` when appropriate. Missing PDFs, unpaired notes, malformed metadata, and ambiguous targets have distinct outcomes; **a shared stem or incomplete lookup never authorizes claiming or skipping a source**.
 
@@ -186,8 +197,9 @@ uncertainty. A priority or superlative claim such as “first,” “only,” �
 “largest,” or “leading” needs either independent support from a second reliable
 source or narrow attribution to the active source or named report; otherwise
 omit it. Independent support that changes the note must be a durable vault
-source listed in `sources:`; route a live page through `clipping-processor`
-first. This verification is autonomous and requires no separate sign-off.
+source listed in `sources:`; follow the [supporting-source rule](references/writing.md#prose-principles)
+for captured pages and wiki-add's scoped research extracts. This verification
+is autonomous and requires no separate sign-off.
 Then apply the shared [editorial reread](references/writing.md#editorial-reread)
 for precise phrasing, clear referents, paragraph focus, natural transitions,
 and succinctness without loss of meaning. Re-check atomic scope and the

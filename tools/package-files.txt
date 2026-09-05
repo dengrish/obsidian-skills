@@ -58,6 +58,9 @@ skills/pdf-organizer/SKILL.md
 skills/pdf-organizer/references/book-splitting.md
 skills/pdf-organizer/references/rename-repair.md
 skills/pdf-organizer/scripts/organize.py
+skills/wiki-add/SKILL.md
+skills/wiki-add/references/research.md
+skills/wiki-add/scripts/backlog.py
 skills/wiki-builder/SKILL.md
 skills/wiki-builder/references/api-surface.md
 skills/wiki-builder/references/calibration.md

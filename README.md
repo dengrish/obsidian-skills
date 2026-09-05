@@ -1,8 +1,8 @@
 # obsidian
 
-Six skills turn PDFs and Web Clipper captures into reading notes and
-interlinked Obsidian wiki entries, then maintain the existing wiki. They run
-in Codex and Claude Code and share one set of
+Seven skills turn PDFs, Web Clipper captures and queued research topics into
+reading notes and interlinked Obsidian wiki entries, then maintain the existing
+wiki. They run in Codex and Claude Code and share one set of
 [vault conventions](shared/CONVENTIONS.md).
 
 ## The skills
@@ -15,7 +15,8 @@ Choose by the requested result, not just the input's file type.
 | Extract figure images | [pdf-figure-extractor](skills/pdf-figure-extractor/SKILL.md) | PDFs → cropped PNGs in `Sources/Images/` |
 | Explain a paper, chapter, report, standard or publication notice | [paper-summarizer](skills/paper-summarizer/SKILL.md) | PDF → reading note in `Articles/` |
 | Clean Web Clipper captures | [clipping-processor](skills/clipping-processor/SKILL.md) | raw capture → cleaned note in `Articles/` |
-| Build or enrich wiki entries from new evidence | [wiki-builder](skills/wiki-builder/SKILL.md) | PDF or cleaned clipping → entries in `Wiki/` |
+| Build or enrich wiki entries from new evidence | [wiki-builder](skills/wiki-builder/SKILL.md) | PDF or URL-origin source note → entries in `Wiki/` |
+| Research and add missing requested topics | [wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md` → durable sources and new requested entries only |
 | Audit, correct or explicitly refactor existing wiki entries | [wiki-linter](skills/wiki-linter/SKILL.md) | existing `Wiki/`, its cited sources or an exact producer mapping → scoped repairs, links, parents and MOCs |
 
 A PDF attached without a stated goal has no default workflow; ask what result
@@ -36,13 +37,19 @@ Inbox/*.pdf → pdf-organizer → Sources/PDFs/
 Inbox/*.md → clipping-processor → Articles/ cleaned clipping
                                      └─ wiki-builder → Wiki/
 
+add-to-wiki.md → wiki-add → durable sources → missing requested entries in Wiki/
+
 Existing Wiki/ → wiki-linter → entry repairs, links, parents, MOCs and proposals
 ```
 
 Figure extraction supplies images to paper-summarizer and wiki-builder.
 Both paper-summarizer and wiki-builder read the **original PDF**; the summary
 is a finished reading note, not a source for wiki-builder. A cleaned clipping
-is itself the source and can be used directly.
+is itself the source and can be used directly. wiki-add can reuse existing
+sources, acquire PDFs through pdf-organizer, or save a clearly marked,
+agent-written research extract for each web page in `Articles/`; these extracts
+are durable evidence, not full-text captures or multi-page summaries. Its
+[research guide](skills/wiki-add/references/research.md) owns that procedure.
 
 **Organize PDFs before deriving filenames and links from them.** Later renames
 must carry the dependent notes, figures, references and sidecars together,
@@ -57,11 +64,19 @@ run. wiki-linter owns retrospective work across the existing wiki. Their
 later source merges from reversing deliberate maintenance decisions.
 For a named existing entry, wiki-linter may correct it from sources it already
 cites or carry out an explicitly requested structural or producer-mapped
-repair. Evidence from a new source still belongs to wiki-builder.
+repair. Enriching an existing entry with new-source evidence still belongs to
+wiki-builder.
+
+wiki-add is the queue-first, create-only route. An existing requested identity,
+including a stub, is skipped without auditing or editing it. New entries use
+builder's writing rules with `parents: []` and `read: false`, but wiki-add never
+adds an unrequested entity to satisfy a builder audit. It checks off only
+successfully published or already-existing queue items; uncertain or blocked
+items remain unchecked. Existing-entry enrichment remains wiki-builder's job.
 
 ## Codex and Claude
 
-The same six skills run in **Codex and Claude Code** on **macOS and Linux**,
+The same seven skills run in **Codex and Claude Code** on **macOS and Linux**,
 including their desktop surfaces when local files and shell execution are
 available. This is a skill package, not an Obsidian community plugin or an MCP
 server. Ordinary chats
@@ -109,21 +124,24 @@ it and any per-run path overrides through [RUNTIME.md](shared/RUNTIME.md).
 ```text
 <vault>/
 ├── Inbox/                    raw clippings and incoming PDFs
-├── Articles/                 cleaned clippings and PDF reading notes
+├── Articles/                 clippings, PDF reading notes and research extracts
 ├── Sources/
 │   ├── PDFs/                 organized PDFs
 │   │   └── <Work>/           a split book's chapter PDFs
 │   └── Images/               flat folder for extracted/downloaded images
 ├── Wiki/                     entity notes, scanned recursively
+├── add-to-wiki.md            wiki-add's requested-topic queue
 ├── <discipline>-moc.md       maps of content at the vault root
 └── *-suggestions.md          the linter's three proposal logs
 ```
 
 PDFs move out of `Inbox/`; raw clippings stay as the record of what was
 captured. The clipping dedup index determines whether a capture was processed.
-Both reading-note writers share `Articles/` and check provenance before
-claiming an existing note: `sources:` item 1 identifies its origin. MOCs and
-proposal logs stay outside `Wiki/` so they are not treated as entries.
+All three source-note producers share `Articles/`: `sources:` item 1 identifies
+the origin used for deduplication, and a body marker distinguishes wiki-add's
+research extracts from full-text clippings. wiki-add reuses suitable existing
+source notes and images without overwriting them. MOCs, proposal logs and the
+topic queue stay outside `Wiki/` so they are not treated as entries.
 
 No skill discards user content. An authorized reprocess or refactor may
 conditionally remove an obsolete path only after its replacement and dependent
@@ -209,7 +227,7 @@ claude plugin validate skills
 
 The plugin-manifest command may report that the repository-root `CLAUDE.md` is
 not loaded as plugin context. That file exists for contributors working on this
-repository and imports `AGENTS.md`; runtime plugin guidance lives in the six
+repository and imports `AGENTS.md`; runtime plugin guidance lives in the seven
 skills. The warning is expected, while the marketplace and skill validations
 should pass cleanly (including with `--strict`).
 

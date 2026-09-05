@@ -524,14 +524,14 @@ def _codex_manifest_bytes(authored):
     manifest["skills"] = "./skills/"
     manifest["interface"] = {
         "displayName": "Obsidian",
-        "shortDescription": "Turn documents and clippings into a maintained Obsidian vault",
+        "shortDescription": "Build an Obsidian wiki from documents and researched topics",
         "longDescription": manifest["description"],
         "developerName": manifest["author"]["name"],
         "category": "Productivity",
         "capabilities": ["Read", "Write"],
         "defaultPrompt": [
             "Organize the PDFs and process the web clippings in my Obsidian inbox.",
-            "Summarize a research paper with its key figures in my Obsidian vault.",
+            "Research the unchecked topics in add-to-wiki.md and add missing wiki entries.",
             "Audit the wiki entries and rebuild my maps of content.",
         ],
     }

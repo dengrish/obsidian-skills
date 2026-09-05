@@ -5,6 +5,12 @@ and Python helpers run on macOS and Linux and are shared by Codex and Claude
 Code; they do not require one host's internal tool names. Installing the plugin
 does not grant access to a vault, install Python packages, or enable browser tools.
 
+When wiki-add needs web research, use the search and page-reading capabilities
+available in the active host; no particular browser, connector or host-specific
+tool name is required. If adequate evidence cannot be accessed, report the
+limitation and leave the affected queue items unchecked. Do not substitute
+unverified recollection for sources.
+
 `SKILL.md` gives the active workflow and its decision gates. Follow its links
 when a step requires a reference; do not load every reference preemptively.
 [`CONVENTIONS.md`](CONVENTIONS.md) owns shared layout, naming, metadata and
@@ -17,6 +23,13 @@ Before creating, replacing, moving, or removing a vault artifact, follow the
 shared [safe-write protocol](SAFE_WRITES.md). A scan or preflight does not
 reserve a pathname, and permission to edit the version that was read does not
 authorize overwriting a later editor save.
+
+wiki-add reads `add-to-wiki.md` at the selected vault root. Its
+[research guide](../skills/wiki-add/references/research.md) distinguishes
+temporary research material from durable sources: publish and verify any new
+source notes, organized PDFs and selected images before the Wiki entries that
+cite them, and verify entries before checking off queue items. Existing source
+notes, images and requested Wiki identities are reused or skipped without edits.
 
 ## Resolve the paths before acting
 

@@ -201,8 +201,10 @@ Use a neutral encyclopedic register: direct, precise, and free of conversational
    *best*, *largest*, and *leading* need independent support from a second
    reliable source or narrow attribution to the active source or named report.
    If independent support changes the published note, it must be a durable vault
-   source listed in `sources:`; capture a web page through `clipping-processor`
-   first. A transient check may justify omitting a ranking, but never adding or
+   source listed in `sources:`; process an existing capture through
+   `clipping-processor`, or acquire it through `wiki-add`'s research-source
+   workflow when that topic-list skill is in scope. A transient check may
+   justify omitting a ranking, but never adding or
    broadening one. Without support, omit the ranking while preserving the
    source-backed descriptive claim. Scope software behavior to the version or time period the
    source establishes, and replace reader-relative words such as *currently*,

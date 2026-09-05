@@ -6177,6 +6177,7 @@ SELFTEST_MIN_CASES = {
     "skills/pdf-figure-extractor/scripts/extract_figures.py": 173,
     "skills/pdf-figure-extractor/scripts/render_page.py": 66,
     "skills/pdf-organizer/scripts/organize.py": 260,
+    "skills/wiki-add/scripts/backlog.py": 28,
     "skills/wiki-builder/scripts/find_collisions.py": 67,
     "skills/wiki-builder/scripts/lint_entry.py": 309,
     "skills/wiki-builder/scripts/vault_index.py": 78,
