@@ -247,7 +247,7 @@ Types: `Concept`, `Person`, `Organization`, `Dataset`, `Software`, `Device`, `Ev
 
 Tags use the [shared discipline enum](../../shared/CONVENTIONS.md#3-the-discipline-tag-enum), not abbreviations or wikilinks.
 
-Open with prose immediately after YAML. A fresh full entry follows the body with one `**Related:**` line, `---`, and exactly one `## Flashcards` card. On merge, preserve every pre-existing card, its `!!` disabled cue, and every scheduling or block-ID attachment recognized by the canonical [card format](references/flashcards-and-emphasis.md#4-flashcards), byte-for-byte and in place; a legacy extra card is a report-only refactor candidate under the card guide. Existing `parents:` and legacy `importance:` stay as found on merge; missing or unknown review state is reported rather than invented.
+Open with prose immediately after YAML. A fresh full entry follows the body with one `**Related:**` line, `---`, and exactly one `## Flashcards` card. On merge, retain every pre-existing card and preserve its `??`/`!!` cue and every scheduling or block-ID attachment byte-for-byte and in place. Content repairs follow the [merge contract](references/merge.md#merge-logic), including required line-1 equation coverage; a legacy extra card is a report-only refactor candidate under the [card guide](references/flashcards-and-emphasis.md#4-flashcards). Existing `parents:` and legacy `importance:` stay as found on merge; missing or unknown review state is reported rather than invented.
 
 ## Quality Checklist
 
@@ -358,7 +358,9 @@ item numbers used by `lint_entry.py` and `wiki-linter`.
 19. **Flashcards** — a fresh full entry has one three-content-line definition
     card after the footer and separator; a legacy extra card remains a finding
     but is report-only absent the explicit refactor authority in the card guide.
-    Keep line 1 self-contained, leak-free, and complete; line 2 is `??` or
+    Keep line 1 self-contained, leak-free, and complete, including applicable
+    inline equations under the [coverage rule](references/flashcards-and-emphasis.md#line-1-equation-coverage);
+    review every existing card for this targeted repair on merges. Line 2 is `??` or
     preserved user `!!`; line 3's content is the canonical primary answer.
     Preserve every recognized schedule and block-ID attachment on every
     pre-existing card byte-for-byte and in place. See

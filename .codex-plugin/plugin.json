@@ -1,6 +1,6 @@
 {
   "name": "obsidian",
-  "version": "1.33.27",
+  "version": "1.33.28",
   "description": "Turn PDFs and web clippings into a maintained Obsidian knowledge base: name and file PDFs, split books into chapters, extract figures, create evidence-grounded reading notes for papers, chapters, reports, standards and publication notices, clean clippings, build interlinked wiki entries, and keep the vault linted and navigable.",
   "repository": "https://github.com/dengrish/obsidian-skills",
   "author": {

@@ -3566,6 +3566,13 @@ def run_self_test():
               "decision threshold moves.",
               'The plot Hooke might have called "a curve."')),
           [])
+    check("punctuation inside inline LaTeX does not split a card sentence",
+          items(mutate(
+              "The plot tracing the trade-off between two error rates as a "
+              "decision threshold moves.",
+              r"The value $f(t)=\text{e.g. A or B}$ identifies an operating "
+              "point.")),
+          [])
     check("Markdown links, emphasis, display math, and HTML are "
           "forbidden on card line 1",
           [items(mutate(

@@ -46,7 +46,7 @@ A display block may sit mid-sentence — "…it is the [[cost-function|cost func
 
 **Structure the layout in display math:** `\frac{…}{…}` rather than the inline slash, `\left( … \right)` around tall content, `\sqrt{…}`, `\sum_{i=1}^{m}`. The slash form stays fine *inline*, where a stacked fraction would break line height.
 
-Display blocks appear only in body prose. `description:` is plain text (writing.md §1); captions and flashcard line 1 allow **inline** math only; flashcard line 3 is plain (`references/flashcards-and-emphasis.md` §4). A display block inside a flashcard would break the card's three-contiguous-line structure — the card's line 1 states its definition with inline math or plain words.
+Display blocks appear only in body prose. `description:` is plain text (writing.md §1); captions and flashcard line 1 allow **inline** math only; flashcard line 3 is plain. Flashcard definitions follow the canonical [line-1 equation-coverage rule](flashcards-and-emphasis.md#line-1-equation-coverage): applicable equations share the description's physical line, never a display block or the answer line.
 
 ## 3. Notation — one symbol per role, vault-wide
 

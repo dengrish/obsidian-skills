@@ -417,7 +417,11 @@ tested facet; itemize the addition in the run report.
 The scanner checks each card's contiguous definition / cue / answer content.
 Line 1 is a self-contained, capitalized, period-ended sentence with inline
 LaTeX as its only markup; it must neither expose nor semantically reconstruct
-the answer and must retain defining mathematical operations. Line 2 is `??` or
+the answer. The agent checks every card against the canonical
+[line-1 equation-coverage rule](../../wiki-builder/references/flashcards-and-emphasis.md#line-1-equation-coverage),
+even when its prose is accurate or the scanner is silent; the targeted repair
+and history limits are defined in [flashcard maintenance](flashcards.md).
+Line 2 is `??` or
 the user's preserved `!!`. Line 3's content, before any protected attachment,
 is the plain-text canonical title or qualified title's base/mathematical plain
 form, plus

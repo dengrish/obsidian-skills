@@ -150,7 +150,10 @@ Keep the non-obvious boundaries visible at the action point:
   rewrite a fact, select source content, or redistribute material merely to
   close a finding.
 - **Cards:** read [flashcard maintenance](references/flashcards.md) before any
-  change. Preserve `!!` and every scheduling or block-ID attachment recognized
+  change. Inspect every card for required line-1 equation coverage, even if
+  its prose is accurate or its review history is unknown; the guide permits
+  that targeted repair while preserving the tested claim and answer line.
+  Preserve `??`/`!!` cues and every scheduling or block-ID attachment recognized
   by the canonical card format on every pre-existing card, byte-for-byte and
   in place. Missing visible metadata does not prove a pre-existing card is
   fresh. When a full entry lacks its required card, create the single primary-

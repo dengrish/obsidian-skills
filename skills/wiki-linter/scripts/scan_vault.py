@@ -5174,6 +5174,13 @@ def run_self_test():
             tags=()).replace(
                 "The idea this entry is about, stated once.",
                 'The label Hooke called "cells."'))
+        _st_write(v, "inline-math-period-card.md", _st_entry(
+            "Inline math period card",
+            "**Inline math period card** is a worked example.",
+            tags=()).replace(
+                "The idea this entry is about, stated once.",
+                r"The value $f(t)=\text{e.g. A or B}$ applies under a stated "
+                "condition."))
         _st_write(v, "markdown-card.md", _st_entry(
             "Markdown card", "**Markdown card** is a worked example.",
             tags=()).replace(
@@ -5277,6 +5284,8 @@ def run_self_test():
                   res, "two-sentence-card", "item19"), True)
         check("a period inside closing quotation marks terminates a card sentence",
               _st_msg(res, "quoted-period-card", "item19"), "")
+        check("punctuation inside inline LaTeX does not split a card sentence",
+              _st_msg(res, "inline-math-period-card", "item19"), "")
         check("Markdown link syntax is rejected on card line 1",
               "Markdown link/image" in _st_msg(
                   res, "markdown-card", "item19"), True)

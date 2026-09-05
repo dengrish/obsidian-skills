@@ -34,9 +34,7 @@ That plugin is a *community plugin installed in the vault* — it lives at `.obs
 
   **What "leak-free" means, exactly.** The definition must not contain the title's own string or any alias's string. The mechanical comparison normalizes Unicode and case and treats punctuation — including slash and dash variants — plus whitespace as word separators (Quality Checklist item 19). So a `Key-value cache` entry's definition may not contain "key-value cache" or "key value cache," and `Bias/variance trade-off` cannot be hidden as "bias – variance trade off." **Component words of a compound title are permitted:** that same definition may freely say "keys and values," because neither word is the title. Evading the component words produces contorted, less identifying definitions — the opposite of what the rule is for. Only whole title and whole alias surfaces are mechanically off-limits. The semantic review also rejects a definition that reconstructs the answer by merely expanding an acronym or reordering all of its components: "machine learning operations practice" still gives away `MLOps`, and "messenger RNA vaccine" still gives away `mRNA vaccine`, even when neither literal string matches.
 
-  **Preserve the defining operation and conditions.** When the body defines the subject mathematically, compare the card with the display equation before saving. A verbal card may compress notation, but it must retain every operation that determines the quantity and every condition needed for the definition to hold. For an Lp norm, saying only "the sum of p-th powers" is a different quantity because it omits the p-th root. Use inline LaTeX when that is the clearest compact definition.
-
-  **LaTeX follows the same conventions as body prose** (prose principle 8). **Use it without hesitation when a symbol or equation sharpens the definition** — the symbolic form is often more uniquely identifying than a verbal paraphrase, exactly what an answer-key definition needs. A `Precision` definition can include `$TP/(TP+FP)$` directly rather than paraphrasing the ratio in words, right-hand side only: strip an entity-name left-hand side that would give the answer away (`\text{precision} =`), but keep an LHS that is only a symbol convention such as `H` for cross-entropy, since the substring check applies inside math regions too. **No Markdown or HTML other than inline LaTeX** — no Obsidian or Markdown links/images, bold, italic (asterisk or underscore form), strikethrough, backticks, or HTML tags. Those forms either render literally in the Spaced Repetition reviewer or turn the answer-key sentence into styled content. LaTeX is the only inline markup line 1 accepts.
+  Apply the [line-1 equation-coverage rule](#line-1-equation-coverage) whenever the body establishes an equation for the claim this card tests. **No Markdown or HTML other than inline LaTeX** — no Obsidian or Markdown links/images, bold, italic (asterisk or underscore form), strikethrough, backticks, or HTML tags. Those forms either render literally in the Spaced Repetition reviewer or turn the answer-key sentence into styled content. LaTeX is the only inline markup line 1 accepts.
 
 - **Line 2 — `??` (active card) or `!!` (user-disabled card).** The literal two-character cue marking the boundary between prompt and answer. No surrounding whitespace, no other content on the line. **`??` is the Spaced Repetition plugin's *multi-line reversed* card separator, and the doubling is load-bearing** — a single `?` is that plugin's one-directional multi-line card. Reversed means the card is drilled both ways, definition→term and term→definition, which is why its scheduling state can carry one schedule per side and why wiki-linter reviews line 1 for clarity in *both* directions (`wiki-linter/references/flashcards.md`). "Simplifying" `??` to `?` silently halves every card in the vault and strands the second schedule. **Wiki-builder always writes `??` verbatim on every card it creates and never writes `!!`.** The user may hand-edit a card's `??` to `!!` to temporarily remove the card from the Spaced Repetition plugin's queue without deleting it; `!!` only ever appears via that manual edit. Both values are valid, both are preserved verbatim on subsequent merges, and both pass the Quality Checklist's line-2 format check. The user re-enables a disabled card by changing `!!` back to `??` themselves; wiki-builder takes no action on either form.
 
@@ -51,6 +49,38 @@ That plugin is a *community plugin installed in the vault* — it lives at `.obs
 The three content lines run consecutively with **no blank line between any pair of them** (a blank line between lines 1–3 would break the card's contiguity). Following-line attachments also start directly after line 3: a blank line closes the attachment position, so an SR-looking comment or callout beyond it remains visible for repair rather than being reassigned to the card. The section's current presentation shape is **one card only**; anything attached directly to line 3 must match a recognized protected form above and is preserved verbatim. Other HTML comments, ordinary callouts, or visible text are malformed card content. A second definition/cue/term sequence is instead a report-only legacy-extra-card finding unless the user's request already authorizes the source-backed refactor described below.
 
 **Exactly one flashcard per entry is the target presentation shape.** The primary card covers the entity's main claim — the same conceptual scope as the body's opening sentence (prose principle 1), but rewritten in flashcard form: the definition leads (line 1), the canonical term answers (line 3). A second term that seems to warrant a card of its own may reveal mixed entry scope, but neither the card count nor absence from the active source authorizes deleting existing material. Preserve every pre-existing card and attachment, quote each extra card verbatim in the run report, and propose a split when a durable cited source supports the second term. Move or remove an extra card only when the request explicitly authorizes that source-backed refactor and accounts for its tested claim and every attachment, or explicitly names the card for deletion. Background knowledge never adds a term, claim, or card the sources do not contain. Fresh entries still receive one term and one card. (The observed corpus failure: a merge appended a second, Q&A-style *concept drift* card to the *Data drift* entry when neither cited chapter mentions that term.)
+
+### Line-1 equation coverage
+
+**When an equation established in the entry's body expresses the claim a card
+tests, include that equation inline on the same first descriptive line as a
+compact verbal cue.** A mathematically accurate prose-only definition still
+needs the equation. Review every card, including disabled and legacy extra
+cards, against its own tested claim; a different facet of the entry is not a
+reason to change that claim.
+
+Use `$…$` only, on **one physical line** with the description, never a display
+block, a separate equation line, or the answer line. Match the body's notation
+or use a demonstrably equivalent compact form. Preserve every defining
+operation, essential condition, and symbol binding needed for the card to be
+self-contained; an Lp norm still needs its p-th root. A lone symbol does not
+substitute for the relationship being tested.
+
+Keep the equation leak-free: remove an answer-name left-hand side such as
+`\text{precision} =`, retaining the right-hand expression and a verbal cue;
+keep a neutral symbolic left side only when it does not reveal the answer.
+For example, this complete description occupies one physical line:
+
+```text
+The fraction $TP/(TP+FP)$ of positive predictions that are correct, where $TP$ and $FP$ count true and false positives and $TP+FP>0$.
+```
+
+Use only math that describes the existing tested claim. An unrelated example,
+performance result, or auxiliary calculation does not qualify, and qualitative
+cards do not need forced math. If a mathematical card has no matching body
+equation or the relationship is underdetermined, preserve it and report the
+missing support; do not invent body math or choose a new learning objective
+to satisfy this rule. Any body-equation repair follows its own item-12 scope.
 
 ---
 

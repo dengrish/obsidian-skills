@@ -730,7 +730,13 @@ def flashcard_line1_faults(text):
         faults.append("does not start with a capitalized word")
     if not ends_with_sentence_period(value):
         faults.append("does not end with a period")
-    sentence_count = count_sentences(value)
+    # Punctuation in a balanced inline equation is mathematical content, not
+    # a prose boundary. Keep the view offset-preserving so punctuation outside
+    # math remains visible; malformed math stays unmasked and is still reported
+    # by ``flashcard_line1_markup`` below.
+    sentence_view = _INLINE_LATEX_RE.sub(
+        lambda match: " " * len(match.group(0)), value)
+    sentence_count = count_sentences(sentence_view)
     if sentence_count > 1:
         faults.append("contains roughly %d sentences" % sentence_count)
     markup = flashcard_line1_markup(text or "")
@@ -1088,6 +1094,19 @@ def run_self_test(verbose=False):
          flashcard_line1_faults("A complete answer-key definition."), []),
         ("quoted clean card passes",
          flashcard_line1_faults('The term Hooke called "cells."'), []),
+        ("punctuation inside inline LaTeX is not a prose sentence boundary",
+         flashcard_line1_faults(
+             r"The value $f(x)=\text{e.g. A or B}$ applies under the "
+             "stated condition."), []),
+        ("a real second sentence after inline LaTeX remains visible",
+         flashcard_line1_faults(
+             r"The value $f(x)=\text{e.g. A or B}$ applies. Another follows."),
+         ["contains roughly 2 sentences"]),
+        ("malformed inline LaTeX remains visible to both checks",
+         flashcard_line1_faults(
+             r"The value $f(x)=\text{e.g. A or B} applies. Another follows."),
+         ["contains roughly 3 sentences",
+          "has forbidden unmatched LaTeX delimiter"]),
         ("lowercase and missing period are both reported",
          flashcard_line1_faults("an incomplete definition"),
          ["does not start with a capitalized word",
@@ -1166,6 +1185,14 @@ def run_self_test(verbose=False):
              "A $k$-nearest neighbors method.",
              r"A $\boldsymbol{k}$-nearest neighbors method.")],
          ["bounded", "bounded"]),
+        ("a named equation side remains an answer leak",
+         answer_surface_match(
+             r"The ratio $\text{precision}=TP/(TP+FP)$ measures correctness.",
+             "Precision"), "bounded"),
+        ("an answer-free equation side does not manufacture a leak",
+         answer_surface_match(
+             r"The ratio $TP/(TP+FP)$ measures correctness.", "Precision"),
+         None),
         ("semantic exponent spelling cannot hide an answer surface",
          answer_surface_match(
              "An $A^{*}$ search explores a graph.", "A-star search"),
