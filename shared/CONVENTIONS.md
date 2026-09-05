@@ -898,10 +898,7 @@ drifted. The script's docstring is the explanation; the code is the rule.
 the ASCII `+`/`#`/`*` mappings and charge normalization, the Greek table including
 capitals (`Σ-algebra`, `ΔG`, `Ω notation`) and final sigma `ς`, and non-Latin
 scripts (CJK), which must raise `SlugError` rather than silently returning an
-empty slug. It also rejects Windows device basenames (`CON`, `PRN`, `AUX`,
-`NUL`, `COM1`–`COM9`, and `LPT1`–`LPT9`) on every host so a Unix-created vault
-does not acquire entries that cannot be checked out or opened natively on
-Windows. Those original three shapes were once an open gap — the suite had no Greek
+empty slug. Those original three shapes were once an open gap — the suite had no Greek
 capital, no `ς` and no CJK title, and the harness's `ADVERSARIAL` list, which
 carried exactly them, ran *only* against a second implementation, so on a healthy
 tree it never executed at all. Both halves are closed: the cases are in the suite,
@@ -916,8 +913,7 @@ Writing a file literally named `.md`, or renaming an entry to `""`, is the
 failure this raises to prevent. **An over-long slug is the same class**: past
 the module's `MAX_STEM_BYTES` budget the eventual write dies with
 ENAMETOOLONG, so the module raises `SlugError` there too — ask the user for a
-shorter title rather than crashing the write. A Windows device basename is
-handled the same way: qualify the canonical title until its slug is portable.
+shorter title rather than crashing the write.
 
 **Consequences worth knowing without opening the script:** the slug derives from
 the **full** title including any parenthetical (`Feature (machine learning)` →

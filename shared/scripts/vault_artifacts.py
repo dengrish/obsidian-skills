@@ -46,11 +46,9 @@ __all__ = [
     "PDFInventory",
     "PDFSelection",
     "FigureInventory",
-    "InventoryIncomplete",
     "portable_identity",
     "inventory_pdfs",
     "verify_selected_pdf",
-    "find_vault_pdfs",
     "source_stem_groups",
     "output_vault_root",
     "inventory_source_figures",
@@ -201,10 +199,6 @@ class FigureInventory:
             "blocked_matches": self.blocked_matches,
             "findings": [item.to_dict() for item in self.findings],
         }
-
-
-class InventoryIncomplete(OSError):
-    """A recursive inventory could not establish a complete namespace."""
 
 
 def inventory_pdfs(root, *, include_hidden=False):
@@ -412,23 +406,6 @@ def verify_selected_pdf(vault_root, selected, *, inventory=None):
         unique = True
         reason = "exactly one vault PDF pathname owns this portable basename"
     return PDFSelection(inv, selected_path, key, matches, unique, reason)
-
-
-def _incomplete_message(inventory):
-    errors = [item for item in inventory.findings if item.severity == "error"]
-    detail = "; ".join("%s: %s" % (item.path, item.message)
-                       for item in errors[:3])
-    if len(errors) > 3:
-        detail += "; and %d more" % (len(errors) - 3)
-    return detail or "inventory did not complete"
-
-
-def find_vault_pdfs(vault_root):
-    """Compatibility wrapper returning paths or raising on an incomplete walk."""
-    inventory = inventory_pdfs(vault_root)
-    if not inventory.complete:
-        raise InventoryIncomplete(_incomplete_message(inventory))
-    return inventory.paths
 
 
 def _selected_already_in_inventory(selected, inventoried):

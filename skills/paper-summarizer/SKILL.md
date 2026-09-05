@@ -104,8 +104,7 @@ embed or substitute another figure.
 ## 2. Read the PDF and record the claims
 
 ```bash
-python3 '<skill>/scripts/paper_text.py' '<pdf path>' --sections
-python3 '<skill>/scripts/paper_text.py' '<pdf path>' --pages
+python3 '<skill>/scripts/paper_text.py' '<pdf path>' --sections --pages
 ```
 
 Read the document's argument, evidence, approach and actual exhibits, not only

@@ -120,7 +120,8 @@ if _here != _shared:
     _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
-from yaml_scalars import parse_scalar, strip_comment  # noqa: E402
+from yaml_scalars import (parse_scalar, split_flow as _split_flow,
+                          strip_comment)  # noqa: E402
 from entry_structure import mask_body_comments, mask_escaped_wikilinks  # noqa: E402
 from slugify import SlugError, slug_stem  # noqa: E402
 
@@ -241,44 +242,6 @@ class Frontmatter(object):
 def unquote_scalar(raw):
     """Return a validated scalar and its quoting style, or raise ValueError."""
     return parse_scalar(raw)
-
-
-def _split_flow(inner):
-    """Split a valid non-nested flow-list payload.
-
-    An empty payload is the valid list ``[]``. A comma-delimited empty element
-    is invalid YAML and raises ``ValueError`` instead of being silently dropped.
-    """
-    if not inner.strip():
-        return []
-    out, buf, quote = [], [], None
-    i = 0
-    while i < len(inner):
-        ch = inner[i]
-        if quote:
-            buf.append(ch)
-            if quote == '"' and ch == "\\" and i + 1 < len(inner):
-                i += 1
-                buf.append(inner[i])
-            elif ch == quote:
-                if quote == "'" and i + 1 < len(inner) and inner[i + 1] == "'":
-                    i += 1
-                    buf.append(inner[i])
-                else:
-                    quote = None
-        elif ch in "\"'" and not "".join(buf).strip():
-            quote = ch
-            buf.append(ch)
-        elif ch == ",":
-            out.append("".join(buf).strip())
-            buf = []
-        else:
-            buf.append(ch)
-        i += 1
-    out.append("".join(buf).strip())
-    if any(x == "" for x in out):
-        raise ValueError("flow list contains an empty comma-delimited item")
-    return out
 
 
 def parse_frontmatter(text):
@@ -602,19 +565,15 @@ def index_entry(path, text=None, root=None):
             descriptor = os.open(abspath, flags)
             with os.fdopen(descriptor, "r", encoding="utf-8-sig") as fh:
                 opened_before = os.fstat(fh.fileno())
-                identity = lambda value: (
-                    value.st_dev, value.st_ino, stat.S_IFMT(value.st_mode))
-                if identity(item) != identity(opened_before):
+                if stable(item) != stable(opened_before):
                     record["errors"].append(
                         "file changed while it was opened; metadata was not indexed")
                     return record
                 text = fh.read()
                 opened_after = os.fstat(fh.fileno())
             after = os.stat(abspath, follow_symlinks=False)
-            if not (stable(item) == stable(after)
-                    and stable(opened_before) == stable(opened_after)
-                    and identity(item) == identity(opened_before)
-                    and identity(after) == identity(opened_after)):
+            if not (stable(item) == stable(opened_before)
+                    == stable(opened_after) == stable(after)):
                 record["errors"].append(
                     "file changed while it was read; metadata was not indexed")
                 return record

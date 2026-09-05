@@ -330,18 +330,8 @@ class Registry:
 
 
 def rel(path):
-    """Return one canonical slash-separated repository-relative identifier.
-
-    Registry keys, package paths, and self-test floor keys are authored with
-    ``/`` on every host.  ``os.path.relpath`` uses ``\\`` on Windows; leaking
-    that presentation into comparisons makes a valid key simultaneously look
-    unused and absent.
-    """
-    try:
-        relative = os.path.relpath(path, ROOT)
-    except ValueError:
-        relative = os.fspath(path)
-    return relative.replace("\\", "/")
+    """Return the repository-relative identifier used by registries and tests."""
+    return os.path.relpath(path, ROOT)
 
 
 _READ_CACHE = {}
@@ -6173,12 +6163,12 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/entry_structure.py": 108,
     "shared/scripts/plugin_paths.py": 110,
     "shared/scripts/plurals.py": 251,
-    "shared/scripts/slugify.py": 82,
+    "shared/scripts/slugify.py": 74,  # device-name restrictions removed
     "shared/scripts/vault_artifacts.py": 39,
     "shared/scripts/yaml_scalars.py": 8,
     "skills/clipping-processor/scripts/dedup_index.py": 149,
     "skills/clipping-processor/scripts/fetch_images.py": 466,
-    "skills/clipping-processor/scripts/slug.py": 137,
+    "skills/clipping-processor/scripts/slug.py": 133,  # device-name guards removed
     "skills/paper-summarizer/scripts/note_lint.py": 203,
     "skills/paper-summarizer/scripts/paper_scan.py": 144,
     "skills/paper-summarizer/scripts/paper_text.py": 49,
@@ -7635,7 +7625,7 @@ CHECKS = [
 
 
 def _configure_utf8_stdio():
-    """Keep JSON and diagnostics writable through legacy Windows pipes."""
+    """Keep Unicode JSON and diagnostics readable under non-UTF-8 locales."""
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if callable(reconfigure):

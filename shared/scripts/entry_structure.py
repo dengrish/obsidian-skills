@@ -35,7 +35,6 @@ __all__ = [
     "math_title_plain_text",
     "mask_body_comments",
     "mask_escaped_wikilinks",
-    "opener_has_subject_date",
     "opener_subject_date_status",
     "normalized_answer_surface",
     "opening_paragraph",
@@ -915,16 +914,6 @@ def opener_subject_date_status(opener, entry_type):
         except ValueError:
             return "malformed"
     return "valid"
-
-
-def opener_has_subject_date(opener, entry_type):
-    """Whether a canonical date parenthetical immediately follows the subject.
-
-    The first outer-bold span is the entry subject under the shared wiki
-    format.  Ordinary bold, triple emphasis, and mixed scientific-name/suffix
-    emphasis all match the same outer span.
-    """
-    return opener_subject_date_status(opener, entry_type) == "valid"
 
 
 def run_self_test(verbose=False):

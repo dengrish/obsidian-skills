@@ -850,7 +850,7 @@ def run_self_test():
 # ---------------------------------------------------------------------------
 
 def _configure_utf8_stdio():
-    """Keep paths and diagnostics writable through legacy Windows pipes."""
+    """Keep Unicode paths and diagnostics readable under non-UTF-8 locales."""
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if callable(reconfigure):

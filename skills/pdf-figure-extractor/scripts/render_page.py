@@ -94,18 +94,9 @@ def _configure_stdio():
 
 
 try:
-    # `import pymupdf` is the modern spelling. The legacy `import fitz`
-    # alias prints a deprecation notice **on stdout** in PyMuPDF >= 1.25,
-    # which corrupts `auto_fig_bbox.py --emit extract` (its output is meant
-    # to be a runnable shell command) — and the alias is slated for removal
-    # outright. Fall back to it only for PyMuPDF older than 1.24.3, which
-    # predates the `pymupdf` module name.
     import pymupdf as fitz
 except ImportError:
-    try:
-        import fitz  # PyMuPDF < 1.24.3
-    except ImportError:
-        fitz = None
+    fitz = None
 
 
 _PYMUPDF_ERROR = (

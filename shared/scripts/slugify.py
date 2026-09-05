@@ -27,8 +27,7 @@ character and would erase meaning):
 MAIN PIPELINE: lowercase -> non-[a-z0-9] to "-" -> collapse runs -> strip
 -> append ".md".  An empty result means the title cannot be slugged
 automatically; the caller must ask the user for a different title rather
-than writing a file literally named ".md". A result equal to a Windows device
-name is likewise refused so the same vault remains portable across hosts.
+than writing a file literally named ".md".
 
 --------------------------------------------------------------------------
 THE THREE SPECIAL-CHARACTER RULES
@@ -102,7 +101,6 @@ __all__ = [
     "base_term",
     "has_parenthetical",
     "mu_variants",
-    "is_windows_device_stem",
     "SlugError",
     "GREEK",
     "TEST_CASES",
@@ -194,30 +192,6 @@ _NON_SLUG_RE = re.compile(r"[^a-z0-9]")
 _HYPHEN_RUN_RE = re.compile(r"-{2,}")
 _TRAILING_PAREN_RE = re.compile(r"^(?P<base>.*?)\s*\([^()]*\)\s*$")
 
-# Windows reserves these basenames even when they carry an extension. The
-# canonical slug is a cross-host vault identity, so reject them on every host
-# instead of letting `con.md` work on Unix and fail only when the vault moves.
-_WINDOWS_DEVICE_STEMS = {
-    "con", "prn", "aux", "nul",
-    *("com%d" % i for i in range(1, 10)),
-    *("lpt%d" % i for i in range(1, 10)),
-}
-
-
-def is_windows_device_stem(value: str) -> bool:
-    """Whether ``value`` would occupy a reserved Windows device basename.
-
-    Windows reserves the device word even before another extension, and ignores
-    trailing spaces and periods in that component.  Wiki slugs contain neither,
-    but the clipping and occupancy helpers also validate caller-supplied stems;
-    keeping this portable-name test here prevents those producers from drifting.
-    """
-    if value is None:
-        return False
-    first = str(value).rstrip(" .").split(".", 1)[0].rstrip(" .")
-    return first.casefold() in _WINDOWS_DEVICE_STEMS
-
-
 # --------------------------------------------------------------------------
 # algorithm
 # --------------------------------------------------------------------------
@@ -292,11 +266,6 @@ def slug_stem(title: str) -> str:
         raise SlugError(
             "title %r reduces to an empty slug -- ask the user for a different "
             "title rather than writing a file named '.md'" % (title,)
-        )
-    if is_windows_device_stem(s):
-        raise SlugError(
-            "title %r slugs to reserved Windows device name %r -- qualify the "
-            "canonical title so its slug is portable across hosts" % (title, s)
         )
     if len(s.encode("utf-8")) > MAX_STEM_BYTES:
         raise SlugError(
@@ -375,17 +344,9 @@ TEST_CASES = [
     ("", None, "L431 empty title -> stop"),
     ("---", None, "L431 all-separator title -> stop"),
 
-    # --- portable basenames: Windows devices stay reserved with .md ----------
-    ("CON", None, "Windows device basename -> qualify the title"),
-    ("prn", None, "Windows device basename, case-insensitive"),
-    ("AUX", None, "Windows device basename"),
-    ("NUL", None, "Windows device basename"),
-    ("COM1", None, "Windows serial device basename"),
-    ("com9", None, "Windows serial device upper bound"),
-    ("LPT1", None, "Windows parallel device basename"),
-    ("lpt9", None, "Windows parallel device upper bound"),
-    ("COM10", "com10.md", "not a reserved Windows device basename"),
-    ("Convolution", "convolution.md", "reserved-name prefix is harmless"),
+    # Short acronym titles follow the ordinary lowercase pipeline.
+    ("CON", "con.md", "short acronym title"),
+    ("LPT1", "lpt1.md", "alphanumeric title"),
 
     # --- worked examples stated elsewhere in the slug section ----------------
     ("Cl⁻", "cl-minus.md", "L396 superscript minus charge"),

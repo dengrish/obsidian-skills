@@ -76,7 +76,6 @@ skills/wiki-builder/scripts/lint_entry.py
 skills/wiki-builder/scripts/vault_index.py
 skills/wiki-linter/SKILL.md
 skills/wiki-linter/references/backlogs.md
-skills/wiki-linter/references/edge-cases.md
 skills/wiki-linter/references/external-artifact-repair.md
 skills/wiki-linter/references/flashcards.md
 skills/wiki-linter/references/hierarchy.md

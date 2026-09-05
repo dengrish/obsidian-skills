@@ -12,7 +12,7 @@ Read this at [workflow step 7](../SKILL.md#7-review-and-report), before finalizi
 
 Run them at the end of step 7 in this order: **missed-entity, overlap/ownership, then orphan-link.** The order is load-bearing. Missed-entity recovery can create a more specific owner for material already drafted elsewhere; the overlap sweep must see that entry. Recovery and overlap repair can also add or change wikilinks, so the orphan sweep runs last against the final state.
 
-**Whatever the audits create or change gets the Quality Checklist run over it.** The per-file pass is finished by then, so nothing else will catch a recovered entry with an overlong description or an overlap repair that disturbed paragraph flow. Re-lint each affected file before continuing.
+**Whatever the audits create or change gets the Quality Checklist run over it.** The per-file pass is finished by then, so nothing else will catch a recovered entry with an overlong description or an overlap repair that disturbed paragraph flow. Repeat the [editorial reread](writing.md#editorial-reread) and re-lint each affected file before continuing.
 
 ### Missed-entity audit (source coverage)
 

@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Host-independent checks for installation layout and portable execution."""
+"""Checks for installation layout and supported-platform execution."""
 
 import ast
-import hashlib
 import importlib.util
 import io
 import json
@@ -12,7 +11,6 @@ import re
 import shlex
 import shutil
 import socket
-import stat
 import subprocess
 import sys
 import tempfile
@@ -133,22 +131,14 @@ class CompatibilityTests(unittest.TestCase):
                             (path.relative_to(ROOT), node.lineno))
         self.assertEqual(problems, [])
 
-    def test_private_mode_and_wiki_slugs_are_native_windows_portable(self):
+    def test_private_mode_is_applied(self):
         atomic = load("compat_atomic_move", ROOT / "shared/scripts/atomic_move.py")
-        slugger = load("compat_slugify", ROOT / "shared/scripts/slugify.py")
         with tempfile.TemporaryDirectory(prefix="obsidian-mode-portability-") as tmp:
             path = Path(tmp) / "staged"
-            with path.open("xb") as staged, patch.object(
-                    atomic.os, "fchmod", None, create=True):
-                atomic.set_private_mode(staged, str(path), 0o640)
+            with path.open("xb") as staged:
+                atomic.set_private_mode(staged, 0o640)
             self.assertTrue(path.is_file())
-            if os.name != "nt":
-                self.assertEqual(os.stat(path).st_mode & 0o777, 0o640)
-        for title in ("CON", "prn", "AUX", "nul", "COM1", "com9",
-                      "LPT1", "lpt9"):
-            with self.subTest(title=title), self.assertRaises(slugger.SlugError):
-                slugger.slugify(title)
-        self.assertEqual(slugger.slugify("Convolution"), "convolution.md")
+            self.assertEqual(os.stat(path).st_mode & 0o777, 0o640)
 
     def test_runtime_probe_enforces_supported_dependency_floors(self):
         runtime = (ROOT / "shared/RUNTIME.md").read_text(encoding="utf-8")
@@ -166,10 +156,8 @@ class CompatibilityTests(unittest.TestCase):
                 '"PyMuPDF": (1, 28, 0)',
                 '"Pillow": (12, 3, 0)'):
             self.assertIn(probe, runtime)
-        self.assertRegex(
-            runtime,
-            r"try:\n\s+import pymupdf\nexcept ImportError:\n\s+import fitz",
-        )
+        self.assertIn("import pymupdf", runtime)
+        self.assertNotIn("import fitz", runtime)
 
     def test_shared_helper_docs_use_the_plugin_python_floor(self):
         helpers = (
@@ -282,17 +270,12 @@ class CompatibilityTests(unittest.TestCase):
             self.assertEqual(build.package_files(root)[
                 "skills/example/assets/diagram.svg"], b"<svg/>\n")
 
-    def test_archive_rejects_nonportable_or_colliding_names(self):
+    def test_archive_rejects_unsafe_or_colliding_names(self):
         build = load("build_plugin_names", ROOT / "tools/build_plugin.py")
         cases = (
+            {"/absolute.md": b"x"},
             {"../escape.md": b"x"},
-            {"skills\\entry.md": b"x"},
-            {"skills/CON.txt": b"x"},
-            {"skills/CONIN$.txt": b"x"},
-            {"skills/CONOUT$": b"x"},
-            {"skills/COM\N{SUPERSCRIPT ONE}.txt": b"x"},
-            {"skills/LPT\N{SUPERSCRIPT THREE}.txt": b"x"},
-            {"skills/trailing.": b"x"},
+            {"skills/control\x1f.md": b"x"},
             {"skills/Entry.md": b"a", "skills/entry.md": b"b"},
             {"skills/Cafe\N{COMBINING ACUTE ACCENT}.md": b"x"},
             {"skills/Caf\N{LATIN SMALL LETTER E WITH ACUTE}.md": b"a",
@@ -378,130 +361,31 @@ class CompatibilityTests(unittest.TestCase):
                 with self.assertRaises(OSError):
                     build.package_files(root)
 
-    def test_stable_snapshot_tolerates_path_handle_metadata_projection(self):
-        build = load("build_plugin_windows_stat", ROOT / "tools/build_plugin.py")
-        with tempfile.TemporaryDirectory(prefix="obsidian-package-stat-") as tmp:
-            source = Path(tmp) / "source.md"
-            content = b"stable package source\n"
-            source.write_bytes(content)
-            real_fstat = build.os.fstat
+    def test_stable_readers_reject_same_file_changes_during_read(self):
+        build = load("build_plugin_changed_read", ROOT / "tools/build_plugin.py")
+        atomic = load("atomic_move_changed_read", ROOT / "shared/scripts/atomic_move.py")
+        index = load(
+            "vault_index_changed_read",
+            ROOT / "skills/wiki-builder/scripts/vault_index.py")
+        lint = load(
+            "lint_entry_changed_read",
+            ROOT / "skills/wiki-builder/scripts/lint_entry.py")
+        scan = load(
+            "scan_vault_changed_read",
+            ROOT / "skills/wiki-linter/scripts/scan_vault.py")
 
-            class HandleStat:
-                """Expose a stable handle view that differs from path stat."""
-
-                def __init__(self, item, ctime_delta=100):
-                    self.item = item
-                    self.ctime_delta = ctime_delta
-
-                def __getattr__(self, name):
-                    if name == "st_ctime_ns":
-                        return getattr(self.item, name) + self.ctime_delta
-                    if name == "st_mode":
-                        # Windows path and handle APIs may project permission
-                        # bits differently; keep the regular-file type intact.
-                        return stat.S_IFMT(self.item.st_mode) | 0o444
-                    return getattr(self.item, name)
-
-            def projected_fstat(descriptor):
-                return HandleStat(real_fstat(descriptor))
-
-            with patch.object(build.os, "fstat", side_effect=projected_fstat):
-                snapshot = build._stable_regular_snapshot(source, "package source")
-            self.assertEqual(snapshot[3:], (len(content), content))
-
+        def changing_fstat(path):
+            real_fstat = os.fstat
             calls = {"count": 0}
 
-            def changing_fstat(descriptor):
+            def change_after_read(descriptor):
                 calls["count"] += 1
-                return HandleStat(real_fstat(descriptor), calls["count"] * 100)
+                if calls["count"] == 2:
+                    with path.open("ab") as output:
+                        output.write(b"\nchanged during read\n")
+                return real_fstat(descriptor)
 
-            with patch.object(build.os, "fstat", side_effect=changing_fstat):
-                with self.assertRaisesRegex(OSError, "changed while its bytes"):
-                    build._stable_regular_snapshot(source, "package source")
-
-    def test_atomic_snapshot_tolerates_path_handle_metadata_projection(self):
-        atomic = load("atomic_move_windows_stat", ROOT / "shared/scripts/atomic_move.py")
-        with tempfile.TemporaryDirectory(prefix="obsidian-atomic-stat-") as tmp:
-            source = Path(tmp) / "source.md"
-            content = b"stable guarded source\n"
-            source.write_bytes(content)
-            real_fstat = atomic.os.fstat
-
-            class HandleStat:
-                """Expose a stable handle view that differs from path stat."""
-
-                def __init__(self, item, ctime_delta=100):
-                    self.item = item
-                    self.ctime_delta = ctime_delta
-
-                def __getattr__(self, name):
-                    if name == "st_ctime_ns":
-                        return getattr(self.item, name) + self.ctime_delta
-                    if name == "st_mode":
-                        return stat.S_IFMT(self.item.st_mode) | 0o444
-                    return getattr(self.item, name)
-
-            def projected_fstat(descriptor):
-                return HandleStat(real_fstat(descriptor))
-
-            with patch.object(atomic.os, "fstat", side_effect=projected_fstat):
-                snapshot = atomic.regular_file_snapshot(source)
-            self.assertEqual(
-                (snapshot.size, snapshot.digest),
-                (len(content), hashlib.sha256(content).hexdigest()))
-
-            calls = {"count": 0}
-
-            def changing_fstat(descriptor):
-                calls["count"] += 1
-                return HandleStat(real_fstat(descriptor), calls["count"] * 100)
-
-            with patch.object(atomic.os, "fstat", side_effect=changing_fstat):
-                with self.assertRaisesRegex(OSError, "changed while it was read"):
-                    atomic.regular_file_snapshot(source)
-
-    def test_convention_paths_use_package_separators(self):
-        conventions = load("conventions_windows_paths", ROOT / "tests/test_conventions.py")
-        with patch.object(conventions.os.path, "relpath",
-                          return_value=r"skills\wiki-builder\scripts\vault_index.py"):
-            self.assertEqual(
-                conventions.rel(ROOT / "skills/wiki-builder/scripts/vault_index.py"),
-                "skills/wiki-builder/scripts/vault_index.py")
-
-    def test_runtime_readers_tolerate_windows_stat_projection(self):
-        """Stable path and handle views may differ from each other on Windows."""
-        modules = {
-            "figure": load(
-                "figure_state_windows_stat", ROOT / "shared/scripts/figure_state.py"),
-            "fetch": load(
-                "fetch_images_windows_stat",
-                ROOT / "skills/clipping-processor/scripts/fetch_images.py"),
-            "index": load(
-                "vault_index_windows_stat",
-                ROOT / "skills/wiki-builder/scripts/vault_index.py"),
-            "lint": load(
-                "lint_entry_windows_stat",
-                ROOT / "skills/wiki-builder/scripts/lint_entry.py"),
-            "scan": load(
-                "scan_vault_windows_stat",
-                ROOT / "skills/wiki-linter/scripts/scan_vault.py"),
-        }
-        real_fstat = os.fstat
-
-        class HandleStat:
-            def __init__(self, item, ctime_delta=100):
-                self.item = item
-                self.ctime_delta = ctime_delta
-
-            def __getattr__(self, name):
-                if name == "st_ctime_ns":
-                    return getattr(self.item, name) + self.ctime_delta
-                if name == "st_mode":
-                    return stat.S_IFMT(self.item.st_mode) | 0o444
-                return getattr(self.item, name)
-
-        def projected_fstat(descriptor):
-            return HandleStat(real_fstat(descriptor))
+            return change_after_read
 
         note_text = (
             '---\ntitle: "Anchor"\ntype: "Concept"\naliases: []\n'
@@ -509,86 +393,54 @@ class CompatibilityTests(unittest.TestCase):
             'description: "A stable test entry."\ntags: []\nparents: []\n'
             'read: false\n---\n\n**Anchor** is a stable test entry.\n'
         )
-        with tempfile.TemporaryDirectory(prefix="obsidian-reader-stat-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="obsidian-changed-read-") as tmp:
             root = Path(tmp)
-            sidecar = root / ".figure-review.txt"
-            sidecar.write_bytes(b"paper\tfig1\n")
-            markdown = root / "anchor.md"
-            markdown.write_bytes(note_text.encode("utf-8"))
+            source = root / "source.md"
+            source.write_bytes(b"stable source\n")
+            with patch.object(build.os, "fstat",
+                              side_effect=changing_fstat(source)):
+                with self.assertRaisesRegex(OSError, "changed while its bytes"):
+                    build._stable_regular_snapshot(source, "package source")
+
+            source.write_bytes(b"stable source\n")
+            with patch.object(atomic.os, "fstat",
+                              side_effect=changing_fstat(source)):
+                with self.assertRaisesRegex(OSError, "changed while it was read"):
+                    atomic.regular_file_snapshot(source)
+
+            note = root / "anchor.md"
+            note.write_text(note_text, encoding="utf-8")
+            with patch.object(index.os, "fstat",
+                              side_effect=changing_fstat(note)):
+                indexed = index.index_entry(note)
+            self.assertTrue(any("changed while it was read" in error
+                                for error in indexed["errors"]))
+
+            note.write_text(note_text, encoding="utf-8")
+            with patch.object(lint.os, "fstat",
+                              side_effect=changing_fstat(note)):
+                linted = lint.lint_file(note)
+            self.assertTrue(any(finding["item"] == "0-unreadable"
+                                for finding in linted["findings"]))
+
+            moc = root / "MOC.md"
+            moc.write_text(
+                scan.MOC_TREE_START + "\n" + scan.MOC_TREE_END + "\n",
+                encoding="utf-8")
+            with patch.object(scan.os, "fstat",
+                              side_effect=changing_fstat(moc)):
+                self.assertEqual(
+                    scan.moc_marker_state(moc)["state"], "unreadable")
+
             wiki = root / "Wiki"
             wiki.mkdir()
             wiki_note = wiki / "anchor.md"
-            wiki_note.write_bytes(note_text.encode("utf-8"))
-            moc = root / "MOC.md"
-            moc.write_bytes((
-                modules["scan"].MOC_TREE_START + "\n" +
-                modules["scan"].MOC_TREE_END + "\n").encode("utf-8"))
-
-            with patch.object(modules["figure"].os, "fstat",
-                              side_effect=projected_fstat):
-                body, _snapshot = modules["figure"]._stable_sidecar_bytes(sidecar)
-            self.assertEqual(body, b"paper\tfig1\n")
-
-            with patch.object(modules["fetch"].os, "fstat",
-                              side_effect=projected_fstat):
-                self.assertEqual(
-                    modules["fetch"]._stable_regular_snapshot(markdown)[3],
-                    len(note_text.encode("utf-8")))
-                self.assertEqual(
-                    modules["fetch"]._stable_markdown_text(markdown), note_text)
-
-            with patch.object(modules["index"].os, "fstat",
-                              side_effect=projected_fstat):
-                indexed = modules["index"].index_entry(markdown)
-            self.assertEqual(indexed["title"], "Anchor")
-            self.assertFalse(any("changed while" in error
-                                 for error in indexed["errors"]))
-
-            with patch.object(modules["lint"].os, "fstat",
-                              side_effect=projected_fstat):
-                linted = modules["lint"].lint_file(markdown)
-            self.assertFalse(any(finding["item"] == "0-unreadable"
-                                 for finding in linted["findings"]))
-
-            with patch.object(modules["scan"].os, "fstat",
-                              side_effect=projected_fstat):
-                self.assertEqual(
-                    modules["scan"].moc_marker_state(moc)["state"], "marked")
-                scanned = modules["scan"].scan(wiki)
-            self.assertFalse(any(problem["item"] == "item0"
-                                 for problem in scanned["problems"]))
-
-            calls = {"count": 0}
-
-            def changing_fstat(descriptor):
-                calls["count"] += 1
-                return HandleStat(real_fstat(descriptor), calls["count"] * 100)
-
-            with patch.object(modules["index"].os, "fstat",
-                              side_effect=changing_fstat):
-                changed_index = modules["index"].index_entry(markdown)
-            self.assertTrue(any("changed while it was read" in error
-                                for error in changed_index["errors"]))
-
-            calls["count"] = 0
-            with patch.object(modules["lint"].os, "fstat",
-                              side_effect=changing_fstat):
-                changed_lint = modules["lint"].lint_file(markdown)
-            self.assertTrue(any(finding["item"] == "0-unreadable"
-                                for finding in changed_lint["findings"]))
-
-            calls["count"] = 0
-            with patch.object(modules["scan"].os, "fstat",
-                              side_effect=changing_fstat):
-                changed_moc = modules["scan"].moc_marker_state(moc)
-            self.assertEqual(changed_moc["state"], "unreadable")
-
-            calls["count"] = 0
-            with patch.object(modules["scan"].os, "fstat",
-                              side_effect=changing_fstat):
-                changed_scan = modules["scan"].scan(wiki)
+            wiki_note.write_text(note_text, encoding="utf-8")
+            with patch.object(scan.os, "fstat",
+                              side_effect=changing_fstat(wiki_note)):
+                scanned = scan.scan(wiki)
             self.assertTrue(any(problem["item"] == "item0"
-                                for problem in changed_scan["problems"]))
+                                for problem in scanned["problems"]))
 
     @unittest.skipUnless(CAN_CREATE_SYMLINK,
                          "host does not grant symlink privileges")
@@ -675,7 +527,7 @@ class CompatibilityTests(unittest.TestCase):
                         root, output, b"new generated bytes", expected)
             self.assertEqual(output.read_bytes(), changed)
 
-    def test_generated_publication_uses_a_portable_bound_output_parent(self):
+    def test_generated_publication_uses_a_bound_output_parent(self):
         build = load("build_plugin_output_parent", ROOT / "tools/build_plugin.py")
         with tempfile.TemporaryDirectory(prefix="obsidian-build-parent-") as tmp:
             root = Path(tmp) / "plugin"
@@ -687,14 +539,6 @@ class CompatibilityTests(unittest.TestCase):
                 root, output, b"complete bytes", None, parent)
             self.assertEqual(output.read_bytes(), b"complete bytes")
             self.assertFalse(any(output.parent.glob(".plugin-build-stage-*")))
-
-            fallback = output.parent / "fallback.bin"
-            cwd = os.getcwd()
-            with patch.object(build.os, "fchdir", None, create=True):
-                build._publish_generated(
-                    root, fallback, b"fallback bytes", None, parent)
-            self.assertEqual(fallback.read_bytes(), b"fallback bytes")
-            self.assertEqual(os.getcwd(), cwd)
 
     @unittest.skipUnless(CAN_CREATE_SYMLINK,
                          "host does not grant symlink privileges")
@@ -774,8 +618,7 @@ class CompatibilityTests(unittest.TestCase):
                     build._publish_outputs(root, outputs, observed, parents)
             self.assertEqual(first.read_bytes(), b"old first")
             self.assertEqual(second.read_bytes(), b"late second edit")
-            if os.name != "nt":
-                self.assertEqual(os.stat(first).st_mode & 0o777, 0o640)
+            self.assertEqual(os.stat(first).st_mode & 0o777, 0o640)
 
     def test_generated_pair_accepts_a_concurrent_builder_converging(self):
         build = load("build_plugin_group_converge", ROOT / "tools/build_plugin.py")
@@ -1196,11 +1039,8 @@ read: false
                 env=clean_env).returncode, 0)
 
     def test_unicode_cli_output_survives_a_narrow_redirected_stream(self):
-        """Public CLIs must not fail after work because cp1252 cannot encode it."""
-        try:
-            import pymupdf
-        except ImportError:
-            import fitz as pymupdf
+        """Public CLIs must not fail after work under a narrow encoding."""
+        import pymupdf
 
         with tempfile.TemporaryDirectory(prefix="obsidian-unicode-stdio-") as tmp:
             root = Path(tmp)
@@ -1224,7 +1064,7 @@ read: false
 
             env = dict(os.environ)
             env.update({
-                "PYTHONIOENCODING": "cp1252:strict",
+                "PYTHONIOENCODING": "ascii:strict",
                 "PYTHONDONTWRITEBYTECODE": "1",
                 "OBSIDIAN_VAULT_SHARED": str(ROOT / "shared/scripts"),
             })

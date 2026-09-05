@@ -154,16 +154,10 @@ def read_pages(path):
     installed — silently returning nothing would read as "the document says
     nothing", which is the worst possible answer for a verification tool.
     """
-    # `pymupdf` first: it is the module name PyMuPDF has moved to, and the
-    # legacy `fitz` alias prints a deprecation warning on every import, which
-    # lands in the middle of a verification report and reads like a failure.
-    doc_mod = None
-    for name in ("pymupdf", "fitz"):
-        try:
-            doc_mod = __import__(name)
-            break
-        except ImportError:
-            continue
+    try:
+        import pymupdf as doc_mod
+    except ImportError:
+        doc_mod = None
     if doc_mod is not None:
         with doc_mod.open(path) as doc:
             # PyMuPDF deliberately opens several document formats. An HTML
@@ -544,10 +538,7 @@ def run_self_test():
     try:
         import pymupdf as _pm
     except ImportError:
-        try:
-            import fitz as _pm  # noqa: F401
-        except ImportError:
-            _pm = None
+        _pm = None
     if _pm is not None:
         import tempfile
         with tempfile.TemporaryDirectory() as _td:

@@ -39,20 +39,11 @@ RegularFileSnapshot = namedtuple(
     "RegularFileSnapshot", ("identity", "digest", "mode", "size"))
 
 
-def set_private_mode(file_or_fd, path, mode):
-    """Set mode on a staged private file on POSIX and native Windows.
-
-    ``os.fchmod`` is absent on native Windows. The pathname fallback is safe
-    only because callers create ``path`` exclusively inside their private
-    staging directory and have not exposed it at a public vault name yet.
-    """
+def set_private_mode(file_or_fd, mode):
+    """Set a staged file's mode through its open descriptor."""
     descriptor = (file_or_fd if isinstance(file_or_fd, int)
                   else file_or_fd.fileno())
-    fchmod = getattr(os, "fchmod", None)
-    if callable(fchmod):
-        fchmod(descriptor, mode)
-    else:
-        os.chmod(path, mode)
+    os.fchmod(descriptor, mode)
 
 
 class MoveIncomplete(OSError):
@@ -184,16 +175,13 @@ def regular_file_snapshot(path):
     """
     path = os.fspath(path)
     before = os.lstat(path)
-    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
-    attributes = getattr(before, "st_file_attributes", 0)
     if (not stat.S_ISREG(before.st_mode)
-            or stat.S_ISLNK(before.st_mode)
-            or bool(reparse and attributes & reparse)):
+            or stat.S_ISLNK(before.st_mode)):
         raise OSError(
-            errno.EINVAL, "snapshot target is a symlink, reparse point, or "
+            errno.EINVAL, "snapshot target is a symlink or "
             "non-regular file", path)
 
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    flags = os.O_RDONLY
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     descriptor = os.open(path, flags)
@@ -231,18 +219,8 @@ def regular_file_snapshot(path):
             getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)),
         )
 
-    # Native Windows may project a stable file's permission and timestamp
-    # metadata differently through path stat and handle stat. Compare each API
-    # with itself across the read, and use the portable identity triple to bind
-    # both path observations to the opened handle. Requiring the complete
-    # lstat tuple to equal the complete fstat tuple produces false conflicts
-    # even though neither view changed.
-    identity = lambda item: (
-        item.st_dev, item.st_ino, stat.S_IFMT(item.st_mode))
-    if not (stable(before) == stable(after)
-            and stable(opened_before) == stable(opened_after)
-            and identity(before) == identity(opened_before)
-            and identity(after) == identity(opened_after)):
+    if not (stable(before) == stable(opened_before)
+            == stable(opened_after) == stable(after)):
         raise OSError(errno.EBUSY, "file changed while it was read", path)
     return RegularFileSnapshot(
         identity=(after.st_dev, after.st_ino, stat.S_IFMT(after.st_mode)),
@@ -272,10 +250,7 @@ def link_noreplace(source, target):
             number = getattr(errno, name, None)
             if number is not None:
                 unavailable.add(number)
-        # Native Windows reports an unsupported hard-link operation through
-        # winerror even when errno is the generic EINVAL/EACCES translation.
-        if (exc.errno in unavailable
-                or getattr(exc, "winerror", None) in {1, 50}):
+        if exc.errno in unavailable:
             raise LinkUnavailable(source, target, exc) from exc
         raise
 
@@ -611,11 +586,6 @@ def _raise_errno(number, path):
 
 def _native_noreplace(src, dst):
     """Use a host exclusive-rename syscall; return False when unavailable."""
-    if os.name == "nt":
-        # Python documents os.rename as no-replace on Windows.
-        os.rename(src, dst)
-        return True
-
     try:
         libc = ctypes.CDLL(None, use_errno=True)
     except (OSError, AttributeError):
@@ -920,24 +890,10 @@ def run_self_test():
     with tempfile.TemporaryDirectory(prefix="atomic-move-test.") as folder:
         mode_path = put(folder, "private-mode", b"mode")
         with open(mode_path, "r+b") as mode_file:
-            saved_fchmod = getattr(os, "fchmod", None)
-            try:
-                os.fchmod = None
-                set_private_mode(mode_file, mode_path, 0o640)
-            finally:
-                if saved_fchmod is None:
-                    delattr(os, "fchmod")
-                else:
-                    os.fchmod = saved_fchmod
+            set_private_mode(mode_file, 0o640)
         actual_mode = stat.S_IMODE(os.stat(mode_path).st_mode)
-        if os.name == "nt":
-            # Native Windows exposes only its read-only/writeable projection
-            # through chmod rather than preserving every POSIX group bit.
-            check("private staged permissions have a native-Windows fallback",
-                  bool(actual_mode & stat.S_IWUSR), True)
-        else:
-            check("private staged permissions have a native-Windows fallback",
-                  actual_mode, 0o640)
+        check("private staged permissions are set through the descriptor",
+              actual_mode, 0o640)
 
         src = put(folder, "source")
         dst = os.path.join(folder, "target")
@@ -982,19 +938,15 @@ def run_self_test():
 
         first = put(folder, "first-link", b"linked")
         second = os.path.join(folder, "second-link")
+        os.link(first, second)
         try:
-            os.link(first, second)
-        except (OSError, AttributeError, NotImplementedError):
-            check("hard-link alias case is unavailable cleanly", True, True)
-        else:
-            try:
-                move_noreplace(first, second)
-                refused = False
-            except FileExistsError:
-                refused = True
-            check("a distinct hard link is occupied, not a case-only alias",
-                  (refused, os.path.lexists(first), os.path.lexists(second)),
-                  (True, True, True))
+            move_noreplace(first, second)
+            refused = False
+        except FileExistsError:
+            refused = True
+        check("a distinct hard link is occupied, not a case-only alias",
+              (refused, os.path.lexists(first), os.path.lexists(second)),
+              (True, True, True))
 
         real_native = globals()["_native_noreplace"]
         globals()["_native_noreplace"] = lambda _src, _dst: False
@@ -1307,16 +1259,12 @@ def run_self_test():
               regular_file_snapshot(snapshot_alias), snapshot)
 
         snapshot_link = os.path.join(folder, "public-snapshot-symlink")
+        os.symlink(snapshot_target, snapshot_link)
         try:
-            os.symlink(snapshot_target, snapshot_link)
-        except (OSError, NotImplementedError):
-            symlink_refused = True       # host cannot create the adversary
-        else:
-            try:
-                regular_file_snapshot(snapshot_link)
-                symlink_refused = False
-            except OSError:
-                symlink_refused = True
+            regular_file_snapshot(snapshot_link)
+            symlink_refused = False
+        except OSError:
+            symlink_refused = True
         check("the public snapshot refuses a leaf symlink", symlink_refused,
               True)
 

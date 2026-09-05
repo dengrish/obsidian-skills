@@ -124,7 +124,7 @@ from slugify import (  # noqa: E402
     has_parenthetical,
     slug_stem as _slug_stem,
 )
-from yaml_scalars import parse_scalar, strip_comment  # noqa: E402
+from yaml_scalars import parse_scalar, split_flow, strip_comment  # noqa: E402
 
 # ===========================================================================
 # NO SINGULARIZER LIVES HERE EITHER, and for the same reason.  The item-5
@@ -903,44 +903,6 @@ FM_ITEM = re.compile(r"^\s*-(?:\s+(.*)|\s*)$")
 def unquote(raw):
     """Decode a validated YAML scalar; malformed input raises ValueError."""
     return parse_scalar(raw)[0]
-
-def split_flow(inner):
-    """Split a valid non-nested flow-list payload.
-
-    An empty payload is the valid list ``[]``. A comma-delimited empty element
-    is invalid YAML and raises ``ValueError`` instead of being silently dropped.
-    """
-    if not inner.strip():
-        return []
-    out, buf, quote = [], [], None
-    i = 0
-    while i < len(inner):
-        ch = inner[i]
-        if quote:
-            buf.append(ch)
-            if quote == '"' and ch == "\\" and i + 1 < len(inner):
-                i += 1
-                buf.append(inner[i])
-            elif ch == quote:
-                if quote == "'" and i + 1 < len(inner) and inner[i + 1] == "'":
-                    i += 1
-                    buf.append(inner[i])
-                else:
-                    quote = None
-        elif ch in "\"'" and not "".join(buf).strip():
-            quote = ch
-            buf.append(ch)
-        elif ch == ",":
-            out.append("".join(buf).strip())
-            buf = []
-        else:
-            buf.append(ch)
-        i += 1
-    out.append("".join(buf).strip())
-    if any(x == "" for x in out):
-        raise ValueError("flow list contains an empty comma-delimited item")
-    return out
-
 
 def raw_scalar(fm_raw, key):
     """The literal text after `key:` in the frontmatter, or None if absent.
@@ -1764,12 +1726,8 @@ def moc_marker_state(path):
             getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)),
             stat.S_IFMT(item.st_mode),
         )
-        identity = lambda item: (
-            item.st_dev, item.st_ino, stat.S_IFMT(item.st_mode))
-        if not (stable(before) == stable(after)
-                and stable(opened) == stable(opened_after)
-                and identity(before) == identity(opened)
-                and identity(after) == identity(opened_after)):
+        if not (stable(before) == stable(opened)
+                == stable(opened_after) == stable(after)):
             raise OSError("MOC pathname changed while it was read")
     except (OSError, UnicodeDecodeError) as exc:
         result["state"] = "unreadable"
@@ -2033,13 +1991,10 @@ def scan(wiki, images=None):
                 item.st_dev, item.st_ino, item.st_size,
                 getattr(item, "st_mtime_ns", int(item.st_mtime * 1e9)),
                 getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)),
+                stat.S_IFMT(item.st_mode),
             )
-            identity = lambda item: (
-                item.st_dev, item.st_ino, stat.S_IFMT(item.st_mode))
-            if not (stable(before) == stable(after)
-                    and stable(opened) == stable(opened_after)
-                    and identity(before) == identity(opened)
-                    and identity(after) == identity(opened_after)):
+            if not (stable(before) == stable(opened)
+                    == stable(opened_after) == stable(after)):
                 raise OSError("leaf Markdown path changed while it was read")
         except (OSError, UnicodeDecodeError) as exc:
             problems.append((sl,"item0",f"unreadable: {type(exc).__name__}: {exc}"))
@@ -4776,9 +4731,7 @@ def _st_entry(title, prose, tags=('"#statistics"',), type_="Concept",
 def _st_write(root, relpath, text, encoding="utf-8"):
     path = os.path.join(root, *relpath.split("/"))
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    # Write the fixture's line endings verbatim. On Windows, ordinary text
-    # mode would turn an explicit CRLF fixture into CRCRLF and test bytes that
-    # a normal editor did not produce.
+    # Keep fixture line endings verbatim, including explicit CRLF test cases.
     mode, kw = (("wb", {}) if isinstance(text, bytes)
                 else ("w", {"encoding": encoding, "newline": ""}))
     with open(path, mode, **kw) as fh:

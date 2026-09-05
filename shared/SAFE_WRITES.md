@@ -76,8 +76,8 @@ capability error above.
 
 Repository Python helpers use `shared/scripts/atomic_move.py` for exclusive
 moves, new-file publication, expected-file replacement, and conditional
-removal. Its `set_private_mode` helper preserves staged permissions on hosts
-with or without `os.fchmod`. Reuse those primitives instead of maintaining a
+removal. Its `set_private_mode` helper preserves staged permissions through the
+open file descriptor. Reuse those primitives instead of maintaining a
 workflow-local copy.
 
 ### Call the shared Python API

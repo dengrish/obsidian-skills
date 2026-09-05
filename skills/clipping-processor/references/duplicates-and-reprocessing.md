@@ -137,8 +137,9 @@ never moved, deleted or rewritten, including after a successful reprocess.
    public name; a recheck followed by `os.replace` still has a race. If
    publication fails, no attachment has moved and the unchanged old note still
    resolves.
-5. A same-path rewrite finishes after read-back. For a changed slug, keep both
-   notes in place and review the prepare phase before running it live:
+5. A same-path rewrite finishes after read-back. For a changed slug, read back
+   the new note and keep both notes in place. Run prepare first with `--dry-run`,
+   review the plan, then run the identical command without `--dry-run`:
 
    ```bash
    python3 '<skill>/scripts/fetch_images.py' rename --phase prepare [--dry-run] \
@@ -179,8 +180,8 @@ never moved, deleted or rewritten, including after a successful reprocess.
    references one of its old image names. Anything else leaves both versions
    resolving and returns to step 6; a new dependency is a blocker, not
    permission for an incidental rewrite.
-8. With an `ok: true` re-probe, review and run the finalize phase using the
-   identical arguments from prepare:
+8. With an `ok: true` re-probe, run finalize first with `--dry-run`, review the
+   plan, then run it live using the identical paths and slugs from prepare:
 
    ```bash
    python3 '<skill>/scripts/fetch_images.py' rename --phase finalize [--dry-run] \
@@ -193,8 +194,10 @@ never moved, deleted or rewritten, including after a successful reprocess.
 
    Finalize repeats the owner, byte-identity, PDF, mapping and dependency checks;
    the earlier probe is not standing cleanup authority. It conditionally retires
-   only the exact old image copies and leaves the new copies in place. If any
-   check fails, it retains both sets and reports the blocker or recovery path.
+   only the exact old image copies and leaves the new copies in place, rechecking
+   external dependencies around every retirement. A newly introduced link causes
+   rollback. If any check fails, it retains both sets and reports the blocker or
+   recovery path.
 9. After finalize succeeds, conditionally remove the distinct old note through
    the shared protocol: displace it, verify the preflight identity and contents,
    then discard only that verified version. Do not use a check followed by

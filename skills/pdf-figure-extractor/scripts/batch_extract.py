@@ -144,18 +144,9 @@ if _here != _shared:
 # work when the script is run as a file rather than via `python -m`.
 
 try:
-    # `import pymupdf` is the modern spelling. The legacy `import fitz`
-    # alias prints a deprecation notice **on stdout** in PyMuPDF >= 1.25,
-    # which corrupts `auto_fig_bbox.py --emit extract` (its output is meant
-    # to be a runnable shell command) — and the alias is slated for removal
-    # outright. Fall back to it only for PyMuPDF older than 1.24.3, which
-    # predates the `pymupdf` module name.
     import pymupdf as fitz
 except ImportError:
-    try:
-        import fitz  # PyMuPDF < 1.24.3
-    except ImportError:
-        fitz = None
+    fitz = None
 
 
 _PYMUPDF_ERROR = (
@@ -559,8 +550,7 @@ def _legacy_png_snapshot(path):
     except ImportError:
         sys.exit("Pillow is required to verify legacy PNGs before recording "
                  "ownership. Use the Python environment from shared/RUNTIME.md.")
-    flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-             | getattr(os, "O_BINARY", 0))
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
         at_name_before = os.stat(path, follow_symlinks=False)
         if not stat.S_ISREG(at_name_before.st_mode):
@@ -604,17 +594,10 @@ def _legacy_png_snapshot(path):
         item.st_dev, item.st_ino, item.st_size,
         getattr(item, "st_mtime_ns", int(item.st_mtime * 1e9)),
         getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)),
-        stat.S_IMODE(item.st_mode),
+        item.st_mode,
     )
-    identity = lambda item: (
-        item.st_dev, item.st_ino, stat.S_IFMT(item.st_mode))
-    # Native Windows can project permissions and timestamps differently for
-    # path stats and handle stats.  Require stability within each API and use
-    # the portable identity to prove both views still describe one file.
-    if not (stable(at_name_before) == stable(at_name)
-            and stable(before) == stable(after)
-            and identity(at_name_before) == identity(before)
-            and identity(at_name) == identity(after)):
+    if not (stable(at_name_before) == stable(before)
+            == stable(after) == stable(at_name)):
         raise ValueError("it changed while its bytes were validated")
     return stable(after) + (digest.hexdigest(),)
 
@@ -2080,30 +2063,22 @@ def run_self_test():
         linked_pdf = _st_fig_pdf(linked_source / "Doe_Linked_2025.pdf")
         source_link = Path(src) / "linked"
         source_loop = Path(src) / "loop"
+        source_link.symlink_to(linked_source, target_is_directory=True)
+        found_with_link = find_pdfs(src)
+        ok("find_pdfs follows a symlinked source subfolder",
+           source_link / linked_pdf.name in found_with_link)
+        source_loop.symlink_to(Path(src), target_is_directory=True)
+        state["n"] += 1
         try:
-            source_link.symlink_to(linked_source, target_is_directory=True)
-            have_source_links = True
-        except (OSError, NotImplementedError):
-            have_source_links = False
-        if have_source_links:
-            found_with_link = find_pdfs(src)
-            ok("find_pdfs follows a symlinked source subfolder",
-               source_link / linked_pdf.name in found_with_link)
-            source_loop.symlink_to(Path(src), target_is_directory=True)
-            state["n"] += 1
-            try:
-                find_pdfs(src)
+            find_pdfs(src)
+            state["bad"] += 1
+            print("FAIL find_pdfs silently accepted a directory symlink loop")
+        except SystemExit as exc:
+            if "inventory" not in str(exc).lower():
                 state["bad"] += 1
-                print("FAIL find_pdfs silently accepted a directory symlink loop")
-            except SystemExit as exc:
-                if "inventory" not in str(exc).lower():
-                    state["bad"] += 1
-                    print("FAIL find_pdfs symlink-loop refusal was unclear: %s" % exc)
-            source_loop.unlink()
-            source_link.unlink()
-        else:
-            ok("symlinked source-subfolder regression skipped where unavailable", True)
-            ok("source symlink-loop regression skipped where unavailable", True)
+                print("FAIL find_pdfs symlink-loop refusal was unclear: %s" % exc)
+        source_loop.unlink()
+        source_link.unlink()
         pdf_directory = Path(src) / "Not_A_Paper_2025.pdf"
         pdf_directory.mkdir()
         state["n"] += 1
@@ -2116,21 +2091,18 @@ def run_self_test():
                 state["bad"] += 1
                 print("FAIL PDF-named directory refusal was unclear: %s" % exc)
         pdf_directory.rmdir()
-        if have_source_links:
-            dangling_pdf = Path(src) / "Dangling_Study_2025.pdf"
-            dangling_pdf.symlink_to(Path(src) / "missing.pdf")
-            state["n"] += 1
-            try:
-                find_pdfs(src)
+        dangling_pdf = Path(src) / "Dangling_Study_2025.pdf"
+        dangling_pdf.symlink_to(Path(src) / "missing.pdf")
+        state["n"] += 1
+        try:
+            find_pdfs(src)
+            state["bad"] += 1
+            print("FAIL find_pdfs accepted a dangling PDF symlink")
+        except SystemExit as exc:
+            if "dangling" not in str(exc):
                 state["bad"] += 1
-                print("FAIL find_pdfs accepted a dangling PDF symlink")
-            except SystemExit as exc:
-                if "dangling" not in str(exc):
-                    state["bad"] += 1
-                    print("FAIL dangling PDF refusal was unclear: %s" % exc)
-            dangling_pdf.unlink()
-        else:
-            ok("dangling PDF regression skipped where symlinks are unavailable", True)
+                print("FAIL dangling PDF refusal was unclear: %s" % exc)
+        dangling_pdf.unlink()
         check("an arbitrary output does not imply a vault",
               output_vault_root(os.path.join(tmp, "figure-output")), None)
         inferred_images = os.path.join(tmp, "sample-vault", "Sources", "Images")
@@ -3250,29 +3222,6 @@ def run_self_test():
         ok("legacy adoption treats a decompression-bomb warning as refusal",
            warning_refused)
 
-        real_fstat = os.fstat
-
-        class ProjectedHandleStat:
-            """Model Windows' stable but distinct handle metadata view."""
-
-            def __init__(self, item):
-                self.item = item
-
-            def __getattr__(self, name):
-                if name == "st_ctime_ns":
-                    return getattr(self.item, name) + 100
-                if name == "st_mode":
-                    return stat.S_IFMT(self.item.st_mode) | 0o444
-                return getattr(self.item, name)
-
-        with mock.patch.object(
-                os, "fstat",
-                side_effect=lambda descriptor: ProjectedHandleStat(
-                    real_fstat(descriptor))):
-            projected_snapshot = _legacy_png_snapshot(warning_png)
-        check("legacy PNG validation accepts a stable Windows handle view",
-              projected_snapshot[-1], _sha256(warning_png))
-
         adopted_bytes = legacy_png.read_bytes()
         adopted_manifest = (legacy_out / MANIFEST_FILE).read_bytes()
         code, so, se = run([
@@ -3654,26 +3603,16 @@ def run_self_test():
         link_dir = Path(tmp) / "external-link"
         link_dir.mkdir()
         selected_link = link_dir / "Doe_Copy_2025.pdf"
-        try:
-            selected_link.symlink_to(link_target)
-            have_selected_link = True
-        except (OSError, NotImplementedError):
-            have_selected_link = False
-        if have_selected_link:
-            code, so, se = run([
-                "--src", str(selected_link), "--out", str(link_images),
-                "--dpi", "72", "--dry-run",
-            ])
-            ok("a differently named external link is cleanly refused",
-               code == 1 and "no vault PDF owns" in so
-               and "unhandled" not in str(code))
-            ok("the refused external link writes no image namespace",
-               not link_images.exists())
-        else:
-            ok("different-basename external-link regression skipped where unavailable",
-               True)
-            ok("different-basename external-link no-write regression skipped where unavailable",
-               True)
+        selected_link.symlink_to(link_target)
+        code, so, se = run([
+            "--src", str(selected_link), "--out", str(link_images),
+            "--dpi", "72", "--dry-run",
+        ])
+        ok("a differently named external link is cleanly refused",
+           code == 1 and "no vault PDF owns" in so
+           and "unhandled" not in str(code))
+        ok("the refused external link writes no image namespace",
+           not link_images.exists())
 
         # APFS cannot materialize distinct NFC/NFD directory entries. Inject
         # the inventory a Linux vault can hold, then drive the public main()

@@ -132,6 +132,8 @@ page-anchor form; the physical page's factual correctness needs the source.
 
 Apply the canonical [naming rules](../../wiki-builder/references/writing.md#3-wikilinks-and-naming).
 A title/filename mismatch is a rename proposal, never an automatic rewrite.
+If the proposed slug is occupied, preserve both files and report their paths
+as an unresolved duplicate/disambiguation proposal; the lint run still completes.
 Report collision-probe matches as candidates; do not merge them. Whole-vault
 maintenance uses slug equality, micro-sign normalization, singular/plural,
 hyphen-collapse, word-order, and light stem morphology. When several probes
@@ -156,7 +158,9 @@ trim substantive prose from an existing `Software` entry.
 
 Apply the canonical [description rule](../../wiki-builder/references/writing.md#description)
 to full entries and legacy stubs. Besides the scanner's form checks, review the
-grammatical subject, current-status tense, and mathematical completeness. A
+grammatical subject, current-status tense, precise phrasing, and mathematical
+completeness. Repair awkward wording or empty framing only when it is a
+concrete clarity defect; do not rewrite an already clear description. A
 plain-language mathematical definition must retain every operation that
 determines the quantity. Fix only when the note establishes the corrected
 wording; otherwise report a source-backed proposal.
@@ -189,31 +193,55 @@ notation. A conflict that requires choosing or changing a fact is a
 source-backed proposal. A neighbor conflict may expose a wrong link, duplicate,
 or split candidate; it does not authorize cross-entry redistribution.
 
-**Flow and ownership review.** Give each paragraph a short purpose label,
-check that every sentence advances it, and read the openings in sequence.
-Inspect endings that open a new reader question after the paragraph has
-finished its job. Keep real causal and contrastive bridges; a stock connector
-does not repair a jump. Bullets are parallel, not sequential. Body links sit in
-sentences that state their relationships. Report source/tutorial scaffolding
-and application catalogs only when they do not serve the entry, and report
-duplicated explanatory treatments by conceptual owner; length, list shape, or
-lexical similarity alone proves nothing.
+**Editorial and ownership review.** Apply the shared
+[prose principles](../../wiki-builder/references/writing.md#prose-principles)
+to phrasing, sentence clarity, paragraph focus, transitions, and succinctness.
+Judge a concrete defect, not a preference for different wording. Inspect
+equation lead-ins and paragraph endings as well as the opening sentences.
+Bullets are parallel, not sequential; body links sit in sentences that state
+their relationships. Report source/tutorial scaffolding and application
+catalogs only when they do not serve the entry, and report duplicated
+explanatory treatments by conceptual owner. Length, a missing transition word,
+list shape, or lexical similarity alone proves nothing.
 
-**Local apply boundary.** Item 9 permits exactly five organizational repairs:
+**Local editorial repairs.** Apply these autonomously when the existing entry
+establishes an unambiguous meaning:
 
-1. Split or merge adjacent prose paragraphs without changing their sentences.
-2. Move unchanged sentences only between adjacent paragraphs under one heading.
-3. Convert an already explicit sequence from bullets to prose.
-4. Integrate a navigation-only link when adjacent prose already states the
-   relationship.
-5. Within one entry, remove one exact duplicate sentence serving the same local
-   semantic role.
+- Repair grammar, fragments, awkward phrasing, or an unclear pronoun with a
+  known referent; split or recombine overloaded sentences without changing
+  their claims.
+- Replace opaque or decorative wording with its direct equivalent. Remove
+  empty framing or consolidate repetition only when it adds no distinct
+  claim, condition, emphasis needed for interpretation, or explanatory step.
+- Reorder sentences within a paragraph or between adjacent paragraphs under
+  one heading; split or merge adjacent paragraphs to restore focus and useful
+  progression. Keep definitions before uses and qualifiers beside their claims.
+- Clarify a transition only from a relationship already established in the
+  entry. Do not infer causation, contrast, chronology, or generality from
+  proximity; use a paragraph boundary when no bridge is supported.
+- Convert an already explicit sequence from bullets to prose, or integrate a
+  navigation-only link when adjacent prose already states the relationship.
 
-Preserve qualifier and antecedent scope, introductions before uses, logical and
-chronological order, citations, equations, and image/table-plus-caption units.
-Report every repair. If the change crosses a section, changes a fact, removes
-substantive content, chooses between claims, or redistributes material across
-entries, preserve it and propose a source-backed follow-up. Entry splits,
+**Preservation and verification.** These repairs change prose expression, not
+the knowledge recorded. Preserve every substantive claim, condition, degree,
+uncertainty, attribution, and scenario boundary. An illustrative example must
+remain an example; a small improvement must not become an unqualified one.
+Keep existing link tokens, citations, math spans and numerical values,
+image/table-plus-caption units, the complete flashcard section, and frontmatter
+verbatim during an item 9 edit. Do not drop a link or a qualifier when removing
+repetition. Descriptions follow item 7; links, equations, exhibits, and cards
+may change only under their own authorized checks, recorded separately.
+During ordinary lint, editorial changes never advance dates or reset review state.
+
+Compare protected content before and after the edit and apply the shared
+[editorial reread](../../wiki-builder/references/writing.md#editorial-reread)
+to the finished passage. Repair any regression and re-run the per-entry lint
+before publication. Leave conforming prose untouched and report the defect and
+repair for each changed entry; there is no shortening quota or human sign-off.
+
+If the change crosses a section, changes a fact, removes substantive content,
+chooses between claims, or redistributes material across entries, preserve it
+and propose a source-backed follow-up. Entry splits,
 merges, and redistribution also require authorization that names the operation,
 or the affected entries and intended outcome. Pure renames keep their separate
 approval rule.
@@ -432,10 +460,11 @@ and preserved under item 2.
 
 - Make targeted, localized corrections. A format or schema finding usually has
   one determinate output. Semantic metadata changes apply only when
-  unambiguous. Item 9 uses only its five listed operations; item 6 may remove a
+  unambiguous. Item 9 permits its bounded editorial repairs; item 6 may remove a
   sentence whose entire function is a forbidden implementation signpost,
   recipe, identifier catalog, or listing while preserving conceptual claims.
-  None grants general rewriting permission.
+  Neither permits discretionary rewrites of conforming prose or bypasses the
+  protected-content rules.
 - Fact changes, conflict resolution, source-content selection, and substantive
   trimming need a source-backed request. A named entry may be corrected from
   sources it already cites under the

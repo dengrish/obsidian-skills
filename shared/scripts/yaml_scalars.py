@@ -1,9 +1,10 @@
 """Read the single-line YAML scalars used in vault frontmatter, using stdlib.
 
-This is not a YAML document parser. Callers own fences, keys, lists and schema
-checks; unsupported structures and malformed scalars raise ValueError rather
-than supplying a guessed title or source identity. Non-null plain values stay
-strings so each schema can validate its own booleans, dates and numbers.
+This is not a YAML document parser. Callers own fences, keys, list placement
+and schema checks; unsupported structures and malformed scalars raise
+ValueError rather than supplying a guessed title or source identity. Non-null
+plain values stay strings so each schema can validate its own booleans, dates
+and numbers.
 """
 import argparse
 import re
@@ -43,6 +44,44 @@ def strip_comment(raw):
             token_start = False
         i += 1
     return raw.rstrip(" \t")
+
+
+def split_flow(inner):
+    """Split a valid non-nested flow-list payload.
+
+    An empty payload is the valid list ``[]``. A comma-delimited empty element
+    is invalid YAML and raises ``ValueError`` instead of being silently dropped.
+    """
+    if not inner.strip():
+        return []
+    out, buf, quote = [], [], None
+    i = 0
+    while i < len(inner):
+        ch = inner[i]
+        if quote:
+            buf.append(ch)
+            if quote == '"' and ch == "\\" and i + 1 < len(inner):
+                i += 1
+                buf.append(inner[i])
+            elif ch == quote:
+                if quote == "'" and i + 1 < len(inner) and inner[i + 1] == "'":
+                    i += 1
+                    buf.append(inner[i])
+                else:
+                    quote = None
+        elif ch in "\"'" and not "".join(buf).strip():
+            quote = ch
+            buf.append(ch)
+        elif ch == ",":
+            out.append("".join(buf).strip())
+            buf = []
+        else:
+            buf.append(ch)
+        i += 1
+    out.append("".join(buf).strip())
+    if any(x == "" for x in out):
+        raise ValueError("flow list contains an empty comma-delimited item")
+    return out
 
 
 _ESCAPES = {
@@ -188,6 +227,16 @@ def self_test():
             self.assertEqual(strip_comment(raw), raw.rsplit(" # note", 1)[0])
             self.assertEqual(strip_comment(' # list follows'), "")
             self.assertEqual(strip_comment("O'Reilly # note"), "O'Reilly")
+
+        def test_flow_list_items(self):
+            self.assertEqual(split_flow(""), [])
+            self.assertEqual(
+                split_flow('"a,b", \'O\'\'Reilly, Inc.\', bare'),
+                ['"a,b"', "'O''Reilly, Inc.'", "bare"],
+            )
+            for inner in (",", '"a",', ',"a"', '"a",,"b"'):
+                with self.subTest(inner=inner), self.assertRaises(ValueError):
+                    split_flow(inner)
 
     output = io.StringIO()
     result = unittest.TextTestRunner(stream=output).run(

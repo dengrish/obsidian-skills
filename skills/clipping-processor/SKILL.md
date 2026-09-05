@@ -270,66 +270,21 @@ images already placed and safely replace the failed embed with the documented
 placeholder. Never withdraw the only note that proves ownership of files
 already placed. Report the conflict and retained scratch file.
 
-For an authorized rewrite or renamed clipping, follow
+For an authorized rewrite or renamed clipping, read and execute
 [the finalization procedure](references/duplicates-and-reprocessing.md#publish-an-approved-replacement).
-Retain the original note until publication succeeds, recheck its ownership and
-unchanged contents, and preserve its permissions and user metadata. Stage the
-complete note and preflight the destination. A same-path rewrite needs no image
-handoff. For a changed slug, publish the new note while retaining the unchanged
-old owner, read it back, and run the prepare phase first as a dry run and then
-live:
+It owns the complete sequence and commands. Retain the unchanged original until
+publication succeeds, preserving its permissions and user metadata. A same-path
+rewrite needs no image handoff.
 
-```bash
-python3 '<skill>/scripts/fetch_images.py' rename --phase prepare [--dry-run] \
-    --attachments '<vault>/Sources/Images' --sources '<vault>/Sources/PDFs' \
-    --owner-note '<vault>/Articles/<old_slug>.md' \
-    --new-owner-note '<vault>/Articles/<new_slug>.md' \
-    --old-slug '<old_slug>' --new-slug '<new_slug>'
-```
-
-The prepare phase creates each new image path exclusively from the exact old
-bytes and retains every old image. Its JSON is the authoritative one-to-one
-image mapping and dependency report; keep it with the unchanged re-probe below.
-Do not use the legacy immediate phase for this workflow. A refused prepare does
-not authorize manual copies or cleanup; retain the old note and images and
-report any recovery paths.
-
-If prepare reports an inbound old-note link, old-image reference, unreadable
-Markdown file or incomplete vault inventory, do not finalize. A complete
-rewrite of those dependencies is a separate authorized operation. Without it,
-leave both resolving versions in place and report the pending handoff.
-When blockers are Wiki entries or recognized root MOCs, an authorized repair
-belongs to `wiki-linter`'s
-[producer-mapped dependency mode](../wiki-linter/references/external-artifact-repair.md).
-Pass it the complete dependency report, exact old/new note and image mappings,
-and this re-probe command:
-
-```bash
-python3 '<skill>/scripts/fetch_images.py' dependencies \
-    --attachments '<vault>/Sources/Images' \
-    --owner-note '<vault>/Articles/<old_slug>.md' --old-slug '<old_slug>'
-```
-
-It repairs only reported resolving references and returns control here. Foreign
-Markdown outside its scope remains blocked. Only after the unchanged probe says
-`ok: true`, run the finalize phase first as a dry run and then live, with the
-same paths and slugs used for prepare:
-
-```bash
-python3 '<skill>/scripts/fetch_images.py' rename --phase finalize [--dry-run] \
-    --attachments '<vault>/Sources/Images' --sources '<vault>/Sources/PDFs' \
-    --owner-note '<vault>/Articles/<old_slug>.md' \
-    --new-owner-note '<vault>/Articles/<new_slug>.md' \
-    --old-slug '<old_slug>' --new-slug '<new_slug>'
-```
-
-Finalize revalidates both owners, the byte-identical pairs, and the complete
-dependency surface before conditionally retiring only the exact old image
-copies. A refusal leaves cleanup pending. After it succeeds, conditionally
-remove the exact snapshotted old note through the shared safe-write protocol;
-never remove it with an unchecked unlink. Do not declare success before both
-steps complete, and report any mixed state if the note cleanup is refused.
-Raw captures and foreign notes/images are never removed.
+For a changed slug, both owner notes must be public before prepare. Keep its
+exact image mapping and dependency report; repair dependencies only under the
+authorization and `wiki-linter` scope defined in that procedure. Finalize only
+after the unchanged dependency re-probe returns `ok: true`, then conditionally
+retire the exact old note. Keep both resolving versions while blockers remain.
+Never substitute manual copies, the legacy immediate phase, or unchecked
+cleanup. Report any refused phase, retained recovery paths, or mixed state;
+success requires both image finalization and old-note cleanup. Raw captures and
+foreign notes/images remain untouched.
 
 ## 7. Report
 

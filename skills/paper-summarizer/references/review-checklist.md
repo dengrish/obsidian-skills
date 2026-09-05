@@ -132,31 +132,13 @@ Walk the callout, headings, body and captions with their supporting pages open:
 
 ## Run lint after source verification
 
-```bash
-python3 '<skill>/scripts/note_lint.py' '<drafted note>' \
-    --mode '<empirical|argument|notice>' --images '<vault>/Sources/Images'
-```
-
-Replace the mode placeholder with the selected body mode. If source inventory
-used its deliberate `--allow-unorganized` exception, add the same flag here;
-the exception otherwise remains a lint failure. Use `--images` for
-embeds; omit it only for a figureless note when the directory
-does not exist. Exit 1 lists violations to fix and rerun. Exit 0 means no
-blocking violations of schema, role/heading mechanics, callout/separator shape,
-citation syntax, required length/count limits, exhibit placement/captions or
-referenced image paths, including the selected mode's Limitations and
-Availability rules. Advisories do not change the exit code: review sentence
-and step length using the brevity targets, and retain a one-item empirical
-Limitations section only when another item would be filler. Report every
-justified exception.
-It does not verify whether that body mode was chosen correctly, semantic fit, provenance, page upper bounds,
-source facts or image content. Its `Methods` and `Results` names are positional
-aliases for non-empirical notes.
-
-Do not repeat every machine check by eye or treat clean lint as factual proof.
-If lint or a required reference is unavailable, leave the draft unpublished and
-report the blocker. If preserving user metadata prevents clean lint, retain the
-original and surface that specific conflict rather than erasing fields.
+After completing the source checks above, return to
+[workflow step 5](../SKILL.md#5-lint-the-complete-draft) for the lint pass.
+That step owns the command, flags, violation fixes, advisory review and
+publication blockers. Do not run a second pass merely because this checklist
+and the workflow both mention lint, or repeat every machine check by eye.
+Clean lint does not establish factual accuracy; publication still requires the
+independent source verification above.
 
 ## Report separate outcomes
 

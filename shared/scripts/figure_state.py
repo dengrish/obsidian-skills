@@ -139,19 +139,12 @@ def _stable_sidecar_bytes(path):
         raise SidecarConflict(
             errno.EEXIST, "%s changed while it was read" % path, path) from exc
     stable = lambda item: (
-        item.st_dev, item.st_ino, item.st_size,
+        item.st_dev, item.st_ino, item.st_mode, item.st_size,
         getattr(item, "st_mtime_ns", int(item.st_mtime * 1e9)),
         getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)),
     )
-    identity = lambda item: (
-        item.st_dev, item.st_ino, stat.S_IFMT(item.st_mode))
-    # Native Windows can project stable permission and timestamp metadata
-    # differently through path stat and handle stat. Compare each API with
-    # itself across the read, then bind the two views by portable identity.
-    if not (stable(before) == stable(after)
-            and stable(opened_before) == stable(opened_after)
-            and identity(before) == identity(opened_before)
-            and identity(after) == identity(opened_after)):
+    if not (stable(before) == stable(opened_before)
+            == stable(opened_after) == stable(after)):
         raise SidecarConflict(
             errno.EEXIST, "%s changed while it was read" % path, path)
     snapshot = (
@@ -288,7 +281,7 @@ def _write_sidecar(path, body, expected=None):
         with open(temporary, "w", encoding="utf-8", newline="") as fh:
             fh.write(body)
             if mode is not None:
-                atomic_move.set_private_mode(fh, temporary, mode)
+                atomic_move.set_private_mode(fh, mode)
         try:
             return _publish_sidecar(temporary, path, expected)
         except BaseException as exc:
@@ -380,7 +373,7 @@ def self_test():
             with self.assertRaises(ValueError):
                 parse_manifest("Straße.png\t" + "a" * 64 + "\nSTRASSE.png\t" + "b" * 64)
 
-        def test_stable_read_tolerates_path_handle_metadata_projection(self):
+        def test_stable_read_rejects_metadata_and_identity_changes(self):
             with tempfile.TemporaryDirectory() as directory:
                 path = os.path.join(directory, MANIFEST_FILE)
                 content = b"A_fig_1.png\t" + b"a" * 64 + b"\n"
@@ -389,7 +382,7 @@ def self_test():
                 real_fstat = os.fstat
 
                 class HandleStat:
-                    def __init__(self, item, ctime_delta=100, ino_delta=0):
+                    def __init__(self, item, ctime_delta=0, ino_delta=0):
                         self.item = item
                         self.ctime_delta = ctime_delta
                         self.ino_delta = ino_delta
@@ -397,20 +390,9 @@ def self_test():
                     def __getattr__(self, name):
                         if name == "st_ctime_ns":
                             return getattr(self.item, name) + self.ctime_delta
-                        if name == "st_mode":
-                            return stat.S_IFMT(self.item.st_mode) | 0o444
                         if name == "st_ino":
                             return self.item.st_ino + self.ino_delta
                         return getattr(self.item, name)
-
-                def projected_fstat(descriptor):
-                    return HandleStat(real_fstat(descriptor))
-
-                with mock.patch.object(os, "fstat",
-                                       side_effect=projected_fstat):
-                    body, snapshot = _stable_sidecar_bytes(path)
-                self.assertEqual(body, content)
-                self.assertEqual(snapshot[2], hashlib.sha256(content).hexdigest())
 
                 calls = {"count": 0}
 
@@ -491,28 +473,20 @@ def self_test():
                 self.assertEqual(read_manifest(path), {"A_fig_1.png": "a" * 64})
                 self.assertEqual(read_manifest(os.path.join(real_images, "absent")), {})
 
-                # A directory symlink can point to another volume. If this
-                # platform permits creating one, prove staging follows the
-                # resolved destination rather than its logical parent. Windows
-                # without developer mode commonly denies this operation; the
-                # ordinary-path assertions above still cover outside-folder
-                # staging and cleanup there.
+                # A directory symlink can point to another volume. Prove
+                # staging follows the resolved destination's parent.
                 logical_root = os.path.join(directory, "logical")
                 logical_images = os.path.join(logical_root, "Images")
                 os.makedirs(logical_root)
-                try:
-                    os.symlink(real_images, logical_images)
-                except (OSError, NotImplementedError):
-                    logical_images = None
-                if logical_images is not None:
-                    stage_parents[:] = []
-                    linked_path = os.path.join(logical_images, MANIFEST_FILE)
-                    with mock.patch.object(tempfile, "mkdtemp",
-                                           side_effect=tracked_mkdtemp):
-                        write_manifest(linked_path, {"A_fig_1.png": "a" * 64})
-                    self.assertEqual(stage_parents, [os.path.realpath(real_root)])
-                    self.assertTrue(os.path.isfile(os.path.join(
-                        real_images, MANIFEST_FILE)))
+                os.symlink(real_images, logical_images)
+                stage_parents[:] = []
+                linked_path = os.path.join(logical_images, MANIFEST_FILE)
+                with mock.patch.object(tempfile, "mkdtemp",
+                                       side_effect=tracked_mkdtemp):
+                    write_manifest(linked_path, {"A_fig_1.png": "a" * 64})
+                self.assertEqual(stage_parents, [os.path.realpath(real_root)])
+                self.assertTrue(os.path.isfile(os.path.join(
+                    real_images, MANIFEST_FILE)))
 
         def test_stale_snapshot_and_late_new_occupant_are_preserved(self):
             with tempfile.TemporaryDirectory() as directory:
@@ -687,24 +661,11 @@ def self_test():
                     self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o444)
                 finally:
                     os.chmod(path, 0o640)
-                writable_mode = stat.S_IMODE(os.stat(path).st_mode)
-                with mock.patch.object(os, "fchmod", None):
-                    write_manifest(path, {"B_fig_1.png": "b" * 64})
-                # Native Windows maps chmod to its read-only attribute and
-                # reports a writable file as 0666, so 0640 is not an
-                # observable state there. Preserve the exact mode the host
-                # exposed for the predecessor instead of asserting a POSIX
-                # representation that Windows cannot retain.
+                write_manifest(path, {"B_fig_1.png": "b" * 64})
                 self.assertEqual(
-                    stat.S_IMODE(os.stat(path).st_mode), writable_mode)
+                    stat.S_IMODE(os.stat(path).st_mode), 0o640)
                 link = os.path.join(directory, "linked.tsv")
-                try:
-                    os.symlink(path, link)
-                except (OSError, NotImplementedError):
-                    # Native Windows can deny symlink creation unless its
-                    # developer-mode or privilege policy enables it. The
-                    # path is still exercised on every capable filesystem.
-                    return
+                os.symlink(path, link)
                 before = open(path, "rb").read()
                 with self.assertRaises(ValueError):
                     write_manifest(link, {"C_fig_1.png": "c" * 64})

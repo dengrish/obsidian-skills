@@ -188,20 +188,12 @@ source or narrow attribution to the active source or named report; otherwise
 omit it. Independent support that changes the note must be a durable vault
 source listed in `sources:`; route a live page through `clipping-processor`
 first. This verification is autonomous and requires no separate sign-off.
-Then re-read the body for atomic scope, paragraph unity and progression,
-and sentence clarity. Give each paragraph a short phrase naming its purpose,
-verify that every sentence advances its controlling idea, and read the
-paragraph openings in sequence; none of these judgments can be established by
-word count. Across every entry this run created, promoted, or merged, also
-check whether the same worked example or multi-sentence explanation is doing
-the same work in more than one note. Give the full treatment to the most
-specific canonical owner; other current-run prose keeps only the concise
-relationship needed for orientation and a wikilink. A reciprocal contrast may
-remain when each subject needs it. If resolving an overlap would move or
-delete pre-existing content not contributed by the active source, propose that
-legacy refactor instead of performing it. Scripts report; they do not
-authorize edits or replace judgment. A prose/script disagreement is reported
-and resolved using the governing rule.
+Then apply the shared [editorial reread](references/writing.md#editorial-reread)
+for precise phrasing, clear referents, paragraph focus, natural transitions,
+and succinctness without loss of meaning. Re-check atomic scope and the
+protected-content rules; word count does not establish quality. Scripts report;
+they do not authorize edits or replace judgment. A prose/script disagreement is
+reported and resolved using the governing rule.
 
 **Do not rename or delete a pre-existing entry as a review fix.** Propose it with the reason and intended slug; inbound links, parents, MOCs, and earlier content extend beyond this run's edit scope. A filename correction on an entry created this run must still leave every reference written during the run resolving.
 
@@ -304,8 +296,9 @@ item numbers used by `lint_entry.py` and `wiki-linter`.
 9. **Body structure, flow, sentence clarity, and atomic scope** — open
    immediately with the main claim in prose; use plain `##` headings only for
    sustained inherent facets. Keep one controlling idea per paragraph, useful
-   progression across paragraphs, clear relationships and qualifications within
-   sentences, and one durable subject per note. Cut tangents, source/tutorial
+   progression across paragraphs, direct phrasing, clear referents, supported
+   transitions, and qualifications beside their claims. Keep one durable
+   subject per note. Cut empty framing, tangents, source/tutorial
    scaffolding that does not serve the entry, repetition, and duplicated
    explanatory work; do not use length alone as a finding. A body link belongs
    in a sentence that states the relationship. Re-check active-source claim

@@ -29,6 +29,11 @@ Builder links only within entries it writes, and on merge only when the active s
 
 **Write only what actually changes.** Leave an unaffected entry byte-for-byte untouched, including ordering and whitespace. Make a targeted repair to a violation, not a discretionary rewrite of conforming prose. Preserve legacy `importance:`, Obsidian appearance/publish keys, user-disabled card cues, and card scheduling metadata. An ordinary lint report records maintenance; those tasks do not advance source dates or clear review state. Source-backed corrections and refactors follow their separate date/review rules.
 
+Conforming hand edits survive under the same rule. A subsequent pass on unchanged
+evidence must make no further entry or MOC edits; report any such second-pass
+change as an idempotence failure. The backlog's recurrence counters follow their
+own update rules.
+
 When a file may change, snapshot the exact bytes and identity used for the
 decision and publish the completed replacement through the shared
 [safe-write protocol and Python API recipe](../../shared/SAFE_WRITES.md#call-the-shared-python-api).
@@ -125,7 +130,7 @@ ledger and name every skipped or unreadable file. Judge prose by purpose rather
 than length or item count, and never resolve a factual conflict from memory.
 Missing source evidence or user-owned state becomes a nonblocking report item.
 
-For item 9 flow and organization only, use the five claim-preserving operations and safeguards in [QC item 9](references/qc-items.md). Other body repairs, such as a date copied from the same entry, source-meta cleanup, equation work, or item 6's removal of clearly implementation-only material, follow their own numbered item and do not create general rewriting permission. Source figure selection, table/source-value fidelity, fact-checking, conflict resolution, and content selection not explicitly authorized by a QC item require a separate source-backed request.
+For phrasing, flow, and succinctness, apply the shared writing standards through the bounded editorial repairs and before/after checks in [QC item 9](references/qc-items.md#9-body-structure-coherence-flow-and-scope). Fix concrete defects autonomously while preserving claims and protected content; leave already clear prose alone. Other body repairs, such as a date copied from the same entry, source-meta cleanup, equation work, or item 6's removal of clearly implementation-only material, follow their own numbered item. Source figure selection, table/source-value fidelity, fact-checking, conflict resolution, and content selection not explicitly authorized by a QC item require a separate source-backed request.
 
 ## Task 1 — Retro-QC (source-independent subset)
 
@@ -141,7 +146,7 @@ Keep the non-obvious boundaries visible at the action point:
   preserving anchors and display labels. Multiple owners and real but unparsed
   targets are report-only. Task 2 owns true duplicates and danglers.
 - **Prose and metadata judgments:** use only the repair authorized by that
-  numbered item. Item 9 has five guarded operations. Do not invent a discipline,
+  numbered item. Item 9 permits claim-preserving editorial repairs. Do not invent a discipline,
   rewrite a fact, select source content, or redistribute material merely to
   close a finding.
 - **Cards:** read [flashcard maintenance](references/flashcards.md) before any
@@ -206,7 +211,6 @@ Read references at their action point, not all at startup.
 | [Link hygiene](references/link-hygiene.md) | Task 2 runs, before any link decision. |
 | [Hierarchy](references/hierarchy.md) | Task 3 runs or a hierarchy diagnostic needs interpretation. |
 | [Reports and backlogs](references/backlogs.md) | Closing the run or editing a suggestion log. |
-| [Edge cases](references/edge-cases.md) | Stub-only disciplines, blank tags, hand edits, rename collisions, narrowed scope, or suspected churn. |
 | [Source-backed corrections](references/source-backed-corrections.md) | The user asks to correct a named entry from sources it already cites. |
 | [Source-backed refactors](references/refactors.md) | The user explicitly asks to split, merge, delete, or redistribute existing entries. |
 | [External-artifact repair](references/external-artifact-repair.md) | A producer supplies exact old/new mappings, blockers, and its re-probe command. |

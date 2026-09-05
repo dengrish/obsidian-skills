@@ -1155,15 +1155,10 @@ def references(vault, names, dirs=None, directory_names=()):
                 body = fh.read()
                 opened_after = os.fstat(fh.fileno())
             final = os.stat(md, follow_symlinks=False)
-            # Windows can expose stable metadata differently through a path
-            # stat and an open handle.  Compare each view with itself, then
-            # bind the two views with the portable file identity.
-            if not (_change_identity(occupant) == _change_identity(final)
-                    and _change_identity(opened_before)
+            if not (_change_identity(occupant)
+                    == _change_identity(opened_before)
                     == _change_identity(opened_after)
-                    and _file_identity(occupant)
-                    == _file_identity(opened_before)
-                    and _file_identity(final) == _file_identity(opened_after)):
+                    == _change_identity(final)):
                 raise InventoryFailed(
                     "leaf Markdown path %r changed while it was read" % md)
         except InventoryFailed:
@@ -1597,10 +1592,9 @@ def _file_identity(st):
 
 def _change_identity(st):
     """Metadata that changes when a file is replaced or written in place."""
-    return (st.st_dev, st.st_ino, st.st_size,
+    return (st.st_dev, st.st_ino, st.st_mode, st.st_size,
             getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)),
-            getattr(st, "st_ctime_ns", int(st.st_ctime * 1e9)),
-            stat.S_IMODE(st.st_mode))
+            getattr(st, "st_ctime_ns", int(st.st_ctime * 1e9)))
 
 
 def _stable_file_snapshot(path):
@@ -1608,7 +1602,7 @@ def _stable_file_snapshot(path):
     before = os.lstat(path)
     if not stat.S_ISREG(before.st_mode):
         raise StaleRenamePlan("%s is not a regular file" % path)
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    flags = os.O_RDONLY
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     try:
@@ -1633,11 +1627,8 @@ def _stable_file_snapshot(path):
     except OSError as exc:
         raise StaleRenamePlan(
             "%s changed while its move snapshot was read: %s" % (path, exc)) from exc
-    if not (_change_identity(before) == _change_identity(after)
-            and _change_identity(opened_before)
-            == _change_identity(opened_after)
-            and _file_identity(before) == _file_identity(opened_before)
-            and _file_identity(after) == _file_identity(opened_after)):
+    if not (_change_identity(before) == _change_identity(opened_before)
+            == _change_identity(opened_after) == _change_identity(after)):
         raise StaleRenamePlan(
             "%s changed while its move snapshot was read" % path)
     return _file_identity(after), digest.hexdigest()
@@ -1678,10 +1669,8 @@ def _read_snapshot(path):
         body = fh.read()
         after = os.fstat(fh.fileno())
     final = os.stat(path, follow_symlinks=False)
-    if not (_change_identity(entry) == _change_identity(final)
-            and _change_identity(before) == _change_identity(after)
-            and _file_identity(entry) == _file_identity(before)
-            and _file_identity(final) == _file_identity(after)):
+    if not (_change_identity(entry) == _change_identity(before)
+            == _change_identity(after) == _change_identity(final)):
         raise StaleRenamePlan(
             "%s changed while it was being read; refusing a mixed snapshot"
             % path)
@@ -2247,7 +2236,7 @@ def _write(path, text, expected=None):
         staged = os.path.join(stage, os.path.basename(target))
         with open(staged, "x", encoding="utf-8", newline="") as fh:
             fh.write(text)
-            set_private_mode(fh, staged, mode)
+            set_private_mode(fh, mode)
             published = (text, _file_identity(os.fstat(fh.fileno())))
         try:
             published = replace_expected(
@@ -3173,14 +3162,6 @@ def _selftest():
               os.path.join("vault", ".organize-recovery-1")),
           True)
 
-    def _try_symlink(source, target, **kwargs):
-        """Create a self-test symlink when the host grants that capability."""
-        try:
-            os.symlink(source, target, **kwargs)
-        except (OSError, AttributeError, NotImplementedError):
-            return False
-        return True
-
     # 1. The new stem contains the old stem — this skill's ordinary rename.
     ren = {"UDL_2026.pdf": "Prince_UDL_2026.pdf",
            "UDL_2026": "Prince_UDL_2026",
@@ -3970,12 +3951,10 @@ def _selftest():
     _v = _vault("Store", "Sources/PDFs")
     _put(_v, "Store/real.pdf")
     _source_link = os.path.join(_v, "Sources/PDFs/real.pdf")
-    _have_source_link = _try_symlink("../Store/real.pdf", _source_link)
-    _m, _e, _b = ((None, None, []) if not _have_source_link else
-                  rename_all(_v, _source_link, "Smith_X_1776.pdf"))
+    os.symlink("../Store/real.pdf", _source_link)
+    _m, _e, _b = rename_all(_v, _source_link, "Smith_X_1776.pdf")
     check("a symlinked source is refused",
-          (not _have_source_link
-           or any("is a symlink to" in b for b in _b)), True)
+          any("is a symlink to" in b for b in _b), True)
 
     # Symlinked directories are an intentional recursive scope; leaf symlinks
     # are not permission to rewrite an arbitrary target outside the vault.
@@ -3983,29 +3962,24 @@ def _selftest():
     _put(_v, "Inbox/download.pdf")
     _put(_v, "Outside/n.md", "![[download.pdf]]\n")
     _leaf_link = os.path.join(_v, "Wiki/n.md")
-    _have_leaf_link = _try_symlink("../Outside/n.md", _leaf_link)
-    _m, _e, _b = ((None, None, []) if not _have_leaf_link else rename_all(
+    os.symlink("../Outside/n.md", _leaf_link)
+    _m, _e, _b = rename_all(
         _v, os.path.join(_v, "Inbox/download.pdf"), "Smith_X_1776.pdf",
-        dest=os.path.join(_v, "Sources/PDFs"), apply=True))
+        dest=os.path.join(_v, "Sources/PDFs"), apply=True)
     check("a leaf Markdown symlink blocks the complete rename",
-          (not _have_leaf_link
-           or any("symlink" in blocker for blocker in _b)), True)
+          any("symlink" in blocker for blocker in _b), True)
     check("the blocked plan leaves the symlink and its external target unchanged",
-          (not _have_leaf_link or
-           (os.path.islink(_leaf_link)
-            and open(os.path.join(_v, "Outside/n.md"),
-                     encoding="utf-8").read() == "![[download.pdf]]\n"
-            and os.path.exists(os.path.join(_v, "Inbox/download.pdf")))),
+          (os.path.islink(_leaf_link)
+           and open(os.path.join(_v, "Outside/n.md"),
+                    encoding="utf-8").read() == "![[download.pdf]]\n"
+           and os.path.exists(os.path.join(_v, "Inbox/download.pdf"))),
           True)
-    if _have_leaf_link:
-        try:
-            _write(_leaf_link, "![[new.pdf]]\n")
-        except StaleRenamePlan as _exc:
-            _refused_leaf = "symlink" in str(_exc)
-        else:
-            _refused_leaf = False
+    try:
+        _write(_leaf_link, "![[new.pdf]]\n")
+    except StaleRenamePlan as _exc:
+        _refused_leaf = "symlink" in str(_exc)
     else:
-        _refused_leaf = True
+        _refused_leaf = False
     check("the low-level note writer also refuses a leaf symlink",
           _refused_leaf, True)
 
@@ -4015,11 +3989,6 @@ def _selftest():
     _real_open = os.open
     _swapped = []
 
-    _race_probe = os.path.join(_v, "Wiki", ".symlink-probe")
-    _have_race_link = _try_symlink(_race_target, _race_probe)
-    if _have_race_link:
-        os.unlink(_race_probe)
-
     def _swap_reference_to_link(path, flags, *args, **kwargs):
         if os.path.abspath(path) == os.path.abspath(_race_note) and not _swapped:
             os.unlink(_race_note)
@@ -4027,14 +3996,11 @@ def _selftest():
             _swapped.append(True)
         return _real_open(path, flags, *args, **kwargs)
 
-    if _have_race_link:
-        try:
-            with patch.object(os, "open", side_effect=_swap_reference_to_link):
-                references(_v, {"download.pdf"})
-            _reference_race_refused = False
-        except InventoryFailed:
-            _reference_race_refused = True
-    else:
+    try:
+        with patch.object(os, "open", side_effect=_swap_reference_to_link):
+            references(_v, {"download.pdf"})
+        _reference_race_refused = False
+    except InventoryFailed:
         _reference_race_refused = True
     check("a Markdown leaf swapped to a symlink before open blocks the scan",
           _reference_race_refused, True)
@@ -4478,40 +4444,6 @@ def _selftest():
               bool(_snapshot_failure), True)
         check("...and leaves the late occupant untouched",
               open(_src, "rb").read(), b"late bytes")
-
-    with _tf.TemporaryDirectory(prefix="org-windows-stat-view-") as _v:
-        _src = _put(_v, "Sources/PDFs/Doe_Study_2025.pdf", b"source bytes")
-        _note = _put(
-            _v, "Articles/Doe_Study_2025.md", b"[[Doe_Study_2025.pdf]]\n")
-        _real_fstat = os.fstat
-
-        class _ProjectedHandleStat:
-            """Model Windows' stable but distinct handle metadata view."""
-
-            def __init__(self, item):
-                self.item = item
-
-            def __getattr__(self, name):
-                if name == "st_ctime_ns":
-                    return getattr(self.item, name) + 100
-                if name == "st_mode":
-                    return stat.S_IFMT(self.item.st_mode) | 0o444
-                return getattr(self.item, name)
-
-        def _projected_fstat(descriptor):
-            return _ProjectedHandleStat(_real_fstat(descriptor))
-
-        with patch.object(os, "fstat", side_effect=_projected_fstat):
-            _move_view = _stable_file_snapshot(_src)
-            _body_view = _read_snapshot(_note)[0]
-            _reference_view = references(_v, {os.path.basename(_src)})
-        check("stable Windows handle metadata does not look like a move race",
-              _move_view[1], hashlib.sha256(b"source bytes").hexdigest())
-        check("stable Windows handle metadata does not block a guarded text read",
-              _body_view, "[[Doe_Study_2025.pdf]]\n")
-        check("stable Windows handle metadata does not erase reference results",
-              sorted(os.path.basename(path) for path in _reference_view),
-              ["Doe_Study_2025.md"])
 
     with _tf.TemporaryDirectory(prefix="org-late-source-identity-") as _v:
         _src = _put(_v, "download.pdf", b"planned source")
@@ -5137,7 +5069,7 @@ def _selftest():
         _note_mode = stat.S_IMODE(os.stat(_note).st_mode)
         _foreign_mode = stat.S_IMODE(os.stat(_foreign).st_mode)
         _old_temp = "%s.organize-%d.tmp" % (_note, os.getpid())
-        _have_temp_link = _try_symlink(_foreign, _old_temp)
+        os.symlink(_foreign, _old_temp)
         _previous_umask = os.umask(0o022)
         try:
             _write(_note, "new note\n")
@@ -5145,20 +5077,18 @@ def _selftest():
             os.umask(_previous_umask)
         with open(_foreign, encoding="utf-8") as _fh:
             check("a foreign old-style temporary symlink and its bytes survive",
-                  (not _have_temp_link or
-                   (os.path.islink(_old_temp)
-                    and _fh.read() == "unrelated private bytes\n"
-                    and stat.S_IMODE(os.stat(_foreign).st_mode)
-                    == _foreign_mode)),
+                  (os.path.islink(_old_temp)
+                   and _fh.read() == "unrelated private bytes\n"
+                   and stat.S_IMODE(os.stat(_foreign).st_mode)
+                   == _foreign_mode),
                   True)
         with open(_note, encoding="utf-8") as _fh:
             check("the note remains a regular private file after atomic replacement",
                   (os.path.islink(_note), _fh.read(), stat.S_IMODE(os.stat(_note).st_mode)),
                   (False, "new note\n", _note_mode))
         check("only the foreign temporary occupant remains after replacement",
-              sorted(os.listdir(_v)), sorted(
-                  ["note.md", "unrelated.txt"] +
-                  ([os.path.basename(_old_temp)] if _have_temp_link else [])))
+              sorted(os.listdir(_v)),
+              sorted(["note.md", "unrelated.txt", os.path.basename(_old_temp)]))
 
     for _old, _new in (("Doe_Canonical_2025.pdf", "Doe_Canonical_2025.pdf"),
                        ("doe_canonical_2025.pdf", "Doe_Canonical_2025.pdf")):
@@ -5279,40 +5209,32 @@ def _selftest():
         os.makedirs(os.path.join(_v, "Sources"))
         os.makedirs(_store)
         _linked_sources = os.path.join(_v, "Sources", "PDFs")
-        _have_linked_sources = _try_symlink(
+        os.symlink(
             _store, _linked_sources, target_is_directory=True)
-        if _have_linked_sources:
-            _inbox_pdf = _put(_v, "Inbox/download.pdf", b"linked destination")
-            _moves, _edits, _blockers = rename_all(
-                _v, _inbox_pdf, "Doe_Linked_2025.pdf", apply=True,
-                dest=_linked_sources)
-            _logical_pdf = os.path.join(_linked_sources, "Doe_Linked_2025.pdf")
-            check("a linked source directory is an in-vault filing destination",
-                  (_blockers, os.path.isfile(_logical_pdf)), ([], True))
+        _inbox_pdf = _put(_v, "Inbox/download.pdf", b"linked destination")
+        _moves, _edits, _blockers = rename_all(
+            _v, _inbox_pdf, "Doe_Linked_2025.pdf", apply=True,
+            dest=_linked_sources)
+        _logical_pdf = os.path.join(_linked_sources, "Doe_Linked_2025.pdf")
+        check("a linked source directory is an in-vault filing destination",
+              (_blockers, os.path.isfile(_logical_pdf)), ([], True))
 
-            _moves, _edits, _blockers = rename_all(
-                _v, _logical_pdf, "Doe_LinkedRevised_2025.pdf", apply=True)
-            _logical_revised = os.path.join(
-                _linked_sources, "Doe_LinkedRevised_2025.pdf")
-            check("a PDF reached through a linked source directory stays in scope",
-                  (_blockers, os.path.isfile(_logical_revised)), ([], True))
+        _moves, _edits, _blockers = rename_all(
+            _v, _logical_pdf, "Doe_LinkedRevised_2025.pdf", apply=True)
+        _logical_revised = os.path.join(
+            _linked_sources, "Doe_LinkedRevised_2025.pdf")
+        check("a PDF reached through a linked source directory stays in scope",
+              (_blockers, os.path.isfile(_logical_revised)), ([], True))
 
-            _physical_pdf = os.path.join(_store, "Doe_LinkedRevised_2025.pdf")
-            _moves, _edits, _blockers = plan_rename(
-                _v, _physical_pdf, "Doe_Physical_2025.pdf")
-            check("the linked directory's direct physical target stays outside",
-                  (bool(_blockers), any("outside the vault" in b
-                                        for b in _blockers)), (True, True))
-            check("a symlink followed by parent traversal cannot escape scope",
-                  _inside(_v, os.path.join(
-                      _linked_sources, os.pardir, "escape.pdf")), False)
-        else:
-            for _label in (
-                    "a linked source directory is an in-vault filing destination",
-                    "a PDF reached through a linked source directory stays in scope",
-                    "the linked directory's direct physical target stays outside",
-                    "a symlink followed by parent traversal cannot escape scope"):
-                check(_label + " (skipped without symlink privileges)", True, True)
+        _physical_pdf = os.path.join(_store, "Doe_LinkedRevised_2025.pdf")
+        _moves, _edits, _blockers = plan_rename(
+            _v, _physical_pdf, "Doe_Physical_2025.pdf")
+        check("the linked directory's direct physical target stays outside",
+              (bool(_blockers), any("outside the vault" in b
+                                    for b in _blockers)), (True, True))
+        check("a symlink followed by parent traversal cannot escape scope",
+              _inside(_v, os.path.join(
+                  _linked_sources, os.pardir, "escape.pdf")), False)
 
     # Folded spelling is only a candidate identity. On an insensitive volume
     # the alternate spelling reaches the same inode and must work; on a
@@ -5339,11 +5261,10 @@ def _selftest():
         _alias = os.path.join(_tmp, "aliasvault")
         os.makedirs(_v)
         if not os.path.lexists(_alias):
-            _have_alias_link = _try_symlink(
+            os.symlink(
                 _v, _alias, target_is_directory=True)
             check("a distinct folded-name symlink is not a filesystem alias",
-                  (not _have_alias_link
-                   or not _inside(_v, os.path.join(_alias, "future.pdf"))),
+                  not _inside(_v, os.path.join(_alias, "future.pdf")),
                   True)
 
     with _tf.TemporaryDirectory(prefix="org-src-book-test-") as _v:

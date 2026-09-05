@@ -80,11 +80,6 @@ jobs:
             python: "3.x"
             dependencies: current
             python_utf8: "1"
-          - name: Current Python and dependencies, Windows
-            os: windows-latest
-            python: "3.x"
-            dependencies: current
-            python_utf8: "1"
     env:
       LANG: C
       LC_ALL: C

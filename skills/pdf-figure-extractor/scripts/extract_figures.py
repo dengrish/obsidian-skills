@@ -124,18 +124,9 @@ from vault_artifacts import (inventory_source_figures, output_vault_root,
                              verify_selected_pdf)
 
 try:
-    # `import pymupdf` is the modern spelling. The legacy `import fitz`
-    # alias prints a deprecation notice **on stdout** in PyMuPDF >= 1.25,
-    # which corrupts `auto_fig_bbox.py --emit extract` (its output is meant
-    # to be a runnable shell command) — and the alias is slated for removal
-    # outright. Fall back to it only for PyMuPDF older than 1.24.3, which
-    # predates the `pymupdf` module name.
     import pymupdf as fitz
 except ImportError:
-    try:
-        import fitz  # PyMuPDF < 1.24.3
-    except ImportError:
-        fitz = None
+    fitz = None
 
 
 _PYMUPDF_ERROR = (
@@ -983,39 +974,30 @@ def run_self_test():
            not [f for f in os.listdir(render_root)
                 if f.startswith(".figure-stage-")])
 
-        # A directory symlink can point to another volume. Exercise that path
-        # when the platform permits creating one. Windows without developer
-        # mode commonly denies symlink creation, so the two checks retain their
-        # tally while explicitly skipping the symlink-specific condition; the
-        # ordinary path above still proves outside-folder staging and cleanup.
+        # A directory symlink can point to another volume. Staging must follow
+        # the resolved output directory's parent.
         logical_root = os.path.join(tmp, "logical-root")
         logical_images = os.path.join(logical_root, "Images")
         os.makedirs(logical_root)
-        try:
-            os.symlink(render_images, logical_images)
-            have_output_symlink = True
-        except (OSError, NotImplementedError):
-            have_output_symlink = False
+        os.symlink(render_images, logical_images)
         linked_stage_parents = []
-        if have_output_symlink:
-            def tracked_linked_mkdtemp(*args, **kwargs):
-                if kwargs.get("prefix") == ".figure-stage-":
-                    linked_stage_parents.append(kwargs.get("dir"))
-                return real_mkdtemp(*args, **kwargs)
 
-            linked_out = os.path.join(
-                logical_images, "Doe_Figs_2025_fig_7.png")
-            with mock.patch.object(tempfile, "mkdtemp",
-                                   side_effect=tracked_linked_mkdtemp):
-                extract_one_figure(doc, 0, (100, 150, 500, 350), linked_out,
-                                   dpi=72, trim=False)
-        ok("a symlinked output folder stages by its resolved parent "
-           "(skipped when directory symlinks are unavailable)",
-           not have_output_symlink or linked_stage_parents == [
+        def tracked_linked_mkdtemp(*args, **kwargs):
+            if kwargs.get("prefix") == ".figure-stage-":
+                linked_stage_parents.append(kwargs.get("dir"))
+            return real_mkdtemp(*args, **kwargs)
+
+        linked_out = os.path.join(
+            logical_images, "Doe_Figs_2025_fig_7.png")
+        with mock.patch.object(tempfile, "mkdtemp",
+                               side_effect=tracked_linked_mkdtemp):
+            extract_one_figure(doc, 0, (100, 150, 500, 350), linked_out,
+                               dpi=72, trim=False)
+        ok("a symlinked output folder stages by its resolved parent",
+           linked_stage_parents == [
                os.path.realpath(render_root)])
-        ok("publication follows a symlinked output folder "
-           "(skipped when directory symlinks are unavailable)",
-           not have_output_symlink or os.path.isfile(os.path.join(
+        ok("publication follows a symlinked output folder",
+           os.path.isfile(os.path.join(
                render_images, "Doe_Figs_2025_fig_7.png")))
         state["n"] += 1
         try:

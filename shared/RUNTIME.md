@@ -1,9 +1,9 @@
 # Running in Codex and Claude
 
 Read this once when using any skill in this plugin. The Markdown instructions
-and Python helpers are shared by Codex and Claude Code; they do not require
-one host's internal tool names. Installing the plugin does not grant access
-to a vault, install Python packages, or enable browser tools.
+and Python helpers run on macOS and Linux and are shared by Codex and Claude
+Code; they do not require one host's internal tool names. Installing the plugin
+does not grant access to a vault, install Python packages, or enable browser tools.
 
 `SKILL.md` gives the active workflow and its decision gates. Follow its links
 when a step requires a reference; do not load every reference preemptively.
@@ -110,19 +110,12 @@ if problems:
 
 import pypdf
 import PIL
-try:
-    import pymupdf
-except ImportError:
-    import fitz
+import pymupdf
 PY
 ```
 
-All supported PyMuPDF versions expose `pymupdf`. The scripts retain a `fitz`
-import fallback for older environments, but that alias does not replace the
-version check above or make an older release supported. On Windows the
-environment's interpreter is `<venv>/Scripts/python.exe`. Shell examples
-elsewhere use POSIX syntax; use a POSIX shell (such as WSL) or translate
-arguments for the active shell.
+Use the environment's `bin/python` interpreter with the POSIX shell examples
+throughout the skills.
 Do not override an externally managed Python installation or install globally
 as a fallback. If installation is blocked, report the missing dependency and
 complete only work that does not depend on it.

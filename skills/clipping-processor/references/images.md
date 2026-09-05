@@ -14,35 +14,11 @@ replace it with a hand-written downloader.
 Keep `![[…]]` embeds and figure numbers. If the slug is unchanged, leave their
 files alone. If it changes, update only the draft embeds by replacing the old
 slug and preserving each figure tail and extension. Do not alter live images
-until both owner notes are safely public. Then begin the guarded
-[two-phase replacement](duplicates-and-reprocessing.md#publish-an-approved-replacement)
-with an explicit prepare phase; omitting `--phase` is a usage error:
-
-```bash
-python3 '<skill>/scripts/fetch_images.py' rename --phase prepare --dry-run \
-    --attachments '<vault>/Sources/Images' \
-    --sources '<vault>/Sources/PDFs' --owner-note '<vault>/Articles/<old_slug>.md' \
-    --new-owner-note '<vault>/Articles/<new_slug>.md' \
-    --old-slug '<old_slug>' --new-slug '<new_slug>'
-```
-
-The old owner must still have a valid web URL as its first current `sources:`
-item and exactly embed every old attachment. The new owner must have the same
-normalized web origin and exactly embed every mapped new name. The helper also
-checks recursive PDF ownership on both stems. Run prepare first with
-`--dry-run`, review its exact mapping and complete dependency report, then run
-the same command live. It exclusively publishes byte-identical new copies and
-retains every old file. Never use bare `cp`/`mv`, omit either owner guard, or use
-the deprecated `--phase immediate` for this workflow.
-
-For canonical vault paths, prepare scans every Markdown note outside the old
-owner for inbound links to the old note and references to each old image name.
-Resolving dependencies are reported while both copies remain available; an
-unreadable note or incomplete walk blocks preparation. This skill has no
-implicit authority to rewrite other notes. Retain its exact blocker paths,
-follow the linked procedure to repair authorized Wiki dependencies, run the
-unchanged dependency re-probe, and use the explicit finalize phase only after
-it reports `ok: true`.
+until both owner notes are safely public. Follow the complete
+[two-phase replacement procedure](duplicates-and-reprocessing.md#publish-an-approved-replacement)
+for prepare, any authorized dependency repair, the unchanged re-probe, and
+finalize. Keep old images until those checks pass; never use bare `cp`/`mv`,
+omit either owner guard, or use `--phase immediate`.
 
 The plan inventories the note in both directions: an old-slug image embed with
 no exact attachment is a blocking result, including legacy loose `_figN`
@@ -55,18 +31,6 @@ an otherwise successful rename. Other-slug and non-image embeds are outside
 this plan. A body can contain both old embeds and new remote images; download
 only the remote images, starting after the highest occupied number, even if
 they appear earlier in document order.
-
-Finalize rechecks external dependencies around every conditional retirement,
-so a link introduced after the dry run causes rollback. Before finalizing, run
-`fetch_images.py dependencies --attachments '<vault>/Sources/Images'
---owner-note '<vault>/Articles/<old_slug>.md' --old-slug '<old_slug>'` once more
-without changing its arguments. Cleanup requires `ok: true`. Otherwise keep
-the old path, report every blocker, and stop or roll back; never discover and
-announce broken links only after deleting their target. An authorized rewrite
-of Wiki-entry or recognized root-MOC blockers uses `wiki-linter`'s
-[producer-mapped dependency repair](../../wiki-linter/references/external-artifact-repair.md)
-with the exact mappings and this re-probe; the clipping producer still owns
-final cleanup.
 
 ## Download and publish
 

@@ -16,10 +16,7 @@ import tempfile
 import unittest
 import yaml
 
-try:
-    import pymupdf
-except ImportError:
-    import fitz as pymupdf
+import pymupdf
 from PIL import Image
 
 

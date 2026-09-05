@@ -79,6 +79,9 @@ For each **included discipline tag** carried by **≥1 non-stub entry** (the dis
 
 One MOC per discipline **tag** that has ≥1 non-stub entry, at `<vault-root>/<discipline-slug>-moc.md`, where `<discipline-slug>` is the tag value with the `#` stripped (`#machine-learning` → `machine-learning-moc.md`).
 
+A discipline containing only legacy stubs gets no new MOC; report that state.
+Preserve any existing MOC under the zero-full-entry rule below.
+
 The generated tree has one stable owned region, delimited by these exact lines:
 
 ```markdown

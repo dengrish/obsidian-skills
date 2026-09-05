@@ -61,9 +61,10 @@ repair. Evidence from a new source still belongs to wiki-builder.
 
 ## Codex and Claude
 
-The same six skills run in **Codex and Claude Code**, including their desktop
-surfaces when local files and shell execution are available. This is a skill
-package, not an Obsidian community plugin or an MCP server. Ordinary chats
+The same six skills run in **Codex and Claude Code** on **macOS and Linux**,
+including their desktop surfaces when local files and shell execution are
+available. This is a skill package, not an Obsidian community plugin or an MCP
+server. Ordinary chats
 without filesystem access cannot run the vault workflow.
 
 | Purpose | Codex | Claude Code |
@@ -98,8 +99,7 @@ claude plugin install obsidian@obsidian-skills
 For local Claude development, `claude --plugin-dir .` loads this checkout.
 Start a fresh task/session after installing or updating. Installation does
 not install Python dependencies or grant vault access; follow the runtime
-guide. Shell examples use POSIX syntax (macOS, Linux or WSL); native PowerShell
-commands need translation.
+guide. Shell examples use POSIX syntax.
 
 ## Vault layout
 
@@ -225,9 +225,9 @@ without rewriting them.
 inventory for the archive. Add an intentional new reference, script, or asset
 there; an unlisted or missing file under a shipped tree makes the build fail.
 This supports arbitrary asset types without silently packaging editor residue
-or secrets. Archive paths must also be NFC-normalized, free of case-folding
-collisions, and valid on Windows. [`.gitattributes`](.gitattributes) keeps tracked text at LF so the
-same revision produces the same archive from Windows, macOS, and Linux clones.
+or secrets. Archive paths must also be NFC-normalized and free of case-folding
+collisions. [`.gitattributes`](.gitattributes) keeps tracked text at LF so the
+same revision produces the same archive from macOS and Linux clones.
 
 For a release, bump the authored manifest's version, validate, rebuild, then
 commit source and generated files together before pushing. An explicit

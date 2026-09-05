@@ -174,7 +174,7 @@ import warnings
 import xml.etree.ElementTree as ET
 import zipfile
 
-_OBSIDIAN_SHARED_MODULES = ("atomic_move", "figure_state", "slugify", "yaml_scalars")
+_OBSIDIAN_SHARED_MODULES = ("atomic_move", "figure_state", "yaml_scalars")
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
@@ -218,7 +218,6 @@ from atomic_move import (LinkUnavailable, MoveIncomplete, PublicationConflict, f
                          replace_expected, publish_new, set_private_mode)
 from dedup_index import normalize_url, read_source
 from figure_state import MANIFEST_FILE, read_manifest
-from slugify import is_windows_device_stem
 
 
 def _name_key(name):
@@ -944,9 +943,7 @@ def _stable_regular_snapshot(path, copy_to=None, copy_mode=None):
     if not stat.S_ISREG(before.st_mode):
         raise OSError(errno.EINVAL, "%r is a symlink or non-regular file" % path,
                       path)
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
+    flags = os.O_RDONLY | os.O_NOFOLLOW
     try:
         descriptor = os.open(path, flags)
     except OSError as exc:
@@ -976,7 +973,7 @@ def _stable_regular_snapshot(path, copy_to=None, copy_mode=None):
                     if destination is not None:
                         destination.write(chunk)
                 if destination is not None:
-                    set_private_mode(destination, copy_to, copy_mode)
+                    set_private_mode(destination, copy_mode)
                     destination.flush()
                     os.fsync(destination.fileno())
                 opened_after = os.fstat(source.fileno())
@@ -1003,19 +1000,12 @@ def _stable_regular_snapshot(path, copy_to=None, copy_mode=None):
                       "%r changed while it was read (%s)" % (path, exc),
                       path) from exc
     stable = lambda item: (
-        item.st_dev, item.st_ino, stat.S_IFMT(item.st_mode), item.st_size,
+        item.st_dev, item.st_ino, item.st_mode, item.st_size,
         getattr(item, "st_mtime_ns", int(item.st_mtime * 1e9)),
         getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)),
     )
-    identity = lambda item: (
-        item.st_dev, item.st_ino, stat.S_IFMT(item.st_mode))
-    # Native Windows can project stable permission and timestamp metadata
-    # differently through path stat and handle stat. Compare each API with
-    # itself across the read, then bind the two views by portable identity.
-    if not (stable(before) == stable(after)
-            and stable(opened_before) == stable(opened_after)
-            and identity(before) == identity(opened_before)
-            and identity(after) == identity(opened_after)):
+    if not (stable(before) == stable(opened_before)
+            == stable(opened_after) == stable(after)):
         if copy_to is not None:
             try:
                 os.unlink(copy_to)
@@ -1310,7 +1300,7 @@ def _markdown_dependency_names(text, image_names, old_slug):
 def _stable_markdown_text(path):
     """Read one complete UTF-8 Markdown entry and reject concurrent changes."""
     def stable(item):
-        return (item.st_dev, item.st_ino, stat.S_IFMT(item.st_mode), item.st_size,
+        return (item.st_dev, item.st_ino, item.st_mode, item.st_size,
                 getattr(item, "st_mtime_ns", int(item.st_mtime * 1e9)),
                 getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)))
 
@@ -1324,15 +1314,9 @@ def _stable_markdown_text(path):
         opened_after = os.fstat(source.fileno())
     entry_after = os.lstat(path)
     target_after = os.stat(path)
-    identity = lambda item: (
-        item.st_dev, item.st_ino, stat.S_IFMT(item.st_mode))
-    # Keep path and handle projections internally stable without requiring
-    # their platform-specific metadata views to be byte-for-byte identical.
     if (stable(entry_before) != stable(entry_after)
-            or stable(target_before) != stable(target_after)
-            or stable(opened_before) != stable(opened_after)
-            or identity(target_before) != identity(opened_before)
-            or identity(target_after) != identity(opened_after)):
+            or not (stable(target_before) == stable(opened_before)
+                    == stable(opened_after) == stable(target_after))):
         raise ValueError("changed while the dependency inventory read it")
     try:
         return raw.decode("utf-8-sig")
@@ -1793,13 +1777,15 @@ def validate_slug(slug, what="--slug"):
     if slug is None or not str(slug).strip():
         raise ValueError(f"{what} is empty — refusing to write '<empty>_fig_N.ext'")
     slug = str(slug)
+    # Names are reused in Markdown, wikilinks, URL-style targets, and HTML.
+    # Delimiter and control-character guards remain relevant on both hosts.
     invalid = [ch for ch in slug
                if ord(ch) < 0x20 or ord(ch) == 0x7f
                or ch in '<>:"/\\|?*']
     if invalid:
         bad = invalid[0]
-        raise ValueError(f"{what} contains Windows-forbidden filename character "
-                         f"{bad!r}: {slug!r} — use the portable slug returned by "
+        raise ValueError(f"{what} contains a path, markup, or control character "
+                         f"{bad!r}: {slug!r} — use the safe slug returned by "
                          "the clipping slug helper")
     if ".." in slug:
         raise ValueError(f"{what} contains '..': {slug!r} — a slug is a "
@@ -1810,16 +1796,10 @@ def validate_slug(slug, what="--slug"):
     # download reported ok and the figure was gone.
     if slug.startswith((".", " ")):
         raise ValueError(f"{what} starts with a dot or space: {slug!r} — that "
-                         "would create a hidden or non-portable filename")
+                         "would create a hidden or ambiguously trimmed filename")
     if not slug.strip(". "):
         raise ValueError(f"{what} is {slug!r} — that names no note; a slug is a "
                          "filename stem, not a directory")
-    if slug.endswith((".", " ")):
-        raise ValueError(f"{what} ends in a dot or space: {slug!r} — Windows "
-                         "cannot store that filename portably")
-    if is_windows_device_stem(slug):
-        raise ValueError(f"{what} is reserved as a Windows device filename: "
-                         f"{slug!r} — qualify the clipping slug")
     return slug
 
 
@@ -3819,19 +3799,15 @@ def run_self_test():
                        ("/etc/passwd", "an absolute path"),
                        ("dir/slug", "a separator"),
                        ("dir\\slug", "a backslash separator"),
-                       ("bad:name", "a Windows-forbidden colon"),
-                       ('bad"name', "a Windows-forbidden quote"),
-                       ("bad|name", "a Windows-forbidden pipe"),
-                       ("bad?name", "a Windows-forbidden question mark"),
-                       ("bad*name", "a Windows-forbidden asterisk"),
-                       ("bad<name", "a Windows-forbidden angle bracket"),
+                       ("bad:name", "a URL-scheme colon"),
+                       ('bad"name', "an HTML attribute quote"),
+                       ("bad|name", "a wikilink label separator"),
+                       ("bad?name", "a Markdown query delimiter"),
+                       ("bad*name", "a Markdown emphasis marker"),
+                       ("bad<name", "a Markdown/HTML angle bracket"),
                        ("bad\x1fname", "a control character"),
                        ("bad\x7fname", "DEL"),
                        ("Teslo..Cancer_2026", "`..` with no separator at all"),
-                       ("trailing.", "a trailing dot"),
-                       ("trailing ", "a trailing space"),
-                       ("CON", "a Windows device basename"),
-                       ("com1.txt", "a Windows device basename before a dot"),
                        ("", "an empty slug"),
                        ("   ", "a whitespace-only slug"),
                        (None, "no slug at all"),
@@ -3841,6 +3817,9 @@ def run_self_test():
                        ("nul\x00byte", "an embedded NUL")):
         raises("validate_slug refuses %s (%r)" % (label, bad),
                validate_slug, bad)
+    for ordinary_slug in ("CON", "COM1", "aux.extra", "trailing.", "trailing "):
+        check("validate_slug accepts macOS/Linux stem %r" % ordinary_slug,
+              validate_slug(ordinary_slug), ordinary_slug)
     check("validate_slug passes an ordinary slug",
           validate_slug("Teslo_Pancreatic_Cancer_2026"),
           "Teslo_Pancreatic_Cancer_2026")
@@ -3970,13 +3949,11 @@ continues here`
                 fh.write(data)
             return path
 
-        # Native Windows can expose a stable file differently through path
-        # stat and handle stat. The readers must tolerate that projection while
-        # still rejecting changes within either view and mismatched identities.
+        # Path and handle metadata must agree throughout each read.
         real_fstat = os.fstat
 
-        class _HandleStat:
-            def __init__(self, item, ctime_delta=100, ino_delta=0):
+        class _AlteredStat:
+            def __init__(self, item, ctime_delta=0, ino_delta=0):
                 self.item = item
                 self.ctime_delta = ctime_delta
                 self.ino_delta = ino_delta
@@ -3984,31 +3961,25 @@ continues here`
             def __getattr__(self, name):
                 if name == "st_ctime_ns":
                     return getattr(self.item, name) + self.ctime_delta
-                if name == "st_mode":
-                    return stat.S_IFMT(self.item.st_mode) | 0o444
                 if name == "st_ino":
                     return self.item.st_ino + self.ino_delta
                 return getattr(self.item, name)
-
-        def projected_fstat(descriptor):
-            return _HandleStat(real_fstat(descriptor))
 
         snapshot_path = touch(os.path.join(tmp, "stable-snapshot.bin"), b"stable")
         markdown_path = touch(
             os.path.join(tmp, "stable-note.md"),
             b"---\nsources:\n  - https://example.com/article\n---\nbody\n")
-        with patch.object(os, "fstat", side_effect=projected_fstat):
-            projected_snapshot = _stable_regular_snapshot(snapshot_path)
-            projected_markdown = _stable_markdown_text(markdown_path)
-        check("stable readers tolerate distinct path/handle metadata projections",
-              (projected_snapshot[1], projected_markdown.endswith("body\n")),
+        stable_snapshot = _stable_regular_snapshot(snapshot_path)
+        stable_markdown = _stable_markdown_text(markdown_path)
+        check("stable readers bind the same bytes and metadata",
+              (stable_snapshot[1], stable_markdown.endswith("body\n")),
               (__import__("hashlib").sha256(b"stable").hexdigest(), True))
 
         calls = {"count": 0}
 
         def changing_fstat(descriptor):
             calls["count"] += 1
-            return _HandleStat(real_fstat(descriptor),
+            return _AlteredStat(real_fstat(descriptor),
                                ctime_delta=calls["count"] * 100)
 
         try:
@@ -4031,7 +4002,7 @@ continues here`
               markdown_changed, True)
 
         def mismatched_fstat(descriptor):
-            return _HandleStat(real_fstat(descriptor), ino_delta=1)
+            return _AlteredStat(real_fstat(descriptor), ino_delta=1)
 
         try:
             with patch.object(os, "fstat", side_effect=mismatched_fstat):
@@ -4098,13 +4069,10 @@ continues here`
                _ensure_within, att, os.path.join(sibling, "a.png"))
         outside = touch(os.path.join(tmp, "outside.png"))
         link = os.path.join(att, "link_fig_1.png")
-        try:
-            os.symlink(outside, link)
-            raises("_ensure_within resolves a symlink out of the folder",
-                   _ensure_within, att, link)
-            os.remove(link)
-        except (OSError, NotImplementedError):
-            pass                              # no symlink support: skip, silently
+        os.symlink(outside, link)
+        raises("_ensure_within resolves a symlink out of the folder",
+               _ensure_within, att, link)
+        os.remove(link)
 
         # --- the scheme and private-host guards, called directly ------------
         for url, label in (("file:///etc/passwd", "file:"),
@@ -4540,12 +4508,7 @@ continues here`
               os.path.isfile(os.path.join(att, "Teslo_Cancer_2026_fig_1.png")),
               True)
         downloaded_mode = stat.S_IMODE(os.stat(res["path"]).st_mode)
-        check("...world-readable, not mkstemp's 0600",
-              (downloaded_mode if os.name != "nt" else
-               ((downloaded_mode & 0o444) == 0o444,
-                bool(downloaded_mode & 0o200),
-                bool(downloaded_mode & 0o111))),
-              0o644 if os.name != "nt" else (True, True, False))
+        check("...world-readable, not mkstemp's 0600", downloaded_mode, 0o644)
         check("...and leaves no temp file behind", strays() - before, set())
         # the occupied-slot refusal: `shutil.move` replaces silently, so a
         # re-run with the wrong --start destroyed the figures already filed
@@ -4574,22 +4537,18 @@ continues here`
               (foreign["ok"], "this Sources/Images vault" in
                (foreign["error"] or "")), (False, True))
         image_alias = os.path.join(tmp, "images-alias")
-        try:
-            os.symlink(att, image_alias)
-        except (OSError, NotImplementedError):
-            pass
-        else:
-            before_alias_attempt = open(os.path.join(
-                att, "Teslo_Cancer_2026_fig_1.png"), "rb").read()
-            alias_foreign = download_one(
-                data_url, image_alias, "Teslo_Cancer_2026", 1,
-                overwrite=True, owner_note=foreign_owner)
-            check("a symlink alias cannot hide the canonical image vault from owner binding",
-                  (alias_foreign["ok"], "this Sources/Images vault" in
-                   (alias_foreign["error"] or ""),
-                   open(os.path.join(att, "Teslo_Cancer_2026_fig_1.png"),
-                        "rb").read()),
-                  (False, True, before_alias_attempt))
+        os.symlink(att, image_alias)
+        before_alias_attempt = open(os.path.join(
+            att, "Teslo_Cancer_2026_fig_1.png"), "rb").read()
+        alias_foreign = download_one(
+            data_url, image_alias, "Teslo_Cancer_2026", 1,
+            overwrite=True, owner_note=foreign_owner)
+        check("a symlink alias cannot hide the canonical image vault from owner binding",
+              (alias_foreign["ok"], "this Sources/Images vault" in
+               (alias_foreign["error"] or ""),
+               open(os.path.join(att, "Teslo_Cancer_2026_fig_1.png"),
+                    "rb").read()),
+              (False, True, before_alias_attempt))
 
         identity_owner = current_owner(att, "Teslo_Cancer_2026")
         real_realpath = os.path.realpath
@@ -5128,12 +5087,7 @@ continues here`
         check("...moving it, so no twin is left at the render path",
               os.path.exists(render), False)
         placed_mode = stat.S_IMODE(os.stat(res["path"]).st_mode)
-        check("...world-readable like a downloaded figure",
-              (placed_mode if os.name != "nt" else
-               ((placed_mode & 0o444) == 0o444,
-                bool(placed_mode & 0o200),
-                bool(placed_mode & 0o111))),
-              0o644 if os.name != "nt" else (True, True, False))
+        check("...world-readable like a downloaded figure", placed_mode, 0o644)
         # the occupied slot: `os.replace` in the heredoc overwrote a previous
         # run's GIF and exited 0
         render = touch(os.path.join(tmp, "render.gif"), b"GIF89a\x02\x00,")
@@ -5291,49 +5245,38 @@ continues here`
         os.makedirs(linked_articles)
         os.makedirs(os.path.join(linked_sources, "Images"))
         os.makedirs(os.path.join(linked_sources, "PDFs"))
-        linked_supported = True
-        try:
-            os.symlink(linked_sources, os.path.join(linked_vault, "Sources"),
-                       target_is_directory=True)
-        except (OSError, NotImplementedError):
-            linked_supported = False
-        if linked_supported:
-            linked_slug = "Linked_Clipping_2025"
-            linked_image = linked_slug + "_fig_1.png"
-            touch(os.path.join(linked_vault, "Sources", "Images", linked_image),
-                  _PNG)
-            linked_owner = os.path.join(linked_articles, linked_slug + ".md")
-            with open(linked_owner, "w", encoding="utf-8") as fh:
-                fh.write("---\nsources:\n  - https://example.com/linked\n---\n"
-                         "![[%s]]\n" % linked_image)
-            bound = _load_clipping_owner(
-                linked_owner, linked_slug,
-                os.path.join(linked_vault, "Sources", "Images"))
-            check("a symlinked Sources directory binds to the logical vault owner",
-                  bound["vault"], os.path.realpath(linked_vault))
+        os.symlink(linked_sources, os.path.join(linked_vault, "Sources"),
+                   target_is_directory=True)
+        linked_slug = "Linked_Clipping_2025"
+        linked_image = linked_slug + "_fig_1.png"
+        touch(os.path.join(linked_vault, "Sources", "Images", linked_image),
+              _PNG)
+        linked_owner = os.path.join(linked_articles, linked_slug + ".md")
+        with open(linked_owner, "w", encoding="utf-8") as fh:
+            fh.write("---\nsources:\n  - https://example.com/linked\n---\n"
+                     "![[%s]]\n" % linked_image)
+        bound = _load_clipping_owner(
+            linked_owner, linked_slug,
+            os.path.join(linked_vault, "Sources", "Images"))
+        check("a symlinked Sources directory binds to the logical vault owner",
+              bound["vault"], os.path.realpath(linked_vault))
 
-            source_vault = tempfile.mkdtemp(prefix="source-complete-vault.", dir=tmp)
-            os.makedirs(os.path.join(source_vault, "Articles"))
-            os.makedirs(os.path.join(source_vault, "Sources", "Images"))
-            alias_vault = tempfile.mkdtemp(prefix="aliased-complete-vault.", dir=tmp)
-            os.makedirs(os.path.join(alias_vault, "Articles"))
-            try:
-                os.symlink(os.path.join(source_vault, "Sources"),
-                           os.path.join(alias_vault, "Sources"),
-                           target_is_directory=True)
-            except (OSError, NotImplementedError):
-                alias_supported = False
-            else:
-                alias_supported = True
-            if alias_supported:
-                alias_owner = os.path.join(
-                    alias_vault, "Articles", linked_slug + ".md")
-                with open(alias_owner, "w", encoding="utf-8") as fh:
-                    fh.write("---\nsources:\n  - https://example.com/alias\n---\n"
-                             "![[%s]]\n" % linked_image)
-                raises("an alias between two complete vaults cannot borrow owner evidence",
-                       _load_clipping_owner, alias_owner, linked_slug,
-                       os.path.join(alias_vault, "Sources", "Images"))
+        source_vault = tempfile.mkdtemp(prefix="source-complete-vault.", dir=tmp)
+        os.makedirs(os.path.join(source_vault, "Articles"))
+        os.makedirs(os.path.join(source_vault, "Sources", "Images"))
+        alias_vault = tempfile.mkdtemp(prefix="aliased-complete-vault.", dir=tmp)
+        os.makedirs(os.path.join(alias_vault, "Articles"))
+        os.symlink(os.path.join(source_vault, "Sources"),
+                   os.path.join(alias_vault, "Sources"),
+                   target_is_directory=True)
+        alias_owner = os.path.join(
+            alias_vault, "Articles", linked_slug + ".md")
+        with open(alias_owner, "w", encoding="utf-8") as fh:
+            fh.write("---\nsources:\n  - https://example.com/alias\n---\n"
+                     "![[%s]]\n" % linked_image)
+        raises("an alias between two complete vaults cannot borrow owner evidence",
+               _load_clipping_owner, alias_owner, linked_slug,
+               os.path.join(alias_vault, "Sources", "Images"))
 
         dep_vault, dep_images, dep_pdfs, dep_owner, dep_names = \
             canonical_rename_fixture("external", "Old_Dependency_2025")
@@ -5512,18 +5455,14 @@ continues here`
         outside_pdfs = os.path.join(tmp, "linked-pdf-target")
         os.makedirs(outside_pdfs)
         touch(os.path.join(outside_pdfs, "Linked_PDF_2025.pdf"), b"%PDF-1.7\n")
-        try:
-            os.symlink(outside_pdfs, os.path.join(pdf_sources, "linked"))
-        except (OSError, NotImplementedError):
-            pass
-        else:
-            linked_pdf_result = rename_slug(
-                pdf_images, "Linked_PDF_2025", "New_Linked_2026",
-                sources=pdf_sources, owner_note=pdf_owner)
-            check("PDF ownership inventory follows linked source subfolders",
-                  ([row["ok"] for row in linked_pdf_result],
-                   os.path.isfile(os.path.join(pdf_images, pdf_names[0]))),
-                  ([False], True))
+        os.symlink(outside_pdfs, os.path.join(pdf_sources, "linked"))
+        linked_pdf_result = rename_slug(
+            pdf_images, "Linked_PDF_2025", "New_Linked_2026",
+            sources=pdf_sources, owner_note=pdf_owner)
+        check("PDF ownership inventory follows linked source subfolders",
+              ([row["ok"] for row in linked_pdf_result],
+               os.path.isfile(os.path.join(pdf_images, pdf_names[0]))),
+              ([False], True))
 
         folder = figures("Old_Slug_2025")
         out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
@@ -5615,15 +5554,11 @@ continues here`
         folder = figures("Old_Slug_2025", ())
         backing = touch(os.path.join(folder, "backing.png"), _PNG)
         linked = os.path.join(folder, "Old_Slug_2025_fig_1.png")
-        try:
-            os.symlink(backing, linked)
-        except (OSError, NotImplementedError):
-            pass
-        else:
-            out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
-            check("a matching symlink is not treated as a regular image move",
-                  ([entry["ok"] for entry in out], os.path.islink(linked),
-                   open(backing, "rb").read()), ([False], True, _PNG))
+        os.symlink(backing, linked)
+        out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
+        check("a matching symlink is not treated as a regular image move",
+              ([entry["ok"] for entry in out], os.path.islink(linked),
+               open(backing, "rb").read()), ([False], True, _PNG))
 
         # §8a: a CONSUMER matches `<stem>_fig`, never `<stem>_fig_`. This side
         # globbed the strict form, so a vault holding pre-convergence names
@@ -5866,13 +5801,9 @@ continues here`
         check("_same_file: two different files are not one",
               _same_file(one, touch(two, b"y")), False)
         os.unlink(two)
-        try:
-            os.link(one, two)
-        except (OSError, AttributeError, NotImplementedError):
-            pass                              # no hard links here: skip, silently
-        else:
-            check("_same_file recognizes distinct names for one inode",
-                  _same_file(one, two), True)
+        os.link(one, two)
+        check("_same_file recognizes distinct names for one inode",
+              _same_file(one, two), True)
 
         # Sources/Images is FLAT and shared. Two guards say the stem is a PDF's.
         folder = figures("Doe_Foo_2025", ("_fig_1.png", "_fig_S1.png"))
@@ -6008,22 +5939,31 @@ continues here`
               (len(rename_calls) >= 1,
                [c for c in rename_calls if "--phase" not in c]),
               (True, []))
-        check("the image procedure requires the recursive PDF ownership guard",
-              bool(re.search(r"recursive PDF ownership.{0,100}both stems",
-                             images_md, re.S)) and
-              "Never use bare `cp`/`mv`, omit either owner guard" in images_md,
+        replacement_anchor = (
+            "duplicates-and-reprocessing.md#publish-an-approved-replacement")
+        images_words = " ".join(images_md.split()).casefold()
+        reprocess_words = " ".join(reprocess_md.split()).casefold()
+        check("the image procedure routes changed slugs to the canonical "
+              "replacement protocol",
+              replacement_anchor in images_words and
+              "## publish an approved replacement" in reprocess_words and
+              "never use bare `cp`/`mv`, omit either owner guard" in images_words,
               True)
-        check("the image procedure explains exact positive clipping ownership",
-              "web URL as its first current `sources:`" in images_md and
-              "exactly embed every old attachment" in images_md and
-              "--owner-note" in images_md, True)
+        check("the canonical replacement protocol explains exact positive "
+              "clipping ownership",
+              "first current `sources:` item is a web url" in reprocess_words and
+              "every old image and mapped destination to be an exact rendered"
+              in reprocess_words and
+              "--owner-note" in reprocess_words, True)
         check("changed-slug docs require the vault-wide dependency probe",
-              ("every Markdown note outside the owner" in reprocess_md
-               and "fetch_images.py' dependencies" in reprocess_md
-               and "Before finalizing" in images_md), True)
+              ("every markdown note outside the owner" in reprocess_words
+               and "fetch_images.py' dependencies" in reprocess_words
+               and "unchanged re-probe" in images_words
+               and replacement_anchor in images_words), True)
         check("dependency refusal is reported before destructive old-path cleanup",
-              ("never delete first" in reprocess_md
-               and "exact blocker paths" in images_md), True)
+              ("never delete first" in reprocess_words
+               and "earlier probe is not standing cleanup authority" in reprocess_words
+               and "reports the blocker or" in reprocess_words), True)
 
         # `Sources/PDFs/` is recursive by contract (a split book lives in
         # `Sources/PDFs/<Work>/`), so the step-3 stem-owner probe has to

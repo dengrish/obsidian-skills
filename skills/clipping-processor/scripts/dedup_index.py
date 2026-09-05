@@ -48,7 +48,7 @@ import sys
 import unicodedata
 from urllib.parse import unquote_plus, urlsplit, urlunsplit
 
-_OBSIDIAN_SHARED_MODULES = ('slugify', 'yaml_scalars')
+_OBSIDIAN_SHARED_MODULES = ('yaml_scalars',)
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys
@@ -87,7 +87,6 @@ if _here != _shared:
     _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
-from slugify import is_windows_device_stem
 from yaml_scalars import parse_scalar, strip_comment
 
 
@@ -271,8 +270,7 @@ def read_source(path):
         # and classify the handle before reading. A `.md` path swapped to a
         # FIFO between a path-stat and ordinary `open()` could otherwise block
         # the whole batch indefinitely while waiting for a writer.
-        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) \
-            | getattr(os, "O_NONBLOCK", 0)
+        flags = os.O_RDONLY | os.O_NONBLOCK
         descriptor = os.open(path, flags)
         if not stat.S_ISREG(os.fstat(descriptor).st_mode):
             return None
@@ -467,21 +465,18 @@ def article_name_index(cleaned_dir, exclude=()):
 
 def _slug_filename(slug):
     """Validate one slug stem and return its Markdown filename."""
+    # Preserve separators and syntax guards: these stems become Markdown,
+    # wikilink, URL-style, and HTML attachment targets as well as filenames.
     invalid = [ch for ch in slug
                if ord(ch) < 0x20 or ord(ch) == 0x7f
                or ch in '<>:"/\\|?*'] if isinstance(slug, str) else []
     if not isinstance(slug, str) or not slug or invalid or ".." in slug \
             or slug.startswith((".", " ")) \
-            or not slug.strip(". ") or slug.endswith((".", " ")) \
             or os.path.basename(slug) != slug \
             or "/" in slug or "\\" in slug or slug.casefold().endswith(".md"):
         raise ValueError("--slug takes a non-empty filename stem, without a path "
-                         "or .md extension, using portable filename characters: "
+                         "or .md extension, using path- and Markdown-safe characters: "
                          "%r" % slug)
-    if is_windows_device_stem(slug):
-        raise ValueError(
-            "--slug %r is a reserved Windows device basename even with .md "
-            "appended; choose a more specific portable stem" % slug)
     return slug + ".md"
 
 
@@ -890,19 +885,9 @@ def run_self_test():
         linked_url = "https://outside.example/article"
         link_target = article(
             "link-target.txt", "---\nsources:\n  - %s\n---\n" % linked_url)
-        try:
-            os.symlink(os.path.join(tmp, "missing-target"),
-                       os.path.join(vault, "Broken.md"))
-            os.symlink(link_target, os.path.join(vault, "Linked.md"))
-            symlink_occupants_exercised = True
-        except (OSError, NotImplementedError):
-            # Preserve the portable-name occupancy part of this test on hosts
-            # where creating symlinks needs a privilege the process lacks.
-            for fallback in ("Broken.md", "Linked.md"):
-                path = os.path.join(vault, fallback)
-                if not os.path.lexists(path):
-                    article(fallback, "placeholder occupant")
-            symlink_occupants_exercised = False
+        os.symlink(os.path.join(tmp, "missing-target"),
+                   os.path.join(vault, "Broken.md"))
+        os.symlink(link_target, os.path.join(vault, "Linked.md"))
         name_index = article_name_index(vault)
         slug_results = check_slugs(
             ["Held", "Broken", "Linked", "a", "Free"], name_index)
@@ -911,8 +896,6 @@ def run_self_test():
              [("Held", "occupied"), ("Broken", "occupied"),
               ("Linked", "occupied"), ("a", "occupied"),
               ("Free", "free")])
-        case("symlink occupancy cases run or degrade without crashing",
-             isinstance(symlink_occupants_exercised, bool), True)
         linked_index, linked_unindexable, _ = build_index(vault)
         case("a Markdown symlink occupies the slug but cannot claim its target URL",
              (normalize_url(linked_url) in linked_index,
@@ -927,9 +910,8 @@ def run_self_test():
         case("an ambiguous slug reports every occupying spelling",
              len(check_slugs(["caf\u00e9"], ambiguous_index)[0]["matches"]), 2)
         for invalid_slug in ("", "\0", ".", "..", "path/name", "path\\name",
-                             "x.md", "CON", "prn", "COM1", "lpt9",
-                             "AUX.extra", "bad:name", "bad?name", "trail.",
-                             "trail ", "two..dots", "line\nbreak", 7):
+                             "x.md", "bad:name", "bad?name", "two..dots",
+                             "line\nbreak", 7):
             try:
                 check_slugs([invalid_slug], name_index)
             except ValueError:
@@ -937,6 +919,10 @@ def run_self_test():
             else:
                 rejected = False
             case("invalid slug is rejected: %r" % invalid_slug, rejected, True)
+
+        for ordinary_slug in ("CON", "COM1", "AUX.extra", "trail.", "trail "):
+            case("ordinary macOS/Linux stem is accepted: %r" % ordinary_slug,
+                 _slug_filename(ordinary_slug), ordinary_slug + ".md")
 
         # --- case(): verdicts, including within one batch ------------------
         res = check([{"id": "raw1", "source": URL},
