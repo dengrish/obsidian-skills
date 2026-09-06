@@ -592,6 +592,24 @@ raise SystemExit(main(fixture['args'], client))
         suggestions.write_text(
             examples + "Actual evidence: [[Doe_Study_2025.pdf#page=1]].\n",
             encoding="utf-8")
+
+        # Sharing a vault must not let a knowledge rename alter immutable
+        # investment history or partly move its otherwise writable family.
+        history = self.vault / "Investments/2025-09-05-market-research.md"
+        history.parent.mkdir(exist_ok=True)
+        history.write_text("Original evidence: [[Doe_Study_2025.pdf#page=1]].\n",
+                           encoding="utf-8")
+        before = {str(path.relative_to(self.vault)): digest(path)
+                  for path in self.vault.rglob("*") if path.is_file()}
+        blocked = self.run_script(organizer, "rename", "--vault", self.vault, pdf,
+                                  "--to", "Doe_Renamed_2025.pdf", "--apply", expected=1)
+        self.assertIn("protected Investments/ record", blocked.stdout)
+        self.assertEqual(before, {str(path.relative_to(self.vault)): digest(path)
+                                  for path in self.vault.rglob("*") if path.is_file()})
+        # Remove only this synthetic blocker to exercise the ordinary rename
+        # and downstream figure/summary consumers in the remainder of the test.
+        history.unlink()
+
         self.run_script(organizer, "rename", "--vault", self.vault, pdf,
                         "--to", "Doe_Renamed_2025.pdf", "--apply")
         renamed = self.pdfs / "Doe_Renamed_2025.pdf"

@@ -168,7 +168,7 @@ class Report:
         out = []
         w = max((len(c) for c in self.checks), default=10)
         out.append("=" * 78)
-        out.append("obsidian :: shared-convention conformance")
+        out.append("obsidian-skills :: shared-convention conformance")
         out.append("  canonical source : %s" % rel(CONVENTIONS))
         out.append("  tree under test  : %s" % rel(SKILLS_DIR))
         out.append("=" * 78)
@@ -875,6 +875,13 @@ def _load_module(path, name, screen=False):
                               for ln, what in effects[:3])))
     saved = list(sys.path)
     try:
+        # Shared helpers can import their shared siblings. Match the containing
+        # directory that Python supplies when one is launched as a script,
+        # without giving skill probes an implicit shared path that would hide
+        # a broken bootstrap. Restore this path along with bootstrap changes.
+        directory = os.path.dirname(os.path.abspath(path))
+        if directory == os.path.join(SHARED_DIR, "scripts"):
+            sys.path.insert(0, directory)
         spec = importlib.util.spec_from_file_location(name, path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -5064,6 +5071,23 @@ ROSTER_COUNT = re.compile(
     r"|\bplugin(?:'s)?\s+(%s)\s+skills\b"
     % (_COUNT_ALT, _COUNT_ALT, _COUNT_ALT), re.I)
 
+README_INTRO_COUNT = re.compile(
+    r"\A\s*(?:\#[^\n]*\n\s*)?(%s)\s+skills?\b" % _COUNT_ALT, re.I)
+
+
+def stated_roster_counts(path, text):
+    """Read explicit roster claims and a README's opening package summary.
+
+    Introductory counts such as 'Seven skills for ...' identify the README's
+    own package. Later workflow subset counts are not global roster claims.
+    """
+    matches = list(ROSTER_COUNT.finditer(text))
+    if os.path.basename(path) == "README.md":
+        intro = README_INTRO_COUNT.match(text)
+        if intro and not any(m.start() <= intro.start(1) < m.end() for m in matches):
+            matches.append(intro)
+    return matches
+
 
 _PLUGIN_FILES = None
 
@@ -5074,6 +5098,9 @@ def walk_plugin_files():
     `tests/` is excluded on purpose: it is the checker, not the contract.  A
     test that discusses a removed skill by name in a comment -- as this one
     does, right above -- is documenting history, not routing work to it.
+    Only authored READMEs are read under `plugins/`. Generated copies are
+    checked as independent installations in test_compatibility.py; scanning
+    them here would double-count sources and shared implementations.
     """
     global _PLUGIN_FILES
     if _PLUGIN_FILES is None:
@@ -5081,7 +5108,7 @@ def walk_plugin_files():
         for base, dirs, names in os.walk(ROOT):
             dirs[:] = sorted(d for d in dirs
                              if not d.startswith(".")
-                             and d not in ("tests", "__pycache__"))
+                             and d not in ("tests", "plugins", "__pycache__"))
             for name in sorted(names):
                 if not name.endswith(TEXT_EXT) or name.startswith("."):
                     continue
@@ -5090,8 +5117,46 @@ def walk_plugin_files():
                     out.append((path, read(path)))
                 except (UnicodeDecodeError, OSError) as exc:
                     UNREADABLE.append((path, "%s: %s" % (type(exc).__name__, exc)))
+        plugins = os.path.join(ROOT, "plugins")
+        if os.path.isdir(plugins):
+            for name in sorted(os.listdir(plugins)):
+                path = os.path.join(plugins, name, "README.md")
+                if os.path.isfile(path):
+                    try:
+                        out.append((path, read(path)))
+                    except (UnicodeDecodeError, OSError) as exc:
+                        UNREADABLE.append((path, "%s: %s" %
+                                           (type(exc).__name__, exc)))
         _PLUGIN_FILES = out
     return iter(_PLUGIN_FILES)
+
+
+def _profile_mapping(path):
+    """Return a distribution's authored source map for its own documents."""
+    parts = rel(path).split(os.sep)
+    if len(parts) < 3 or parts[0] != "plugins":
+        return None
+    inventory = os.path.join(ROOT, "tools", "package-files.json")
+    profiles = json.loads(read(inventory))
+    mapping = profiles.get(parts[1])
+    if not isinstance(mapping, dict):
+        raise HarnessError("no package mapping for %s" % parts[1])
+    return mapping
+
+
+def _profile_source_reference(path, token):
+    """Resolve a runtime-relative profile document link before copies exist."""
+    mapping = _profile_mapping(path)
+    if mapping is None:
+        return None
+    source = rel(path).replace(os.sep, "/")
+    document = next((name for name, origin in mapping.items()
+                     if origin == source), None)
+    if document is None:
+        raise HarnessError("profile document is not packaged: %s" % source)
+    destination = os.path.normpath(os.path.join(os.path.dirname(document), token))
+    origin = mapping.get(destination.replace(os.sep, "/"))
+    return os.path.join(ROOT, origin) if origin is not None else None
 
 
 #: Like SENT_SPLIT, but a bare newline does NOT end a sentence -- only a
@@ -5178,7 +5243,9 @@ def _roster_candidates(text, roster, tag_values):
     #     "This name sits beside a real skill name, both backticked" is strong
     #     evidence, so it may cross a hard wrap.
     for off, sent in _sentences(text):
-        about = bool(re.search(r"\bskill", sent, re.I))
+        # A compound identity such as `obsidian-skills` is not itself a
+        # statement that the sentence names a skill.
+        about = bool(re.search(r"(?<![\w-])skills?\b", sent, re.I))
         loose_ok = _loose_frame_applies(sent, roster)
         for name, moff in _decorated(sent, BACKTICKED_SKILL):
             esc = re.escape(name)
@@ -5306,21 +5373,26 @@ def check_skill_roster(rep, conv):
     #     that says "all five skills" goes stale in exactly the same way.
     counted = 0
     for path, text in walk_plugin_files():
-        for m in ROSTER_COUNT.finditer(text):
+        mapping = _profile_mapping(path)
+        document_roster = ({name.split("/")[1] for name in mapping
+                            if re.fullmatch(r"skills/[^/]+/SKILL\.md", name)}
+                           if mapping is not None else roster)
+        for m in stated_roster_counts(path, text):
             word = next(g for g in m.groups() if g).lower()
             counted += 1
             n = NUMBER_WORDS.get(word, int(word) if word.isdigit() else None)
-            if n != len(roster):
+            if n != len(document_roster):
                 rep.fail(check,
-                         "%s says the plugin has %s skills, but skills/ holds "
-                         "%d (%s). A stale count is the readable half of a "
-                         "stale roster."
-                         % (rel(path), word, len(roster),
-                            ", ".join(sorted(roster))), at(path, m.start(), text))
+                         "%s states %s skills, but its source/package scope "
+                         "holds %d (%s). A stale count is the readable half of "
+                         "a stale roster."
+                         % (rel(path), word, len(document_roster),
+                            ", ".join(sorted(document_roster))),
+                         at(path, m.start(), text))
     rep.saw(check, "stated roster counts", counted)
     if counted:
-        rep.ok(check, "%d stated roster count(s) agree with skills/ (%d skills)"
-               % (counted, len(roster)))
+        rep.ok(check, "%d stated roster count(s) agree with their source or "
+                      "package skill roster" % counted)
 
 
 # ===========================================================================
@@ -5456,6 +5528,9 @@ def _resolve_ref(skill, token, nearby_skills=(), source_path=None):
     """Candidate on-disk locations for a `references/…` or `scripts/…` token."""
     cands = []
     if source_path is not None:
+        profile_source = _profile_source_reference(source_path, token)
+        if profile_source is not None:
+            cands.append(profile_source)
         cands.append(os.path.join(os.path.dirname(source_path), token))
     if skill:
         cands.append(os.path.join(SKILLS_DIR, skill, token))
@@ -5572,8 +5647,9 @@ def check_reference_paths(rep, conv):
                 target = target.split("?", 1)[0]
                 if not target.lower().endswith(".md"):
                     continue
-                destination = os.path.normpath(
-                    os.path.join(os.path.dirname(path), target))
+                destination = (_profile_source_reference(path, target)
+                               or os.path.normpath(
+                                   os.path.join(os.path.dirname(path), target)))
             else:
                 destination = path
             if not os.path.isfile(destination):
@@ -5901,11 +5977,12 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/organism_names.py": 29,
     "shared/scripts/entry_structure.py": 143,
     "shared/scripts/plugin_paths.py": 110,
+    "shared/scripts/portable_names.py": 5,
     "shared/scripts/plurals.py": 251,
     "shared/scripts/slugify.py": 74,  # device-name restrictions removed
     "shared/scripts/vault_artifacts.py": 39,
     "shared/scripts/yaml_scalars.py": 12,
-    "skills/clipping-clean/scripts/dedup_index.py": 161,
+    "skills/clipping-clean/scripts/dedup_index.py": 168,
     "skills/clipping-clean/scripts/fetch_images.py": 539,
     "skills/clipping-clean/scripts/slug.py": 133,  # device-name guards removed
     "skills/market-research/scripts/market_notes.py": 71,
@@ -5914,7 +5991,7 @@ SELFTEST_MIN_CASES = {
     "skills/market-research/scripts/market_fred.py": 10,
     "skills/market-research/scripts/market_http.py": 20,
     "skills/market-research/scripts/market_news.py": 33,
-    "skills/market-research/scripts/market_prices.py": 25,
+    "skills/market-research/scripts/market_prices.py": 28,
     "skills/market-research/scripts/market_public.py": 92,
     "skills/paper-summarize/scripts/note_lint.py": 228,
     "skills/paper-summarize/scripts/paper_scan.py": 162,
@@ -5923,7 +6000,7 @@ SELFTEST_MIN_CASES = {
     "skills/figure-extract/scripts/batch_extract.py": 354,
     "skills/figure-extract/scripts/extract_figures.py": 185,
     "skills/figure-extract/scripts/render_page.py": 66,
-    "skills/pdf-organize/scripts/organize.py": 327,
+    "skills/pdf-organize/scripts/organize.py": 335,
     "skills/wiki-add/scripts/backlog.py": 32,
     "skills/wiki-build/scripts/find_collisions.py": 67,
     "skills/wiki-build/scripts/lint_entry.py": 319,
@@ -6489,51 +6566,60 @@ def check_manifest_validity(rep, conv):
     check = "manifest-validity"
     xmlish = re.compile(r"<[^>\s][^>]*>")
 
-    # The plugin manifest itself.  Nothing checked it at all: a trailing comma
-    # makes it unparseable and the whole plugin fails to load, which no
-    # convention check would ever notice.
-    manifest = os.path.join(ROOT, ".claude-plugin", "plugin.json")
-    if not os.path.isfile(manifest):
-        rep.fail(check, ".claude-plugin/plugin.json is missing -- the plugin "
-                        "has no manifest and will not install", rel(manifest))
-    else:
+    # Each installable plugin owns a manifest. The repository root describes
+    # the marketplace and is deliberately not a third installable plugin.
+    plugins = os.path.join(ROOT, "plugins")
+    manifests = []
+    if os.path.isdir(plugins):
+        manifests = [
+            os.path.join(plugins, name, ".claude-plugin", "plugin.json")
+            for name in sorted(os.listdir(plugins))
+            if os.path.isdir(os.path.join(plugins, name))
+        ]
+    rep.saw(check, "plugin manifests", len(manifests))
+    for manifest in manifests:
+        if not os.path.isfile(manifest):
+            rep.fail(check, "plugin.json is missing -- this plugin will not "
+                            "install", rel(manifest))
+            continue
         try:
             data = json.loads(read(manifest))
         except ValueError as exc:
-            rep.fail(check, ".claude-plugin/plugin.json is not valid JSON: %s. "
-                            "The loader reads this first; nothing else in the "
-                            "plugin runs." % exc, rel(manifest))
-            data = None
-        if isinstance(data, dict):
-            pname = data.get("name")
-            if not isinstance(pname, str) or not re.fullmatch(r"[a-z0-9-]+", pname or ""):
-                rep.fail(check,
-                         ".claude-plugin/plugin.json name is %r; it must be a "
-                         "non-empty lowercase kebab-case string" % (pname,),
+            rep.fail(check, "plugin.json is not valid JSON: %s. The loader "
+                            "reads this before any skill runs." % exc,
+                     rel(manifest))
+            continue
+        if not isinstance(data, dict):
+            rep.fail(check, "plugin.json must contain a JSON object", rel(manifest))
+            continue
+        pname = data.get("name")
+        package_root = os.path.dirname(os.path.dirname(manifest))
+        if not isinstance(pname, str) or not re.fullmatch(r"[a-z0-9-]+", pname or ""):
+            rep.fail(check,
+                     "plugin.json name is %r; it must be a non-empty lowercase "
+                     "kebab-case string" % (pname,), rel(manifest))
+        elif pname != os.path.basename(package_root):
+            rep.fail(check, "plugin.json name %r differs from its distribution "
+                            "directory %r" % (pname, os.path.basename(package_root)),
+                     rel(manifest))
+        else:
+            readme = os.path.join(package_root, "README.md")
+            h1 = None
+            if os.path.isfile(readme):
+                hm = re.match(r"#\s+(\S+)", read(readme))
+                h1 = hm.group(1) if hm else None
+            if not h1 or h1.casefold() != pname.casefold():
+                rep.fail(check, "plugin.json calls the plugin %r but its "
+                                "README.md title is %r" % (pname, h1),
                          rel(manifest))
             else:
-                # The plugin's identity has two homes -- the manifest and
-                # README's title -- so it is exactly the kind of fact that
-                # drifts.  Compared here rather than against the checkout
-                # directory name, which is whatever the user cloned into.
-                readme = os.path.join(ROOT, "README.md")
-                h1 = None
-                if os.path.isfile(readme):
-                    hm = re.match(r"#\s+(\S+)", read(readme))
-                    h1 = hm.group(1) if hm else None
-                if h1 and h1 != pname:
-                    rep.fail(check,
-                             "plugin.json calls the plugin %r but README.md's "
-                             "title says %r -- one of the two is stale, and a "
-                             "reader cannot tell which" % (pname, h1),
-                             rel(manifest))
-                else:
-                    rep.ok(check, "plugin.json name %r agrees with README.md's "
-                                  "title" % pname, rel(manifest))
-            if str(data.get("description", "")).strip():
-                rep.ok(check, "plugin.json has a description", rel(manifest))
-            else:
-                rep.fail(check, "plugin.json has no description", rel(manifest))
+                rep.ok(check, "plugin.json name %r agrees with its distribution "
+                              "directory and README title" % pname, rel(manifest))
+        description = data.get("description")
+        if isinstance(description, str) and description.strip():
+            rep.ok(check, "plugin.json has a description", rel(manifest))
+        else:
+            rep.fail(check, "plugin.json has no description", rel(manifest))
 
     rep.saw(check, "skill manifests", len(skill_names()))
     for name in skill_names():

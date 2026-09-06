@@ -1,0 +1,25 @@
+{
+  "name": "investments",
+  "version": "1.0.0",
+  "description": "Research buying opportunities in liquid U.S.-listed stocks, track investment theses and recommendation outcomes, and write concise daily briefs with detailed research records in an Obsidian vault.",
+  "repository": "https://github.com/dengrish/obsidian-skills",
+  "author": {
+    "name": "Dennis Grishin"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Investments",
+    "shortDescription": "Research buying opportunities and track investment theses",
+    "longDescription": "Research buying opportunities in liquid U.S.-listed stocks, track investment theses and recommendation outcomes, and write concise daily briefs with detailed research records in an Obsidian vault.",
+    "developerName": "Dennis Grishin",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Research buying opportunities and write today's investment note.",
+      "Review the outcomes of earlier buying recommendations."
+    ]
+  }
+}

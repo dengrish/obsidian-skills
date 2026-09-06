@@ -50,7 +50,7 @@ jobs:
           if ! git cat-file -e "$BASE_REVISION^{commit}" 2>/dev/null; then
             git fetch --no-tags origin "$BASE_REVISION"
           fi
-      - name: Require a version advance for packaged changes
+      - name: Require each affected plugin version to advance
         if: github.event_name == 'pull_request' || github.event_name == 'push'
         env:
           BASE_REVISION: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -117,7 +117,7 @@ jobs:
         run: python -m pip install --requirement requirements-dev.txt
       - name: Check the installed dependency set
         run: python -m pip check
-      - name: Check reproducible generated files
+      - name: Check both reproducible plugin distributions
         run: python tools/build_plugin.py --check
       - name: Run convention and script checks
         run: python tests/test_conventions.py

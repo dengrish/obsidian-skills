@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Derive dependency floors and enforce the plugin release version contract."""
+"""Derive dependency floors and enforce independent plugin release versions."""
 
 import argparse
 import json
@@ -23,6 +23,9 @@ SEMVER = re.compile(
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
 )
 PACKAGE_INVENTORY = "tools/package-files.txt"
+PACKAGE_MAPS = "tools/package-files.json"
+PLUGIN_NAMES = ("knowledge", "investments")
+LEGACY_MANIFEST = ".claude-plugin/plugin.json"
 LEGACY_PACKAGE_ROOT_FILES = {
     ".gitattributes",
     "AGENTS.md",
@@ -231,19 +234,137 @@ def semver_is_greater(candidate, baseline):
     return len(candidate_pre) > len(baseline_pre)
 
 
-def _manifest_version(repository, revision):
-    text = _revision_file(
-        repository, revision, ".claude-plugin/plugin.json")
+def _manifest_version(repository, revision,
+                      name=".claude-plugin/plugin.json", expected_name=None):
+    text = _revision_file(repository, revision, name)
     try:
         manifest = json.loads(text)
         version = manifest["version"]
     except (json.JSONDecodeError, KeyError, TypeError) as exc:
-        raise ContractError("authored manifest is invalid in %s: %s" %
-                            (revision, exc)) from exc
+        raise ContractError("authored manifest %s is invalid in %s: %s" %
+                            (name, revision, exc)) from exc
+    if expected_name is not None and manifest.get("name") != expected_name:
+        raise ContractError("authored manifest %s must name plugin %r in %s" %
+                            (name, expected_name, revision))
     if not isinstance(version, str):
         raise ContractError("authored manifest version is not text in %s" % revision)
     parse_semver(version)
     return version
+
+
+def _require_version_advance(plugin, candidate, baseline, changes):
+    """Compare one distribution's release identity with its own baseline."""
+    if not semver_is_greater(candidate, baseline):
+        preview = ", ".join(changes[:8])
+        if len(changes) > 8:
+            preview += ", and %d more" % (len(changes) - 8)
+        raise ContractError(
+            "%s packaged source changed (%s), but authored plugin version %s "
+            "does not advance base version %s" %
+            (plugin, preview, candidate, baseline))
+    print("%s packaged source changed and version advances %s -> %s." %
+          (plugin, baseline, candidate))
+
+
+def _split_versions(repository, revision):
+    """Require both fixed release identities once the split layout is present."""
+    manifests = {
+        plugin: "plugins/%s/.claude-plugin/plugin.json" % plugin
+        for plugin in PLUGIN_NAMES
+    }
+    present = {
+        plugin for plugin, name in manifests.items()
+        if _revision_blob(repository, revision, name) is not None
+    }
+    if not present:
+        return None
+    if present != set(PLUGIN_NAMES):
+        raise ContractError(
+            "split release is incomplete in %s; both knowledge and investments "
+            "authored manifests are required" % revision)
+    if _revision_blob(repository, revision, LEGACY_MANIFEST) is not None:
+        raise ContractError(
+            "split release in %s must remove the legacy obsidian authored "
+            "manifest" % revision)
+    return {
+        plugin: _manifest_version(
+            repository, revision, name, expected_name=plugin)
+        for plugin, name in manifests.items()
+    }
+
+
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ContractError("duplicate JSON key in package maps: %r" % key)
+        result[key] = value
+    return result
+
+
+def _valid_relative_path(value):
+    return (
+        isinstance(value, str) and bool(value)
+        and "\\" not in value and not value.startswith("/")
+        and not any(ord(character) < 32 for character in value)
+        and all(part not in ("", ".", "..") for part in value.split("/"))
+    )
+
+
+def _package_maps(repository, revision):
+    """Read historical input maps as data, never execute a past build script."""
+    text = _revision_file(repository, revision, PACKAGE_MAPS, required=False)
+    if text is None:
+        return None
+    try:
+        maps = json.loads(text, object_pairs_hook=_unique_json_object)
+    except json.JSONDecodeError as exc:
+        raise ContractError("%s is invalid in %s: %s" %
+                            (PACKAGE_MAPS, revision, exc)) from exc
+    if not isinstance(maps, dict) or set(maps) != set(PLUGIN_NAMES):
+        raise ContractError("%s must define exactly knowledge and investments "
+                            "in %s" % (PACKAGE_MAPS, revision))
+    for plugin, files in maps.items():
+        if not isinstance(files, dict) or not files or any(
+                not _valid_relative_path(destination)
+                or not _valid_relative_path(source)
+                for destination, source in files.items()):
+            raise ContractError("%s has invalid %s package paths in %s" %
+                                (PACKAGE_MAPS, plugin, revision))
+        manifest = "plugins/%s/.claude-plugin/plugin.json" % plugin
+        if files.get(".claude-plugin/plugin.json") != manifest:
+            raise ContractError("%s must map %s's own authored manifest in %s" %
+                                (PACKAGE_MAPS, plugin, revision))
+    return maps
+
+
+def _split_state(repository, revision):
+    versions = _split_versions(repository, revision)
+    maps = _package_maps(repository, revision)
+    if (versions is None) != (maps is None):
+        raise ContractError("split release in %s requires both authored "
+                            "manifests and %s" % (revision, PACKAGE_MAPS))
+    return versions, maps
+
+
+def plugin_packaged_changes(plugin, changed, base_map, head_map,
+                            comparison_map=None):
+    """Attribute mapped inputs, outputs and map edits to one distribution."""
+    if comparison_map is None:
+        comparison_map = base_map
+    sources = (set(base_map.values()) | set(head_map.values())
+               | set(comparison_map.values()))
+    prefix = "plugins/%s/" % plugin
+    archive = "%s.plugin" % plugin
+    selected = {
+        name for name in changed
+        if name in sources or name.startswith(prefix) or name == archive
+    }
+    # Only this plugin's projection matters: editing a knowledge entry in the
+    # common map must not require an investments release, or vice versa.
+    if comparison_map != head_map:
+        selected.add(PACKAGE_MAPS + "[%s]" % plugin)
+    return sorted(selected)
 
 
 def check_version_bump(repository, base, comparison):
@@ -283,6 +404,41 @@ def check_version_bump(repository, base, comparison):
         if _revision_blob(repository, diff_base, name)
         != _revision_blob(repository, "HEAD", name)
     ]
+    baseline_versions, baseline_maps = _split_state(repository, resolved_base)
+    candidate_versions, candidate_maps = _split_state(repository, "HEAD")
+    if baseline_versions is not None and candidate_versions is None:
+        raise ContractError(
+            "the split knowledge/investments release cannot roll back to the "
+            "legacy layout or remove both plugin identities")
+    if candidate_versions is not None:
+        if baseline_versions is None:
+            # New names have independent release histories. This is a one-way
+            # migration from the actual legacy identity, not an exemption that
+            # can be reused by deleting a released plugin's manifest or map.
+            legacy_version = _manifest_version(
+                repository, resolved_base, LEGACY_MANIFEST,
+                expected_name="obsidian")
+            print("Legacy obsidian %s becomes independent first releases: %s." %
+                  (legacy_version, ", ".join(
+                      "%s %s" % (plugin, candidate_versions[plugin])
+                      for plugin in PLUGIN_NAMES)))
+            return
+        comparison_maps = _package_maps(repository, diff_base) or {
+            plugin: {} for plugin in PLUGIN_NAMES
+        }
+        any_changes = False
+        for plugin in PLUGIN_NAMES:
+            changes = plugin_packaged_changes(
+                plugin, changed, baseline_maps[plugin], candidate_maps[plugin],
+                comparison_map=comparison_maps[plugin])
+            if changes:
+                any_changes = True
+                _require_version_advance(
+                    plugin, candidate_versions[plugin],
+                    baseline_versions[plugin], changes)
+        if not any_changes:
+            print("No packaged source changed; no plugin version bump is required.")
+        return
     package_changes = packaged_changes(
         changed,
         _inventory(repository, resolved_base),
@@ -293,15 +449,7 @@ def check_version_bump(repository, base, comparison):
         return
     baseline = _manifest_version(repository, resolved_base)
     candidate = _manifest_version(repository, "HEAD")
-    if not semver_is_greater(candidate, baseline):
-        preview = ", ".join(package_changes[:8])
-        if len(package_changes) > 8:
-            preview += ", and %d more" % (len(package_changes) - 8)
-        raise ContractError(
-            "packaged source changed (%s), but authored plugin version %s does "
-            "not advance base version %s" % (preview, candidate, baseline))
-    print("Packaged source changed and plugin version advances %s -> %s." %
-          (baseline, candidate))
+    _require_version_advance("obsidian", candidate, baseline, package_changes)
 
 
 def main(argv=None):
@@ -313,7 +461,7 @@ def main(argv=None):
     floors.add_argument("--output", type=Path, required=True)
     floors.add_argument("--repository", type=Path, default=Path.cwd())
     version = subparsers.add_parser(
-        "version", help="require a version advance when packaged source changed")
+        "version", help="require each affected plugin's release version to advance")
     version.add_argument("--base", required=True)
     version.add_argument(
         "--comparison", choices=("pull-request", "push"), required=True)

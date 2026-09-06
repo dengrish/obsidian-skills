@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the Codex manifest and a reproducible, complete plugin archive."""
+"""Build independently installable knowledge and investments plugins."""
 
 import argparse
 from contextlib import contextmanager
@@ -25,16 +25,9 @@ if str(SHARED_SCRIPTS) not in sys.path:
 import atomic_move
 
 
-PACKAGE_ROOT_FILES = (
-    ".gitattributes",
-    "AGENTS.md",
-    "CLAUDE.md",
-    "README.md",
-    "requirements.txt",
-    "requirements-dev.txt",
-)
-PACKAGE_TREES = (".claude-plugin", "skills", "shared", "tests", "tools")
-PACKAGE_INVENTORY = "tools/package-files.txt"
+PLUGIN_NAMES = ("knowledge", "investments")
+PACKAGE_TREES = ("skills", "shared")
+PACKAGE_INVENTORY = "tools/package-files.json"
 IGNORED_PACKAGE_FILES = {".DS_Store"}
 IGNORED_PACKAGE_SUFFIXES = {".pyc", ".pyo"}
 IGNORED_PACKAGE_DIRS = {"__pycache__"}
@@ -66,35 +59,44 @@ def _validate_package_names(files):
                 "%r and %r" % (previous, name))
 
 
-def _package_inventory(root):
-    """Read the exact package inventory and reject drift in either direction."""
-    raw = _read_package_source(root, root / PACKAGE_INVENTORY)
-    try:
-        decoded = raw.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise ValueError("%s is not UTF-8" % PACKAGE_INVENTORY) from exc
-    names = decoded.splitlines()
-    if not names or any(not name or name != name.strip() for name in names):
-        raise ValueError(
-            "%s must contain one nonblank normalized path per line" %
-            PACKAGE_INVENTORY)
-    if names != sorted(set(names)):
-        raise ValueError(
-            "%s must be sorted and contain no duplicates" % PACKAGE_INVENTORY)
-    _validate_package_names(dict.fromkeys(names, b""))
-    allowed_roots = set(PACKAGE_ROOT_FILES)
-    for name in names:
-        if (name not in allowed_roots
-                and not any(name.startswith(tree + "/")
-                            for tree in PACKAGE_TREES)):
-            raise ValueError(
-                "%s lists a path outside the package boundary: %s" %
-                (PACKAGE_INVENTORY, name))
-    missing_roots = sorted(allowed_roots - set(names))
-    if missing_roots:
-        raise ValueError(
-            "%s omits required root files: %s" %
-            (PACKAGE_INVENTORY, ", ".join(missing_roots)))
+def _package_inventory(root, snapshots=None):
+    """Validate exact per-plugin destination/source maps and source coverage."""
+    def unique_pairs(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate package-map key: %s" % key)
+            result[key] = value
+        return result
+
+    raw = _read_package_source(root, root / PACKAGE_INVENTORY, snapshots)
+    maps = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_pairs)
+    if not isinstance(maps, dict) or set(maps) != set(PLUGIN_NAMES):
+        raise ValueError("package maps must contain exactly knowledge and investments")
+    sources = set()
+    for plugin, mapping in maps.items():
+        if not isinstance(mapping, dict) or not mapping:
+            raise ValueError("%s package map must be a nonempty object" % plugin)
+        _validate_package_names(mapping)
+        if not all(isinstance(source, str) for source in mapping.values()):
+            raise ValueError("package-map sources must be repository-relative paths")
+        _validate_package_names(dict.fromkeys(mapping.values()))
+        required = {".claude-plugin/plugin.json", "README.md", "requirements.txt"}
+        if not required <= set(mapping):
+            raise ValueError("%s package map omits required runtime metadata" % plugin)
+        if ".codex-plugin/plugin.json" in mapping:
+            raise ValueError("Codex manifests are generated, never mapped inputs")
+        manifest_path = "plugins/%s/.claude-plugin/plugin.json" % plugin
+        if mapping[".claude-plugin/plugin.json"] != manifest_path:
+            raise ValueError("%s authored manifest must be %s" % (plugin, manifest_path))
+        for destination, source in mapping.items():
+            if destination.startswith(("skills/", "shared/")) and destination != source:
+                raise ValueError("runtime skill/shared paths must retain their source layout")
+            if not (destination in required or destination.startswith(("skills/", "shared/"))):
+                raise ValueError("unexpected runtime package path: %s" % destination)
+            if source.startswith("plugins/") and source != "plugins/%s/%s" % (plugin, destination):
+                raise ValueError("a plugin cannot depend on another generated tree: %s" % source)
+        sources.update(mapping.values())
 
     actual = set()
     for tree in PACKAGE_TREES:
@@ -111,24 +113,47 @@ def _package_inventory(root):
                     or path.suffix.lower() in IGNORED_PACKAGE_SUFFIXES):
                 continue
             if not path.is_file():
-                raise ValueError(
-                    "plugin package contains a non-regular path: %s" % relative)
+                raise ValueError("plugin source contains a non-regular path: %s" % relative)
             actual.add(relative.as_posix())
-    listed_tree_files = {
-        name for name in names
-        if any(name.startswith(tree + "/") for tree in PACKAGE_TREES)
-    }
-    unlisted = sorted(actual - listed_tree_files)
-    absent = sorted(listed_tree_files - actual)
-    if unlisted or absent:
-        details = []
-        if unlisted:
-            details.append("unlisted files: %s" % ", ".join(unlisted))
-        if absent:
-            details.append("missing files: %s" % ", ".join(absent))
-        raise ValueError("%s is stale (%s)" %
-                         (PACKAGE_INVENTORY, "; ".join(details)))
-    return names
+    listed = {source for source in sources
+              if any(source.startswith(tree + "/") for tree in PACKAGE_TREES)}
+    if actual != listed:
+        raise ValueError("%s is stale (unlisted files: %s; missing files: %s)" %
+                         (PACKAGE_INVENTORY, ", ".join(sorted(actual - listed)),
+                          ", ".join(sorted(listed - actual))))
+    skill_owners = {}
+    for plugin, mapping in maps.items():
+        for destination in mapping:
+            if destination.startswith("skills/"):
+                skill = destination.split("/")[1]
+                owner = skill_owners.setdefault(skill, plugin)
+                if owner != plugin:
+                    raise ValueError("skill %s appears in both plugins" % skill)
+    if skill_owners.get("market-research") != "investments":
+        raise ValueError("market-research must belong to investments")
+    if any(owner != "knowledge" for skill, owner in skill_owners.items()
+           if skill != "market-research"):
+        raise ValueError("knowledge skills must belong to knowledge")
+    return maps
+
+
+def _validate_distribution_tree(root, plugin, files):
+    """Refuse unlisted output files; never delete unexpected runtime residue."""
+    directory = root / "plugins" / plugin
+    reject_symlinks(root, directory)
+    for path in sorted(directory.rglob("*")):
+        relative = path.relative_to(directory)
+        if any(part in IGNORED_PACKAGE_DIRS for part in relative.parts):
+            continue
+        reject_symlinks(root, path)
+        if path.is_dir():
+            continue
+        if (path.name in IGNORED_PACKAGE_FILES
+                or path.suffix.lower() in IGNORED_PACKAGE_SUFFIXES):
+            continue
+        if not path.is_file() or relative.as_posix() not in files:
+            raise ValueError("unlisted or non-regular generated path: %s; inspect it "
+                             "before removing an obsolete generated asset" % path.relative_to(root))
 
 
 def reject_symlinks(root, path):
@@ -237,14 +262,28 @@ def _stable_output_snapshot(path):
     return _stable_regular_snapshot(path, "generated output")
 
 
-def _read_package_source(root, path):
+def _read_package_source(root, path, snapshots=None):
     """Read one allowlisted source without following a swapped leaf link."""
     reject_symlinks(root, path)
     snapshot = _stable_regular_snapshot(path, "package source")
     # Catch a directory-component substitution that happened during the read;
     # the bytes are discarded and can never reach the archive.
     reject_symlinks(root, path)
+    if snapshots is not None:
+        previous = snapshots.setdefault(path, snapshot)
+        if previous != snapshot:
+            raise OSError(errno.EBUSY, "package source changed during collection", os.fspath(path))
     return snapshot[4]
+
+
+def _verify_sources(root, snapshots):
+    """Require all derived files to use the same unchanged source snapshots."""
+    for path, expected in snapshots.items():
+        reject_symlinks(root, path)
+        current = _stable_regular_snapshot(path, "package source")
+        reject_symlinks(root, path)
+        if current != expected:
+            raise OSError(errno.EBUSY, "package source changed after planning", os.fspath(path))
 
 
 def _observe_output(path):
@@ -279,19 +318,26 @@ def _observe_parent(path):
 
 
 def _create_output_parent(root, path):
-    """Create one direct generated-output directory, then bind its identity."""
+    """Create nested output directories through verified parent descriptors."""
     root = Path(os.path.abspath(root))
     path = Path(os.path.abspath(path))
-    if path.parent != root:
-        raise OSError(errno.EPERM,
-                      "generated output parent must be directly under plugin root",
-                      os.fspath(path))
-    reject_symlinks(root, path)
     try:
-        os.mkdir(path, 0o755)
-    except FileExistsError:
-        pass                       # a racing builder may have created it
-    reject_symlinks(root, path)
+        parts = path.relative_to(root).parts
+    except ValueError as exc:
+        raise OSError(errno.EPERM, "generated output parent is outside repository", os.fspath(path)) from exc
+    current = root
+    for part in parts:
+        expected = _directory_identity(current)
+        with _bound_output_parent(current, expected):
+            try:
+                os.mkdir(part, 0o755)
+            except FileExistsError:
+                pass
+            identity = _directory_identity(part)
+        current = current / part
+        reject_symlinks(root, current)
+        if _directory_identity(current) != identity:
+            raise OSError(errno.EBUSY, "generated directory changed during creation", os.fspath(current))
     return _directory_identity(path)
 
 
@@ -458,12 +504,12 @@ def _verify_generated_outputs(root, outputs, observed_parents):
     return verified
 
 
-def _publish_outputs(root, outputs, observed, observed_parents):
-    """Publish the generated pair and conditionally undo a partial group."""
+def _publish_outputs(root, outputs, observed, observed_parents, validate_inputs=None):
+    """Publish generated files and conditionally undo a partial group."""
     stale = [path for path, content in outputs.items()
              if not _snapshot_matches(observed[path], content)]
 
-    # The snapshots authorize the whole derived pair. Revalidate every member
+    # The snapshots authorize the complete derived group. Revalidate every member
     # and parent before exposing the first new byte.
     for path in outputs:
         if (_observe_bound_output(root, path, observed_parents[path])
@@ -474,11 +520,15 @@ def _publish_outputs(root, outputs, observed, observed_parents):
 
     published = []
     try:
+        if validate_inputs is not None:
+            validate_inputs()
         for path in stale:
             snapshot = _publish_generated(
                 root, path, outputs[path], observed[path],
                 observed_parents[path])
             published.append((path, snapshot))
+        if validate_inputs is not None:
+            validate_inputs()
         _verify_generated_outputs(root, outputs, observed_parents)
         return stale
     except (OSError, ValueError) as exc:
@@ -486,6 +536,8 @@ def _publish_outputs(root, outputs, observed, observed_parents):
         # this run observed it. Accept that convergence before undoing an
         # earlier publication that the successful build relied on.
         try:
+            if validate_inputs is not None:
+                validate_inputs()
             _verify_generated_outputs(root, outputs, observed_parents)
             return stale
         except (OSError, ValueError):
@@ -519,42 +571,75 @@ def _remove_generated(path, published, expected_parent):
 
 
 def _codex_manifest_bytes(authored):
-    """Derive Codex presentation metadata from exact authored bytes."""
+    """Derive host presentation fields from one authored plugin manifest."""
     manifest = json.loads(authored)
+    name = manifest.get("name")
+    if name not in PLUGIN_NAMES:
+        raise ValueError("unknown plugin manifest name: %r" % name)
+    presentation = {
+        "knowledge": (
+            "Build and maintain an Obsidian knowledge base",
+            ["Organize my PDFs and clean my web clippings.",
+             "Research queued topics and create missing wiki entries.",
+             "Audit my wiki and rebuild its maps of content."]),
+        "investments": (
+            "Research buying opportunities and track investment theses",
+            ["Research buying opportunities and write today's investment note.",
+             "Review the outcomes of earlier buying recommendations."]),
+    }
+    subtitle, prompts = presentation[name]
     manifest["skills"] = "./skills/"
     manifest["interface"] = {
-        "displayName": "Obsidian",
-        "shortDescription": "Build an Obsidian wiki from documents and researched topics",
+        "displayName": name.capitalize(),
+        "shortDescription": subtitle,
         "longDescription": manifest["description"],
         "developerName": manifest["author"]["name"],
         "category": "Productivity",
         "capabilities": ["Read", "Write"],
-        "defaultPrompt": [
-            "Organize the PDFs and process the web clippings in my Obsidian inbox.",
-            "Research the unchecked topics in add-to-wiki.md and add missing wiki entries.",
-            "Audit the wiki entries and rebuild my maps of content.",
-        ],
+        "defaultPrompt": prompts,
     }
     return (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
-def codex_manifest(root):
-    """Keep common metadata authored once; add only Codex presentation fields."""
-    path = root / ".claude-plugin/plugin.json"
-    return _codex_manifest_bytes(_read_package_source(root, path))
+def codex_manifest(root, plugin_name):
+    """Keep each plugin's common metadata authored once."""
+    if plugin_name not in PLUGIN_NAMES:
+        raise ValueError("unknown plugin: %s" % plugin_name)
+    path = root / "plugins" / plugin_name / ".claude-plugin/plugin.json"
+    authored = _read_package_source(root, path)
+    if json.loads(authored).get("name") != plugin_name:
+        raise ValueError("authored plugin name disagrees with its package")
+    return _codex_manifest_bytes(authored)
 
 
-def package_files(root):
-    """Collect the complete intentional package tree without local residue."""
-    names = _package_inventory(root)
-    files = {
-        name: _read_package_source(root, root / name)
-        for name in names
-    }
+def package_files(root, plugin_name, *, snapshots=None):
+    """Collect one independent runtime package from exact canonical sources."""
+    maps = _package_inventory(root, snapshots)
+    if plugin_name not in maps:
+        raise ValueError("unknown plugin: %s" % plugin_name)
+    files = {destination: _read_package_source(root, root / source, snapshots)
+             for destination, source in maps[plugin_name].items()}
+    if json.loads(files[".claude-plugin/plugin.json"]).get("name") != plugin_name:
+        raise ValueError("authored plugin name disagrees with its package")
     files[".codex-plugin/plugin.json"] = _codex_manifest_bytes(
         files[".claude-plugin/plugin.json"])
     _validate_package_names(files)
     return files
+
+
+def generated_outputs(root, *, snapshots=None):
+    """Return all loose runtime files and reproducible archives to publish."""
+    outputs = {}
+    snapshots = {} if snapshots is None else snapshots
+    maps = _package_inventory(root, snapshots)
+    for name in PLUGIN_NAMES:
+        files = package_files(root, name, snapshots=snapshots)
+        _validate_distribution_tree(root, name, files)
+        outputs.update({root / "plugins" / name / relative: content
+                        for relative, content in files.items()
+                        if maps[name].get(relative) != "plugins/%s/%s" % (name, relative)})
+        outputs[root / (name + ".plugin")] = archive_bytes(files)
+    return outputs
 
 
 def archive_bytes(files):
@@ -591,15 +676,11 @@ def main():
     args = parser.parse_args()
     root = ROOT
     try:
-        paths = (root / ".codex-plugin/plugin.json", root / "obsidian.plugin")
+        sources = {}
+        outputs = generated_outputs(root, snapshots=sources)
+        paths = tuple(outputs)
         for path in paths:
             reject_symlinks(root, path)
-        files = package_files(root)
-        outputs = {
-            root / ".codex-plugin/plugin.json":
-                files[".codex-plugin/plugin.json"],
-            root / "obsidian.plugin": archive_bytes(files),
-        }
         observed_parents = {
             path: _observe_parent(path.parent) for path in paths
         }
@@ -617,6 +698,7 @@ def main():
         parser.exit(2, "Cannot build plugin: %s\n" % exc)
     if args.check:
         try:
+            _verify_sources(root, sources)
             current = {
                 path: (None if observed_parents[path] is None else
                        _observe_bound_output(
@@ -632,10 +714,11 @@ def main():
         if stale:
             print("Run python3 tools/build_plugin.py")
         else:
-            print("Codex manifest and obsidian.plugin match the source tree.")
+            print("Both plugin trees and archives match their canonical sources.")
         return int(bool(stale))
     try:
-        stale = _publish_outputs(root, outputs, observed, observed_parents)
+        stale = _publish_outputs(root, outputs, observed, observed_parents,
+                                 validate_inputs=lambda: _verify_sources(root, sources))
         for path in stale:
             print("Built " + str(path.relative_to(root)))
     except (OSError, ValueError) as exc:

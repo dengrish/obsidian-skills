@@ -1,0 +1,2 @@
+# Python 3.10+ standard library only; system IANA timezone data is required.
+# No third-party packages are required by the investment helpers.

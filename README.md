@@ -1,9 +1,18 @@
-# obsidian
+# Obsidian skills
 
-Eight skills turn PDFs, Web Clipper captures and queued research topics into
-reading notes and interlinked Obsidian wiki entries, maintain the existing
-wiki, and produce daily market research. They run in Codex and Claude Code and
-share one set of [vault conventions](shared/CONVENTIONS.md).
+Eight skills are packaged as two independently installable plugins for Codex
+and Claude Code. Both can use the same selected Obsidian vault:
+
+| Plugin | Purpose | Namespace |
+|---|---|---|
+| **knowledge** | Organize sources and maintain a knowledge base | `knowledge:` |
+| **investments** | Research buying opportunities and evaluate earlier recommendations | `investments:` |
+
+They share one GitHub repository and the `obsidian-skills` marketplace. Each
+plugin has its own version and includes its skills, references and shared helpers.
+Knowledge workflows use the [vault conventions](shared/CONVENTIONS.md);
+investment notes follow their own format. Common input safety, safe writes and
+suggestion-log protocols keep both plugins compatible with the same vault.
 
 ## The skills
 
@@ -11,14 +20,14 @@ Choose by the requested result, not just the input's file type.
 
 | Requested result | Skill | Main input and output |
 |---|---|---|
-| Rename, file or split PDFs | [pdf-organize](skills/pdf-organize/SKILL.md) | PDFs → organized PDFs and chapter files |
-| Extract figure images | [figure-extract](skills/figure-extract/SKILL.md) | PDFs → cropped PNGs in `Sources/Images/` |
-| Explain a paper, chapter, report, standard or publication notice | [paper-summarize](skills/paper-summarize/SKILL.md) | PDF → reading note in `Articles/` |
-| Clean Web Clipper captures | [clipping-clean](skills/clipping-clean/SKILL.md) | raw capture → cleaned note in `Articles/` |
-| Build or enrich wiki entries from new evidence | [wiki-build](skills/wiki-build/SKILL.md) | PDF or URL-origin source note → entries in `Wiki/` |
-| Research and add missing requested topics | [wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md` → durable sources and new requested entries only |
-| Audit, correct or explicitly refactor existing wiki entries | [wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources or an exact producer mapping → scoped repairs, links, parents and MOCs |
-| Research market catalysts and developing momentum | [market-research](skills/market-research/SKILL.md) | current market evidence and earlier analyses → brief daily note in `Investments/` |
+| Rename, file or split PDFs | [knowledge:pdf-organize](skills/pdf-organize/SKILL.md) | PDFs → organized PDFs and chapter files |
+| Extract figure images | [knowledge:figure-extract](skills/figure-extract/SKILL.md) | PDFs → cropped PNGs in `Sources/Images/` |
+| Explain a paper, chapter, report, standard or publication notice | [knowledge:paper-summarize](skills/paper-summarize/SKILL.md) | PDF → reading note in `Articles/` |
+| Clean Web Clipper captures | [knowledge:clipping-clean](skills/clipping-clean/SKILL.md) | raw capture → cleaned note in `Articles/` |
+| Build or enrich wiki entries from new evidence | [knowledge:wiki-build](skills/wiki-build/SKILL.md) | PDF or URL-origin source note → entries in `Wiki/` |
+| Research and add missing requested topics | [knowledge:wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md` → durable sources and new requested entries only |
+| Audit, correct or explicitly refactor existing wiki entries | [knowledge:wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources or an exact producer mapping → scoped repairs, links, parents and MOCs |
+| Research market catalysts and developing momentum | [investments:market-research](skills/market-research/SKILL.md) | current market evidence and earlier analyses → brief daily note in `Investments/` |
 
 A PDF attached without a stated goal has no default workflow; ask what result
 the user wants. An inbox-wide request splits captured `.md` files and `.pdf`
@@ -104,59 +113,66 @@ Reserve Bank of St. Louis. Use of its FRED integration is subject to the
 
 ## Codex and Claude
 
-The same eight skills run in **Codex and Claude Code** on **macOS and Linux**,
-including their desktop surfaces when local files and shell execution are
-available. This is a skill package, not an Obsidian community plugin or an MCP
-server. Ordinary chats
-without filesystem access cannot run the vault workflow.
+Both plugins run on **macOS and Linux** in Codex and Claude Code, including
+local desktop workflows with filesystem and shell access. These are skill
+packages, not Obsidian community plugins or MCP servers. Installing them does
+not install Python dependencies, grant vault access or schedule work.
 
-Invoke the Wiki skills as `obsidian:wiki-build`, `obsidian:wiki-add`, and
-`obsidian:wiki-lint`. Suggestion logs use current skill names under `Reviews/`
-and follow the [shared protocol](shared/SUGGESTIONS.md). MOCs are fully generated
-nested outlines at `MOCs/<discipline>.md`, without marker comments. Unexpected
-root `<discipline>-moc.md` files are preserved and reported, not moved or
-replaced during routine maintenance.
-
-| Purpose | Codex | Claude Code |
-|---|---|---|
-| Contributor instructions | `AGENTS.md` | `CLAUDE.md` imports `AGENTS.md` |
-| Plugin manifest | generated `.codex-plugin/plugin.json` | authored `.claude-plugin/plugin.json` |
-| Marketplace | `.claude-plugin/marketplace.json` (compatibility format) | same catalog |
-| Runtime instructions and helpers | `skills/` and `shared/` | the same files |
-
-`CLAUDE.md` contains only `@AGENTS.md`, the
-[documented Claude import](https://code.claude.com/docs/en/memory#agentsmd).
-This avoids duplicated instructions and symlink requirements. These files
-govern contributions to the repository; installed skills explicitly link
-their [runtime setup](shared/RUNTIME.md) instead of depending on either host
-to load repository instructions in the user's vault.
-
-Install the **whole repository** through its marketplace; copying only a
-`SKILL.md` loses references, sibling skills and shared Python helpers.
-The Codex CLI accepts the Claude marketplace format (verified with Codex CLI
-0.147.0), so both hosts use one catalog.
+Install either or both through the existing shared marketplace:
 
 ```bash
-# Codex
+# Codex: add the marketplace once, then select the plugins you want.
 codex plugin marketplace add https://github.com/dengrish/obsidian-skills.git
-codex plugin add obsidian@obsidian-skills
+codex plugin add knowledge@obsidian-skills
+codex plugin add investments@obsidian-skills
 
 # Claude Code
 claude plugin marketplace add dengrish/obsidian-skills
-claude plugin install obsidian@obsidian-skills
+claude plugin install knowledge@obsidian-skills
+claude plugin install investments@obsidian-skills
 ```
 
-For local Claude development, `claude --plugin-dir .` loads this checkout.
-Start a fresh task/session after installing or updating. Installation does
-not install Python dependencies or grant vault access; follow the runtime
-guide. Shell examples use POSIX syntax.
+Invoke skills as `knowledge:wiki-build`, `knowledge:wiki-add`,
+`knowledge:wiki-lint`, or `investments:market-research`. Start a fresh
+session/task after installation or updates to refresh the host's catalog.
+Each plugin uses its own packaged `skills/` and `shared/` resources; copying
+one SKILL.md or relying on a sibling installation is unsupported.
 
-Recurring market research is configured separately in the active host when
-requested; installing or manually running the skill does not activate a job.
-Its default daily research time is 08:30 `America/Los_Angeles`, equivalent to
-11:30 `America/New_York`, following daylight-saving changes. Normal trading days
-include a separate intraday assessment alongside completed-session trend data;
-closed-market days produce a short status note.
+| Purpose | Location |
+|---|---|
+| Contributor guidance | `AGENTS.md`; `CLAUDE.md` imports it with `@AGENTS.md` |
+| Marketplace for both hosts | `.claude-plugin/marketplace.json` |
+| Authored manifests | `plugins/<name>/.claude-plugin/plugin.json` |
+| Generated Codex manifests | `plugins/<name>/.codex-plugin/plugin.json` |
+| Canonical runtime sources | root `skills/` and `shared/` |
+| Self-contained runtime trees | `plugins/knowledge/` and `plugins/investments/` |
+| Reproducible archives | `knowledge.plugin` and `investments.plugin` |
+
+Contributor instructions stay in the repository; installed skills load their
+packaged runtime guidance explicitly. For local Claude development, use
+`claude --plugin-dir plugins/knowledge` or `claude --plugin-dir plugins/investments`
+after building the source tree.
+
+### Migrating from the former obsidian plugin
+
+Publish the split source, refresh the existing marketplace in each host, and
+install `knowledge@obsidian-skills` and `investments@obsidian-skills`. Verify
+both new plugins before removing the former `obsidian@obsidian-skills`
+installation; do not keep duplicate skill catalogs enabled after migration.
+Do not manually edit caches or replace the GitHub marketplace with a local one.
+
+Update scheduled skill references from `obsidian:market-research` to
+`investments:market-research` only after the new installed plugin is available.
+Keep the selected vault, credentials file, interpreter and schedule unchanged;
+shared-helper overrides must point to the selected investments installation.
+The default daily edition remains 08:30 `America/Los_Angeles` / 11:30
+`America/New_York`, including closed-market days and daylight-saving changes.
+A source edit alone does not switch an existing automation or install a plugin.
+
+No vault migration is needed. Existing notes, recommendation IDs, review logs,
+figure sidecars, raw captures and ownership markers retain their meanings.
+The `OBSIDIAN_VAULT_SHARED` setting and hidden `.obsidian-skills-tmp-` scratch
+prefix are durable protocols, independent of the plugin namespace.
 
 ## Vault layout
 
@@ -250,7 +266,7 @@ The shared implementations are `slugify.py` (wiki slugs), `atomic_move.py`
 (exclusive moves and verified regular-file publication/removal), `naming.py`
 (source filenames and book identity),
 `plurals.py` (English singularization),
-`yaml_scalars.py` (decoded metadata), `figure_state.py` (figure ownership and
+`yaml_scalars.py` (decoded metadata), `portable_names.py` (portable file identity), `figure_state.py` (figure ownership and
 review sidecars), `vault_artifacts.py` (portable PDF and source-figure
 inventories), `organism_names.py` (Organism title/name classification),
 `entry_structure.py` (shared Wiki text, image and source-identity parsing,
@@ -292,40 +308,43 @@ execution from another working directory and platform-sensitive paths and
 interpreter handling. These tests do not establish prose quality, correct
 source interpretation or visually accurate crops; review those separately.
 
-When Claude Code is available, also run:
+When Claude Code is available, validate both manifests and skill trees:
 
 ```bash
-claude plugin validate .claude-plugin/plugin.json
-claude plugin validate .claude-plugin/marketplace.json
-claude plugin validate skills
+claude plugin validate .claude-plugin/marketplace.json --strict
+claude plugin validate plugins/knowledge/.claude-plugin/plugin.json --strict
+claude plugin validate plugins/investments/.claude-plugin/plugin.json --strict
+claude plugin validate plugins/knowledge/skills --strict
+claude plugin validate plugins/investments/skills --strict
 ```
 
-The plugin-manifest command may report that the repository-root `CLAUDE.md` is
-not loaded as plugin context. That file exists for contributors working on this
-repository and imports `AGENTS.md`; runtime plugin guidance lives in the eight
-skills. The warning is expected, while the marketplace and skill validations
-should pass cleanly (including with `--strict`).
+Author each plugin manifest in `plugins/<name>/.claude-plugin/plugin.json`,
+along with that plugin's README and any plugin-specific requirements file.
+Those files are inputs; all other files under `plugins/` are generated. Edit
+canonical root `skills/` and `shared/` files rather than generated runtime
+copies. Development tests, build tools and contributor instructions are not
+included in installed packages.
 
-Author common metadata in `.claude-plugin/plugin.json`. The build command
-generates `.codex-plugin/plugin.json` and `obsidian.plugin`, including all
-references and shared helpers while excluding local environments and Git
-state. Completed outputs are staged on the destination filesystem and replace
-only the exact generated files observed before publication; a late edit or
-occupant stops publication unchanged. `--check` detects stale generated files
-without rewriting them.
+[`tools/package-files.json`](tools/package-files.json) maps each plugin's
+package-relative destinations to exact repository-relative source files. Shared
+files have one editable source and are copied into each consuming runtime.
+Add every intentional skill/shared asset to the map. The build rejects missing
+inputs and unlisted generated files; when removing an asset, inspect and remove
+its obsolete generated copy too. Paths must be NFC-normalized and free of
+case-folding collisions. [`.gitattributes`](.gitattributes) preserves LF text and
+binary archive bytes across supported hosts.
 
-[`tools/package-files.txt`](tools/package-files.txt) is the exact authored-file
-inventory for the archive. Add an intentional new reference, script, or asset
-there; an unlisted or missing file under a shipped tree makes the build fail.
-This supports arbitrary asset types without silently packaging editor residue
-or secrets. Archive paths must also be NFC-normalized and free of case-folding
-collisions. [`.gitattributes`](.gitattributes) keeps tracked text at LF so the
-same revision produces the same archive from macOS and Linux clones.
+The build stages complete output and uses guarded publication to preserve later
+edits. Authored input changes invalidate the plan; authored metadata is never
+written as generated output. `--check` verifies both loose trees and archives
+without changing them. Tests exercise isolated extracted packages so neither can
+silently import from the repository or the other plugin.
 
-For a release, bump the authored manifest's version, validate, rebuild, then
-commit source and generated files together before pushing. An explicit
-version is a cache key: pushing changed code with the same version does not
-deliver a Claude plugin update. See
-[Claude version management](https://code.claude.com/docs/en/plugins-reference#version-management).
-Refresh the marketplace and update/reinstall the plugin in each host afterward;
-a push does not refresh an already-running session.
+Each plugin starts at **1.0.0** under its new identity and advances independently.
+Before distributing a runtime change, bump every affected plugin's authored
+version, validate, rebuild, and commit source plus generated files together.
+A shared input change requires a bump for all consuming plugins; a skill-specific
+change affects only its owner. CI compares the per-plugin source maps and
+versions against the appropriate Git baseline. Pushing does not refresh an
+already-running session; update the installed plugins and start a fresh session
+when delivering a release.

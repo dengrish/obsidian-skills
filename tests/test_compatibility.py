@@ -16,12 +16,20 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from urllib.parse import unquote, urlsplit
 import zipfile
 
 import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
+PLUGIN_SKILLS = {
+    "knowledge": {
+        "clipping-clean", "paper-summarize", "figure-extract", "pdf-organize",
+        "wiki-add", "wiki-build", "wiki-lint",
+    },
+    "investments": {"market-research"},
+}
 
 
 def _can_create_symlink():
@@ -58,9 +66,39 @@ def copy_package_source(destination):
         shutil.copytree(
             ROOT / name, destination / name,
             ignore=shutil.ignore_patterns(".DS_Store", "__pycache__", "*.pyc", "*.pyo"))
+    for name in PLUGIN_SKILLS:
+        authored = destination / "plugins" / name / ".claude-plugin"
+        authored.mkdir(parents=True)
+        shutil.copy2(ROOT / "plugins" / name / ".claude-plugin/plugin.json",
+                     authored / "plugin.json")
+        shutil.copy2(ROOT / "plugins" / name / "README.md",
+                     authored.parent / "README.md")
+        requirements = ROOT / "plugins" / name / "requirements.txt"
+        if name == "investments":
+            shutil.copy2(requirements, authored.parent / "requirements.txt")
 
 
 class CompatibilityTests(unittest.TestCase):
+    def test_readme_roster_counts_use_their_own_package_scope(self):
+        conventions = load("convention_roster_counts", ROOT / "tests/test_conventions.py")
+        canonical = (ROOT / "shared/CONVENTIONS.md").read_text(encoding="utf-8")
+        for relative, intro, fails in (
+                ("README.md", "Eight skills are packaged as two plugins.", False),
+                ("plugins/knowledge/README.md", "Seven skills for organizing sources.", False),
+                ("plugins/knowledge/README.md", "Eight skills for organizing sources.", True),
+                ("plugins/investments/README.md", "One skill for market research.", False)):
+            with self.subTest(relative=relative, intro=intro):
+                report = conventions.Report()
+                prose = "# Overview\n\n" + intro + "\n\nUse the `wiki-build` skill.\n"
+                with patch.object(conventions, "walk_plugin_files", return_value=[
+                        (str(ROOT / relative), prose)]):
+                    conventions.check_skill_roster(report, canonical)
+                self.assertEqual(bool(report.by_status("FAIL")), fails, report.render())
+        self.assertEqual(conventions.stated_roster_counts(
+            "README.md", "# Overview\n\nOrganize a vault.\n\nFour skills for PDFs help here."), [])
+        self.assertEqual(conventions.stated_roster_counts(
+            "SKILL.md", "Four skills for PDFs help here."), [])
+
     def test_convention_defects_and_broken_checks_fail_the_run(self):
         conventions = load("convention_failures", ROOT / "tests/test_conventions.py")
         conv = (ROOT / "shared/CONVENTIONS.md").read_text(encoding="utf-8")
@@ -78,6 +116,12 @@ class CompatibilityTests(unittest.TestCase):
                 self.assertTrue(any(expected in row[3]
                                     for row in report.by_status("FAIL")))
                 self.assertIn("RESULT: FAIL", report.render())
+
+        # A marketplace's compound name cannot serve as its own evidence
+        # that the prose is naming a skill (the suffix alone used to do so).
+        self.assertEqual(conventions._roster_candidates(
+            "The marketplace remains `obsidian-skills`.\n",
+            set(conventions.skill_names()), set()), [])
 
         def no_results(report, canonical):
             pass
@@ -246,62 +290,94 @@ class CompatibilityTests(unittest.TestCase):
                 self.assertTrue(metadata["description"].strip())
                 self.assertLessEqual(len(metadata["description"]), 1024)
 
-    def test_manifests_share_metadata_and_skill_tree(self):
-        claude = json.loads(
-            (ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
-        codex = json.loads(
-            (ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
-        for key, value in claude.items():
-            self.assertEqual(codex[key], value, key)
-        claude_skills = ROOT / claude.get("skills", "skills")
-        codex_skills = ROOT / codex["skills"]
-        self.assertEqual(claude_skills.resolve(), codex_skills.resolve())
-        skills = sorted(claude_skills.glob("*/SKILL.md"))
-        self.assertEqual({path.parent.name for path in skills}, {
-            "clipping-clean", "paper-summarize", "figure-extract",
-            "pdf-organize", "wiki-add", "wiki-build", "wiki-lint",
-            "market-research",
-        })
-        for path in skills:
-            self.assertTrue((path.parent / "../../shared/RUNTIME.md").resolve().is_file())
+    def test_manifests_share_metadata_and_each_plugin_owns_its_skill_tree(self):
+        seen = set()
+        for name, expected_skills in PLUGIN_SKILLS.items():
+            with self.subTest(plugin=name):
+                root = ROOT / "plugins" / name
+                claude = json.loads(
+                    (root / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+                codex = json.loads(
+                    (root / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+                self.assertEqual(claude["name"], name)
+                for key, value in claude.items():
+                    self.assertEqual(codex[key], value, key)
+                claude_skills = root / claude.get("skills", "skills")
+                codex_skills = root / codex["skills"]
+                self.assertEqual(claude_skills.resolve(), codex_skills.resolve())
+                skills = sorted(claude_skills.glob("*/SKILL.md"))
+                roster = {path.parent.name for path in skills}
+                self.assertEqual(roster, expected_skills)
+                self.assertFalse(seen & roster)
+                seen.update(roster)
+                for path in skills:
+                    self.assertTrue(
+                        (path.parent / "../../shared/RUNTIME.md").resolve().is_file())
+        self.assertEqual(seen, {
+            path.parent.name for path in (ROOT / "skills").glob("*/SKILL.md")})
+        for retired in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json",
+                        "obsidian.plugin"):
+            self.assertFalse(os.path.lexists(ROOT / retired), retired)
 
-    def test_marketplace_metadata_identifies_the_authored_plugin(self):
-        manifest = json.loads(
-            (ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+    def test_marketplace_metadata_identifies_both_authored_plugins(self):
         marketplace = json.loads(
-            (ROOT / ".claude-plugin/marketplace.json").read_text(
-                encoding="utf-8"))
+            (ROOT / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
         self.assertEqual(marketplace["name"], "obsidian-skills")
         self.assertIsInstance(marketplace["description"], str)
         self.assertTrue(marketplace["description"].strip())
-        self.assertEqual(marketplace["owner"], manifest["author"])
-        self.assertEqual(len(marketplace["plugins"]), 1)
-        entry = marketplace["plugins"][0]
-        self.assertEqual(entry["name"], manifest["name"])
-        self.assertEqual(entry["source"], "./")
-        self.assertEqual(entry["description"], manifest["description"])
+        self.assertEqual(len(marketplace["plugins"]), len(PLUGIN_SKILLS))
+        entries = {entry["name"]: entry for entry in marketplace["plugins"]}
+        self.assertEqual(set(entries), set(PLUGIN_SKILLS))
+        for name, entry in entries.items():
+            with self.subTest(plugin=name):
+                manifest = json.loads((ROOT / "plugins" / name /
+                    ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+                self.assertEqual(marketplace["owner"], manifest["author"])
+                self.assertEqual(entry["name"], manifest["name"])
+                self.assertEqual(entry["source"], "./plugins/" + name)
+                self.assertEqual(entry["description"], manifest["description"])
 
-    def test_archive_is_complete_and_current(self):
+    def test_archives_and_distribution_trees_are_complete_and_current(self):
         build = load("build_plugin", ROOT / "tools/build_plugin.py")
-        expected = build.package_files(ROOT)
-        content = (ROOT / "obsidian.plugin").read_bytes()
-        with zipfile.ZipFile(io.BytesIO(content)) as archive:
-            self.assertEqual(set(archive.namelist()), set(expected))
-            self.assertEqual(len(archive.namelist()), len(expected))
-            self.assertTrue(all(
-                info.compress_type == zipfile.ZIP_STORED
-                for info in archive.infolist()))
-            for name, data in expected.items():
-                self.assertEqual(archive.read(name), data, name)
-                self.assertFalse(Path(name).is_absolute())
-                self.assertNotIn("..", Path(name).parts)
-        self.assertEqual(content, build.archive_bytes(expected))
+        for plugin_name, roster in PLUGIN_SKILLS.items():
+            with self.subTest(plugin=plugin_name):
+                expected = build.package_files(ROOT, plugin_name)
+                content = (ROOT / (plugin_name + ".plugin")).read_bytes()
+                with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                    self.assertEqual(set(archive.namelist()), set(expected))
+                    self.assertEqual(len(archive.namelist()), len(expected))
+                    self.assertTrue(all(
+                        info.compress_type == zipfile.ZIP_STORED
+                        for info in archive.infolist()))
+                    for name, data in expected.items():
+                        self.assertEqual(archive.read(name), data, name)
+                        self.assertFalse(Path(name).is_absolute())
+                        self.assertNotIn("..", Path(name).parts)
+                        self.assertEqual(
+                            (ROOT / "plugins" / plugin_name / name).read_bytes(),
+                            data, name)
+                self.assertEqual(content, build.archive_bytes(expected))
+                distribution = ROOT / "plugins" / plugin_name
+                actual = set()
+                for path in distribution.rglob("*"):
+                    self.assertFalse(path.is_symlink(), str(path))
+                    if (path.is_file() and "__pycache__" not in path.parts
+                            and path.name != ".DS_Store"
+                            and path.suffix not in (".pyc", ".pyo")):
+                        actual.add(path.relative_to(distribution).as_posix())
+                self.assertEqual(actual, set(expected))
+                self.assertEqual({
+                    Path(name).parts[1] for name in expected
+                    if name.startswith("skills/")}, roster)
+                self.assertFalse(any(
+                    name.startswith(("tools/", "tests/", "plugins/"))
+                    for name in expected))
 
     def test_packaged_market_cli_uses_private_credentials_without_local_launchers(self):
         with tempfile.TemporaryDirectory(prefix="obsidian-market-config-") as tmp:
             root = Path(tmp).resolve()
             install = root / "installed plugin"
-            with zipfile.ZipFile(ROOT / "obsidian.plugin") as archive:
+            with zipfile.ZipFile(ROOT / "investments.plugin") as archive:
                 archive.extractall(install)
             private = root / "private config"
             private.mkdir(mode=0o700)
@@ -355,38 +431,149 @@ class CompatibilityTests(unittest.TestCase):
     def test_packaging_derives_the_loose_and_archived_codex_manifest_once(self):
         build = load("build_plugin_single_manifest", ROOT / "tools/build_plugin.py")
         derived = b"one exact derived manifest\n"
-        with patch.object(build, "_codex_manifest_bytes",
-                          return_value=derived) as convert:
-            files = build.package_files(ROOT)
-        convert.assert_called_once_with(files[".claude-plugin/plugin.json"])
-        self.assertEqual(files[".codex-plugin/plugin.json"], derived)
+        for name in PLUGIN_SKILLS:
+            with self.subTest(plugin=name), patch.object(
+                    build, "_codex_manifest_bytes", return_value=derived) as convert:
+                files = build.package_files(ROOT, name)
+            convert.assert_called_once_with(files[".claude-plugin/plugin.json"])
+            self.assertEqual(files[".codex-plugin/plugin.json"], derived)
+
+    def test_changing_one_plugins_skill_does_not_change_its_siblings_archive(self):
+        build = load("build_plugin_profile_isolation", ROOT / "tools/build_plugin.py")
+        with tempfile.TemporaryDirectory(prefix="independent-profile-bytes-") as tmp:
+            root = Path(tmp) / "source"
+            copy_package_source(root)
+            for name, skills in PLUGIN_SKILLS.items():
+                with self.subTest(plugin=name):
+                    before = {
+                        plugin: build.archive_bytes(build.package_files(root, plugin))
+                        for plugin in PLUGIN_SKILLS}
+                    changed = root / "skills" / sorted(skills)[0] / "SKILL.md"
+                    with changed.open("a", encoding="utf-8") as output:
+                        output.write("\nProfile-specific runtime update.\n")
+                    after = {
+                        plugin: build.archive_bytes(build.package_files(root, plugin))
+                        for plugin in PLUGIN_SKILLS}
+                    for plugin in PLUGIN_SKILLS:
+                        if plugin == name:
+                            self.assertNotEqual(before[plugin], after[plugin])
+                        else:
+                            self.assertEqual(before[plugin], after[plugin])
+
+    def test_build_preserves_authored_edits_and_rolls_back_generated_publications(self):
+        build = load("build_plugin_authored_races", ROOT / "tools/build_plugin.py")
+        for phase in ("after collection", "during publication"):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory(
+                    prefix="plugin-authored-race-") as tmp:
+                root = Path(tmp).resolve() / "source"
+                copy_package_source(root)
+                initial_sources = {}
+                initial = build.generated_outputs(root, snapshots=initial_sources)
+                for path in initial:
+                    if not path.parent.exists():
+                        build._create_output_parent(root, path.parent)
+                parents = {path: build._directory_identity(path.parent) for path in initial}
+                observed = {path: build._observe_output(path) for path in initial}
+                build._publish_outputs(root, initial, observed, parents,
+                    validate_inputs=lambda: build._verify_sources(root, initial_sources))
+
+                # A real runtime change makes this publication nontrivial.
+                changed = root / "skills/wiki-build/SKILL.md"
+                with changed.open("a", encoding="utf-8") as output:
+                    output.write("\nPlanned runtime change.\n")
+                sources = {}
+                outputs = build.generated_outputs(root, snapshots=sources)
+                inventory = json.loads((root / build.PACKAGE_INVENTORY).read_text(
+                    encoding="utf-8"))
+                for name, mapping in inventory.items():
+                    for destination, origin in mapping.items():
+                        authored_output = root / "plugins" / name / destination
+                        if authored_output == root / origin:
+                            self.assertNotIn(authored_output, outputs)
+                observed = {path: build._observe_output(path) for path in outputs}
+                self.assertTrue(any(observed[path][4] != data
+                                    for path, data in outputs.items()))
+                authored = root / "plugins/knowledge/README.md"
+                saved = authored.read_bytes() + b"\nConcurrent authored README edit.\n"
+                injected = {"done": False}
+                publish = build._publish_generated
+
+                def publish_then_edit(*args, **kwargs):
+                    result = publish(*args, **kwargs)
+                    if not injected["done"]:
+                        authored.write_bytes(saved)
+                        injected["done"] = True
+                    return result
+
+                if phase == "after collection":
+                    authored.write_bytes(saved)
+                with patch.object(build, "_publish_generated",
+                        side_effect=publish_then_edit if phase == "during publication"
+                        else publish):
+                    with self.assertRaisesRegex(OSError, "package source changed"):
+                        build._publish_outputs(root, outputs, observed, parents,
+                            validate_inputs=lambda: build._verify_sources(root, sources))
+                if phase == "during publication":
+                    self.assertTrue(injected["done"])
+                self.assertEqual(authored.read_bytes(), saved)
+                for path, previous in observed.items():
+                    self.assertEqual(path.read_bytes(), previous[4], str(path))
+                self.assertFalse(any(root.rglob(".plugin-build-*")))
+
+    def test_build_rejects_shared_sources_changed_between_profiles(self):
+        build = load("build_plugin_cross_profile_race", ROOT / "tools/build_plugin.py")
+        with tempfile.TemporaryDirectory(prefix="plugin-cross-profile-race-") as tmp:
+            root = Path(tmp).resolve() / "source"
+            copy_package_source(root)
+            common = root / "shared/RUNTIME.md"
+            saved = common.read_bytes() + b"\nChanged between profile snapshots.\n"
+            collect = build.package_files
+            collected = []
+
+            def change_shared_after_first_profile(*args, **kwargs):
+                result = collect(*args, **kwargs)
+                collected.append(args[1])
+                if len(collected) == 1:
+                    common.write_bytes(saved)
+                return result
+
+            with patch.object(build, "package_files",
+                              side_effect=change_shared_after_first_profile):
+                with self.assertRaisesRegex(OSError, "package source changed"):
+                    build.generated_outputs(root)
+            self.assertEqual(len(collected), 1)
+            self.assertEqual(common.read_bytes(), saved)
+            for name in PLUGIN_SKILLS:
+                self.assertFalse((root / (name + ".plugin")).exists())
+                self.assertFalse((root / "plugins" / name / "skills").exists())
 
     def test_package_inventory_includes_declared_assets_and_rejects_unknown_files(self):
         build = load("build_plugin_inventory", ROOT / "tools/build_plugin.py")
         with tempfile.TemporaryDirectory(prefix="obsidian-package-inventory-") as tmp:
             root = Path(tmp) / "plugin"
             copy_package_source(root)
-            asset = root / "skills/example/assets/diagram.svg"
+            asset = root / "skills/wiki-build/assets/diagram.svg"
             asset.parent.mkdir(parents=True)
             asset.write_bytes(b"<svg/>\n")
             with self.assertRaisesRegex(ValueError, "unlisted files"):
-                build.package_files(root)
+                build.package_files(root, "knowledge")
 
             inventory = root / build.PACKAGE_INVENTORY
-            names = inventory.read_text(encoding="utf-8").splitlines()
-            names.append(asset.relative_to(root).as_posix())
+            profiles = json.loads(inventory.read_text(encoding="utf-8"))
+            relative = asset.relative_to(root).as_posix()
+            profiles["knowledge"][relative] = relative
             inventory.write_text(
-                "\n".join(sorted(names)) + "\n", encoding="utf-8")
-            packaged = build.package_files(root)
-            self.assertEqual(packaged["skills/example/assets/diagram.svg"],
+                json.dumps(profiles, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            packaged = build.package_files(root, "knowledge")
+            self.assertEqual(packaged["skills/wiki-build/assets/diagram.svg"],
                              b"<svg/>\n")
 
             (root / "skills/.DS_Store").write_bytes(b"finder metadata")
-            cache = root / "skills/example/__pycache__"
+            cache = root / "skills/wiki-build/__pycache__"
             cache.mkdir()
             (cache / "helper.pyc").write_bytes(b"bytecode")
-            self.assertEqual(build.package_files(root)[
-                "skills/example/assets/diagram.svg"], b"<svg/>\n")
+            self.assertEqual(build.package_files(root, "knowledge")[
+                "skills/wiki-build/assets/diagram.svg"], b"<svg/>\n")
 
     def test_archive_rejects_unsafe_or_colliding_names(self):
         build = load("build_plugin_names", ROOT / "tools/build_plugin.py")
@@ -412,7 +599,8 @@ class CompatibilityTests(unittest.TestCase):
             copy_package_source(root)
             foreign = Path(tmp) / "outside.txt"
             foreign.write_text("not repository content", encoding="utf-8")
-            for name in ("skills/linked.md", "README.md", ".claude-plugin/plugin.json", "shared"):
+            for name in ("skills/linked.md", "plugins/knowledge/README.md",
+                         "plugins/knowledge/.claude-plugin/plugin.json", "shared"):
                 with self.subTest(path=name):
                     path = root / name
                     original = path.read_bytes() if path.is_file() else None
@@ -424,7 +612,7 @@ class CompatibilityTests(unittest.TestCase):
                     path.symlink_to(foreign)
                     try:
                         with self.assertRaisesRegex(ValueError, "symlink"):
-                            build.package_files(root)
+                            build.package_files(root, "knowledge")
                     finally:
                         path.unlink()
                         if backup.exists():
@@ -442,7 +630,7 @@ class CompatibilityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="obsidian-package-race-") as tmp:
             root = Path(tmp) / "plugin"
             copy_package_source(root)
-            victim = root / "README.md"
+            victim = root / "plugins/knowledge/README.md"
             original = victim.read_bytes()
             foreign = Path(tmp) / "outside.txt"
             foreign.write_bytes(b"never package these bytes")
@@ -459,7 +647,7 @@ class CompatibilityTests(unittest.TestCase):
 
             with patch.object(build.os, "open", side_effect=swap_leaf):
                 with self.assertRaises((OSError, ValueError)):
-                    build.package_files(root)
+                    build.package_files(root, "knowledge")
             self.assertTrue(victim.is_symlink())
             self.assertEqual(foreign.read_bytes(), b"never package these bytes")
 
@@ -477,7 +665,7 @@ class CompatibilityTests(unittest.TestCase):
 
             with patch.object(build.os, "open", side_effect=change_in_place):
                 with self.assertRaises(OSError):
-                    build.package_files(root)
+                    build.package_files(root, "knowledge")
 
     def test_stable_readers_reject_same_file_changes_during_read(self):
         build = load("build_plugin_changed_read", ROOT / "tools/build_plugin.py")
@@ -615,15 +803,11 @@ class CompatibilityTests(unittest.TestCase):
     def test_build_does_not_write_through_output_symlinks(self):
         with tempfile.TemporaryDirectory(prefix="obsidian-build-boundary-") as tmp:
             root = Path(tmp) / "plugin"
-            (root / "tools").mkdir(parents=True)
-            (root / "shared/scripts").mkdir(parents=True)
+            copy_package_source(root)
             script = root / "tools/build_plugin.py"
-            script.write_bytes((ROOT / "tools/build_plugin.py").read_bytes())
-            (root / "shared/scripts/atomic_move.py").write_bytes(
-                (ROOT / "shared/scripts/atomic_move.py").read_bytes())
             foreign = Path(tmp) / "outside.txt"
             foreign.write_text("preserve external bytes", encoding="utf-8")
-            (root / "obsidian.plugin").symlink_to(foreign)
+            (root / "knowledge.plugin").symlink_to(foreign)
             result = subprocess.run([sys.executable, str(script)], cwd=tmp,
                                     capture_output=True, text=True,
                                     encoding="utf-8", timeout=30)
@@ -632,7 +816,7 @@ class CompatibilityTests(unittest.TestCase):
             self.assertEqual(
                 foreign.read_text(encoding="utf-8"),
                 "preserve external bytes")
-            self.assertTrue((root / "obsidian.plugin").is_symlink())
+            self.assertTrue((root / "knowledge.plugin").is_symlink())
 
     @unittest.skipUnless(CAN_CREATE_SYMLINK,
                          "host does not grant symlink privileges")
@@ -1107,9 +1291,12 @@ read: false
     def test_heading_check_preserves_import_paths_and_reports_unreadable_rules(self):
         conventions = load("convention_headings", ROOT / "tests/test_conventions.py")
         before = list(sys.path)
-        module = conventions.mod_generic(str(ROOT / "skills/paper-summarize/scripts/note_lint.py"))
-        self.assertIsNotNone(module)
-        self.assertEqual(sys.path, before)
+        for relative in ("skills/paper-summarize/scripts/note_lint.py",
+                         "shared/scripts/vault_artifacts.py"):
+            with self.subTest(module=relative):
+                module = conventions.mod_generic(str(ROOT / relative))
+                self.assertIsNotNone(module)
+                self.assertEqual(sys.path, before)
         report = conventions.Report()
         with patch.object(conventions, "mod_generic", return_value=None):
             conventions.check_note_headings(
@@ -1267,50 +1454,145 @@ read: false
                 self.assertIn("PyMuPDF required", blocked.stderr)
                 self.assertNotIn("Traceback", blocked.stderr)
 
-    def test_packaged_helpers_run_outside_plugin_directory(self):
-        # Hosts execute helpers while their cwd is the user's vault, and
-        # plugin cache paths commonly contain spaces. Exercise the real CLIs.
-        with tempfile.TemporaryDirectory(prefix="obsidian-install-") as tmp:
-            install = Path(tmp) / "plugin with spaces"
-            vault = Path(tmp) / "vault with spaces"
-            vault.mkdir()
-            with zipfile.ZipFile(ROOT / "obsidian.plugin") as archive:
-                archive.extractall(install)
-            for path in sorted((install / "skills").glob("*/scripts/*.py")):
-                with self.subTest(script=path.name):
-                    result = subprocess.run(
-                        [sys.executable, str(path), "--help"], cwd=vault,
-                        capture_output=True, text=True, encoding="utf-8",
-                        timeout=30)
-                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            # Both instruction and shared-resource references survive copying.
-            imported = (install / "CLAUDE.md").read_text(
-                encoding="utf-8").strip().removeprefix("@")
-            self.assertEqual((install / imported).read_bytes(), (ROOT / "AGENTS.md").read_bytes())
-            check = [sys.executable, str(install / "tools/build_plugin.py"), "--check"]
-            clean_env = dict(os.environ)
-            clean_env.pop("OBSIDIAN_VAULT_SHARED", None)
-            # A source checkout need not already contain the generated Codex
-            # directory. `--check` stays write-free; the build creates it.
-            shutil.rmtree(install / ".codex-plugin")
+    def test_each_plugin_runs_with_repository_and_sibling_paths_unavailable(self):
+        # A complete runtime must work by itself from a vault whose path, like
+        # real host cache paths, contains spaces. Isolated Python removes the
+        # checkout/PYTHONPATH import route; the hook also rejects explicit reads
+        # from the checkout or the unavailable sibling. The dependency venv is
+        # allowed when CI/development keeps it inside the source checkout.
+        runner = r"""
+import os
+import runpy
+import sys
+script, source_root, sibling_root = sys.argv[1:4]
+arguments = sys.argv[4:]
+source_root = os.path.realpath(source_root)
+sibling_root = os.path.realpath(sibling_root)
+dependency_root = os.path.realpath(sys.prefix)
+def beneath(path, root):
+    return path == root or path.startswith(root + os.sep)
+def audit(event, args):
+    if event in ("open", "os.listdir", "os.scandir"):
+        path = args[0]
+    elif event == "import" and len(args) > 1:
+        path = args[1]
+    else:
+        return
+    if not isinstance(path, (str, bytes)):
+        return
+    path = os.path.realpath(os.fsdecode(path))
+    if beneath(path, sibling_root) or (
+            beneath(path, source_root) and not beneath(path, dependency_root)):
+        raise PermissionError("Independent plugin cannot read " + path)
+sys.addaudithook(audit)
+for forbidden in (os.path.join(source_root, "shared", "scripts", "slugify.py"),
+                  os.path.join(sibling_root, "skills", "unavailable.py")):
+    try:
+        open(forbidden, "rb")
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError("The isolation hook did not deny " + forbidden)
+# runpy does not supply the script directory like an ordinary CLI launch.
+# Restore only that installed directory, never a repository or sibling path.
+sys.path.insert(0, os.path.dirname(os.path.abspath(script)))
+sys.argv = [script] + arguments
+runpy.run_path(script, run_name="__main__")
+"""
+        for name in PLUGIN_SKILLS:
+            with self.subTest(plugin=name), tempfile.TemporaryDirectory(
+                    prefix="independent-plugin-") as tmp:
+                root = Path(tmp).resolve()
+                install = root / (name + " plugin with spaces")
+                vault = root / "vault with spaces"
+                vault.mkdir()
+                sibling_name = next(other for other in PLUGIN_SKILLS if other != name)
+                sibling = root / sibling_name
+                self.assertFalse(sibling.exists())
+                with zipfile.ZipFile(ROOT / (name + ".plugin")) as archive:
+                    archive.extractall(install)
+                env = dict(os.environ)
+                for variable in ("OBSIDIAN_VAULT_SHARED", "PYTHONPATH", "PYTHONHOME"):
+                    env.pop(variable, None)
+                scripts = sorted((install / "skills").glob("*/scripts/*.py"))
+                scripts += sorted((install / "shared/scripts").glob("*.py"))
+                self.assertTrue(scripts)
+                for path in scripts:
+                    with self.subTest(script=path.relative_to(install).as_posix()):
+                        result = subprocess.run(
+                            [sys.executable, "-I", "-B", "-c", runner,
+                             str(path), str(ROOT), str(sibling), "--help"],
+                            cwd=vault, env=env, capture_output=True, text=True,
+                            encoding="utf-8", timeout=30)
+                        self.assertEqual(result.returncode, 0,
+                                         result.stdout + result.stderr)
+                self.assertFalse(sibling.exists())
+                self.assertEqual(list(vault.iterdir()), [])
+
+    def test_each_installed_plugin_resolves_its_local_markdown_links(self):
+        conventions = load("installed_link_masks", ROOT / "tests/test_conventions.py")
+        link = re.compile(r"\]\(\s*<?([^\s)>]+)>?(?:\s+[^)]*)?\)")
+        for name in PLUGIN_SKILLS:
+            with self.subTest(plugin=name), tempfile.TemporaryDirectory(
+                    prefix="independent-plugin-links-") as tmp:
+                install = Path(tmp).resolve() / (name + " plugin")
+                with zipfile.ZipFile(ROOT / (name + ".plugin")) as archive:
+                    archive.extractall(install)
+                checked = 0
+                for path in sorted(install.rglob("*.md")):
+                    visible = conventions._mask_markdown_code(
+                        path.read_text(encoding="utf-8"))
+                    for match in link.finditer(visible):
+                        target = urlsplit(match.group(1))
+                        if target.scheme or target.netloc:
+                            continue
+                        checked += 1
+                        resolved = ((path.parent / unquote(target.path)).resolve()
+                                    if target.path else path)
+                        self.assertTrue(resolved.is_relative_to(install),
+                            "%s: local link escapes %s: %s" %
+                            (path.relative_to(install), name, match.group(1)))
+                        self.assertTrue(resolved.exists(),
+                            "%s: missing installed link %s" %
+                            (path.relative_to(install), match.group(1)))
+                        if target.fragment and resolved.suffix == ".md":
+                            anchors = conventions._markdown_heading_anchors(
+                                resolved.read_text(encoding="utf-8"))
+                            self.assertIn(unquote(target.fragment), anchors,
+                                "%s: missing installed heading %s" %
+                                (path.relative_to(install), match.group(1)))
+                self.assertGreater(checked, 0, "No local links were checked for " + name)
+
+    def test_source_build_checks_without_writing_and_rebuilds_missing_outputs(self):
+        with tempfile.TemporaryDirectory(prefix="independent-source-build-") as tmp:
+            root = Path(tmp).resolve() / "source checkout"
+            copy_package_source(root)
+            working = Path(tmp) / "unrelated working directory"
+            working.mkdir()
+            check = [sys.executable, str(root / "tools/build_plugin.py"), "--check"]
+            env = dict(os.environ)
+            env.pop("OBSIDIAN_VAULT_SHARED", None)
             missing = subprocess.run(
-                check, cwd=vault, capture_output=True, env=clean_env)
-            self.assertEqual(missing.returncode, 1)
-            self.assertFalse((install / ".codex-plugin").exists())
-            # The archive does not contain itself: build it in the isolated copy.
-            subprocess.run(
-                check[:-1], cwd=vault, check=True, capture_output=True,
-                env=clean_env)
-            self.assertTrue((install / ".codex-plugin/plugin.json").is_file())
-            self.assertEqual(subprocess.run(
-                check, cwd=vault, capture_output=True,
-                env=clean_env).returncode, 0)
-            with (install / "shared/RUNTIME.md").open(
-                    "a", encoding="utf-8") as output:
+                check, cwd=working, env=env, capture_output=True, timeout=30)
+            self.assertEqual(missing.returncode, 1, missing.stdout + missing.stderr)
+            for name in PLUGIN_SKILLS:
+                self.assertFalse((root / "plugins" / name / ".codex-plugin").exists())
+                self.assertFalse((root / "plugins" / name / "skills").exists())
+                self.assertFalse((root / (name + ".plugin")).exists())
+            built = subprocess.run(
+                check[:-1], cwd=working, env=env, capture_output=True, timeout=60)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            for name in PLUGIN_SKILLS:
+                self.assertTrue((root / "plugins" / name / ".codex-plugin/plugin.json").is_file())
+                self.assertTrue((root / (name + ".plugin")).is_file())
+            current = subprocess.run(
+                check, cwd=working, env=env, capture_output=True, timeout=30)
+            self.assertEqual(current.returncode, 0, current.stdout + current.stderr)
+            with (root / "shared/RUNTIME.md").open("a", encoding="utf-8") as output:
                 output.write("\nChanged after packaging.\n")
-            self.assertNotEqual(subprocess.run(
-                check, cwd=vault, capture_output=True,
-                env=clean_env).returncode, 0)
+            stale = subprocess.run(
+                check, cwd=working, env=env, capture_output=True, timeout=30)
+            self.assertEqual(stale.returncode, 1, stale.stdout + stale.stderr)
 
     def test_unicode_cli_output_survives_a_narrow_redirected_stream(self):
         """Public CLIs must not fail after work under a narrow encoding."""

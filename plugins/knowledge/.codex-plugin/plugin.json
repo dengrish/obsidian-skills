@@ -1,0 +1,26 @@
+{
+  "name": "knowledge",
+  "version": "1.0.0",
+  "description": "Build and maintain an Obsidian knowledge base: organize PDFs, extract figures, create reading notes, clean web clippings, research queued topics, and maintain interlinked wiki entries and maps of content.",
+  "repository": "https://github.com/dengrish/obsidian-skills",
+  "author": {
+    "name": "Dennis Grishin"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Knowledge",
+    "shortDescription": "Build and maintain an Obsidian knowledge base",
+    "longDescription": "Build and maintain an Obsidian knowledge base: organize PDFs, extract figures, create reading notes, clean web clippings, research queued topics, and maintain interlinked wiki entries and maps of content.",
+    "developerName": "Dennis Grishin",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Organize my PDFs and clean my web clippings.",
+      "Research queued topics and create missing wiki entries.",
+      "Audit my wiki and rebuild its maps of content."
+    ]
+  }
+}

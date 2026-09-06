@@ -6,9 +6,14 @@
   },
   "plugins": [
     {
-      "name": "obsidian",
-      "source": "./",
-      "description": "Build and maintain an Obsidian knowledge base: organize PDFs, extract figures, create reading notes, clean web clippings, research queued topics, maintain interlinked wiki entries and maps of content, and write daily investment research."
+      "name": "knowledge",
+      "source": "./plugins/knowledge",
+      "description": "Build and maintain an Obsidian knowledge base: organize PDFs, extract figures, create reading notes, clean web clippings, research queued topics, and maintain interlinked wiki entries and maps of content."
+    },
+    {
+      "name": "investments",
+      "source": "./plugins/investments",
+      "description": "Research buying opportunities in liquid U.S.-listed stocks, track investment theses and recommendation outcomes, and write concise daily briefs with detailed research records in an Obsidian vault."
     }
   ]
 }
