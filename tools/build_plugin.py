@@ -9,8 +9,10 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import unicodedata
@@ -28,6 +30,8 @@ import atomic_move
 PLUGIN_NAMES = ("knowledge", "investments")
 PACKAGE_TREES = ("skills", "shared")
 PACKAGE_INVENTORY = "tools/package-files.json"
+PACKAGE_PROVENANCE = "provenance.json"
+BUILD_INPUTS = ("tools/build_plugin.py", "shared/scripts/atomic_move.py")
 IGNORED_PACKAGE_FILES = {".DS_Store"}
 IGNORED_PACKAGE_SUFFIXES = {".pyc", ".pyo"}
 IGNORED_PACKAGE_DIRS = {"__pycache__"}
@@ -86,6 +90,8 @@ def _package_inventory(root, snapshots=None):
             raise ValueError("%s package map omits required runtime metadata" % plugin)
         if ".codex-plugin/plugin.json" in mapping:
             raise ValueError("Codex manifests are generated, never mapped inputs")
+        if PACKAGE_PROVENANCE in mapping:
+            raise ValueError("provenance manifests are generated, never mapped inputs")
         manifest_path = "plugins/%s/.claude-plugin/plugin.json" % plugin
         if mapping[".claude-plugin/plugin.json"] != manifest_path:
             raise ValueError("%s authored manifest must be %s" % (plugin, manifest_path))
@@ -612,6 +618,162 @@ def codex_manifest(root, plugin_name):
     return _codex_manifest_bytes(authored)
 
 
+class _GitUnavailable(Exception):
+    """The build cannot verify a source snapshot using local Git history."""
+
+
+def _git_bytes(root, *arguments, input_bytes=None):
+    """Read local history without inherited Git overrides or replacement refs."""
+    environment = {key: value for key, value in os.environ.items()
+                   if not key.startswith("GIT_")}
+    environment["GIT_NO_REPLACE_OBJECTS"] = "1"
+    try:
+        result = subprocess.run(
+            ["git", "--no-optional-locks", "--literal-pathspecs",
+             "-C", os.fspath(root), *arguments],
+            input=input_bytes, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=environment, timeout=30, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise _GitUnavailable from exc
+    if result.returncode:
+        raise _GitUnavailable
+    return result.stdout
+
+
+def _git_snapshot(root, commit, paths):
+    """Read raw committed blobs in one process; missing paths are not matches."""
+    names = tuple(sorted(set(paths)))
+    request = "".join("%s:%s\n" % (commit, name) for name in names).encode("utf-8")
+    output = _git_bytes(root, "cat-file", "--batch", input_bytes=request)
+    result = {}
+    position = 0
+    for name in names:
+        boundary = output.find(b"\n", position)
+        if boundary < 0:
+            raise _GitUnavailable
+        header = output[position:boundary].split()
+        position = boundary + 1
+        if header[-1:] == [b"missing"]:
+            result[name] = None
+            continue
+        if len(header) != 3 or header[1] != b"blob":
+            raise _GitUnavailable
+        try:
+            size = int(header[2])
+        except ValueError as exc:
+            raise _GitUnavailable from exc
+        end = position + size
+        if size < 0 or output[end:end + 1] != b"\n":
+            raise _GitUnavailable
+        result[name] = output[position:end]
+        position = end + 1
+    if position != len(output):
+        raise _GitUnavailable
+    return result
+
+
+def _source_identity(root, plugin_name, mapping, source_bytes):
+    """Name a commit containing these exact canonical inputs, or say why not.
+
+    Selecting history by canonical paths keeps a generated-assets commit from
+    changing its own embedded identity. A package-map-only change matters only
+    when this plugin's map subset changed. Shared build helper changes affect
+    both plugins. Full history is required; a shallow boundary is not evidence
+    that its apparent first commit really introduced a source snapshot.
+    """
+    try:
+        top = _git_bytes(root, "rev-parse", "--show-toplevel").decode("utf-8").rstrip("\n")
+        if Path(top).resolve() != root.resolve():
+            raise _GitUnavailable
+        if _git_bytes(root, "rev-parse", "--is-shallow-repository").strip() != b"false":
+            raise _GitUnavailable
+        head = _git_bytes(root, "rev-parse", "--verify", "HEAD^{commit}").decode("ascii").strip()
+        if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head):
+            raise _GitUnavailable
+
+        def matches(commit):
+            committed = _git_snapshot(
+                root, commit, (*source_bytes, PACKAGE_INVENTORY))
+            raw_map = committed.pop(PACKAGE_INVENTORY)
+            try:
+                committed_map = json.loads(raw_map) if raw_map is not None else None
+            except (TypeError, ValueError, UnicodeError):
+                committed_map = None
+            return (isinstance(committed_map, dict)
+                    and committed_map.get(plugin_name) == mapping
+                    and all(committed[path] == data
+                            for path, data in source_bytes.items()))
+
+        # Even an uncommitted reversion to an older snapshot is a development
+        # build. Never infer release provenance from matching some old commit.
+        if not matches(head):
+            return None, "uncommitted"
+
+        def latest(paths):
+            commit = _git_bytes(root, "log", "-1", "--no-show-signature",
+                                "--no-follow", "--format=%H", head,
+                                "--", *sorted(paths)).decode("ascii").strip()
+            if commit and not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit):
+                raise _GitUnavailable
+            return commit
+
+        # Usually the latest source edit already includes the right map. Only
+        # consult map history separately when it does not, so an unrelated
+        # plugin's map edit does not force a new identity for this package.
+        # Combined history also sees a merge joining a source change from one
+        # parent and a map change from another; neither parent is its source.
+        candidates = set()
+        for paths in (source_bytes, (PACKAGE_INVENTORY,),
+                      (*source_bytes, PACKAGE_INVENTORY)):
+            candidate = latest(paths)
+            if not candidate or candidate in candidates:
+                continue
+            candidates.add(candidate)
+            if matches(candidate):
+                return candidate, "committed"
+        return None, "unavailable"
+    except (_GitUnavailable, UnicodeError):
+        return None, "unavailable"
+
+
+def _provenance_bytes(root, plugin_name, mapping, files, snapshots):
+    """Describe this exact distribution without hashing its own description."""
+    authored = json.loads(files[".claude-plugin/plugin.json"])
+    source_bytes = {source: files[destination]
+                    for destination, source in mapping.items()}
+    for source in BUILD_INPUTS:
+        data = _read_package_source(root, root / source, snapshots)
+        if source in source_bytes and source_bytes[source] != data:
+            raise OSError(errno.EBUSY, "build helper changed during collection", source)
+        source_bytes[source] = data
+    commit, status = _source_identity(root, plugin_name, mapping, source_bytes)
+    hashes = {path: hashlib.sha256(data).hexdigest()
+              for path, data in sorted(files.items())}
+    digest = hashlib.sha256(json.dumps(
+        hashes, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    repository = authored.get("repository")
+    if not isinstance(repository, str):
+        raise ValueError("plugin provenance requires a GitHub repository URL")
+    repository = repository.rstrip("/")
+    if repository.endswith(".git"):
+        repository = repository[:-4]
+    if (not re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository)
+            or any(part in (".", "..") for part in repository.split("/")[-2:])):
+        raise ValueError("plugin provenance requires a GitHub repository URL")
+    provenance = {
+        "schema": 1,
+        "plugin": plugin_name,
+        "plugin_version": authored["version"],
+        "repository": repository,
+        "source_commit": commit,
+        "source_url": repository + "/commit/" + commit if commit else None,
+        "source_status": status,
+        "runtime_sha256": digest,
+        "files": hashes,
+    }
+    return (json.dumps(provenance, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+
+
 def package_files(root, plugin_name, *, snapshots=None):
     """Collect one independent runtime package from exact canonical sources."""
     maps = _package_inventory(root, snapshots)
@@ -623,6 +785,8 @@ def package_files(root, plugin_name, *, snapshots=None):
         raise ValueError("authored plugin name disagrees with its package")
     files[".codex-plugin/plugin.json"] = _codex_manifest_bytes(
         files[".claude-plugin/plugin.json"])
+    files[PACKAGE_PROVENANCE] = _provenance_bytes(
+        root, plugin_name, maps[plugin_name], files, snapshots)
     _validate_package_names(files)
     return files
 

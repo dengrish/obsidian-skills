@@ -75,6 +75,7 @@ _OBSIDIAN_SHARED_MODULES = (
     'equation_coverage',
     'introduced_aliases',
     'markdown_tables',
+    'note_provenance',
     'organism_names',
     'plurals',
     'slugify',
@@ -125,6 +126,7 @@ from slugify import (  # noqa: E402
     slug_stem as _slug_stem,
 )
 from yaml_scalars import parse_scalar, split_flow, strip_comment  # noqa: E402
+from note_provenance import split_provenance  # noqa: E402
 
 # ===========================================================================
 # NO SINGULARIZER LIVES HERE EITHER, and for the same reason.  The item-5
@@ -1476,7 +1478,11 @@ def moc_file_state(path, *, _directory_fd=None, _texts=None):
 
     if _texts is not None:
         _texts[result["path"]] = text
-    result["state"] = "readable" if text.strip() else "empty"
+    try:
+        outline, _provenance = split_provenance(text)
+    except ValueError:
+        outline = text  # Keep malformed metadata visible to tree diagnostics.
+    result["state"] = "readable" if outline.strip() else "empty"
     return result
 
 
@@ -1855,6 +1861,11 @@ def scan(wiki, images=None):
         finally:
             if descriptor is not None:
                 os.close(descriptor)
+        try:
+            text, _provenance = split_provenance(text)
+        except ValueError as exc:
+            problems.append((sl, "item2/provenance",
+                             "invalid skill provenance: %s" % exc))
         _frontmatter_boundary_bad = []
         fm_raw, body, blank_after = split_frontmatter(
             text, _frontmatter_boundary_bad)
@@ -4145,7 +4156,14 @@ def scan(wiki, images=None):
         _moc_parse[_discipline] = _tree
         # File safety and whole-document tree structure use the same guarded read.
         # Reopening the pathname here could follow a later symlink swap.
-        _moc_lines = _moc_texts[_moc_state["path"]].splitlines()
+        _moc_text = _moc_texts[_moc_state["path"]]
+        try:
+            _moc_text, _provenance = split_provenance(_moc_text)
+        except ValueError as exc:
+            _tree["structurally_parseable"] = False
+            _moc_add(_moc_state, "invalid-provenance",
+                     "invalid skill provenance: %s" % exc)
+        _moc_lines = _moc_text.splitlines()
         _stack = []                 # one parsed node at each active bullet level
         _previous_level = 0
         _seen_placement = {}        # (slug, nearest parent) -> first line

@@ -90,6 +90,7 @@ jobs:
       - name: Check out the tested revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Set up Python
@@ -124,6 +125,8 @@ jobs:
         run: python tests/test_conventions.py
       - name: Run compatibility checks
         run: python tests/test_compatibility.py
+      - name: Check note provenance
+        run: python tests/test_provenance.py
       - name: Run end-to-end workflows
         run: python tests/test_end_to_end.py
       - name: Test research evaluation and comparison

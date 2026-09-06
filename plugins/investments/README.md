@@ -24,8 +24,11 @@ variables. Read-only data access covers SEC, Nasdaq, Alpaca, Alpha Vantage and
 FRED, subject to account access and coverage limits. Credentials are never
 included in plugin installation or publication.
 
-Use the same selected Obsidian vault as `knowledge` if desired. Existing
-`Investments/YYYY-MM-DD-market-research.md` records remain immutable, and
+Use the same selected Obsidian vault as `knowledge` if desired. Published
+`Investments/` records remain immutable. Scheduled runs create one daily edition;
+user-requested fresh reviews create timestamped manual editions under the
+[note format](skills/market-research/references/note-format.md#editions-and-retries).
+Both share the same thesis and outcome history.
 `Reviews/market-research-suggestions.md` keeps its existing name under the
 [shared protocol](shared/SUGGESTIONS.md).
 

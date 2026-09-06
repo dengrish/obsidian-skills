@@ -225,7 +225,9 @@ An ordinary request to build or update the wiki authorizes this apply; do not
 ask for a second human review. An explicit preview/plan-only/no-apply request
 does not. For an authorized apply, follow the shared
 [safe-write protocol and Python API recipe](../../shared/SAFE_WRITES.md#call-the-shared-python-api).
-Copy each final reviewed
+Stamp each new or changed draft with [verified skill provenance](../../shared/PROVENANCE.md)
+and re-lint those final bytes; preserve creator metadata on merges and leave
+no-op entries untouched. Copy each final reviewed
 file into a unique private stage on the destination filesystem, outside the
 recursive Wiki tree; resolve a symlinked Wiki directory before choosing that
 stage parent. Preserve the inspected permissions for replacements. If Wiki is

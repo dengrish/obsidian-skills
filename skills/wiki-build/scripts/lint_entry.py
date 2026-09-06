@@ -170,6 +170,7 @@ _OBSIDIAN_SHARED_MODULES = (
     'equation_coverage',
     'introduced_aliases',
     'markdown_tables',
+    'note_provenance',
     'organism_names',
     'plurals',
     'slugify',
@@ -228,6 +229,7 @@ from equation_coverage import (  # noqa: E402
     find_missing_display_equation_candidates,
     find_noncanonical_display_equation_candidates,
 )
+from note_provenance import split_provenance  # noqa: E402
 from entry_structure import (  # noqa: E402
     description_subject_forms as _description_subject_forms,
     acronym_initial_forms as _initial_forms,
@@ -1967,6 +1969,11 @@ def lint_text(text, filename):
               "title": None, "aliases": [],
               "description_chars": None}
 
+    try:
+        text, _provenance = split_provenance(text)
+    except ValueError as exc:
+        findings.append(_f("2-provenance", "error",
+                           "invalid skill provenance: %s" % exc))
     fm = parse_frontmatter(text)
     if not _check_structure(fm, findings):
         return result

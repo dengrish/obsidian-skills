@@ -25,6 +25,11 @@ them. Include exchange-qualified identities and distinguish common shares/ADRs
 from funds or other instruments. A named index or provider universe is useful
 only if its actual constituents or screen results are accessible.
 
+An additional same-day edition resumes this research history at its own cutoff.
+Read the latest earlier available edition, carry forward its open theses and
+coverage gaps, and focus on new evidence or previously unresolved checks. Do not
+restart the screen definition, recommendation clock or monthly learning summary.
+
 Record the sources, query/filter definitions, covered window, observed result
 counts when available, and limitations for **each** pass. Preserve materially
 assessed exclusions with a reason and revisit condition. A capped result page,

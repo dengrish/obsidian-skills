@@ -2,6 +2,7 @@
 """Checks for installation layout and supported-platform execution."""
 
 import ast
+import hashlib
 import importlib.util
 import io
 import json
@@ -455,6 +456,144 @@ class CompatibilityTests(unittest.TestCase):
                 files = build.package_files(ROOT, name)
             convert.assert_called_once_with(files[".claude-plugin/plugin.json"])
             self.assertEqual(files[".codex-plugin/plugin.json"], derived)
+
+    def test_provenance_fingerprints_every_distributed_file_except_itself(self):
+        build = load("build_plugin_provenance_inventory", ROOT / "tools/build_plugin.py")
+        with tempfile.TemporaryDirectory(prefix="plugin-provenance-no-git-") as tmp:
+            root = Path(tmp) / "source"
+            copy_package_source(root)
+            for name in PLUGIN_SKILLS:
+                with self.subTest(plugin=name):
+                    files = build.package_files(root, name)
+                    provenance = json.loads(files["provenance.json"])
+                    hashes = {
+                        path: hashlib.sha256(data).hexdigest()
+                        for path, data in files.items() if path != "provenance.json"}
+                    self.assertEqual(provenance["schema"], 1)
+                    self.assertEqual(provenance["plugin"], name)
+                    self.assertEqual(provenance["plugin_version"], json.loads(
+                        files[".claude-plugin/plugin.json"])["version"])
+                    self.assertEqual(provenance["files"], hashes)
+                    self.assertEqual(provenance["runtime_sha256"], hashlib.sha256(
+                        json.dumps(hashes, sort_keys=True, separators=(",", ":"))
+                        .encode("utf-8")).hexdigest())
+                    self.assertEqual(provenance["source_status"], "unavailable")
+                    self.assertIsNone(provenance["source_commit"])
+                    self.assertIsNone(provenance["source_url"])
+                    self.assertEqual(files, build.package_files(root, name))
+
+    @unittest.skipUnless(shutil.which("git"), "Git is required for source identity checks")
+    def test_provenance_tracks_canonical_commits_without_release_self_reference(self):
+        build = load("build_plugin_provenance_git", ROOT / "tools/build_plugin.py")
+        with tempfile.TemporaryDirectory(prefix="plugin-provenance-git-") as tmp:
+            root = Path(tmp) / "source"
+            copy_package_source(root)
+            environment = {key: value for key, value in os.environ.items()
+                           if not key.startswith("GIT_")}
+            environment.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+
+            def git(*args):
+                completed = subprocess.run(
+                    ["git", "-c", "user.name=Provenance Test", "-c",
+                     "user.email=test@example.invalid", "-c", "commit.gpgsign=false",
+                     "-c", "core.hooksPath=" + os.devnull, "-C", str(root), *args],
+                    env=environment, capture_output=True, check=True)
+                return completed.stdout.decode("utf-8").strip()
+
+            def commit(message):
+                git("add", "--all")
+                git("commit", "-m", message)
+                return git("rev-parse", "HEAD")
+
+            def metadata(name):
+                return json.loads(build.package_files(root, name)["provenance.json"])
+
+            git("init")
+            first = commit("Canonical source snapshot")
+            initial = {name: metadata(name) for name in PLUGIN_SKILLS}
+            for row in initial.values():
+                self.assertEqual(row["source_status"], "committed")
+                self.assertEqual(row["source_commit"], first)
+                self.assertEqual(row["source_url"], row["repository"] + "/commit/" + first)
+
+            for path, data in build.generated_outputs(root).items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            generated = commit("Generated distributions")
+            self.assertNotEqual(first, generated)
+            self.assertEqual({name: metadata(name) for name in PLUGIN_SKILLS}, initial)
+
+            investment_skill = root / "skills/market-research/SKILL.md"
+            original_investment = investment_skill.read_bytes()
+            investment_skill.write_bytes(original_investment + b"\nInvestment change.\n")
+            investment_commit = commit("Investment source update")
+            investment = metadata("investments")
+            self.assertEqual(investment["source_commit"], investment_commit)
+            self.assertEqual(metadata("knowledge"), initial["knowledge"])
+
+            # Another plugin's new mapped input must not move this one's identity.
+            asset = root / "skills/wiki-build/assets/provenance-test.txt"
+            asset.parent.mkdir(parents=True)
+            asset.write_bytes(b"New knowledge input.\n")
+            map_path = root / build.PACKAGE_INVENTORY
+            mapping = json.loads(map_path.read_bytes())
+            relative = asset.relative_to(root).as_posix()
+            mapping["knowledge"][relative] = relative
+            map_path.write_text(json.dumps(mapping, indent=2) + "\n", encoding="utf-8")
+            knowledge_commit = commit("Knowledge asset and map update")
+            self.assertEqual(metadata("knowledge")["source_commit"], knowledge_commit)
+            self.assertEqual(metadata("investments"), investment)
+
+            # A map-only change still needs the commit containing the actual map.
+            mapping["knowledge"]["requirements.txt"] = "plugins/knowledge/requirements.txt"
+            map_path.write_text(json.dumps(mapping, indent=2) + "\n", encoding="utf-8")
+            map_commit = commit("Knowledge-only mapping update")
+            knowledge = metadata("knowledge")
+            self.assertEqual(knowledge["source_commit"], map_commit)
+            self.assertEqual(metadata("investments"), investment)
+
+            # A merge can be the first snapshot containing both a source edit
+            # and a map-only edit. Looking at either path set alone omits it.
+            git("checkout", "-b", "provenance-map-only")
+            mapping["knowledge"]["requirements.txt"] = "requirements.txt"
+            map_path.write_text(json.dumps(mapping, indent=2) + "\n", encoding="utf-8")
+            commit("Mapping change on one branch")
+            git("checkout", "-b", "provenance-source-only", map_commit)
+            knowledge_skill = root / "skills/wiki-build/SKILL.md"
+            knowledge_skill.write_bytes(knowledge_skill.read_bytes() + b"\nSeparate branch edit.\n")
+            commit("Source change on another branch")
+            git("merge", "--no-ff", "provenance-map-only", "-m", "Combine source and map")
+            merged = git("rev-parse", "HEAD")
+            knowledge = metadata("knowledge")
+            self.assertEqual(knowledge["source_status"], "committed")
+            self.assertEqual(knowledge["source_commit"], merged)
+            (root / "generated-test-output.txt").write_text("Derived output.\n", encoding="utf-8")
+            commit("Generated-only output after merge")
+            self.assertEqual(metadata("knowledge"), knowledge)
+            self.assertEqual(metadata("investments"), investment)
+
+            investment_skill.write_bytes(investment_skill.read_bytes() + b"\nUncommitted change.\n")
+            dirty = metadata("investments")
+            self.assertEqual(dirty["source_status"], "uncommitted")
+            self.assertIsNone(dirty["source_commit"])
+            self.assertIsNone(dirty["source_url"])
+            self.assertNotEqual(dirty["runtime_sha256"], investment["runtime_sha256"])
+            self.assertEqual(metadata("knowledge"), knowledge)
+            investment_skill.write_bytes(original_investment)
+            self.assertEqual(metadata("investments")["source_status"], "uncommitted")
+
+            helper = root / "tools/build_plugin.py"
+            helper.write_bytes(helper.read_bytes() + b"\n# Uncommitted build helper.\n")
+            self.assertEqual(metadata("knowledge")["source_status"], "uncommitted")
+
+            # A shallow boundary must not be mistaken for the source's first commit.
+            shallow = Path(tmp) / "shallow"
+            subprocess.run(["git", "clone", "--depth=1", root.as_uri(), str(shallow)],
+                           env=environment, capture_output=True, check=True)
+            shallow_metadata = json.loads(
+                build.package_files(shallow, "investments")["provenance.json"])
+            self.assertEqual(shallow_metadata["source_status"], "unavailable")
+            self.assertIsNone(shallow_metadata["source_commit"])
 
     def test_changing_one_plugins_skill_does_not_change_its_siblings_archive(self):
         build = load("build_plugin_profile_isolation", ROOT / "tools/build_plugin.py")

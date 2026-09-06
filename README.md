@@ -93,12 +93,12 @@ Each note has a short decision brief and a detailed research record for future
 runs, including thesis changes, daily checks of two-week and 1/3/6/12/24/60-month
 outcomes and monthly summaries of evidence-backed lessons. Quoted recommendation prices stay
 separate from the fixed hypothetical entry convention. No qualifying
-buying opportunity is a valid result. Daily notes use
-`Investments/YYYY-MM-DD-market-research.md` and the skill's
-[note format](skills/market-research/references/note-format.md); they are not
+buying opportunity is a valid result. Scheduled and user-requested manual editions
+use the skill's [note format](skills/market-research/references/note-format.md) in
+`Investments/`, sharing one thesis and outcome history; they are not
 Wiki entries or source notes for automatic wiki-build intake. It researches
 opportunities without reviewing current holdings, recommending sales, placing
-trades, or rewriting earlier daily records.
+trades, or rewriting earlier records.
 Its optional [data retrieval helpers](skills/market-research/references/data-access.md)
 cover SEC filings/facts, Nasdaq directories/halts, Alpaca prices/actions/sessions/news,
 Alpha Vantage news/earnings calendars, and FRED macro series/release dates. Setup
@@ -258,6 +258,7 @@ The full path/ownership table is in
 | [shared/RUNTIME.md](shared/RUNTIME.md) | Host-independent paths, Python setup and tool fallbacks |
 | [shared/CONVENTIONS.md](shared/CONVENTIONS.md) | Shared layout, schemas, enums, naming, links and ownership |
 | [shared/SAFE_WRITES.md](shared/SAFE_WRITES.md) | Exclusive creation, conditional replacement, cleanup and rollback safety |
+| [shared/PROVENANCE.md](shared/PROVENANCE.md) | Exact skill identity on generated notes and preservation of creator attribution |
 | [shared/SUGGESTIONS.md](shared/SUGGESTIONS.md) | Reviews/ log attribution, open-issue lifecycle, format and publication |
 | `skills/<name>/scripts/` | Executable helpers and their embedded self-tests |
 | `shared/scripts/` | Canonical implementations used by several skills |
@@ -274,7 +275,7 @@ historical explanations are harder to keep aligned.
 The shared implementations are `slugify.py` (wiki slugs), `atomic_move.py`
 (exclusive moves and verified regular-file publication/removal), `naming.py`
 (source filenames and book identity),
-`plurals.py` (English singularization),
+`plurals.py` (English singularization), `note_provenance.py` (verified bundle identity and note attribution),
 `yaml_scalars.py` (decoded metadata), `portable_names.py` (portable file identity), `figure_state.py` (figure ownership and
 review sidecars), `vault_artifacts.py` (portable PDF and source-figure
 inventories), `organism_names.py` (Organism title/name classification),
@@ -297,11 +298,12 @@ versions used for untrusted documents and images. From the repository root:
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python tests/test_conventions.py
+.venv/bin/python tools/build_plugin.py
 .venv/bin/python tests/test_end_to_end.py
 .venv/bin/python tests/test_market_research_eval.py
-.venv/bin/python tools/build_plugin.py
 .venv/bin/python tests/test_compatibility.py
 .venv/bin/python tools/build_plugin.py --check
+.venv/bin/python tests/test_provenance.py
 ```
 
 The convention suite checks shared contracts, schemas, examples, command
@@ -359,9 +361,22 @@ silently import from the repository or the other plugin.
 
 Each plugin starts at **1.0.0** under its new identity and advances independently.
 Before distributing a runtime change, bump every affected plugin's authored
-version, validate, rebuild, and commit source plus generated files together.
+version and validate the changes. Commit the authored inputs first, then run
+`python3 tools/build_plugin.py`, validate the generated distributions, and
+commit their trees and archives separately. Push both commits together. The
+bundled `provenance.json` can then point to the exact source commit without
+trying to embed a commit's own hash inside itself. Do not amend the source
+commit after building; rebuild if its identity or authored inputs change.
+Builds with uncommitted inputs remain useful for local validation but report
+uncommitted provenance, not a release commit. CI needs complete Git history
+to reproduce the source identity used by the build.
 A shared input change requires a bump for all consuming plugins; a skill-specific
 change affects only its owner. CI compares the per-plugin source maps and
 versions against the appropriate Git baseline. Pushing does not refresh an
 already-running session; update the installed plugins and start a fresh session
 when delivering a release.
+
+Generated Markdown notes record the producing skill, plugin version, source
+commit link and verified runtime fingerprint under the shared
+[provenance contract](shared/PROVENANCE.md). Existing notes are not backfilled
+with a guessed creator, and unchanged notes stay unchanged.

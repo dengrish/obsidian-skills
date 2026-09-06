@@ -51,8 +51,13 @@ boundaries. These tests use temporary vaults; do not substitute a user's live
 vault for their fixtures.
 
 Before distributing runtime changes, bump each affected plugin's authored version
-and run `python3 tools/build_plugin.py`, then
-`python3 tools/build_plugin.py --check`. A Git push alone does not invalidate
+and commit the authored inputs first. Then run `python3 tools/build_plugin.py`,
+`python3 tools/build_plugin.py --check`, and the relevant validation; commit the
+generated distributions separately and push both commits together. This lets
+bundled provenance identify the exact source commit without a self-referential
+commit hash. Do not amend that source commit without rebuilding. Development
+builds may report uncommitted or unavailable source provenance; do not label
+them with an unrelated clean commit. A Git push alone does not invalidate
 an installed plugin whose explicit version has not changed. A shared input
 change requires a bump in every consuming plugin; plugin-specific changes do
 not force a release of the other plugin. Do not edit users'

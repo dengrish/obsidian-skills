@@ -26,6 +26,10 @@ Each flashcard has **three content lines**. wiki-build writes those three at cre
 - beginning on the line immediately after line 3, with no intervening blank, as one or more whole-line `<!--SR:…-->` blocks, each ending at a line-final `-->` and possibly spanning several lines; or
 - beginning on the line immediately after line 3, with no intervening blank, in the exact metadata callout `> [!sr|card-metadata]`, whose quoted body contains the `<!--SR:…-->` schedule.
 
+The note's [skill-provenance footer](../../../shared/PROVENANCE.md) is separate
+from every card and schedule. Put it after the complete final card and its
+attachments, separated by a blank line; never attach it as a fourth card line.
+
 An existing card may also carry a trailing Obsidian block ID such as `^roc-card`: after the schedule on a same-line term or callout body, or after the term when the schedule follows separately. It is an inbound-link anchor, not card content. **Every recognized schedule and block ID is user-owned attachment state: preserve its bytes and position verbatim, and never move it between cards.** The plugin may instead store schedules outside the note, so absence of these attachments does not establish that an existing card is unstudied. The shared `entry_structure.py` parser is the canonical mechanical implementation: it removes attachments only from a read-only linting view and never rewrites source text.
 
 That plugin is a *community plugin installed in the vault* — it lives at `.obsidian/plugins/obsidian-spaced-repetition/`, it is **not** a skill in this plugin, and nothing here invokes it or can check that it ran. Everything below is a format contract with an external tool: wiki-build writes what that plugin parses and preserves what it writes.

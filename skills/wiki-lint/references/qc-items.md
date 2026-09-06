@@ -37,6 +37,7 @@ ownership.
 | `item2/parents-null` | Write `parents: []`; this changes only the spelling of an already empty value. |
 | `item2/parents-form` | Preserve usable targets while normalizing representation and unambiguous target spelling. Re-derive invalid relationships only in Task 3's authorized closure. |
 | `item2/obsidian-key` | Report and preserve exactly; it is valid user configuration. |
+| `item2/provenance` | Preserve the record and report malformed, duplicate or misplaced attribution. Follow [note provenance](../../../shared/PROVENANCE.md); repair only when the correct identity is established, never infer a historical creator from the current installation. |
 | `item3`, `item3/report-only` | Report date problems; wiki-lint writes neither date. |
 | `item4/source-identity` | Establish provenance under item 4 before removing anything; preserve independent or uncertain citations. |
 | `item9/imperative-link` | Integrate the link only when adjacent prose already states the relationship and the edit adds no claim; otherwise report a source-backed proposal. |

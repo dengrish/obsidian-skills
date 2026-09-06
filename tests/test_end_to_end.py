@@ -145,12 +145,28 @@ class WorkflowTests(unittest.TestCase):
                         PYTHONDONTWRITEBYTECODE="1")
 
     def run_script(self, relative, *args, expected=0):
+        env = self.env
+        if relative == "skills/market-research/scripts/market_notes.py":
+            # Publication verifies the complete generated bundle. Exercising the
+            # source checkout here would bypass the installed-runtime contract.
+            relative = "plugins/investments/" + relative
+        if relative.startswith("plugins/investments/"):
+            env = dict(env, OBSIDIAN_VAULT_SHARED=str(ROOT / "plugins/investments/shared/scripts"))
         result = subprocess.run(
             [sys.executable, str(ROOT / relative), *map(str, args)],
-            cwd=self.vault, env=self.env, capture_output=True, text=True,
+            cwd=self.vault, env=env, capture_output=True, text=True,
             encoding="utf-8", timeout=60)
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
         return result
+
+    def stamp_market_draft(self, path):
+        plugin = ROOT / "plugins/investments"
+        script = "plugins/investments/shared/scripts/note_provenance.py"
+        args = ("--plugin", plugin, "--skill", "market-research")
+        record = json.loads(self.run_script(script, "inspect", *args).stdout)
+        stamped = path.with_name(path.stem + "-stamped" + path.suffix)
+        self.run_script(script, "stamp", *args, "--draft", path, "--output", stamped)
+        return record, stamped
 
     def make_pdf(self, path):
         with pymupdf.open() as doc:
@@ -551,6 +567,7 @@ raise SystemExit(main(fixture['args'], client))
                          {"3m", "6m", "12m", "24m", "60m"})
         self.assertEqual({item["horizon"] for item in checked["checkpoints"]
                           if item["state"] == "observed"}, {"2w", "1m"})
+        _, draft = self.stamp_market_draft(draft)
         self.run_script(script, "publish", draft, "--vault", self.vault)
         rebuilt = json.loads(self.run_script(script, "outcomes", "--vault", self.vault).stdout)
         self.assertEqual(rebuilt["checkpoints"], checked["checkpoints"])
@@ -629,6 +646,14 @@ raise SystemExit(main(fixture['args'], client))
         linted = json.loads(self.run_script(script, "lint", draft).stdout)
         self.assertEqual(linted["theses"][0]["id"], thesis)
         self.assertEqual(linted["theses"][0]["state"], "watch")
+        missing = self.run_script(script, "publish", draft, "--vault", self.vault, expected=2)
+        self.assertIn("skill-provenance footer", missing.stdout)
+        self.assertFalse(target.exists())
+        generator, draft = self.stamp_market_draft(draft)
+        stamped = json.loads(self.run_script(script, "lint", draft).stdout)
+        self.assertEqual(stamped["provenance"], {"schema": 1, "generated_by": generator})
+        self.assertEqual(generator["skill"], "investments:market-research")
+        self.assertEqual(len(generator["runtime_sha256"]), 64)
         created = json.loads(self.run_script(script, "publish", draft, "--vault", self.vault).stdout)
         self.assertEqual(created, {"status": "created", "path": str(target.resolve())})
         self.assertEqual(target.read_bytes(), draft.read_bytes())

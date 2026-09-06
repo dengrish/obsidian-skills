@@ -84,6 +84,12 @@ item format. An empty log keeps its heading and intro, followed by a blank line
 and `No open suggestions.` Remove that empty-state sentence when adding an
 item. Do not add dated sections, resolved-history sections, or filler.
 
+Use the final [provenance footer](PROVENANCE.md) for a new or changed log,
+outside the issue blocks. Attribute the actual writer, preserving the original
+producer when known; the log's filename does not establish who created it.
+The empty-state heading, intro and sentence remain ordinary content before
+that footer. Unchanged logs keep their complete bytes.
+
 Remove an item automatically once its specific resolution is verified; no
 additional confirmation is required. A planned change, a reported fix, a
 missing artifact, version bump, nonrecurrence alone, or a finding absent from

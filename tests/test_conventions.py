@@ -5974,6 +5974,7 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/introduced_aliases.py": 23,
     "shared/scripts/markdown_tables.py": 42,
     "shared/scripts/naming.py": 191,
+    "shared/scripts/note_provenance.py": 9,
     "shared/scripts/organism_names.py": 29,
     "shared/scripts/entry_structure.py": 143,
     "shared/scripts/plugin_paths.py": 110,
@@ -5985,7 +5986,7 @@ SELFTEST_MIN_CASES = {
     "skills/clipping-clean/scripts/dedup_index.py": 168,
     "skills/clipping-clean/scripts/fetch_images.py": 539,
     "skills/clipping-clean/scripts/slug.py": 133,  # device-name guards removed
-    "skills/market-research/scripts/market_notes.py": 75,
+    "skills/market-research/scripts/market_notes.py": 92,
     "skills/market-research/scripts/market_credentials.py": 13,
     "skills/market-research/scripts/market_data.py": 21,
     "skills/market-research/scripts/market_filings.py": 28,

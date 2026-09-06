@@ -1,7 +1,7 @@
 # Outcomes and learning
 
-Use this guide during every daily run. Track the first time a buying thesis is
-published as `ready`, preserve its original evidence, and evaluate fixed future
+Use this guide during every scheduled or manual review. Track the first time a
+buying thesis is published as `ready`, preserve its original evidence, and evaluate fixed future
 windows. Later `watch`, invalidated or expired states do not erase that record or
 restart its clock. Never-ready watches remain a separate group. A new thesis in
 the same stock needs a new linked ID; related recommendations and overlapping
@@ -17,8 +17,12 @@ improvement, distinguishing later developments from the original momentum thesis
 ## Daily observations and monthly synthesis
 
 Run `market_notes.py outcomes --vault '<vault>'` to rebuild the recommendation,
-checkpoint and lesson index from published daily notes. No separate database or
-mutable tracking file is authoritative. The helper returns recommendation origins,
+checkpoint and lesson index from published editions. For manual runs, pass
+`--mode manual --as-of '<cutoff>'` using the context's fixed cutoff, as described
+under [editions and retries](note-format.md#editions-and-retries). Earlier
+available same-day editions participate in the same chronology and journals;
+another edition never creates a second first-ready event for the same thesis.
+No separate database or mutable tracking file is authoritative. The helper returns recommendation origins,
 calendar targets, due/unavailable/correction-affected checkpoints, active and
 retired lesson links, the latest monthly summary, and whether a summary is due.
 It validates record relationships and timestamps; it does not fetch prices or
@@ -164,14 +168,15 @@ before applying it prospectively; never optimize past benchmarks or endpoints.
 All journal sections belong under `### Outcome review` in the Research record.
 Use the exact H4 titles and table headers below when an event is recorded. Omit
 a journal with no changes, or write exactly `No changes.` under its heading.
-Do not create duplicate journals, repeat unchanged rows each day, or use these
-reserved headings elsewhere. Use other H4/H5 headings for the detail cards that
+Do not create duplicate journals, repeat unchanged rows in later editions, or use
+these reserved headings elsewhere. Use other H4/H5 headings for the detail cards that
 the `Record` links point to. The helper indexes these tables; prose explains them.
 
 Keep one row per recommendation/checkpoint/lesson/month in each journal per note.
 A `Record` is an unpiped filename-qualified wikilink to an existing dated market
-note and its actual section, or the current draft. Prefer the canonical form
-`[[Investments/YYYY-MM-DD-market-research#Section]]`; never point to a future note,
+note and its actual section, or the current draft. Use its exact recognized
+filename, for example `[[Investments/2026-09-08-market-research#Section]]` or
+`[[Investments/2026-09-08-143015-market-research#Section]]`; never point to a future note,
 missing heading, external URL or scratch file. A record link must identify the
 detail supporting that row, not merely a generic note with no relevant evidence.
 Use distinct descriptive headings so the references remain retrievable. For a
@@ -306,6 +311,8 @@ are performed within the normal research workflow, without a mandatory human gat
 
 Before publication, run both `lint` and
 `outcomes --vault '<vault>' --draft '<scratch>/daily.md'` using the bundled helper.
+For manual editions, include the same `--mode manual --as-of '<cutoff>'` used
+during planning.
 Resolve missing recommendation records, inconsistent first-ready dates, broken
 references, future observations or conflicting corrections before publishing.
 Keep genuine missing market data as pending/unavailable with a truthful record,
