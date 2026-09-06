@@ -36,7 +36,7 @@ def utc_now():
 
 def parse_time(value):
     if not isinstance(value, str) or not re.fullmatch(
-            r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})', value):
+            r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)', value):
         raise DataError('invalid_input', 'Use an ISO timestamp with seconds and an explicit timezone offset.')
     try:
         return datetime.fromisoformat(value.replace('Z', '+00:00')).astimezone(timezone.utc)
@@ -276,6 +276,16 @@ def run_self_test():
                     parse_time(value)
             with self.assertRaises(DataError):
                 parse_date('2026-02-29')
+
+        def test_timestamp_offset_minutes_are_not_silently_normalized(self):
+            for value in ('2026-09-05T09:00:00-04:99', '2026-09-05T09:00:00+00:60',
+                          '2026-09-05T09:00:00+24:00'):
+                with self.subTest(value=value):
+                    with self.assertRaises(DataError) as error:
+                        parse_time(value)
+                    self.assertEqual(error.exception.code, 'invalid_input')
+            self.assertEqual(parse_time('2026-09-05T09:00:00-04:59'),
+                             parse_time('2026-09-05T13:59:00Z'))
 
         def test_credentials_are_local_and_control_safe(self):
             with self.assertRaises(DataError):

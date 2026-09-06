@@ -279,6 +279,13 @@ class EvaluationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "explicit offset"):
             evaluator.export_inputs(self.inputs)
 
+    def test_malformed_offsets_cannot_change_evaluation_availability(self):
+        for offset in ('-04:99', '+00:60'):
+            inputs = copy.deepcopy(self.inputs)
+            inputs['cases'][0]['sources'][0]['available_at'] = '2025-08-08T07:00:00' + offset
+            with self.subTest(offset=offset), self.assertRaisesRegex(ValueError, 'explicit offset'):
+                evaluator.export_inputs(inputs)
+
     def test_stale_inputs_or_key_cannot_be_silently_used(self):
         run = self.correct_run()
         self.inputs["cases"][0]["sources"][0]["facts"][0]["value"] = 999

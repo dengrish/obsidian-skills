@@ -114,7 +114,8 @@ def iso_date(value):
 
 
 def iso_time(value):
-    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})', value):
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?'
+                        r'(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)', value):
         raise ValueError('timestamps must include ISO8601 seconds and an explicit offset')
     return datetime.fromisoformat(value.replace('Z', '+00:00'))
 
@@ -476,7 +477,7 @@ def outcomes(vault, draft=None, now=None):
     def baseline_version(item):
         return record_identity(item), event_identity(item['baseline_at']), item['version_note']
 
-    def correction(row, item, previous, changed, finalized, note_day):
+    def correction(row, item, previous, changed, finalized, note_day, first_observation=False):
         replaces = row['Replaces']
         if previous is None:
             if replaces != '-':
@@ -491,6 +492,9 @@ def outcomes(vault, draft=None, now=None):
                 raise ValueError('changed finalized record must link to a distinct new detail card in the current draft')
         elif replaces not in ('-', previous['record']):
             raise ValueError('Replaces does not identify the previous Record link')
+        if (first_observation and unpublished_draft and note_day == day
+                and Path(item['record_note']).name[:10] != note_day):
+            raise ValueError('newly observed data must link to a new detail card in the current draft')
 
     for note_day, (path, note, _) in sorted(notes.items()):
         as_of = iso_time(note['metadata']['as_of'])
@@ -527,8 +531,10 @@ def outcomes(vault, draft=None, now=None):
                         changed = previous is not None and (
                             event_identity(item['baseline_at']) != event_identity(previous['baseline_at'])
                             or record_identity(item) != record_identity(previous))
-                        correction(row, item, previous, changed, previous is not None
-                                   and previous['baseline_at'] not in ('pending', 'unavailable'), note_day)
+                        finalized = previous is not None and previous['baseline_at'] not in ('pending', 'unavailable')
+                        correction(row, item, previous, changed, finalized, note_day,
+                                   first_observation=previous is not None and not finalized
+                                   and baseline not in ('pending', 'unavailable'))
                         item['version_note'] = path if previous is None or changed else previous['version_note']
                         recommendations[identifier] = item
                     elif title == 'Checkpoint records':
@@ -565,12 +571,15 @@ def outcomes(vault, draft=None, now=None):
                         finalized = previous is not None and (
                             previous['state'] == 'observed' or previous['_needs_card_recheck']
                             or previous['_baseline_version'] != item['_baseline_version'])
-                        correction(row, item, previous, changed, finalized, note_day)
+                        correction(row, item, previous, changed, finalized, note_day,
+                                   first_observation=previous is not None and previous['state'] == 'unavailable'
+                                   and item['state'] == 'observed')
                         # Legacy same-card changes cannot make unchanged evidence current.
                         # Repeats retain this flag until an explicit distinct-card correction.
                         item['_needs_card_recheck'] = previous is not None and (
                             record_identity(item) == record_identity(previous)
-                            and (previous['_needs_card_recheck'] or (changed and finalized)))
+                            and (previous['_needs_card_recheck'] or (changed and finalized)
+                                 or (previous['state'] == 'unavailable' and item['state'] == 'observed')))
                         checkpoints[key] = item
                     elif title == 'Lesson records':
                         identifier = row['Lesson']
@@ -868,6 +877,19 @@ def run_self_test():
                 with self.subTest(timestamp=timestamp), self.assertRaises(ValueError):
                     lint_bytes(self.note(as_of=timestamp))
             lint_bytes(self.note(as_of='2026-09-05T12:00:00-04:00', generated='2026-09-05T12:02:00-04:00'))
+
+        def test_malformed_offset_minutes_cannot_be_normalized_into_valid_metadata(self):
+            for offset in ('-04:60', '-04:99', '+00:60'):
+                data = self.note(as_of='2026-09-05T09:00:00' + offset,
+                                 generated='2026-09-05T09:02:00' + offset)
+                with self.subTest(offset=offset):
+                    with self.assertRaisesRegex(ValueError, 'timestamp'):
+                        lint_bytes(data)
+                    self.draft.write_bytes(data)
+                    with self.assertRaisesRegex(ValueError, 'timestamp'):
+                        publish(self.draft, self.vault,
+                                datetime.fromisoformat('2026-09-05T16:00:00-04:00'))
+            self.assertFalse((self.vault / 'Investments').exists())
 
         def test_schema_and_sections(self):
             source = self.note()
@@ -1541,6 +1563,47 @@ def run_self_test():
                                                   if row['horizon'] == '1m')['state'], 'observed')
                     self.assertEqual(correction_path.read_bytes(), correction_bytes)
 
+        def test_legacy_observation_on_missing_data_card_remains_due_until_explicit_resolution(self):
+            identifier, _, _ = self.baseline_fixture()
+            missing_link = self.record_link('2024-03-01')
+            alias = missing_link.replace('Investments/', '').replace('-research#', '-research.md#')
+            observed_at = '2024-02-29T16:00:00-05:00'
+            self.outcome_note('2024-03-01', journals=[self.journal('Checkpoint records', [
+                (identifier, '1m', 'unavailable', '-', missing_link, '-')])])
+            self.outcome_note('2024-03-02', journals=[self.journal('Checkpoint records', [
+                (identifier, '1m', 'observed', observed_at, missing_link, '-')])])
+            repeated = self.outcome_note('2026-09-05', [(identifier, 'watch', 'Carry the earlier thesis')], [
+                self.journal('Checkpoint records', [(identifier, '1m', 'observed', observed_at, alias, '-')])])
+            originals = {path: path.read_bytes() for path in (self.vault / 'Investments').iterdir()}
+            result = outcomes(self.vault, now=self.now)
+            self.assertTrue(result['complete'], result['findings'])
+            checkpoint = next(row for row in result['checkpoints'] if row['horizon'] == '1m')
+            self.assertEqual(checkpoint['state'], 'needs-recheck')
+            self.assertIn(checkpoint, result['due_checkpoints'])
+            self.assertEqual(publish(repeated, self.vault, self.now)['status'], 'unchanged')
+
+            next_day = '2026-09-06'
+            next_now = datetime.fromisoformat(next_day + 'T09:03:00-04:00')
+            for replaces, complete in (('-', False), (alias, True)):
+                with self.subTest(replaces=replaces):
+                    self.outcome_note(next_day, [(identifier, 'watch', 'Carry the earlier thesis')], [
+                        self.journal('Checkpoint records', [(identifier, '1m', 'observed', observed_at,
+                                                            self.record_link(next_day), replaces)])], draft=True)
+                    repaired = outcomes(self.vault, self.draft, next_now)
+                    self.assertEqual(repaired['complete'], complete, repaired['findings'])
+                    if not complete:
+                        with self.assertRaisesRegex(ValueError, 'explicitly replace'):
+                            publish(self.draft, self.vault, next_now)
+                        self.assertFalse((self.vault / 'Investments/2026-09-06-market-research.md').exists())
+            self.assertEqual(publish(self.draft, self.vault, next_now)['status'], 'created')
+            self.assertEqual(publish(self.draft, self.vault, next_now)['status'], 'unchanged')
+            repaired = outcomes(self.vault, now=next_now)
+            self.assertTrue(repaired['complete'], repaired['findings'])
+            self.assertEqual(next(row['state'] for row in repaired['checkpoints'] if row['horizon'] == '1m'),
+                             'observed')
+            self.assertNotIn('1m', [row['horizon'] for row in repaired['due_checkpoints']])
+            self.assertEqual({path: path.read_bytes() for path in originals}, originals)
+
         def test_equivalent_record_spellings_do_not_change_baseline_version(self):
             identifier, _, baseline_link = self.baseline_fixture()
             self.outcome_note('2024-03-01', journals=[self.journal('Checkpoint records', [
@@ -1604,6 +1667,55 @@ def run_self_test():
                         (identifier, first_day, '2026-09-04T09:30:00-04:00', record, '-')])], draft=True)
                     result = outcomes(self.vault, self.draft, self.now)
                     self.assertEqual(result['complete'], complete, result['findings'])
+
+        def test_late_baseline_observation_requires_a_current_evidence_card(self):
+            identifier, _, old_link = self.baseline_fixture()
+            old_path = self.vault / 'Investments/2024-01-31-market-research.md'
+            observed = old_path.read_bytes()
+            for unavailable in ('pending', 'unavailable'):
+                original = observed.replace(b'2024-01-31T09:30:00-05:00', unavailable.encode())
+                old_path.write_bytes(original)
+                for record, complete in ((old_link, False), (self.record_link('2026-09-05'), True)):
+                    with self.subTest(unavailable=unavailable, record=record):
+                        self.outcome_note('2026-09-05', [(identifier, 'watch', 'Carry the earlier thesis')], [
+                            self.journal('Recommendation records', [(identifier, '2024-01-30',
+                                '2024-01-31T09:30:00-05:00', record, '-')])], draft=True)
+                        result = outcomes(self.vault, self.draft, self.now)
+                        self.assertEqual(result['complete'], complete, result['findings'])
+                        if not complete:
+                            with self.assertRaisesRegex(ValueError, 'current draft'):
+                                publish(self.draft, self.vault, self.now)
+                            self.assertFalse((self.vault / 'Investments/2026-09-05-market-research.md').exists())
+                self.assertEqual(old_path.read_bytes(), original)
+            self.assertEqual(publish(self.draft, self.vault, self.now)['status'], 'created')
+            self.assertEqual(publish(self.draft, self.vault, self.now)['status'], 'unchanged')
+            self.assertEqual(outcomes(self.vault, now=self.now)['recommendations'][0]['record'],
+                             self.record_link('2026-09-05'))
+
+        def test_late_checkpoint_observation_requires_a_current_evidence_card(self):
+            identifier, _, _ = self.baseline_fixture()
+            old_link = self.record_link('2024-03-01')
+            old_path = self.outcome_note('2024-03-01', journals=[self.journal('Checkpoint records', [
+                (identifier, '1m', 'unavailable', '-', old_link, '-')])])
+            original = old_path.read_bytes()
+            for record, complete in ((old_link, False), (self.record_link('2026-09-05'), True)):
+                with self.subTest(record=record):
+                    self.outcome_note('2026-09-05', [(identifier, 'watch', 'Carry the earlier thesis')], [
+                        self.journal('Checkpoint records', [(identifier, '1m', 'observed',
+                            '2024-02-29T16:00:00-05:00', record, '-')])], draft=True)
+                    result = outcomes(self.vault, self.draft, self.now)
+                    self.assertEqual(result['complete'], complete, result['findings'])
+                    if not complete:
+                        with self.assertRaisesRegex(ValueError, 'current draft'):
+                            publish(self.draft, self.vault, self.now)
+                        self.assertFalse((self.vault / 'Investments/2026-09-05-market-research.md').exists())
+            self.assertEqual(publish(self.draft, self.vault, self.now)['status'], 'created')
+            self.assertEqual(publish(self.draft, self.vault, self.now)['status'], 'unchanged')
+            checkpoint = next(row for row in outcomes(self.vault, now=self.now)['checkpoints']
+                              if row['horizon'] == '1m')
+            self.assertEqual(checkpoint['state'], 'observed')
+            self.assertEqual(checkpoint['record'], self.record_link('2026-09-05'))
+            self.assertEqual(old_path.read_bytes(), original)
 
         def test_baseline_cannot_predate_known_first_ready_generation(self):
             identifier, _, _ = self.baseline_fixture()

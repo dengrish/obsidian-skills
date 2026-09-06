@@ -279,6 +279,10 @@ lessons are not lost between monthly consolidations.
 Old daily notes remain immutable. First observations and pending/unavailable-to-
 observed updates use `-` in `Replaces`. Changing a finalized baseline or checkpoint
 requires an explicit new row whose `Replaces` is the exact previous `Record` link.
+When a pending or unavailable baseline/checkpoint first becomes observed, link a
+new detail card in the current draft. An older missing-data card cannot support
+the newly obtained values even if its cutoff was already after the opening or
+closing event. Published historical rows and identical retries remain readable.
 For a `needs-recheck` checkpoint, explicitly replace that prior link even if its
 stored observation was unavailable.
 The new `Record` must identify a distinct detail card in the current draft;
@@ -293,6 +297,8 @@ convention as a factual correction.
 A factual baseline correction makes previously calculated checkpoints `needs-recheck`
 until each affected window is explicitly revised against the corrected baseline.
 Checkpoint corrections with unresolved evidence links also remain `needs-recheck`.
+This includes historical unavailable-to-observed updates that reused the same
+missing-data card; repeating that card does not resolve the missing evidence.
 They remain due even if the old result was observed; retained obsolete figures
 are not current evidence. Handle corrections before deriving new lessons and
 reassess lessons that relied on the superseded observations. Source corrections

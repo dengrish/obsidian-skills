@@ -10,6 +10,7 @@ import argparse
 import contextlib
 import hashlib
 import html as html_module
+from html.parser import HTMLParser
 import importlib.metadata
 import json
 import logging
@@ -251,6 +252,24 @@ def _parse_isolated(html, form, section, offset, count):
         return value
 
 
+def _text_for_credential_check(html):
+    """Inspect joined character data without changing the document being parsed."""
+    parts = []
+    class TextOnly(HTMLParser):
+        def handle_data(self, data):
+            parts.append(data)
+    scanner = TextOnly(convert_charrefs=True)
+    try:
+        scanner.feed(html)
+        scanner.close()
+    except AssertionError:
+        # HTMLParser asserts on unknown marked sections such as <![bogus]>.
+        # Provider syntax cannot bypass the CLI's structured failure contract.
+        raise DataError('invalid_document',
+                        'The primary HTML could not be inspected for credential echoes; no text was parsed or returned.') from None
+    return ''.join(parts)
+
+
 def sec_filing(client, args):
     """Fetch only a positively matched accession whose metadata passes the cutoff."""
     cik = _cik(getattr(args, 'cik', None))
@@ -280,13 +299,15 @@ def sec_filing(client, args):
         # Markdown escaping must not turn credentials into strings missed by
         # final exact-value redaction. Use a renderer-stable plain marker.
         parser_html = parser_html.replace('[redacted]', 'REDACTED')
-    # Entity decoding plus Markdown escaping can disguise a credential from the
-    # CLI's final redaction. Inspect a decoded copy, but never parse that copy:
-    # escaped source examples such as &lt;table&gt; must remain displayed text.
-    decoded_check = html_module.unescape(parser_html)
-    if redact(decoded_check, client.env, extra_values=getattr(client, 'redaction_values', ())) != decoded_check:
+    # Entity decoding, transparent comments and inline tags can reconstruct a
+    # credential that Markdown escaping then hides from exact-value redaction.
+    # Inspect both decoded HTML and joined character data before excerpt paging;
+    # keep the original markup for parsing so escaped source examples stay text.
+    checks = (html_module.unescape(parser_html), _text_for_credential_check(parser_html))
+    if any(redact(value, client.env, extra_values=getattr(client, 'redaction_values', ())) != value
+           for value in checks):
         raise DataError('credential_echo',
-                        'Encoded credential values were detected in the provider document; no text was parsed or returned.')
+                        'Encoded or markup-split credential values were detected in the provider document; no text was parsed or returned.')
     parsed = _parse_isolated(parser_html, row['form'], section, offset, count)
     warnings = list(lookup.get('warnings', []))
     if not lookup['complete']:
@@ -308,6 +329,7 @@ def sec_filing(client, args):
 
 def run_self_test():
     import copy
+    import io
     import unittest
     from unittest.mock import patch
     accession = '0000000001-25-000001'
@@ -469,8 +491,54 @@ def run_self_test():
                         self.assert_code('credential_echo', lambda: sec_filing(client, self.args))
                     parse.assert_not_called()
 
+        def test_markup_split_credentials_fail_before_parser_and_paging(self):
+            secret = 'OFFLINE_ONLY_FIXTURE_SECRET'
+            sources = ['OFFLINE_<!-- transparent comment -->ONLY_FIXTURE_SECRET',
+                       'OFFLINE_<wbr>ONLY_FIXTURE_SECRET']
+            sources += ['OFFLINE_<' + tag + '>ONLY</' + tag + '>_FIXTURE_SECRET'
+                        for tag in ('span', 'em', 'strong', 'b', 'i', 'a')]
+            for source in sources:
+                for displaced in (False, True):
+                    client = Fake(self.payload, '<html><body><p>' + source + '</p></body></html>')
+                    if displaced:
+                        client.redaction_values = (secret,)
+                    else:
+                        client.env['FRED_API_KEY'] = secret
+                    # A tiny page could hide the completed echo from a check
+                    # performed only on the returned Markdown excerpt.
+                    self.args.max_chars = 5
+                    with patch(__name__ + '._require_dependency'), patch(__name__ + '._parse_isolated') as parse:
+                        self.assert_code('credential_echo', lambda: sec_filing(client, self.args))
+                    parse.assert_not_called()
+
+        def test_actual_parser_joins_comment_split_credentials_before_escaping(self):
+            source = '<html><body><p>OFFLINE_<!-- transparent -->ONLY_FIXTURE_SECRET</p></body></html>'
+            rendered = self.actual(source)['data']['text']
+            self.assertEqual(rendered, r'OFFLINE\_ONLY\_FIXTURE\_SECRET')
+            client = Fake(self.payload, source)
+            client.env['FRED_API_KEY'] = 'OFFLINE_ONLY_FIXTURE_SECRET'
+            self.assert_code('credential_echo', lambda: sec_filing(client, self.args))
+
+        def test_malformed_html_inspection_returns_structured_cli_failure(self):
+            import market_data
+            source = '<html><body><![bogus]><p>UNSAFE_SOURCE_MUST_NOT_RETURN</p></body></html>'
+            client = Fake(self.payload, source)
+            output = io.StringIO()
+            with patch(__name__ + '._require_dependency'), patch(__name__ + '._parse_isolated') as parse, \
+                    patch.object(market_data, 'handlers', return_value={'sec-filing': sec_filing}), \
+                    contextlib.redirect_stdout(output):
+                code = market_data.main(['sec-filing', '--cik', self.args.cik,
+                                         '--accession', self.args.accession,
+                                         '--as-of', self.args.as_of], client)
+            result = json.loads(output.getvalue())
+            self.assertEqual(code, 2)
+            self.assertFalse(result['complete'])
+            self.assertEqual(result['error']['code'], 'invalid_document')
+            self.assertNotIn('UNSAFE_SOURCE_MUST_NOT_RETURN', output.getvalue())
+            parse.assert_not_called()
+
         def test_escaped_source_markup_is_not_decoded_before_parsing(self):
-            html = '<html><body><p>Example: &lt;table&gt; and A&amp;B.</p></body></html>'
+            html = '<html><body><p>Example: &lt;table&gt; and A&amp;B.<!-- keep --><span>Visible</span></p></body></html>'
             client = Fake(self.payload, html)
             with patch(__name__ + '._require_dependency'), patch(__name__ + '._parse_isolated', return_value=self.parsed) as parse:
                 self.assertTrue(sec_filing(client, self.args)['complete'])

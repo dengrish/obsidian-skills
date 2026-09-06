@@ -196,8 +196,10 @@ footnotes; earnings exhibits may require opening a separate issuer release.
 Output is paged by `--offset` and `--max-chars` (default 20,000, maximum 100,000).
 Follow `data.next_offset` while needed, keeping the same filing, section and
 cutoff, and require unchanged source and full-text digests when joining pages.
-Any echoed credentials are removed before parsing; a warning identifies this
-change, and the text digest then describes the redacted rendering.
+Literal credential echoes are redacted before parsing; a warning identifies this
+change, and the text digest then describes the redacted rendering. If entity
+decoding or joined HTML text would reconstruct a credential, extraction fails
+without returning text.
 Excerpts remain incomplete rather than silently claiming the whole filing was
 read. Character positions are locations in rendered text, not PDF page numbers.
 Retain only decision-relevant excerpts and calculations in the daily note, with

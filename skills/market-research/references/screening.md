@@ -23,7 +23,7 @@ Retrieve existing `market_data.py` responses for:
   mapping date. Retrieve at least 13 months, including the session before the
   12-month anniversary. Follow the data guide's delayed-feed and date rules.
 
-The provider limits a price request to 200 symbols. Retain multiple complete
+The retrieval helper limits a price request to 200 symbols. Retain multiple complete
 response objects for larger universes, including pagination warnings, rather
 than dropping names to fit one call. Repeat the benchmark in another bundle to
 compare shortlisted candidates with their sector benchmark on the same dates.

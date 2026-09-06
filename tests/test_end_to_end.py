@@ -279,6 +279,12 @@ raise SystemExit(main(fixture['args'], client))
     def test_market_transport_providers_and_cli_preserve_scope_and_secrets(self):
         run = self.market_response
 
+        invalid_cutoff = run(['prices', '--symbols', 'AAPL',
+                              '--start', '2025-09-01T00:00:00-04:00',
+                              '--end', '2025-09-06T08:45:00-04:99'], [], 2)
+        self.assertEqual(invalid_cutoff['error']['code'], 'invalid_input')
+        self.assertEqual(invalid_cutoff['requests'], [])
+
         bars = run(['prices', '--symbols', 'AAPL,MSFT', '--start', '2025-09-01T00:00:00-04:00',
                     '--end', '2025-09-06T08:45:00-04:00', '--max-pages', '1'], [{
                         'bars': {'AAPL': [{'t': '2025-09-05T04:00:00Z', 'o': 100, 'h': 105,
@@ -317,6 +323,10 @@ raise SystemExit(main(fixture['args'], client))
         self.assertIsNone(filing['data']['next_offset'])
         encoded_echo = run(filing_args, [submissions, filing_html.replace('_', '&#95;')], 2)
         self.assertEqual(encoded_echo['error']['code'], 'credential_echo')
+        split_echo = run(filing_args, [submissions, filing_html.replace(
+            'DUMMY_SECRET_FOR_OFFLINE_TEST', 'DUMMY_<!--split-->SECRET_FOR_OFFLINE_TEST')], 2)
+        self.assertEqual(split_echo['error']['code'], 'credential_echo')
+        self.assertNotIn('data', split_echo)
         # A newly filed accession after the edition cutoff cannot be fetched,
         # even if the caller explicitly asks for it.
         filing_rows['acceptanceDateTime'] = ['2025-09-05T14:00:00Z']

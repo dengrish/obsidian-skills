@@ -57,7 +57,8 @@ as current trading. Before 11:30 New York time, use the helper's earlier actual
 cutoff and describe the edition as early/manual.
 
 If today's recognized note already exists, read it and run the outcome inventory
-below before reusing it. The context's `valid` marker checks note structure, not
+below before reusing it. Context's `thesis_history` and `active_theses` describe
+prior dates; today's states are in the existing note. The `valid` marker checks note structure, not
 cross-note journal consistency; history and cross-note journals must validate.
 Pending or unavailable market observations remain valid limitations.
 A successful routine retry returns the existing note without rewriting that

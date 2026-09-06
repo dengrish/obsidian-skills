@@ -353,7 +353,7 @@ def alpha_calendar(client, args):
     if raw.lstrip().startswith(('{', '[')):
         try:
             payload = json.loads(raw)
-        except (ValueError, TypeError) as exc:
+        except (ValueError, TypeError, RecursionError) as exc:
             raise DataError('invalid_response', 'Alpha Vantage returned malformed calendar error data.') from exc
         _provider_error(payload)
         raise DataError('invalid_response', 'Alpha Vantage returned JSON instead of a calendar CSV.')
@@ -716,6 +716,13 @@ def run_self_test():
                 alpha_calendar(Client(json.dumps({'Note': '25 requests per day fixture-secret-not-a-real-key'})), self.calendar_args())
             self.assertNotIn('fixture-secret', str(caught.exception))
             self.assertIn('quota', str(caught.exception))
+
+        def test_calendar_deep_json_error_is_an_incomplete_response(self):
+            raw = '[' * 2000 + '"fixture-secret-not-a-real-key"' + ']' * 2000
+            with self.assertRaises(DataError) as caught:
+                alpha_calendar(Client(raw), self.calendar_args())
+            self.assertEqual(caught.exception.code, 'invalid_response')
+            self.assertNotIn('fixture-secret', str(caught.exception))
 
         def test_calendar_invalid_horizon_makes_no_request(self):
             client = Client(self.calendar_csv())
