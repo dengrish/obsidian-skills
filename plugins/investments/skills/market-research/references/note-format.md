@@ -1,9 +1,8 @@
 # Daily market note format
 
-Use `<vault>/Investments/YYYY-MM-DD-market-research.md`, with the review's
-**America/New_York** date and one ordinary edition per calendar day. Keep prior
-notes unchanged; place corrections and changed assessments in the next dated
-note with a link to the affected record.
+Keep market notes in `<vault>/Investments/`, with the review's
+**America/New_York** date. Keep published notes unchanged; place corrections and
+changed assessments in a later edition with a link to the affected record.
 
 Each note has two parts: a short **Decision brief** for the user and a detailed
 **Research record** for future research. Both are visible Markdown in the same
@@ -12,6 +11,30 @@ not a transcript of the research process. It may be much longer than the brief,
 but should not repeat full articles, entire social feeds, or unchanged earlier
 analyses. No fixed word target applies to the record. The helper's 256 KiB file
 safety limit is not a writing target.
+
+## Editions and retries
+
+- **Scheduled:** `YYYY-MM-DD-market-research.md`, one edition per calendar day.
+  Helpers default to `--mode scheduled`; the daily schedule keeps its established
+  cutoff, and successful retries reuse the existing edition.
+- **Manual:** `YYYY-MM-DD-HHMMSS-market-research.md`, using the New York date and
+  whole-second time in `as_of`. A user-requested fresh review may create another
+  edition on the same day without replacing an earlier note or changing the schedule.
+
+For a manual review, run `context --mode manual` once to freeze the actual cutoff.
+Reuse its `as_of` with `--mode manual --as-of '<cutoff>'` for later context and
+outcome calls, including retry and draft checks. An explicit cutoff must be a
+nonfuture timestamp on today's New York date, with whole seconds. Use the same
+value in draft frontmatter. `publish --mode manual` derives the filename from the
+draft; an optional `--as-of` must match. Neither the schema nor the two-part layout
+changes. Identify the edition's cutoff clearly in the brief.
+
+History and journals include earlier available editions from the same day,
+ordered chronologically; later cutoffs and notes generated after the selected
+cutoff are not evidence for it. If a later manual edition already exists, do not
+insert a missing scheduled edition retrospectively. Run a fresh manual review
+instead. A filename collision never overwrites content: identical published
+bytes can be retried; a different edition needs a new current cutoff.
 
 ## Metadata and outline
 
@@ -32,7 +55,12 @@ Keep exactly the two H2 headings and six H3 subsections below, in order. Opening
 conclusion/coverage prose belongs directly under Decision brief. Research record
 starts with its first subsection; use H4 or deeper headings for individual
 candidates or supporting detail within a subsection. Keep the ledger only under
-Thesis updates. Do not conceal content in HTML comments or code fences.
+Thesis updates. Do not conceal content in HTML comments or code fences. The
+final [skill-provenance footer](../../../shared/PROVENANCE.md) is the sole
+metadata exception: it records the verified producer, release, source commit
+and runtime fingerprint, never financial state or supporting evidence. It does
+not add a frontmatter key or change this outline. Historical notes without it
+remain valid and immutable; new publications require it.
 
 The following is a layout template; replace all illustrative values and prose:
 
@@ -210,7 +238,7 @@ Use this exact ledger only under `### Thesis updates`:
 | NASDAQ:EXAMPLE@2026-09-08 | watch | New; confirmation pending. |
 ```
 
-The thesis ID is `EXCHANGE:TICKER@YYYY-MM-DD`, with uppercase exchange/ticker
+The usual thesis ID is `EXCHANGE:TICKER@YYYY-MM-DD`, with uppercase exchange/ticker
 and the date first recorded. An ID first introduced in a new draft uses that
 note's date; finding older source evidence does not backdate the thesis. Keep
 published IDs unchanged, including earlier records whose ID date was inaccurate.
@@ -231,6 +259,11 @@ that explanation. Close ideas explicitly rather than dropping their rows. All
 featured buying candidates must have matching ledger IDs/states and detailed
 assessments. Once terminal, a materially different thesis gets a new ID linked to
 the old one; do not revive an invalidated record or erase a failed prediction.
+If that new thesis is introduced on the same day for the same security, a manual
+edition uses `EXCHANGE:TICKER@YYYY-MM-DD-HHMMSS`, with the suffix matching its
+New York `as_of` time exactly. Only a manual edition can introduce this suffix;
+later editions carry the resulting ID unchanged. A fresh edition alone does not
+justify a new thesis ID or restart its recommendation clock.
 Invalidation/expiry qualifies future purchases, not sales of the user's holdings.
 
 Link the first and most recent material analysis with qualified wikilinks such

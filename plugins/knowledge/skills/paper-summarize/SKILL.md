@@ -234,6 +234,10 @@ rather than licensing a reconstructed rule set.
 
 ## 6. Publish the verified, linted note
 
+Apply the [provenance footer](../../shared/PROVENANCE.md) to the complete scratch
+draft and re-lint the stamped bytes. Preserve any known original producer on an
+authorized rewrite; do not stamp skipped or unchanged notes.
+
 The destination is `Articles/<pdf stem>.md`, without a disambiguating suffix.
 Re-inventory `Articles/` under the same NFC/case-folded basename identity before
 publication; an equivalent spelling that arrived after intake is an occupied

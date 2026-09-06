@@ -190,13 +190,15 @@ In discipline trees, use entries for existing category nodes and unlinked
 terms for missing categories. Recompute stale/self-cyclic parents inside the
 authorized closure and write the MOC in the same task. **The entire recognized
 discipline or misc MOC is generated:** read its previous tree for continuity, derive
-from current entries, and publish the complete bullet outline without
-comments, H1, frontmatter, or separate prose. Non-outline comments and prose are
+from current entries, and publish the complete bullet outline with the final
+[provenance footer](../../shared/PROVENANCE.md), but no other comments, H1,
+frontmatter, or separate prose. Other non-outline comments and prose are
 obsolete formatting; repair them in this Task 3 without a separate region or
 span approval. This whole-note ownership excludes unknown files, unrelated
 notes, and suggestion logs. Reorganize when coverage warrants it and skip
 unchanged output. Preserve inactive discipline MOCs unless cleanup is requested.
-An authorized misc refresh clears an existing zero-member list to empty and
+An authorized misc refresh clears an existing zero-member list to no bullets,
+retaining or updating its provenance footer under the shared rules, and
 keeps the file; an explicit request may create empty misc.
 
 Apply the safe-write guard to every parent and whole-MOC publication. Create a
@@ -207,10 +209,15 @@ Per-file guards do not make Task 3 transactional: after an interrupted write,
 report actual paths and re-read/re-derive the same authorized closure before
 retrying. Later edits must survive.
 
+Stamp every note actually changed by QC, link repair, or hierarchy work under
+[note provenance](../../shared/PROVENANCE.md), preserving a known creator and
+recording `wiki-lint` as updater. Do not backfill or rewrite unchanged notes.
+Keep the footer outside cards and navigation bullets; re-scan the stamped bytes.
+
 Afterward, re-scan. Included entries with valid membership must have no placement gap, invalid or
 unresolved parent, self-parent, or cycle. Every active included MOC must have
 `moc_file_states` state `readable` (or `empty` for zero-member misc), contain
-only the generated outline, and
+only the generated outline and valid provenance footer when present, and
 have no `moc_consistency_findings` record. Each entry's complete parent
 union must match its nearest linked ancestors across the included MOCs, or `[[MOCs/misc]]` for entries tagged only `#misc`. After
 a full-vault pass these conditions hold for every active discipline, misc, and

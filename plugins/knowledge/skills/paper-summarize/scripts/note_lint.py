@@ -28,7 +28,7 @@ import stat
 import sys
 import unicodedata
 
-_OBSIDIAN_SHARED_MODULES = ('naming', 'portable_names', 'vault_artifacts', 'yaml_scalars')
+_OBSIDIAN_SHARED_MODULES = ('naming', 'note_provenance', 'portable_names', 'vault_artifacts', 'yaml_scalars')
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/RUNTIME.md) ---
 import os as _os, sys as _sys
@@ -68,6 +68,7 @@ if _here != _shared:
 # --- end bootstrap ---
 
 from naming import core_stem, looks_canonical
+from note_provenance import split_provenance
 from vault_artifacts import inventory_source_figures
 from yaml_scalars import parse_scalar, strip_comment
 
@@ -1291,6 +1292,11 @@ def lint(text, path="<note>", images=None, *, mode,
         note.fail(0, "file must end with a single newline")
     elif text.endswith("\n\n"):
         note.fail(0, "file ends with more than one newline")
+    try:
+        text, _provenance = split_provenance(text)
+        note.text = text
+    except ValueError as exc:
+        note.fail(0, "invalid skill provenance: %s" % exc)
     note.raw_lines = text[:-1].split("\n") if text.endswith("\n") else text.split("\n")
     keys, kv, body_start = _split_front_matter(note)
     fenced = _fenced(note.raw_lines)

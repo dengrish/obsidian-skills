@@ -250,6 +250,11 @@ reference blocks finalization; do not reconstruct its rules from memory.
 
 ## 6. Publish safely
 
+Apply the [provenance footer](../../shared/PROVENANCE.md) after completeness and
+editorial review, then check the stamped draft. It identifies this polished
+note's producer; do not add it to the read-only raw capture. Preserve any known
+original producer on an authorized rewrite and leave no-op notes untouched.
+
 Publish only the completed, audited and reviewed bytes to `Articles/<slug>.md`.
 Recheck the destination immediately before publication. A collision discovered
 now returns to the naming decision; it is not permission to overwrite or rename

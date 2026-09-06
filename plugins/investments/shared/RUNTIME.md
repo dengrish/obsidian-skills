@@ -9,7 +9,10 @@ does not grant access to a vault, install Python packages, or enable browser too
 when a step requires a reference; do not load every reference preemptively.
 The active skill's references own its folder layout, naming, metadata,
 research method and artifact ownership. Read [input safety](INPUT_SAFETY.md)
-before handling external values or content. At closeout, read
+before handling external values or content. Before publishing a generated or
+changed Markdown note, follow [note provenance](PROVENANCE.md) to record the
+verified installed skill, source commit and runtime fingerprint without
+changing a workflow's content schema or immutable-history rules. At closeout, read
 [SUGGESTIONS.md](SUGGESTIONS.md) for the shared `Reviews/` logs: record only
 evidenced issues in the owning skill or consumed producer's log, remove
 specifically verified resolutions, and make no log writes on a report-only run.

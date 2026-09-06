@@ -25,7 +25,7 @@ import sys
 import tempfile
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-_OBSIDIAN_SHARED_MODULES = ('atomic_move', 'portable_names')
+_OBSIDIAN_SHARED_MODULES = ('atomic_move', 'note_provenance', 'portable_names')
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/RUNTIME.md) ---
 import os as _os, sys as _sys
@@ -65,6 +65,7 @@ if _here != _shared:
 # --- end bootstrap ---
 
 import atomic_move
+import note_provenance
 from portable_names import portable_identity
 
 MAX_BYTES = 256 * 1024
@@ -75,8 +76,8 @@ SUBHEADINGS = {
     'Research record': ('Screening and sources', 'Candidate assessments', 'Thesis updates', 'Outcome review'),
 }
 ATX = re.compile(r' {0,3}(#{1,6})(?:[ \t]+(.*)|[ \t]*)$')
-DAILY = re.compile(r'(\d{4}-\d{2}-\d{2})-market-research\.md\Z')
-THESIS = re.compile(r'([A-Z][A-Z0-9]{1,15}:[A-Z][A-Z0-9.-]{0,14})@(\d{4}-\d{2}-\d{2})\Z')
+DAILY = re.compile(r'(\d{4}-\d{2}-\d{2})(?:-(\d{6}))?-market-research\.md\Z')
+THESIS = re.compile(r'([A-Z][A-Z0-9]{1,15}:[A-Z][A-Z0-9.-]{0,14})@(\d{4}-\d{2}-\d{2})(?:-(\d{6}))?\Z')
 STATES = {'watch', 'ready', 'invalidated', 'expired'}
 ACTIVE = {'watch', 'ready'}
 HORIZONS = ('2w', '1m', '3m', '6m', '12m', '24m', '60m')
@@ -259,7 +260,8 @@ def lint_bytes(data, expected_date=None):
     """Validate structure only, never the truth of financial claims or dates."""
     if len(data) > MAX_BYTES:
         raise ValueError('note exceeds %d bytes' % MAX_BYTES)
-    lines = data.decode('utf-8').splitlines()
+    text, provenance = note_provenance.split_provenance(data.decode('utf-8'))
+    lines = text.splitlines()
     if not lines or lines[0] != '---':
         raise ValueError('note must start with frontmatter')
     try:
@@ -308,11 +310,33 @@ def lint_bytes(data, expected_date=None):
             match = THESIS.fullmatch(thesis_id)
             if not match or iso_date(match[2]) > day:
                 raise ValueError('invalid or future thesis ID: ' + thesis_id)
+            if match[3]:
+                time(int(match[3][:2]), int(match[3][2:4]), int(match[3][4:]))
             if thesis_id in seen or state not in STATES or not update:
                 raise ValueError('duplicate thesis, invalid state or empty update: ' + thesis_id)
             seen.add(thesis_id)
             rows.append({'id': thesis_id, 'state': state, 'update': update})
-    return {'metadata': meta, 'theses': rows, 'journals': journal_tables(sections['Outcome review'])}
+    return {'metadata': meta, 'provenance': provenance, 'theses': rows,
+            'journals': journal_tables(sections['Outcome review'])}
+
+
+def active_provenance():
+    """Verify the actual executing bundle, never an unrelated shared override."""
+    plugin_root = Path(__file__).resolve(strict=True).parents[3]
+    expected_shared = (plugin_root / 'shared' / 'scripts').resolve(strict=True)
+    if Path(_shared).resolve(strict=True) != expected_shared:
+        raise ValueError('publication provenance requires shared helpers from the executing plugin bundle')
+    return note_provenance.verified_record(plugin_root, 'market-research')
+
+
+def require_publication_provenance(metadata):
+    """New immutable editions identify their current, verified creator."""
+    if metadata is None:
+        raise ValueError('new market notes require a skill-provenance footer; stamp the draft with '
+                         'the installed plugin\'s note_provenance helper before publication')
+    if metadata.get('generated_by') != active_provenance() or 'updated_by' in metadata:
+        raise ValueError('new market-note provenance must identify the executing installed '
+                         'market-research bundle as its creator, without an update record')
 
 
 def output_folder(vault, create=False):
@@ -334,13 +358,31 @@ def output_folder(vault, create=False):
     return vault, folder, None
 
 
-def inventory(vault, day):
-    """Keep omitted open theses open; expose every malformed daily-note owner."""
+def edition_identity(current, mode='scheduled', as_of=None):
+    """Freeze a manual run's identity; ordinary scheduled retries keep one target."""
+    if mode not in ('scheduled', 'manual'):
+        raise ValueError('mode must be scheduled or manual')
+    if mode == 'scheduled':
+        if as_of is not None:
+            raise ValueError('--as-of is only supported with --mode manual')
+        cutoff = min(current, scheduled_cutoff(current))
+        return current.date().isoformat() + '-market-research.md', cutoff
+    cutoff = ny_now(iso_time(as_of)) if as_of is not None else current.replace(microsecond=0)
+    if (cutoff.date() != current.date() or cutoff.astimezone(timezone.utc) > current.astimezone(timezone.utc)
+            or cutoff.microsecond):
+        raise ValueError('manual as_of must be a nonfuture timestamp on today\'s New York date, with whole seconds')
+    # Fixed offsets compare as instants even during the repeated fall-back hour.
+    return cutoff.strftime('%Y-%m-%d-%H%M%S-market-research.md'), iso_time(cutoff.isoformat())
+
+
+def inventory(vault, day, edition=None, cutoff=None):
+    """Read all editions in evidence-time order; preserve omitted open theses."""
     vault, folder, folder_identity = output_folder(vault)
-    result = {'complete': True, 'findings': [], 'prior_notes': [], 'other_notes': [],
-              'current_note': {'path': str(folder / (day + '-market-research.md')), 'state': 'missing'},
+    edition = edition or day + '-market-research.md'
+    result = {'complete': True, 'findings': [], 'prior_notes': [], 'later_notes': [], 'other_notes': [],
+              'current_note': {'path': str(folder / edition), 'state': 'missing'},
               'thesis_history': [], 'active_theses': []}
-    tokens, latest, terminal = {}, {}, set()
+    tokens, latest, terminal, records = {}, {}, set(), []
     paths = sorted(folder.iterdir(), key=lambda path: path.name) if folder_identity else []
     names = {}
     for path in paths:
@@ -350,51 +392,73 @@ def inventory(vault, day):
         if not match:
             result['other_notes'].extend(str(path) for path in owners if path.suffix.lower() == '.md')
             continue
-        today = match[1] == day
+        selected = identity == edition
         try:
             if len(owners) != 1 or owners[0].name != identity:
                 raise ValueError('portable-equivalent or noncanonical daily-note owner')
             path = owners[0]
             data, token = read_stable(path)
             note = lint_bytes(data, match[1])
+            stamp = iso_time(note['metadata']['as_of'])
+            if match[2] and (ny_now(stamp).strftime('%H%M%S') != match[2] or stamp.microsecond):
+                raise ValueError('manual filename time must match its as_of in New York, with whole seconds')
             tokens[str(path)] = token
-            if today:
-                result['current_note']['state'] = 'valid'
-            if match[1] > day:
-                continue
-            revived = [row['id'] for row in note['theses']
-                       if row['state'] in ACTIVE and row['id'] in terminal]
-            if revived:
-                raise ValueError('terminal theses require a new linked thesis ID, not revival: '
-                                 + ', '.join(revived))
-            terminal.update(row['id'] for row in note['theses'] if row['state'] not in ACTIVE)
-            if today:
-                continue
-            result['prior_notes'].append(str(path))
-            for row in note['theses']:
-                record = dict(row, note=str(path))
-                result['thesis_history'].append(record)
-                latest[row['id']] = record
+            records.append((stamp, iso_time(note['metadata']['generated_at']), str(path), note))
+            if selected:
+                result['current_note'].update(state='valid', as_of=note['metadata']['as_of'])
+                if match[2] and cutoff is not None and stamp != cutoff:
+                    raise ValueError('manual filename is occupied by another timestamp; start a new manual run')
+                cutoff = stamp
         except (ValueError, OSError, UnicodeError) as exc:
             result['complete'] = False
             result['findings'].append({'paths': list(map(str, owners)), 'error': str(exc)})
-            if today:
+            if selected:
                 result['current_note']['state'] = 'blocked'
+    for stamp, generated, path, note in sorted(records):
+        selected = Path(path).name == edition
+        note_day = note['metadata']['date']
+        if note_day > day:
+            continue
+        later = cutoff is not None and not selected and (stamp >= cutoff or generated > cutoff)
+        if later:
+            result['later_notes'].append(path)
+            continue
+        revived = [row['id'] for row in note['theses']
+                   if row['state'] in ACTIVE and row['id'] in terminal]
+        if revived:
+            result['complete'] = False
+            result['findings'].append({'paths': [path], 'error':
+                'terminal theses require a new linked thesis ID, not revival: ' + ', '.join(revived)})
+            continue
+        terminal.update(row['id'] for row in note['theses'] if row['state'] not in ACTIVE)
+        if selected:
+            continue
+        result['prior_notes'].append(path)
+        for row in note['theses']:
+            record = dict(row, note=path)
+            result['thesis_history'].append(record)
+            latest[row['id']] = record
+    if result['current_note']['state'] == 'missing' and result['later_notes']:
+        result['complete'] = False
+        result['findings'].append({'paths': result['later_notes'], 'error':
+            'a later edition already exists; do not backfill or publish out of order; start a fresh manual run'})
     result['active_theses'] = [row for _, row in sorted(latest.items()) if row['state'] in ACTIVE]
     if output_folder(vault)[2] != folder_identity:
         raise ValueError('Investments directory changed during inventory')
     return result, (folder_identity, tuple((str(path),) for path in paths), tokens)
 
 
-def context(vault, now=None):
+def context(vault, now=None, mode='scheduled', as_of=None):
     current = ny_now(now)
     day = current.date().isoformat()
     scheduled = scheduled_cutoff(current)
-    result, _ = inventory(vault, day)
-    return dict(result, date=day, now=current.isoformat(),
+    edition, cutoff = edition_identity(current, mode, as_of)
+    result, _ = inventory(vault, day, edition, cutoff)
+    return dict(result, date=day, now=current.isoformat(), mode=mode,
                 scheduled_cutoff=scheduled.isoformat(),
-                as_of=min(current, scheduled).isoformat(),
-                timing='early/manual' if current < scheduled else 'scheduled-cutoff',
+                as_of=result['current_note'].get('as_of', cutoff.isoformat()),
+                timing='manual' if mode == 'manual' else
+                       'early/manual' if current < scheduled else 'scheduled-cutoff',
                 calendar='unverified; verify the exchange session and holiday calendar')
 
 
@@ -412,16 +476,29 @@ def horizon_target(day, horizon):
     return day + timedelta(days=14) if horizon == '2w' else month_target(day, int(horizon[:-1]))
 
 
-def outcomes(vault, draft=None, now=None):
+def outcomes(vault, draft=None, now=None, mode='scheduled', as_of=None):
     """Rebuild the prospective journal without a mutable index or any writes."""
     current = ny_now(now)
     day = current.date().isoformat()
-    history, snapshot = inventory(vault, day)
-    findings, notes, draft_token = list(history['findings']), {}, None
+    draft_data, draft_token = None, None
+    if draft is not None:
+        draft_data, draft_token = read_stable(draft)
+        draft_note = lint_bytes(draft_data, day)
+        if mode == 'manual':
+            if as_of is not None and iso_time(as_of) != iso_time(draft_note['metadata']['as_of']):
+                raise ValueError('manual --as-of must match the draft as_of')
+            as_of = draft_note['metadata']['as_of']
+    edition, cutoff = edition_identity(current, mode, as_of)
+    if draft is not None:
+        cutoff = iso_time(draft_note['metadata']['as_of'])
+    history, snapshot = inventory(vault, day, edition, cutoff)
+    findings, notes = list(history['findings']), {}
+    edition_key = Path(edition).stem
     def finding(path, error):
         findings.append({'paths': [str(path)], 'error': str(error)})
+    included = set(history['prior_notes']) | {history['current_note']['path']}
     for path, token in snapshot[2].items():
-        if Path(path).name[:10] > day:
+        if path not in included:
             continue
         data, checked = read_stable(path)
         if checked != token:
@@ -429,37 +506,44 @@ def outcomes(vault, draft=None, now=None):
         note = lint_bytes(data)
         if iso_time(note['metadata']['generated_at']) > current:
             finding(path, 'generated_at is in the future')
-        notes[note['metadata']['date']] = (path, note, data)
-    unpublished_draft = draft is not None and day not in notes
+        notes[Path(path).stem] = (path, note, data)
+    unpublished_draft = draft is not None and edition_key not in notes
     if draft is not None:
-        data, draft_token = read_stable(draft)
-        note = lint_bytes(data, day)
-        if iso_time(note['metadata']['generated_at']) > current:
+        if iso_time(draft_note['metadata']['generated_at']) > current:
             raise ValueError('draft generated_at is in the future')
-        if day in notes and notes[day][2] != data:
-            raise ValueError('today already has a different published note; draft overlay is only for unpublished content')
-        notes[day] = (history['current_note']['path'], note, data)
+        if edition_key in notes and notes[edition_key][2] != draft_data:
+            raise ValueError('edition already has a different published note; draft overlay is only for unpublished content')
+        notes[edition_key] = (history['current_note']['path'], draft_note, draft_data)
+    ordered = sorted(notes.items(), key=lambda item: (
+        iso_time(item[1][1]['metadata']['as_of']), iso_time(item[1][1]['metadata']['generated_at']), item[0]))
+    positions = {key: index for index, (key, _) in enumerate(ordered)}
     first, recommendations, checkpoints, lessons = {}, {}, {}, {}
     monthly = None
     introduced_theses = set()
-    for note_day, (path, note, _) in sorted(notes.items()):
+    for note_key, (path, note, _) in ordered:
+        note_day = note['metadata']['date']
         for row in note['theses']:
-            if (unpublished_draft and note_day == day and row['id'] not in introduced_theses
+            if (unpublished_draft and note_key == edition_key and row['id'] not in introduced_theses
                     and THESIS.fullmatch(row['id'])[2] != note_day):
                 finding(path, 'new thesis ID must use its first-recorded note date: ' + row['id'])
+            if unpublished_draft and note_key == edition_key and row['id'] not in introduced_theses:
+                identity = THESIS.fullmatch(row['id'])
+                if identity[3] and (mode != 'manual' or identity[2] + '-' + identity[3]
+                        != ny_now(iso_time(note['metadata']['as_of'])).strftime('%Y-%m-%d-%H%M%S')):
+                    finding(path, 'new time-suffixed thesis ID must match its manual edition as_of: ' + row['id'])
             introduced_theses.add(row['id'])
             if row['state'] == 'ready':
                 first.setdefault(row['id'], {'id': row['id'], 'first_ready': note_day,
                                              'first_ready_note': path})
 
-    def reference(raw, note_day):
-        match = re.fullmatch(r'\[\[(?:Investments/)?(\d{4}-\d{2}-\d{2})-market-research'
+    def reference(raw, note_key):
+        match = re.fullmatch(r'\[\[(?:Investments/)?(\d{4}-\d{2}-\d{2}(?:-\d{6})?-market-research)'
                              r'(?:\.md)?(?:#([^\[\]|\\#\r\n]+))?\]\]', raw)
-        if not match or match[1] not in notes or match[1] > note_day:
+        if not match or match[1] not in notes or positions[match[1]] > positions[note_key]:
             raise ValueError('Record must link to a known, nonfuture dated market note or section: ' + raw)
-        # Preserve all published note-wide links, including today's immutable
-        # record and identical retries. Only a new draft can adopt this rule.
-        if unpublished_draft and note_day == day and not match[2]:
+        # Preserve published note-wide links and identical retries. New drafts
+        # reference a specific card in an exact edition, never an ambiguous date.
+        if unpublished_draft and note_key == edition_key and not match[2]:
             raise ValueError('new draft Record must include a specific section anchor: ' + raw)
         target, target_note, data = notes[match[1]]
         if match[2] and sum((heading[2] or '').strip() == match[2]
@@ -477,7 +561,7 @@ def outcomes(vault, draft=None, now=None):
     def baseline_version(item):
         return record_identity(item), event_identity(item['baseline_at']), item['version_note']
 
-    def correction(row, item, previous, changed, finalized, note_day, first_observation=False):
+    def correction(row, item, previous, changed, finalized, note_key, first_observation=False):
         replaces = row['Replaces']
         if previous is None:
             if replaces != '-':
@@ -487,16 +571,17 @@ def outcomes(vault, draft=None, now=None):
                 raise ValueError('changed finalized record must explicitly replace its previous Record link')
             # Earlier releases accepted reused correction cards. Keep their immutable
             # history and retries readable; a new correction needs a newly written card.
-            if (unpublished_draft and note_day == day
-                    and Path(item['record_note']).name[:10] != note_day):
+            if (unpublished_draft and note_key == edition_key
+                    and Path(item['record_note']).stem != edition_key):
                 raise ValueError('changed finalized record must link to a distinct new detail card in the current draft')
         elif replaces not in ('-', previous['record']):
             raise ValueError('Replaces does not identify the previous Record link')
-        if (first_observation and unpublished_draft and note_day == day
-                and Path(item['record_note']).name[:10] != note_day):
+        if (first_observation and unpublished_draft and note_key == edition_key
+                and Path(item['record_note']).stem != edition_key):
             raise ValueError('newly observed data must link to a new detail card in the current draft')
 
-    for note_day, (path, note, _) in sorted(notes.items()):
+    for note_key, (path, note, _) in ordered:
+        note_day = note['metadata']['date']
         as_of = iso_time(note['metadata']['as_of'])
         for title, columns in JOURNALS.items():
             seen = set()
@@ -506,12 +591,12 @@ def outcomes(vault, draft=None, now=None):
                     if key in seen:
                         raise ValueError('duplicate journal key in ' + title + ': ' + str(key))
                     seen.add(key)
-                    target, section, record_as_of = reference(row['Record'], note_day)
+                    target, section, record_as_of = reference(row['Record'], note_key)
                     common = {'record': row['Record'], 'record_note': target,
                               'record_section': section, 'journal_note': path}
                     if title in ('Recommendation records', 'Checkpoint records'):
                         identifier = row['Recommendation']
-                        if identifier not in first or first[identifier]['first_ready'] > note_day:
+                        if identifier not in first or positions[Path(first[identifier]['first_ready_note']).stem] > positions[note_key]:
                             raise ValueError('recommendation has no actual ready state by this date: ' + identifier)
                     if title == 'Recommendation records':
                         if row['First ready'] != first[identifier]['first_ready']:
@@ -521,7 +606,7 @@ def outcomes(vault, draft=None, now=None):
                             stamp = iso_time(baseline)
                             if (ny_now(stamp).date() <= iso_date(row['First ready']) or stamp > as_of):
                                 raise ValueError('baseline must follow First ready in New York and not exceed as_of')
-                            first_note = notes[first[identifier]['first_ready']][1]
+                            first_note = notes[Path(first[identifier]['first_ready_note']).stem][1]
                             if stamp < iso_time(first_note['metadata']['generated_at']):
                                 raise ValueError('baseline must not precede the first-ready note\'s generated_at')
                             if stamp > record_as_of:
@@ -532,7 +617,7 @@ def outcomes(vault, draft=None, now=None):
                             event_identity(item['baseline_at']) != event_identity(previous['baseline_at'])
                             or record_identity(item) != record_identity(previous))
                         finalized = previous is not None and previous['baseline_at'] not in ('pending', 'unavailable')
-                        correction(row, item, previous, changed, finalized, note_day,
+                        correction(row, item, previous, changed, finalized, note_key,
                                    first_observation=previous is not None and not finalized
                                    and baseline not in ('pending', 'unavailable'))
                         item['version_note'] = path if previous is None or changed else previous['version_note']
@@ -571,7 +656,7 @@ def outcomes(vault, draft=None, now=None):
                         finalized = previous is not None and (
                             previous['state'] == 'observed' or previous['_needs_card_recheck']
                             or previous['_baseline_version'] != item['_baseline_version'])
-                        correction(row, item, previous, changed, finalized, note_day,
+                        correction(row, item, previous, changed, finalized, note_key,
                                    first_observation=previous is not None and previous['state'] == 'unavailable'
                                    and item['state'] == 'observed')
                         # Legacy same-card changes cannot make unchanged evidence current.
@@ -588,17 +673,17 @@ def outcomes(vault, draft=None, now=None):
                                 or row['Status'] not in ('provisional', 'supported', 'retired')):
                             raise ValueError('invalid lesson ID or status: ' + identifier)
                         previous = lessons.get(identifier)
-                        if (unpublished_draft and note_day == day and previous is None
+                        if (unpublished_draft and note_key == edition_key and previous is None
                                 and match[1] != note_day):
                             raise ValueError('new lesson ID must use its first-recorded note date: ' + identifier)
                         item = dict(id=identifier, status=row['Status'], **common)
                         if (previous is not None and item['status'] != previous['status']
                                 and record_identity(item) == record_identity(previous)):
                             raise ValueError('changed lesson status must link to a distinct new detail card')
-                        if (unpublished_draft and note_day == day and previous is not None
+                        if (unpublished_draft and note_key == edition_key and previous is not None
                                 and (item['status'] != previous['status']
                                      or record_identity(item) != record_identity(previous))
-                                and Path(item['record_note']).name[:10] != note_day):
+                                and Path(item['record_note']).stem != edition_key):
                             raise ValueError('revised lesson must link to a new detail card in the current draft')
                         lessons[identifier] = item
                     else:
@@ -632,14 +717,13 @@ def outcomes(vault, draft=None, now=None):
             planned.append(item)
             if stale or (target is not None and target <= current.date() and state != 'observed'):
                 due.append(item)
-    if inventory(vault, day)[1] != snapshot:
+    if inventory(vault, day, edition, cutoff)[1] != snapshot:
         finding(history['current_note']['path'], 'daily-note history changed during outcome planning; rerun')
     if draft_token is not None and atomic_move.regular_file_snapshot(draft) != draft_token:
         finding(draft, 'draft changed during outcome planning; rerun')
-    cutoff = notes[day][1]['metadata']['as_of'] if day in notes else min(
-        current, scheduled_cutoff(current)).isoformat()
+    cutoff = notes[edition_key][1]['metadata']['as_of'] if edition_key in notes else cutoff.isoformat()
     return {'complete': not findings, 'findings': findings, 'date': day,
-            'as_of': cutoff,
+            'as_of': cutoff, 'mode': mode, 'current_note': history['current_note'],
             'calendar': 'unverified; due targets require exchange-calendar and completed-session verification',
             'recommendations': [recommendations[key] for key in sorted(recommendations)],
             'due_baselines': [value for key, value in sorted(recommendations.items())
@@ -675,7 +759,25 @@ def publish_pinned(staged, target, stage_parent, folder_identity):
         os.close(folder_fd)
 
 
-def publish(draft, vault, now=None):
+def publish(draft, vault, now=None, mode='scheduled', as_of=None):
+    # Distinct edition filenames no longer collide atomically. Serialize helper
+    # publishers on the existing vault directory, without a persistent lock file.
+    # Advisory locks are released by the OS even after an interrupted process.
+    import fcntl
+    root = Path(vault).expanduser().resolve(strict=True)
+    flags = os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0) | getattr(os, 'O_NOFOLLOW', 0)
+    descriptor = os.open(root, flags)
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ValueError('another market-note publication is in progress; rerun context after it finishes') from exc
+        return _publish(draft, root, now, mode, as_of)
+    finally:
+        os.close(descriptor)
+
+
+def _publish(draft, vault, now=None, mode='scheduled', as_of=None):
     data, expected = read_stable(draft)
     note = lint_bytes(data)
     current = ny_now(now)
@@ -684,14 +786,20 @@ def publish(draft, vault, now=None):
         raise ValueError('publication creates only today\'s New York note; no historical backfill')
     if iso_time(note['metadata']['generated_at']) > current:
         raise ValueError('generated_at is in the future')
-    history, baseline = inventory(vault, day)
+    if mode == 'manual':
+        if as_of is not None and iso_time(as_of) != iso_time(note['metadata']['as_of']):
+            raise ValueError('manual --as-of must match the draft as_of')
+        as_of = note['metadata']['as_of']
+    edition, cutoff = edition_identity(current, mode, as_of)
+    cutoff = iso_time(note['metadata']['as_of'])
+    history, baseline = inventory(vault, day, edition, cutoff)
     target = Path(history['current_note']['path'])
     if not history['complete']:
         raise ValueError('daily-note history is incomplete: ' + json.dumps(history['findings'], ensure_ascii=False))
     if history['current_note']['state'] == 'valid':
         existing, _ = read_stable(target)
         if existing == data:
-            planned = outcomes(vault, draft, current)
+            planned = outcomes(vault, draft, current, mode, as_of)
             if not planned['complete']:
                 raise ValueError('outcome journal is incomplete: ' + json.dumps(planned['findings'], ensure_ascii=False))
             return {'status': 'unchanged', 'path': str(target)}
@@ -705,13 +813,14 @@ def publish(draft, vault, now=None):
                and latest.get(row['id']) in {'invalidated', 'expired'}]
     if revived:
         raise ValueError('terminal theses require a new linked thesis ID, not revival: ' + ', '.join(revived))
-    planned = outcomes(vault, draft, current)
+    planned = outcomes(vault, draft, current, mode, as_of)
     if not planned['complete']:
         raise ValueError('outcome journal is incomplete: ' + json.dumps(planned['findings'], ensure_ascii=False))
+    require_publication_provenance(note['provenance'])
     vault, folder, folder_identity = output_folder(vault, create=True)
     # Folder creation changes an absent-folder baseline, but does not adopt files.
     if baseline[0] is None:
-        checked, baseline = inventory(vault, day)
+        checked, baseline = inventory(vault, day, edition, cutoff)
         if not checked['complete'] or baseline[1]:
             raise ValueError('Investments was populated concurrently; rerun context')
     stage_dir = Path(tempfile.mkdtemp(prefix='.market-research-stage-', dir=vault))
@@ -723,7 +832,7 @@ def publish(draft, vault, now=None):
             os.fsync(handle.fileno())
         if atomic_move.regular_file_snapshot(draft) != expected:
             raise ValueError('draft changed after validation')
-        _, checked = inventory(vault, day)
+        _, checked = inventory(vault, day, edition, cutoff)
         if checked != baseline or output_folder(vault)[2] != folder_identity:
             raise ValueError('daily-note history changed after planning; rerun context')
         actual = publish_pinned(staged, target, vault, folder_identity)
@@ -751,6 +860,15 @@ def run_self_test():
             self.vault = Path(self.temp.name).resolve()
             self.now = datetime.fromisoformat('2026-09-05T09:03:00-04:00')
             self.draft = self.vault / 'draft.txt'
+            # Financial-history fixtures predate provenance and intentionally
+            # exercise that logic alone. Dedicated tests below restore the real
+            # publication gate and cover current-bundle and historical behavior.
+            self.provenance_gate = patch(__name__ + '.require_publication_provenance')
+            self.provenance_gate.start()
+            self.addCleanup(self.provenance_gate.stop)
+            self.generator = {'skill': 'investments:market-research', 'plugin_version': '1.2.0',
+                              'source_commit': None, 'source_url': None,
+                              'source_status': 'unavailable', 'runtime_sha256': 'f' * 64}
 
         def note(self, day='2026-09-05', rows=(), as_of=None, generated=None):
             ledger = ('| Thesis | State | Update / next check |\n| --- | --- | --- |\n'
@@ -803,6 +921,238 @@ def run_self_test():
                              .replace((record_day + 'T09:02:00-04:00').encode(),
                                       (record_day + 'T16:02:00-05:00').encode()))
             return identifier, first_link, baseline_link
+
+        def test_manual_identity_uses_live_time_and_frozen_retry(self):
+            now = iso_time('2026-09-05T14:05:06.999-04:00')
+            first = context(self.vault, now, mode='manual')
+            self.assertTrue(first['complete'])
+            self.assertEqual(first['as_of'], '2026-09-05T14:05:06-04:00')
+            self.assertEqual(Path(first['current_note']['path']).name,
+                             '2026-09-05-140506-market-research.md')
+            later = now + timedelta(minutes=20)
+            retry = context(self.vault, later, mode='manual', as_of=first['as_of'])
+            self.assertEqual(retry['current_note'], first['current_note'])
+            self.assertEqual(retry['as_of'], first['as_of'])
+            new = context(self.vault, later, mode='manual')
+            self.assertNotEqual(new['current_note']['path'], first['current_note']['path'])
+            self.assertEqual(outcomes(self.vault, now=later, mode='manual', as_of=first['as_of'])['as_of'],
+                             first['as_of'])
+            for invalid in ('2026-09-04T14:05:06-04:00', '2026-09-05T15:05:06-04:00',
+                            '2026-09-05T14:05:06.5-04:00'):
+                with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                    context(self.vault, now, mode='manual', as_of=invalid)
+            with self.assertRaisesRegex(ValueError, 'only supported'):
+                context(self.vault, now, as_of=first['as_of'])
+
+        def test_manual_scheduled_manual_editions_preserve_history_and_first_ready(self):
+            identifier = 'NYSE:ABC@2026-09-05'
+            first_cutoff = '2026-09-05T09:00:00-04:00'
+            first_context = context(self.vault, self.now, mode='manual', as_of=first_cutoff)
+            first_path = Path(first_context['current_note']['path'])
+            first_link = '[[Investments/' + first_path.stem + '#Outcome review]]'
+            rows = [(identifier, 'ready', 'Confirmed fixture setup')]
+            self.draft.write_bytes(self.note(rows=rows) + ('\n' + self.journal('Recommendation records', [
+                (identifier, '2026-09-05', 'pending', first_link, '-')]) + '\n' +
+                self.journal('Monthly summaries', [('2026-09', first_link)])).encode())
+            lint_bytes(self.draft.read_bytes())
+            planned = outcomes(self.vault, self.draft, self.now, mode='manual')
+            self.assertTrue(planned['complete'], planned['findings'])
+            self.assertEqual(publish(self.draft, self.vault, self.now, mode='manual')['path'], str(first_path))
+            original = first_path.read_bytes()
+            scheduled_now = iso_time('2026-09-05T11:32:00-04:00')
+            scheduled = context(self.vault, scheduled_now)
+            self.assertEqual(scheduled['prior_notes'], [str(first_path)])
+            self.assertEqual([row['id'] for row in scheduled['active_theses']], [identifier])
+            self.draft.write_bytes(self.note(rows=rows, as_of=scheduled['as_of'], generated=scheduled_now.isoformat()))
+            middle = Path(publish(self.draft, self.vault, scheduled_now)['path'])
+            middle_bytes = middle.read_bytes()
+            manual_now = iso_time('2026-09-05T13:02:00-04:00')
+            manual = context(self.vault, manual_now, mode='manual', as_of='2026-09-05T13:00:00-04:00')
+            self.assertEqual(manual['prior_notes'], [str(first_path), str(middle)])
+            latest_link = '[[Investments/' + Path(manual['current_note']['path']).stem + '#Outcome review]]'
+            self.draft.write_bytes(self.note(rows=rows, as_of=manual['as_of'], generated=manual_now.isoformat())
+                                  + ('\n' + self.journal('Monthly summaries', [('2026-09', latest_link)])).encode())
+            latest = publish(self.draft, self.vault, manual_now, mode='manual')
+            planned = outcomes(self.vault, now=manual_now, mode='manual', as_of=manual['as_of'])
+            self.assertTrue(planned['complete'], planned['findings'])
+            self.assertEqual(len(planned['recommendations']), 1)
+            self.assertEqual(planned['recommendations'][0]['first_ready_note'], str(first_path))
+            self.assertEqual(len(planned['checkpoints']), len(HORIZONS))
+            self.assertEqual(planned['latest_monthly_summary']['record_note'], latest['path'])
+            self.assertEqual(publish(self.draft, self.vault, manual_now, mode='manual')['status'], 'unchanged')
+            self.assertEqual(publish(middle, self.vault, manual_now)['status'], 'unchanged')
+            self.assertEqual(outcomes(self.vault, now=manual_now)['latest_monthly_summary']['record_note'], str(first_path))
+            self.assertEqual(first_path.read_bytes(), original)
+            self.assertEqual(middle.read_bytes(), middle_bytes)
+            self.assertEqual(len(list(first_path.parent.glob('*.md'))), 3)
+
+        def test_manual_editions_carry_active_theses_and_cannot_revive_terminal_ids(self):
+            identifier = 'NYSE:ABC@2026-09-05'
+            first = self.prior('2026-09-05', [(identifier, 'watch', 'Original setup')])
+            original = first.read_bytes()
+            later = iso_time('2026-09-05T13:02:00-04:00')
+            fields = dict(as_of='2026-09-05T13:00:00-04:00', generated=later.isoformat())
+            self.draft.write_bytes(self.note(**fields))
+            with self.assertRaisesRegex(ValueError, 'carry active'):
+                publish(self.draft, self.vault, later, mode='manual')
+            self.draft.write_bytes(self.note(rows=[(identifier, 'expired', 'Window ended')], **fields))
+            terminal = publish(self.draft, self.vault, later, mode='manual')['path']
+            later = later + timedelta(hours=1)
+            self.draft.write_bytes(self.note(rows=[(identifier, 'watch', 'Attempted revival')],
+                as_of='2026-09-05T14:00:00-04:00', generated=later.isoformat()))
+            with self.assertRaisesRegex(ValueError, 'not revival'):
+                publish(self.draft, self.vault, later, mode='manual')
+            self.assertEqual(first.read_bytes(), original)
+            self.assertTrue(Path(terminal).exists())
+
+        def test_terminal_thesis_can_renew_with_a_distinct_manual_edition_id(self):
+            first = 'NYSE:ABC@2026-09-05'
+            self.outcome_note('2026-09-05', [(first, 'ready', 'Original confirmed setup')], [
+                self.journal('Recommendation records', [(first, '2026-09-05', 'pending',
+                                                         self.record_link('2026-09-05'), '-')])])
+            noon = iso_time('2026-09-05T12:02:00-04:00')
+            self.draft.write_bytes(self.note(rows=[(first, 'invalidated', 'Original catalyst failed')],
+                as_of='2026-09-05T12:00:00-04:00', generated=noon.isoformat()))
+            terminal = publish(self.draft, self.vault, noon, mode='manual')['path']
+            later = iso_time('2026-09-05T13:02:00-04:00')
+            renewal = first + '-130000'
+            record = '[[Investments/2026-09-05-130000-market-research#Outcome review]]'
+            self.draft.write_bytes(self.note(rows=[(renewal, 'ready', 'Distinct new catalyst; [[Investments/'
+                + Path(terminal).stem + '#Thesis updates]] preserves the failed thesis.')],
+                as_of='2026-09-05T13:00:00-04:00', generated=later.isoformat())
+                + ('\n' + self.journal('Recommendation records', [(renewal, '2026-09-05', 'pending', record, '-')])).encode())
+            result = outcomes(self.vault, self.draft, later, mode='manual')
+            self.assertTrue(result['complete'], result['findings'])
+            self.assertEqual({row['id'] for row in result['recommendations']}, {first, renewal})
+            saved = publish(self.draft, self.vault, later, mode='manual')
+            self.assertEqual(publish(saved['path'], self.vault, later, mode='manual')['status'], 'unchanged')
+            next_context = context(self.vault, later + timedelta(hours=1), mode='manual')
+            self.assertEqual([row['id'] for row in next_context['active_theses']], [renewal])
+
+        def test_new_time_suffixed_thesis_requires_its_exact_manual_edition(self):
+            later = iso_time('2026-09-05T13:02:00-04:00')
+            for mode, identifier in (('scheduled', 'NYSE:ABC@2026-09-05-130000'),
+                                     ('manual', 'NYSE:ABC@2026-09-05-125959')):
+                with self.subTest(mode=mode, identifier=identifier):
+                    self.draft.write_bytes(self.note(rows=[(identifier, 'watch', 'Fixture setup')],
+                        as_of='2026-09-05T13:00:00-04:00', generated=later.isoformat()))
+                    result = outcomes(self.vault, self.draft, later, mode=mode)
+                    self.assertFalse(result['complete'])
+                    self.assertTrue(any('time-suffixed thesis' in finding['error'] for finding in result['findings']))
+                    with self.assertRaisesRegex(ValueError, 'time-suffixed thesis'):
+                        publish(self.draft, self.vault, later, mode=mode)
+            with self.assertRaises(ValueError):
+                lint_bytes(self.note(rows=[('NYSE:ABC@2026-09-05-250000', 'watch', 'Invalid time')]))
+
+        def test_missing_scheduled_and_backdated_manual_editions_are_blocked(self):
+            late = iso_time('2026-09-05T13:02:00-04:00')
+            self.draft.write_bytes(self.note(as_of='2026-09-05T13:00:00-04:00', generated=late.isoformat()))
+            published = Path(publish(self.draft, self.vault, late, mode='manual')['path'])
+            original = published.read_bytes()
+            self.assertFalse(context(self.vault, late)['complete'])
+            for mode, cutoff in (('scheduled', '2026-09-05T11:30:00-04:00'),
+                                 ('manual', '2026-09-05T12:59:59-04:00')):
+                with self.subTest(mode=mode):
+                    self.draft.write_bytes(self.note(as_of=cutoff, generated=late.isoformat()))
+                    self.assertFalse(outcomes(self.vault, self.draft, late, mode=mode)['complete'])
+                    with self.assertRaisesRegex(ValueError, 'out of order'):
+                        publish(self.draft, self.vault, late, mode=mode)
+            self.assertEqual(published.read_bytes(), original)
+            self.assertEqual(len(list(published.parent.glob('*.md'))), 1)
+
+        def test_earlier_cutoff_with_later_publication_cannot_leak_into_manual_history(self):
+            path = self.prior('2026-09-05', [])
+            path.write_bytes(self.note(generated='2026-09-05T13:02:00-04:00'))
+            late = iso_time('2026-09-05T13:05:00-04:00')
+            context_result = context(self.vault, late, mode='manual', as_of='2026-09-05T13:00:00-04:00')
+            self.assertFalse(context_result['complete'])
+            self.assertEqual(context_result['prior_notes'], [])
+            self.assertEqual(context_result['later_notes'], [str(path)])
+
+        def test_manual_identity_collisions_and_mismatched_filenames_fail_closed(self):
+            cutoff = '2026-09-05T09:00:00-04:00'
+            self.draft.write_bytes(self.note())
+            saved = Path(publish(self.draft, self.vault, self.now, mode='manual')['path'])
+            original = saved.read_bytes()
+            self.draft.write_bytes(original.replace(b'Wait for confirmation.', b'Changed decision.'))
+            with self.assertRaisesRegex(ValueError, 'different bytes'):
+                publish(self.draft, self.vault, self.now, mode='manual')
+            with self.assertRaisesRegex(ValueError, 'must match'):
+                publish(self.draft, self.vault, self.now, mode='manual', as_of='2026-09-05T09:01:00-04:00')
+            self.assertEqual(saved.read_bytes(), original)
+            saved.rename(saved.with_name('2026-09-05-090001-market-research.md'))
+            result = context(self.vault, self.now, mode='manual', as_of=cutoff)
+            self.assertFalse(result['complete'])
+            self.assertTrue(any('filename time' in finding['error'] for finding in result['findings']))
+
+        def test_manual_daylight_saving_repeated_wall_clock_collision_is_not_overwritten(self):
+            early = iso_time('2026-11-01T01:32:00-04:00')
+            self.draft.write_bytes(self.note('2026-11-01', as_of='2026-11-01T01:30:00-04:00',
+                                            generated=early.isoformat()))
+            path = Path(publish(self.draft, self.vault, early, mode='manual')['path'])
+            original = path.read_bytes()
+            self.assertEqual(publish(path, self.vault, early, mode='manual')['status'], 'unchanged')
+            self.assertTrue(context(self.vault, early, mode='manual',
+                                    as_of='2026-11-01T01:30:00-04:00')['complete'])
+            late = iso_time('2026-11-01T01:32:00-05:00')
+            result = context(self.vault, late, mode='manual', as_of='2026-11-01T01:30:00-05:00')
+            self.assertFalse(result['complete'])
+            self.assertEqual(result['current_note']['state'], 'blocked')
+            self.assertEqual(path.read_bytes(), original)
+
+        def test_manual_cutoff_orders_ambiguous_times_by_instant(self):
+            before_fallback = iso_time('2026-11-01T01:45:00-04:00')
+            after_fallback = iso_time('2026-11-01T01:15:00-05:00')
+            with self.assertRaisesRegex(ValueError, 'nonfuture'):
+                context(self.vault, before_fallback, mode='manual', as_of=after_fallback.isoformat())
+            accepted = context(self.vault, after_fallback, mode='manual', as_of=before_fallback.isoformat())
+            self.assertTrue(accepted['complete'])
+            self.assertEqual(accepted['as_of'], before_fallback.isoformat())
+            self.draft.write_bytes(self.note('2026-11-01', as_of=after_fallback.isoformat(),
+                                            generated=after_fallback.isoformat()))
+            saved = Path(publish(self.draft, self.vault, after_fallback, mode='manual')['path'])
+            self.assertEqual(publish(saved, self.vault, after_fallback, mode='manual')['status'], 'unchanged')
+
+        def test_same_day_correction_cards_must_belong_to_exact_new_edition(self):
+            lesson = 'lesson-2026-09-05-01'
+            earlier = self.outcome_note('2026-09-05', journals=[self.journal('Lesson records', [
+                (lesson, 'provisional', self.record_link('2026-09-05'))])])
+            earlier.write_bytes(earlier.read_bytes() + b'\n#### Unused older card\n\nOriginal evidence.\n')
+            now = iso_time('2026-09-05T13:02:00-04:00')
+            base = self.note(as_of='2026-09-05T13:00:00-04:00', generated=now.isoformat())
+            old = '[[Investments/2026-09-05-market-research#Unused older card]]'
+            self.draft.write_bytes(base + ('\n' + self.journal('Lesson records', [(lesson, 'supported', old)])).encode())
+            rejected = outcomes(self.vault, self.draft, now, mode='manual')
+            self.assertFalse(rejected['complete'])
+            self.assertTrue(any('current draft' in finding['error'] for finding in rejected['findings']))
+            new = '[[Investments/2026-09-05-130000-market-research#Outcome review]]'
+            self.draft.write_bytes(base + ('\n' + self.journal('Lesson records', [(lesson, 'supported', new)])).encode())
+            self.assertTrue(outcomes(self.vault, self.draft, now, mode='manual')['complete'])
+            publish(self.draft, self.vault, now, mode='manual')
+
+        def test_same_day_future_edition_references_are_rejected(self):
+            lesson = 'lesson-2026-09-05-01'
+            first = self.outcome_note('2026-09-05', journals=[self.journal('Lesson records', [
+                (lesson, 'provisional', '[[Investments/2026-09-05-130000-market-research#Outcome review]]')])])
+            late = iso_time('2026-09-05T13:02:00-04:00')
+            self.draft.write_bytes(self.note(as_of='2026-09-05T13:00:00-04:00', generated=late.isoformat()))
+            result = outcomes(self.vault, self.draft, late, mode='manual')
+            self.assertFalse(result['complete'])
+            self.assertTrue(any('nonfuture' in finding['error'] for finding in result['findings']))
+            self.assertTrue(first.exists())
+
+        def test_publication_lock_prevents_concurrent_editions_without_lock_files(self):
+            import fcntl
+            descriptor = os.open(self.vault, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self.draft.write_bytes(self.note())
+                with self.assertRaisesRegex(ValueError, 'publication is in progress'):
+                    publish(self.draft, self.vault, self.now, mode='manual')
+            finally:
+                os.close(descriptor)
+            self.assertEqual(publish(self.draft, self.vault, self.now, mode='manual')['status'], 'created')
+            self.assertFalse(list(self.vault.glob('*lock*')))
 
         def test_clock_and_dst(self):
             for pacific, eastern, utc in (
@@ -903,6 +1253,65 @@ def run_self_test():
                          source.replace(b'### Outcome review', b'# Second title')):
                 with self.subTest(data=data), self.assertRaises(ValueError):
                     lint_bytes(data)
+
+        def test_provenance_footer_is_separate_from_financial_state(self):
+            original = self.note()
+            stamped = note_provenance.stamp_text(original.decode('utf-8'), self.generator).encode('utf-8')
+            old, new = lint_bytes(original), lint_bytes(stamped)
+            self.assertIsNone(old.pop('provenance'))
+            self.assertEqual(new.pop('provenance'), {'schema': 1, 'generated_by': self.generator})
+            self.assertEqual(old, new)
+            footer = stamped.decode('utf-8').split('<!-- skill-provenance:', 1)[1]
+            for malformed in (
+                    stamped + b'\nHidden continuation.\n',
+                    stamped + ('\n<!-- skill-provenance:' + footer).encode('utf-8'),
+                    original.replace(b'No active theses.', b'<!-- No active theses. -->')
+                    + stamped[len(original):],
+                    stamped.replace(b'"schema":', b'"financial_state":'),
+                    stamped.replace(b'<!-- skill-provenance:', b'<!-- unrelated:')):
+                with self.subTest(malformed=malformed), self.assertRaises(ValueError):
+                    lint_bytes(malformed)
+
+        def test_new_publication_requires_its_verified_creator(self):
+            self.provenance_gate.stop()
+            self.draft.write_bytes(self.note())
+            with patch(__name__ + '.active_provenance', return_value=self.generator):
+                with self.assertRaisesRegex(ValueError, 'skill-provenance footer'):
+                    publish(self.draft, self.vault, self.now)
+                for change in ({'plugin_version': '0.0.1'}, {'runtime_sha256': 'e' * 64},
+                               {'skill': 'knowledge:wiki-build'}):
+                    with self.subTest(change=change):
+                        self.draft.write_text(note_provenance.stamp_text(
+                            self.note().decode('utf-8'), dict(self.generator, **change)), encoding='utf-8')
+                        with self.assertRaisesRegex(ValueError, 'executing installed'):
+                            publish(self.draft, self.vault, self.now)
+                update = {'schema': 1, 'generated_by': self.generator, 'updated_by': self.generator}
+                self.draft.write_text(self.note().decode('utf-8').rstrip() + '\n\n'
+                                      + '<!-- skill-provenance: ' + json.dumps(update) + ' -->\n', encoding='utf-8')
+                with self.assertRaisesRegex(ValueError, 'without an update record'):
+                    publish(self.draft, self.vault, self.now)
+                self.assertFalse((self.vault / 'Investments').exists())
+                self.draft.write_text(note_provenance.stamp_text(
+                    self.note().decode('utf-8'), self.generator), encoding='utf-8')
+                saved = publish(self.draft, self.vault, self.now)
+                self.assertEqual(saved['status'], 'created')
+                self.assertEqual(Path(saved['path']).read_bytes(), self.draft.read_bytes())
+
+        def test_historical_identical_retry_never_relabels_its_creator(self):
+            self.provenance_gate.stop()
+            current = self.prior('2026-09-05', [])
+            original = current.read_bytes()
+            with patch(__name__ + '.active_provenance', side_effect=AssertionError('must not verify a retry')):
+                self.assertEqual(publish(current, self.vault, self.now)['status'], 'unchanged')
+            self.assertEqual(current.read_bytes(), original)
+            self.assertIsNone(lint_bytes(original)['provenance'])
+
+        def test_publisher_rejects_shared_helpers_from_another_bundle(self):
+            with patch(__name__ + '._shared', str(self.vault)), \
+                    patch.object(note_provenance, 'verified_record') as verify:
+                with self.assertRaisesRegex(ValueError, 'executing plugin bundle'):
+                    active_provenance()
+                verify.assert_not_called()
 
         def test_required_subsections_cannot_be_missing(self):
             for titles in SUBHEADINGS.values():
@@ -1098,12 +1507,12 @@ def run_self_test():
             self.prior('2026-09-03', [])
             self.draft.write_bytes(self.note())
             original, calls = inventory, 0
-            def changed(vault, day):
+            def changed(vault, day, *edition_args):
                 nonlocal calls
                 calls += 1
                 if calls == 2:
                     self.prior('2026-09-04', [('NYSE:ABC@2026-09-04', 'watch', 'Concurrent thesis')])
-                return original(vault, day)
+                return original(vault, day, *edition_args)
             with patch.dict(globals(), {'inventory': changed}):
                 with self.assertRaisesRegex(RuntimeError, 'history changed'):
                     publish(self.draft, self.vault, self.now)
@@ -2030,18 +2439,21 @@ def main(argv=None):
     publish_parser = commands.add_parser('publish')
     publish_parser.add_argument('draft')
     publish_parser.add_argument('--vault', required=True)
+    for run_parser in (context_parser, outcomes_parser, publish_parser):
+        run_parser.add_argument('--mode', choices=('scheduled', 'manual'), default='scheduled')
+        run_parser.add_argument('--as-of', help='fixed manual run timestamp returned by context')
     args = parser.parse_args(argv)
     if args.test:
         return 0 if run_self_test() else 1
     try:
         if args.command == 'context':
-            result = context(args.vault)
+            result = context(args.vault, mode=args.mode, as_of=args.as_of)
         elif args.command == 'outcomes':
-            result = outcomes(args.vault, args.draft)
+            result = outcomes(args.vault, args.draft, mode=args.mode, as_of=args.as_of)
         elif args.command == 'lint':
             result = lint_bytes(read_stable(args.note)[0])
         elif args.command == 'publish':
-            result = publish(args.draft, args.vault)
+            result = publish(args.draft, args.vault, mode=args.mode, as_of=args.as_of)
         else:
             parser.error('choose context, outcomes, lint, publish or --test')
         print(json.dumps(result, ensure_ascii=False, indent=2))

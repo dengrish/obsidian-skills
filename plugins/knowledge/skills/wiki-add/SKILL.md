@@ -123,6 +123,11 @@ Wiki entries only for queued topics. A clean script result does not establish so
 
 ## 5. Publish and verify
 
+Stamp every new note with [verified skill provenance](../../shared/PROVENANCE.md)
+and validate the final bytes. New Wiki entries produced here name `wiki-add`,
+even though their writing rules come from the builder. Existing-topic outcomes
+remain byte-for-byte unchanged, including missing historical provenance.
+
 Refresh the real Wiki inventory and candidate probes immediately before
 publication. Re-adjudicate a new occupant or alias owner; preserve it unchanged.
 A newly arrived same-entity entry can become an existing-topic outcome after

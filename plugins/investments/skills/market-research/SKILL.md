@@ -39,6 +39,12 @@ Use the helper to establish the date, cutoff, and existing record:
 python3 '<skill>/scripts/market_notes.py' context --vault '<vault>'
 ```
 
+The default `scheduled` mode creates or reuses the daily scheduled edition. For
+a user-requested fresh review, use `context --mode manual`, then preserve its
+`as_of` value with `--mode manual --as-of '<cutoff>'` on subsequent context and
+outcome calls. Manual editions use their actual cutoff and a timestamped filename;
+see [edition naming and retries](references/note-format.md#editions-and-retries).
+
 For the scheduled edition, freeze evidence at 11:30 New York time; record the
 actual generation time separately. Read news since the previous completed
 review's cutoff, including intervening after-hours releases and still-relevant
@@ -53,18 +59,20 @@ Verify the exchange calendar and actual session, including exceptional closures;
 never derive holidays from weekdays alone. Run every calendar day when daily
 execution is requested. On a closed-market day, write a short follow-up with the
 last completed session and next scheduled session; do not present stale prices
-as current trading. Before 11:30 New York time, use the helper's earlier actual
-cutoff and describe the edition as early/manual.
+as current trading. A scheduled run before 11:30 New York time uses the helper's
+earlier actual cutoff and is described as an early edition.
 
-If today's recognized note already exists, read it and run the outcome inventory
+If the selected edition already exists, read it and run the outcome inventory
 below before reusing it. Context's `thesis_history` and `active_theses` describe
-prior dates; today's states are in the existing note. The `valid` marker checks note structure, not
+earlier editions available by the cutoff, including the same date; the selected
+edition's states are in its existing note. The `valid` marker checks note structure, not
 cross-note journal consistency; history and cross-note journals must validate.
 Pending or unavailable market observations remain valid limitations.
 A successful routine retry returns the existing note without rewriting that
-day's judgments, creating a numbered duplicate, or starting a second market run.
+edition's judgments, creating a numbered duplicate, or starting a second market run.
 Report malformed history, inconsistent journals or an unsafe occupant instead of
-replacing files. An additional same-day edition requires a separately agreed scope.
+replacing files. A fresh manual review is a new edition, not a retry; preserve
+all earlier notes and carry forward their evidence and theses.
 
 ## Recover the prior theses
 
@@ -197,14 +205,28 @@ entire feeds, or duplicating unchanged history. Link specific earlier records an
 state today's changes. Charts belong where they clarify verified evidence, usually
 in the record. All supporting data and citations remain ordinary visible Markdown.
 
-Stage the complete draft in the run's owned scratch directory, then validate and
-publish it with the bundled helper:
+Stage the complete draft in the run's owned scratch directory. Stamp the finalized
+draft with the verified installed plugin's identity, following
+[note provenance](../../shared/PROVENANCE.md), then validate and publish the stamped
+copy. Here `<plugin>` is the installed plugin root containing this skill and its
+own `shared/` directory; it is never the development checkout or another plugin.
 
 ```bash
-python3 '<skill>/scripts/market_notes.py' lint '<scratch>/daily.md'
-python3 '<skill>/scripts/market_notes.py' outcomes --vault '<vault>' --draft '<scratch>/daily.md'
-python3 '<skill>/scripts/market_notes.py' publish '<scratch>/daily.md' --vault '<vault>'
+python3 '<plugin>/shared/scripts/note_provenance.py' stamp --plugin '<plugin>' --skill market-research --draft '<scratch>/daily.md' --output '<scratch>/daily-stamped.md'
+python3 '<skill>/scripts/market_notes.py' lint '<scratch>/daily-stamped.md'
+python3 '<skill>/scripts/market_notes.py' outcomes --vault '<vault>' --draft '<scratch>/daily-stamped.md'
+python3 '<skill>/scripts/market_notes.py' publish '<scratch>/daily-stamped.md' --vault '<vault>'
 ```
+
+Each new edition must identify this verified bundle as its creator; do not copy
+an earlier note's provenance or use `--previous` for a new edition. Keep its final
+metadata footer separate from all financial evidence. Existing notes and
+byte-identical retries retain their original attribution, including absent
+provenance on historical notes; never relabel them as current output.
+
+For a manual edition, include `--mode manual --as-of '<cutoff>'` on the draft
+outcome check and `--mode manual` on publication. Publication derives the target
+from the draft's `as_of`; its optional `--as-of` must match that value.
 
 Before publication, audit the claims that determine selection, readiness or risk
 against their retained evidence and calculations. Check citations, timestamps,

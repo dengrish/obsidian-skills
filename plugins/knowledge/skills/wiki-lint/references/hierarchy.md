@@ -5,7 +5,9 @@ on `hierarchy_diagnostic`. A MOC is a **fully generated navigation note**: disci
 `MOCs/<discipline-slug>.md`, and entries tagged only `#misc` have a flat list in
 `MOCs/misc.md`. Its complete content is a bullet outline derived from the
 current Wiki entries. It contains no ownership
-comments, H1, frontmatter, or separate prose sections.
+comments, H1, frontmatter, or separate prose sections, except the final
+[skill-provenance footer](../../../shared/PROVENANCE.md). That metadata is not
+part of the navigation tree. A footer-only misc MOC is an empty outline.
 
 `parents:` and the MOCs are **two renderings of one hierarchy**. Derive one
 tree per included specific discipline, root it at `[[MOCs/<discipline-slug>]]`, and
@@ -135,7 +137,8 @@ target ambiguous. Preserve it until the intended owner is established.
 
 The **whole recognized discipline or misc MOC belongs to Task 3**. Within an authorized
 closure, regenerate its complete content from the derived placement plan and
-publish it through the shared safe-write protocol. Old comments,
+publish it through the shared safe-write protocol, preserving/updating the
+provenance footer under its shared rules. Other comments,
 frontmatter, headings, and prose are obsolete generated formatting and are
 removed during regeneration under that whole-file ownership. This does not
 extend to unknown files in `MOCs/`, other vault notes, or suggestion logs.
@@ -152,7 +155,8 @@ A discipline MOC is a nested bullet list, for example:
 
 For discipline trees, use two spaces per level. Each bullet is either a piped entry link with its
 canonical readable title or an unlinked category term. There are no trailing
-descriptions, comments, H1, or frontmatter. Drop a trailing title
+descriptions, inline comments, H1, or frontmatter. The provenance footer follows
+the outline after a blank line. Drop a trailing title
 parenthetical that repeats this discipline's name, but retain a finer
 qualifier: `[[Wiki/clustering-machine-learning|Clustering]]` is suitable in the
 machine-learning MOC, while `[[Wiki/pruning-decision-trees|Pruning (decision trees)]]`
@@ -189,7 +193,7 @@ unless cleanup is explicitly requested. These preserved
 findings do not prevent the active hierarchy from completing, but must not be
 described as repaired. **Misc is different:** refresh its entire list from all
 entries tagged only `#misc` in the authorized misc closure. If that list is empty,
-clear an existing misc file to an empty file (no heading or comment) and keep it.
+clear an existing misc file to an empty outline and keep its provenance footer.
 An explicit request can create empty misc; never apply the inactive-discipline
 preservation rule to retain stale misc members.
 
@@ -221,8 +225,10 @@ preservation rule to retain stale misc members.
 - `moc_consistency_findings` validates the **whole file**: bullet structure,
   depth, canonical targets/labels, entry coverage, duplicate placements,
   wrong-group links, discipline eponymous-root shape, misc list order/flatness, and parent-union
-  consistency. Comments, prose, headings, fences, and frontmatter are malformed
-  outline lines; none delimit a separately owned region.
+  consistency. A valid final provenance footer is metadata outside the outline;
+  malformed or misplaced provenance is reported. Other comments, prose, headings,
+  fences, and frontmatter are malformed outline lines; none delimit a separately
+  owned region.
   Exact union comparison requires every expected group MOC to be readable/empty and
   structurally parseable with usable placements; any unsafe linked ancestor
   or occurrence blocks inference, even if another occurrence is usable.
@@ -232,7 +238,8 @@ preservation rule to retain stale misc members.
 After a completed closure, every included entry with valid membership has no placement gap,
 unresolved/invalid parent, self-parent, or cycle. Every active included MOC is
 readable (or empty misc with zero members), contains only the complete generated
-outline, and has no consistency finding. Each included entry's parents exactly
+outline plus its valid provenance footer when present, and has no consistency
+finding. Each included entry's parents exactly
 match its nearest linked ancestors across its discipline MOCs or `[[MOCs/misc]]`. Re-scan to verify these conditions. After a
 full-vault pass they hold for all active disciplines, misc, and requested entries;
 inactive discipline MOCs and skipped closures remain explicitly reported and

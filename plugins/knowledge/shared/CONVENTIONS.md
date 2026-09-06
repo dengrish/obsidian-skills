@@ -1,7 +1,9 @@
 # Vault conventions — the canonical statement
 
 **This file is the authority for knowledge note conventions.** Shared runtime,
-input-safety and publication rules live in their linked guides. A skill that
+input-safety and publication rules live in their linked guides. The shared
+[note-provenance footer](PROVENANCE.md) records verified runtime identity
+outside the content formats below, without adding a frontmatter field. A skill that
 needs one of these facts **points at this file** rather than restating it;
 where a skill's own text and
 this file disagree, this file is what a future edit should reconcile against.
@@ -63,7 +65,7 @@ publication stages follow [SAFE_WRITES.md](SAFE_WRITES.md) separately.
 | `Sources/PDFs/<Work>/` | book-chapter PDFs, e.g. `Sources/PDFs/Prince_UDL_2026/`. The folder is what pdf-organize creates when it splits a book. paper-summarize's batch **scans** it — a book is only recognisable as one when a chapter turns up beside it — and then **skips** every chapter it finds, so a sweep never becomes a book's worth of summaries | pdf-organize, the user | figure-extract, paper-summarize (scans, skips), wiki-build, wiki-add |
 | `Sources/Images/` | **flat**; every figure and downloaded image, all extensions, whatever it came from | figure-extract, clipping-clean, wiki-add (new research images only); **pdf-organize** renames in place only within an approved source rename (§1a) | wiki-build, wiki-add, paper-summarize, clipping-clean (its `rename` path re-reads the folder — §8a), wiki-lint (with `--images`, validates embeds and reports nested/staging residue without opening or deleting files) |
 | `Wiki/` | wiki entries, one `.md` per entity (walked **recursively**) | wiki-build, wiki-add (missing requested entries only), wiki-lint | wiki-build, wiki-add, wiki-lint |
-| `Investments/` | **flat**; `YYYY-MM-DD-market-research.md` daily analyses using the independent `investments:market-research` note format | market-research only; earlier dated records remain unchanged | market-research (longitudinal evidence and thesis review) |
+| `Investments/` | **flat**; market analyses whose naming and schema follow the independent `investments:market-research` note format | market-research only; earlier dated records remain unchanged | market-research (longitudinal evidence and thesis review) |
 | `add-to-wiki.md` at the *vault root* | requested-topic queue | the user; wiki-add checks off successful or already-existing items only | wiki-add |
 | `MOCs/` | **flat**; fully generated `<discipline>.md` nested outlines plus `misc.md` for Wiki entries tagged `#misc`; no `-moc` suffix, marker comments, H1, or frontmatter | wiki-lint | wiki-lint (navigation/hierarchy diagnostics only; reads each before an in-place update) |
 | `Reviews/` | `<current-skill>-suggestions.md` for installed skills, plus `Reviews/wiki-notes-suggestions.md` for Wiki note-content improvements; open issues only | skills under the attribution and setup rules in [SUGGESTIONS.md](SUGGESTIONS.md) | skills consuming the relevant outputs or verifying a fix |
