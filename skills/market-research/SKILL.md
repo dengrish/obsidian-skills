@@ -105,14 +105,15 @@ research method's repeatable announcement and price-history passes, retaining
 their universe, filters and coverage in the research record. A materially changed
 screen needs an explanation so longitudinal comparisons remain interpretable.
 
-Use the bundled [data-access guide](references/data-access.md) for SEC filings
-and facts, Nasdaq directories and halts, Alpaca prices/actions/sessions/news,
-Alpha Vantage news/calendars, and FRED macro observations/release dates. Check
-local setup without network access first; use configured sources for repeatable
-retrieval and preserve their declared
-coverage, cutoffs and partial-result warnings. Missing keys limit only the
-affected source. These helpers retrieve evidence; interpretation and screening
-still follow the research method.
+Follow the bundled [data-access guide and retrieval plan](references/data-access.md#retrieval-plan)
+to assign configured sources to the session, universe, announcement, price,
+shortlist, corporate-action, macro and outcome checks. Check local setup without
+network access first, using any approved provider-specific launcher supplied by
+the host/task as described in that guide. Use the relevant commands; do not run
+every endpoint merely to exercise a script. Preserve coverage, cutoffs,
+partial-result warnings and material skipped/unavailable checks. Missing keys
+limit only the affected source. These helpers retrieve evidence; interpretation
+and screening still follow the research method.
 
 Use available host web search, page-reading, and market-data capabilities for
 primary-source verification and coverage beyond the helpers. No paid feed or

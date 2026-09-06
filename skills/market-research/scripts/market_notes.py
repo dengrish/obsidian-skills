@@ -424,6 +424,7 @@ def outcomes(vault, draft=None, now=None):
         if iso_time(note['metadata']['generated_at']) > current:
             finding(path, 'generated_at is in the future')
         notes[note['metadata']['date']] = (path, note, data)
+    unpublished_draft = draft is not None and day not in notes
     if draft is not None:
         data, draft_token = read_stable(draft)
         note = lint_bytes(data, day)
@@ -445,6 +446,10 @@ def outcomes(vault, draft=None, now=None):
                              r'(?:\.md)?(?:#([^\[\]|\\#\r\n]+))?\]\]', raw)
         if not match or match[1] not in notes or match[1] > note_day:
             raise ValueError('Record must link to a known, nonfuture dated market note or section: ' + raw)
+        # Preserve all published note-wide links, including today's immutable
+        # record and identical retries. Only a new draft can adopt this rule.
+        if unpublished_draft and note_day == day and not match[2]:
+            raise ValueError('new draft Record must include a specific section anchor: ' + raw)
         target, target_note, data = notes[match[1]]
         if match[2] and sum((heading[2] or '').strip() == match[2]
                            for line in data.decode('utf-8').splitlines()
@@ -1568,6 +1573,51 @@ def run_self_test():
             result = outcomes(self.vault, self.draft, self.now)
             self.assertFalse(result['complete'])
             self.assertIn('exactly one heading', result['findings'][0]['error'])
+
+        def test_new_records_need_anchors_without_invalidating_older_note_links(self):
+            identifier = 'lesson-2026-09-04-01'
+            old_link = '[[Investments/2026-09-04-market-research]]'
+            old = self.outcome_note('2026-09-04', journals=[self.journal('Lesson records', [
+                (identifier, 'provisional', old_link)])])
+            original = old.read_bytes()
+            legacy = outcomes(self.vault, now=self.now)
+            self.assertTrue(legacy['complete'], legacy['findings'])
+            self.assertIsNone(legacy['active_lessons'][0]['record_section'])
+            for link in (old_link, '[[Investments/2026-09-05-market-research]]'):
+                with self.subTest(link=link):
+                    self.outcome_note('2026-09-05', journals=[self.journal('Lesson records', [
+                        (identifier, 'provisional', link)])], draft=True)
+                    result = outcomes(self.vault, self.draft, self.now)
+                    self.assertFalse(result['complete'])
+                    self.assertIn('specific section anchor', result['findings'][0]['error'])
+                    with self.assertRaisesRegex(ValueError, 'specific section anchor'):
+                        publish(self.draft, self.vault, self.now)
+            updated_link = '[[Investments/2026-09-05-market-research#Updated lesson evidence]]'
+            self.outcome_note('2026-09-05', journals=[self.journal('Lesson records', [
+                (identifier, 'supported', updated_link)])], draft=True)
+            self.draft.write_bytes(self.draft.read_bytes()
+                                   + b'\n#### Updated lesson evidence\n\nSynthetic evidence with a prior-record link: '
+                                   + old_link.encode() + b'.\n')
+            checked = outcomes(self.vault, self.draft, self.now)
+            self.assertTrue(checked['complete'], checked['findings'])
+            self.assertEqual(checked['active_lessons'][0]['record_section'], 'Updated lesson evidence')
+            self.assertEqual(old.read_bytes(), original)
+
+        def test_published_same_day_note_links_allow_read_and_identical_retry(self):
+            link = '[[Investments/2026-09-05-market-research]]'
+            published = self.outcome_note('2026-09-05', journals=[self.journal('Lesson records', [
+                ('lesson-2026-09-05-01', 'provisional', link)])])
+            original = published.read_bytes()
+            indexed = outcomes(self.vault, now=self.now)
+            self.assertTrue(indexed['complete'], indexed['findings'])
+            self.assertIsNone(indexed['active_lessons'][0]['record_section'])
+            self.draft.write_bytes(original)
+            retry = outcomes(self.vault, self.draft, self.now)
+            self.assertTrue(retry['complete'], retry['findings'])
+            self.assertEqual(retry['active_lessons'], indexed['active_lessons'])
+            self.assertEqual(publish(self.draft, self.vault, self.now)['status'], 'unchanged')
+            self.assertEqual(published.read_bytes(), original)
+            self.assertFalse(list(self.vault.glob('.market-research-stage-*')))
 
         def test_due_baselines_include_terminal_recommendations_once(self):
             identifier, first_day = 'NYSE:ABC@2026-09-03', '2026-09-03'

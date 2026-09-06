@@ -195,7 +195,8 @@ class Reply(io.BytesIO):
     status = 200
     headers = {}
 opener = Mock()
-opener.open.side_effect = [Reply(json.dumps(row).encode()) for row in fixture['pages']]
+opener.open.side_effect = [Reply(row.encode() if isinstance(row, str) else json.dumps(row).encode())
+                          for row in fixture['pages']]
 client = HttpClient(fixture['env'], opener=opener, sleeper=lambda _: None)
 raise SystemExit(main(fixture['args'], client))
 ''', encoding='utf-8')
@@ -239,6 +240,38 @@ raise SystemExit(main(fixture['args'], client))
         unavailable = run(news_args, [{'Information': 'Invalid api key DUMMY_SECRET_FOR_OFFLINE_TEST'}], 2)
         self.assertFalse(unavailable['complete'])
         self.assertEqual(unavailable['error']['code'], 'access_denied')
+
+        capped = run(news_args + ['--limit', '1'], [{'items': '2', 'feed': [
+            article, {**article, 'time_published': '20250905T123100'}]}], 2)
+        self.assertEqual(capped['provider_record_count'], 2)
+        self.assertEqual(capped['returned_record_count'], 1)
+        self.assertEqual(capped['limited_record_count'], 1)
+
+        alpaca_news = run(['news', '--provider', 'alpaca', '--symbol', 'AAPL',
+                          '--since', '2025-09-04T16:00:00-04:00',
+                          '--as-of', '2025-09-05T09:00:00-04:00', '--include-content'], [{
+            'news': [{'id': 1, 'headline': 'Synthetic update',
+                      'created_at': '2025-09-05T12:30:00Z', 'updated_at': '2025-09-05T12:35:00Z',
+                      'symbols': ['AAPL'], 'url': 'https://example.test/update',
+                      'content': 'DUMMY_SECRET_FOR_OFFLINE_TEST'}], 'next_page_token': None}], 0)
+        self.assertTrue(alpaca_news['complete'])
+        self.assertEqual(alpaca_news['data'][0]['content'], '[redacted]')
+
+        # Match the real RSS field names and padded fractional clock, with
+        # synthetic values. A JSON-only fixture misses this provider's parser.
+        rss = '''<rss xmlns:ndaq="urn:nasdaq"><channel>
+<pubDate>Fri, 05 Sep 2025 13:00:00 GMT</pubDate><ndaq:numItems>1</ndaq:numItems>
+<item><ndaq:HaltDate>09/05/2025</ndaq:HaltDate>
+<ndaq:HaltTime>08:00:00                      .590</ndaq:HaltTime>
+<ndaq:IssueSymbol>FIX</ndaq:IssueSymbol><ndaq:IssueName>Fixture company</ndaq:IssueName>
+<ndaq:Mkt>Q</ndaq:Mkt><ndaq:ReasonCode>T1</ndaq:ReasonCode></item></channel></rss>'''
+        halt_args = ['halts', '--date', '2025-09-05', '--as-of', '2025-09-05T09:00:00-04:00']
+        halt = run(halt_args, [rss], 0)
+        self.assertEqual(halt['data']['halts'][0]['market_code'], 'Q')
+        self.assertEqual(halt['data']['halts'][0]['halt_at'], '2025-09-05T08:00:00.590000-04:00')
+        self.assertIn('haltdate=09052025', halt['requests'][0]['url'])
+        mismatched = run(halt_args, [rss.replace('09/05/2025', '09/04/2025')], 2)
+        self.assertEqual(mismatched['error']['code'], 'schema_error')
 
         vintage = '2025-09-03'
         metadata = {'realtime_start': vintage, 'realtime_end': vintage, 'seriess': [{

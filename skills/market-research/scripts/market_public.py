@@ -407,6 +407,13 @@ def _local_name(tag):
 def _halt_stamp(day, clock):
     if not day or not clock:
         return None
+    # Nasdaq's RSS can pad the seconds field before its fractional suffix.
+    # Normalize only that observed format, preserving subsecond precision and
+    # leaving the original field untouched in source_fields.
+    match = re.fullmatch(r'(\d{2}:\d{2}:\d{2})(?:[ \t]*(\.\d{1,6}))?', clock)
+    if match is None:
+        _bad('Nasdaq halt timestamp is invalid.')
+    clock = match[1] + (match[2] or '')
     try:
         parsed = datetime.strptime(day + ' ' + clock, '%m/%d/%Y %H:%M:%S.%f' if '.' in clock else '%m/%d/%Y %H:%M:%S')
         zoned = parsed.replace(tzinfo=_ny())
@@ -453,7 +460,7 @@ def _rss(text):
                 if key in fields:
                     _bad('Nasdaq RSS item field is duplicated.')
                 fields[key] = (child.text or '').strip()
-            for key in ('HaltDate', 'HaltTime', 'IssueSymbol', 'IssueName', 'Market'):
+            for key in ('HaltDate', 'HaltTime', 'IssueSymbol', 'IssueName', 'Mkt'):
                 _str(fields.get(key))
             halt_at = _halt_stamp(fields['HaltDate'], fields['HaltTime'])
             quote_at = _halt_stamp(fields.get('ResumptionDate'), fields.get('ResumptionQuoteTime'))
@@ -466,10 +473,11 @@ def _rss(text):
                 if parts.scheme not in ('http', 'https') or not parts.netloc or parts.username or parts.password:
                     _bad('Nasdaq RSS item link is not an ordinary web URL.')
             records.append({'symbol': fields['IssueSymbol'], 'security_name': fields['IssueName'],
+                            'market_code': fields['Mkt'],
                             'halt_at': halt_at, 'scheduled_quote_resumption_at': quote_at,
                             'scheduled_trade_resumption_at': trade_at,
                             'reason_code': fields.get('ReasonCode') or None, 'source_url': url,
-                            'source_fields': {k: fields[k] for k in ('HaltDate', 'HaltTime', 'IssueSymbol', 'IssueName', 'Market', 'ReasonCode', 'PauseThresholdPrice', 'ResumptionDate', 'ResumptionQuoteTime', 'ResumptionTradeTime') if k in fields}})
+                            'source_fields': {k: fields[k] for k in ('HaltDate', 'HaltTime', 'IssueSymbol', 'IssueName', 'Mkt', 'ReasonCode', 'PauseThresholdPrice', 'ResumptionDate', 'ResumptionQuoteTime', 'ResumptionTradeTime') if k in fields}})
             if len(records) > MAX_RECORDS:
                 _bad('Nasdaq RSS exceeds the record bound.')
     if published is None:
@@ -495,6 +503,8 @@ def nasdaq_halts(client, args):
     symbols = set(_csv((getattr(args, 'symbols', None) or '').upper(), SYMBOL))
     limit = _int_arg(args, 'limit', 20000, MAX_RECORDS)
     rows, published = _rss(client.get_text(HALTS, params=params))
+    if day and any(parse_time(row['halt_at']).astimezone(_ny()).date() != parsed_day for row in rows):
+        _bad('Nasdaq returned a halt outside the explicitly requested halt date.')
     selected = [r for r in rows if (not symbols or r['symbol'] in symbols)
                 and (not cutoff or parse_time(r['halt_at']) <= cutoff)]
     warnings = ['Feed is a current snapshot of the requested halt day, not a historical record of what was known at an earlier cutoff.',
@@ -603,13 +613,33 @@ def self_test():
     fails(lambda: _directory(nasdaq.replace('|N|100|N', '|Z|100|N'), 'nasdaqlisted.txt'), 'invalid flag')
     directory_args.limit = 1
     check(not nasdaq_symbols(directory_client, directory_args)['complete'], 'directory bound')
-    rss = '<rss xmlns:n="urn:nasdaq"><channel><pubDate>Fri, 04 Sep 2026 13:00:00 GMT</pubDate><n:numItems>1</n:numItems><item><n:HaltDate>09/04/2026</n:HaltDate><n:HaltTime>08:00:00</n:HaltTime><n:IssueSymbol>FIX</n:IssueSymbol><n:IssueName>Fixture</n:IssueName><n:Market>NASDAQ</n:Market><n:ReasonCode>T1</n:ReasonCode><n:ResumptionDate>09/04/2026</n:ResumptionDate><n:ResumptionTradeTime>09:30:00</n:ResumptionTradeTime></item></channel></rss>'
+    rss = '<rss xmlns:n="urn:nasdaq"><channel><pubDate>Fri, 04 Sep 2026 13:00:00 GMT</pubDate><n:numItems>1</n:numItems><item><n:HaltDate>09/04/2026</n:HaltDate><n:HaltTime>08:00:00</n:HaltTime><n:IssueSymbol>FIX</n:IssueSymbol><n:IssueName>Fixture</n:IssueName><n:Mkt>Q</n:Mkt><n:ReasonCode>T1</n:ReasonCode><n:ResumptionDate>09/04/2026</n:ResumptionDate><n:ResumptionTradeTime>09:30:00</n:ResumptionTradeTime></item></channel></rss>'
     halt_args = SimpleNamespace(symbols=None, date='2026-09-04', as_of='2026-09-04T13:00:00Z', limit=20000)
     client = Fake({HALTS: rss})
     result = nasdaq_halts(client, halt_args)
     check(result['data']['halts'][0]['halt_at'] == '2026-09-04T08:00:00-04:00', 'ET halt timestamp')
     check(client.calls[0][1]['haltdate'] == '09042026', 'official historical halt parameter')
     check('scheduled_trade_resumption_at' in result['data']['halts'][0] and not result['query']['point_in_time'], 'scheduled not actual resumption')
+    check(result['data']['halts'][0]['market_code'] == 'Q'
+          and result['data']['halts'][0]['source_fields']['Mkt'] == 'Q', 'actual Nasdaq Mkt field retained')
+    padded_clock = '08:00:00                      .590'
+    padded_rss = rss.replace('<n:HaltTime>08:00:00</n:HaltTime>', '<n:HaltTime>' + padded_clock + '</n:HaltTime>')
+    padded = nasdaq_halts(Fake({HALTS: padded_rss}), halt_args)['data']['halts'][0]
+    check(padded['halt_at'] == '2026-09-04T08:00:00.590000-04:00'
+          and padded['source_fields']['HaltTime'] == padded_clock, 'padded fraction parsed without discarding raw clock')
+    fails(lambda: _rss(rss.replace('<n:Mkt>Q</n:Mkt>', '')), 'missing actual market field rejected')
+    for bad_clock in ('08: 00:00', '08:00:00 .1234567', '08:00:00 .', '08:00:00 trailing'):
+        fails(lambda: _halt_stamp('09/04/2026', bad_clock), 'malformed clock not normalized')
+    wrong_day = rss.replace('<n:HaltDate>09/04/2026</n:HaltDate>', '<n:HaltDate>09/03/2026</n:HaltDate>')
+    fails(lambda: nasdaq_halts(Fake({HALTS: wrong_day}), halt_args), 'historical halt date mismatch rejected')
+    default_halt_args = copy.copy(halt_args)
+    default_halt_args.date = None
+    check(nasdaq_halts(Fake({HALTS: wrong_day}), default_halt_args)['complete'],
+          'default current-trade-day feed need not match current calendar day')
+    later_resume = rss.replace('<n:ResumptionDate>09/04/2026</n:ResumptionDate>',
+                              '<n:ResumptionDate>09/08/2026</n:ResumptionDate>')
+    check(nasdaq_halts(Fake({HALTS: later_resume}), halt_args)['complete'],
+          'historical halt date does not restrict a later scheduled resumption')
     fails(lambda: _rss('<!DOCTYPE foo [<!ENTITY a "x">]>' + rss), 'DTD and entity rejected')
     fails(lambda: _rss(rss.replace('>1</n:numItems>', '>2</n:numItems>')), 'RSS count mismatch')
     fails(lambda: _rss('<html>blocked</html>'), 'HTML error not empty success')

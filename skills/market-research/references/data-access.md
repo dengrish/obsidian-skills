@@ -26,6 +26,16 @@ and [API key](https://fred.stlouisfed.org/docs/api/api_key.html); do not use its
 documentation's demonstration key. Host-specific secure storage is separate
 from this portable helper. Follow the [FRED API terms](https://fred.stlouisfed.org/docs/api/terms_of_use.html).
 
+The direct Python examples below assume those variables are already available.
+If the host or task supplies an approved local credential launcher, use that
+launcher for both `check` and retrieval within its allowed provider/command scope.
+Separate providers may have separate launchers: combine only the relevant source
+rows from their checks, rather than treating another launcher's missing variables
+as missing account access. Do not infer unavailable credentials from the ordinary
+shell when an approved launcher supplies them. During research, do not create or
+rebuild launchers, search credential stores, or retrieve/export secrets yourself;
+report a missing or blocked route and continue with other sources.
+
 ```bash
 python3 '<skill>/scripts/market_data.py' check
 python3 '<skill>/scripts/market_data.py' check --live --source alpaca
@@ -40,6 +50,32 @@ vintage sample. A successful sample does not establish
 access to every endpoint, real-time data, or complete market coverage. Missing
 credentials should limit only the affected source; continue with other usable
 sources and host web tools, recording gaps.
+
+## Retrieval plan
+
+Use `market_data.py` through the configured route above for the evidence needed
+at each stage. `market_notes.py` separately supplies history, due work and guarded
+publication under `SKILL.md`; the sibling data modules are imports, not additional
+commands to run. This is a plan for relevant retrieval, not a requirement to call
+every endpoint on every day. Reuse adequately dated evidence when appropriate;
+record sources used, material unavailable access and why a relevant check was
+skipped in Screening and sources. A successful setup probe is not today's research.
+
+| Stage | Commands and use |
+|---|---|
+| Review window and session | `sessions` for the last/next sessions and their opening/closing boundaries; verify exceptional closures against an exchange source. Reuse this calendar for price filtering and due outcome events. |
+| Accessible universe | `symbols` when establishing or refreshing the current directory-based screen or resolving instrument identity. Preserve membership dates and provider symbol mappings; it does not classify every non-ETF as an eligible common share. |
+| Announcement pass | `news --provider alpaca` for a bounded broad or ticker-specific news window when configured; use `news --provider alpha_vantage` selectively for additional coverage within its account quota. Use `earnings` for upcoming scheduled risks, then verify timing and results on issuer pages. Neither news feed must duplicate the other on every run. |
+| Price-history pass | `prices` for the declared universe and benchmarks over matching periods. Compute the chosen measurements from retained inputs; the helper does not screen or rank. Use session-filtered minute data or another explicitly regular-session source for regular-session liquidity, not unfiltered daily volume. |
+| Shortlist and readiness | `sec-company` for relevant filings, then `sec-facts` when comparable reported fundamentals are needed. Open the actual filing/release for material claims and disclosures absent from XBRL. Check `halts` and current issuer/exchange notices before first readiness or when a trading-status concern arises; a current empty feed does not reconstruct an earlier cutoff or clear an older unresolved halt. |
+| Corporate actions | `actions` when validating adjustments, unexplained price discontinuities, instrument changes or outcome inputs. Its process-date records need issuer corroboration; choose the relevant history and keep original raw observations. |
+| Macro context | `fred-releases` for relevant upcoming releases and `fred-series` for a small dated set of rates, credit, employment or inflation observations when they affect a thesis. Verify fresh announcements with the releasing agency. |
+| Outcome work | Use `sessions`, `prices` and relevant `actions` for due baselines/checkpoints returned by `market_notes.py outcomes`; retain fixed events, matching benchmark inputs and availability evidence. Do not refetch completed observations unless corrections or changed evidence require it. |
+
+Use host search/page-reading for primary releases, transcripts, agency announcements
+and bounded social research; there are no bundled X, Reddit or Stocktwits adapters.
+Disclose inaccessible sources or inadequate history and use the research method's
+fallbacks instead of silently omitting a discovery pass or required evidence check.
 
 ## Query and result contract
 
@@ -168,7 +204,8 @@ day across the account; the helper does not track usage by other processes or
 automatically retry quota failures. `news` accepts one symbol per request or a
 general/topic query. Multiple provider tickers and topics have AND semantics;
 separate symbol requests are needed for a watchlist. News is capped at 1,000
-items with no page cursor. A response reaching the requested cap is incomplete;
+items with no page cursor. The helper enforces the requested output limit even
+if the provider returns extra articles. A response reaching the requested cap is incomplete;
 split the time window and deduplicate article URLs rather than assuming all
 news was returned. Provider sentiment/relevance scores are discovery metadata,
 not calibrated buying probabilities. Original publication time does not prove

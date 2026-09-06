@@ -129,7 +129,8 @@ def _bar(raw, timeframe, start, end):
     if any(not _finite(raw.get(key), positive=True) for key in ("o", "h", "l", "c", "vw")):
         raise DataError("invalid_response", "Alpaca bar contains an invalid price or VWAP.")
     if (not _finite(raw.get("v")) or not _finite(raw.get("n"), integer=True)
-            or raw["h"] < raw["l"]):
+            or raw["h"] < raw["l"]
+            or any(not raw["l"] <= raw[key] <= raw["h"] for key in ("o", "c"))):
         raise DataError("invalid_response", "Alpaca bar volume, trade count, or range is invalid.")
     local = stamp.astimezone(ny)
     if timeframe == "1Day":
@@ -513,6 +514,18 @@ def run_self_test():
             for raw in (bar(o=float("nan")), bar(n=True), bar("2026-09-05T04:00:00Z")):
                 with self.subTest(raw=raw), self.assertRaises(DataError):
                     alpaca_bars(FakeClient([page({"AAPL": [raw]})]), args())
+
+        def test_open_and_close_must_be_within_the_bar_range(self):
+            # Alpaca's open/close-eligible trades also update high/low. A
+            # contradictory candle must not become a momentum/return input.
+            for changes in ({"o": 97}, {"o": 106}, {"c": 97}, {"c": 106}):
+                with self.subTest(changes=changes), self.assertRaises(DataError):
+                    alpaca_bars(FakeClient([page({"AAPL": [bar(**changes)]})]), args(symbols="AAPL"))
+            for changes in ({"o": 98, "c": 105}, {"o": 105, "c": 98},
+                            {"o": 100, "h": 100, "l": 100, "c": 100, "vw": 100}):
+                with self.subTest(changes=changes):
+                    result = alpaca_bars(FakeClient([page({"AAPL": [bar(**changes)]})]), args(symbols="AAPL"))
+                    self.assertTrue(result["complete"])
 
         def test_duplicate_bar_never_silently_succeeds(self):
             result = alpaca_bars(FakeClient([page({"AAPL": [bar(), bar()]})]), args(symbols="AAPL"))

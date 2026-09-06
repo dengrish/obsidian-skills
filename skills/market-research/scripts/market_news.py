@@ -286,6 +286,8 @@ def alpha_news(client, args):
             continue
         data.append(item)
     data.sort(key=lambda item: item['published_at'], reverse=(sort == 'LATEST'))
+    limited = max(0, len(data) - limit)
+    data = data[:limit]
     saturated = len(feed) >= limit
     warnings = [
         'Coverage is the Alpha Vantage news collection, not every announcement or publisher.',
@@ -296,6 +298,8 @@ def alpha_news(client, args):
         warnings.append('Multiple topics use AND matching: an article must cover every requested topic.')
     if saturated:
         warnings.append('The response reached the requested limit; coverage may be truncated. Narrow the time window within the request budget; this endpoint has no pagination cursor.')
+    if limited:
+        warnings.append('%d otherwise usable article record(s) exceeded the requested output limit and were omitted.' % limited)
     if invalid:
         warnings.append('%d malformed article record(s) were omitted.' % invalid)
     if unmatched:
@@ -319,7 +323,8 @@ def alpha_news(client, args):
         'complete': not (saturated or invalid or unmatched or count_mismatch),
         'warnings': warnings, 'provider_record_count': len(feed),
         'returned_record_count': len(data), 'outside_cutoff_count': outside,
-        'invalid_record_count': invalid, 'symbol_mismatch_count': unmatched, 'data': data,
+        'invalid_record_count': invalid, 'symbol_mismatch_count': unmatched,
+        'limited_record_count': limited, 'data': data,
     }
 
 
@@ -509,6 +514,20 @@ def run_self_test():
 
         def calendar_args(self, **changes):
             return SimpleNamespace(**{'symbol': None, 'horizon': '3month', 'as_of': None, **changes})
+
+        def test_news_output_limit_holds_when_provider_overreturns(self):
+            rows = [self.article(stamp) for stamp in
+                    ('20260904T123000', '20260904T122000', '20260904T124000')]
+            for sort, expected in (('EARLIEST', ['2026-09-04T12:20:00Z', '2026-09-04T12:30:00Z']),
+                                   ('LATEST', ['2026-09-04T12:40:00Z', '2026-09-04T12:30:00Z'])):
+                result = alpha_news(Client({'feed': rows, 'items': '3'}),
+                                    self.news_args(limit=2, sort=sort))
+                self.assertEqual([item['published_at'] for item in result['data']], expected)
+                self.assertEqual(result['provider_record_count'], 3)
+                self.assertEqual(result['returned_record_count'], 2)
+                self.assertEqual(result['limited_record_count'], 1)
+                self.assertFalse(result['complete'])
+                self.assertTrue(any('exceeded the requested output limit' in w for w in result['warnings']))
 
         def calendar_csv(self, row='ABC,"Example, Inc.",2026-10-01,2026-09-30,1.234567890123456789,USD\n'):
             return ','.join(CALENDAR_FIELDS) + '\n' + row
