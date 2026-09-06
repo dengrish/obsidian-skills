@@ -558,6 +558,58 @@ class CompatibilityTests(unittest.TestCase):
             self.assertTrue(any(problem["item"] == "item0"
                                 for problem in scanned["problems"]))
 
+    @unittest.skipUnless(hasattr(os, "mkfifo") and hasattr(os, "O_NONBLOCK"),
+                         "host has no POSIX FIFO support")
+    def test_stable_readers_reject_a_regular_file_replaced_by_a_fifo(self):
+        build = load("build_plugin_fifo_read", ROOT / "tools/build_plugin.py")
+        index = load("vault_index_fifo_read", ROOT / "skills/wiki-build/scripts/vault_index.py")
+        lint = load("lint_entry_fifo_read", ROOT / "skills/wiki-build/scripts/lint_entry.py")
+        scan = load("scan_vault_fifo_read", ROOT / "skills/wiki-lint/scripts/scan_vault.py")
+
+        def build_refuses(path):
+            with self.assertRaises(OSError):
+                build._stable_regular_snapshot(path, "package source")
+            return True
+
+        readers = (
+            ("package", build_refuses),
+            ("index", lambda path: bool(index.index_entry(path)["errors"])),
+            ("entry lint", lambda path: any(
+                row["item"] == "0-unreadable"
+                for row in lint.lint_file(path)["findings"])),
+            ("wiki scan", lambda path: any(
+                row["item"] == "item0"
+                for row in scan.scan(path.parent)["problems"])),
+            ("MOC", lambda path: scan.moc_file_state(path)["state"] == "unreadable"),
+        )
+        with tempfile.TemporaryDirectory(prefix="obsidian-fifo-read-") as tmp:
+            victim = Path(tmp) / "probe.md"
+            for name, reader in readers:
+                with self.subTest(reader=name):
+                    victim.write_text("regular bytes before open\n", encoding="utf-8")
+                    observed_flags = []
+                    real_open = os.open
+
+                    def swap_for_fifo(path, flags, *args, **kwargs):
+                        if (os.path.abspath(path) == os.path.abspath(victim)
+                                and not observed_flags):
+                            observed_flags.append(flags)
+                            victim.unlink()
+                            os.mkfifo(victim)
+                            # Keep a regressed reader from hanging the suite;
+                            # assert its original flags after exercising the
+                            # real descriptor-type rejection below.
+                            flags |= os.O_NONBLOCK
+                        return real_open(path, flags, *args, **kwargs)
+
+                    try:
+                        with patch.object(os, "open", side_effect=swap_for_fifo):
+                            self.assertTrue(reader(victim))
+                        self.assertEqual(len(observed_flags), 1)
+                        self.assertTrue(observed_flags[0] & os.O_NONBLOCK)
+                    finally:
+                        victim.unlink()
+
     @unittest.skipUnless(CAN_CREATE_SYMLINK,
                          "host does not grant symlink privileges")
     def test_build_does_not_write_through_output_symlinks(self):

@@ -403,7 +403,7 @@ The loss itself is never written down explicitly; only its gradient. This makes 
 
 ## Flashcards
 
-A learning-to-rank method that sidesteps the non-differentiability of ranking metrics by defining gradients directly, scaling them by $|\Delta\text{NDCG}|$ — the change in NDCG from swapping a pair of items.
+A learning-to-rank method that defines pairwise gradients as $\lambda_{ij} = \lambda_{ij}^{\text{RankNet}} |\Delta\text{NDCG}_{ij}|$, where $\lambda_{ij}^{\text{RankNet}}$ is the RankNet gradient for items $i,j$ and $\Delta\text{NDCG}_{ij}$ is the NDCG change from swapping them.
 ??
 LambdaRank
 ```

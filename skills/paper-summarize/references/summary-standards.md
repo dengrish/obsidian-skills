@@ -58,7 +58,11 @@ Absence of evidence is what the study reported. Absence of effect is a different
 | was as safe as placebo | serious adverse events were similar in number (11 vs 9), but the trial was not sized to detect a difference in them |
 | showed no difference between groups | the difference did not reach the study's significance threshold; the interval is wide enough to include a clinically meaningful effect in either direction |
 
-**Always carry the interval on a null**, because the interval is the whole content of the result. A null with a tight interval around zero is genuine evidence of a small effect; a null with a wide interval is no information at all, and the two must not be written the same way.
+**Carry the reported interval on a null.** A tight interval around zero can
+rule out effects large enough to matter; a wide interval can leave material
+benefit and harm unresolved. State what its bounds support. When the source
+does not report an interval, name that missing precision rather than inventing
+one.
 
 **"Not statistically significant" is not a synonym for "small".** And a difference between a significant result and a non-significant one is not itself a finding unless the paper tested it directly.
 
@@ -229,13 +233,13 @@ prompts above rather than pretending an empirical checklist applies.
 | Instead of | Write |
 |---|---|
 | proves / confirms | the trial found; the data are consistent with |
-| a breakthrough / a game-changer | the first result of its kind, in a 219-patient trial |
+| a breakthrough / a game-changer | state the specific improvement and the population or system studied; claim firstness only when the source establishes it |
 | significantly better | statistically significantly better, at a difference of X points |
-| safe | no serious adverse events were reported in N participants over M weeks — a period too short to detect late harms |
+| safe | no serious adverse events were reported in N participants over M weeks; that observation does not establish overall safety |
 | shows that X causes Y | in a randomised trial, X reduced Y from A to B (rung 1); or: X is associated with lower Y; the design cannot separate that from the reasons people had X (rung 3) |
 | more research is needed | the open question is specifically whether the effect holds past 12 weeks |
 | the authors conclude | *(only where they actually do — and then say it plainly)* |
-| experts say | *(cut: a summary of one document has no experts in it)* |
+| experts say | identify the speaker and the source-supported statement, or omit the unsupported appeal to authority |
 
 
 ## Sources

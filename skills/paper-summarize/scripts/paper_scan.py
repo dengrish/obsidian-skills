@@ -112,7 +112,7 @@ from yaml_scalars import parse_source_fields
 #: Figure-label namespaces, ranked so a listing reads main → appendix →
 #: supplementary → Supporting Information → Extended Data.  Longest prefix
 #: first: `SI1` must not be read as `S` + `I1`.
-_NAMESPACES = (("SI", 3), ("ED", 4), ("S", 2), ("A", 1))
+_NAMESPACES = (("SI", 3), ("ED", 4), ("S", 2))
 
 #: Sorts after every real number, so an unparseable label lands at the end of
 #: its namespace instead of at the front.
@@ -142,7 +142,7 @@ _WIKILINK_RE = re.compile(r"\A!?\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]\Z")
 #: this split reads the convention rather than guessing at it.
 _PANEL_LABEL_RE = re.compile(r"\A(.*[0-9])([a-z])\Z")
 _FIGURE_LABEL_RE = re.compile(
-    r"\A(?P<base>(?:SI|ED|S)?\d+(?:-\d+)*|A-?\d+(?:-\d+)*)"
+    r"\A(?P<base>(?:SI|ED|S)?\d+(?:-\d+)*|[A-Z]-?\d+(?:-\d+)*)"
     r"(?P<panel>[a-z])?(?:-(?P<variant>[^-].*))?\Z")
 
 
@@ -204,14 +204,20 @@ def label_sort_key(label):
     separate exhibit rather than as part of one.
     """
     base, panel, variant = figure_parts(label)
-    rank, rest = 0, base
+    rank, rest, appendix = 0, base, ""
     for prefix, r in _NAMESPACES:
         tail = base[len(prefix):]
         if base.startswith(prefix) and re.match(r"\A-?\d", tail):
             rank, rest = r, tail.lstrip("-")
             break
+    else:
+        match = re.fullmatch(r"([A-Z])-?(\d+(?:-\d+)*)", base)
+        if match:
+            rank, appendix, rest = 1, match.group(1), match.group(2)
     nums = tuple(int(p) if p.isdecimal() else _BIG
                  for p in rest.split("-") if p)
+    if appendix:
+        nums = (ord(appendix),) + nums
     return (rank, nums or (_BIG,), panel, variant, label)
 
 
@@ -294,6 +300,24 @@ def figures_for(attachments, stem):
     return out
 
 
+def _read_note_text(path):
+    """Read regular UTF-8 note bytes without waiting on a replaced FIFO."""
+    descriptor = None
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            return None
+        with os.fdopen(descriptor, "r", encoding="utf-8-sig",
+                       errors="strict") as fh:
+            descriptor = None
+            return fh.read()
+    except (OSError, ValueError, UnicodeError):
+        return None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
 def note_source(path):
     """The note's origin from its frontmatter, or None.
 
@@ -314,8 +338,10 @@ def note_source(path):
         # Decode the whole note before accepting its claimed origin. Otherwise
         # valid-looking frontmatter can establish ownership even when invalid
         # bytes later in the body make the note itself unreadable.
-        with open(path, "r", encoding="utf-8-sig", errors="strict") as fh:
-            lines = iter(fh.read().splitlines())
+        text = _read_note_text(path)
+        if text is None:
+            return None
+        lines = iter(text.splitlines())
         for first in lines:
             if first.strip():
                 break
@@ -350,10 +376,8 @@ _EMBED_ONLY_RE = re.compile(r"\A!\[\[[^\]\n]+\]\]\Z")
 
 def body_is_embed_only(path):
     """True when the note's body is a single `![[…]]` line and nothing else."""
-    try:
-        with open(path, "r", encoding="utf-8-sig", errors="strict") as fh:
-            text = fh.read()
-    except (OSError, UnicodeError):
+    text = _read_note_text(path)
+    if text is None:
         return False
     # Split on the frontmatter FENCES, which are whole lines.  A bare
     # `text.split("---", 2)` also splits on a `---` inside a frontmatter value
@@ -730,6 +754,8 @@ _SORT_CASES = [
      ["1", "1-2", "2", "2-2", "2-10", "10", "A1", "S1", "SI1", "ED1"]),
     (["S2-3", "S1", "S10"], ["S1", "S2-3", "S10"]),
     (["A-1", "A-2"], ["A-1", "A-2"]),
+    (["B1", "A2", "1", "S1", "A1", "B1a", "B1-crop"],
+     ["1", "A1", "A2", "B1", "B1-crop", "B1a", "S1"]),
     # A panel sits with its own figure, not after every figure (§8b).
     (["2", "1b", "1", "1a", "S1a", "S1"],
      ["1", "1a", "1b", "2", "S1", "S1a"]),
@@ -757,6 +783,8 @@ _FIGURE_PART_CASES = [
     ("S2c", ("S2", "c", "")),
     ("1-38-transparent", ("1-38", "", "transparent")),
     ("ED2-high-contrast", ("ED2", "", "high-contrast")),
+    ("B-2-high-contrast", ("B-2", "", "high-contrast")),
+    ("C3a-crop", ("C3", "a", "crop")),
 ]
 
 #: (stem, books-in-run, note state, expected status).
@@ -919,6 +947,29 @@ def run_self_test():
         with open(p, "wb") as fh:
             fh.write(body)
         return p
+
+    # Both ownership readers can be reached after the scan's regular-file
+    # check. A pathname that becomes a FIFO must return without a writer.
+    import subprocess
+    fifo_note = os.path.join(_d, "changed-note.md")
+    os.mkfifo(fifo_note)
+    probe = ("import importlib.util,json,sys; "
+             "s=importlib.util.spec_from_file_location('paper_scan',sys.argv[1]); "
+             "m=importlib.util.module_from_spec(s); s.loader.exec_module(m); "
+             "print(json.dumps([m.note_source(sys.argv[2]), "
+             "m.body_is_embed_only(sys.argv[2])]))")
+    try:
+        child = subprocess.run([sys.executable, "-c", probe, __file__, fifo_note],
+                               capture_output=True, text=True,
+                               encoding="utf-8", timeout=5)
+        fifo_ok = child.returncode == 0 and child.stdout.strip() == "[null, false]"
+    except subprocess.TimeoutExpired:
+        fifo_ok = False
+    n += 1
+    if not fifo_ok:
+        bad += 1
+        print("FAIL non-regular note readers waited on a FIFO or accepted it")
+    os.unlink(fifo_note)
 
     _fm = '---\ntitle: x\nsource: "[[Doe_Foo_2025.pdf]]"\nread: false\n---\n'
     for label, body, want in (

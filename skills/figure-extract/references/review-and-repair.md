@@ -70,13 +70,15 @@ makes the run fail; resolve it before retrying, rather than deleting the
 manifest to make output appear unowned. Completed crops retain their ownership
 records when another PDF fails or an ordinary interruption ends the run.
 
-For batch extraction, occupancy is semantic and portable: every inventoried
+For both extraction commands, occupancy is semantic and portable: every inventoried
 `<stem>_fig_<label>.*` spelling shares one slot after case folding and Unicode
 normalization. Thus a clipping-owned `.jpg` or `.webp`, a differently cased
 `.PNG`, or a normalization alias blocks the new PDF crop even if the canonical
 `.png` path itself is absent. The sole pass-through is the exact regular PNG
 pathname, which still needs a matching manifest digest before it can be skipped
 or replaced. The refusal preserves every occupant and reports its stored name.
+A conflicting different figure slot does not block a named crop; an incomplete
+inventory still blocks because the requested slot cannot be proved free.
 
 Crop bytes are staged outside the flat image folder and must pass nonblank
 read-back before publication. A new name is created exclusively, so a file

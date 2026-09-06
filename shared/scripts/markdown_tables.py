@@ -86,7 +86,7 @@ def _table_cell_count(line):
 def _has_table_separator(line):
     """Whether a line contains an unescaped pipe outside inline LaTeX."""
     without_math = _CAPTION_MATH_RE.sub("", line)
-    return bool(re.search(r"(?<!\\)\|", without_math))
+    return bool(_unescaped_pipe_positions(without_math))
 
 
 def _is_caption_candidate(line):
@@ -102,7 +102,6 @@ def _is_table_body_row(line):
     """Whether a non-header line continues a detected GFM table."""
     if not (line or "").strip() or _is_caption_candidate(line):
         return False
-    stripped = line.strip()
     if _TABLE_BLOCK_START_RE.match(line):
         return False
     if _THEMATIC_BREAK_RE.fullmatch(line):
@@ -236,6 +235,14 @@ def _self_test():
          markdown_table_spans(
              "Metric | Value\n--- | ---\n*Recall* | *0.8*\n*Metric.*"),
          [(0, 2)]),
+        ("an even backslash run leaves a real table separator",
+         markdown_table_spans(
+             "Metric | Value\n--- | ---\n" + r"*Path\\\\|value*" + "\n*Metric.*"),
+         [(0, 2)]),
+        ("an escaped pipe can remain in a caption",
+         markdown_table_spans(
+             "Metric | Value\n--- | ---\n" + r"*Path\|value*"),
+         [(0, 1)]),
         ("LaTeX bar remains inside the caption",
          markdown_table_spans(
              "Metric | Value\n--- | ---\nError | 0.2\n*Error is $|x-y|$.*"),

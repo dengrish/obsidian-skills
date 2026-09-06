@@ -122,8 +122,7 @@ from slugify import SlugError, mu_variants, slug_stem  # noqa: E402
 # in shared/scripts/plurals.py; `python3 shared/scripts/plurals.py --test` is
 # the conformance suite.  Do NOT paste a copy back.
 from plurals import (  # noqa: E402
-    AMBIGUOUS_IRREGULAR_PLURALS, IRREGULAR_PLURALS, IRREGULAR_SINGULARS,
-    VES_IRREGULARS, plural_key, pluralize, real_permutation, singular_forms,
+    plural_key, pluralize, real_permutation, singular_forms,
     singular_key, singular_keys, singularize, stem_key, stem_tokens,
     wordorder_key_singular,
 )

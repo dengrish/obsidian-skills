@@ -2411,7 +2411,7 @@ FIG_NAME_MIN = 292
 #: watch -- a local rebind of its skip logic would have gone unseen.
 NAMING_CONSUMERS = {
     os.path.join("pdf-organize", "scripts", "organize.py"):
-        ("looks_canonical", "CANONICAL"),
+        ("looks_canonical",),
     os.path.join("figure-extract", "scripts", "batch_extract.py"):
         ("chapter_book_stem", "core_stem"),
     os.path.join("paper-summarize", "scripts", "paper_scan.py"):
@@ -5868,7 +5868,7 @@ SELFTEST_TIMEOUT = 240
 #: The self-test function itself: `run_self_test`, `_selftest`, `run_selftest`.
 SELFTEST_FUNC = re.compile(r"^def\s+(_?(?:run_)?self_?tests?\w*)\s*\(", re.M)
 
-#: The two entry points in use: a `--test` flag (eighteen scripts) and a
+#: The two entry points in use: a `--test` flag and a
 #: `selftest` subcommand (`organize.py`, `fetch_images.py`, whose CLIs are
 #: subcommand-shaped already).  Both are accepted; having none is the failure.
 SELFTEST_FLAG = re.compile(r"""add_argument\(\s*["']--test["']""")
@@ -5888,7 +5888,7 @@ SELFTEST_TALLY = re.compile(
 #: fails.  Lowering a number here is a deliberate, reviewable statement that
 #: cases went away; a script with no line is checked for a clean tally only.
 SELFTEST_MIN_CASES = {
-    # Updated after the full review of 2026-09-05. Raising after growth is the
+    # Updated after the full review of 2026-09-06. Raising after growth is the
     # mirror duty of the "lowering is a deliberate, reviewable statement" rule
     # below: new regression cases must not disappear with the harness green.
     "shared/scripts/atomic_move.py": 32,
@@ -5896,10 +5896,10 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/equation_coverage.py": 160,
     "shared/scripts/figure_state.py": 10,
     "shared/scripts/introduced_aliases.py": 23,
-    "shared/scripts/markdown_tables.py": 40,
+    "shared/scripts/markdown_tables.py": 42,
     "shared/scripts/naming.py": 191,
     "shared/scripts/organism_names.py": 29,
-    "shared/scripts/entry_structure.py": 138,
+    "shared/scripts/entry_structure.py": 143,
     "shared/scripts/plugin_paths.py": 110,
     "shared/scripts/plurals.py": 251,
     "shared/scripts/slugify.py": 74,  # device-name restrictions removed
@@ -5916,19 +5916,19 @@ SELFTEST_MIN_CASES = {
     "skills/market-research/scripts/market_news.py": 33,
     "skills/market-research/scripts/market_prices.py": 25,
     "skills/market-research/scripts/market_public.py": 92,
-    "skills/paper-summarize/scripts/note_lint.py": 227,
-    "skills/paper-summarize/scripts/paper_scan.py": 158,
-    "skills/paper-summarize/scripts/paper_text.py": 49,
+    "skills/paper-summarize/scripts/note_lint.py": 228,
+    "skills/paper-summarize/scripts/paper_scan.py": 162,
+    "skills/paper-summarize/scripts/paper_text.py": 55,
     "skills/figure-extract/scripts/auto_fig_bbox.py": 346,
     "skills/figure-extract/scripts/batch_extract.py": 354,
-    "skills/figure-extract/scripts/extract_figures.py": 182,
+    "skills/figure-extract/scripts/extract_figures.py": 185,
     "skills/figure-extract/scripts/render_page.py": 66,
-    "skills/pdf-organize/scripts/organize.py": 319,
+    "skills/pdf-organize/scripts/organize.py": 327,
     "skills/wiki-add/scripts/backlog.py": 32,
     "skills/wiki-build/scripts/find_collisions.py": 67,
     "skills/wiki-build/scripts/lint_entry.py": 319,
     "skills/wiki-build/scripts/vault_index.py": 79,
-    "skills/wiki-lint/scripts/scan_vault.py": 452,
+    "skills/wiki-lint/scripts/scan_vault.py": 457,
 }
 
 

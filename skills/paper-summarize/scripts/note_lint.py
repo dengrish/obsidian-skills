@@ -2116,6 +2116,7 @@ def _selftest():
     # regular and source-scoped before an embed can pass.
     import contextlib
     import io
+    import subprocess
     import tempfile
     long_note = _mutate("More prose.",
                         " ".join(["Recurrence"] * (MAX_SENTENCE_WORDS + 1)) + ".")
@@ -2138,6 +2139,27 @@ def _selftest():
         fail += 1
         print("FAIL  the unorganized-source override rejected an explicit null date")
     with tempfile.TemporaryDirectory() as scratch:
+        fifo_note = os.path.join(scratch, "changed-note.md")
+        os.mkfifo(fifo_note)
+        # Simulate a pathname replaced after the CLI's file-type preflight.
+        probe = ("import importlib.util,sys; "
+                 "s=importlib.util.spec_from_file_location('note_lint',sys.argv[1]); "
+                 "m=importlib.util.module_from_spec(s); s.loader.exec_module(m); "
+                 "m.os.path.isfile=lambda path: True; "
+                 "sys.exit(m.main([sys.argv[2],'--mode','empirical']))")
+        try:
+            child = subprocess.run(
+                [sys.executable, "-c", probe, __file__, fifo_note],
+                capture_output=True, text=True, encoding="utf-8", timeout=5)
+            fifo_ok = child.returncode == 2 and "non-regular file" in child.stderr
+        except subprocess.TimeoutExpired:
+            fifo_ok = False
+        if fifo_ok:
+            ok += 1
+        else:
+            fail += 1
+            print("FAIL  the note CLI waited on a FIFO after file preflight")
+        os.unlink(fifo_note)
         image_path = os.path.join(scratch, "Doe_X_2025_fig_2.png")
         with open(image_path, "wb") as fh:
             fh.write(b"")
@@ -2262,8 +2284,15 @@ def main(argv=None):
     # turn CRLF into LF before ``lint`` can enforce the repository's LF-only
     # note contract, so the public CLI would accept bytes the library API
     # correctly rejects.
-    with open(a.note, encoding="utf-8", newline="") as fh:
-        text = fh.read()
+    try:
+        descriptor = os.open(a.note, os.O_RDONLY | os.O_NONBLOCK)
+        with os.fdopen(descriptor, encoding="utf-8", newline="") as fh:
+            if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                raise ValueError("the note changed to a non-regular file")
+            text = fh.read()
+    except (OSError, UnicodeError, ValueError) as exc:
+        sys.stderr.write("cannot read note %r: %s\n" % (a.note, exc))
+        return 2
     advisories = []
     findings = lint(text, a.note, a.images, mode=a.mode,
                     allow_unorganized=a.allow_unorganized,

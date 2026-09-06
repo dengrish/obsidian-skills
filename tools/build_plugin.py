@@ -167,7 +167,7 @@ def _stable_regular_snapshot(path, label):
             path,
         )
 
-    flags = os.O_RDONLY | os.O_NOFOLLOW
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
     try:
         descriptor = os.open(path, flags)
     except OSError as exc:

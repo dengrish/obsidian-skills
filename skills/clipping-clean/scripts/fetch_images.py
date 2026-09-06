@@ -169,7 +169,8 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 _OBSIDIAN_SHARED_MODULES = (
-    "atomic_move", "entry_structure", "figure_state", "markdown_tables", "yaml_scalars")
+    "atomic_move", "entry_structure", "figure_state", "markdown_tables", "slugify",
+    "yaml_scalars")
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys

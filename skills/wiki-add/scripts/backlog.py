@@ -19,7 +19,7 @@ import stat
 import sys
 import tempfile
 
-_OBSIDIAN_SHARED_MODULES = ('atomic_move', 'entry_structure', 'markdown_tables')
+_OBSIDIAN_SHARED_MODULES = ('atomic_move', 'entry_structure', 'markdown_tables', 'slugify')
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/CONVENTIONS.md) ---
 import os as _os, sys as _sys

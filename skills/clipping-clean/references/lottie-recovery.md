@@ -321,8 +321,12 @@ If no reachable source, permitted renderer or valid output is available:
    poster and GIF as separate figures.
 2. Otherwise keep one actionable placeholder at that location:
    `<!-- source has a Lottie animation here, not converted in this environment;
-   lottie source: <lottie_url>; view at <source> -->`. Record the conversion
-   failure and source URL in the report.
+   lottie source: <redacted Lottie locator>; view at <capture URL> -->`. Use the
+   fetch helper's redacted `url` field for the Lottie locator in both the
+   placeholder and report. If the helper was unavailable, omit credentials,
+   query, fragment and any inline data payload as required by
+   [image failure reporting](images.md#failures-and-readability). Record the
+   conversion failure; the retained raw capture is the retry record.
 
 Do not invent a poster or pass an arbitrary animation frame off as the full
 figure. Reprocessing keeps an equivalent existing placeholder rather than

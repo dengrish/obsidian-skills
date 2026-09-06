@@ -19,10 +19,10 @@ Four modes, all over one page-indexed extraction:
   ``--sections``  where the standard sections start.  Finds the pages holding
                   the abstract, methods, results, limitations and
                   data-availability statements, and also the funding,
-                  conflict-of-interest and registration ones -- which
-                  paper-summarize never reports (references/note-format.md) and
-                  reads only to see what a reporting guideline asks for and
-                  the paper does not say.  A heading is a short line that is
+                  conflict-of-interest and registration ones. Methodological
+                  registration remains in scope; funding and conflicts are
+                  excluded from the note (references/note-format.md).
+                  A heading is a short line that is
                   *only* a heading; prose that merely opens with a section
                   word is not one.
 
@@ -75,6 +75,8 @@ _TRANSLATE = {
 #: is that `Supplementary`, `Suppl.`, `Supp.` and `Extended Data` all land in
 #: `S`.  Without the marker group `Supplementary Figure 1` counted toward
 #: figure 1, which is a different figure.
+_FIG_ENDPOINT = r"(?:si|ed|[a-z][.-]?)?\d+(?:\.\d+)*"
+_FIG_LABEL = _FIG_ENDPOINT + r"(?:-" + _FIG_ENDPOINT + r")*"
 _FIG_REF = re.compile(
     r"(?:\b(?P<marker>supplementary|supplemental|suppl\.|supp\.|extended\s+data)\s+)?"
     r"\bfig(?:ure)?(?P<plural>s)?\.?\s*"
@@ -82,8 +84,7 @@ _FIG_REF = re.compile(
     # Reading "Figures 1-3" as one label `1-3` scores a figure no run can write
     # and costs figures 1, 2 and 3 a citation each -- and the en dash papers
     # actually use folds to `-` before this ever runs, so it is the common case.
-    r"(?P<label>(?:si|ed|s)?\d+(?:\.\d+)*"
-    r"(?P<tail>-(?:si|ed|s)?\d+(?:\.\d+)*)?)"
+    r"(?P<label>" + _FIG_LABEL + r")"
     r"[a-z]?\b(?!\s*%)", re.I)
 
 #: Further labels after a plural reference: ``Figures 1, 2 and 3``. The
@@ -91,8 +92,7 @@ _FIG_REF = re.compile(
 #: Supplementary / Extended Data marker.
 _FIG_MORE = re.compile(
     r"\s*(?:,\s*(?:and\s+)?|and\s+|&\s*)"
-    r"(?P<label>(?:si|ed|s)?\d+(?:\.\d+)*"
-    r"(?:-(?:si|ed|s)?\d+(?:\.\d+)*)?)"
+    r"(?P<label>" + _FIG_LABEL + r")"
     r"[a-z]?\b", re.I)
 
 _MAX_FIG_RANGE = 20
@@ -190,8 +190,9 @@ def read_pages(path):
             "neither PyMuPDF nor pypdf is installed, so this script cannot "
             "read a PDF at all. Use a virtual environment with the plugin "
             "dependencies; see shared/RUNTIME.md.\n"
-            "Do not fall back to reading the document by eye and reporting the "
-            "verification as done.")
+            "If source pages are available through another permitted viewer, "
+            "verify claims directly there and report that text search was "
+            "unavailable; otherwise leave the draft unpublished.")
     reader = pypdf.PdfReader(path)
     if getattr(reader, "is_encrypted", False):
         # An owner-password-only PDF opens with the empty user password; a
@@ -240,16 +241,21 @@ def _range_labels(label, plural):
         return [label]
     low, high = label.split("-", 1)
     endpoint = re.compile(
-        r"(?P<prefix>si|ed|s)?(?P<number>\d+(?:\.\d+)*)\Z", re.I)
+        r"(?P<prefix>si|ed|[a-z])?(?P<separator>\.)?"
+        r"(?P<number>\d+(?:\.\d+)*)\Z", re.I)
     lo_match, hi_match = endpoint.fullmatch(low), endpoint.fullmatch(high)
     if not lo_match or not hi_match:
         return [label]
     lo_prefix = (lo_match.group("prefix") or "").upper()
     hi_prefix = (hi_match.group("prefix") or "").upper()
+    lo_separator = lo_match.group("separator") or ""
+    hi_separator = hi_match.group("separator") or ""
     # The namespace may be written once (S1-3) or at both endpoints
     # (S1-S3). A prefix that appears only on the upper endpoint, or two
     # different prefixes, does not unambiguously describe one range.
     if (hi_prefix and not lo_prefix) or (hi_prefix and hi_prefix != lo_prefix):
+        return [label]
+    if hi_prefix and lo_separator != hi_separator:
         return [label]
     lo_parts = lo_match.group("number").split(".")
     hi_parts = hi_match.group("number").split(".")
@@ -261,7 +267,7 @@ def _range_labels(label, plural):
     if not 0 < hi - lo <= _MAX_FIG_RANGE:
         return [label]
     hierarchy = ".".join(lo_parts[:-1])
-    return [lo_prefix + (hierarchy + "." if hierarchy else "") + str(n)
+    return [lo_prefix + lo_separator + (hierarchy + "." if hierarchy else "") + str(n)
             for n in range(lo, hi + 1)]
 
 
@@ -285,7 +291,7 @@ def cites(pages, ed_prefix="S"):
                     pos = more.end()
             for label in labels:
                 label = label.replace(".", "-")
-                label = re.sub(r"\A(si|ed|s)", lambda x: x.group(1).upper(),
+                label = re.sub(r"\A(si|ed|[a-z])", lambda x: x.group(1).upper(),
                                label, flags=re.I)
                 if marker and not label[0].isalpha():
                     clean_marker = re.sub(r"\s+", " ", marker).lower().rstrip(".")
@@ -519,6 +525,24 @@ def run_self_test():
          cites(["Figure 4-6 shows the loss curve."]), {"4-6": 1})
     case("a hierarchical label survives",
          cites(["As shown in Figure 1.2, the loss falls."]), {"1-2": 1})
+    case("appendix labels match the extractor's compact and separated forms",
+         cites(["Figure A1 shows the trend. Figure A.2 shows the check. "
+                "Figure B-2 shows the sensitivity analysis."]),
+         {"A1": 1, "A-2": 1, "B-2": 1})
+    case("appendix panels count toward their whole figure",
+         cites(["Figure B.2c shows the control."]), {"B-2": 1})
+    case("appendix plural lists preserve every prefix",
+         cites(["See Figures A1, A2 and B3 for the controls."]),
+         {"A1": 1, "A2": 1, "B3": 1})
+    case("compact appendix ranges expand within their namespace",
+         cites(["Figures A1-A3 show the controls."]),
+         {"A1": 1, "A2": 1, "A3": 1})
+    case("dotted appendix ranges keep their normalized label spelling",
+         cites(["Figures B.1-B.3 show the controls."]),
+         {"B-1": 1, "B-2": 1, "B-3": 1})
+    case("multi-level dashed labels are not truncated",
+         cites(["Figure 1-2-3 shows the hierarchy. Figure C-2-1 is the control."]),
+         {"1-2-3": 1, "C-2-1": 1})
     # A loose match is reported as loose and is not counted as found.
     _txt, _missing = _render_find([{"needle": "2015.3", "pages": [],
                                     "loose_pages": [1]}])

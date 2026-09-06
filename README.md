@@ -253,8 +253,8 @@ The shared implementations are `slugify.py` (wiki slugs), `atomic_move.py`
 `yaml_scalars.py` (decoded metadata), `figure_state.py` (figure ownership and
 review sidecars), `vault_artifacts.py` (portable PDF and source-figure
 inventories), `organism_names.py` (Organism title/name classification),
-`entry_structure.py` (shared sentence, opener, answer-surface, and flashcard
-structure checks), `introduced_aliases.py`
+`entry_structure.py` (shared Wiki text, image and source-identity parsing,
+plus sentence, opener, answer-surface and flashcard checks), `introduced_aliases.py`
 (body-introduced alias candidates), `code_typography.py` (literal prose shapes
 that require backticks), `equation_coverage.py` (a conservative missing-display
 equation candidate shared by both Wiki skills), `markdown_tables.py` (GFM table

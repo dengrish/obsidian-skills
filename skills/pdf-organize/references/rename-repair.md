@@ -36,7 +36,11 @@ it does not independently rename unrelated notes or images.
   follows the logical path: a PDF reached beneath a linked source directory
   is in scope, while the link target's direct physical path is not. A
   case/normalization spelling is accepted only when filesystem identity proves
-  it is the selected vault. A leaf `.md` symlink is a blocker: following it
+  it is the selected vault. A PDF reached through multiple logical directory
+  aliases, or a leaf PDF symlink to a moved source, blocks the rename: the
+  selected move cannot preserve every aliased source pathname. Reconcile the
+  reported aliases to one source path before re-planning. A leaf `.md` symlink
+  is a blocker: following it
   for a rewrite could mutate an external target outside the selected vault, so
   reconcile the link or establish a regular in-scope note before retrying.
   Local Markdown URL escapes

@@ -116,7 +116,8 @@ if _here != _shared:
 # --- end bootstrap ---
 
 from figure_state import (MANIFEST_FILE, file_digest, read_manifest,
-                          read_manifest_snapshot, write_manifest, manifest_key)
+                          read_manifest_snapshot, write_manifest, manifest_key,
+                          figure_identity, check_manifest_writable)
 import atomic_move
 from naming import looks_canonical
 from render_page import MAX_RENDER_PIXELS, checked_render_dimensions
@@ -423,49 +424,70 @@ def _stable_output_digest(path):
     return _stable_output_snapshot(path)[1]
 
 
-def _figure_slot_conflict(out_dir, stem, suffix, out_path):
-    """Return a portable same-label occupant other than ``out_path``."""
+def _figure_slot_conflict(out_dir, stem, fig_suffix, out_path):
+    """Return an occupied semantic figure slot, or ``None`` when it is free.
+
+    The published PDF crop is always PNG, but the shared image folder also
+    contains clipping output such as JPG and WebP. Consumers identify a figure
+    by portable ``<stem>_fig_<label>`` identity before considering its
+    extension, so checking only ``out_path`` can create two equally plausible
+    files for one figure. The one direct regular path spelled exactly like the
+    intended PNG is allowed through for the manifest/digest ownership check;
+    every extension twin, case/NFC alias, nested match, symlink and nonregular
+    occupant blocks without being changed.
+
+    A missing output folder is conclusively empty for a dry-run preview. An
+    existing folder whose shared inventory is incomplete cannot establish that
+    the slot is free and therefore fails closed.
+    """
     if not os.path.lexists(out_dir):
         return None
     inventory = inventory_source_figures(out_dir, stem)
-    if not inventory.safe:
-        details = []
-        if inventory.blocked_matches:
-            details.append("blocked source-keyed occupant(s): " + ", ".join(
-                inventory.blocked_matches[:4]))
-        details.extend("%s (%s)" % (item.path, item.message)
-                       for item in inventory.findings
-                       if item.severity == "error")
-        return out_path, ("the portable figure namespace cannot be proved "
-                          "safe: %s" % ("; ".join(details)
-                                        or "inventory incomplete"))
-    wanted = unicodedata.normalize(
-        "NFC", "%s_fig_%s" % (stem, suffix)).casefold()
+    if not inventory.complete:
+        detail = "; ".join(
+            "%s: %s" % (item.path, item.message)
+            for item in inventory.findings
+            if item.kind in {"unreadable", "changed-during-inventory"}
+        ) or "the image folder could not be inventoried completely"
+        return out_path, (
+            "the portable figure namespace is incomplete, so this slot cannot "
+            "be proved free (%s)" % detail
+        )
+
+    slot = figure_identity("%s_fig_%s" % (stem, fig_suffix))
     exact = os.path.abspath(os.fspath(out_path))
-    candidates = []
+    direct = set(inventory.candidates)
+    conflicts = []
     for candidate in inventory.candidates + inventory.blocked_matches:
-        base = os.path.splitext(os.path.basename(candidate))[0]
-        if unicodedata.normalize("NFC", base).casefold() != wanted:
+        basename = os.path.basename(candidate)
+        candidate_stem, _extension = os.path.splitext(basename)
+        if figure_identity(candidate_stem) != slot:
             continue
         candidate_abs = os.path.abspath(os.fspath(candidate))
-        same_entry = candidate_abs == exact
-        if not same_entry and os.path.lexists(out_path):
-            try:
-                same_entry = os.path.samefile(candidate, out_path)
-            except OSError:
-                same_entry = False
-        if same_entry:
-            continue
-        candidates.append(candidate)
-    if not candidates:
+        if candidate in direct:
+            same_entry = candidate_abs == exact
+            if not same_entry and os.path.lexists(out_path):
+                try:
+                    same_entry = os.path.samefile(candidate, out_path)
+                except OSError:
+                    same_entry = False
+            if same_entry:
+                # Normalization-insensitive filesystems can return an NFD
+                # directory spelling for the NFC path we opened. It is one
+                # file, not a semantic-slot twin; ownership is decided by the
+                # manifest and digest below.
+                continue
+        conflicts.append(candidate)
+    if not conflicts:
         return None
-    candidates.sort(key=lambda path: unicodedata.normalize(
-        "NFC", os.fspath(path)).casefold())
-    return candidates[0], (
-        "the portable figure slot is already occupied by %s; writing %s "
-        "would leave ambiguous extension, case, or Unicode variants" %
-        (", ".join(os.path.basename(path) for path in candidates),
-         os.path.basename(out_path)))
+    conflicts.sort(key=lambda path: figure_identity(os.fspath(path)))
+    return conflicts[0], (
+        "the portable figure slot is occupied by %s; publishing %s would "
+        "leave ambiguous extension, case, or Unicode variants" % (
+            ", ".join(os.path.basename(path) for path in conflicts),
+            os.path.basename(out_path),
+        )
+    )
 
 
 def _restore_after_slot_conflict(out_path, published, predecessor,
@@ -1517,6 +1539,49 @@ def run_self_test():
                twin_dir, "Doe_Figs_2025_fig_2.png"))
            and not os.path.exists(os.path.join(twin_dir, MANIFEST_FILE)))
 
+        # A named repair owns one slot. An unrelated nested figure remains a
+        # reported inventory defect, but does not turn this free slot into a
+        # collision. A nested twin of the requested figure still blocks it.
+        nested_dir = os.path.join(twin_dir, "old")
+        os.makedirs(nested_dir)
+        nested_figure = os.path.join(nested_dir, "Doe_Figs_2025_fig_3.png")
+        _st_png(nested_figure, (20, 20), (80, 140, 200))
+        nested_bytes = open(nested_figure, "rb").read()
+        code, so, se = run([
+            pdf, "--out", twin_dir, "--stem", "Doe_Figs_2025",
+            "--crop", "1:1:100,150,500,350", "--dpi", "72", "--no-trim",
+        ])
+        check("a different nested figure does not block a named free crop",
+              (code, os.path.isfile(os.path.join(
+                  twin_dir, "Doe_Figs_2025_fig_1.png")),
+               open(nested_figure, "rb").read()), (0, True, nested_bytes))
+        code, so, se = run([
+            pdf, "--out", twin_dir, "--stem", "Doe_Figs_2025",
+            "--crop", "1:3:100,150,500,350", "--dpi", "72", "--no-trim",
+        ])
+        ok("a nested twin still blocks its exact figure slot",
+           code != 0 and not os.path.exists(os.path.join(
+               twin_dir, "Doe_Figs_2025_fig_3.png")))
+
+        protected_manifest = os.path.join(twin_dir, MANIFEST_FILE)
+        protected_body = open(protected_manifest, "rb").read()
+        os.chmod(protected_manifest, 0o444)
+        try:
+            # Root/ACL-enabled processes may still pass os.access; the explicit
+            # mode protection must be respected before publishing any crop.
+            with mock.patch.object(os, "access", return_value=True):
+                code, so, se = run([
+                    pdf, "--out", twin_dir, "--stem", "Doe_Figs_2025",
+                    "--crop", "1:4:100,150,500,350", "--dpi", "72", "--no-trim",
+                ])
+            check("a protected manifest refuses an explicit crop before publication",
+                  (code != 0, os.path.exists(os.path.join(
+                      twin_dir, "Doe_Figs_2025_fig_4.png")),
+                   open(protected_manifest, "rb").read()),
+                  (True, False, protected_body))
+        finally:
+            os.chmod(protected_manifest, 0o644)
+
         cli_no_link_root = os.path.join(tmp, "CliNoHardLinks")
         cli_no_link_dir = os.path.join(cli_no_link_root, "Images")
         with mock.patch.object(atomic_move, "publish_new",
@@ -2213,11 +2278,9 @@ def main(argv=None):
     manifest_path = os.path.join(out_dir, MANIFEST_FILE)
     try:
         manifest, manifest_snapshot = read_manifest_snapshot(manifest_path)
+        check_manifest_writable(manifest_path)
     except (OSError, UnicodeError, ValueError) as exc:
         die(f"Refusing explicit crops: cannot safely read {manifest_path}: {exc}")
-    if os.path.lexists(manifest_path):
-        if os.path.islink(manifest_path) or not os.access(manifest_path, os.W_OK):
-            die(f"Refusing explicit crops: {manifest_path} is not a writable regular sidecar")
     # Preflight every target even in a legacy folder. An absent manifest is
     # not proof that an occupied slot belongs to this PDF: clippings share
     # these filenames. An explicit crop must not bypass the batch ownership guard.

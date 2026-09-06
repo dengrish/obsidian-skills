@@ -229,6 +229,13 @@ from equation_coverage import (  # noqa: E402
     find_noncanonical_display_equation_candidates,
 )
 from entry_structure import (  # noqa: E402
+    description_subject_forms as _description_subject_forms,
+    acronym_initial_forms as _initial_forms,
+    markdown_image_spans as _markdown_image_spans,
+    source_stem,
+    strip_code,
+    strip_fenced,
+    strip_indented,
     answer_surface_match,
     body_opens_with_prose,
     count_sentences,
@@ -253,7 +260,6 @@ from vault_index import (  # noqa: E402
     SCHEMA_ORDER,
     extract_wikilinks,
     fold_name,
-    index_entry,
     iter_markdown_files,
     parse_frontmatter,
     split_sections,
@@ -377,38 +383,6 @@ def _plain_string_allowed(value, style):
             and value[:1].isalpha()
             and not _YAML_TYPED_PLAIN_RE.fullmatch(value.strip())
             and not re.search(r":(?:\s|$)|\s#", value))
-
-
-def source_stem(item):
-    """``(stem, ext)`` of one ``sources:`` item, both case-folded.
-
-    The pair is the identity of the DOCUMENT the item names, so everything
-    that can vary without changing which document that is gets dropped: the
-    ``[[ ]]`` wrapper, a ``#page=N`` anchor, a display pipe, and any folder
-    qualification (``Sources/PDFs/X.pdf`` and ``X.pdf`` are one file).
-    Case and Unicode normalization are folded so document identity stays
-    stable across filesystems that alias those spellings and ones that can
-    store both.
-
-    ``("", "")`` when the item carries no extension at all -- a plain text
-    value, or a malformed item whose missing extension is item 4's own
-    finding rather than this one's.
-    """
-    inner = (item or "").strip()
-    if inner.startswith("[[") and inner.endswith("]]"):
-        inner = inner[2:-2]
-    inner = inner.split("|", 1)[0]                       # display pipe
-    inner = inner.split("#", 1)[0]                       # #page=N anchor
-    inner = inner.replace("\\", "/").rsplit("/", 1)[-1]  # folder qualification
-    stem, dot, ext = inner.rpartition(".")
-    if not dot:
-        return "", ""
-    # NFC as well as case: one document may be spelled NFD on disk and NFC in a
-    # note. Raw strings would miss the ``4-duplicate-source`` pair and make the
-    # result host-dependent. CONVENTIONS.md 7 requires this to agree exactly
-    # with wiki-lint's scan_vault.source_stem(); keep the two lines identical.
-    return (unicodedata.normalize("NFC", stem.strip()).lower(),
-            unicodedata.normalize("NFC", ext.strip()).lower())
 
 
 def parse_flashcards(flashcard_lines):
@@ -677,29 +651,6 @@ def _check_slug(fm, findings, filename):
 
 _LEADING_ARTICLE_RE = re.compile(r"^(?:a|an|the)\s+", re.IGNORECASE)
 _SUBJECT_BOUNDARY_RE = re.compile(r"^(?:$|[\s,(:;\u2013\u2014])")
-
-
-def _description_subject_forms(title):
-    """Canonical plain-text subjects accepted by item 7.
-
-    A parenthetical title contributes its base term, and a title containing
-    LaTeX contributes the same meaning-preserving plain form used by the
-    opener and flashcard checks. Preserve every other letter's case: item 7 has only the
-    documented first-letter carve-out, not general case folding.
-    """
-    forms = []
-    # A disambiguation parenthetical belongs to the canonical title and file,
-    # not to running prose.  ``Feature (machine learning) supplies ...`` is
-    # therefore not an alternate accepted subject for ``Feature``.
-    subjects = (base_term(title),) if has_parenthetical(title) else (title,)
-    for subject in subjects:
-        for form in (
-                subject,
-                math_title_plain_text(subject) if subject else None):
-            form = (form or "").strip()
-            if form and form not in forms:
-                forms.append(form)
-    return forms
 
 
 def _description_has_entity_subject(description, title):
@@ -1130,22 +1081,6 @@ _SHORT_FOR_PAREN_RE = re.compile(r"^short\s+for[\s,:]+", re.IGNORECASE)
 _SCI_ABBREV_RE = re.compile(r"^[A-Z]\.\s*[a-z][A-Za-z.-]*(?:\s+[a-z][A-Za-z.-]*)*$")
 
 
-def _initial_forms(value):
-    """Possible initial strings for a written-out name."""
-    words = re.findall(r"[A-Za-z0-9]+", value or "")
-    if not words:
-        return set()
-    stop = {"a", "an", "and", "of", "the", "to", "with"}
-
-    def initial(word):
-        return word if word.isupper() and 1 < len(word) <= 6 else word[:1]
-
-    all_words = "".join(initial(word) for word in words).casefold()
-    content = "".join(initial(word) for word in words
-                      if word.casefold() not in stop).casefold()
-    return {form for form in (all_words, content) if form}
-
-
 def _acronym_counterpart(term, candidate):
     """Whether the pair has an acronym/full-form relationship.
 
@@ -1279,254 +1214,9 @@ def _check_alias_completeness(fm, sections, findings, filename):
 # _check_field_order already reports a missing key.
 
 
-# --------------------------------------------------------------------------
-# listing maskers -- BYTE-IDENTICAL copies of scan_vault.py's strip_fenced /
-# strip_indented / strip_code and their regexes.  The duplicate-wikilink
-# check must read the same LISTING-MASKED text the scanner's item10/dup
-# reads: a `[[target]]` shown in a fence, an inline code span or an
-# indented block is a sample, and counting it made a real single link
-# report as a duplicate whose remedy edits the listing or drops the link.
-# Keep these in lockstep with scan_vault.py (the two tools must agree).
-# --------------------------------------------------------------------------
-
-_FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
-
-
-def strip_fenced(text):
-    """Blank every line inside a ``` / ~~~ fenced code block, line count kept.
-
-    A fenced block is a LISTING: its contents are shown, not asserted, so a
-    scan that reads them as frontmatter or as prose reports the sample rather
-    than the entry.  Line count is preserved so any offset computed against the
-    original still lines up.
-
-    CommonMark 4.5: a fence closes only on a run of the SAME character at
-    least as long as the opener, so a ``` sample shown inside a ```` block is
-    content, not a close.  A blind toggle inverted the masking there, and the
-    `[[link]]` inside the outer listing came back item10/dangling — whose
-    Task-2 remedy edits the listing.
-    """
-    text = mask_body_comments(text)
-    out, fence = [], None            # fence = the opening run, e.g. "````"
-    for ln in (text or "").split("\n"):
-        m = _FENCE_RE.match(ln)
-        # Backticks are forbidden in a backtick fence's info string. A prose
-        # line such as `````code``` is inline`` therefore contains an inline
-        # span; it must not open a phantom fence that hides the rest of the
-        # entry. Tilde-fence info strings have no corresponding restriction.
-        valid_opener = bool(
-            m and not (m.group(1).startswith("`") and "`" in m.group(2)))
-        if valid_opener and fence is None:
-            fence = m.group(1)
-            # Retain nested/list fences while rejecting a more-indented sample
-            # as the closer of a top-level fence. Tabs count as four columns.
-            fence_indent = max(3, len(ln[:m.start(1)].expandtabs(4)))
-            out.append("")
-            continue
-        if (fence is not None and m and m.group(1)[0] == fence[0]
-                and len(m.group(1)) >= len(fence) and not m.group(2).strip()
-                and len(ln[:m.start(1)].expandtabs(4)) <= fence_indent):
-            fence = None
-            out.append("")
-            continue
-        out.append("" if fence is not None else ln)
-    return "\n".join(out)
-
-
-#: An inline code span: a run of N backticks, content, and a closing run of the
-#: SAME length.  Not `` `[^`]*` ``, which reads ``` ``[[x]]`` ``` as two empty
-#: spans around a bare `[[x]]` and leaves the link visible to whatever is
-#: reading — an item-10 dangler whose remedy creates a file for a sample of
-#: link syntax.  Line-bounded on purpose: a code span may legally span a line
-#: break, but honouring that lets one stray backtick swallow the rest of an
-#: entry and HIDE real links, which is the costlier direction to be wrong in.
-_INLINE_CODE = re.compile(r"(`+)[^\n]*?\1(?!`)")
-
-#: An indented code block's line: four spaces, or a tab (CommonMark 4.4).
-_INDENT_CODE = re.compile(r"^(?: {4}|\t)")
-#: A list-item opener, at CommonMark's ≤3 spaces of leading indent.  A list
-#: item's continuation content is indented for exactly the reason code is,
-#: which is the one case that must NOT be read as code.
-_LIST_ITEM = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:\s|$)")
-
-
-def strip_indented(text):
-    """Blank every line of an INDENTED (4-space / tab) code block.
-
-    The third listing spelling, after ``` and ~~~.  Obsidian renders it as
-    code like the other two, so a `[[target]]` inside one links nothing and
-    reporting it as dangling prescribes creating a file for something only
-    ever shown.
-
-    CommonMark's rule, applied conservatively.  An indented code block may
-    only start where a new block can start — after a blank line — so it never
-    interrupts a paragraph.  The look-alike that is *not* code is a **list
-    item's continuation content**, indented for exactly that reason, so a run
-    whose nearest preceding non-blank line is a list item, or is itself
-    indented (i.e. already inside one), is left alone.  Erring that way is
-    deliberate and one-directional: masking a list continuation would HIDE a
-    real dangling link, while declining to mask one only leaves the behaviour
-    that was there before.  Line count is preserved, as `strip_fenced` does.
-    """
-    lines = (text or "").split("\n")
-    out = list(lines)
-    prev_nonblank = None
-    i, n = 0, len(lines)
-    while i < n:
-        ln = lines[i]
-        if not ln.strip():
-            i += 1
-            continue
-        starts_block = (i == 0) or (not lines[i - 1].strip())
-        in_list = prev_nonblank is not None and (
-            _LIST_ITEM.match(prev_nonblank) or prev_nonblank[:1].isspace())
-        if _INDENT_CODE.match(ln) and starts_block and not in_list:
-            # Consume the block: indented lines, and the blank lines between
-            # them, up to the last indented line.
-            j, last = i, i
-            while j < n:
-                if not lines[j].strip():
-                    j += 1
-                    continue
-                if not _INDENT_CODE.match(lines[j]):
-                    break
-                last = j
-                j += 1
-            for k in range(i, last + 1):
-                out[k] = ""
-            prev_nonblank = lines[last]
-            i = last + 1
-            continue
-        prev_nonblank = ln
-        i += 1
-    return "\n".join(out)
-
-
-def strip_code(text):
-    """Every LISTING blanked: fenced, indented, and inline code spans.
-
-    What is left is what this entry ASSERTS, with everything it merely SHOWS
-    removed.  A scan that has to distinguish the two — item 10 is the one that
-    matters, because its remediation CREATES the file it names — must read
-    this and not the raw prose: a `[[target-note]]` printed in a listing or
-    quoted in a code span is a sample of link syntax, not a link, and Obsidian
-    renders it as literal text.  `build_backfill` already reads the
-    fenced-stripped form, and for the same reason.
-
-    All three markdown spellings of a listing are covered, because a check
-    that knows only one of them is not a rule about listings — it is a rule
-    about backticks, and the entry that used the other spelling gets the
-    destructive finding.
-    """
-    return mask_escaped_wikilinks(mask_body_comments(text, mask_code=True))
-
-
 _OBSIDIAN_IMAGE_EMBED_LINE_RE = re.compile(
     r"^\s*!\[\[[^\]\n]*\.(?:png|jpe?g|gif|svg|webp|tiff?|bmp|avif|ico)"
     r"(?:\|[^\]\n]*)?\]\]\s*$", re.IGNORECASE)
-
-
-def _markdown_image_openers(text):
-    """Yield image start and destination start for unescaped CommonMark syntax."""
-    text = text or ""
-    n = len(text)
-    for match in re.finditer(r"!", text):
-        start = match.start()
-        backslashes, k = 0, start - 1
-        while k >= 0 and text[k] == "\\":
-            backslashes += 1
-            k -= 1
-        if backslashes % 2 or start + 1 >= n or text[start + 1] != "[":
-            continue
-        depth, i, escaped = 1, start + 2, False
-        while i < n and text[i] != "\n":
-            ch = text[i]
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == "[":
-                depth += 1
-            elif ch == "]":
-                depth -= 1
-                if depth == 0:
-                    break
-            i += 1
-        if depth == 0 and i + 1 < n and text[i + 1] == "(":
-            yield start, i + 2
-
-
-def _markdown_image_spans(text):
-    """Yield ``(start, end, destination)`` for valid one-line Markdown images.
-
-    Unlike a ``[^)]*`` regex, this small parser accepts balanced parentheses
-    in bare destinations and CommonMark angle-bracket destinations.  It also
-    tolerates the optional quoted/parenthesized title after a destination.
-    """
-    for image_start, i in _markdown_image_openers(text):
-        n = len(text)
-        if i >= n or text[i] == "\n":
-            continue
-        destination = ""
-        if text[i] == "<":
-            j, escaped = i + 1, False
-            while j < n and text[j] != "\n":
-                ch = text[j]
-                if ch == ">" and not escaped:
-                    break
-                escaped = (ch == "\\" and not escaped)
-                if ch != "\\":
-                    escaped = False
-                j += 1
-            if j >= n or text[j] != ">":
-                continue
-            destination, i = text[i + 1:j], j + 1
-        else:
-            start, depth, escaped = i, 0, False
-            while i < n and text[i] != "\n":
-                ch = text[i]
-                if escaped:
-                    escaped = False; i += 1; continue
-                if ch == "\\":
-                    escaped = True; i += 1; continue
-                if ch == "(" :
-                    depth += 1
-                elif ch == ")":
-                    if depth == 0:
-                        destination = text[start:i]
-                        yield image_start, i + 1, destination
-                        break
-                    depth -= 1
-                elif ch.isspace() and depth == 0:
-                    destination = text[start:i]
-                    break
-                i += 1
-            else:
-                continue
-            if i < n and text[i] == ")":
-                continue  # already yielded the no-title form above
-
-        # Angle destinations and bare destinations followed by whitespace may
-        # carry one optional title.  Validate that tail and locate the outer ).
-        while i < n and text[i] in " \t":
-            i += 1
-        if i < n and text[i] in "\"'":
-            quote = text[i]; i += 1; escaped = False
-            while i < n and text[i] != "\n":
-                if text[i] == quote and not escaped:
-                    i += 1; break
-                escaped = text[i] == "\\" and not escaped
-                if text[i] != "\\": escaped = False
-                i += 1
-        elif i < n and text[i] == "(":
-            close = text.find(")", i + 1)
-            if close < 0 or "\n" in text[i:close]:
-                continue
-            i = close + 1
-        while i < n and text[i] in " \t":
-            i += 1
-        if i < n and text[i] == ")":
-            yield image_start, i + 1, destination
 
 
 def _markdown_image_line(line):
@@ -2332,7 +2022,8 @@ def lint_file(path, _snapshot_text=None):
         if not stat.S_ISREG(before.st_mode):
             raise OSError("leaf Markdown path is not a regular file")
         descriptor = os.open(
-            abspath, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            abspath, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0))
         opened = os.fstat(descriptor)
         if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
             raise OSError("leaf Markdown path changed while it was opened")

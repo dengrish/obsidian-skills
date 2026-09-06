@@ -73,6 +73,7 @@ _OBSIDIAN_SHARED_MODULES = (
     'figure_state',
     'markdown_tables',
     'naming',
+    'slugify',
     'vault_artifacts',
     'yaml_scalars',
 )
@@ -120,7 +121,6 @@ if _here != _shared:
 #: hold separate copies and they disagreed about where `_src` sits, which cost
 #: either every chapter's figures or a doubled set of them.  CONVENTIONS.md §1a.
 from naming import (                       # noqa: E402  (after the bootstrap)
-    CANONICAL,
     DISAMBIGUATOR,
     SAFE_NAME,
     chapter_book_stem,
@@ -134,10 +134,10 @@ from figure_state import (MANIFEST_FILE, REVIEW_FILE, rewrite_sidecar,
                           check_manifest_writable)  # noqa: E402
 import atomic_move as _atomic_move          # noqa: E402
 from atomic_move import (LinkUnavailable, MoveIncomplete, PublicationConflict,
-                         file_identity, move_noreplace, publish_new,
+                         move_noreplace, publish_new,
                          remove_expected, replace_expected,
                          set_private_mode)  # noqa: E402
-from vault_artifacts import inventory_source_figures  # noqa: E402
+from vault_artifacts import inventory_pdfs, inventory_source_figures  # noqa: E402
 from yaml_scalars import parse_scalar, parse_source_fields, split_flow, strip_comment  # noqa: E402
 from entry_structure import mask_body_comments, mask_escaped_wikilinks  # noqa: E402
 
@@ -600,8 +600,7 @@ def _note_is_about(path, stem):
         return body.startswith("![[") and _named(body)
 
     try:
-        with open(path, encoding="utf-8-sig") as fh:
-            body = fh.read().lstrip()
+        body = _read_snapshot(path)[0].removeprefix("\ufeff").lstrip()
         lines = body.splitlines()
         if not lines or not _frontmatter_fence(lines[0]):
             return _legacy(body)
@@ -629,8 +628,7 @@ def _unquoted_source_claim(path, stem):
     repair as an inventory blocker instead.
     """
     try:
-        with open(path, encoding="utf-8-sig") as fh:
-            lines = fh.read().splitlines()
+        lines = _read_snapshot(path)[0].removeprefix("\ufeff").splitlines()
     except (OSError, UnicodeError):
         return False
     if not lines or not _frontmatter_fence(lines[0]):
@@ -1570,6 +1568,41 @@ def obsolete_names(moves):
                 unicodedata.normalize("NFC", os.path.basename(dst)), re.I) is None}
 
 
+def _pdf_alias_blockers(vault, moves):
+    """Refuse a PDF move that would break another logical source pathname.
+
+    Directory aliases share one physical rename, while leaf symlinks retain
+    the obsolete target. Neither can be repaired by moving the selected path
+    and rewriting only its known directory qualification. Unlike the Markdown
+    walk, the shared PDF inventory preserves every logical directory alias.
+    Distinct hard links have different real paths and survive an ordinary
+    rename independently, so they are not aliases for this check.
+    """
+    moving = {os.path.realpath(src): os.path.abspath(src) for src, dst in moves
+              if (src.lower().endswith(".pdf") or dst.lower().endswith(".pdf"))
+              and os.path.abspath(src) != os.path.abspath(dst)}
+    if not moving:
+        return []
+    inventory = inventory_pdfs(vault)
+    if not inventory.complete:
+        detail = "; ".join("%s: %s" % (item.path, item.message)
+                           for item in inventory.findings
+                           if item.severity == "error")
+        return ["PDF path aliases could not be inventoried completely (%s); "
+                "nothing may be renamed" % detail]
+    aliases = {}
+    for entry in inventory.entries:
+        selected = moving.get(os.path.realpath(entry.path))
+        if selected is not None and os.path.abspath(entry.path) != selected:
+            aliases.setdefault(selected, []).append(entry.path)
+    return ["%s also resolves through PDF path alias(es) %s. A rename would "
+            "leave those source paths or their qualified references broken; "
+            "reconcile the aliases to one source path before renaming. "
+            "No alias or reference was changed."
+            % (selected, ", ".join(sorted(paths)))
+            for selected, paths in sorted(aliases.items())]
+
+
 def _image_ownership_blockers(vault, source, keyed):
     """Require positive PDF-manifest ownership for every derived image."""
     images = os.path.join(vault, "Sources", "Images")
@@ -1695,7 +1728,7 @@ def _move_snapshot_identity(snapshot):
     return value[0] if kind == "regular" else value
 
 
-def _read_snapshot(path):
+def _read_snapshot(path, *, errors="strict"):
     """Read exact text and reject a file that changes during that read."""
     entry = os.stat(path, follow_symlinks=False)
     if stat.S_ISLNK(entry.st_mode):
@@ -1706,7 +1739,8 @@ def _read_snapshot(path):
     flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
              | getattr(os, "O_NONBLOCK", 0))
     descriptor = os.open(path, flags)
-    with os.fdopen(descriptor, "r", encoding="utf-8", newline="") as fh:
+    with os.fdopen(descriptor, "r", encoding="utf-8", errors=errors,
+                   newline="") as fh:
         before = os.fstat(fh.fileno())
         if _file_identity(entry) != _file_identity(before):
             raise StaleRenamePlan(
@@ -1903,10 +1937,6 @@ def plan_rename(vault, path, new_basename, dest=None):
     ren = {b: _derive(old_stem, b, new_stem) for b in keyed.values()}
     directory_ren = {b: ren[b] for p, b in keyed.items()
                      if os.path.isdir(p) and not os.path.islink(p)}
-    reference_ren = {old: new for old, new in ren.items()
-                     if _nfc_low(old) not in {_nfc_low(name)
-                                              for name in directory_ren}}
-
     # A source that arrived with no extension at all (`download`, a browser
     # save) is the one case where the caller's extension is new information
     # rather than a contradiction: there is nothing to preserve, so supply it.
@@ -1914,6 +1944,12 @@ def plan_rename(vault, path, new_basename, dest=None):
     # own extension, which `_derive` carries through in the tail.
     if not old_ext and new_ext:
         ren[src_basename] = new_stem + new_ext
+    # References use the final destination basename too. In particular an
+    # extensionless download gains .pdf before filing removes its old folder
+    # qualification; a stem-only rewrite would leave links to no actual file.
+    directory_keys = {_nfc_low(name) for name in directory_ren}
+    reference_ren = {old: new for old, new in ren.items()
+                     if _nfc_low(old) not in directory_keys}
 
     try:
         blockers = (_image_ownership_blockers(vault, path, keyed)
@@ -2060,6 +2096,8 @@ def plan_rename(vault, path, new_basename, dest=None):
 
     moves = sorted(((p, os.path.join(_home(p), ren[b]))
                     for p, b in keyed.items()), key=lambda t: -len(t[0]))
+    if have_vault:
+        blockers.extend(_pdf_alias_blockers(vault, moves))
 
     # The vault-wide check above does NOT cover the destination when the file
     # is outside the vault -- and this skill is explicitly pointed at a
@@ -2157,8 +2195,7 @@ def plan_rename(vault, path, new_basename, dest=None):
                 # one of the names being changed, which is decidable: re-read
                 # it leniently and look.
                 try:
-                    with open(md, encoding="utf-8", errors="replace") as fh:
-                        loose = fh.read()
+                    loose, _identity = _read_snapshot(md, errors="replace")
                 except OSError as retry:
                     blockers.append(
                         "%s could not be re-read to inspect its non-UTF-8 "
@@ -2778,9 +2815,9 @@ def split_book(pdf_path, chapters, out_dir, taken=None, verbose=True):
     every basename already in the vault, so a chapter cannot collide with a
     file in another folder.  Returns the list of `note:` strings.
 
-    **Two passes: resolve everything, then write.**  Splitting is destructive
-    and half of it is worse than none, so nothing reaches disk until every
-    chapter has a verified start page, a non-overlapping in-range end page, a
+    **Two passes: resolve everything, then write.** The original is preserved;
+    no chapter reaches disk until every chapter has a verified start page,
+    a non-overlapping in-range end page, a
     usable filename, and a target proved free vault-wide.  A write that fails
     part-way attempts to remove what this run just created. Any cleanup failure
     is named as an incomplete rollback so the caller can inspect it before
@@ -2841,6 +2878,8 @@ def split_book(pdf_path, chapters, out_dir, taken=None, verbose=True):
     try:
         existing_chapters = []
         for name in _listdir(out_dir):
+            if not name.lower().endswith(".pdf"):
+                continue
             book = chapter_book_stem(name)
             if (book is not None
                     and _nfc_low(core_stem(book, is_stem=True))
@@ -3335,6 +3374,53 @@ def _selftest():
         _m, _e, _b = plan_rename(_v, _p, new)
         got = None if _b else os.path.basename(_m[0][1])
         check("%s --to %s" % (src, new), got, want)
+
+    with _tf.TemporaryDirectory(prefix="org-extensionless-links-") as _v:
+        _pdf = Path(_v, "Inbox", "download")
+        _pdf.parent.mkdir()
+        _pdf.write_bytes(b"%PDF-1.4\n")
+        _note = Path(_v, "Citation.md")
+        _note.write_text("[[Inbox/download]]\n[read](Inbox/download)\n",
+                         encoding="utf-8")
+        _dest = os.path.join(_v, "Sources", "PDFs")
+        _moves, _edits, _blockers = rename_all(
+            _v, str(_pdf), "Doe_Study_2025.pdf", apply=True, dest=_dest)
+        check("an extensionless PDF filing carries complete source links",
+              (_blockers, _note.read_text(encoding="utf-8"),
+               Path(_dest, "Doe_Study_2025.pdf").read_bytes(), _pdf.exists()),
+              ([], "[[Doe_Study_2025.pdf]]\n[read](Doe_Study_2025.pdf)\n",
+               b"%PDF-1.4\n", False))
+
+    for _alias_kind, _source_name in (("directory", "Doe_Old_2025.pdf"),
+                                     ("leaf", "Doe_Old_2025.pdf"),
+                                     ("leaf", "download")):
+        with _tf.TemporaryDirectory(prefix="org-pdf-path-alias-") as _v:
+            _root = Path(_v, "vault")
+            _source_dir = _root / "Sources" / "PDFs"
+            _source_dir.mkdir(parents=True)
+            _pdf = _source_dir / _source_name
+            _pdf_bytes = b"%PDF-1.4\noriginal PDF bytes"
+            _pdf.write_bytes(_pdf_bytes)
+            if _alias_kind == "directory":
+                (_root / "Alias").symlink_to(_source_dir, target_is_directory=True)
+                _alias = _root / "Alias" / _pdf.name
+                _alias_link = "Alias/" + _pdf.name
+            else:
+                _alias = _root / "Alias.pdf"
+                _alias.symlink_to(_pdf)
+                _alias_link = "Alias.pdf"
+            _note = _root / "Citation.md"
+            _body = "[[Sources/PDFs/" + _source_name + "]]\n[[" + _alias_link + "]]\n"
+            _note.write_text(_body, encoding="utf-8")
+            _moves, _edits, _blockers = rename_all(
+                str(_root), str(_pdf), "Doe_New_2025.pdf", apply=True)
+            check("a %s PDF alias to %s blocks the complete rename without damage"
+                  % (_alias_kind, _source_name),
+                  (any("PDF path alias(es)" in item and str(_alias) in item
+                       for item in _blockers),
+                   _note.read_text(encoding="utf-8"), _pdf.read_bytes(),
+                   _alias.read_bytes(), (_source_dir / "Doe_New_2025.pdf").exists()),
+                  (True, _body, _pdf_bytes, _pdf_bytes, False))
 
     # 15. A folder-qualified wikilink names ONE path, so it refers to the keyed
     #     file only when the keyed file lives there.  The qualification used to
@@ -5000,6 +5086,28 @@ def _selftest():
         check("an existing chapter set blocks a parallel second split",
               "existing chapter set" in _existing_refusal, True)
 
+    with _tf.TemporaryDirectory(prefix="org-nonpdf-chapter-name-") as _v:
+        _book = os.path.join(_v, "Kuhn_S_2012.pdf")
+        _source_writer = _TestPdfWriter()
+        _source_writer.add_blank_page(width=100, height=100)
+        with open(_book, "wb") as _fh:
+            _source_writer.write(_fh)
+        _reader_object = _TestPdfReader(_book)
+        _reader_object.pages[0].extract_text = lambda: "Chapter 1 Introduction"
+        _out = os.path.join(_v, "Kuhn_S_2012")
+        _note = _put(_v, "Kuhn_S_2012/Kuhn_S_2012_01_Intro.md",
+                     "existing chapter notes\n")
+        with patch.dict(globals(), _reader=lambda _path: _reader_object):
+            _notes = split_book(
+                _book, [{"heading_text": "Chapter 1 Introduction",
+                         "filename": "Kuhn_S_2012_01_Intro.pdf",
+                         "start_idx": 0, "end_idx": 1}], _out, verbose=False)
+        check("a chapter-shaped note is not an existing PDF chapter set",
+              (_notes, len(_TestPdfReader(os.path.join(
+                  _out, "Kuhn_S_2012_01_Intro.pdf")).pages),
+               Path(_note).read_text(encoding="utf-8"), os.path.isfile(_book)),
+              ([], 1, "existing chapter notes\n", True))
+
     # Obsidian encodes local Markdown destinations. Repair those alongside
     # wikilinks, but decode only once and leave other documents/URLs alone.
     for _old in ("download (1).pdf", "download%20(1).pdf"):
@@ -5045,6 +5153,7 @@ def _selftest():
     # a future regression removes the flag instead of hanging the self-test.
     if hasattr(os, "mkfifo") and hasattr(os, "O_NONBLOCK"):
         for _reader in (lambda p: _read_snapshot(p),
+                        lambda p: _read_snapshot(p, errors="replace"),
                         lambda p: _stable_file_snapshot(p),
                         lambda p: references(os.path.dirname(p), {"Doe_Old_2025.pdf"})):
             with _tf.TemporaryDirectory(prefix="org-fifo-snapshot-test-") as _v:
@@ -5067,6 +5176,26 @@ def _selftest():
                     _refused = True
                 check("a FIFO swapped at descriptor open is rejected without blocking",
                       _refused, True)
+
+        for _owner_reader, _body in (
+                (_note_is_about, '---\nsources: ["[[Doe_Old_2025.pdf]]"]\n---\n'),
+                (_unquoted_source_claim, '---\nsource: [[Doe_Old_2025.pdf]]\n---\n')):
+            with _tf.TemporaryDirectory(prefix="org-fifo-ownership-") as _v:
+                _victim = _put(_v, "Articles/Doe_Old_2025.md", _body)
+                _open = os.open
+
+                def _ownership_fifo(path, flags, *args, **kwargs):
+                    if os.fspath(path) == _victim:
+                        if not flags & os.O_NONBLOCK:
+                            raise AssertionError("ownership read could block on a FIFO")
+                        os.unlink(path)
+                        os.mkfifo(path)
+                    return _open(path, flags, *args, **kwargs)
+
+                with patch.object(os, "open", side_effect=_ownership_fifo):
+                    _owned = _owner_reader(_victim, "Doe_Old_2025")
+                check("ownership cannot be established from a FIFO replacement",
+                      _owned, False)
 
     # A rename repairs live navigation, including a Reviews log's evidence
     # links, but must preserve literal historical examples in every note.

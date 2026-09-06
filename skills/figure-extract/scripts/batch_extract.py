@@ -74,7 +74,7 @@ Usage:
     # Re-extract existing figures whose ownership and bytes are verified:
     python3 batch_extract.py --src ... --out ... --overwrite
 
-    # During an absent-manifest migration, claim only inspected historical
+    # During legacy migration, claim only inspected historical
     # extractor crops named exactly (repeat the option for more than one):
     python3 batch_extract.py --src ... --out ... \\
         --adopt-legacy Doe_Study_2025:1
@@ -172,7 +172,7 @@ from auto_fig_bbox import (
     find_caption_blocks,
 )
 from extract_figures import (extract_one_figure, normalize_fig_num,
-                             validated_figure_suffix)
+                             validated_figure_suffix, _figure_slot_conflict)
 import atomic_move
 
 
@@ -189,8 +189,7 @@ from figure_state import (MANIFEST_FILE, REVIEW_FILE, write_manifest,
                           write_review, figure_identity, manifest_key,
                           check_manifest_writable, parse_reviewed, read_sidecar,
                           read_manifest_snapshot, file_digest)  # noqa: E402
-from vault_artifacts import (inventory_pdfs, inventory_source_figures,
-                             output_vault_root,
+from vault_artifacts import (inventory_pdfs, output_vault_root,
                              source_stem_groups,
                              verify_selected_pdf)  # noqa: E402
 
@@ -227,11 +226,6 @@ MANIFEST_HEADER = (
     "# Removing a record or file is destructive: first verify the exact figure\n"
     "# and obtain any authorization the current task has not already supplied.\n"
 )
-
-#: Files this extractor writes: the `[stem]_fig_<N>.png` convention of 8b.
-#: Used only to seed the duplicate-detection index. Ownership is never inferred
-#: from this broad glob; legacy migration names exact files with --adopt-legacy.
-FIGURE_GLOB = "*_fig_*.png"
 
 
 def _configure_stdio():
@@ -520,7 +514,7 @@ def load_manifest(path):
 
     The returned snapshot distinguishes a missing file from an existing empty
     manifest. Missing ownership records never claim occupied image names;
-    explicit absent-manifest migration is handled by `adopt_legacy_files`.
+    explicit migration of unrecorded slots is handled by `adopt_legacy_files`.
     """
     return read_manifest_snapshot(path)
 
@@ -596,8 +590,7 @@ def _legacy_png_snapshot(path):
     return stable(after) + (digest.hexdigest(),)
 
 
-def adopt_legacy_files(out_dir, entries, eligible_stems, manifest,
-                       manifest_existed):
+def adopt_legacy_files(out_dir, entries, eligible_stems, manifest):
     """Explicitly claim complete PNGs in currently unrecorded figure slots."""
     if not entries:
         return []
@@ -810,72 +803,6 @@ def _foreign_occupant(manifest, out_path):
     if digest != recorded:
         return "its bytes have changed since this extractor wrote it", digest
     return "", digest
-
-
-def _figure_slot_conflict(out_dir, stem, fig_suffix, out_path):
-    """Return an occupied semantic figure slot, or ``None`` when it is free.
-
-    The published PDF crop is always PNG, but the shared image folder also
-    contains clipping output such as JPG and WebP. Consumers identify a figure
-    by portable ``<stem>_fig_<label>`` identity before considering its
-    extension, so checking only ``out_path`` can create two equally plausible
-    files for one figure. The one direct regular path spelled exactly like the
-    intended PNG is allowed through for the manifest/digest ownership check;
-    every extension twin, case/NFC alias, nested match, symlink and nonregular
-    occupant blocks without being changed.
-
-    A missing output folder is conclusively empty for a dry-run preview. An
-    existing folder whose shared inventory is incomplete cannot establish that
-    the slot is free and therefore fails closed.
-    """
-    if not os.path.lexists(out_dir):
-        return None
-    inventory = inventory_source_figures(out_dir, stem)
-    if not inventory.complete:
-        detail = "; ".join(
-            "%s: %s" % (item.path, item.message)
-            for item in inventory.findings
-            if item.kind in {"unreadable", "changed-during-inventory"}
-        ) or "the image folder could not be inventoried completely"
-        return out_path, (
-            "the portable figure namespace is incomplete, so this slot cannot "
-            "be proved free (%s)" % detail
-        )
-
-    slot = figure_identity("%s_fig_%s" % (stem, fig_suffix))
-    exact = os.path.abspath(os.fspath(out_path))
-    direct = set(inventory.candidates)
-    conflicts = []
-    for candidate in inventory.candidates + inventory.blocked_matches:
-        basename = os.path.basename(candidate)
-        candidate_stem, _extension = os.path.splitext(basename)
-        if figure_identity(candidate_stem) != slot:
-            continue
-        candidate_abs = os.path.abspath(os.fspath(candidate))
-        if candidate in direct:
-            same_entry = candidate_abs == exact
-            if not same_entry and os.path.lexists(out_path):
-                try:
-                    same_entry = os.path.samefile(candidate, out_path)
-                except OSError:
-                    same_entry = False
-            if same_entry:
-                # Normalization-insensitive filesystems can return an NFD
-                # directory spelling for the NFC path we opened. It is one
-                # file, not a semantic-slot twin; ownership is decided by the
-                # manifest and digest below.
-                continue
-        conflicts.append(candidate)
-    if not conflicts:
-        return None
-    conflicts.sort(key=lambda path: figure_identity(os.fspath(path)))
-    return conflicts[0], (
-        "the portable figure slot is occupied by %s; publishing %s would "
-        "leave ambiguous extension, case, or Unicode variants" % (
-            ", ".join(os.path.basename(path) for path in conflicts),
-            os.path.basename(out_path),
-        )
-    )
 
 
 def _note_output(result, seen_hashes, out_path, fig_num, stem, manifest,
@@ -2959,7 +2886,7 @@ def run_self_test():
         explicit_manifest = {}
         explicit = adopt_legacy_files(
             seed_dir, ["Doe_Prior_2025:1"], {"Doe_Prior_2025"},
-            explicit_manifest, False)
+            explicit_manifest)
         check("one exact complete PNG can be selected for legacy adoption",
               ([item[1] for item in explicit], explicit_manifest),
               (["Doe_Prior_2025_fig_1.png"],
@@ -2971,7 +2898,7 @@ def run_self_test():
         repeated_manifest = {}
         repeated = adopt_legacy_files(
             seed_dir, ["Doe_Prior_2025:1", "Doe_Prior_2025:2"],
-            {"Doe_Prior_2025"}, repeated_manifest, False)
+            {"Doe_Prior_2025"}, repeated_manifest)
         check("--adopt-legacy is repeatable but remains file-exact",
               ([item[1] for item in repeated], sorted(repeated_manifest)),
               (["Doe_Prior_2025_fig_1.png", "Doe_Prior_2025_fig_2.png"],
@@ -2980,22 +2907,22 @@ def run_self_test():
         existing_manifest = {"Other_Study_2025_fig_1.png": "a" * 64}
         existing_adoption = adopt_legacy_files(
             seed_dir, ["Doe_Prior_2025:1"], {"Doe_Prior_2025"},
-            existing_manifest, True)
+            existing_manifest)
         check("an existing manifest can adopt a distinct unrecorded slot",
               ([item[1] for item in existing_adoption],
                sorted(existing_manifest)),
               (["Doe_Prior_2025_fig_1.png"],
                ["Doe_Prior_2025_fig_1.png", "Other_Study_2025_fig_1.png"]))
-        for entry, eligible, existed, phrase in (
-                ("Doe_Prior_2025:2", {"Doe_Prior_2025"}, False,
+        for entry, eligible, phrase in (
+                ("Doe_Prior_2025:2", {"Doe_Prior_2025"},
                  "requires the exact regular file"),
-                ("doe_prior_2025:1", {"Doe_Prior_2025"}, False,
+                ("doe_prior_2025:1", {"Doe_Prior_2025"},
                  "exact on-disk stem"),
-                ("Doe_Prior_2025:../1", {"Doe_Prior_2025"}, False,
+                ("Doe_Prior_2025:../1", {"Doe_Prior_2025"},
                  "filename fragment")):
             state["n"] += 1
             try:
-                adopt_legacy_files(seed_dir, [entry], eligible, {}, existed)
+                adopt_legacy_files(seed_dir, [entry], eligible, {})
                 state["bad"] += 1
                 print("FAIL unsafe explicit legacy adoption: %s" % entry)
             except ValueError as exc:
@@ -3007,7 +2934,7 @@ def run_self_test():
         try:
             adopt_legacy_files(
                 seed_dir, ["Doe_Prior_2025:1"], {"Doe_Prior_2025"},
-                {"DOE_PRIOR_2025_FIG_1.PNG": "a" * 64}, True)
+                {"DOE_PRIOR_2025_FIG_1.PNG": "a" * 64})
             state["bad"] += 1
             print("FAIL adoption accepted a slot already in the manifest")
         except ValueError as exc:
@@ -3247,7 +3174,7 @@ def run_self_test():
         pending_manifest = dict(prior_record)
         pending_adoptions = adopt_legacy_files(
             late_out, ["Doe_Legacy_2025:1"], {"Doe_Legacy_2025"},
-            pending_manifest, True)
+            pending_manifest)
         Image.new("RGB", (30, 20), (90, 40, 150)).save(
             late_out / "Doe_Legacy_2025_fig_1.jpg")
         with contextlib.redirect_stderr(io.StringIO()):
@@ -4041,7 +3968,6 @@ def main(argv=None):
     manifest_file = os.path.join(out_dir, MANIFEST_FILE)
     try:
         manifest, manifest_snapshot = load_manifest(manifest_file)
-        manifest_existed = manifest_snapshot[0]
         if not args.dry_run:
             check_manifest_writable(manifest_file)
     except (OSError, UnicodeError, ValueError) as exc:
@@ -4060,8 +3986,7 @@ def main(argv=None):
     }
     try:
         adoptions = adopt_legacy_files(
-            out_dir, args.adopt_legacy, adoptable_stems, manifest,
-            manifest_existed)
+            out_dir, args.adopt_legacy, adoptable_stems, manifest)
     except (OSError, UnicodeError, ValueError) as exc:
         print("REFUSED: %s. No sidecar or figure was written." % exc,
               file=sys.stderr)

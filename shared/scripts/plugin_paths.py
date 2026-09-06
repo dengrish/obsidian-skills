@@ -1,96 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""plugin_paths.py -- locate the obsidian plugin's ``shared/scripts/``.
+"""Locate the Obsidian plugin's shared Python helpers.
 
-WHY THIS EXISTS
----------------
-Several skills need the same canonical helpers.  The plugin
-installs as one tree, so a skill script can reach ``shared/scripts/`` by
-walking up from its own ``__file__``.  But a skill can also be *extracted
-alone* -- copied out of the plugin, vendored into another package, run from a
-tarball of one skill directory -- and then there is no ``shared/`` above it.
+Resolution order:
+1. An explicit ``OBSIDIAN_VAULT_SHARED`` directory, which must contain the
+   requested modules. An invalid override is an error, never a silent fallback.
+2. The first usable ``shared/scripts/`` within five ancestors of the script.
+3. Co-located helpers for an extracted skill, reported explicitly by diagnostics.
 
-The three failure modes we are avoiding:
+Normal installations use one complete plugin tree. Do not vendor copies of
+shared algorithms into individual skills. Shared modules take import precedence
+and each skill's own scripts directory precedes unrelated import locations.
 
-  1. **Vendoring a second copy of the algorithm** into each skill.  That is the
-     duplication that produced the data-loss bug this shared layer exists to
-     prevent: ``C++`` slugged to ``c-plus-plus`` in one copy and ``c`` in the
-     other, so the linter proposed renaming correctly-named entries, and an
-     approved rename rewrites links vault-wide.
-  2. **Dying with ``ModuleNotFoundError: No module named 'slugify'``**, which
-     tells the user nothing about what is wrong or how to fix it.
-  3. **Letting ``PYTHONPATH`` or site-packages shadow a skill's sibling
-     module.**  Shared modules must win over a stray local copy, but the
-     skill's own ``scripts/`` directory must still win over unrelated import
-     locations.
+Skill scripts cannot import this module before locating it, so they embed
+``BOOTSTRAP`` verbatim and declare ``_OBSIDIAN_SHARED_MODULES``. The convention
+suite verifies every copy and declaration. The resolver API supports diagnostics
+once the shared layer is available; it does not replace the bootstrap.
 
-So: honor a valid override, resolve the plugin-relative path, fall back to a
-co-located copy where that richer API supports one, and otherwise fail with an
-error that names the searched locations and the one-line fix.
-
-THE BOOTSTRAP
--------------
-A skill script cannot ``import plugin_paths`` before it knows where
-``shared/scripts/`` is -- so the search itself has to be inlined.  The
-canonical snippet is :data:`BOOTSTRAP` below.  It is pure path arithmetic --
-it restates no convention, so a copy of it cannot drift in any way that
-matters -- and ``tests/test_conventions.py`` asserts every copy in the tree is
-byte-identical to :data:`BOOTSTRAP`.  Paste it verbatim, then ``import
-slugify`` (and, if you want the richer helpers, ``import plugin_paths``)
-normally.
-
-Four properties of the snippet are load-bearing, and each one is a bug that
-was actually shipped:
-
-  * ``$OBSIDIAN_VAULT_SHARED`` is consulted FIRST, by the snippet itself.  The
-    override used to be readable only through this module, i.e. only *after*
-    the bootstrap had already succeeded -- so it could never rescue the case
-    it exists for.
-  * ``shared/scripts/`` is inserted at position 0 and the script's own
-    directory immediately after it.  The shared path must outrank a stray
-    local ``slugify.py``; the own directory must outrank an unrelated
-    ``vault_index`` on ``PYTHONPATH`` or in site-packages.
-  * Every script declares the shared modules it imports.  A candidate is
-    usable only when it contains those ``.py`` files, so an empty or wrong
-    ``$OBSIDIAN_VAULT_SHARED`` fails here with the resolution message rather
-    than at the next import with a bare ``ModuleNotFoundError``.  A pasted
-    bootstrap without a declaration probes for :data:`PROBE_MODULE`.
-  * Failing to resolve is a :class:`SystemExit` carrying the searched
-    locations and the fix, not a fall-through to ``ModuleNotFoundError: No
-    module named 'slugify'``.
-
-The snippet knows the complete required-module list before it searches, so it
-can use the same final co-located fallback as :func:`find_shared_scripts`.
-That directory is accepted only when every declared helper is present. A stray
-same-named module beside a normally installed skill cannot win because the
-plugin-relative shared directory is searched first.
-
-SEARCH ORDER (:func:`find_shared_scripts`)
-------------------------------------------
-  1. ``$OBSIDIAN_VAULT_SHARED`` if set -- the explicit escape hatch for an
-     unusual install; must be a directory and must hold the named module (or
-     :data:`PROBE_MODULE` when none is named), or it is an error, never a
-     silent skip.  An override that resolves to a directory without the
-     module in it is failure mode 2 wearing a hat: the caller puts it on
-     ``sys.path`` and the next line dies with the bare ``ModuleNotFoundError``.
-  2. Plugin-relative: walk up from the starting path (default: the caller's
-     directory) at most :data:`MAX_WALK_UP` levels, taking the first
-     ancestor whose ``shared/scripts/`` contains the requested module.  From
-     ``skills/<skill>/scripts/x.py`` the plugin root is three levels up, so
-     the default bound of 5 has slack for a deeper layout without wandering
-     into ``$HOME``.
-  3. Co-located fallback: the starting directory itself, if it holds the
-     module being looked for.  This is the "skill extracted alone, someone
-     dropped a copy next to it" case -- supported so the skill still runs,
-     and reported by :func:`describe` so the copy is visible rather than
-     silently authoritative.
-
-Stdlib only, Python 3.10+.  Usable as a module and as a CLI:
-
-    python3 shared/scripts/plugin_paths.py            # human-readable report
-    python3 shared/scripts/plugin_paths.py --json     # same, machine-readable
-    python3 shared/scripts/plugin_paths.py --bootstrap  # print the snippet
-    python3 shared/scripts/plugin_paths.py --test     # inline self-test
+Stdlib only, Python 3.10+. Commands:
+    python3 shared/scripts/plugin_paths.py              # resolution report
+    python3 shared/scripts/plugin_paths.py --json       # machine-readable report
+    python3 shared/scripts/plugin_paths.py --bootstrap  # canonical snippet
+    python3 shared/scripts/plugin_paths.py --test       # inline self-tests
 Exit codes: 0 resolved, 1 not found.
 """
 
@@ -308,36 +239,16 @@ def ensure_shared_on_path(start=None, module=PROBE_MODULE):
 
 
 def _root_of(shared):
-    """The plugin root implied by ``shared``, or ``None`` if it implies none.
-
-    ONE rule, used by :func:`plugin_root` and :func:`describe` alike.  They
-    used to compute this separately and only :func:`plugin_root` applied the
-    ``isdir(root/shared/scripts)`` guard, so :func:`describe` reported a
-    ``plugin_root`` that :func:`plugin_root` itself refused -- point the
-    override at a vendored ``lib/`` and ``describe()`` named its grandparent
-    as the plugin root while ``plugin_root()`` returned ``None``.  A
-    diagnostic that contradicts the function it is diagnosing is worse than no
-    diagnostic: it is the thing the reader trusts.
-    """
+    """Return the root above a recognized shared/scripts tree, else ``None``."""
     root = os.path.dirname(os.path.dirname(shared))
     return root if os.path.isdir(os.path.join(root, *SHARED_REL)) else None
 
 
 def plugin_root(start=None, module=PROBE_MODULE):
-    """Return the plugin root (the parent of ``shared/``), or ``None``.
+    """Return the resolved plugin root, or ``None`` when none is established.
 
-    ``None`` when the co-located fallback resolved -- there is no plugin root
-    in that case, which is exactly the signal a caller wants.
-
-    Probes with :data:`PROBE_MODULE`, as :func:`describe` does, so that the
-    two answer for the same set of overrides.  Passing none was the same
-    contradiction :func:`_root_of` removes, one layer up and pointing the
-    other way: set ``$OBSIDIAN_VAULT_SHARED`` to a hollow ``lib/`` sitting
-    inside a REAL plugin and the ``if module`` guard in
-    :func:`find_shared_scripts` was skipped here, so this function named that
-    plugin as the root while :func:`describe` raised and reported ``None``.
-    A diagnostic and the function it diagnoses that disagree is the bug; which
-    of the two is right does not enter into it.
+    Uses the same required-module probe as ``describe``. An invalid override
+    or a co-located helper directory without a plugin tree has no root.
     """
     try:
         shared = find_shared_scripts(start=start, module=module)

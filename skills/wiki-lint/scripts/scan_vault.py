@@ -140,7 +140,7 @@ from yaml_scalars import parse_scalar, split_flow, strip_comment  # noqa: E402
 # conformance suite.  Do NOT paste a copy back.
 # ===========================================================================
 from plurals import (  # noqa: E402
-    pluralize, real_permutation, singular_key, singular_keys,
+    pluralize, real_permutation, singular_keys,
     stem_key, wordorder_key_singular,
 )
 from organism_names import (  # noqa: E402
@@ -156,6 +156,13 @@ from equation_coverage import (  # noqa: E402
     find_noncanonical_display_equation_candidates,
 )
 from entry_structure import (  # noqa: E402
+    description_subject_forms,
+    acronym_initial_forms as _initial_forms,
+    markdown_image_spans,
+    source_stem,
+    strip_code,
+    strip_fenced,
+    strip_indented,
     answer_surface_match,
     body_opens_with_prose,
     count_sentences,
@@ -228,20 +235,6 @@ def _first_letter_ci_equal(a, b):
     return a[0].lower() == b[0].lower() and a[1:] == b[1:]
 
 
-def description_subject_forms(title):
-    """Canonical title/base/math-plain forms accepted as item-7 subjects."""
-    forms = []
-    subjects = (base_term(title),) if has_parenthetical(title) else (title,)
-    for subject in subjects:
-        for form in (
-                subject,
-                math_title_plain_text(subject) if subject else None):
-            form = (form or "").strip()
-            if form and form not in forms:
-                forms.append(form)
-    return forms
-
-
 def description_has_entity_subject(description, title):
     """Conservative mechanical floor for the entity-as-subject rule."""
     if not description or not title:
@@ -281,22 +274,6 @@ _SCI_ABBREV_RE = re.compile(
 _NON_NAME_PAREN_RE = re.compile(
     r"^(?:b\.|c\.|d\.|fl\.|r\.|e\.g|i\.e|cf\.|vs\.|see\s|a\s|an\s|the\s|"
     r"annual|ongoing)|\d{3,4}", re.IGNORECASE)
-
-
-def _initial_forms(value):
-    """Possible initial strings for a written-out name."""
-    words = re.findall(r"[A-Za-z0-9]+", value or "")
-    if not words:
-        return set()
-    stop = {"a", "an", "and", "of", "the", "to", "with"}
-
-    def initial(word):
-        return word if word.isupper() and 1 < len(word) <= 6 else word[:1]
-
-    all_words = "".join(initial(word) for word in words).casefold()
-    content = "".join(initial(word) for word in words
-                      if word.casefold() not in stop).casefold()
-    return {form for form in (all_words, content) if form}
 
 
 def _acronym_counterpart(term, candidate):
@@ -497,100 +474,6 @@ def leftover_dollars(body):
 EMB = re.compile(
     r"^\s*!\[\[[^\]\n]*\.(?:png|jpe?g|gif|svg|webp|tiff?|bmp|avif|ico)"
     r"(?:\|[^\]\n]*)?\]\]\s*$", re.IGNORECASE)
-
-
-def _markdown_image_openers(text):
-    """Yield image start and destination start for unescaped CommonMark syntax."""
-    text = text or ""
-    n = len(text)
-    for match in re.finditer(r"!", text):
-        start = match.start()
-        backslashes, k = 0, start - 1
-        while k >= 0 and text[k] == "\\":
-            backslashes += 1
-            k -= 1
-        if backslashes % 2 or start + 1 >= n or text[start + 1] != "[":
-            continue
-        depth, i, escaped = 1, start + 2, False
-        while i < n and text[i] != "\n":
-            ch = text[i]
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == "[":
-                depth += 1
-            elif ch == "]":
-                depth -= 1
-                if depth == 0:
-                    break
-            i += 1
-        if depth == 0 and i + 1 < n and text[i + 1] == "(":
-            yield start, i + 2
-
-
-def markdown_image_spans(text):
-    """Yield valid one-line Markdown image spans and full destinations."""
-    for image_start, i in _markdown_image_openers(text):
-        n = len(text)
-        if i >= n or text[i] == "\n":
-            continue
-        destination = ""
-        if text[i] == "<":
-            j, escaped = i + 1, False
-            while j < n and text[j] != "\n":
-                ch = text[j]
-                if ch == ">" and not escaped:
-                    break
-                escaped = ch == "\\" and not escaped
-                if ch != "\\": escaped = False
-                j += 1
-            if j >= n or text[j] != ">":
-                continue
-            destination, i = text[i + 1:j], j + 1
-        else:
-            start, depth, escaped = i, 0, False
-            while i < n and text[i] != "\n":
-                ch = text[i]
-                if escaped:
-                    escaped = False; i += 1; continue
-                if ch == "\\":
-                    escaped = True; i += 1; continue
-                if ch == "(":
-                    depth += 1
-                elif ch == ")":
-                    if depth == 0:
-                        destination = text[start:i]
-                        yield image_start, i + 1, destination
-                        break
-                    depth -= 1
-                elif ch.isspace() and depth == 0:
-                    destination = text[start:i]
-                    break
-                i += 1
-            else:
-                continue
-            if i < n and text[i] == ")":
-                continue
-        while i < n and text[i] in " \t":
-            i += 1
-        if i < n and text[i] in "\"'":
-            quote = text[i]; i += 1; escaped = False
-            while i < n and text[i] != "\n":
-                if text[i] == quote and not escaped:
-                    i += 1; break
-                escaped = text[i] == "\\" and not escaped
-                if text[i] != "\\": escaped = False
-                i += 1
-        elif i < n and text[i] == "(":
-            close = text.find(")", i + 1)
-            if close < 0 or "\n" in text[i:close]:
-                continue
-            i = close + 1
-        while i < n and text[i] in " \t":
-            i += 1
-        if i < n and text[i] == ")":
-            yield image_start, i + 1, destination
 
 
 def markdown_link_spans(text):
@@ -991,32 +874,6 @@ def parse_fm(fm, bad=None):
             key = None
     return d
 
-def source_stem(item):
-    """``(stem, ext)`` of one `sources:` item, both case-folded.
-
-    The pair is the identity of the DOCUMENT the item names, so everything that
-    can vary without changing which document that is gets dropped: the `[[ ]]`
-    wrapper, a `#page=N` anchor, a display pipe, and any folder qualification
-    (`Sources/PDFs/X.pdf` and `X.pdf` are one file). Case and Unicode
-    normalization are folded so document identity stays stable across
-    filesystems that alias those spellings and ones that can store both.
-
-    `("", "")` when the item carries no extension at all; the source-format
-    check reports that malformed item.
-    """
-    inner = (item or "").strip()
-    if inner.startswith("[[") and inner.endswith("]]"): inner = inner[2:-2]
-    inner = inner.split("|",1)[0]                       # display pipe
-    inner = inner.split("#",1)[0]                       # #page=N anchor
-    inner = inner.replace("\\","/").rsplit("/",1)[-1]   # folder qualification
-    stem, dot, ext = inner.rpartition(".")
-    if not dot: return "", ""
-    # NFC as well as case: one document may be spelled NFD on disk and NFC in a
-    # note. Raw strings would miss the item4 pair and make results host-dependent.
-    # §7 requires this to agree exactly with wiki-build's
-    # lint_entry.source_stem(); keep the two lines identical.
-    return (unicodedata.normalize("NFC", stem.strip()).lower(),
-            unicodedata.normalize("NFC", ext.strip()).lower())
 
 WIKILINK = re.compile(
     r"(?<!\!)\[\[([^\]\|]+?)(?:\\?\|([^\]]+))?\]\]")  # (?<!!) excludes ![[embeds]]
@@ -1193,49 +1050,6 @@ def tag_canonical(tag_slug):
 
 WORD = re.compile(r"[A-Za-z0-9]+")
 
-_FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
-
-
-def strip_fenced(text):
-    """Blank every line inside a ``` / ~~~ fenced code block, line count kept.
-
-    A fenced block is a LISTING: its contents are shown, not asserted, so a
-    scan that reads them as frontmatter or as prose reports the sample rather
-    than the entry.  Line count is preserved so any offset computed against the
-    original still lines up.
-
-    CommonMark 4.5: a fence closes only on a run of the SAME character at
-    least as long as the opener, so a ``` sample shown inside a ```` block is
-    content, not a close.  A blind toggle inverted the masking there, and the
-    `[[link]]` inside the outer listing came back item10/dangling — whose
-    Task-2 remedy edits the listing.
-    """
-    text = mask_body_comments(text)
-    out, fence = [], None            # fence = the opening run, e.g. "````"
-    for ln in (text or "").split("\n"):
-        m = _FENCE_RE.match(ln)
-        # Backticks cannot occur in a backtick fence's info string. A line
-        # beginning with a closed triple-backtick inline span is prose, not a
-        # fence opener; treating it as one hides the rest of the entry.
-        valid_opener = bool(
-            m and not (m.group(1).startswith("`") and "`" in m.group(2)))
-        if valid_opener and fence is None:
-            fence = m.group(1)
-            # Retain nested/list fences while rejecting a more-indented sample
-            # as the closer of a top-level fence. Tabs count as four columns.
-            fence_indent = max(3, len(ln[:m.start(1)].expandtabs(4)))
-            out.append("")
-            continue
-        if (fence is not None and m and m.group(1)[0] == fence[0]
-                and len(m.group(1)) >= len(fence) and not m.group(2).strip()
-                and len(ln[:m.start(1)].expandtabs(4)) <= fence_indent):
-            fence = None
-            out.append("")
-            continue
-        out.append("" if fence is not None else ln)
-    return "\n".join(out)
-
-
 #: An inline code span: a run of N backticks, content, and a closing run of the
 #: SAME length.  Not `` `[^`]*` ``, which reads ``` ``[[x]]`` ``` as two empty
 #: spans around a bare `[[x]]` and leaves the link visible to whatever is
@@ -1244,85 +1058,6 @@ def strip_fenced(text):
 #: break, but honouring that lets one stray backtick swallow the rest of an
 #: entry and HIDE real links, which is the costlier direction to be wrong in.
 _INLINE_CODE = re.compile(r"(`+)[^\n]*?\1(?!`)")
-
-#: An indented code block's line: four spaces, or a tab (CommonMark 4.4).
-_INDENT_CODE = re.compile(r"^(?: {4}|\t)")
-#: A list-item opener, at CommonMark's ≤3 spaces of leading indent.  A list
-#: item's continuation content is indented for exactly the reason code is,
-#: which is the one case that must NOT be read as code.
-_LIST_ITEM = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:\s|$)")
-
-
-def strip_indented(text):
-    """Blank every line of an INDENTED (4-space / tab) code block.
-
-    The third listing spelling, after ``` and ~~~.  Obsidian renders it as
-    code like the other two, so a `[[target]]` inside one links nothing and
-    reporting it as dangling prescribes creating a file for something only
-    ever shown.
-
-    CommonMark's rule, applied conservatively.  An indented code block may
-    only start where a new block can start — after a blank line — so it never
-    interrupts a paragraph.  The look-alike that is *not* code is a **list
-    item's continuation content**, indented for exactly that reason, so a run
-    whose nearest preceding non-blank line is a list item, or is itself
-    indented (i.e. already inside one), is left alone.  Erring that way is
-    deliberate and one-directional: masking a list continuation would HIDE a
-    real dangling link, while declining to mask one only leaves the behaviour
-    that was there before.  Line count is preserved, as `strip_fenced` does.
-    """
-    lines = (text or "").split("\n")
-    out = list(lines)
-    prev_nonblank = None
-    i, n = 0, len(lines)
-    while i < n:
-        ln = lines[i]
-        if not ln.strip():
-            i += 1
-            continue
-        starts_block = (i == 0) or (not lines[i - 1].strip())
-        in_list = prev_nonblank is not None and (
-            _LIST_ITEM.match(prev_nonblank) or prev_nonblank[:1].isspace())
-        if _INDENT_CODE.match(ln) and starts_block and not in_list:
-            # Consume the block: indented lines, and the blank lines between
-            # them, up to the last indented line.
-            j, last = i, i
-            while j < n:
-                if not lines[j].strip():
-                    j += 1
-                    continue
-                if not _INDENT_CODE.match(lines[j]):
-                    break
-                last = j
-                j += 1
-            for k in range(i, last + 1):
-                out[k] = ""
-            prev_nonblank = lines[last]
-            i = last + 1
-            continue
-        prev_nonblank = ln
-        i += 1
-    return "\n".join(out)
-
-
-def strip_code(text):
-    """Every LISTING blanked: fenced, indented, and inline code spans.
-
-    What is left is what this entry ASSERTS, with everything it merely SHOWS
-    removed.  A scan that has to distinguish the two — item 10 is the one that
-    matters, because its remediation CREATES the file it names — must read
-    this and not the raw prose: a `[[target-note]]` printed in a listing or
-    quoted in a code span is a sample of link syntax, not a link, and Obsidian
-    renders it as literal text.  `build_backfill` already reads the
-    fenced-stripped form, and for the same reason.
-
-    All three markdown spellings of a listing are covered, because a check
-    that knows only one of them is not a rule about listings — it is a rule
-    about backticks, and the entry that used the other spelling gets the
-    destructive finding.
-    """
-    return mask_escaped_wikilinks(mask_body_comments(text, mask_code=True))
-
 
 def plural_surface(title):
     """The plural SURFACE form of a title: only the HEAD (last) token inflects.
@@ -1712,7 +1447,8 @@ def moc_file_state(path, *, _directory_fd=None, _texts=None):
     descriptor = None
     try:
         descriptor = os.open(
-            read_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), **options)
+            read_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0), **options)
         opened = os.fstat(descriptor)
         if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
             raise OSError("MOC pathname changed while it was opened")
@@ -2084,7 +1820,8 @@ def scan(wiki, images=None):
             if not stat.S_ISREG(before.st_mode):
                 raise OSError("leaf Markdown path is not a regular file")
             descriptor = os.open(
-                path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+                path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_NONBLOCK", 0))
             opened = os.fstat(descriptor)
             if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
                 raise OSError("leaf Markdown path changed while it was opened")
@@ -2266,11 +2003,16 @@ def scan(wiki, images=None):
     # A skipped file may own any alias, including one otherwise claimed by a
     # single parsed note. Keep local QC/collision evidence, but do not expose
     # a partial alias map to link, label, or parent canonicalization.
-    for _sl, _e in (sorted(entries.items()) if alias_inventory_complete else ()):
+    # The second file sharing a portable basename may carry aliases absent
+    # from the first. Inventory all physical records, but keep those aliases
+    # report-only: the slug-keyed repair model cannot choose one such file.
+    for _e in (diagnostic_records if alias_inventory_complete else ()):
+        _sl = _e["slug"]
         for _a in _e["aliases"]:
             _k = fold_name(_a)
             if _k:
-                if _k in alias_of and alias_of[_k][0] != _sl:
+                if (fold_name(_sl) in ambiguous_files
+                        or (_k in alias_of and alias_of[_k][0] != _sl)):
                     ambiguous_aliases.add(_k)
                 alias_of.setdefault(_k, (_sl, _a))
 
@@ -3781,9 +3523,13 @@ def scan(wiki, images=None):
                 # An alias resolves to its existing entry. A new same-named
                 # file would take precedence and steal that identity.
                 if lookup_key in ambiguous_aliases:
+                    ownership = (
+                        "belongs to an entry whose filename has multiple physical owners"
+                        if fold_name(alias_of[lookup_key][0]) in ambiguous_files
+                        else "is claimed as an alias by multiple entries")
                     problems.append((sl, "item10/ambiguous",
-                                     f'wikilink target "{tgt}" is claimed as an alias by multiple '
-                                     f'entries; preserve the link, anchor and display text until its '
+                                     f'wikilink target "{tgt}" {ownership}; '
+                                     f'preserve the link, anchor and display text until its '
                                      f'owner is resolved. Report only; never choose the first alias owner'))
                     continue
                 _own_sl, _own_raw = alias_of[lookup_key]
@@ -4181,7 +3927,8 @@ def scan(wiki, images=None):
     # ---- Surface map + backfill candidates (Task 2 worklist; the executing agent judges closeness) ----
     surface_owners = {}                   # lowercased surface form -> all owners
     _title_surf, _alias_surf, _organism_common_surf = set(), set(), set()
-    for sl,e in entries.items():
+    for e in diagnostic_records:
+        sl = e["slug"]
         forms = ([("title", e["title"])]
                  + [("alias", a.replace("-", " ")) for a in e["aliases"]]
                  + [("organism-common", name)
@@ -5264,6 +5011,49 @@ def run_self_test():
               any("path" in p for p in res["problems"]
                   if p["slug"] == "hub"), False)
 
+        # Alias inventory must retain every physical file, including the
+        # second owner of a duplicate basename. Its aliases are real, but
+        # slug-keyed repair plans cannot safely choose their destination.
+        v_alias_path = os.path.join(tmp, "v2-duplicate-path-aliases")
+        _st_write(v_alias_path, "a/duplicate.md", _st_entry(
+            "First owner", "**First owner** describes the first file."))
+        _st_write(v_alias_path, "b/duplicate.md", _st_entry(
+            "Second owner", "**Second owner** describes the second file.",
+            aliases=('"second-alias"', '"shared-surface"')))
+        _st_write(v_alias_path, "unique-owner.md", _st_entry(
+            "Unique owner", "**Unique owner** describes a separate file.",
+            aliases=('"shared-surface"', '"unique-alias"')))
+        _st_write(v_alias_path, "alias-reader.md", _st_entry(
+            "Alias reader", "**Alias reader** uses [[second-alias]], "
+            "[[second-alias]] and [[shared-surface]].",
+            related="[[second-alias]]", parents=('"[[second-alias]]"',)))
+        _st_write(v_alias_path, "bare-reader.md", _st_entry(
+            "Bare reader", "**Bare reader** mentions shared surface here."))
+        _st_write(v_alias_path, "qualified-reader.md", _st_entry(
+            "Qualified reader", "**Qualified reader** uses "
+            "[[b/duplicate|Second owner]] and [[unique-alias|Unique owner]].",
+            related="[[b/duplicate|Second owner]]"))
+        alias_path_res = scan(v_alias_path)
+        check("secondary duplicate-file aliases cannot imply removal or rewriting",
+              sorted({key for key in _st_keys(alias_path_res, "alias-reader")
+                      if key.startswith("item10/") or key == "item11"}),
+              ["item10/ambiguous"])
+        check("every use of a duplicate-file alias remains report-only",
+              _st_msg(alias_path_res, "alias-reader", "item10/ambiguous").count(
+                  "preserve the link"), 4)
+        check("duplicate-file alias parents keep uncertain ownership",
+              [(row["target"], row["reason"])
+               for row in alias_path_res["hierarchy_diagnostic"]["unresolved_parents"]
+               if row["slug"] == "alias-reader"],
+              [("second-alias", "ambiguous")])
+        check("secondary duplicate-file aliases prevent arbitrary surface backfill",
+              [row for row in alias_path_res["backfill_candidates"]
+               if row["slug"] == "bare-reader"], [])
+        check("duplicate-file aliases leave qualified paths and unrelated aliases usable",
+              [key for key in _st_keys(alias_path_res, "qualified-reader")
+               if key.startswith("item10/") or key in ("item11", "item18")],
+              ["item10/alias"])
+
         # A case-sensitive filesystem can hold two entries whose only pathname
         # difference is the Markdown extension's case. Link identity correctly
         # folds that suffix, but physical QC must still retain both files.
@@ -5763,7 +5553,7 @@ def run_self_test():
               "item2/parents-null" in _st_keys(res, "block-parents"), False)
         check("a .md source naming the same document as a .pdf source is item4 "
               "(stems folded for case and folder, as CONVENTIONS 7 requires of "
-              "both copies of source_stem)",
+              "the shared source_stem helper)",
               "Preserve both sources" in _st_msg(res, "twice-cited", "item4/source-identity"), True)
         check("a frontmatter key shown inside a FENCE is not a merge scar",
               "item13" in _st_keys(res, "sw"), False)

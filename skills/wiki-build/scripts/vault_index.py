@@ -552,7 +552,8 @@ def index_entry(path, text=None, root=None):
             # utf-8-sig, not utf-8: a leading BOM becomes part of the first line,
             # so `lines[0].strip() != "---"` and a perfectly valid entry was
             # reported as having "no YAML frontmatter".
-            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0))
             descriptor = os.open(abspath, flags)
             with os.fdopen(descriptor, "r", encoding="utf-8-sig") as fh:
                 opened_before = os.fstat(fh.fileno())
