@@ -8,7 +8,7 @@ It works with Python 3.10+ in either host and needs no extra Python packages.
 
 ## Setup and access checks
 
-| Source | Local environment variables | Commands and purpose |
+| Source | Credential names | Commands and purpose |
 |---|---|---|
 | SEC EDGAR | `SEC_USER_AGENT`: application/name and a real contact email | `sec-company`: identity and filings; `sec-facts`: selected reported XBRL facts |
 | Nasdaq Trader | None | `symbols`: current exchange directories; `halts`: halt RSS |
@@ -16,29 +16,46 @@ It works with Python 3.10+ in either host and needs no extra Python packages.
 | Alpha Vantage | `ALPHA_VANTAGE_API_KEY` | `news` (default provider): news and provider sentiment; `earnings`: current earnings calendar |
 | FRED / ALFRED | `FRED_API_KEY` | `fred-series`: metadata and observations at a daily vintage; `fred-releases`: source release-date calendar |
 
-API keys are sufficient; do not request account passwords. Configure secrets
-locally in the environment of the process that runs the skill, including a
-scheduler when applicable. Do not paste their values into command arguments,
-shell history, notes, suggestion logs, or the repository. The helper does not
-load `.env` files, persist credentials, create accounts, or change subscriptions.
+API keys are sufficient; do not request account passwords. Supply the named
+values through the process environment or an explicitly selected private JSON
+file. Pass the file's path as `--credentials-file` after the command; the bundled
+helper loads it directly, so no separate credential launcher is needed. The same
+interface works in Codex and Claude on macOS and Linux.
+
+The file contains one JSON object using only the credential names in the table.
+Values must be nonempty strings without control characters; omit unavailable
+credentials. Duplicate or unknown names are rejected. Keep the file outside the
+plugin, repository and vault, owned by the current user, with mode `600` (or
+read-only `400`) and no symlinks or hard links. A private parent folder with mode
+`700` is recommended. Use a direct path without `..` traversal. The reader rejects
+unsafe files, files over 32 KiB and files that change during reading before
+contacting a provider. It never creates or changes the file.
+
+An explicit file is authoritative for all named credentials: an omitted key
+stays missing rather than falling back to an inherited environment value.
+Without the option, environment-based configuration works as before. Loading
+does not modify the parent process environment. Use the same selected file for
+both offline checks and retrieval; no directory or credential store is searched
+automatically. Do not open the file's contents into the conversation, execute it
+as shell code, or paste values into arguments, history, notes or logs.
+
+The helper does not load `.env` files, persist credentials, create accounts,
+or change subscriptions. Setup and key rotation remain separate from research;
+report missing or blocked configuration instead of repairing it during a run.
 FRED requires the user's own [free account](https://fredhelp.stlouisfed.org/fred/account/fred-account-features/register/)
 and [API key](https://fred.stlouisfed.org/docs/api/api_key.html); do not use its
 documentation's demonstration key. Host-specific secure storage is separate
 from this portable helper. Follow the [FRED API terms](https://fred.stlouisfed.org/docs/api/terms_of_use.html).
 
-The direct Python examples below assume those variables are already available.
-If the host or task supplies an approved local credential launcher, use that
-launcher for both `check` and retrieval within its allowed provider/command scope.
-Separate providers may have separate launchers: combine only the relevant source
-rows from their checks, rather than treating another launcher's missing variables
-as missing account access. Do not infer unavailable credentials from the ordinary
-shell when an approved launcher supplies them. During research, do not create or
-rebuild launchers, search credential stores, or retrieve/export secrets yourself;
-report a missing or blocked route and continue with other sources.
+The examples below show both configuration routes. Add the same
+`--credentials-file` option to any retrieval command when using a file. Never
+put key values in this option. Public Nasdaq queries need no credentials and
+can omit it.
 
 ```bash
 python3 '<skill>/scripts/market_data.py' check
-python3 '<skill>/scripts/market_data.py' check --live --source alpaca
+python3 '<skill>/scripts/market_data.py' check --credentials-file '<credentials.json>'
+python3 '<skill>/scripts/market_data.py' check --credentials-file '<credentials.json>' --live --source alpaca
 ```
 
 The default check is offline: it reports missing/invalid configuration without
@@ -53,7 +70,7 @@ sources and host web tools, recording gaps.
 
 ## Retrieval plan
 
-Use `market_data.py` through the configured route above for the evidence needed
+Use `market_data.py` with the configuration above for the evidence needed
 at each stage. `market_notes.py` separately supplies history, due work and guarded
 publication under `SKILL.md`; the sibling data modules are imports, not additional
 commands to run. This is a plan for relevant retrieval, not a requirement to call

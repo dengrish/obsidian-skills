@@ -11,6 +11,7 @@ configured keys nor a successful probe establishes comprehensive coverage.
 from __future__ import annotations
 
 import argparse
+from copy import copy
 from datetime import timedelta
 import json
 import os
@@ -21,7 +22,8 @@ from zoneinfo import ZoneInfo
 
 # Keep sibling imports independent of the host's working directory/import loader.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from market_http import DataError, HttpClient, redact, required_env, utc_now
+from market_http import CREDENTIAL_NAMES, DataError, HttpClient, redact, required_env, utc_now
+from market_credentials import credential_environment, load_credentials
 
 
 REQUIRED = {
@@ -38,6 +40,12 @@ def parser():
         def error(self, message):
             # Do not echo mistakenly pasted keys, arbitrary argument values, or URLs.
             raise DataError('invalid_input', 'Invalid command arguments. Use --help for the selected command.')
+
+    class SingleCredentialsFile(argparse.Action):
+        def __call__(self, parser, namespace, value, option_string=None):
+            if getattr(namespace, self.dest, None) is not None:
+                raise DataError('invalid_input', 'Specify --credentials-file only once per command.')
+            setattr(namespace, self.dest, value)
 
     root = SafeParser(description=__doc__)
     root.add_argument('--test', action='store_true', help='run offline CLI tests')
@@ -109,6 +117,8 @@ def parser():
         sub.add_argument('--max-pages', type=int, default=10, help='maximum observation or release-date pages')
         sub.add_argument('--limit', type=int, default=1000, help='maximum total records, 1–100000')
     for sub in commands.choices.values():
+        sub.add_argument('--credentials-file', action=SingleCredentialsFile, metavar='PATH',
+                         help='explicit private JSON credentials; replaces known environment credentials')
         sub.add_argument('--max-requests', type=int, default=100, help='per-command HTTP attempt budget, 1–500')
         sub.add_argument('--max-seconds', type=int, default=120, help='per-command transport budget, 1–600 seconds')
     return root
@@ -185,13 +195,27 @@ def check_sources(client, args):
 def main(argv=None, client=None):
     args = None
     env = dict(os.environ if client is None else client.env)
+    # Preserve displaced values for redaction, including ambient keys omitted by an injected client.
+    redaction_values = tuple(source.get(key, '') for source in (os.environ, env)
+                             for key in CREDENTIAL_NAMES) + tuple(getattr(client, 'redaction_values', ()))
     try:
         args = parser().parse_args(argv)
         if args.test:
             return run_self_test()
         if args.command is None:
             raise DataError('invalid_input', 'Choose a command; use --help to see the available sources.')
-        client = client or HttpClient(env, max_requests=args.max_requests, max_seconds=args.max_seconds)
+        if args.credentials_file is not None:
+            loaded = load_credentials(args.credentials_file)
+            redaction_values += tuple(loaded.values())
+            env = credential_environment(env, loaded)
+        if client is None:
+            client = HttpClient(env, max_requests=args.max_requests, max_seconds=args.max_seconds,
+                                redaction_values=redaction_values)
+        elif args.credentials_file is not None:
+            # Do not rewrite a caller's credential environment while using its injected transport.
+            client = copy(client)
+            client.env = env
+            client.redaction_values = tuple(getattr(client, 'redaction_values', ())) + redaction_values
         result = check_sources(client, args) if args.command == 'check' else handlers()[args.command](client, args)
         if not isinstance(result, dict) or not isinstance(result.get('complete'), bool):
             raise DataError('invalid_response', 'Provider adapter returned an invalid result.')
@@ -208,17 +232,28 @@ def main(argv=None, client=None):
                   'error': {'code': 'invalid_response', 'message': 'Unexpected provider data or local input; no complete result was assumed.'},
                   'requests': client.requests if client is not None else []}
         code = 2
-    print(json.dumps(redact(result, env), ensure_ascii=False, allow_nan=False))
+    print(json.dumps(redact(result, env, extra_values=redaction_values), ensure_ascii=False, allow_nan=False))
     return code
 
 
 def run_self_test():
     import contextlib
     import io
+    import tempfile
     import unittest
     from unittest.mock import Mock, patch
 
     class CliTests(unittest.TestCase):
+        def setUp(self):
+            self.temp = tempfile.TemporaryDirectory()
+            self.addCleanup(self.temp.cleanup)
+            self.credentials_path = Path(self.temp.name).resolve() / 'credentials.json'
+
+        def credentials(self, value=None):
+            self.credentials_path.write_text(json.dumps(value or {'FRED_API_KEY': 'file-private-value'}), encoding='utf-8')
+            self.credentials_path.chmod(0o600)
+            return str(self.credentials_path)
+
         def call(self, args, env=None, handler_map=None):
             client = SimpleNamespace(env=env or {}, requests=[])
             output = io.StringIO()
@@ -314,6 +349,95 @@ def run_self_test():
             code, result = self.call(['symbols'], handler_map={'symbols': Mock(side_effect=ValueError('private response'))})
             self.assertEqual(code, 2)
             self.assertNotIn('private response', json.dumps(result))
+
+        def test_file_is_authoritative_for_injected_client_without_mutation(self):
+            source = {'ALPACA_API_KEY': 'inherited-id', 'ALPACA_SECRET_KEY': 'inherited-secret',
+                      'FRED_API_KEY': 'inherited-fred', 'NONSECRET_SETTING': 'kept'}
+            client = SimpleNamespace(env=dict(source), requests=[])
+            handler = Mock(return_value={'complete': True, 'data': []})
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output), patch(__name__ + '.handlers', return_value={'symbols': handler}):
+                code = main(['symbols', '--credentials-file', self.credentials()], client)
+            effective_client = handler.call_args.args[0]
+            self.assertEqual(code, 0)
+            self.assertEqual(effective_client.env, {'FRED_API_KEY': 'file-private-value', 'NONSECRET_SETTING': 'kept'})
+            self.assertEqual(client.env, source)
+            self.assertIsNot(effective_client, client)
+
+        def test_partial_file_does_not_fall_back_to_inherited_provider_keys(self):
+            handler = Mock()
+            code, result = self.call(['check', '--live', '--source', 'alpaca', '--credentials-file', self.credentials()],
+                                    {'ALPACA_API_KEY': 'inherited-id', 'ALPACA_SECRET_KEY': 'inherited-secret'},
+                                    {'prices': handler})
+            self.assertEqual(code, 2)
+            self.assertEqual(result['data'][0]['missing_or_invalid'], ['ALPACA_API_KEY', 'ALPACA_SECRET_KEY'])
+            handler.assert_not_called()
+
+        def test_new_client_gets_file_values_and_process_environment_is_unchanged(self):
+            environment = {'FRED_API_KEY': 'inherited-fred', 'ALPACA_API_KEY': 'inherited-id'}
+            factory = Mock(return_value=SimpleNamespace(env={'FRED_API_KEY': 'file-private-value'}, requests=[]))
+            with patch.dict(os.environ, environment, clear=True), patch(__name__ + '.HttpClient', factory), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                before = dict(os.environ)
+                code = main(['check', '--source', 'fred', '--credentials-file', self.credentials()])
+                self.assertEqual(dict(os.environ), before)
+            self.assertEqual(code, 0)
+            self.assertEqual(factory.call_args.args[0], {'FRED_API_KEY': 'file-private-value'})
+
+        def test_redacts_file_injected_and_ambient_values_in_payloads_and_errors(self):
+            values = ['file-private-value', 'injected-private-value', 'ambient-private-value']
+            for handler in (Mock(return_value={'complete': True, 'data': values}),
+                            Mock(side_effect=DataError('fixture', ', '.join(values)))):
+                with patch.dict(os.environ, {'FRED_API_KEY': values[2]}):
+                    code, result = self.call(['symbols', '--credentials-file', self.credentials()],
+                                            {'FRED_API_KEY': values[1]}, {'symbols': handler})
+                for value in values:
+                    self.assertNotIn(value, json.dumps(result))
+
+        def test_existing_client_redaction_values_survive_with_and_without_file(self):
+            client = HttpClient({'FRED_API_KEY': 'current-fixture'},
+                                redaction_values=('previous-fixture-private-value',))
+            handler = Mock(return_value={'complete': True, 'data': 'previous-fixture-private-value'})
+            for args in (['symbols'], ['symbols', '--credentials-file', self.credentials()]):
+                output = io.StringIO()
+                with patch(__name__ + '.handlers', return_value={'symbols': handler}), contextlib.redirect_stdout(output):
+                    self.assertEqual(main(args, client), 0)
+                self.assertNotIn('previous-fixture-private-value', output.getvalue())
+
+        def test_file_failures_never_construct_transport_or_fetch(self):
+            self.credentials_path.write_text('{"UNKNOWN":"file-private-value"}', encoding='utf-8')
+            self.credentials_path.chmod(0o600)
+            for path in (str(self.credentials_path), str(self.credentials_path.parent / 'missing-private-value')):
+                with patch(__name__ + '.HttpClient') as factory, patch(__name__ + '.handlers') as route:
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        code = main(['check', '--live', '--credentials-file', path])
+                    self.assertEqual(code, 2)
+                    self.assertEqual(json.loads(output.getvalue())['requests'], [])
+                    self.assertNotIn('private-value', output.getvalue())
+                    factory.assert_not_called()
+                    route.assert_not_called()
+
+        def test_help_and_tests_do_not_read_credentials(self):
+            for args in (['check', '--credentials-file', 'missing-private-value', '--help'],
+                         ['--test', 'check', '--credentials-file', 'missing-private-value']):
+                with patch(__name__ + '.load_credentials') as load, patch(__name__ + '.run_self_test', return_value=0), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    if '--help' in args:
+                        with self.assertRaises(SystemExit) as error:
+                            main(args)
+                        self.assertEqual(error.exception.code, 0)
+                    else:
+                        self.assertEqual(main(args), 0)
+                    load.assert_not_called()
+
+        def test_duplicate_file_flags_fail_before_loading(self):
+            with patch(__name__ + '.load_credentials') as load:
+                code, result = self.call(['check', '--credentials-file', 'first-private-value',
+                                         '--credentials-file=second-private-value'])
+                self.assertEqual(code, 2)
+                self.assertNotIn('private-value', json.dumps(result))
+                load.assert_not_called()
 
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(CliTests)
     result = unittest.TextTestRunner(verbosity=0).run(suite)

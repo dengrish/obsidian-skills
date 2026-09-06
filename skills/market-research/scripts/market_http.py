@@ -17,6 +17,7 @@ import os
 import re
 import ssl
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -53,11 +54,12 @@ def parse_date(value):
 
 
 def required_env(env, key):
-    value = env.get(key, '').strip()
-    if not value:
-        raise DataError('missing_credentials', 'Set ' + key + ' in the local environment before using this source.')
-    if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+    value = env.get(key, '')
+    if any(unicodedata.category(ch) == 'Cc' for ch in value):
         raise DataError('invalid_credentials', key + ' contains control characters.')
+    value = value.strip()
+    if not value:
+        raise DataError('missing_credentials', 'Configure ' + key + ' in the selected credentials file or local environment before using this source.')
     return value
 
 
@@ -65,10 +67,17 @@ SECRET_FIELDS = {'apikey', 'api_key', 'token', 'access_token', 'secret', 'key'}
 CREDENTIAL_NAMES = ('ALPACA_API_KEY', 'ALPACA_SECRET_KEY', 'ALPHA_VANTAGE_API_KEY', 'SEC_USER_AGENT', 'FRED_API_KEY')
 
 
-def redact(value, env=None):
+def redact(value, env=None, *, extra_values=()):
     """Sanitize even echoed provider payloads before any JSON leaves the CLI."""
-    secrets = [str((env or {}).get(key, '')).strip() for key in CREDENTIAL_NAMES]
-    secrets = [secret for secret in secrets if secret]
+    values = [str((env or {}).get(key, '')) for key in CREDENTIAL_NAMES] + list(extra_values)
+    secrets = sorted({spelling for value in values for spelling in (str(value), str(value).strip())
+                      if spelling}, key=len, reverse=True)
+    spellings = set()
+    for secret in secrets:
+        json_spellings = [json.dumps(secret, ensure_ascii=ascii_only)[1:-1] for ascii_only in (False, True)]
+        spellings.update((secret, urllib.parse.quote(secret, safe=''), urllib.parse.quote_plus(secret),
+                          *json_spellings, *(value.replace('/', '\\/') for value in json_spellings)))
+    spellings = sorted(spellings, key=len, reverse=True)
     def clean(item):
         if isinstance(item, dict):
             return {clean(str(key)): ('[redacted]' if str(key).lower() in SECRET_FIELDS else clean(val))
@@ -77,9 +86,8 @@ def redact(value, env=None):
             return [clean(val) for val in item]
         if not isinstance(item, str):
             return item
-        for secret in secrets:
-            for spelling in (secret, urllib.parse.quote(secret, safe=''), urllib.parse.quote_plus(secret)):
-                item = item.replace(spelling, '[redacted]')
+        for spelling in spellings:
+            item = item.replace(spelling, '[redacted]')
         return re.sub(r'(?i)([?&](?:apikey|api_key|token|access_token|secret|key)=)[^&#\s]*',
                       r'\1[redacted]', item)
     return clean(value)
@@ -115,12 +123,13 @@ def no_redirect_handler():
 class HttpClient:
     """One bounded command; no disk cache, proxy inheritance or key persistence."""
     def __init__(self, env=None, *, max_requests=100, max_seconds=120, max_bytes=20 * 1024 * 1024,
-                 opener=None, clock=time.monotonic, sleeper=time.sleep):
+                 opener=None, clock=time.monotonic, sleeper=time.sleep, redaction_values=()):
         if (not isinstance(max_requests, int) or not 1 <= max_requests <= 500
                 or not isinstance(max_seconds, (int, float)) or not math.isfinite(max_seconds)
                 or not 1 <= max_seconds <= 600 or not 1 <= max_bytes <= 50 * 1024 * 1024):
             raise DataError('invalid_input', 'Invalid request, duration or response-size budget.')
         self.env = dict(os.environ if env is None else env)
+        self.redaction_values = tuple(redaction_values)
         self.max_requests, self.max_bytes = max_requests, max_bytes
         self.clock, self.sleep = clock, sleeper
         self.deadline = clock() + max_seconds
@@ -170,7 +179,8 @@ class HttpClient:
                 self.sleep(pause)
             self.last_request[host] = self.clock()
             self.attempts += 1
-            event = {'url': redact(target, self.env), 'retrieved_at': utc_now().isoformat(), 'status': None}
+            event = {'url': redact(target, self.env, extra_values=self.redaction_values),
+                     'retrieved_at': utc_now().isoformat(), 'status': None}
             self.requests.append(event)
             try:
                 request = urllib.request.Request(target, headers=request_headers, method='GET')
@@ -272,6 +282,8 @@ def run_self_test():
                 required_env({}, 'ALPACA_API_KEY')
             with self.assertRaises(DataError):
                 required_env({'ALPACA_API_KEY': 'a\r\nb'}, 'ALPACA_API_KEY')
+            with self.assertRaises(DataError):
+                required_env({'ALPACA_API_KEY': 'a\x85b'}, 'ALPACA_API_KEY')
             self.assertEqual(required_env({'ALPACA_API_KEY': ' abc '}, 'ALPACA_API_KEY'), 'abc')
 
         def test_provider_get_and_provenance(self):
@@ -397,6 +409,28 @@ def run_self_test():
             self.assertNotIn('dummy', encoded)
             self.assertNotIn('person@example.test', encoded)
             self.assertNotIn('unknown', encoded)
+
+        def test_displaced_credentials_are_redacted_from_request_records(self):
+            client = self.client([Reply()], redaction_values=('former+private-value',))
+            client.get_json('https://www.alphavantage.co/query',
+                            {'apikey': 'dummy+key', 'symbol': 'former+private-value'})
+            self.assertNotIn('private-value', json.dumps(client.requests))
+            self.assertIn('[redacted]', client.requests[0]['url'])
+
+        def test_redaction_covers_raw_trimmed_and_encoded_credentials(self):
+            secret = ' private+value '
+            value = [secret, secret.strip(), urllib.parse.quote(secret, safe=''), urllib.parse.quote_plus(secret)]
+            encoded = json.dumps(redact(value, extra_values=(secret,)))
+            self.assertNotIn('private', encoded)
+
+        def test_redaction_covers_json_escaped_credentials_inside_provider_text(self):
+            secret = 'Test "Person" / private\\value café@example.test'
+            spellings = [json.dumps(secret, ensure_ascii=ascii_only)[1:-1] for ascii_only in (False, True)]
+            spellings += [value.replace('/', '\\/') for value in spellings]
+            value = {'notes': ['Embedded JSON: {"echo": "' + value + '"}' for value in spellings]}
+            encoded = json.dumps(redact(value, {'SEC_USER_AGENT': secret}))
+            self.assertNotIn('private', encoded)
+            self.assertNotIn('example.test', encoded)
 
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(TransportTests)
     result = unittest.TextTestRunner(verbosity=0).run(suite)

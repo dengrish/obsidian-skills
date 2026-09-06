@@ -297,6 +297,61 @@ class CompatibilityTests(unittest.TestCase):
                 self.assertNotIn("..", Path(name).parts)
         self.assertEqual(content, build.archive_bytes(expected))
 
+    def test_packaged_market_cli_uses_private_credentials_without_local_launchers(self):
+        with tempfile.TemporaryDirectory(prefix="obsidian-market-config-") as tmp:
+            root = Path(tmp).resolve()
+            install = root / "installed plugin"
+            with zipfile.ZipFile(ROOT / "obsidian.plugin") as archive:
+                archive.extractall(install)
+            private = root / "private config"
+            private.mkdir(mode=0o700)
+            config = private / "researcher's credentials.json"
+            fixtures = {
+                "ALPACA_API_KEY": "synthetic-alpaca-id",
+                "ALPACA_SECRET_KEY": "synthetic-alpaca-secret",
+                "ALPHA_VANTAGE_API_KEY": "synthetic-alpha-key",
+                "SEC_USER_AGENT": "Synthetic Research test@example.invalid",
+                "FRED_API_KEY": "a" * 32,
+            }
+            config.write_text(json.dumps(fixtures), encoding="utf-8")
+            config.chmod(0o600)
+            before = config.read_bytes()
+            script = install / "skills/market-research/scripts/market_data.py"
+            env = {key: value for key, value in os.environ.items() if key not in fixtures}
+
+            def invoke(*args):
+                return subprocess.run(
+                    [sys.executable, "-I", "-S", "-B", str(script), *map(str, args)],
+                    cwd=root, env=env, capture_output=True, text=True,
+                    encoding="utf-8", timeout=30)
+
+            result = invoke("check", "--credentials-file", config)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            data = json.loads(result.stdout)
+            self.assertTrue(data["complete"])
+            self.assertTrue(all(row["configured"] for row in data["data"]))
+            self.assertEqual(data["requests"], [])
+            for secret in fixtures.values():
+                self.assertNotIn(secret, result.stdout + result.stderr)
+            self.assertEqual(config.read_bytes(), before)
+
+            # A selected partial file cannot silently pick up an unrelated
+            # account from the process environment, including in an installed copy.
+            config.write_text(json.dumps({"FRED_API_KEY": fixtures["FRED_API_KEY"]}),
+                              encoding="utf-8")
+            env.update({key: value for key, value in fixtures.items() if key != "FRED_API_KEY"})
+            partial = invoke("check", "--credentials-file", config)
+            self.assertEqual(partial.returncode, 2, partial.stdout + partial.stderr)
+            rows = {row["source"]: row for row in json.loads(partial.stdout)["data"]}
+            self.assertTrue(rows["fred"]["configured"])
+            self.assertFalse(rows["alpaca"]["configured"])
+            self.assertFalse(rows["sec"]["configured"])
+            self.assertFalse(rows["alpha_vantage"]["configured"])
+
+            help_result = invoke("check", "--credentials-file", private / "missing.json", "--help")
+            self.assertEqual(help_result.returncode, 0, help_result.stdout + help_result.stderr)
+            self.assertIn("--credentials-file", help_result.stdout)
+
     def test_packaging_derives_the_loose_and_archived_codex_manifest_once(self):
         build = load("build_plugin_single_manifest", ROOT / "tools/build_plugin.py")
         derived = b"one exact derived manifest\n"

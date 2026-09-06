@@ -108,8 +108,10 @@ screen needs an explanation so longitudinal comparisons remain interpretable.
 Follow the bundled [data-access guide and retrieval plan](references/data-access.md#retrieval-plan)
 to assign configured sources to the session, universe, announcement, price,
 shortlist, corporate-action, macro and outcome checks. Check local setup without
-network access first, using any approved provider-specific launcher supplied by
-the host/task as described in that guide. Use the relevant commands; do not run
+network access first. When the user or task specifies a credentials file, pass
+its path to the bundled `market_data.py` with `--credentials-file` for both checks
+and retrieval; otherwise use the configured environment. Keep secret values
+outside the conversation and plugin. Use the relevant commands; do not run
 every endpoint merely to exercise a script. Preserve coverage, cutoffs,
 partial-result warnings and material skipped/unavailable checks. Missing keys
 limit only the affected source. These helpers retrieve evidence; interpretation
@@ -204,8 +206,14 @@ preserve reported recovery stages on failure, and read back the published note.
 Ensure its citations and retained evidence remain usable after owned scratch is
 cleaned; no published reference should point to a run's temporary files.
 
-At closeout, apply [suggestion-log rules](../../shared/SUGGESTIONS.md), clean
-owned scratch that is no longer needed, and return the note link with the main
+At closeout, including a successful same-day retry, maintain
+`Reviews/market-research-suggestions.md` under the
+[shared suggestion-log rules](../../shared/SUGGESTIONS.md). On apply-capable
+runs, create it if missing; retain the standard empty state when there are no
+open issues. Record evidenced workflow defects, keeping investment ideas and
+outcome learning in the daily notes.
+
+Clean owned scratch that is no longer needed, and return the note link with the main
 conclusion and any material limitation. A scheduler should notify on a new
 completed daily note, a material thesis change, or a blocked run; an unchanged
 same-day retry should stay quiet. Do not modify plugin sources during a market run.

@@ -2,7 +2,7 @@
 """Read Alpaca/Alpha Vantage news and Alpha Vantage earnings calendars.
 
 This provider module makes no file writes and never places trades. Credentials
-come from provider environment variables, via the shared read-only transport. Run this
+come from the configured client, via the shared read-only transport. Run this
 file with --test for offline fixtures; use market_data.py for live requests.
 """
 
