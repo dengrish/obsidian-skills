@@ -6,6 +6,7 @@ host configuration or installed plugin cache is used.
 """
 
 import ast
+from datetime import datetime, time, timedelta
 import hashlib
 import json
 import os
@@ -14,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from zoneinfo import ZoneInfo
 import yaml
 
 import pymupdf
@@ -163,6 +165,205 @@ class WorkflowTests(unittest.TestCase):
         return json.loads(self.run_script(
             "skills/paper-summarize/scripts/paper_scan.py", "--src", self.pdfs,
             "--notes", self.notes, "--images", self.images, "--json").stdout)
+
+    def test_market_documented_template_is_accepted_by_publisher_linter(self):
+        guide = (ROOT / "skills/market-research/references/note-format.md").read_text(encoding="utf-8")
+        template = guide.split("```markdown\n", 1)[1].split("\n```", 1)[0]
+        draft = Path(self.scratch.name) / "documented market template.md"
+        draft.write_text(template + "\n", encoding="utf-8")
+        result = json.loads(self.run_script(
+            "skills/market-research/scripts/market_notes.py", "lint", draft).stdout)
+        self.assertEqual(result["theses"], [])
+        self.assertFalse((self.vault / "Investments").exists())
+
+    def test_market_checkpoint_catchup_and_lessons_survive_invalidation(self):
+        script = "skills/market-research/scripts/market_notes.py"
+        clock = json.loads(self.run_script(script, "context", "--vault", self.vault).stdout)
+        today = datetime.fromisoformat(clock["now"]).date()
+        first_day = today - timedelta(days=2000)
+        baseline_day = first_day + timedelta(days=1)
+        update_day = baseline_day + timedelta(days=1)
+        thesis = "NASDAQ:EXAMPLE@" + first_day.isoformat()
+        zone = ZoneInfo("America/New_York")
+        folder = self.vault / "Investments"
+        folder.mkdir()
+
+        def stamp(day, hour, minute=0):
+            return datetime.combine(day, time(hour, minute), zone).isoformat()
+
+        def link(day, heading):
+            return f"[[Investments/{day}-market-research#{heading}]]"
+
+        def daily(day, state, review):
+            as_of = clock["as_of"] if day == today else stamp(day, 9)
+            generated = clock["now"] if day == today else stamp(day, 9, 5)
+            ledger = ("| Thesis | State | Update / next check |\n|---|---|---|\n"
+                      f"| {thesis} | {state} | Synthetic historical state only. |"
+                      if state else "No active theses.")
+            return (f'---\nmarket_research: 1\ndate: {day}\nas_of: "{as_of}"\n'
+                    f'generated_at: "{generated}"\nsession: unknown\ncoverage: limited\n---\n'
+                    f'# Market research — {day}\n\n## Decision brief\n\nSynthetic fixture only.\n\n'
+                    '### Buying opportunities\n\nNo real investment recommendation.\n\n'
+                    '### Next checks\n\nCheck due synthetic observations.\n\n'
+                    '## Research record\n\n### Screening and sources\n\nSynthetic calendar and values.\n\n'
+                    '### Candidate assessments\n\nNo claim about a real security or holdings.\n\n'
+                    f'### Thesis updates\n\n{ledger}\n\n### Outcome review\n\n{review}\n')
+
+        recommendation_header = ("#### Recommendation records\n\n"
+            "| Recommendation | First ready | Baseline at | Record | Replaces |\n"
+            "|---|---|---|---|---|\n")
+        first = folder / f"{first_day}-market-research.md"
+        first.write_text(daily(first_day, "ready", recommendation_header
+            + f"| {thesis} | {first_day} | pending | {link(first_day, 'Original recommendation')} | - |\n\n"
+            + "#### Original recommendation\n\nSynthetic reference quote120; prospective baseline pending."),
+            encoding="utf-8")
+        initial = json.loads(self.run_script(script, "outcomes", "--vault", self.vault).stdout)
+        self.assertEqual([item["id"] for item in initial["due_baselines"]], [thesis])
+        update = folder / f"{update_day}-market-research.md"
+        update.write_text(daily(update_day, "invalidated", recommendation_header
+            + f"| {thesis} | {first_day} | {stamp(baseline_day, 9, 30)} | {link(update_day, 'Baseline evidence')} | - |\n\n"
+            + "#### Baseline evidence\n\nSynthetic opening100; original quote120 is not an execution. "
+            + f"Original: {link(first_day, 'Original recommendation')}. The buying thesis later failed."),
+            encoding="utf-8")
+        originals = {path: path.read_bytes() for path in (first, update)}
+        planned = json.loads(self.run_script(script, "outcomes", "--vault", self.vault).stdout)
+        self.assertTrue(planned["complete"])
+        self.assertEqual(planned["recommendations"][0]["first_ready"], first_day.isoformat())
+        self.assertEqual({item["horizon"] for item in planned["due_checkpoints"]},
+                         {"2w", "1m", "3m", "6m", "12m", "24m", "60m"})
+        # Previously published month-only records remain readable without rewriting.
+        one_month = next(item for item in planned["checkpoints"] if item["horizon"] == "1m")
+        month_target_day = datetime.fromisoformat(one_month["target_date"]).date()
+        month_note_day = month_target_day + timedelta(days=1)
+        previous_month = folder / f"{month_note_day}-market-research.md"
+        previous_month.write_text(daily(month_note_day, None,
+            "#### Checkpoint records\n\n"
+            "| Recommendation | Months | State | Observed at | Record | Replaces |\n"
+            "|---|---|---|---|---|---|\n"
+            f"| {thesis} | 1 | observed | {stamp(month_target_day, 16)} | "
+            f"{link(month_note_day, 'Historical monthly result')} | - |\n\n"
+            "#### Historical monthly result\n\nSynthetic prior monthly observation; "
+            f"baseline: {link(update_day, 'Baseline evidence')}."), encoding="utf-8")
+        originals[previous_month] = previous_month.read_bytes()
+        two_week = next(item for item in planned["checkpoints"] if item["horizon"] == "2w")
+        target_day = datetime.fromisoformat(two_week["target_date"]).date()
+        self.assertEqual(target_day, baseline_day + timedelta(days=14))
+        lesson = f"lesson-{today}-01"
+        review = ("#### Checkpoint records\n\n"
+            "| Recommendation | Horizon | State | Observed at | Record | Replaces |\n"
+            "|---|---|---|---|---|---|\n"
+            f"| {thesis} | 2w | observed | {stamp(target_day, 16)} | {link(today, 'Observed result')} | - |\n\n"
+            "#### Observed result\n\nSynthetic100-to90 return is -10%; benchmark100-to105 is +5%; "
+            "excess is -15 percentage points, gross of costs. Baseline: "
+            f"{link(update_day, 'Baseline evidence')}. Invalidation did not erase this observation.\n\n"
+            "#### Lesson records\n\n| Lesson | Status | Record |\n|---|---|---|\n"
+            f"| {lesson} | provisional | {link(today, 'Provisional lesson')} |\n\n"
+            "#### Provisional lesson\n\nOne synthetic case does not establish predictive skill; "
+            "test the prior catalyst assumption prospectively and seek contrary cases.\n\n"
+            "#### Monthly summaries\n\n| Month | Record |\n|---|---|\n"
+            f"| {today:%Y-%m} | {link(today, 'Learning summary')} |\n\n"
+            "#### Learning summary\n\nOne first-ready idea, including its failure; two observed "
+            "and five overdue checkpoints; one provisional lesson. Other data remain unavailable.")
+        draft = Path(self.scratch.name) / "outcome draft.md"
+        draft.write_text(daily(today, None, review).replace(stamp(target_day, 16), stamp(today, 16)),
+                         encoding="utf-8")
+        self.run_script(script, "outcomes", "--vault", self.vault, "--draft", draft, expected=2)
+        self.run_script(script, "publish", draft, "--vault", self.vault, expected=2)
+        self.assertFalse((folder / f"{today}-market-research.md").exists())
+        draft.write_text(daily(today, None, review), encoding="utf-8")
+        checked = json.loads(self.run_script(script, "outcomes", "--vault", self.vault, "--draft", draft).stdout)
+        self.assertEqual(checked["active_lessons"][0]["id"], lesson)
+        self.assertFalse(checked["monthly_review_due"])
+        self.assertEqual({item["horizon"] for item in checked["due_checkpoints"]},
+                         {"3m", "6m", "12m", "24m", "60m"})
+        self.assertEqual({item["horizon"] for item in checked["checkpoints"]
+                          if item["state"] == "observed"}, {"2w", "1m"})
+        self.run_script(script, "publish", draft, "--vault", self.vault)
+        rebuilt = json.loads(self.run_script(script, "outcomes", "--vault", self.vault).stdout)
+        self.assertEqual(rebuilt["checkpoints"], checked["checkpoints"])
+        self.assertEqual(rebuilt["active_lessons"], checked["active_lessons"])
+        self.assertTrue(Path(rebuilt["active_lessons"][0]["record_note"]).is_file())
+        for path, original in originals.items():
+            self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(list(self.vault.glob(".market-research-stage-*")), [])
+
+    def test_market_daily_history_publication_and_retry(self):
+        script = "skills/market-research/scripts/market_notes.py"
+        initial = json.loads(self.run_script(script, "context", "--vault", self.vault).stdout)
+        folder = self.vault / "Investments"
+        self.assertTrue(initial["complete"])
+        self.assertFalse(folder.exists(), "context must not create output folders")
+        today = datetime.fromisoformat(initial["now"]).date()
+        yesterday = today - timedelta(days=1)
+        thesis = "NASDAQ:EXAMPLE@" + yesterday.isoformat()
+
+        evidence = '\n\n'.join(
+            f'Observation {index}: synthetic café revenue was $12.34; the dated source '
+            'and counterargument remain separate. No real market claim or investment '
+            'recommendation is made. [Fixture source](https://example.invalid/filing).'
+            for index in range(100))
+
+        def daily(day, as_of, generated_at, carry, record=evidence):
+            ledger = ("| Thesis | State | Update / next check |\n"
+                      "| --- | --- | --- |\n"
+                      f"| {thesis} | watch | Synthetic fixture; no investment recommendation. |"
+                      if carry else "No active theses.")
+            buying = (f'{thesis}: watch only; no confirmed buying opportunity.'
+                      if carry else 'No confirmed buying opportunity.')
+            return (f'---\nmarket_research: 1\ndate: {day}\nas_of: "{as_of}"\n'
+                    f'generated_at: "{generated_at}"\nsession: unknown\ncoverage: unavailable\n---\n\n'
+                    f'# Market research — {day}\n\n## Decision brief\n\nNo verified market data.\n\n'
+                    f'### Buying opportunities\n\n{buying}\n\n'
+                    '### Next checks\n\nVerify data before assessing the fixture.\n\n'
+                    '## Research record\n\n### Screening and sources\n\nSynthetic test only.\n\n'
+                    f'### Candidate assessments\n\n#### {thesis}\n\n{record}\n\n'
+                    f'### Thesis updates\n\n{ledger}\n\n'
+                    '### Outcome review\n\nNo confirmed ideas are due for measurement.\n')
+
+        folder.mkdir()
+        prior_time = datetime.combine(yesterday, time(9), ZoneInfo("America/New_York")).isoformat()
+        prior = folder / f"{yesterday}-market-research.md"
+        prior.write_text(daily(yesterday, prior_time, prior_time, True), encoding="utf-8")
+        original_prior = prior.read_bytes()
+        user_note = folder / "My own research.md"
+        user_note.write_text("Personal notes must remain unchanged.\n", encoding="utf-8")
+        original_user = user_note.read_bytes()
+        draft = Path(self.scratch.name) / "market draft.md"
+        target = folder / f"{today}-market-research.md"
+
+        draft.write_text(daily(today, initial["as_of"], initial["now"], False), encoding="utf-8")
+        refused = self.run_script(script, "publish", draft, "--vault", self.vault, expected=2)
+        self.assertIn("carry active theses", refused.stdout)
+        self.assertFalse(target.exists())
+        draft.write_text(daily(today, initial["as_of"], initial["now"], True), encoding="utf-8")
+        linted = json.loads(self.run_script(script, "lint", draft).stdout)
+        self.assertEqual(linted["theses"][0]["id"], thesis)
+        self.assertEqual(linted["theses"][0]["state"], "watch")
+        created = json.loads(self.run_script(script, "publish", draft, "--vault", self.vault).stdout)
+        self.assertEqual(created, {"status": "created", "path": str(target.resolve())})
+        self.assertEqual(target.read_bytes(), draft.read_bytes())
+        brief, record = target.read_text(encoding="utf-8").split('## Research record\n', 1)
+        self.assertIn(f'{thesis}: watch only;', brief)
+        self.assertNotIn('### Thesis updates', brief)
+        self.assertGreater(len(record), 10 * len(brief), "retain detailed evidence beyond the brief")
+        self.assertIn(evidence, record, "long evidence must remain verbatim after publication")
+        retry = json.loads(self.run_script(script, "publish", draft, "--vault", self.vault).stdout)
+        self.assertEqual(retry["status"], "unchanged")
+        published_bytes = target.read_bytes()
+        draft.write_text(draft.read_text(encoding="utf-8").replace("Synthetic test only.", "Changed assessment."),
+                         encoding="utf-8")
+        self.run_script(script, "publish", draft, "--vault", self.vault, expected=2)
+        self.assertEqual(target.read_bytes(), published_bytes)
+        self.assertEqual(prior.read_bytes(), original_prior)
+        self.assertEqual(user_note.read_bytes(), original_user)
+        current = json.loads(self.run_script(script, "context", "--vault", self.vault).stdout)
+        self.assertEqual(current["current_note"]["state"], "valid")
+        self.assertEqual(current["prior_notes"], [str(prior.resolve())])
+        self.assertEqual(current["other_notes"], [str(user_note.resolve())])
+        self.assertEqual(current["active_theses"][0]["id"], thesis)
+        historical_record = Path(current["active_theses"][0]["note"]).read_text(encoding="utf-8")
+        self.assertIn(evidence, historical_record, "ledger retrieval must reach the complete earlier record")
+        self.assertEqual(list(self.vault.glob(".market-research-stage-*")), [])
 
     def test_paper_note_lint_applies_the_selected_nonempirical_mode(self):
         note = self.notes / "Doe_Correction_2025.md"

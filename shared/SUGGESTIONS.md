@@ -10,15 +10,20 @@ files; record evidence-backed changes to skill behavior here.
 Use logs only when the run already has a selected or established vault.
 Standalone PDF workflows with no vault report suggestions in the conversation;
 do not create `Reviews/` beside an external input or ask for a vault solely for
-logging. This does not waive a Wiki or source-note workflow's vault requirement.
+logging. This does not waive a Wiki, source-note, or market-research workflow's
+vault requirement.
 
 ## Destination and attribution
 
 Use `Reviews/<current-skill>-suggestions.md`, with exactly these skill names:
-`clipping-clean`, `figure-extract`, `paper-summarize`, `pdf-organize`, `wiki-add`,
-`wiki-build`, and `wiki-lint`. Use `Reviews/wiki-notes-suggestions.md` for
-note-content issues that remain outside the run's repair scope, rather than
-misclassifying them as skill defects.
+`clipping-clean`, `figure-extract`, `market-research`, `paper-summarize`,
+`pdf-organize`, `wiki-add`, `wiki-build`, and `wiki-lint`.
+Use `Reviews/wiki-notes-suggestions.md` for Wiki note-content issues that remain
+outside the run's repair scope, rather than misclassifying them as skill defects.
+
+market-research factual corrections follow that skill's daily-note continuity
+rules. Its suggestion log tracks evidenced workflow defects, not investment
+ideas, watchlist changes, or copies of daily analyses.
 
 A skill may update its own log and the logs of producers whose outputs it
 actually consumed in this run. Attribute a proposal to the behavior that
@@ -88,8 +93,8 @@ write, and empty canonical logs are kept rather than deleted.
 
 A report-only, preview, or no-apply run writes no logs or setup files. On an
 apply-capable run in an established vault, initialize any missing canonical
-skill logs so all seven exist; create the note-content log when needed. This initialization
-does not authorize adding issues to unrelated producer logs.
+skill logs so all eight exist; create the note-content log when needed. This
+initialization does not authorize adding issues to unrelated producer logs.
 
 Use the shared [safe-write protocol](SAFE_WRITES.md): snapshot complete log
 bytes when read, stage the reviewed result privately, publish missing files

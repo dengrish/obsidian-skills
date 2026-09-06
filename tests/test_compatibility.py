@@ -260,6 +260,7 @@ class CompatibilityTests(unittest.TestCase):
         self.assertEqual({path.parent.name for path in skills}, {
             "clipping-clean", "paper-summarize", "figure-extract",
             "pdf-organize", "wiki-add", "wiki-build", "wiki-lint",
+            "market-research",
         })
         for path in skills:
             self.assertTrue((path.parent / "../../shared/RUNTIME.md").resolve().is_file())

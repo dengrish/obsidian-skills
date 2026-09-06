@@ -1,9 +1,9 @@
 # obsidian
 
-Seven skills turn PDFs, Web Clipper captures and queued research topics into
-reading notes and interlinked Obsidian wiki entries, then maintain the existing
-wiki. They run in Codex and Claude Code and share one set of
-[vault conventions](shared/CONVENTIONS.md).
+Eight skills turn PDFs, Web Clipper captures and queued research topics into
+reading notes and interlinked Obsidian wiki entries, maintain the existing
+wiki, and produce daily market research. They run in Codex and Claude Code and
+share one set of [vault conventions](shared/CONVENTIONS.md).
 
 ## The skills
 
@@ -18,6 +18,7 @@ Choose by the requested result, not just the input's file type.
 | Build or enrich wiki entries from new evidence | [wiki-build](skills/wiki-build/SKILL.md) | PDF or URL-origin source note → entries in `Wiki/` |
 | Research and add missing requested topics | [wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md` → durable sources and new requested entries only |
 | Audit, correct or explicitly refactor existing wiki entries | [wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources or an exact producer mapping → scoped repairs, links, parents and MOCs |
+| Research premarket catalysts and developing momentum | [market-research](skills/market-research/SKILL.md) | current market evidence and earlier analyses → brief daily note in `Investments/` |
 
 A PDF attached without a stated goal has no default workflow; ask what result
 the user wants. An inbox-wide request splits captured `.md` files and `.pdf`
@@ -40,6 +41,8 @@ Inbox/*.md → clipping-clean → Articles/ cleaned clipping
 add-to-wiki.md → wiki-add → durable sources → missing requested entries in Wiki/
 
 Existing Wiki/ → wiki-lint → entry repairs, links, parents, MOCs and proposals
+
+Market evidence + prior Investments/ notes → market-research → daily research note
 ```
 
 Figure extraction supplies images to paper-summarize and wiki-build.
@@ -74,9 +77,23 @@ adds an unrequested entity to satisfy a builder audit. It checks off only
 successfully published or already-existing queue items; uncertain or blocked
 items remain unchecked. Existing-entry enrichment remains wiki-build's job.
 
+market-research finds long-only buying opportunities in liquid U.S.-listed
+stocks over a 3–12 month momentum horizon. It combines repeatable announcement
+and price screens with verified business evidence and bounded social research.
+Each note has a short decision brief and a detailed research record for future
+runs, including thesis changes, daily checks of two-week and 1/3/6/12/24/60-month
+outcomes and monthly summaries of evidence-backed lessons. Quoted recommendation prices stay
+separate from the fixed hypothetical entry convention. No qualifying
+buying opportunity is a valid result. Daily notes use
+`Investments/YYYY-MM-DD-market-research.md` and the skill's
+[note format](skills/market-research/references/note-format.md); they are not
+Wiki entries or source notes for automatic wiki-build intake. It researches
+opportunities without reviewing current holdings, recommending sales, placing
+trades, or rewriting earlier daily records.
+
 ## Codex and Claude
 
-The same seven skills run in **Codex and Claude Code** on **macOS and Linux**,
+The same eight skills run in **Codex and Claude Code** on **macOS and Linux**,
 including their desktop surfaces when local files and shell execution are
 available. This is a skill package, not an Obsidian community plugin or an MCP
 server. Ordinary chats
@@ -123,6 +140,11 @@ Start a fresh task/session after installing or updating. Installation does
 not install Python dependencies or grant vault access; follow the runtime
 guide. Shell examples use POSIX syntax.
 
+Recurring market research is configured separately in the active host when
+requested; installing or manually running the skill does not activate a job.
+Its default daily research time is 09:00 `America/New_York`, following New York's
+daylight-saving changes. Closed-market days produce a short status note.
+
 ## Vault layout
 
 `<vault>` is the user-selected vault or an unambiguous workspace vault. Resolve
@@ -137,6 +159,7 @@ it and any per-run path overrides through [RUNTIME.md](shared/RUNTIME.md).
 │   │   └── <Work>/           a split book's chapter PDFs
 │   └── Images/               flat folder for extracted/downloaded images
 ├── Wiki/                     entity notes, scanned recursively
+├── Investments/              dated market research, separate from the Wiki
 ├── MOCs/                     generated navigation outlines
 │   ├── <discipline>.md       e.g. machine-learning.md (no -moc suffix)
 │   └── misc.md               Wiki entries tagged #misc
@@ -151,8 +174,8 @@ captured. The clipping dedup index determines whether a capture was processed.
 All three source-note producers share `Articles/`: `sources:` item 1 identifies
 the origin used for deduplication, and a body marker distinguishes wiki-add's
 research extracts from full-text clippings. wiki-add reuses suitable existing
-source notes and images without overwriting them. MOCs, proposal logs and the
-topic queue stay outside `Wiki/` so they are not treated as entries. MOC
+source notes and images without overwriting them. Market research, MOCs, proposal
+logs and the topic queue stay outside `Wiki/` so they are not treated as entries. MOC
 links and root parents use `[[MOCs/<discipline>]]`, so a same-named entity
 can coexist in `Wiki/`. Generated outline links use qualified entry paths
 such as `[[Wiki/machine-learning|Machine learning]]`. Each recognized discipline
@@ -265,7 +288,7 @@ claude plugin validate skills
 
 The plugin-manifest command may report that the repository-root `CLAUDE.md` is
 not loaded as plugin context. That file exists for contributors working on this
-repository and imports `AGENTS.md`; runtime plugin guidance lives in the seven
+repository and imports `AGENTS.md`; runtime plugin guidance lives in the eight
 skills. The warning is expected, while the marketplace and skill validations
 should pass cleanly (including with `--strict`).
 

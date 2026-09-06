@@ -5,11 +5,14 @@ and Python helpers run on macOS and Linux and are shared by Codex and Claude
 Code; they do not require one host's internal tool names. Installing the plugin
 does not grant access to a vault, install Python packages, or enable browser tools.
 
-When wiki-add needs web research, use the search and page-reading capabilities
-available in the active host; no particular browser, connector or host-specific
-tool name is required. If adequate evidence cannot be accessed, report the
-limitation and leave the affected queue items unchecked. Do not substitute
-unverified recollection for sources.
+When wiki-add or market-research needs web research, use the search and
+page-reading capabilities available in the active host; no particular browser, connector or host-specific
+tool name is required. market-research also uses available market-data tools,
+with source and observation times recorded under its research method. If
+adequate evidence cannot be accessed, report the limitation: wiki-add leaves
+affected queue items unchecked; market-research records the missing evidence
+without making an unsupported investment assessment. Do not substitute
+unverified recollection for sources or quotes.
 
 `SKILL.md` gives the active workflow and its decision gates. Follow its links
 when a step requires a reference; do not load every reference preemptively.
@@ -33,6 +36,18 @@ temporary research material from durable sources: publish and verify any new
 source notes, organized PDFs and selected images before the Wiki entries that
 cite them, and verify entries before checking off queue items. Existing source
 notes, images and requested Wiki identities are reused or skipped without edits.
+
+market-research reads earlier daily analyses and publishes to `Investments/`
+under its own [note format](../skills/market-research/references/note-format.md):
+a short buying-opportunity brief followed by a detailed research record.
+It does not evaluate current holdings or recommend sales. Social research uses
+only accessible sources; no social feed or comprehensive monitoring is assumed.
+These notes are separate from Wiki entries, source notes, and MOCs; earlier
+dated records remain unchanged. Scheduling is external to the skill: configure
+recurring execution in the active host only when the user requests it, using
+an explicit vault and timezone. Installing the plugin or invoking the skill
+manually does not activate a schedule. The shared workflow does not require a
+particular host's automation tool.
 
 ## Resolve the paths before acting
 
@@ -66,7 +81,9 @@ notes, images and requested Wiki identities are reused or skipped without edits.
   create navigation artifacts. Unexpected root `<discipline>-moc.md` notes are
   preserved and reported; do not create duplicate navigation notes or move
   existing files during plugin setup.
-- Individual folder overrides apply to the requested run. Confirm existing
+- Individual folder overrides apply to the requested run where the selected
+  workflow supports them; market-research fixes its output at `Investments/`
+  under the selected vault. Confirm existing
   inputs and keep the skills' normal output folders under the selected vault.
   Do not edit installed skills to configure a different user's vault.
 
@@ -128,10 +145,14 @@ falling back to an overwrite-capable copy or cross-device move. See
 The helpers require Python 3.10+; use a release that is still receiving security
 fixes. Examples use `python3`; substitute the full path to a suitable interpreter
 supplied by the host when available. Python 3.9 is end-of-life, and the supported
-PyMuPDF and Pillow security floors require Python 3.10 or newer. Wiki and clipping
-helpers use the standard library; PDF
-reading/splitting needs `pypdf`, and figure extraction needs PyMuPDF and Pillow.
+PyMuPDF and Pillow security floors require Python 3.10 or newer. Wiki, clipping,
+and market-research helpers use the standard library; PDF reading/splitting
+needs `pypdf`, and figure extraction needs PyMuPDF and Pillow.
 `requirements.txt` at the plugin root supplies the full set.
+market-research also needs the system IANA timezone database for
+`America/New_York`, normally present on macOS and Linux. If unavailable, report
+the missing timezone data; do not substitute a fixed UTC offset that breaks
+daylight-saving cutoffs.
 
 PDFs and existing image files are untrusted parser input. An import-only check
 can silently accept an old vulnerable package, so verify installed versions as
