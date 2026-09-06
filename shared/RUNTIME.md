@@ -118,9 +118,11 @@ The helpers require Python 3.10+; use a release that is still receiving security
 fixes. Examples use `python3`; substitute the full path to a suitable interpreter
 supplied by the host when available. Use the same interpreter for dependency
 installation and every script invocation. Standard-library-only workflows,
-including investment research, require no PDF or image packages and no package
-installation. Use only the dependencies needed by the active workflow and the
-current plugin's own `requirements.txt`; another plugin is never a setup dependency.
+including core investment retrieval, screening and note handling, need no package
+installation. Optional commands can declare additional dependencies, such as the
+investment filing parser. Use only the active workflow's dependencies from the
+current plugin's `requirements.txt` or its documented optional requirements file;
+another plugin is never a setup dependency.
 
 A workflow using named timezones also needs the system IANA timezone database,
 normally present on macOS and Linux. Investment research uses

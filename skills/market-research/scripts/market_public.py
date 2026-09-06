@@ -202,7 +202,8 @@ def _submissions(client, args, headers):
             _bad('SEC submissions returned conflicting duplicate accessions.')
         unique[key] = row
     warnings = ['Company identity metadata is current, not a historical ticker/universe reconstruction.',
-                'Acceptance timestamps approximate availability; SEC dissemination can follow acceptance.']
+                'Acceptance timestamps approximate availability; SEC dissemination can follow acceptance.',
+                'Acceptance before the assigned filing date does not prove publication: those filings use conservative date-only availability.']
     complete = len(eligible) <= pages
     if not complete:
         warnings.append('Historical submissions page limit reached; requested filing interval is incomplete.')
@@ -216,7 +217,12 @@ def _availability(filed, accepted, since, cutoff):
     filed_date = parse_date(filed)
     if accepted:
         stamp = parse_time(accepted)
-        return (stamp <= cutoff and (not since or stamp >= since), 'acceptance_timestamp')
+        # EDGAR can accept an evening submission while assigning the next
+        # business day's filing date and withholding dissemination until then.
+        # A prior-day acceptance is not an intraday publication timestamp for
+        # that later filing date; apply the date-only rules below instead.
+        if stamp.astimezone(_ny()).date() >= filed_date:
+            return (stamp <= cutoff and (not since or stamp >= since), 'acceptance_timestamp')
     if filed_date >= cutoff.astimezone(_ny()).date():
         return False, 'date_only_unproven' if filed_date == cutoff.astimezone(_ny()).date() else 'after_cutoff'
     if since and filed_date < since.astimezone(_ny()).date():
@@ -599,6 +605,31 @@ def self_test():
     check(result['data']['facts'][1]['unit'] == 'USD' and result['data']['facts'][1]['fp'] == 'Q2', 'original fact units and period retained')
     result = sec_facts(Fake({base: missing_time, fact_url: facts}), args)
     check(len(result['data']['facts']) == 1 and not result['complete'], 'facts same-day date-only withheld')
+    # December 31 evening acceptance can be assigned January 2's filing date:
+    # the earlier acceptance does not establish dissemination before the holiday.
+    delayed_accession = '0000000001-25-000010'
+    delayed = copy.deepcopy(submission)
+    delayed['filings']['recent'] = {
+        'accessionNumber': [delayed_accession], 'filingDate': ['2026-01-02'],
+        'form': ['10-K'], 'acceptanceDateTime': ['2025-12-31T23:00:00Z']}
+    delayed_facts = {'cik': 1, 'facts': {'us-gaap': {'Assets': {'units': {'USD': [
+        {'val': 20, 'accn': delayed_accession, 'filed': '2026-01-02',
+         'end': '2025-09-30', 'form': '10-K'}]}}}}}
+    for handler, field in ((sec_company, 'filings'), (sec_facts, 'facts')):
+        for cutoff, since, count, complete in (
+                ('2025-12-31T23:30:00Z', None, 0, True),
+                ('2026-01-02T17:00:00Z', None, 0, False),
+                ('2026-01-03T17:00:00Z', None, 1, True),
+                ('2026-01-03T17:00:00Z', '2026-01-02', 1, True),
+                ('2026-01-03T17:00:00Z', '2026-01-02T17:00:00Z', 0, False)):
+            delayed_args = copy.copy(args)
+            delayed_args.as_of, delayed_args.since = cutoff, since
+            result = handler(Fake({base: delayed, fact_url: delayed_facts}), delayed_args)
+            check(len(result['data'][field]) == count and result['complete'] == complete,
+                  'delayed SEC filing uses assigned date rather than earlier acceptance')
+            if count:
+                check(result['data'][field][0]['availability_basis'] == 'prior_filing_date_only',
+                      'delayed SEC filing availability basis is explicit')
     for handler in (sec_company, sec_facts):
         for identity_args in (args, symbol_args):
             for key, value in (('limit', 0), ('limit', MAX_RECORDS + 1),

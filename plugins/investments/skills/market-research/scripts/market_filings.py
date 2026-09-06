@@ -161,7 +161,10 @@ def _parse_payload(payload):
     doc = parse_html(html, config=ParserConfig(form=form, max_document_size=MAX_HTML_BYTES,
                      enable_parallel=False, extract_xbrl=False, extract_images=False,
                      optimize_for_ai=False))
-    detected = doc.sections
+    # EdgarTools' Sections mapping resolves aliases such as "Item 1" to the
+    # first matching item, which is ambiguous across the two parts of a 10-Q.
+    # Copy the actual keys so our exact-key contract cannot use that fallback.
+    detected = dict(doc.sections.items())
     if len(detected) > 500:
         raise DataError('parser_size', 'The parser returned too many sections.')
     sections = []
@@ -521,6 +524,31 @@ def run_self_test():
             self.assertFalse(result['complete'])
             self.assertEqual(result['data']['text'], '')
             self.assertTrue(result['data']['sections'])
+
+        def test_actual_quarterly_sections_require_exact_keys(self):
+            if not dependency_status()['available']:
+                self.skipTest('Optional pinned parser is not installed.')
+            source = ('<html><body><h1>Part I. Financial Information</h1>'
+                      '<h2>Item 1. Financial Statements</h2><p>' +
+                      'Quarterly financial results. ' * 40 +
+                      '</p><h2>Item 2. Management Discussion and Analysis</h2><p>' +
+                      'Revenue increased due to demand. ' * 40 +
+                      '</p><h1>Part II. Other Information</h1>'
+                      '<h2>Item 1. Legal Proceedings</h2><p>' +
+                      'A material contract dispute is pending. ' * 40 + '</p></body></html>')
+            for key, included, excluded in (
+                    ('part_i_item_1', 'Quarterly financial results', 'contract dispute'),
+                    ('part_ii_item_1', 'contract dispute', 'Quarterly financial results')):
+                result = _parse_isolated(source, '10-Q', key, 0, MAX_CHARS)
+                self.assertTrue(result['complete'])
+                self.assertIn(included, result['data']['text'])
+                self.assertNotIn(excluded, result['data']['text'])
+            for alias in ('Item 1', '1'):
+                result = _parse_isolated(source, '10-Q', alias, 0, MAX_CHARS)
+                self.assertFalse(result['complete'])
+                self.assertEqual(result['data']['text'], '')
+                self.assertEqual({s['section_id'] for s in result['data']['sections']},
+                                 {'part_i_item_1', 'part_i_item_2', 'part_ii_item_1'})
 
         def test_actual_parser_paging_preserves_full_text_hash(self):
             first = self.actual(count=100)

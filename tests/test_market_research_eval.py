@@ -156,6 +156,15 @@ class EvaluationTests(unittest.TestCase):
         answer["evidence"].append("later_close")
         self.assertTrue({"assessment_error", "cutoff_error"} <= self.codes(run, "case04", "confirmation"))
 
+    def test_rule_and_session_schedule_suffice_to_reject_early_confirmation(self):
+        run = self.correct_run()
+        answer = self.answer(run, "case04", "confirmation")
+        answer["evidence"] = ["thesis.condition", "calendar.close_time"]
+        self.assertEqual(self.codes(run, "case04", "confirmation"), set())
+        # A quote alone does not establish which confirmation was required.
+        answer["evidence"] = ["prices.intraday"]
+        self.assertIn("evidence_error", self.codes(run, "case04", "confirmation"))
+
     def test_missing_revenue_cannot_create_operating_margin(self):
         run = self.correct_run()
         answer = self.answer(run, "case05", "operating_margin")
@@ -164,6 +173,16 @@ class EvaluationTests(unittest.TestCase):
                       calculation=operation("multiply", operation("divide", fact("current.operating_income"), fact("prior.revenue")), {"constant": 100}))
         self.assertTrue({"unsupported_claim", "evidence_error", "calculation_error"}
                         <= self.codes(run, "case05", "operating_margin"))
+
+    def test_missing_denominator_fact_alone_supports_margin_abstention(self):
+        run = self.correct_run()
+        answer = self.answer(run, "case05", "operating_margin")
+        answer["evidence"] = ["current.revenue_gap"]
+        self.assertEqual(self.codes(run, "case05", "operating_margin"), set())
+        for evidence in ([], ["current.operating_income"], ["prior.revenue"]):
+            with self.subTest(evidence=evidence):
+                answer["evidence"] = evidence
+                self.assertIn("evidence_error", self.codes(run, "case05", "operating_margin"))
 
     def test_theme_does_not_establish_material_issuer_exposure(self):
         run = self.correct_run()

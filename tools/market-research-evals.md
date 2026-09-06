@@ -154,6 +154,13 @@ evidence and actual EPS alone still fail. Both unchanged development responses
 were regraded: baseline and current each pass 17/17. The initial 16/17 versus 17/17 difference was a rubric error,
 not a demonstrated research improvement.
 
+The key also accepts the explicit missing-denominator fact alone for margin
+abstention, and the frozen confirmation rule plus session schedule for rejecting
+a close-based confirmation before the close. The actual numerator and an intraday
+quote are unnecessary to establish those limitations. These citation alternatives
+do not change the expected financial answers; reports retain the answer-key hash
+so results from different rubrics remain distinguishable.
+
 ## Prepare a private held-out evaluation
 
 Create new `inputs.json` and `expected.json` files in a private evaluator location,

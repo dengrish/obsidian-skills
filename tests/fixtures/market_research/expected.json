@@ -162,6 +162,10 @@
               "thesis.condition",
               "prices.intraday",
               "calendar.close_time"
+            ],
+            [
+              "thesis.condition",
+              "calendar.close_time"
             ]
           ],
           "reason_codes": [
@@ -194,6 +198,9 @@
           "evidence_alternatives": [
             [
               "current.operating_income",
+              "current.revenue_gap"
+            ],
+            [
               "current.revenue_gap"
             ]
           ],

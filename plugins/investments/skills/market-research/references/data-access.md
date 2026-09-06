@@ -185,8 +185,9 @@ EdgarTools' network, latest-company, or persistent-data interfaces.
 
 The response identifies the filing, acceptance/filing-date availability basis,
 original URL, parser version, detected `data.sections`, source/text digests and
-rendered Markdown. Use a returned `section_id` when requesting `--section`; do
-not guess ambiguous 10-Q part/item numbers. Missing sections are
+rendered Markdown. Use an exact returned `section_id` when requesting `--section`;
+generic aliases such as `Item 1` are rejected because different 10-Q parts can
+reuse the same item number. Missing sections are
 explicitly incomplete. The parser's sections and tables are extraction aids,
 not guarantees of completeness or normalized financial statements. Use the
 original document for omitted or ambiguous content, especially table units and
@@ -207,18 +208,23 @@ the durable SEC URL and section; do not publish the entire filing or cite scratc
 **SEC.** No API key is needed, but provide a real identifying contact. The helper
 spaces requests below the SEC's ten-per-second ceiling; do not run parallel
 processes that collectively exceed it. It resolves a current ticker to a company
-CIK, retrieves submissions, and filters filing acceptance times at the cutoff.
+CIK, retrieves submissions, and checks filing dates and acceptance times at the cutoff.
 Without `--since`, coverage is the recent submissions block, not all history;
 with it, relevant older submission pages are retrieved within `--max-pages`.
 Current ticker mappings and company metadata are not historical security masters.
-Acceptance time may precede public dissemination, especially near the cutoff.
-Open the selected primary filing before treating a timing-sensitive fact as known.
+Acceptance can precede the assigned filing date: some evening submissions are
+not disseminated until the next business day. The helper then uses conservative
+date-only availability: future filing dates are excluded, and same-day timing
+remains unproven. See the [SEC's filing-status guidance](https://www.sec.gov/submit-filings/filer-support-resources/how-do-i-guides/determine-status-my-filing).
+Even same-day acceptance is not an exact public-dissemination timestamp. Open the
+selected primary filing and verify publication evidence for timing-sensitive claims.
 
 The `sec-facts` command retains concept, taxonomy, units, periods, filing dates and accession
 identities. It includes reported versions, not a computed comparable financial
 series: distinguish quarterly/YTD/annual periods, amendments and restatements;
 do not sum duplicate versions. Same-day facts need a known pre-cutoff accession
-acceptance; otherwise they are omitted and coverage is incomplete. Use
+acceptance no earlier than the assigned filing date; otherwise they are omitted
+and coverage is incomplete. Use
 `--concepts` or `--taxonomy` when the default small US-GAAP set does not fit the
 issuer. Standard entity-wide XBRL excludes many custom/segment disclosures;
 missing concepts require reading filings, not inferring zero values.
@@ -255,6 +261,9 @@ reflect later corporate actions. `--asof` sets ticker mapping, not a knowledge
 cutoff. The helper paginates symbol-first results (10,000 bars total per page)
 and reports symbols with no usable bars. This does not guarantee every expected
 session is present; check calendar gaps before computing signals or outcomes.
+The price command supports individual or comma-separated provider adjustments,
+such as `split,spin-off`; `raw` and `all` must be used alone. The offline screener
+still requires exactly `split`, so another adjustment basis is a separate analysis.
 [Bars documentation](https://docs.alpaca.markets/us/reference/stockbars) and
 [market-data FAQ](https://docs.alpaca.markets/us/docs/market-data-faq).
 

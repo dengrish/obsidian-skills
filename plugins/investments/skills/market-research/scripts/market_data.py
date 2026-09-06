@@ -89,7 +89,8 @@ def parser():
     prices.add_argument('--end', required=True, help='end timestamp with timezone; daily bars use completed prior dates')
     prices.add_argument('--feed', choices=('sip', 'iex'), default='sip')
     prices.add_argument('--timeframe', choices=('1Day', '1Min'), default='1Day')
-    prices.add_argument('--adjustment', choices=('raw', 'split', 'dividend', 'spin-off', 'all'), default='raw')
+    prices.add_argument('--adjustment', default='raw',
+                        help='raw, all, split, dividend, spin-off, or a comma-separated combination of specific adjustments')
     prices.add_argument('--asof', help='ticker-mapping date; not a historical knowledge cutoff')
     prices.add_argument('--max-pages', type=int, default=20)
     actions = commands.add_parser('actions', help='retrieve Alpaca corporate actions by process date')
@@ -316,6 +317,29 @@ def run_self_test():
             self.assertEqual(code, 0)
             self.assertEqual(handler.call_args.args[1].vintage_date, '2026-09-03')
             self.assertNotIn('fixture-fred-secret', json.dumps(result))
+
+        def test_combined_price_adjustments_reach_the_provider(self):
+            from datetime import datetime, timezone
+            from market_prices import alpaca_bars
+            frozen = datetime(2026, 9, 5, tzinfo=timezone.utc)
+            client = SimpleNamespace(env={'ALPACA_API_KEY': 'fixture-id', 'ALPACA_SECRET_KEY': 'fixture-secret'},
+                                     requests=[], get_json=Mock(return_value={
+                                         'bars': {'AAPL': [{'t': '2026-09-03T04:00:00Z', 'o': 10,
+                                                           'h': 11, 'l': 9, 'c': 10, 'v': 100,
+                                                           'n': 10, 'vw': 10}]}, 'next_page_token': None}))
+            argv = ['prices', '--symbols', 'AAPL', '--start', '2026-09-03T04:00:00Z',
+                    '--end', '2026-09-04T12:00:00Z', '--adjustment', 'split,spin-off']
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output), patch(__name__ + '.handlers', return_value={'prices': alpaca_bars}), \
+                    patch('market_prices.utc_now', return_value=frozen):
+                self.assertEqual(main(argv, client), 0)
+            self.assertEqual(client.get_json.call_args.kwargs['params']['adjustment'], 'split,spin-off')
+            self.assertEqual(json.loads(output.getvalue())['query']['adjustment'], 'split,spin-off')
+            client.get_json.reset_mock()
+            with contextlib.redirect_stdout(io.StringIO()), patch(__name__ + '.handlers', return_value={'prices': alpaca_bars}), \
+                    patch('market_prices.utc_now', return_value=frozen):
+                self.assertEqual(main(argv[:-1] + ['raw,split'], client), 2)
+            client.get_json.assert_not_called()
 
         def test_live_probe_missing_keys_does_not_call_provider(self):
             handler = Mock()

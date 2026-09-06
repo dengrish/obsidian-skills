@@ -323,6 +323,13 @@ raise SystemExit(main(fixture['args'], client))
         after_cutoff = run(filing_args, [submissions], 2)
         self.assertEqual(len(after_cutoff['requests']), 1)
         self.assertFalse(after_cutoff['complete'])
+        # Earlier acceptance does not permit downloading a filing assigned a
+        # later filing date: dissemination may be deferred until that day.
+        filing_rows['acceptanceDateTime'] = ['2025-09-04T23:00:00Z']
+        filing_rows['filingDate'] = ['2025-09-08']
+        deferred = run(filing_args, [submissions], 2)
+        self.assertEqual(len(deferred['requests']), 1)
+        self.assertFalse(deferred['complete'])
 
         article = {'title': 'Synthetic issuer update', 'url': 'https://example.test/update',
                    'time_published': '20250905T123000', 'summary': 'DUMMY_SECRET_FOR_OFFLINE_TEST',

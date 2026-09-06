@@ -90,6 +90,14 @@ Relax `require_above_ma50` when a documented setup needs earlier examination.
 Announcement and thematic candidates remain eligible for research even if they
 fail these discovery filters; every candidate still needs purchase confirmation.
 
+When earlier notes define additional filters or another sort order, retain those
+requirements explicitly. This helper does not calculate market capitalization,
+regular-session turnover or arbitrary combinations of its metrics. Apply missing
+checks separately from verified data, or record a deliberate screen change;
+do not silently replace the saved definition with this example's defaults. A
+display limit may discard names needed for a later filter or different ranking,
+so retain all relevant measured candidates before applying those extra steps.
+
 The supported sort metrics are `relative_return_3m`, `relative_return_6m`,
 `relative_return_12m`, `return_3m`, `return_6m`, `return_12m` and
 `average_daily_notional`. Sorting is descending with stable identity tie breaks.

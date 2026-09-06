@@ -141,7 +141,7 @@ rules. Social popularity alone never establishes a buying opportunity. Missing
 access is an explicit coverage gap; do not imply that a feed is installed or that
 sampled searches provide continuous or comprehensive monitoring.
 
-Apply the four setup-specific evidence tests in the research method. Prefer
+Apply the relevant setup-specific evidence tests in the research method. Prefer
 **zero to three leading buying ideas**, ranked by the quality of the catalyst, price
 confirmation, downside/invalidation evidence, and fit to the 3–12 month horizon.
 Treat these as judgments, not fabricated probabilities or a guaranteed edge.

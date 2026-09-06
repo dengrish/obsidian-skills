@@ -47,7 +47,7 @@ Compare the beneficiaries on evidence of benefit, timing, price reaction and the
 strongest reason the benefit may already be reflected in expectations. Retain the
 few links from theme to company that determine the case, the names actually
 checked, material exclusions and coverage limits. Feed nominated stocks through
-the same universe, four setup tests and purchase confirmation below; a compelling
+the same universe, applicable setup tests and purchase confirmation below; a compelling
 industry story alone is not `ready`. This expansion supplements the two passes,
 not a claim to have screened the whole industry. No useful theme or no qualifying
 beneficiary is a valid result.
