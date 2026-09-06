@@ -51,6 +51,7 @@ skills/market-research/references/note-format.md
 skills/market-research/references/outcomes-and-learning.md
 skills/market-research/references/research-method.md
 skills/market-research/scripts/market_data.py
+skills/market-research/scripts/market_fred.py
 skills/market-research/scripts/market_http.py
 skills/market-research/scripts/market_news.py
 skills/market-research/scripts/market_notes.py

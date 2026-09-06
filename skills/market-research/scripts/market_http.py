@@ -62,7 +62,7 @@ def required_env(env, key):
 
 
 SECRET_FIELDS = {'apikey', 'api_key', 'token', 'access_token', 'secret', 'key'}
-CREDENTIAL_NAMES = ('ALPACA_API_KEY', 'ALPACA_SECRET_KEY', 'ALPHA_VANTAGE_API_KEY', 'SEC_USER_AGENT')
+CREDENTIAL_NAMES = ('ALPACA_API_KEY', 'ALPACA_SECRET_KEY', 'ALPHA_VANTAGE_API_KEY', 'SEC_USER_AGENT', 'FRED_API_KEY')
 
 
 def redact(value, env=None):
@@ -95,9 +95,10 @@ def allowed_url(url):
         'www.sec.gov': r'/files/company_tickers(?:_exchange)?\.json',
         'data.sec.gov': r'(?:/submissions/CIK\d{10}(?:-submissions-\d+)?\.json|/api/xbrl/companyfacts/CIK\d{10}\.json)',
         'www.nasdaqtrader.com': r'(?:/dynamic/[Ss]ym[Dd]ir/(?:nasdaqlisted|otherlisted)\.txt|/rss\.aspx)',
-        'data.alpaca.markets': r'(?:/v2/stocks/bars|/v1/corporate-actions)',
+        'data.alpaca.markets': r'(?:/v2/stocks/bars|/v1/corporate-actions|/v1beta1/news)',
         'paper-api.alpaca.markets': r'/v2/calendar',
         'www.alphavantage.co': r'/query',
+        'api.stlouisfed.org': r'/fred/(?:series(?:/observations)?|releases/dates|release/dates)',
     }
     if parsed.hostname not in patterns or not re.fullmatch(patterns[parsed.hostname], parsed.path):
         raise DataError('unsafe_url', 'This resource is outside the read-only provider allowlist.')
@@ -148,13 +149,16 @@ class HttpClient:
         for key, value in headers.items():
             if key.lower() not in allowed_headers or any(ord(ch) < 32 or ord(ch) == 127 for ch in str(value)):
                 raise DataError('unsafe_headers', 'Unexpected request header or control character.')
-        if any(key.lower() in SECRET_FIELDS for key in params) and host != 'www.alphavantage.co':
-            raise DataError('unsafe_credentials', 'Query credentials are permitted only for the Alpha Vantage endpoint.')
+        query_credentials = {key.lower() for key in params if key.lower() in SECRET_FIELDS}
+        allowed_credentials = {'www.alphavantage.co': {'apikey'}, 'api.stlouisfed.org': {'api_key'}}
+        if not query_credentials.issubset(allowed_credentials.get(host, set())):
+            raise DataError('unsafe_credentials', 'Query credentials are not approved for this provider resource.')
         target = url + ('?' + urllib.parse.urlencode(params, doseq=True) if params else '')
         request_headers = {'User-Agent': 'obsidian-market-research/1.0', 'Accept': 'application/json,text/plain',
                            'Accept-Encoding': 'identity', **headers}
         # Space requests within a command; daily Alpha Vantage quotas remain server/account limits.
-        interval = 0.2 if host.endswith('sec.gov') else 0.35 if 'alpaca.markets' in host else 0.0
+        interval = (0.2 if host.endswith('sec.gov') else 0.35 if 'alpaca.markets' in host
+                    else 0.55 if host == 'api.stlouisfed.org' else 0.0)
         for retry in range(3):
             if self.attempts >= self.max_requests:
                 raise DataError('request_budget', 'Request limit reached; retry only the unresolved portion.')
@@ -280,11 +284,33 @@ def run_self_test():
             self.assertEqual(len(event['sha256']), 64)
             self.assertEqual(client.opener.open.call_args.args[0].method, 'GET')
 
+        def test_fred_query_and_returned_text_are_redacted(self):
+            client = self.client([Reply(b'{"notes":"fixture-fred-secret"}')])
+            client.env = {'FRED_API_KEY': 'fixture-fred-secret'}
+            result = client.get_json('https://api.stlouisfed.org/fred/series',
+                                     {'series_id': 'TEST', 'api_key': 'fixture-fred-secret'})
+            self.assertNotIn('fixture-fred-secret', json.dumps(client.requests))
+            self.assertNotIn('fixture-fred-secret', json.dumps(redact(result, client.env)))
+            self.assertIn('api_key=%5Bredacted%5D', urllib.parse.quote(client.requests[0]['url'], safe=':?=&/'))
+
+        def test_provider_query_credentials_cannot_cross_hosts(self):
+            client = self.client([])
+            for url, params in (
+                    ('https://data.alpaca.markets/v1beta1/news', {'api_key': 'dummy'}),
+                    ('https://api.stlouisfed.org/fred/series', {'apikey': 'dummy'}),
+                    ('https://www.alphavantage.co/query', {'api_key': 'dummy'})):
+                with self.subTest(url=url), self.assertRaises(DataError):
+                    client.get_json(url, params)
+            client.opener.open.assert_not_called()
+
         def test_rejects_unapproved_resources_before_network(self):
             client = self.client([])
             for url in ('http://www.sec.gov/files/company_tickers.json', 'https://localhost/query',
                         'https://data.alpaca.markets/v2/orders', 'https://api.alpaca.markets/v2/account',
-                        'https://user:pass@www.alphavantage.co/query', 'https://www.alphavantage.co/query?apikey=x'):
+                        'https://user:pass@www.alphavantage.co/query', 'https://www.alphavantage.co/query?apikey=x',
+                        'https://api.stlouisfed.org/fred/series/search',
+                        'https://fred.stlouisfed.org/fred/series',
+                        'https://api.stlouisfed.org/fred/series?api_key=x'):
                 with self.subTest(url=url), self.assertRaises(DataError):
                     client.get_json(url)
             client.opener.open.assert_not_called()

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Read Alpha Vantage news and earnings calendars through market_data.py.
+"""Read Alpaca/Alpha Vantage news and Alpha Vantage earnings calendars.
 
 This provider module makes no file writes and never places trades. Credentials
-come from ALPHA_VANTAGE_API_KEY, via the shared read-only transport. Run this
+come from provider environment variables, via the shared read-only transport. Run this
 file with --test for offline fixtures; use market_data.py for live requests.
 """
 
@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from market_http import DataError, parse_date, parse_time, required_env, utc_now
 
 API = 'https://www.alphavantage.co/query'
+ALPACA_NEWS = 'https://data.alpaca.markets/v1beta1/news'
 TOPICS = frozenset(('blockchain', 'earnings', 'ipo', 'mergers_and_acquisitions',
                     'financial_markets', 'economy_fiscal', 'economy_monetary',
                     'economy_macro', 'energy_transportation', 'finance',
@@ -135,6 +136,97 @@ def _news_item(row):
     }
 
 
+def news(client, args):
+    if getattr(args, 'provider', 'alpha_vantage') == 'alpaca':
+        return alpaca_news(client, args)
+    if getattr(args, 'include_content', False):
+        raise DataError('invalid_input', 'include-content is supported only for Alpaca news.')
+    return alpha_news(client, args)
+
+
+def alpaca_news(client, args):
+    """One bounded page for access checks or narrow windows; never imply wire completeness."""
+    symbol = _symbol(getattr(args, 'symbol', None))
+    since, cutoff = parse_time(args.since), parse_time(args.as_of)
+    if since > cutoff or cutoff > utc_now():
+        raise DataError('invalid_input', 'News requires since <= as_of <= now.')
+    if getattr(args, 'topics', None) is not None:
+        raise DataError('invalid_input', 'Alpaca news does not support Alpha Vantage topic filters.')
+    limit = getattr(args, 'limit', None)
+    limit = 50 if limit is None else limit
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 50:
+        raise DataError('invalid_input', 'Alpaca news limit must be an integer from 1 through 50.')
+    sort = getattr(args, 'sort', 'EARLIEST')
+    if sort not in ('EARLIEST', 'LATEST'):
+        raise DataError('invalid_input', 'News sort must be EARLIEST or LATEST.')
+    content = bool(getattr(args, 'include_content', False))
+    params = {'start': _iso(since), 'end': _iso(cutoff), 'limit': limit,
+              'sort': 'asc' if sort == 'EARLIEST' else 'desc',
+              'include_content': str(content).lower(), 'exclude_contentless': 'false'}
+    if symbol:
+        params['symbols'] = symbol
+    headers = {'APCA-API-KEY-ID': required_env(client.env, 'ALPACA_API_KEY'),
+               'APCA-API-SECRET-KEY': required_env(client.env, 'ALPACA_SECRET_KEY')}
+    payload = client.get_json(ALPACA_NEWS, params=params, headers=headers)
+    retrieved = utc_now()
+    if not isinstance(payload, dict) or not isinstance(payload.get('news'), list):
+        raise DataError('invalid_response', 'Alpaca returned an invalid news page.')
+    if 'next_page_token' not in payload:
+        raise DataError('invalid_response', 'Alpaca news pagination marker is missing.')
+    token = payload['next_page_token']
+    if token is not None and (not isinstance(token, str) or not token or len(token) > 4096):
+        raise DataError('invalid_response', 'Alpaca news pagination marker is invalid.')
+    data, excluded = [], 0
+    try:
+        if len(payload['news']) > limit:
+            raise ValueError('oversized page')
+        for row in payload['news']:
+            if not isinstance(row, dict):
+                raise ValueError('invalid article')
+            created, updated = parse_time(row.get('created_at')), parse_time(row.get('updated_at'))
+            if updated < created:
+                raise ValueError('invalid time order')
+            ident = row.get('id')
+            if isinstance(ident, bool) or not isinstance(ident, int) or ident <= 0:
+                raise ValueError('invalid article ID')
+            symbols = row.get('symbols')
+            if not isinstance(symbols, list) or not all(isinstance(s, str) and s for s in symbols):
+                raise ValueError('invalid symbols')
+            url = _text(row.get('url'), required=True)
+            parsed = urlsplit(url)
+            if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password:
+                raise ValueError('invalid article URL')
+            # The provider documents updated-time sorting, but not the interval's
+            # timestamp field. Preserve older-created revisions; exclude text
+            # updated after the evidence cutoff rather than inventing its old version.
+            if updated < since or updated > cutoff or (symbol and symbol not in symbols):
+                excluded += 1
+                continue
+            data.append({'id': ident, 'title': _text(row.get('headline'), required=True),
+                         'published_at': _iso(created), 'updated_at': _iso(updated),
+                         'url': url, 'publisher': _text(row.get('source')),
+                         'author': _text(row.get('author')), 'symbols': symbols,
+                         'summary': _text(row.get('summary')),
+                         'content': _text(row.get('content')) if content else None})
+    except (ValueError, TypeError, DataError):
+        raise DataError('invalid_response', 'Alpaca returned malformed news records; no complete result was assumed.') from None
+    warnings = ['This is a current provider response, not a historical article-text snapshot or a complete market news wire.',
+                'EARLIEST/LATEST sort by provider update time, not publication time; interval timestamp semantics are not documented.',
+                'An empty recent query does not establish real-time delivery or the absence of announcements.']
+    if token is not None:
+        warnings.append('More provider results exist; this one-page sample is incomplete. Narrow the window for further retrieval.')
+    if excluded:
+        warnings.append('Records outside the evidence window or requested symbol were excluded.')
+    return {'source': {'provider': 'alpaca', 'endpoint': ALPACA_NEWS},
+            'query': {'symbol': symbol, 'since': _iso(since), 'as_of': _iso(cutoff),
+                      'limit': limit, 'sort': sort, 'include_content': content},
+            'retrieved_at': _iso(retrieved), 'point_in_time_verified': False,
+            'complete': token is None and not excluded, 'warnings': warnings,
+            'pagination': {'pages': 1, 'exhausted': token is None},
+            'provider_record_count': len(payload['news']), 'excluded_record_count': excluded,
+            'returned_record_count': len(data), 'data': data}
+
+
 def alpha_news(client, args):
     """Retrieve one provider result set; saturation never implies full coverage."""
     symbol = _symbol(getattr(args, 'symbol', None))
@@ -143,7 +235,8 @@ def alpha_news(client, args):
         raise DataError('invalid_input', 'News since must be at or before as_of.')
     if as_of > utc_now():
         raise DataError('invalid_input', 'News as_of cannot be in the future.')
-    limit = getattr(args, 'limit', 200)
+    limit = getattr(args, 'limit', None)
+    limit = 200 if limit is None else limit
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
         raise DataError('invalid_input', 'News limit must be an integer from 1 through 1000.')
     sort = getattr(args, 'sort', 'EARLIEST')
@@ -324,6 +417,83 @@ def run_self_test():
         get_text = get_json
 
     class Tests(unittest.TestCase):
+        def alpaca_client(self, payload):
+            client = Client(payload)
+            client.env = {'ALPACA_API_KEY': 'fixture-id', 'ALPACA_SECRET_KEY': 'fixture-secret'}
+            return client
+
+        def alpaca_article(self, **changes):
+            return {'id': 1, 'headline': 'Fixture announcement', 'source': 'fixture',
+                    'created_at': '2026-09-04T12:30:00Z', 'updated_at': '2026-09-04T12:35:00Z',
+                    'symbols': ['ABC'], 'url': 'https://example.org/news',
+                    'content': '<p>Fixture body.</p>', **changes}
+
+        def test_alpaca_headers_content_and_explicit_window(self):
+            client = self.alpaca_client({'news': [self.alpaca_article()], 'next_page_token': None})
+            result = news(client, self.news_args(provider='alpaca', limit=None, include_content=True))
+            url, params, headers = client.calls[0]
+            self.assertEqual(url, ALPACA_NEWS)
+            self.assertEqual(params['start'], '2026-09-04T12:00:30Z')
+            self.assertEqual(params['end'], '2026-09-04T13:00:15Z')
+            self.assertEqual(params['limit'], 50)
+            self.assertEqual(params['sort'], 'desc')
+            self.assertEqual(params['exclude_contentless'], 'false')
+            self.assertNotIn('fixture-secret', json.dumps(params))
+            self.assertEqual(headers['APCA-API-SECRET-KEY'], 'fixture-secret')
+            self.assertEqual(result['data'][0]['content'], '<p>Fixture body.</p>')
+            self.assertTrue(result['complete'])
+            self.assertFalse(result['point_in_time_verified'])
+
+        def test_alpaca_empty_and_paginated_samples_remain_distinct(self):
+            for token in (None, 'next-page'):
+                client = self.alpaca_client({'news': [], 'next_page_token': token})
+                result = alpaca_news(client, self.news_args(limit=10))
+                self.assertEqual(len(client.calls), 1)
+                self.assertEqual(result['complete'], token is None)
+                self.assertEqual(result['data'], [])
+                self.assertTrue(any('empty recent query' in w for w in result['warnings']))
+
+        def test_alpaca_revisions_preserve_created_time_and_exclude_invalid_window(self):
+            rows = [self.alpaca_article(created_at='2026-09-03T12:30:00Z'),
+                    self.alpaca_article(id=2, updated_at='2026-09-04T13:01:00Z'),
+                    self.alpaca_article(id=3, created_at='2026-09-03T12:00:00Z',
+                                        updated_at='2026-09-03T12:30:00Z'),
+                    self.alpaca_article(id=4, symbols=['XYZ'])]
+            result = alpaca_news(self.alpaca_client({'news': rows, 'next_page_token': None}),
+                                 self.news_args(limit=10))
+            self.assertEqual([r['id'] for r in result['data']], [1])
+            self.assertEqual(result['data'][0]['published_at'], '2026-09-03T12:30:00Z')
+            self.assertIsNone(result['data'][0]['content'])
+            self.assertEqual(result['excluded_record_count'], 3)
+            self.assertFalse(result['complete'])
+
+        def test_alpaca_invalid_input_and_missing_credentials_make_no_request(self):
+            for changes in ({'limit': 51}, {'limit': 0}, {'topics': 'earnings'},
+                            {'since': '2026-09-04T14:00:00Z'}, {'as_of': '9999-12-30T00:00:00Z'}):
+                client = self.alpaca_client({})
+                with self.subTest(changes=changes), self.assertRaises(DataError):
+                    alpaca_news(client, self.news_args(**changes))
+                self.assertEqual(client.calls, [])
+            client = Client({})
+            with self.assertRaises(DataError):
+                alpaca_news(client, self.news_args(limit=10))
+            self.assertEqual(client.calls, [])
+
+        def test_alpaca_malformed_pages_are_not_reported_complete(self):
+            for payload in ({'news': []}, {'news': [], 'next_page_token': ''},
+                            {'news': [self.alpaca_article(created_at='bad')], 'next_page_token': None},
+                            {'news': [self.alpaca_article(id=True)], 'next_page_token': None},
+                            {'news': [self.alpaca_article(url='https://user:secret@example.org/')], 'next_page_token': None}):
+                with self.subTest(payload=payload), self.assertRaises(DataError):
+                    alpaca_news(self.alpaca_client(payload), self.news_args(limit=10))
+
+        def test_alpaca_returned_text_uses_cli_credential_redaction(self):
+            from market_http import redact
+            client = self.alpaca_client({'news': [self.alpaca_article(headline='echo fixture-secret')],
+                                        'next_page_token': None})
+            result = alpaca_news(client, self.news_args(limit=10))
+            self.assertNotIn('fixture-secret', json.dumps(redact(result, client.env)))
+
         def news_args(self, **changes):
             values = dict(symbol='ABC', topics=None, since='2026-09-04T08:00:30-04:00',
                           as_of='2026-09-04T09:00:15-04:00', limit=200, sort='LATEST')

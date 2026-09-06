@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 # Keep sibling imports independent of the host's working directory/import loader.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -28,6 +29,7 @@ REQUIRED = {
     'nasdaq': (),
     'alpaca': ('ALPACA_API_KEY', 'ALPACA_SECRET_KEY'),
     'alpha_vantage': ('ALPHA_VANTAGE_API_KEY',),
+    'fred': ('FRED_API_KEY',),
 }
 
 
@@ -81,17 +83,31 @@ def parser():
     sessions = commands.add_parser('sessions', help='retrieve Alpaca exchange-session dates and boundaries')
     sessions.add_argument('--start', required=True, help='YYYY-MM-DD')
     sessions.add_argument('--end', required=True, help='YYYY-MM-DD')
-    news = commands.add_parser('news', help='retrieve a bounded Alpha Vantage news window')
+    news = commands.add_parser('news', help='retrieve a bounded provider news window')
+    news.add_argument('--provider', choices=('alpha_vantage', 'alpaca'), default='alpha_vantage')
     news.add_argument('--symbol', help='one ticker only; omit for topic/general discovery')
     news.add_argument('--topics', help='comma-separated topics; multiple topics mean AND')
     news.add_argument('--since', required=True, help='inclusive start timestamp with timezone')
     news.add_argument('--as-of', required=True, help='inclusive cutoff timestamp with timezone')
-    news.add_argument('--limit', type=int, default=200, help='1–1000; a full response is marked possibly truncated')
+    news.add_argument('--limit', type=int, help='Alpha Vantage: 1–1000, default 200; Alpaca: 1–50, default 50')
     news.add_argument('--sort', choices=('EARLIEST', 'LATEST'), default='EARLIEST')
+    news.add_argument('--include-content', action='store_true', help='Alpaca only: request article bodies when available')
     earnings = commands.add_parser('earnings', help='retrieve the current Alpha Vantage earnings calendar')
     earnings.add_argument('--symbol', help='optional one-symbol filter')
     earnings.add_argument('--horizon', choices=('3month', '6month', '12month'), default='3month')
     earnings.add_argument('--as-of', help='optional historical cutoff; current calendar cannot verify its vintage')
+    macro = commands.add_parser('fred-series', help='retrieve one FRED series at an explicit daily vintage')
+    macro.add_argument('--series', required=True, help='FRED series ID, e.g. DGS10')
+    macro.add_argument('--start', required=True, help='first observation date, YYYY-MM-DD')
+    macro.add_argument('--end', required=True, help='last observation date, YYYY-MM-DD')
+    macro.add_argument('--vintage-date', required=True, help='daily knowledge date; does not establish intraday availability')
+    releases = commands.add_parser('fred-releases', help='retrieve FRED source release dates, not intraday release times')
+    releases.add_argument('--start', required=True, help='first source release date, YYYY-MM-DD')
+    releases.add_argument('--end', required=True, help='last source release date, YYYY-MM-DD')
+    releases.add_argument('--release-id', type=int, help='optional one-release filter')
+    for sub in (macro, releases):
+        sub.add_argument('--max-pages', type=int, default=10, help='maximum observation or release-date pages')
+        sub.add_argument('--limit', type=int, default=1000, help='maximum total records, 1–100000')
     for sub in commands.choices.values():
         sub.add_argument('--max-requests', type=int, default=100, help='per-command HTTP attempt budget, 1–500')
         sub.add_argument('--max-seconds', type=int, default=120, help='per-command transport budget, 1–600 seconds')
@@ -102,11 +118,13 @@ def handlers():
     # Imports work from either host and any current directory; every sibling ships together.
     from market_public import sec_company, sec_facts, nasdaq_symbols, nasdaq_halts
     from market_prices import alpaca_bars, alpaca_actions, alpaca_calendar
-    from market_news import alpha_news, alpha_calendar
+    from market_news import news, alpha_calendar
+    from market_fred import fred_series, fred_releases
     return {
         'sec-company': sec_company, 'sec-facts': sec_facts, 'symbols': nasdaq_symbols,
         'halts': nasdaq_halts, 'prices': alpaca_bars, 'actions': alpaca_actions,
-        'sessions': alpaca_calendar, 'news': alpha_news, 'earnings': alpha_calendar,
+        'sessions': alpaca_calendar, 'news': news, 'earnings': alpha_calendar,
+        'fred-series': fred_series, 'fred-releases': fred_releases,
     }
 
 
@@ -144,11 +162,18 @@ def check_sources(client, args):
                 result = handlers()['prices'](client, SimpleNamespace(
                     symbols='SPY', start=(end - timedelta(days=10)).isoformat(), end=end.isoformat(),
                     timeframe='1Day', feed='sip', adjustment='raw', asof=None, max_pages=1))
-            else:
+            elif source == 'alpha_vantage':
                 result = handlers()['earnings'](client, SimpleNamespace(symbol='IBM', horizon='3month', as_of=None))
+            else:
+                vintage = utc_now().astimezone(ZoneInfo('America/Chicago')).date() - timedelta(days=1)
+                result = handlers()['fred-series'](client, SimpleNamespace(
+                    series='DGS10', start=(vintage - timedelta(days=10)).isoformat(),
+                    end=vintage.isoformat(), vintage_date=vintage.isoformat(),
+                    max_pages=1, limit=10))
             row.update(access='reachable', sample_complete=result['complete'], warnings=result.get('warnings', []))
             row['scope'] = {'sec': 'company submissions only', 'nasdaq': 'symbol directories only',
-                            'alpaca': 'old SIP daily bars only', 'alpha_vantage': 'earnings calendar only'}[source]
+                            'alpaca': 'old SIP daily bars only', 'alpha_vantage': 'earnings calendar only',
+                            'fred': 'one DGS10 metadata and daily-vintage observation sample only'}[source]
         except DataError as exc:
             row.update(access='unavailable', error={'code': exc.code, 'message': str(exc)})
     return {'data': rows, 'complete': all(row['configured'] and (not args.live or row['access'] == 'reachable')
@@ -214,6 +239,34 @@ def run_self_test():
             self.assertEqual(code, 0)
             self.assertEqual(result['data'][0]['access'], 'not_tested')
             self.assertNotIn('dummy', json.dumps(result))
+
+        def test_fred_missing_key_does_not_fetch(self):
+            handler = Mock()
+            code, result = self.call(['check', '--live', '--source', 'fred'],
+                                    handler_map={'fred-series': handler})
+            self.assertEqual(code, 2)
+            self.assertEqual(result['data'][0]['missing_or_invalid'], ['FRED_API_KEY'])
+            handler.assert_not_called()
+
+        def test_fred_access_check_is_narrow_and_uses_a_prior_vintage(self):
+            handler = Mock(return_value={'complete': True, 'data': {}, 'warnings': []})
+            code, result = self.call(['check', '--live', '--source', 'fred'],
+                                    {'FRED_API_KEY': 'fixture-fred-secret'}, {'fred-series': handler})
+            self.assertEqual(code, 0)
+            self.assertEqual(handler.call_count, 1)
+            args = handler.call_args.args[1]
+            self.assertEqual(args.series, 'DGS10')
+            self.assertLess(args.vintage_date, utc_now().date().isoformat())
+            self.assertEqual(result['data'][0]['coverage'], 'not_established')
+
+        def test_fred_command_routes_and_redacts_provider_echo(self):
+            handler = Mock(return_value={'complete': True, 'data': {'notes': 'fixture-fred-secret'}})
+            code, result = self.call(['fred-series', '--series', 'DGS10', '--start', '2026-08-01',
+                                     '--end', '2026-09-03', '--vintage-date', '2026-09-03'],
+                                    {'FRED_API_KEY': 'fixture-fred-secret'}, {'fred-series': handler})
+            self.assertEqual(code, 0)
+            self.assertEqual(handler.call_args.args[1].vintage_date, '2026-09-03')
+            self.assertNotIn('fixture-fred-secret', json.dumps(result))
 
         def test_live_probe_missing_keys_does_not_call_provider(self):
             handler = Mock()

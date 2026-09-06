@@ -41,6 +41,13 @@ Recycled headlines and syndicated copies are not independent evidence. For macro
 events, use the releasing agency's calendar and actual data; an event after the
 cutoff is a risk to monitor, not an outcome.
 
+When FRED is configured, use the [data-access guide](data-access.md) to add dated
+interest-rate, credit, employment and inflation context where it changes a buying
+thesis. Its daily vintages and source release dates do not establish 09:00 ET
+availability. Keep macro interpretation proportional to the stock-specific
+evidence, retain comparable periods and units, and mention it in the Decision
+brief only when it materially changes the opportunity or risk.
+
 Use market data that identifies instrument, session and observation timestamp;
 label delayed quotes. No current quote/history access means no claim of current
 technical confirmation. Search snippets, unattributed screenshots and retrieval

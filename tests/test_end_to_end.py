@@ -167,7 +167,7 @@ class WorkflowTests(unittest.TestCase):
             "--notes", self.notes, "--images", self.images, "--json").stdout)
 
     def test_market_setup_without_keys_from_unrelated_directory(self):
-        for key in ('SEC_USER_AGENT', 'ALPACA_API_KEY', 'ALPACA_SECRET_KEY', 'ALPHA_VANTAGE_API_KEY'):
+        for key in ('SEC_USER_AGENT', 'ALPACA_API_KEY', 'ALPACA_SECRET_KEY', 'ALPHA_VANTAGE_API_KEY', 'FRED_API_KEY'):
             self.env.pop(key, None)
         before = sorted(str(path.relative_to(self.vault)) for path in self.vault.rglob('*'))
         result = json.loads(self.run_script('skills/market-research/scripts/market_data.py',
@@ -177,6 +177,7 @@ class WorkflowTests(unittest.TestCase):
         sources = {row['source']: row for row in result['data']}
         self.assertTrue(sources['nasdaq']['configured'])
         self.assertFalse(sources['alpaca']['configured'])
+        self.assertFalse(sources['fred']['configured'])
         self.assertTrue(all(row['access'] == 'not_tested' for row in sources.values()))
         self.assertEqual(before, sorted(str(path.relative_to(self.vault)) for path in self.vault.rglob('*')))
 
@@ -202,7 +203,8 @@ raise SystemExit(main(fixture['args'], client))
         def run(args, pages, expected):
             key = 'DUMMY_SECRET_FOR_OFFLINE_TEST'
             fixture = {'args': args, 'pages': pages, 'env': {
-                'ALPHA_VANTAGE_API_KEY': key, 'ALPACA_API_KEY': key, 'ALPACA_SECRET_KEY': key}}
+                'ALPHA_VANTAGE_API_KEY': key, 'ALPACA_API_KEY': key, 'ALPACA_SECRET_KEY': key,
+                'FRED_API_KEY': key}}
             response = subprocess.run(
                 [sys.executable, str(driver), str(ROOT / 'skills/market-research/scripts')],
                 input=json.dumps(fixture), cwd=self.vault, env=self.env,
@@ -237,6 +239,38 @@ raise SystemExit(main(fixture['args'], client))
         unavailable = run(news_args, [{'Information': 'Invalid api key DUMMY_SECRET_FOR_OFFLINE_TEST'}], 2)
         self.assertFalse(unavailable['complete'])
         self.assertEqual(unavailable['error']['code'], 'access_denied')
+
+        vintage = '2025-09-03'
+        metadata = {'realtime_start': vintage, 'realtime_end': vintage, 'seriess': [{
+            'id': 'TEST', 'title': 'Synthetic macro series',
+            'realtime_start': vintage, 'realtime_end': vintage,
+            'observation_start': '2025-09-01', 'observation_end': '2025-09-03',
+            'frequency': 'Daily', 'frequency_short': 'D', 'units': 'Percent', 'units_short': '%',
+            'seasonal_adjustment': 'Not Seasonally Adjusted', 'seasonal_adjustment_short': 'NSA',
+            'last_updated': '2025-09-03 15:16:00-05', 'notes': 'DUMMY_SECRET_FOR_OFFLINE_TEST'}]}
+        observations = {'realtime_start': vintage, 'realtime_end': vintage,
+                        'observation_start': '2025-09-01', 'observation_end': '2025-09-03',
+                        'units': 'lin', 'output_type': 1, 'file_type': 'json',
+                        'order_by': 'observation_date', 'sort_order': 'asc',
+                        'count': 2, 'offset': 0, 'limit': 1000, 'observations': [
+                            {'realtime_start': vintage, 'realtime_end': vintage,
+                             'date': '2025-09-01', 'value': '1.25'},
+                            {'realtime_start': vintage, 'realtime_end': vintage,
+                             'date': '2025-09-02', 'value': '.'}]}
+        macro = run(['fred-series', '--series', 'TEST', '--start', '2025-09-01',
+                     '--end', '2025-09-03', '--vintage-date', vintage], [metadata, observations], 0)
+        self.assertEqual(len(macro['requests']), 2)
+        self.assertTrue(all('api_key=[redacted]' in row['url'] for row in macro['requests']))
+        self.assertFalse(macro['point_in_time_verified'])
+        self.assertEqual(macro['data']['observations'][0]['value'], '1.25')
+        self.assertIsNone(macro['data']['observations'][1]['value'])
+
+        releases = run(['fred-releases', '--start', '2025-09-04', '--end', '2025-09-10'], [{
+            'realtime_start': '2025-09-04', 'realtime_end': '2025-09-10',
+            'order_by': 'release_date', 'sort_order': 'asc', 'count': 1, 'offset': 0, 'limit': 1000,
+            'release_dates': [{'release_id': 10, 'release_name': 'Synthetic release', 'date': '2025-09-05'}]}], 0)
+        self.assertEqual(releases['data']['release_dates'][0]['release_date'], '2025-09-05')
+        self.assertFalse(releases['point_in_time_verified'])
 
     def test_market_documented_template_is_accepted_by_publisher_linter(self):
         guide = (ROOT / "skills/market-research/references/note-format.md").read_text(encoding="utf-8")

@@ -106,9 +106,10 @@ their universe, filters and coverage in the research record. A materially change
 screen needs an explanation so longitudinal comparisons remain interpretable.
 
 Use the bundled [data-access guide](references/data-access.md) for SEC filings
-and facts, Nasdaq directories and halts, Alpaca prices/actions/sessions, and
-Alpha Vantage news/calendars. Check local setup without network access first;
-use configured sources for repeatable retrieval and preserve their declared
+and facts, Nasdaq directories and halts, Alpaca prices/actions/sessions/news,
+Alpha Vantage news/calendars, and FRED macro observations/release dates. Check
+local setup without network access first; use configured sources for repeatable
+retrieval and preserve their declared
 coverage, cutoffs and partial-result warnings. Missing keys limit only the
 affected source. These helpers retrieve evidence; interpretation and screening
 still follow the research method.

@@ -12,14 +12,19 @@ It works with Python 3.10+ in either host and needs no extra Python packages.
 |---|---|---|
 | SEC EDGAR | `SEC_USER_AGENT`: application/name and a real contact email | `sec-company`: identity and filings; `sec-facts`: selected reported XBRL facts |
 | Nasdaq Trader | None | `symbols`: current exchange directories; `halts`: halt RSS |
-| Alpaca | `ALPACA_API_KEY`, `ALPACA_SECRET_KEY` | `prices`: historical bars; `actions`: corporate actions; `sessions`: exchange calendar through the paper endpoint |
-| Alpha Vantage | `ALPHA_VANTAGE_API_KEY` | `news`: news and provider sentiment; `earnings`: current earnings calendar |
+| Alpaca | `ALPACA_API_KEY`, `ALPACA_SECRET_KEY` | `prices`: historical bars; `actions`: corporate actions; `sessions`: paper exchange calendar; `news --provider alpaca`: bounded news sample |
+| Alpha Vantage | `ALPHA_VANTAGE_API_KEY` | `news` (default provider): news and provider sentiment; `earnings`: current earnings calendar |
+| FRED / ALFRED | `FRED_API_KEY` | `fred-series`: metadata and observations at a daily vintage; `fred-releases`: source release-date calendar |
 
 API keys are sufficient; do not request account passwords. Configure secrets
 locally in the environment of the process that runs the skill, including a
 scheduler when applicable. Do not paste their values into command arguments,
 shell history, notes, suggestion logs, or the repository. The helper does not
 load `.env` files, persist credentials, create accounts, or change subscriptions.
+FRED requires the user's own [free account](https://fredhelp.stlouisfed.org/fred/account/fred-account-features/register/)
+and [API key](https://fred.stlouisfed.org/docs/api/api_key.html); do not use its
+documentation's demonstration key. Host-specific secure storage is separate
+from this portable helper. Follow the [FRED API terms](https://fred.stlouisfed.org/docs/api/terms_of_use.html).
 
 ```bash
 python3 '<skill>/scripts/market_data.py' check
@@ -30,7 +35,8 @@ The default check is offline: it reports missing/invalid configuration without
 printing values or making requests. A live check probes only the selected source,
 or all configured sources if no source is selected. It consumes requests and
 tests a small sample: SEC submissions, Nasdaq directories, old Alpaca SIP bars,
-or one Alpha Vantage earnings calendar. A successful sample does not establish
+one Alpha Vantage earnings calendar, or FRED DGS10 metadata and a short prior-day
+vintage sample. A successful sample does not establish
 access to every endpoint, real-time data, or complete market coverage. Missing
 credentials should limit only the affected source; continue with other usable
 sources and host web tools, recording gaps.
@@ -47,6 +53,9 @@ python3 '<skill>/scripts/market_data.py' symbols > '<scratch>/symbols.json'
 python3 '<skill>/scripts/market_data.py' sec-company --symbol AAPL --as-of '2026-09-04T09:00:00-04:00' --since '2026-09-01' > '<scratch>/filings.json'
 python3 '<skill>/scripts/market_data.py' prices --symbols 'AAPL,MSFT,SPY' --start '2025-09-01T00:00:00-04:00' --end '2026-09-04T08:45:00-04:00' --adjustment split > '<scratch>/prices.json'
 python3 '<skill>/scripts/market_data.py' news --symbol AAPL --since '2026-09-03T16:00:00-04:00' --as-of '2026-09-04T09:00:00-04:00' > '<scratch>/news.json'
+python3 '<skill>/scripts/market_data.py' news --provider alpaca --symbol AAPL --since '2026-09-03T16:00:00-04:00' --as-of '2026-09-04T09:00:00-04:00' --sort LATEST --limit 10 --include-content > '<scratch>/alpaca-news.json'
+python3 '<skill>/scripts/market_data.py' fred-series --series DGS10 --start '2026-01-01' --end '2026-09-03' --vintage-date '2026-09-03' > '<scratch>/treasury-yield.json'
+python3 '<skill>/scripts/market_data.py' fred-releases --start '2026-09-04' --end '2026-09-11' > '<scratch>/macro-releases.json'
 ```
 
 Run the helper with a command followed by `--help` for its filters. Each retrieval
@@ -140,6 +149,20 @@ another verified exchange calendar for later targets such as five-year reviews.
 [Corporate actions](https://docs.alpaca.markets/us/reference/corporateactions-1)
 and [calendar documentation](https://docs.alpaca.markets/us/reference/legacycalendar).
 
+`news --provider alpaca` checks a bounded explicit window, with an optional
+single-symbol filter and article bodies via `--include-content`. It retrieves
+one page of up to 50 articles; a next-page marker means incomplete coverage.
+Narrow the window to investigate further, retaining and deduplicating article IDs.
+It does not apply the bars' 15-minute guard: the provider decides news access.
+Compare a historical window with an explicit recent window to test entitlement.
+Only a returned article's creation time within the last 15 minutes demonstrates
+recent publication delivery; an empty HTTP 200 response or a fresh update to an
+old story does not. Sort order uses **update time**. Publication/update times
+and current text do not establish a historical text snapshot, and rows updated
+after the cutoff are excluded. Broad results include stocks and crypto and are
+not a liquid U.S. stock screen. REST access does not verify streaming access or
+complete Benzinga coverage. [News endpoint](https://docs.alpaca.markets/us/reference/news-3).
+
 **Alpha Vantage.** Budget around the documented free allowance of 25 calls per
 day across the account; the helper does not track usage by other processes or
 automatically retry quota failures. `news` accepts one symbol per request or a
@@ -160,8 +183,47 @@ Confirm event timing and actual results with the issuer.
 [API documentation](https://www.alphavantage.co/documentation/) and
 [free allowance](https://www.alphavantage.co/support/).
 
+**FRED / ALFRED.** The `fred-series` command retrieves one series' metadata and observations
+in native units and frequency. Both real-time bounds are pinned to the explicit
+`--vintage-date`; observation dates identify measured periods, not release dates.
+Missing `.` observations become null, never zero. Preserve units, seasonal
+adjustment, vintage, retrieval timestamp and the provider's metadata. Compare
+observations within the same vintage when calculating growth; compare separate
+dated requests when studying revisions. A pinned real-time interval can be clipped
+to the query date and is not each observation's original release or revision date.
+
+Vintages have **daily**, not intraday, resolution. A same-day vintage retrieved
+later does not prove availability by 09:00 ET. For historical morning context,
+a prior-day vintage is a conservative source-date proxy, not proof of exact FRED
+ingestion. Use archived pre-cutoff snapshots or separate agency publication-time
+evidence for same-day releases. Series-level `last_updated` is an update on FRED's
+server, not every observation's first availability. FRED/ALFRED may lag the source;
+ALFRED describes updates as typically within one business day. Verify fresh
+morning announcements with the releasing agency.
+[Vintage semantics](https://fred.stlouisfed.org/docs/api/fred/realtime_period.html),
+[observations](https://fred.stlouisfed.org/docs/api/fred/series_observations.html),
+and [update timing](https://alfred.stlouisfed.org/help).
+
+`fred-releases` retrieves dates for all releases or `--release-id`, including
+scheduled dates without data. Dates are source publications, not confirmed FRED
+availability or release times. Future events are risks to monitor, not reported
+outcomes; a current calendar cannot reconstruct its earlier announced schedule.
+Both commands have a total record limit and page budget and mark partial results
+explicitly. Check requested-history coverage; available history varies by series.
+[Release dates](https://fred.stlouisfed.org/docs/api/fred/release_dates.html).
+
+Use a small relevant subset for macro context, not an automatic buying signal:
+
+| Series | Context |
+|---|---|
+| [DGS2](https://fred.stlouisfed.org/series/DGS2), [DGS10](https://fred.stlouisfed.org/series/DGS10) | Daily Treasury yields; calculate curve differences only on matching dates |
+| [BAMLH0A0HYM2](https://alfred.stlouisfed.org/series?seid=BAMLH0A0HYM2) | Daily close high-yield credit spread; verify available history before comparing historical ranges |
+| [ICSA](https://fred.stlouisfed.org/series/ICSA) | Weekly initial unemployment claims |
+| [PAYEMS](https://fred.stlouisfed.org/series/PAYEMS), [UNRATE](https://fred.stlouisfed.org/series/UNRATE) | Monthly payrolls and unemployment |
+| [CPIAUCSL](https://fred.stlouisfed.org/series/CPIAUCSL), [PCEPILFE](https://fred.stlouisfed.org/series/PCEPILFE) | Monthly headline CPI and core PCE price indexes; index levels are not inflation rates |
+
 For implementation or troubleshooting, the CLI delegates to
 [public data](../scripts/market_public.py), [prices](../scripts/market_prices.py),
-[news/calendars](../scripts/market_news.py), and the shared
+[news/calendars](../scripts/market_news.py), [macro data](../scripts/market_fred.py), and the shared
 [request transport](../scripts/market_http.py). These sibling modules have
 offline self-tests but no separate operational retrieval interface.

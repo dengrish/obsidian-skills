@@ -91,9 +91,14 @@ Wiki entries or source notes for automatic wiki-build intake. It researches
 opportunities without reviewing current holdings, recommending sales, placing
 trades, or rewriting earlier daily records.
 Its optional [data retrieval helpers](skills/market-research/references/data-access.md)
-cover SEC filings/facts, Nasdaq directories/halts, Alpaca prices/actions/sessions,
-and Alpha Vantage news/earnings calendars. Setup can be checked offline; keyed
-sources use local environment variables, with explicit feed and coverage limits.
+cover SEC filings/facts, Nasdaq directories/halts, Alpaca prices/actions/sessions/news,
+Alpha Vantage news/earnings calendars, and FRED macro series/release dates. Setup
+can be checked offline; keyed sources use local environment variables, with
+explicit feed and coverage limits.
+
+This product uses the FRED® API but is not endorsed or certified by the Federal
+Reserve Bank of St. Louis. Use of its FRED integration is subject to the
+[FRED API Terms of Use](https://fred.stlouisfed.org/docs/api/terms_of_use.html).
 
 ## Codex and Claude
 
