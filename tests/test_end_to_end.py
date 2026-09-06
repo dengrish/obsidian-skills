@@ -166,6 +166,78 @@ class WorkflowTests(unittest.TestCase):
             "skills/paper-summarize/scripts/paper_scan.py", "--src", self.pdfs,
             "--notes", self.notes, "--images", self.images, "--json").stdout)
 
+    def test_market_setup_without_keys_from_unrelated_directory(self):
+        for key in ('SEC_USER_AGENT', 'ALPACA_API_KEY', 'ALPACA_SECRET_KEY', 'ALPHA_VANTAGE_API_KEY'):
+            self.env.pop(key, None)
+        before = sorted(str(path.relative_to(self.vault)) for path in self.vault.rglob('*'))
+        result = json.loads(self.run_script('skills/market-research/scripts/market_data.py',
+                                            'check', expected=2).stdout)
+        self.assertEqual(result['requests'], [])
+        self.assertFalse(result['complete'])
+        sources = {row['source']: row for row in result['data']}
+        self.assertTrue(sources['nasdaq']['configured'])
+        self.assertFalse(sources['alpaca']['configured'])
+        self.assertTrue(all(row['access'] == 'not_tested' for row in sources.values()))
+        self.assertEqual(before, sorted(str(path.relative_to(self.vault)) for path in self.vault.rglob('*')))
+
+    def test_market_transport_providers_and_cli_preserve_scope_and_secrets(self):
+        # Use the real CLI, transport and adapters from another directory. Only
+        # the HTTPS opener is replaced; no production fixture/network overrides.
+        driver = Path(self.scratch.name) / 'market fixture driver.py'
+        driver.write_text('''import io, json, sys
+from unittest.mock import Mock
+sys.path.insert(0, sys.argv[1])
+from market_data import main
+from market_http import HttpClient
+fixture = json.load(sys.stdin)
+class Reply(io.BytesIO):
+    status = 200
+    headers = {}
+opener = Mock()
+opener.open.side_effect = [Reply(json.dumps(row).encode()) for row in fixture['pages']]
+client = HttpClient(fixture['env'], opener=opener, sleeper=lambda _: None)
+raise SystemExit(main(fixture['args'], client))
+''', encoding='utf-8')
+
+        def run(args, pages, expected):
+            key = 'DUMMY_SECRET_FOR_OFFLINE_TEST'
+            fixture = {'args': args, 'pages': pages, 'env': {
+                'ALPHA_VANTAGE_API_KEY': key, 'ALPACA_API_KEY': key, 'ALPACA_SECRET_KEY': key}}
+            response = subprocess.run(
+                [sys.executable, str(driver), str(ROOT / 'skills/market-research/scripts')],
+                input=json.dumps(fixture), cwd=self.vault, env=self.env,
+                capture_output=True, text=True, encoding='utf-8', timeout=30)
+            self.assertEqual(response.returncode, expected, response.stdout + response.stderr)
+            self.assertNotIn(key, response.stdout + response.stderr)
+            result = json.loads(response.stdout)
+            self.assertEqual(result['market_data'], 1)
+            return result
+
+        bars = run(['prices', '--symbols', 'AAPL,MSFT', '--start', '2025-09-01T00:00:00-04:00',
+                    '--end', '2025-09-06T08:45:00-04:00', '--max-pages', '1'], [{
+                        'bars': {'AAPL': [{'t': '2025-09-05T04:00:00Z', 'o': 100, 'h': 105,
+                                          'l': 99, 'c': 104, 'v': 10000, 'n': 100, 'vw': 102}]},
+                        'next_page_token': 'another-page'}], 2)
+        self.assertFalse(bars['complete'])
+        self.assertEqual(bars['data']['missing_symbols'], ['MSFT'])
+        self.assertEqual(len(bars['data']['bars']['AAPL']), 1)
+        self.assertEqual(bars['source']['feed'], 'sip')
+        self.assertEqual(len(bars['requests']), 1)
+
+        article = {'title': 'Synthetic issuer update', 'url': 'https://example.test/update',
+                   'time_published': '20250905T123000', 'summary': 'DUMMY_SECRET_FOR_OFFLINE_TEST',
+                   'ticker_sentiment': [{'ticker': 'AAPL'}]}
+        news_args = ['news', '--symbol', 'AAPL', '--since', '2025-09-04T16:00:00-04:00',
+                     '--as-of', '2025-09-05T09:00:00-04:00']
+        news = run(news_args, [{'items': '1', 'feed': [article]}], 0)
+        self.assertTrue(news['complete'])
+        self.assertEqual(len(news['data']), 1)
+        self.assertIn('[redacted]', news['requests'][0]['url'])
+        self.assertEqual(len(news['requests'][0]['sha256']), 64)
+        unavailable = run(news_args, [{'Information': 'Invalid api key DUMMY_SECRET_FOR_OFFLINE_TEST'}], 2)
+        self.assertFalse(unavailable['complete'])
+        self.assertEqual(unavailable['error']['code'], 'access_denied')
+
     def test_market_documented_template_is_accepted_by_publisher_linter(self):
         guide = (ROOT / "skills/market-research/references/note-format.md").read_text(encoding="utf-8")
         template = guide.split("```markdown\n", 1)[1].split("\n```", 1)[0]
@@ -267,6 +339,24 @@ class WorkflowTests(unittest.TestCase):
         draft = Path(self.scratch.name) / "outcome draft.md"
         draft.write_text(daily(today, None, review).replace(stamp(target_day, 16), stamp(today, 16)),
                          encoding="utf-8")
+        self.run_script(script, "outcomes", "--vault", self.vault, "--draft", draft, expected=2)
+        self.run_script(script, "publish", draft, "--vault", self.vault, expected=2)
+        self.assertFalse((folder / f"{today}-market-research.md").exists())
+        # A timestamp correction must point to a new evidence card, not an alias
+        # of the old card that could leave its previously calculated returns current.
+        old_record = link(update_day, 'Baseline evidence')
+        alias_record = old_record.replace('-market-research#', '-market-research.md#')
+        ambiguous_correction = (recommendation_header
+            + f"| {thesis} | {first_day} | {stamp(baseline_day, 9, 31)} | "
+            + f"{alias_record} | {old_record} |\n\n" + review)
+        draft.write_text(daily(today, None, ambiguous_correction), encoding="utf-8")
+        self.run_script(script, "outcomes", "--vault", self.vault, "--draft", draft, expected=2)
+        self.run_script(script, "publish", draft, "--vault", self.vault, expected=2)
+        self.assertFalse((folder / f"{today}-market-research.md").exists())
+        # A real section link is insufficient when that immutable evidence card
+        # predates the observation it is supposed to support.
+        stale_evidence = review.replace(link(today, 'Observed result'), old_record)
+        draft.write_text(daily(today, None, stale_evidence), encoding="utf-8")
         self.run_script(script, "outcomes", "--vault", self.vault, "--draft", draft, expected=2)
         self.run_script(script, "publish", draft, "--vault", self.vault, expected=2)
         self.assertFalse((folder / f"{today}-market-research.md").exists())

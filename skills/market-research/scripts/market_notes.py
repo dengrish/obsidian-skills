@@ -222,7 +222,12 @@ def journal_tables(section):
         if title in result:
             raise ValueError('duplicate outcome journal: ' + title)
         stop = next((at for at, depth, _ in headings if at > index and depth <= level), len(lines))
-        body = '\n'.join(lines[index + 1:stop]).strip()
+        body_lines = lines[index + 1:stop]
+        while body_lines and not body_lines[0].strip():
+            body_lines = body_lines[1:]
+        while body_lines and not body_lines[-1].strip():
+            body_lines = body_lines[:-1]
+        body = '\n'.join(body_lines)
         result[title] = []
         if body == 'No changes.':
             continue
@@ -329,7 +334,7 @@ def inventory(vault, day):
     result = {'complete': True, 'findings': [], 'prior_notes': [], 'other_notes': [],
               'current_note': {'path': str(folder / (day + '-market-research.md')), 'state': 'missing'},
               'thesis_history': [], 'active_theses': []}
-    tokens, latest = {}, {}
+    tokens, latest, terminal = {}, {}, set()
     paths = sorted(folder.iterdir(), key=lambda path: path.name) if folder_identity else []
     names = {}
     for path in paths:
@@ -349,7 +354,15 @@ def inventory(vault, day):
             tokens[str(path)] = token
             if today:
                 result['current_note']['state'] = 'valid'
-            if match[1] >= day:
+            if match[1] > day:
+                continue
+            revived = [row['id'] for row in note['theses']
+                       if row['state'] in ACTIVE and row['id'] in terminal]
+            if revived:
+                raise ValueError('terminal theses require a new linked thesis ID, not revival: '
+                                 + ', '.join(revived))
+            terminal.update(row['id'] for row in note['theses'] if row['state'] not in ACTIVE)
+            if today:
                 continue
             result['prior_notes'].append(str(path))
             for row in note['theses']:
@@ -432,14 +445,23 @@ def outcomes(vault, draft=None, now=None):
                              r'(?:\.md)?(?:#([^\[\]|\\#\r\n]+))?\]\]', raw)
         if not match or match[1] not in notes or match[1] > note_day:
             raise ValueError('Record must link to a known, nonfuture dated market note or section: ' + raw)
-        target, _, data = notes[match[1]]
+        target, target_note, data = notes[match[1]]
         if match[2] and sum((heading[2] or '').strip() == match[2]
                            for line in data.decode('utf-8').splitlines()
                            if (heading := ATX.fullmatch(line))) != 1:
             raise ValueError('Record section must resolve to exactly one heading: ' + raw)
-        return target
+        return target, match[2], iso_time(target_note['metadata']['as_of'])
 
-    def correction(row, previous, changed, finalized):
+    def record_identity(item):
+        return item['record_note'], item['record_section']
+
+    def event_identity(value):
+        return value if value in ('pending', 'unavailable', '-') else iso_time(value)
+
+    def baseline_version(item):
+        return record_identity(item), event_identity(item['baseline_at']), item['version_note']
+
+    def correction(row, item, previous, changed, finalized, note_day):
         replaces = row['Replaces']
         if previous is None:
             if replaces != '-':
@@ -447,6 +469,10 @@ def outcomes(vault, draft=None, now=None):
         elif changed and finalized:
             if replaces != previous['record']:
                 raise ValueError('changed finalized record must explicitly replace its previous Record link')
+            # Earlier releases accepted same-card corrections. Keep their immutable
+            # history readable; new rows must supply a distinct correction card.
+            if note_day == day and record_identity(item) == record_identity(previous):
+                raise ValueError('changed finalized record must link to a distinct new detail card')
         elif replaces not in ('-', previous['record']):
             raise ValueError('Replaces does not identify the previous Record link')
 
@@ -460,8 +486,9 @@ def outcomes(vault, draft=None, now=None):
                     if key in seen:
                         raise ValueError('duplicate journal key in ' + title + ': ' + str(key))
                     seen.add(key)
-                    target = reference(row['Record'], note_day)
-                    common = {'record': row['Record'], 'record_note': target, 'journal_note': path}
+                    target, section, record_as_of = reference(row['Record'], note_day)
+                    common = {'record': row['Record'], 'record_note': target,
+                              'record_section': section, 'journal_note': path}
                     if title in ('Recommendation records', 'Checkpoint records'):
                         identifier = row['Recommendation']
                         if identifier not in first or first[identifier]['first_ready'] > note_day:
@@ -474,12 +501,19 @@ def outcomes(vault, draft=None, now=None):
                             stamp = iso_time(baseline)
                             if (ny_now(stamp).date() <= iso_date(row['First ready']) or stamp > as_of):
                                 raise ValueError('baseline must follow First ready in New York and not exceed as_of')
+                            first_note = notes[first[identifier]['first_ready']][1]
+                            if stamp < iso_time(first_note['metadata']['generated_at']):
+                                raise ValueError('baseline must not precede the first-ready note\'s generated_at')
+                            if stamp > record_as_of:
+                                raise ValueError('baseline must not exceed its Record note\'s as_of')
                         previous = recommendations.get(identifier)
                         item = dict(first[identifier], baseline_at=baseline, **common)
-                        changed = previous is not None and any(item[key] != previous[key]
-                                                               for key in ('baseline_at', 'record'))
-                        correction(row, previous, changed, previous is not None
-                                   and previous['baseline_at'] not in ('pending', 'unavailable'))
+                        changed = previous is not None and (
+                            event_identity(item['baseline_at']) != event_identity(previous['baseline_at'])
+                            or record_identity(item) != record_identity(previous))
+                        correction(row, item, previous, changed, previous is not None
+                                   and previous['baseline_at'] not in ('pending', 'unavailable'), note_day)
+                        item['version_note'] = path if previous is None or changed else previous['version_note']
                         recommendations[identifier] = item
                     elif title == 'Checkpoint records':
                         horizon = row['Horizon']
@@ -498,15 +532,29 @@ def outcomes(vault, draft=None, now=None):
                             target_day = horizon_target(ny_now(iso_time(baseline_time)).date(), horizon)
                             if stamp > as_of or ny_now(stamp).date() < target_day:
                                 raise ValueError('checkpoint observation must be on/after its calendar target and not exceed as_of')
+                            if stamp > record_as_of:
+                                raise ValueError('checkpoint observation must not exceed its Record note\'s as_of')
                         elif row['State'] != 'unavailable' or observed != '-':
                             raise ValueError('checkpoint state must be observed with a timestamp or unavailable with -')
                         key = (identifier, horizon)
                         previous = checkpoints.get(key)
                         item = dict(recommendation=identifier, horizon=horizon, state=row['State'],
-                                    observed_at=observed, baseline_record=baseline['record'], **common)
-                        changed = previous is not None and any(item[key] != previous[key] for key in
-                                                               ('state', 'observed_at', 'record', 'baseline_record'))
-                        correction(row, previous, changed, previous is not None and previous['state'] == 'observed')
+                                    observed_at=observed, baseline_record=baseline['record'],
+                                    _baseline_version=baseline_version(baseline), **common)
+                        changed = previous is not None and (
+                            any(item[key] != previous[key] for key in ('state', '_baseline_version'))
+                            or event_identity(item['observed_at']) != event_identity(previous['observed_at']))
+                        changed = changed or (previous is not None
+                                              and record_identity(item) != record_identity(previous))
+                        finalized = previous is not None and (
+                            previous['state'] == 'observed' or previous['_needs_card_recheck']
+                            or previous['_baseline_version'] != item['_baseline_version'])
+                        correction(row, item, previous, changed, finalized, note_day)
+                        # Legacy same-card changes cannot make unchanged evidence current.
+                        # Repeats retain this flag until an explicit distinct-card correction.
+                        item['_needs_card_recheck'] = previous is not None and (
+                            record_identity(item) == record_identity(previous)
+                            and (previous['_needs_card_recheck'] or (changed and finalized)))
                         checkpoints[key] = item
                     elif title == 'Lesson records':
                         identifier = row['Lesson']
@@ -514,7 +562,12 @@ def outcomes(vault, draft=None, now=None):
                         if (not match or iso_date(match[1]) > iso_date(note_day) or int(match[2]) < 1
                                 or row['Status'] not in ('provisional', 'supported', 'retired')):
                             raise ValueError('invalid lesson ID or status: ' + identifier)
-                        lessons[identifier] = dict(id=identifier, status=row['Status'], **common)
+                        previous = lessons.get(identifier)
+                        item = dict(id=identifier, status=row['Status'], **common)
+                        if (previous is not None and item['status'] != previous['status']
+                                and record_identity(item) == record_identity(previous)):
+                            raise ValueError('changed lesson status must link to a distinct new detail card')
+                        lessons[identifier] = item
                     else:
                         if row['Month'] != note_day[:7]:
                             raise ValueError('monthly summary Month must match the containing note month')
@@ -527,17 +580,20 @@ def outcomes(vault, draft=None, now=None):
         if identifier not in recommendations:
             finding(ready['first_ready_note'], 'ready recommendation is missing a Recommendation record: ' + identifier)
             recommendations[identifier] = dict(ready, baseline_at='pending', record=None,
-                                               record_note=None, journal_note=None)
+                                               record_note=None, record_section=None,
+                                               journal_note=None, version_note=None)
     planned, due = [], []
     for identifier, baseline in sorted(recommendations.items()):
         known = baseline['baseline_at'] not in ('pending', 'unavailable')
         for horizon in HORIZONS:
             prior = checkpoints.get((identifier, horizon))
             target = horizon_target(ny_now(iso_time(baseline['baseline_at'])).date(), horizon) if known else None
-            stale = prior is not None and prior['baseline_record'] != baseline['record']
+            stale = prior is not None and (prior['_baseline_version'] != baseline_version(baseline)
+                                          or prior['_needs_card_recheck'])
             state = ('needs-recheck' if stale else prior['state'] if prior else
                      'needs-baseline' if target is None else 'due' if target <= current.date() else 'pending')
-            item = dict(prior or {}, recommendation=identifier, horizon=horizon, state=state,
+            item = dict({key: value for key, value in (prior or {}).items() if not key.startswith('_')},
+                        recommendation=identifier, horizon=horizon, state=state,
                         target_date=target.isoformat() if target else None,
                         baseline_at=baseline['baseline_at'], current_baseline_record=baseline['record'])
             planned.append(item)
@@ -597,13 +653,16 @@ def publish(draft, vault, now=None):
         raise ValueError('generated_at is in the future')
     history, baseline = inventory(vault, day)
     target = Path(history['current_note']['path'])
+    if not history['complete']:
+        raise ValueError('daily-note history is incomplete: ' + json.dumps(history['findings'], ensure_ascii=False))
     if history['current_note']['state'] == 'valid':
         existing, _ = read_stable(target)
         if existing == data:
+            planned = outcomes(vault, draft, current)
+            if not planned['complete']:
+                raise ValueError('outcome journal is incomplete: ' + json.dumps(planned['findings'], ensure_ascii=False))
             return {'status': 'unchanged', 'path': str(target)}
         raise ValueError('daily note already exists with different bytes; preserve and reuse it')
-    if not history['complete']:
-        raise ValueError('daily-note history is incomplete: ' + json.dumps(history['findings'], ensure_ascii=False))
     present = {row['id'] for row in note['theses']}
     omitted = [row['id'] for row in history['active_theses'] if row['id'] not in present]
     if omitted:
@@ -695,20 +754,21 @@ def run_self_test():
             path.write_bytes(data)
             return path
 
-        def baseline_fixture(self, first_day='2024-01-30', baseline_day='2024-01-31'):
+        def baseline_fixture(self, first_day='2024-01-30', baseline_day='2024-01-31', record_day=None):
+            record_day = record_day or baseline_day
             identifier = 'NYSE:ABC@' + first_day
-            first_link, baseline_link = self.record_link(first_day), self.record_link(baseline_day)
+            first_link, baseline_link = self.record_link(first_day), self.record_link(record_day)
             self.outcome_note(first_day, [(identifier, 'ready', 'Synthetic confirmed setup')], [
                 self.journal('Recommendation records', [(identifier, first_day, 'pending', first_link, '-')])])
-            self.outcome_note(baseline_day, [(identifier, 'watch', 'Synthetic follow-up')], [
+            self.outcome_note(record_day, [(identifier, 'watch', 'Synthetic follow-up')], [
                 self.journal('Recommendation records', [(identifier, first_day, baseline_day + 'T09:30:00-05:00',
                                                          baseline_link, '-')])])
             # The fixture baseline session is observed in a later intraday review.
-            path = self.vault / 'Investments' / (baseline_day + '-market-research.md')
-            path.write_bytes(path.read_bytes().replace((baseline_day + 'T09:00:00-04:00').encode(),
-                                                       (baseline_day + 'T16:00:00-05:00').encode())
-                             .replace((baseline_day + 'T09:02:00-04:00').encode(),
-                                      (baseline_day + 'T16:02:00-05:00').encode()))
+            path = self.vault / 'Investments' / (record_day + '-market-research.md')
+            path.write_bytes(path.read_bytes().replace((record_day + 'T09:00:00-04:00').encode(),
+                                                       (record_day + 'T16:00:00-05:00').encode())
+                             .replace((record_day + 'T09:02:00-04:00').encode(),
+                                      (record_day + 'T16:02:00-05:00').encode()))
             return identifier, first_link, baseline_link
 
         def test_clock_and_dst(self):
@@ -822,6 +882,26 @@ def run_self_test():
                 publish(self.draft, self.vault, self.now)
             self.assertFalse(list(self.vault.glob('.market-research-stage-*')))
 
+        def test_identical_retry_still_validates_history_and_outcomes(self):
+            identifier = 'NYSE:ABC@2026-09-05'
+            for broken in ('current recommendation', 'prior recommendation', 'prior structure'):
+                with self.subTest(broken=broken):
+                    folder = self.vault / 'Investments'
+                    if folder.exists():
+                        shutil.rmtree(folder)
+                    current = self.prior('2026-09-05', [(identifier, 'ready', 'Missing record')]
+                                         if broken == 'current recommendation' else [])
+                    if broken != 'current recommendation':
+                        prior = self.prior('2026-09-04', [('NYSE:ABC@2026-09-04', 'ready', 'Missing record')])
+                        if broken == 'prior structure':
+                            prior.write_text('Preserve this malformed history.', encoding='utf-8')
+                    before = {path.name: path.read_bytes() for path in folder.iterdir()}
+                    self.draft.write_bytes(current.read_bytes())
+                    with self.assertRaisesRegex(ValueError, 'history is incomplete|outcome journal is incomplete'):
+                        publish(self.draft, self.vault, self.now)
+                    self.assertEqual({path.name: path.read_bytes() for path in folder.iterdir()}, before)
+                    self.assertFalse(list(self.vault.glob('.market-research-stage-*')))
+
         def test_no_backfill_or_future_generation(self):
             for data in (self.note('2026-09-04'), self.note(generated='2026-09-05T09:04:00-04:00')):
                 self.draft.write_bytes(data)
@@ -850,6 +930,29 @@ def run_self_test():
             self.draft.write_bytes(self.note(rows=[(thesis, 'ready', 'Do not erase expiry')]))
             with self.assertRaisesRegex(ValueError, 'not revival'):
                 publish(self.draft, self.vault, self.now)
+
+        def test_historical_terminal_revival_blocks_publication_and_identical_retry(self):
+            identifier = 'NYSE:ABC@2026-09-01'
+            for revival_day in ('2026-09-03', '2026-09-05'):
+                with self.subTest(revival_day=revival_day):
+                    folder = self.vault / 'Investments'
+                    if folder.exists():
+                        shutil.rmtree(folder)
+                    self.prior('2026-09-01', [(identifier, 'watch', 'Original thesis')])
+                    self.prior('2026-09-02', [(identifier, 'expired', 'Terminal thesis')])
+                    revived = self.prior(revival_day, [(identifier, 'watch', 'Invalid revival')])
+                    before = {path.name: path.read_bytes() for path in folder.iterdir()}
+                    self.draft.write_bytes(revived.read_bytes() if revival_day == '2026-09-05'
+                                           else self.note(rows=[(identifier, 'watch', 'Carry revival')]))
+                    history = context(self.vault, self.now)
+                    self.assertFalse(history['complete'])
+                    self.assertTrue(any('not revival' in row['error'] for row in history['findings']))
+                    self.assertEqual(history['active_theses'], [])
+                    self.assertFalse(outcomes(self.vault, now=self.now)['complete'])
+                    with self.assertRaisesRegex(ValueError, 'history is incomplete'):
+                        publish(self.draft, self.vault, self.now)
+                    self.assertEqual({path.name: path.read_bytes() for path in folder.iterdir()}, before)
+                    self.assertFalse(list(self.vault.glob('.market-research-stage-*')))
 
         def test_history_rechecked_before_publication(self):
             self.prior('2026-09-03', [])
@@ -1159,6 +1262,178 @@ def run_self_test():
                 result = outcomes(self.vault, self.draft, self.now)
                 self.assertEqual(result['complete'], complete, result['findings'])
 
+        def test_finalized_corrections_need_distinct_canonical_cards_today(self):
+            identifier, _, baseline_link = self.baseline_fixture()
+            observation_link = self.record_link('2024-03-01')
+            self.outcome_note('2024-03-01', journals=[self.journal('Checkpoint records', [
+                (identifier, '1m', 'observed', '2024-02-29T16:00:00-05:00', observation_link, '-')])])
+            for title, previous, fields in (
+                    ('Recommendation records', baseline_link,
+                     (identifier, '2024-01-30', '2024-01-31T09:31:00-05:00')),
+                    ('Checkpoint records', observation_link,
+                     (identifier, '1m', 'observed', '2024-02-29T15:59:00-05:00'))):
+                for new_link in (previous, previous.replace('Investments/', ''),
+                                 previous.replace('-research#', '-research.md#')):
+                    with self.subTest(title=title, new_link=new_link):
+                        self.outcome_note('2026-09-05', journals=[self.journal(title, [
+                            fields + (new_link, previous)])], draft=True)
+                        result = outcomes(self.vault, self.draft, self.now)
+                        self.assertFalse(result['complete'])
+                        self.assertIn('distinct new detail card', result['findings'][0]['error'])
+
+        def test_legacy_same_card_baseline_changes_are_recheckable_without_rewriting(self):
+            identifier, _, baseline_link = self.baseline_fixture(record_day='2024-02-02')
+            observation_link = self.record_link('2024-03-01')
+            self.outcome_note('2024-03-01', journals=[self.journal('Checkpoint records', [
+                (identifier, '1m', 'observed', '2024-02-29T16:00:00-05:00', observation_link, '-')])])
+            correction = self.outcome_note('2024-03-02', journals=[self.journal('Recommendation records', [
+                (identifier, '2024-01-30', '2024-02-01T09:30:00-05:00', baseline_link, baseline_link)])])
+            original = correction.read_bytes()
+            result = outcomes(self.vault, now=self.now)
+            self.assertTrue(result['complete'], result['findings'])
+            checkpoint = next(row for row in result['checkpoints'] if row['horizon'] == '1m')
+            self.assertEqual(checkpoint['state'], 'needs-recheck')
+            self.assertEqual(checkpoint['target_date'], '2024-03-01')
+            self.outcome_note('2026-09-05', journals=[self.journal('Checkpoint records', [
+                (identifier, '1m', 'observed', '2024-03-01T16:00:00-05:00',
+                 self.record_link('2026-09-05'), observation_link)])], draft=True)
+            repaired = outcomes(self.vault, self.draft, self.now)
+            self.assertTrue(repaired['complete'], repaired['findings'])
+            self.assertEqual(next(row for row in repaired['checkpoints'] if row['horizon'] == '1m')['state'], 'observed')
+            self.assertEqual(correction.read_bytes(), original)
+
+        def test_reverted_legacy_baseline_still_requires_checkpoint_recheck(self):
+            identifier, _, baseline_link = self.baseline_fixture(record_day='2024-02-02')
+            self.outcome_note('2024-03-01', journals=[self.journal('Checkpoint records', [
+                (identifier, '1m', 'observed', '2024-02-29T16:00:00-05:00',
+                 self.record_link('2024-03-01'), '-')])])
+            for note_day, baseline_day in (('2024-03-02', '2024-02-01'), ('2024-03-03', '2024-01-31')):
+                self.outcome_note(note_day, journals=[self.journal('Recommendation records', [
+                    (identifier, '2024-01-30', baseline_day + 'T09:30:00-05:00', baseline_link, baseline_link)])])
+            result = outcomes(self.vault, now=self.now)
+            self.assertTrue(result['complete'], result['findings'])
+            self.assertEqual(next(row for row in result['checkpoints'] if row['horizon'] == '1m')['state'], 'needs-recheck')
+
+        def test_legacy_same_card_checkpoint_changes_remain_due_until_new_card(self):
+            identifier, _, _ = self.baseline_fixture()
+            observation_link = self.record_link('2024-03-01')
+            alias = observation_link.replace('Investments/', '').replace('-research#', '-research.md#')
+            self.outcome_note('2024-03-01', journals=[self.journal('Checkpoint records', [
+                (identifier, '1m', 'observed', '2024-02-29T16:00:00-05:00', observation_link, '-')])])
+            for state, observed in (('observed', '2024-02-29T15:59:00-05:00'), ('unavailable', '-')):
+                with self.subTest(state=state):
+                    correction_path = self.outcome_note('2024-03-02', journals=[self.journal('Checkpoint records', [
+                        (identifier, '1m', state, observed, observation_link, observation_link)])])
+                    correction_bytes = correction_path.read_bytes()
+                    self.outcome_note('2024-03-03', journals=[self.journal('Checkpoint records', [
+                        (identifier, '1m', state, observed, alias, '-')])])
+                    result = outcomes(self.vault, now=self.now)
+                    self.assertTrue(result['complete'], result['findings'])
+                    checkpoint = next(row for row in result['due_checkpoints'] if row['horizon'] == '1m')
+                    self.assertEqual(checkpoint['state'], 'needs-recheck')
+                    self.assertFalse(any(key.startswith('_') for key in checkpoint))
+                    # A same-card repeat cannot clear the unresolved correction today.
+                    self.outcome_note('2026-09-05', journals=[self.journal('Checkpoint records', [
+                        (identifier, '1m', state, observed, observation_link, '-')])], draft=True)
+                    repeated = outcomes(self.vault, self.draft, self.now)
+                    self.assertTrue(repeated['complete'], repeated['findings'])
+                    self.assertEqual(next(row for row in repeated['checkpoints']
+                                          if row['horizon'] == '1m')['state'], 'needs-recheck')
+                    for record, replaces, complete in ((alias, alias, False),
+                                                       (self.record_link('2026-09-05'), '-', False),
+                                                       (self.record_link('2026-09-05'), alias, True)):
+                        self.outcome_note('2026-09-05', journals=[self.journal('Checkpoint records', [
+                            (identifier, '1m', 'observed', '2024-03-02T16:00:00-05:00', record, replaces)])], draft=True)
+                        repaired = outcomes(self.vault, self.draft, self.now)
+                        self.assertEqual(repaired['complete'], complete, repaired['findings'])
+                        if complete:
+                            self.assertEqual(next(row for row in repaired['checkpoints']
+                                                  if row['horizon'] == '1m')['state'], 'observed')
+                    self.assertEqual(correction_path.read_bytes(), correction_bytes)
+
+        def test_equivalent_record_spellings_do_not_change_baseline_version(self):
+            identifier, _, baseline_link = self.baseline_fixture()
+            self.outcome_note('2024-03-01', journals=[self.journal('Checkpoint records', [
+                (identifier, '1m', 'observed', '2024-02-29T16:00:00-05:00',
+                 self.record_link('2024-03-01'), '-')])])
+            alias = baseline_link.replace('Investments/', '').replace('-research#', '-research.md#')
+            self.outcome_note('2026-09-05', journals=[self.journal('Recommendation records', [
+                (identifier, '2024-01-30', '2024-01-31T09:30:00-05:00', alias, '-')])], draft=True)
+            result = outcomes(self.vault, self.draft, self.now)
+            self.assertTrue(result['complete'], result['findings'])
+            self.assertEqual(next(row for row in result['checkpoints'] if row['horizon'] == '1m')['state'], 'observed')
+
+        def test_equivalent_event_timestamps_do_not_create_corrections(self):
+            identifier, _, baseline_link = self.baseline_fixture()
+            observation_link = self.record_link('2024-03-01')
+            self.outcome_note('2024-03-01', journals=[self.journal('Checkpoint records', [
+                (identifier, '1m', 'observed', '2024-02-29T16:00:00-05:00', observation_link, '-')])])
+            original = outcomes(self.vault, now=self.now)
+            for baseline, observed in (('2024-01-31T09:30:00.000-05:00', '2024-02-29T16:00:00.000-05:00'),
+                                       ('2024-01-31T14:30:00Z', '2024-02-29T21:00:00+00:00')):
+                with self.subTest(baseline=baseline, observed=observed):
+                    self.outcome_note('2026-09-05', journals=[
+                        self.journal('Recommendation records', [
+                            (identifier, '2024-01-30', baseline, baseline_link, '-')]),
+                        self.journal('Checkpoint records', [
+                            (identifier, '1m', 'observed', observed, observation_link, '-')])], draft=True)
+                    result = outcomes(self.vault, self.draft, self.now)
+                    self.assertTrue(result['complete'], result['findings'])
+                    self.assertEqual(result['recommendations'][0]['version_note'],
+                                     original['recommendations'][0]['version_note'])
+                    self.assertEqual(next(row for row in result['checkpoints']
+                                          if row['horizon'] == '1m')['state'], 'observed')
+                    self.assertNotIn('1m', [row['horizon'] for row in result['due_checkpoints']])
+
+        def test_timestamped_records_cannot_predate_their_events(self):
+            identifier, first_link, baseline_link = self.baseline_fixture()
+            for title, fields, old_link, replaces in (
+                    ('Recommendation records', (identifier, '2024-01-30', '2024-02-01T09:30:00-05:00'),
+                     first_link, baseline_link),
+                    ('Checkpoint records', (identifier, '1m', 'observed', '2024-02-29T16:00:00-05:00'),
+                     baseline_link, '-')):
+                with self.subTest(title=title):
+                    self.outcome_note('2026-09-05', journals=[self.journal(title, [
+                        fields + (old_link, replaces)])], draft=True)
+                    rejected = outcomes(self.vault, self.draft, self.now)
+                    self.assertFalse(rejected['complete'])
+                    self.assertTrue(any("Record note's as_of" in row['error'] for row in rejected['findings']))
+                    self.outcome_note('2026-09-05', journals=[self.journal(title, [
+                        fields + (self.record_link('2026-09-05'), replaces)])], draft=True)
+                    accepted = outcomes(self.vault, self.draft, self.now)
+                    self.assertTrue(accepted['complete'], accepted['findings'])
+
+        def test_pending_baseline_requires_evidence_record_after_the_opening(self):
+            identifier, first_day = 'NYSE:ABC@2026-09-03', '2026-09-03'
+            first_link = self.record_link(first_day)
+            self.outcome_note(first_day, [(identifier, 'ready', 'Original setup')], [
+                self.journal('Recommendation records', [(identifier, first_day, 'pending', first_link, '-')])])
+            for record, complete in ((first_link, False), (self.record_link('2026-09-05'), True)):
+                with self.subTest(record=record):
+                    self.outcome_note('2026-09-05', journals=[self.journal('Recommendation records', [
+                        (identifier, first_day, '2026-09-04T09:30:00-04:00', record, '-')])], draft=True)
+                    result = outcomes(self.vault, self.draft, self.now)
+                    self.assertEqual(result['complete'], complete, result['findings'])
+
+        def test_baseline_cannot_predate_known_first_ready_generation(self):
+            identifier, _, _ = self.baseline_fixture()
+            first = self.vault / 'Investments/2024-01-30-market-research.md'
+            first.write_bytes(first.read_bytes().replace(b'2024-01-30T09:02:00-04:00',
+                                                        b'2024-02-01T12:00:00-05:00'))
+            result = outcomes(self.vault, now=self.now)
+            self.assertFalse(result['complete'])
+            self.assertTrue(any('first-ready note\'s generated_at' in row['error'] for row in result['findings']))
+
+        def test_journal_headers_cannot_be_indented_code(self):
+            identifier = 'NYSE:ABC@2026-09-05'
+            self.outcome_note('2026-09-05', [(identifier, 'ready', 'Synthetic setup')], [
+                self.journal('Recommendation records', [(identifier, '2026-09-05', 'pending',
+                                                         self.record_link('2026-09-05'), '-')])], draft=True)
+            data = self.draft.read_bytes().replace(b'| Recommendation | First ready |',
+                                                  b'    | Recommendation | First ready |')
+            with self.assertRaisesRegex(ValueError, 'must not be indented'):
+                lint_bytes(data)
+
         def test_observation_corrections_require_explicit_replacement(self):
             identifier, _, _ = self.baseline_fixture()
             old_link = self.record_link('2024-03-01')
@@ -1199,6 +1474,30 @@ def run_self_test():
             self.assertEqual(next(row for row in result['due_checkpoints'] if row['horizon'] == '1m')['state'], 'unavailable')
             self.assertEqual([row['horizon'] for row in result['due_checkpoints']], ['2w', '1m', '3m', '6m', '12m', '24m'])
 
+        def test_stale_unavailable_checkpoint_requires_explicit_distinct_correction(self):
+            identifier, _, baseline_link = self.baseline_fixture()
+            checkpoint_link = self.record_link('2024-03-01')
+            self.outcome_note('2024-03-01', journals=[self.journal('Checkpoint records', [
+                (identifier, '1m', 'unavailable', '-', checkpoint_link, '-')])])
+            self.outcome_note('2024-03-02', journals=[self.journal('Recommendation records', [
+                (identifier, '2024-01-30', '2024-02-01T09:30:00-05:00',
+                 self.record_link('2024-03-02'), baseline_link)])])
+            before = outcomes(self.vault, now=self.now)
+            self.assertEqual(next(row for row in before['checkpoints']
+                                  if row['horizon'] == '1m')['state'], 'needs-recheck')
+            for state, observed, record, replaces, complete in (
+                    ('observed', '2024-03-01T16:00:00-05:00', self.record_link('2026-09-05'), '-', False),
+                    ('unavailable', '-', checkpoint_link, checkpoint_link, False),
+                    ('unavailable', '-', self.record_link('2026-09-05'), '-', False),
+                    ('observed', '2024-03-01T16:00:00-05:00', self.record_link('2026-09-05'), checkpoint_link, True)):
+                with self.subTest(state=state, record=record, replaces=replaces):
+                    self.outcome_note('2026-09-05', journals=[self.journal('Checkpoint records', [
+                        (identifier, '1m', state, observed, record, replaces)])], draft=True)
+                    result = outcomes(self.vault, self.draft, self.now)
+                    self.assertEqual(result['complete'], complete, result['findings'])
+                    self.assertEqual(next(row for row in result['checkpoints'] if row['horizon'] == '1m')['state'],
+                                     'observed' if complete else 'needs-recheck')
+
         def test_lesson_status_and_monthly_retrieval(self):
             lesson = 'lesson-2026-08-01-01'
             self.outcome_note('2026-08-01', journals=[self.journal('Lesson records', [
@@ -1215,6 +1514,24 @@ def run_self_test():
             self.assertEqual(after['active_lessons'], [])
             self.assertEqual(after['retired_lessons'][0]['status'], 'retired')
             self.assertFalse(after['monthly_review_due'])
+
+        def test_lesson_status_changes_require_a_distinct_canonical_card(self):
+            identifier = 'lesson-2026-08-01-01'
+            old_link, current_link = self.record_link('2026-08-01'), self.record_link('2026-09-05')
+            self.outcome_note('2026-08-01', journals=[self.journal('Lesson records', [
+                (identifier, 'provisional', old_link)])])
+            alias = old_link.replace('Investments/', '').replace('-research#', '-research.md#')
+            for status, record, complete in (('provisional', alias, True), ('supported', old_link, False),
+                                             ('retired', alias, False), ('supported', current_link, True),
+                                             ('retired', current_link, True)):
+                with self.subTest(status=status, record=record):
+                    self.outcome_note('2026-09-05', journals=[self.journal('Lesson records', [
+                        (identifier, status, record)])], draft=True)
+                    result = outcomes(self.vault, self.draft, self.now)
+                    self.assertEqual(result['complete'], complete, result['findings'])
+                    if not complete:
+                        self.assertIn('distinct new detail card', result['findings'][0]['error'])
+                        self.assertEqual(result['active_lessons'][0]['status'], 'provisional')
 
         def test_invalid_lessons_and_misdated_monthly_summaries(self):
             for identifier, status in (('lesson-2026-09-05-00', 'provisional'),

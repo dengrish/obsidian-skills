@@ -58,7 +58,9 @@ When an ID first becomes `ready`, create its recommendation record and a detail
 card under Outcome review, linked to the original Candidate assessments. Preserve:
 
 - **Identity and origin:** thesis ID, company/share class/currency, first-ready
-  note/date, setup type, original rationale and chosen buying horizon.
+  note/date, setup type and original rationale. Retain earlier watch milestones
+  and expiry dates separately from the prospective buying horizon and end date
+  justified at first readiness under the note format's thesis-continuity rules.
 - **Reference quote:** the price quoted in the recommendation, its source,
   timestamp, timezone, session, delay and adjustment basis. Record unavailable
   data explicitly. This quote is not an actual fill or the evaluation baseline.
@@ -68,20 +70,35 @@ card under Outcome review, linked to the original Candidate assessments. Preserv
   named broad-market and relevant sector benchmark instruments, and cost treatment.
   Choose these before observing outcomes; the first ready record defines them.
 - **Baseline:** initially pending, then the sourced stock/benchmark opening
-  values and actual timestamp when available, with a link to the original record.
+  values, session date and timestamp basis when available, with a link to the
+  original record.
 
 Use the **regular-session opening on the first trading date after the first-ready
 note's New York date**, and only after known publication, as the hypothetical
 baseline. Verify that session against the exchange calendar, including closures.
-This preserves the existing conservative convention and avoids treating a past
-premarket indication or same-day opening as a feasible purchase after publication.
-Never switch to a more favorable price after seeing results. If publication timing
-is uncertain, leave the baseline unavailable until established.
+Do not treat a past premarket indication or same-day opening as a feasible
+purchase after publication. Never switch to a more favorable price after seeing
+results. If publication timing is uncertain, leave the baseline unavailable until
+established.
 
 A later daily note records the baseline only after the opening has occurred and
-its data were available by that note's cutoff. Retain the observed quote and the
-hypothetical baseline separately; neither asserts that the user bought the stock.
-Once fixed, do not change a baseline except for an explicit sourced correction.
+its data were available by that note's cutoff. Use the provider's documented
+regular-session daily open/close fields consistently, identifying whether these
+are daily bar values or official auction prices. `Baseline at` and `Observed at`
+use sourced event timestamps when available. For date-only daily bars, use the
+verified exchange session's opening/closing boundary as a **session marker**, and
+label its basis and precision in the detail card. A calendar marker is not an
+observed trade time: [NYSE openings can occur after 09:30](https://www.nyse.com/trade/auctions).
+Retain the bar's date, field definition and evidence of availability by the cutoff;
+a missing bar or unverified session marker stays unavailable. Never substitute a
+later convenient session for the fixed baseline or endpoint.
+
+Retain the observed quote and hypothetical baseline separately; neither asserts
+that the user bought the stock. Freeze the baseline event, original raw opening
+values and their provenance. Later corporate actions can require sourced
+adjustments for a checkpoint calculation; they do not make those original
+observations wrong or restart the baseline clock. Correct factual errors through
+the correction journal below.
 
 ## Checkpoint timing, returns and decision quality
 
@@ -89,7 +106,7 @@ Evaluate **two weeks and 1, 3, 6, 12, 24 and 60 calendar months** from the actua
 baseline's New York date. Two weeks means **14 calendar days**, not a fractional
 month or ten trading sessions. For monthly horizons, clamp the day to the last day
 of a shorter month. For every horizon, use the close of the first regular session
-on or after that calendar target. Verify the actual close,
+on or after that calendar target. Verify the session and its closing boundary,
 including early closes and exceptional closures. The helper's calendar target is
 only a research due date; it cannot establish that a trading session occurred.
 An outcome becomes observable only after that close and by a later review's cutoff.
@@ -103,14 +120,21 @@ does not justify a new investing rule or a sell recommendation.
 
 Keep the original target and actual observation dates when catching up late.
 The publication date of the new record identifies when the result was recorded;
-do not backdate the daily note. Record actual baseline/endpoint prices, timestamps,
-currency, source IDs/URLs, corporate actions and matching benchmark observations.
-Price returns require consistent split-adjusted inputs and disclosure of excluded
-cash dividends. Total returns need supported dividend/reinvestment treatment for
-both stock and benchmark. Retain the inputs and formula, not just a percentage.
+do not backdate the daily note. Record the sourced baseline/endpoint prices,
+timestamp basis/precision, currency, source IDs/URLs, corporate actions and matching
+benchmark observations. Preserve the raw baseline and endpoint observations,
+then retain any adjustment factors and adjusted calculation inputs in the
+checkpoint card. Price returns require consistent split-adjusted inputs and
+disclosure of excluded cash dividends. Total returns need supported
+dividend/reinvestment treatment for both stock and benchmark. Never divide an
+adjusted close by a raw opening value: providers can mix these fields in one
+response, as [Alpha Vantage's Daily Adjusted documentation](https://www.alphavantage.co/documentation/#dailyadj)
+illustrates. Retain the inputs and formula, not just a percentage. A later split
+requires a consistent calculation basis, not a correction to accurate raw history.
 
 Show stock return, broad-market and sector returns where available, and their
-differences over the same timestamps and convention. Label gross results as
+differences over the same baseline/endpoint sessions and return convention;
+disclose any difference in timestamp precision. Label gross results as
 excluding fees, spreads and slippage. A net scenario needs reproducible stated
 assumptions, not invented fills or expenses. Missing benchmark data is a limitation,
 not a zero benchmark return. Preserve missing, delisted, acquired or renamed
@@ -148,7 +172,9 @@ note and its actual section, or the current draft. Prefer the canonical form
 `[[Investments/YYYY-MM-DD-market-research#Section]]`; never point to a future note,
 missing heading, external URL or scratch file. A record link must identify the
 detail supporting that row, not merely a generic note with no relevant evidence.
-Use distinct descriptive headings so the references remain retrievable.
+Use distinct descriptive headings so the references remain retrievable. For a
+timestamped baseline or checkpoint, the linked card's note must also have a cutoff
+at or after that event; an older pending card cannot contain a later observation.
 
 #### Recommendation records
 
@@ -158,12 +184,14 @@ Use distinct descriptive headings so the references remain retrievable.
 
 `Recommendation` uses the unchanged thesis ID. `First ready` is the date of its
 first published ready state, which may be later than the date in the thesis ID.
-`Baseline at` is `pending`, `unavailable`, or an observed ISO timestamp with seconds
-and an explicit offset. Use the verified New York opening offset. The baseline's
-New York date must follow the first-ready date, and the observation must not be
-later than the containing note's cutoff. Put prices and full provenance in the
-linked detail card. The pending-to-observed update points to its new baseline
-card while retaining the original recommendation link in that card.
+`Baseline at` is `pending`, `unavailable`, or an ISO timestamp with seconds and an
+explicit offset, representing the sourced opening event or the verified session
+marker defined above. Use the verified New York opening offset. The baseline's
+New York date must follow the first-ready date. Its timestamp must not precede the
+first-ready note's known generation time or exceed the containing note's cutoff.
+Put prices, timestamp basis/precision and full provenance in the linked detail
+card. The pending-to-observed update points
+to its new baseline card while retaining the original recommendation link there.
 
 #### Checkpoint records
 
@@ -180,17 +208,19 @@ do not rewrite historical notes. Use `Horizon` for new records.
 `State` is `observed` or `unavailable`. For unavailable
 observations use `-` in `Observed at` and explain missing data/next check in the
 card. The helper derives future pending windows; no journal row is needed merely
-to list them. For an observed window, enter the actual closing ISO timestamp,
-never a retrieval time or future close. The baseline must be known, the New York
-observation date must be on/after the computed target, and the timestamp must be
-at/before the current note's cutoff. The caller additionally verifies the exact
-first eligible trading session and data availability.
+to list them. For an observed window, enter the sourced closing event timestamp
+or verified session closing marker, never a retrieval time or future close.
+The baseline must be known, the New York observation date must be on/after the
+computed target, and the timestamp must be at/before the current note's cutoff.
+The caller additionally verifies the exact first eligible trading session and
+data availability.
 
 The linked checkpoint card records the recommendation/first-ready link, baseline
-record/version, horizon, calendar target, actual observation, sourced inputs,
-returns/benchmarks, cost convention, original-thesis assessment and limitations.
-Keep reference price, baseline and endpoint unambiguous. The examples above show
-syntax only; do not publish them as facts or leave their links unresolved.
+record/version, horizon, calendar target, observation and timestamp basis/precision,
+sourced raw/adjusted inputs, returns/benchmarks, cost convention, original-thesis
+assessment and limitations. Keep reference price, baseline and endpoint
+unambiguous. The examples above show syntax only; do not publish them as facts or
+leave their links unresolved.
 
 #### Lesson records
 
@@ -245,12 +275,17 @@ lessons are not lost between monthly consolidations.
 Old daily notes remain immutable. First observations and pending/unavailable-to-
 observed updates use `-` in `Replaces`. Changing a finalized baseline or checkpoint
 requires an explicit new row whose `Replaces` is the exact previous `Record` link.
-The new detail card links the old one, identifies the factual error, cites the
-corrected evidence, and explains affected calculations. Do not silently substitute
-a favorable observation or present a new convention as a factual correction.
+For a `needs-recheck` checkpoint, explicitly replace that prior link even if its
+stored observation was unavailable.
+The new `Record` must identify a distinct detail card; another spelling of the
+old note/section link is not a new card. The new detail card links the old one,
+identifies the factual error, cites the corrected evidence, and explains affected
+calculations. Do not silently substitute a favorable observation or present a new
+convention as a factual correction.
 
-A baseline correction makes previously calculated checkpoints `needs-recheck`
+A factual baseline correction makes previously calculated checkpoints `needs-recheck`
 until each affected window is explicitly revised against the corrected baseline.
+Checkpoint corrections with unresolved evidence links also remain `needs-recheck`.
 They remain due even if the old result was observed; retained obsolete figures
 are not current evidence. Handle corrections before deriving new lessons and
 reassess lessons that relied on the superseded observations. Source corrections

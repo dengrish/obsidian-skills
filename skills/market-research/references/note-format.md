@@ -79,15 +79,19 @@ No active theses.
 
 ### Outcome review
 
-No published ready ideas yet; no checkpoint observations are due. No monthly
-summary exists yet.
+No published ready ideas yet; no checkpoint observations are due. Check
+monthly_review_due and complete the first monthly summary even when all counts
+are zero.
 ```
 
 The example date and statements are not an actual market assessment. Every
 subsection must have content; use a truthful empty-state or coverage statement
-instead of inventing candidates, observations, or results. On later runs, Outcome
-review records the daily due-check and relevant new records, links the latest
-monthly summary, and consolidates findings on the first completed run each month.
+instead of inventing candidates, observations, or results. On every run, including
+the first, follow the helper's `monthly_review_due` result. A completed zero-record
+review needs a short summary card and a `Monthly summaries` row under the
+[outcome guide](outcomes-and-learning.md), not empty recommendation/checkpoint
+tables. Incomplete reviews remain due. Otherwise Outcome review records the daily
+due-check and relevant new records and links the latest monthly summary.
 
 ## Part 1: Decision brief
 
@@ -111,7 +115,7 @@ The brief and record must agree on candidate identity, status, conditions,
 observed values and risks. A `watch` is not presented as a confirmed purchase.
 A `ready` means the research conditions for considering a new long position are
 met; it does not imply portfolio suitability, a purchase, or guaranteed returns.
-Current-holdings review, sell timing and rebalancing belong to a separate skill.
+Current-holdings review, sell timing and rebalancing are outside this skill's scope.
 
 ## Part 2: Research record
 
@@ -221,10 +225,19 @@ contains only its table or exact `No active theses.` sentence, with table rows
 starting at column zero. Keep explanatory prose in Candidate assessments.
 
 Keep the active list selective (about ten by default), but never omit an existing
-thesis to meet a count target. Each new thesis records its chosen 3–12 month
-horizon, next expected milestone and review-by/end date in its initial assessment.
-Expire a passed window explicitly; a renewed thesis needs a new linked ID rather
-than a restarted clock. Briefly revisit aging and invalidated ideas each week.
+thesis to meet a count target. Each new thesis records its expected opportunity,
+next milestone, review-by date and any catalyst/thesis expiry in its initial
+assessment. A watch's monitoring dates are distinct from its prospective buying
+horizon.
+
+At first readiness, state and justify a 3–12 month buying horizon and end date
+from that readiness date using current evidence. Preserve the first-seen date,
+earlier expectations and deadlines, and explain why the opportunity remains
+prospective after time on watch. Routine confirmation may qualify the same ID;
+it does not automatically extend catalyst or thesis expiry. If a fixed deadline
+leaves no credible 3–12 month opportunity, keep the idea unready or expire it as
+appropriate. A materially renewed rationale needs a new linked ID. Expire passed
+thesis windows explicitly; revisit aging and invalidated ideas each week.
 
 The day the last active idea closes must include its terminal row; the next day
 may use `No active theses.`. Preserve prior terminal records for later outcome

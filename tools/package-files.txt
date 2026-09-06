@@ -46,10 +46,16 @@ skills/figure-extract/scripts/extract_figures.py
 skills/figure-extract/scripts/render_page.py
 skills/figure-extract/scripts/requirements.txt
 skills/market-research/SKILL.md
+skills/market-research/references/data-access.md
 skills/market-research/references/note-format.md
 skills/market-research/references/outcomes-and-learning.md
 skills/market-research/references/research-method.md
+skills/market-research/scripts/market_data.py
+skills/market-research/scripts/market_http.py
+skills/market-research/scripts/market_news.py
 skills/market-research/scripts/market_notes.py
+skills/market-research/scripts/market_prices.py
+skills/market-research/scripts/market_public.py
 skills/paper-summarize/SKILL.md
 skills/paper-summarize/references/edge-cases.md
 skills/paper-summarize/references/figures.md

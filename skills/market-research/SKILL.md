@@ -54,10 +54,13 @@ last completed session and next scheduled session; do not present stale prices
 as current premarket trading. Before 09:00, use the helper's earlier actual cutoff
 and describe the edition as early/manual.
 
-If today's recognized note already exists, read and return it. A routine retry
-does not rewrite that day's judgments, create a numbered duplicate, or expand
-into a second market run. Report a malformed or unsafe occupant instead of
-replacing it. An additional same-day edition requires a separately agreed scope.
+If today's recognized note already exists, read it and run the outcome inventory
+below before reusing it. The context's `valid` marker checks note structure, not
+cross-note journal consistency; both history and outcomes must be complete.
+A successful routine retry returns the existing note without rewriting that
+day's judgments, creating a numbered duplicate, or starting a second market run.
+Report malformed history, inconsistent journals or an unsafe occupant instead of
+replacing files. An additional same-day edition requires a separately agreed scope.
 
 ## Recover the prior theses
 
@@ -102,8 +105,17 @@ research method's repeatable announcement and price-history passes, retaining
 their universe, filters and coverage in the research record. A materially changed
 screen needs an explanation so longitudinal comparisons remain interpretable.
 
-Use available host web search, page-reading, and market-data capabilities. No
-paid feed or particular connector is assumed, and this skill does not install,
+Use the bundled [data-access guide](references/data-access.md) for SEC filings
+and facts, Nasdaq directories and halts, Alpaca prices/actions/sessions, and
+Alpha Vantage news/calendars. Check local setup without network access first;
+use configured sources for repeatable retrieval and preserve their declared
+coverage, cutoffs and partial-result warnings. Missing keys limit only the
+affected source. These helpers retrieve evidence; interpretation and screening
+still follow the research method.
+
+Use available host web search, page-reading, and market-data capabilities for
+primary-source verification and coverage beyond the helpers. No paid feed or
+particular connector is assumed, and this skill does not install,
 subscribe, log in, or bypass access restrictions. Open supporting pages; search
 snippets and model recollection are leads, not verified financial evidence.
 When reliable market data are unavailable, label coverage limited/unavailable,
@@ -122,14 +134,17 @@ confirmation, downside/invalidation evidence, and fit to the 3–12 month horizo
 Treat these as judgments, not fabricated probabilities or a guaranteed edge.
 For each selected idea, provide:
 
-- What changed, with the actual announcement date/time and primary source.
+- What changed: for news-driven setups, the actual announcement date/time and
+  primary source; without a new catalyst, the dated price development and latest
+  relevant business evidence.
 - Why it could matter over the holding horizon, what the price may already assume,
   and the strongest counterargument. Compare relevant operating evidence with
   earlier quarters and corroborating industry evidence when available.
 - Verified regular-session trend evidence and any separately timestamped
   premarket reaction; distinguish facts from the overreaction/reversal hypothesis.
 - An observable confirmation condition, invalidation condition, next milestone,
-  and dated review window within the chosen 3–12 month horizon.
+  and prospective 3–12 month buying window when first marked ready. Follow the
+  research method's aging rules, preserving original watch dates and deadlines.
 
 Do not turn a premarket price spike into a confirmed closing breakout, assume an
 order will fill at the quoted price, or mark a hypothetical idea as a purchase.
@@ -140,8 +155,8 @@ brokerage settings.
 Each daily run checks newly due, unavailable and correction-affected observations
 at **two weeks and 1, 3, 6, 12, 24 and 60 months (five years)**, including failed or
 expired buying theses. Verify the actual exchange session and available data before
-treating a calendar target as an observed result. Catch up missed checkpoints without rewriting earlier
-notes or pretending the observation was available sooner.
+treating a calendar target as an observed result. Catch up missed checkpoints
+without rewriting earlier notes or pretending the observation was available sooner.
 
 On the first completed review each month, consolidate results and lessons under
 the outcome guide. Apply relevant lessons as evidence checks within this skill's
@@ -181,8 +196,8 @@ arithmetic, setup counterarguments, and continuity against the previous active
 theses. Verify every brief candidate's state, conditions and risks agree with its
 detailed assessment and ledger, and that the brief makes no current-holdings or
 sell recommendation. The helper validates structure and preserves occupied files;
-it cannot establish factual accuracy or an investment edge. No mandatory human review is
-required to publish the research note. Follow [safe writes](../../shared/SAFE_WRITES.md),
+it cannot establish factual accuracy or an investment edge. No mandatory human
+review is required to publish the research note. Follow [safe writes](../../shared/SAFE_WRITES.md),
 preserve reported recovery stages on failure, and read back the published note.
 Ensure its citations and retained evidence remain usable after owned scratch is
 cleaned; no published reference should point to a run's temporary files.

@@ -7,8 +7,10 @@ does not grant access to a vault, install Python packages, or enable browser too
 
 When wiki-add or market-research needs web research, use the search and
 page-reading capabilities available in the active host; no particular browser, connector or host-specific
-tool name is required. market-research also uses available market-data tools,
-with source and observation times recorded under its research method. If
+tool name is required. market-research also provides optional read-only
+[data retrieval helpers](../skills/market-research/references/data-access.md)
+and uses available market-data tools, with source and observation times
+recorded under its research method. If
 adequate evidence cannot be accessed, report the limitation: wiki-add leaves
 affected queue items unchecked; market-research records the missing evidence
 without making an unsupported investment assessment. Do not substitute

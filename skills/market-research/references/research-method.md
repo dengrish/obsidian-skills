@@ -96,8 +96,8 @@ distinguish continuation from a failed rebound. Check adverse news and upcoming
 earnings. Say no material new catalyst was found in the checked sources, not
 that none exists.
 
-For shortlisted businesses, compare the current release/transcript with the
-previous quarter and a year-earlier period where seasonality matters. Track the
+For shortlisted businesses, compare the latest relevant release/transcript with
+the previous quarter and a year-earlier period where seasonality matters. Track the
 few metrics supporting the thesis: demand, backlog, pricing, margins, cash flow
 and management's explanations. Preserve periods, definitions and comparable
 values; explain restatements and changing disclosures. Treat management language
@@ -196,12 +196,14 @@ to confirmation/invalidation conditions; never move them silently to keep a
 thesis alive. Preserve the original prediction, including failures and misses.
 
 On the first review each week, check whether old catalysts occurred, expected
-improvements appeared, and the chosen 3–12 month horizon still makes sense. Anchor
-the horizon and review-by date to the first note. Expire passed windows explicitly;
-a materially renewed thesis needs a new linked ID, without restarting the old
-clock. Invalidation can occur earlier and means the buying thesis no longer
-qualifies; it is not a sell recommendation. Retain substantive updates in the
-research record and surface only decision-relevant changes in the brief.
+improvements appeared, and the thesis remains relevant. Preserve the original
+watch dates and catalyst deadlines; before first readiness, apply the
+[note format's prospective buying-window check](note-format.md#thesis-continuity).
+Expire passed thesis windows explicitly; a materially renewed thesis needs a new
+linked ID. Invalidation can occur earlier and means the buying thesis no longer
+qualifies; it is not a sell recommendation.
+Retain substantive updates in the research record and surface only
+decision-relevant changes in the brief.
 
 ## Prospective outcome review
 
