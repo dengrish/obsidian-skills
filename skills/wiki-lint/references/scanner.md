@@ -43,7 +43,7 @@ One JSON object with these keys.
 | `rename_candidates` | array | `{"slug", "new_slug", "inbound_links", "target_exists"}` — entries whose filename ≠ `slug(title)`. `inbound_links` is how many actual prose/Related wikilinks a rename would have to rewrite. It uses the same path-aware resolver as item 10, so path-qualified, anchored, case/normalization-variant, and explicit-`.md` spellings count against the file they open; a bare target with several same-basename owners is conservatively omitted instead of assigned by walk order. `target_exists: true` means the destination is already taken — either an existing file **(whether or not it parsed as an entry: a file with no frontmatter is absent from `inventory` and still occupies its name, and the approved `mv` would destroy it)**, **or a second candidate in this same list proposing the same `new_slug`** — so this is a likely duplicate/disambiguation and must **not** be renamed into (applying both of a colliding pair in sequence would have the second silently overwrite the first). `new_slug` is never empty: a title that reduces to the empty slug (CJK, all-symbol) is reported as an `item5` problem instead, because renaming to it would produce a file literally called `.md`. **Propose for approval — never auto-applied.** |
 | `backfill_candidates` | array | `{"slug", "target", "surface", "bare_noun_alias", "organism_common_name"}` — a bare-text mention of `target`'s title/alias (or its plural), or an explicitly bound Organism common-name surface, found in `slug`'s prose. `target` is the supplied safe entry destination: an ordinary unambiguous slug, or the full extensionless vault-relative path when qualification is required, such as `Wiki/misc` or `Wiki/statistics`. Preserve that target in body and Related links. Existing links, embeds, ambiguous title/alias surfaces, duplicate Wiki-basename destinations, targets already linked in that entry, and designated common-noun surfaces/destinations are excluded. `organism_common_name: true` means the target's description or opening sentence directly equates its canonical Organism title with that complete surface (or its natural inflection); a bound `fruit fly` never donates the broader head `fly`. It is a locally valid display label, never an instruction to add a global alias, and still needs the ordinary identity/closeness judgment. Other single lowercase aliases of qualified destinations remain candidates and carry `bare_noun_alias: true`; batch-review them under the closeness bar rather than treating the flag as an automatic decision. Unwritable presentation surfaces are masked so they cannot hide a later eligible occurrence: whole-line italic captions, parsed Markdown-table rows, ATX and Setext headings, fenced/indented/inline code, Markdown link-reference definitions, inline Markdown image syntax including alt text, inline/full/collapsed/shortcut Markdown-link labels resolved by those definitions, bare URLs/autolinks, and Obsidian links/embeds. The plural form inflects the title's head token, so irregular forms such as `Confusion matrices` and `Hypotheses` are matched. |
 | `image_folder_findings` | array | `{"path", "kind", "message"}` for a nested directory/file, recognizable temporary/staging artifact, unreadable path, or portable basename collision under the supplied `--images` directory. The `kind` is `nested-directory`, `nested-file`, `temporary-artifact`, `unreadable`, `unusable-file`, or `portable-name-collision`; a collision also carries `paths` with every case/NFC-equivalent owner. The flat-folder and publish-only-finished-files rules come from `CONVENTIONS.md` §8. These are folder-level, report-only observations kept outside `problems`, so they do not inflate entry tallies or authorize moving/renaming/deleting user files. A colliding name remains present for embed-existence checks. An `unreadable` finding suppresses all `item12/missing-image` results for that run because a partial inventory cannot establish absence. The two PDF sidecars and `.DS_Store` are omitted. Empty when `--images` is not supplied or the folder conforms. |
-| `hierarchy_diagnostic` | object | Report-only state of entry parents and canonical/legacy MOCs, detailed below. Findings are evidence for an authorized Task 3 closure, never write or migration authorization. |
+| `hierarchy_diagnostic` | object | Report-only state of entry parents, canonical MOCs, and unexpected old root occupants, detailed below. Findings are evidence for an authorized Task 3 closure, never write authorization. |
 
 ### Hierarchy diagnostics
 
@@ -54,8 +54,7 @@ specific-discipline coverage diagnostics alongside `item8`. Other field-value
 QC findings do not exclude an otherwise valid misc tag.
 
 - `entries` counts entries in the scan. `placement_gaps` records
-  missing discipline or misc coverage; `placed_unparented` is its compatibility slug
-  projection. `unresolved_parents` records `missing`, `ambiguous`,
+  missing discipline or misc coverage. `unresolved_parents` records `missing`, `ambiguous`,
   `unparsed`, `unreadable`, `legacy-moc`, or `noncanonical-moc` targets.
   `noncanonical-moc` identifies a real `MOCs/<unknown>.md` file outside the
   discipline enum that cannot serve as a recognized MOC root. A legacy root note
@@ -72,9 +71,10 @@ QC findings do not exclude an otherwise valid misc tag.
   a missing file ready for creation. The state describes the file, not an
   owned region; recognized discipline and misc MOCs are generated as whole notes.
 - `legacy_moc_states` inventories recognized preexisting specific-discipline root
-  `<discipline>-moc.md` files, never `misc-moc.md`, with the same file-state information plus `canonical_path`. Compare it
-  with canonical states before creating a file: both existing paths mean
-  duplicate ownership, even when their content matches.
+  `<discipline>-moc.md` occupants, never `misc-moc.md`, with the same file-state
+  information plus `canonical_path`. This is a read-only ownership safeguard:
+  preserve and report the old note, and do not initialize a competing canonical
+  MOC. It is not a migration worklist or generated-file ownership.
 - `moc_inventory_findings` contains records with `kind`, `path`, and `message`,
   plus the relevant `discipline`, `paths`, or `canonical_path`. Kinds include
   `unsafe-directory`, `ambiguous-directory`, `noncanonical-directory`,
@@ -97,12 +97,9 @@ QC findings do not exclude an otherwise valid misc tag.
   `wrong-discipline-link` finding also identifies entries without a valid
   misc-only tag list when listed in misc. An empty active
   MOC reports missing entries when members exist; an empty zero-member misc
-  file is valid after an authorized refresh. A `legacy-markers` finding identifies obsolete marker comments
-  with their first `line` and a `lines` list; standalone old marker lines may
-  be skipped for inference but remain a repair finding. All other content
-  anywhere in the file is validated: prose, headings, fences, and frontmatter
-  are malformed outline lines. No marker-region ownership or adoption gate
-  applies; authorized Task 3 regenerates the complete outline.
+  file is valid after an authorized refresh. Comments, prose, headings, fences,
+  and frontmatter are malformed outline lines. Every line belongs to the same
+  generated outline; authorized Task 3 regenerates it completely.
 - Every generated entry target uses its full extensionless vault-relative
   path, such as `Wiki/methods/k-means`; root parents use `MOCs/<discipline>`
   or `MOCs/misc`.
@@ -111,13 +108,12 @@ QC findings do not exclude an otherwise valid misc tag.
 - Exact union comparison requires every required group MOC to be readable/empty and
   structurally parseable, with a usable entry placement in each. An unsafe
   occurrence below an unresolved/wrong-discipline ancestor blocks
-  inference even if another occurrence is usable. `self_parented`,
-  `parent_cycles`, and `per_discipline` describe existing edges;
-  `per_discipline` records use `entries` for their member count.
+  inference even if another occurrence is usable. `self_parented`
+  and `parent_cycles` describe existing edges.
 
 After a completed full-vault Task 3 pass, active entry/discipline hierarchy
 worklists are empty and every active MOC is readable (or empty for zero-member misc) and contains
-only its generated outline. Inactive discipline MOCs, legacy migration blockers, and skipped
+only its generated outline. Inactive discipline MOCs, unexpected old root occupants, and skipped
 closures remain reported and preserved; do not describe their findings as
 repaired.
 

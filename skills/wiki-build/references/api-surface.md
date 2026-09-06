@@ -20,8 +20,6 @@ For a version-specific behavior claim the active source cannot establish, use th
 
 **A non-`Software` entry carries no backticked API identifier — none.** The library itself may be named — in plain prose ("the joblib library") or, when it has an entry, as a wikilink (`[[scikit-learn]]` — bare, because display equals slug; checklist item 10) — but its classes, functions, methods, kwargs, attributes, and module paths do not live here. A load-bearing identifier may appear in the library's `Software` entry under the selective rule above; a lookup-only identifier is simply omitted.
 
-*(History: until 2026-08-16 this file permitted one "name-only signpost" per non-Software entry — "Implemented in [library] as `Identifier`." or the parenthetical fold "…(`Identifier` in [library])…". That allowance is retired by the user's standing decision: both shapes are now violations, and a lint pass strips them. A wikilink to the Software entry supplies artifact-level navigation; it is not a promise that the wiki catalogs every searchable identifier.)*
-
 ## The two sides of the split
 
 - **`Software` entries:** selectively retain the API elements that explain an artifact-wide interface or design convention. The entry on scikit-learn can explain `fit()`/`transform()`, pipeline composition, the trailing-underscore convention for learned attributes, and double-underscore nested-parameter addressing. It does not need every estimator that follows those conventions. Apply the source-contribution gate above before adding either prose or a citation.
@@ -29,7 +27,7 @@ For a version-specific behavior claim the active source cannot establish, use th
 
 ## Hard caps (Quality Checklist item 6 enforces)
 
-- **Zero** library-specific signposts per non-Software entry — the signpost form itself is retired.
+- **Zero** library-specific signposts per non-Software entry.
 - **Zero** backticked API identifiers of any kind: classes, functions, methods, kwargs, attributes, module paths, calling conventions.
 - **Mechanical count rule:** any backticked token in a non-Software entry that is a library identifier is a violation. Library *names* are not identifiers — they appear in plain prose or as wikilinks, never backticked. Two backticked shapes remain non-identifiers (matching the linter's scanner): a bare file extension (`.csv`) and a bracket special token (`[CLS]`).
 
@@ -52,7 +50,7 @@ Run this literally before declaring a non-Software entry done. This failure mode
 - `"flag enables"` / `"flag controls"` / `"argument controls"` / `"argument enables"` / `"kwarg"` / ``"defaults to `"`` / ``"defaults to `True`"`` / ``"defaults to `False`"`` — explicit kwarg/default-value documentation, forbidden anywhere outside Software entries.
 - ``"or via `"`` / ``"or with `"`` / ``"or through `"`` / ``"or by calling `"`` — alternative implementation paths; how-to content.
 
-For each match, the default reaction is **delete the sentence** — or, for an identifier folded into a parenthetical, delete the parenthetical and keep the explanatory sentence around it. Keep a conceptual claim after stripping its API detail only when the source supports that claim independently of the named artifact. If the behavior is library-specific, retain a plain library attribution or delete the entire claim; never promote an implementation's behavior into a property of the underlying concept. The reader can still navigate from `[[pytorch|PyTorch]]` / `[[transformers-library|Transformers library]]` / `[[scikit-learn]]` to the artifact's Software entry; that link does not require the entry to preserve the omitted identifier. **There is no exception** for retaining an API identifier: the permitted-signpost carve-out this paragraph used to state was retired on 2026-08-16.
+For each match, the default reaction is **delete the sentence** — or, for an identifier folded into a parenthetical, delete the parenthetical and keep the explanatory sentence around it. Keep a conceptual claim after stripping its API detail only when the source supports that claim independently of the named artifact. If the behavior is library-specific, retain a plain library attribution or delete the entire claim; never promote an implementation's behavior into a property of the underlying concept. The reader can still navigate from `[[pytorch|PyTorch]]` / `[[transformers-library|Transformers library]]` / `[[scikit-learn]]` to the artifact's Software entry; that link does not require the entry to preserve the omitted identifier.
 
 ## The author test (apply during the review pass)
 

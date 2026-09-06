@@ -63,9 +63,9 @@ notes, images and requested Wiki identities are reused or skipped without edits.
   create empty misc.
   Before creation, reject a non-directory or symlink occupant at `MOCs/` and
   portable-equivalent folder collisions; never overwrite or follow one to
-  create navigation artifacts. Existing root `<discipline>-moc.md` notes use
-  the [authorized layout migration](../skills/wiki-lint/references/hierarchy.md#migrate-the-legacy-layout),
-  not automatic copy-and-delete during plugin setup.
+  create navigation artifacts. Unexpected root `<discipline>-moc.md` notes are
+  preserved and reported; do not create duplicate navigation notes or move
+  existing files during plugin setup.
 - Individual folder overrides apply to the requested run. Confirm existing
   inputs and keep the skills' normal output folders under the selected vault.
   Do not edit installed skills to configure a different user's vault.

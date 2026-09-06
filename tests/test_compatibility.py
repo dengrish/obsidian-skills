@@ -61,6 +61,65 @@ def copy_package_source(destination):
 
 
 class CompatibilityTests(unittest.TestCase):
+    def test_convention_defects_and_broken_checks_fail_the_run(self):
+        conventions = load("convention_failures", ROOT / "tests/test_conventions.py")
+        conv = (ROOT / "shared/CONVENTIONS.md").read_text(encoding="utf-8")
+        for check, prose, expected in (
+                (conventions.check_reference_paths,
+                 "Consult `shared/MissingGuide.md`.\n", "MissingGuide.md"),
+                (conventions.check_skill_roster,
+                 "Use the `missing-producer` skill.\n", "missing-producer")):
+            with self.subTest(check=check.__name__):
+                report = conventions.Report()
+                with patch.object(conventions, "walk_plugin_files", return_value=[
+                        (str(ROOT / "README.md"), prose)]):
+                    check(report, conv)
+                self.assertEqual(report.exit_code(), 1)
+                self.assertTrue(any(expected in row[3]
+                                    for row in report.by_status("FAIL")))
+                self.assertIn("RESULT: FAIL", report.render())
+
+        def no_results(report, canonical):
+            pass
+
+        def empty_population(report, canonical):
+            report.ok("fixture", "discovery ran")
+            report.saw("fixture", "inputs", 0)
+
+        def crashes(report, canonical):
+            raise ValueError("fixture failure")
+
+        for check, expected in ((no_results, "NO results"),
+                                (empty_population, "VACUOUS"),
+                                (crashes, "CRASHED")):
+            with self.subTest(check=check.__name__):
+                output = io.StringIO()
+                with patch.object(conventions, "CHECKS", [check]), \
+                        patch.object(sys, "stdout", output):
+                    code = conventions.main(["--json"])
+                result = json.loads(output.getvalue())
+                self.assertEqual(code, 1)
+                self.assertFalse(result["ok"])
+                self.assertTrue(any(expected in row["message"]
+                                    for row in result["results"]))
+
+    def test_moc_placement_checks_instructions_not_selftest_fixtures(self):
+        conventions = load("convention_moc_fixtures", ROOT / "tests/test_conventions.py")
+        conv = (ROOT / "shared/CONVENTIONS.md").read_text(encoding="utf-8")
+        cases = (
+            ("fixture.py", 'def run_self_test():\n    path = "Wiki/test-moc.md"\n', False),
+            ("fixture.py", 'def write_moc():\n    path = "Wiki/test-moc.md"\n', True),
+            ("fixture.md", 'Write the MOC to `Wiki/test-moc.md`.\n', True),
+        )
+        for path, text, should_fail in cases:
+            with self.subTest(path=path, text=text):
+                report = conventions.Report()
+                with patch.object(conventions, "walk_skill_files", return_value=[
+                        ("wiki-lint", path, text),
+                        ("wiki-lint", "valid.md", "MOCs/<discipline>.md")]):
+                    conventions.check_moc_placement(report, conv)
+                self.assertEqual(bool(report.by_status("FAIL")), should_fail)
+
     def test_repository_normalizes_text_and_preserves_plugin_bytes(self):
         attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
         self.assertEqual(attributes, "* text=auto eol=lf\n*.plugin binary\n")
@@ -847,6 +906,75 @@ read: false
                     if row[0] == "yaml-example"]
         self.assertTrue(any("tags:" in message for message in failures),
                         failures)
+
+    def test_frontmatter_declared_lists_keep_unknown_keys_visible(self):
+        conventions = load("convention_complete_schema_lists",
+                           ROOT / "tests/test_conventions.py")
+        conv = (ROOT / "shared/CONVENTIONS.md").read_text(encoding="utf-8")
+        schemas = conventions._canonical_schemas(conv)
+        valid = "\n".join("Field order: " + ", ".join(keys) + "."
+                          for keys in schemas.values())
+        source = schemas["source-note"]
+        renderers = {
+            "plain": lambda keys: "Field order: " + ", ".join(keys) + ".",
+            "backticks": lambda keys: "Schema order is " +
+            ", ".join("`" + key + "`" for key in keys) + ".",
+            "constant": lambda keys: "SCHEMA = (" +
+            ", ".join(repr(key) for key in keys) + ")",
+            "numbered": lambda keys: "Frontmatter fields:\n" + "\n".join(
+                "%d. `%s` — Required field." % (i, key)
+                for i, key in enumerate(keys, 1)),
+        }
+        for index in (0, len(source) // 2, len(source) - 1):
+            keys = list(source)
+            keys[index] = "unexpected_property"
+            for form, render in renderers.items():
+                with self.subTest(index=index, form=form):
+                    path = str(ROOT / "skills/paper-summarize/references/schema-probe.md")
+                    report = conventions.Report()
+                    with patch.object(conventions, "walk_skill_files", return_value=[
+                            ("paper-summarize", path, valid + "\n\n" + render(keys))]):
+                        conventions.check_frontmatter(report, conv)
+                    self.assertEqual(report.exit_code(), 1)
+                    self.assertTrue(any(
+                        "unexpected_property" in row[3] and "not in the canonical" in row[3]
+                        for row in report.by_status("FAIL")), report.results)
+
+    def test_frontmatter_larger_record_slices_still_check_order_only(self):
+        conventions = load("convention_schema_record_slices",
+                           ROOT / "tests/test_conventions.py")
+        conv = (ROOT / "shared/CONVENTIONS.md").read_text(encoding="utf-8")
+        schemas = conventions._canonical_schemas(conv)
+        valid = "\n".join("Field order: " + ", ".join(keys) + "."
+                          for keys in schemas.values())
+        entry = [key for key in schemas["wiki-entry"] if key != "read"]
+        renderers = {
+            "record": lambda keys: "Per-entry record: " + ", ".join(keys) + ".",
+            "constant": lambda keys: "INDEX_FIELDS = [" +
+            ", ".join(repr(key) for key in keys) + "]",
+            "response": lambda keys: "The response has fields: " +
+            ", ".join("`" + key + "`" for key in keys) + ".",
+        }
+        for reordered in (False, True):
+            members = list(entry)
+            if reordered:
+                members[0], members[1] = members[1], members[0]
+            for prefix in ([], ["slug", "path", "relpath"]):
+                keys = prefix + members + ["body_wikilink_targets", "errors"]
+                for form, render in renderers.items():
+                    with self.subTest(reordered=reordered, prefix=prefix, form=form):
+                        path = str(ROOT / "skills/wiki-build/references/index-probe.md")
+                        report = conventions.Report()
+                        with patch.object(conventions, "walk_skill_files", return_value=[
+                                ("wiki-build", path, valid + "\n\n" + render(keys))]):
+                            conventions.check_frontmatter(report, conv)
+                        self.assertEqual(report.exit_code(), int(reordered), report.results)
+                        if reordered:
+                            self.assertTrue(any("out of order" in row[3]
+                                                for row in report.by_status("FAIL")))
+                        else:
+                            self.assertTrue(any("order only" in row[3]
+                                                for row in report.by_status("PASS")))
 
     def test_reference_paths_require_exact_case(self):
         conventions = load("convention_reference_case", ROOT / "tests/test_conventions.py")

@@ -86,8 +86,8 @@ not an unguarded network fetch.
 
 ## Scratch renderer recipe
 
-`scripts/lottie_to_gif.py` is not shipped. Write this recipe at the absolute
-scratch path. It uses an already-available `lottie.min.js` beside the script or
+Write this recipe to `<figure-scratch>/lottie_to_gif.py`. It uses an
+already-available `lottie.min.js` beside that scratch script or
 its fixed CDN URL, the sole permitted network request in the renderer. Keep the
 `cat` command, Python body and `PYEOF` terminator flush-left when copying.
 

@@ -56,9 +56,7 @@ final write is left to the rendering step, because a script that does its own
 `rename` requires an explicit phase. A clipping reprocess uses `prepare` to
 publish verified new-name copies while retaining the old names, then `finalize`
 only after the reported dependencies have been rewritten and an unchanged
-re-probe passes. The explicit `immediate` phase remains for compatibility with
-older callers whose set has no dependencies; it is deprecated for the clipping
-reprocess workflow and never substitutes for the two-owner handoff.
+re-probe passes. Both phases require the old and new published owner notes.
 
 `rename`'s required `--sources` is the vault's `Sources/PDFs`: a `<old_slug>.pdf`
 found anywhere beneath (the folder is recursive — book chapters live in
@@ -80,11 +78,9 @@ Guards, because this is the only script in the skill that writes into the vault:
   text from the model, not necessarily what `slug.py` returned.
 * **Neither `download` nor a rename phase clobbers.** `prepare` exclusively
   publishes byte-identical new-name copies and retains every old name;
-  `finalize` conditionally retires only its verified old duplicates. The legacy
-  `immediate` phase moves only a dependency-free set and is all-or-nothing. An
-  unexpected destination is an error (`--dry-run` reports it too). A case-only
-  immediate rename of the same file (`teslo_…` → `Teslo_…`) is still allowed
-  when identity checks confirm it. Publication, retirement and every rollback
+  `finalize` conditionally retires only its verified old duplicates. An
+  unexpected destination is an error (`--dry-run` reports it too).
+  Publication, retirement and every rollback
   are conditional, so a path claimed after the plan is preserved and any mixed
   state is reported for inspection.
   `download` refuses an occupied `<slug>_fig_<N>.*` slot the same way —
@@ -96,7 +92,7 @@ Guards, because this is the only script in the skill that writes into the vault:
   `rename` inventories every other Markdown note for inbound old-note links and
   old-image references before and during the operation. `prepare` reports those
   dependencies while keeping both names resolvable; an incomplete scan still
-  blocks it. `finalize` and legacy `immediate` refuse any dependency or
+  blocks it. `finalize` refuses any dependency or
   incomplete scan with exact blocker paths. `dependencies` repeats that
   complete check before the old Articles path is retired.
 * **Only `http`, `https` and `data:`** — generic URL clients also speak `file:`
@@ -130,8 +126,6 @@ Importable
     download_one(url, attachments, slug, index, owner_note=None) -> dict
     fetch_source(url, out=None) -> dict                # Lottie source, outside vault
     place_file(src, attachments, slug, index, owner_note=None) -> dict
-    rename_slug(attachments, old_slug, new_slug, dry_run=False,
-                *, sources=..., owner_note=...) -> list[dict]
     prepare_slug_rename(attachments, old_slug, new_slug, *, sources=...,
                         owner_note=..., new_owner_note=..., dry_run=False) -> dict
     finalize_slug_rename(attachments, old_slug, new_slug, *, sources=...,
@@ -214,7 +208,7 @@ if _here != _shared:
     _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
-from atomic_move import (LinkUnavailable, MoveIncomplete, PublicationConflict, file_identity,
+from atomic_move import (LinkUnavailable, PublicationConflict, file_identity,
                          link_noreplace, move_noreplace, remove_expected,
                          replace_expected, publish_new, set_private_mode)
 from dedup_index import normalize_url, read_source
@@ -1063,13 +1057,12 @@ def _has_current_sources_key(text):
     return False
 
 
-def _mask_inline_code(text, *, mask_unclosed=True):
+def _mask_inline_code(text):
     """Blank CommonMark backtick spans, including multiline spans.
 
     A closing run must have exactly the opening width; a longer run is a
-    different delimiter.  Treat unresolved runs like the other malformed
-    delimiters: mask to EOF for positive ownership evidence, but keep them
-    visible for a dependency scan that must fail closed against data loss.
+    different delimiter. Unresolved runs mask to EOF because malformed
+    literal text cannot establish positive attachment ownership.
     """
     chars = list(text)
     cursor = 0
@@ -1094,13 +1087,10 @@ def _mask_inline_code(text, *, mask_unclosed=True):
                 break
             probe = run_end
         if end < 0:
-            if mask_unclosed:
-                for index in range(start, len(text)):
-                    if chars[index] not in "\r\n":
-                        chars[index] = " "
-                break
-            cursor = start + width
-            continue
+            for index in range(start, len(text)):
+                if chars[index] not in "\r\n":
+                    chars[index] = " "
+            break
         stop = end + width
         for index in range(start, stop):
             if chars[index] not in "\r\n":
@@ -2726,9 +2716,7 @@ def place_file(src, attachments, slug, index, overwrite=False, owner_note=None,
 
 
 def _same_file(a, b):
-    """True when two paths are one file — a case-only rename on a case-insensitive
-    volume (`teslo_…` → `Teslo_…`, the documented old-convention reprocess) looks
-    like an existing destination but isn't one."""
+    """True when two paths identify one file; missing paths cannot match."""
     try:
         return os.path.samefile(a, b)
     except OSError:
@@ -2747,7 +2735,7 @@ def _same_file(a, b):
 _PDF_ONLY_LABEL = re.compile(r"_fig_?(?:S\d|SI\d|ED\d|\d+[.-]\d)", re.I)
 
 #: §8a's CONSUMER glob: `<stem>_fig`, never `<stem>_fig_`, any extension.
-#: `rename_slug` reads the folder as a consumer — it takes whatever is filed
+#: The handoff planner reads the folder as a consumer — it takes whatever is filed
 #: under this note's stem — and the strict `_fig_*` it used to glob left every
 #: pre-convergence figure (§8c: the ones whose number follows `_fig` with
 #: nothing in between) behind under the OLD stem while reporting
@@ -2868,51 +2856,19 @@ def dependency_status(attachments, owner_note, old_slug):
             "blockers": blockers}
 
 
-def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources,
-                owner_note=None, require_vault=False,
-                _allow_dependencies=False, _allow_prepared=False):
-    """Rename every <old_slug>_fig_N.<ext> attachment to the new slug.
+def _plan_slug_rename(attachments, old_slug, new_slug, *, sources,
+                      owner_note=None, require_vault=False):
+    """Plan the complete owned image mapping without changing any files.
 
-    **All or nothing.** The whole set is planned first, and if any member is
-    refused nothing is renamed at all; a rename that fails part-way is rolled
-    back. This used to rename file by file, so a destination that already
-    existed at `_fig_2` stopped the loop's second iteration with `_fig_1`
-    already moved: the note's embeds all point at one slug, so half of them
-    then resolved to nothing, and the figures were split across two stems where
-    no re-run could reassemble them — `rename` would refuse the collision
-    again, forever, and the report said "1 renamed, 1 failed" as if that were a
-    partial success.
-
-    An existing destination is refused, not overwritten. This runs on the
-    reprocess path, where a corrected author or year turns one slug into
-    another that may already own figures in Sources/Images/ — os.rename would
-    replace those files with no error and no way back.
-
-    The glob is §8a's loose `<stem>_fig*`, not `<stem>_fig_*`. This side of the
-    script is a CONSUMER — it moves whatever is filed under the note's stem —
-    and a vault holds figures written before the two producers agreed on the
-    separator (§8c). The strict form matched `X_fig_1.png` and skipped the
-    separator-less file sitting right beside it, then reported
-    `{"renamed": 3, "failed": 0}`: the note's embeds all moved to the new stem
-    while part of its figure set stayed at the old one, unmentioned.
-
-    `Sources/Images/` is FLAT and shared: the same stem can belong to a PDF
-    whose figures `figure-extract` wrote. Globbing the stem and renaming
-    what comes back moved three of those out from under a summary note whose
-    embeds then resolved to nothing. Two guards, both cheap: a label spelling
-    only the other producer writes, and the required `sources` inventory, where
-    a PDF of that stem settles ownership outright. A PDF-only label is a
-    refusal for the WHOLE set, not just that file: it is evidence that the
-    other producer owns this stem, and the plain-integer figures beside it are
-    then just as likely to be its. The remaining candidates still are not
-    inferred to be clipping figures: every basename must be an exact rendered
-    embed in the snapshotted ``Articles/<old_slug>.md`` passed as
-    ``owner_note``.
+    Both supported handoff phases use this inventory. A current byte-identical
+    destination can be a previously prepared copy; other occupied slots fail
+    the whole plan. Every selected basename needs exact clipping ownership,
+    while PDF stems, manifests, supplementary labels and missing embeds block
+    the handoff. The loose consumer glob keeps all existing image spellings
+    visible without authorizing files from their names alone.
     """
     validate_slug(old_slug, "--old-slug")
     validate_slug(new_slug, "--new-slug")
-    if (_allow_dependencies or _allow_prepared) and not dry_run:
-        raise ValueError("internal prepared-handoff allowances are planning-only")
     if sources is None:
         raise ValueError("--sources is required for every rename so PDF-owned "
                          "figures cannot be mistaken for clipping images")
@@ -2956,8 +2912,6 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources,
             attachments, new_slug, glob.escape(os.path.splitext(tail)[0]) + ".*")
         entry = {"from": base, "to": os.path.basename(dst), "ok": False,
                  "error": None}
-        if dry_run:
-            entry["dry_run"] = True
         if _manifest_name_key(base) in owned:
             entry["error"] = "recorded in the PDF figure manifest; not this skill's to rename"
         elif any(name.startswith(destination_prefix) for name in owned):
@@ -2978,7 +2932,7 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources,
         elif any(not _same_file(src, path) for path in destination_slot) \
                 or (os.path.lexists(dst) and not _same_file(src, dst)):
             prepared = False
-            if (_allow_prepared and len(destination_slot) == 1
+            if (len(destination_slot) == 1
                     and _manifest_name_key(os.path.basename(destination_slot[0]))
                     == _manifest_name_key(os.path.basename(dst))):
                 try:
@@ -3018,17 +2972,15 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources,
                       "embed with the documented missing-attachment placeholder "
                       "before renaming"),
         }
-        if dry_run:
-            entry["dry_run"] = True
         plan.append((os.path.join(attachments, base),
                      os.path.join(attachments, new_slug + tail), entry))
 
     # A changed stem retires both attachment names and, after publication, the
     # old Articles path. Other vault notes can depend on either. Clipping
-    # processor does not have authority to rewrite unrelated Markdown, so a
-    # complete canonical-vault scan must refuse the image mutation before it
-    # makes those references dangle. The same scan is repeated around each
-    # move below so a reference added after planning triggers rollback.
+    # cleaning does not have authority to rewrite unrelated Markdown, so
+    # preparation must retain both names while dependencies remain. Refuse
+    # an incomplete inventory here; finalization separately requires no old
+    # dependencies and repeats that complete check around retirement.
     dependency_images = sorted({
         os.path.basename(src) for src, _dst, _entry in plan
     } | {
@@ -3042,31 +2994,18 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources,
     dependency_blockers = (_vault_dependency_blockers(
         owner, old_slug, dependency_images) if changed_slug else [])
     dependency_errors = [row for row in dependency_blockers if row.get("error")]
-    if dependency_blockers and (not _allow_dependencies or dependency_errors):
+    if dependency_errors:
         error = _dependency_error(dependency_blockers)
         if not plan:
             entry = {"from": old_slug + ".md", "to": new_slug + ".md",
                      "ok": False, "error": error,
                      "dependency_blockers": dependency_blockers}
-            if dry_run:
-                entry["dry_run"] = True
             plan.append((None, None, entry))
         else:
             for _src, _dst, entry in plan:
                 entry["dependency_blockers"] = dependency_blockers
                 if not entry["error"]:
                     entry["error"] = error
-
-    identities = {}
-    for src, _dst, entry in plan:
-        if entry["error"]:
-            continue
-        try:
-            identities[src] = file_identity(src)
-        except OSError as exc:
-            entry["error"] = ("source changed while the rename was being "
-                              "planned (%s: %s)" %
-                              (type(exc).__name__, exc))
 
     _validate_clipping_owner(owner)
     blocked = [e for _s, _d, e in plan if e["error"]]
@@ -3075,57 +3014,8 @@ def rename_slug(attachments, old_slug, new_slug, dry_run=False, *, sources,
             if not entry["error"]:
                 entry["error"] = _STRADDLE % blocked[0]["from"]
         return [e for _s, _d, e in plan]
-    if dry_run:
-        for _src, _dst, entry in plan:
-            entry["ok"] = True
-        return [e for _s, _d, e in plan]
-
-    done = []
-    for src, dst, entry in plan:
-        try:
-            _validate_clipping_owner(owner)
-            if changed_slug:
-                blockers = _vault_dependency_blockers(
-                    owner, old_slug, dependency_images)
-                if blockers:
-                    entry["dependency_blockers"] = blockers
-                    raise ValueError(_dependency_error(blockers))
-            stage_parent = os.path.dirname(os.path.realpath(attachments))
-            move_noreplace(src, dst, expected=identities[src],
-                           stage_parent=stage_parent)
-            entry["ok"] = os.path.lexists(dst)
-            done.append((src, dst, entry))
-            _validate_clipping_owner(owner)
-            if changed_slug:
-                blockers = _vault_dependency_blockers(
-                    owner, old_slug, dependency_images)
-                if blockers:
-                    entry["dependency_blockers"] = blockers
-                    raise ValueError(_dependency_error(blockers))
-        except (OSError, ValueError) as exc:
-            # Put back what has already moved, so the set is still whole under
-            # one slug and the re-run after the fix is the same operation.
-            if isinstance(exc, MoveIncomplete):
-                entry["error"] = ("MOVE INCOMPLETE — both paths must be "
-                                  "inspected before retrying: %s" % exc)
-            else:
-                entry["error"] = f"{type(exc).__name__}: {exc}"
-            for back_src, back_dst, back_entry in reversed(done):
-                try:
-                    move_noreplace(
-                        back_dst, back_src, expected=identities[back_src],
-                        stage_parent=os.path.dirname(os.path.realpath(attachments)))
-                    back_entry["ok"] = False
-                    if back_entry is not entry:
-                        back_entry["error"] = _STRADDLE % os.path.basename(src)
-                except OSError as back:
-                    back_entry["error"] = ("ROLLBACK INCOMPLETE (%s) — inspect "
-                                           "both its old and new paths; neither "
-                                           "was overwritten" % back)
-            for _s2, _d2, other in plan:
-                if not other["ok"] and not other["error"]:
-                    other["error"] = _STRADDLE % os.path.basename(src)
-            return [e for _s, _d, e in plan]
+    for _src, _dst, entry in plan:
+        entry["ok"] = True
     return [e for _s, _d, e in plan]
 
 
@@ -3134,10 +3024,9 @@ def _handoff_plan(attachments, sources, owner_note, new_owner_note,
     """Validate one two-owner image mapping without changing either set."""
     if old_slug == new_slug:
         raise ValueError("a two-phase handoff requires two distinct slug spellings")
-    results = rename_slug(
-        attachments, old_slug, new_slug, True, sources=sources,
-        owner_note=owner_note, require_vault=True,
-        _allow_dependencies=True, _allow_prepared=True)
+    results = _plan_slug_rename(
+        attachments, old_slug, new_slug, sources=sources,
+        owner_note=owner_note, require_vault=True)
     failed = [row for row in results if not row.get("ok")]
     if failed:
         raise ValueError("image handoff preflight failed: " + "; ".join(
@@ -3164,8 +3053,9 @@ def _handoff_plan(attachments, sources, owner_note, new_owner_note,
         old_path = os.path.join(attachments, old_name)
         new_path = os.path.join(attachments, new_name)
         if _same_file(old_path, new_path):
-            raise ValueError("%s and %s resolve to the same file; use the ordinary "
-                             "case-only rename path" % (old_name, new_name))
+            raise ValueError("%s and %s resolve to the same file; retain the "
+                             "existing names instead of attempting a two-owner "
+                             "handoff" % (old_name, new_name))
         if sum(_manifest_name_key(name) == _manifest_name_key(old_name)
                for name in old_owner["embeds"]) != 1:
             raise ValueError("%s is no longer a unique rendered filename-only "
@@ -3465,6 +3355,7 @@ def run_self_test():
     end-to-end download is a `data:` URI, which opens no socket. Nothing is
     written outside a temp directory, which is removed on the way out.
     """
+    from pathlib import Path
     from unittest.mock import PropertyMock, patch
 
     cases = []
@@ -3933,14 +3824,14 @@ continues here`
                     fh.write("\n![[%s]]\n" % name)
             return path
 
-        def checked_rename(*args, **kwargs):
+        def checked_plan(*args, **kwargs):
             """Every ordinary self-test call follows the required ownership path."""
             kwargs.setdefault("sources", sources)
             if "owner_note" not in kwargs and len(args) >= 3:
                 matched = [os.path.basename(path)
                            for path in _glob_slug(args[0], args[1], _FIG_GLOB)]
                 kwargs["owner_note"] = clipping_note(args[1], matched)
-            return rename_slug(*args, **kwargs)
+            return _plan_slug_rename(*args, **kwargs)
 
         def touch(path, data=b"x"):
             with open(path, "wb") as fh:
@@ -4903,7 +4794,7 @@ continues here`
                open(owned_file, "rb").read(), os.path.exists(owned_render)),
               (False, False, _PNG, True))
         check("recorded PDF figures cannot be renamed by a clipping either",
-              [row["ok"] for row in checked_rename(
+              [row["ok"] for row in checked_plan(
                   pdf_owned, "Doe_Paper_2026", "New_Note_2026")],
               [False])
         with open(os.path.join(pdf_owned, MANIFEST_FILE), "w",
@@ -5278,7 +5169,7 @@ continues here`
         check("no failed download leaves its temp file behind",
               strays() - before, set())
 
-        # --- rename_slug ----------------------------------------------------
+        # --- handoff planning ----------------------------------------------------
         def figures(slug, names=("_fig_1.png", "_fig_2.png", "_fig_3.png")):
             # a fresh folder per fixture: a shared one carries the previous
             # case's renames into the next one's assertions
@@ -5289,9 +5180,9 @@ continues here`
 
         missing_guard = figures("Needs_Ownership_2025", ("_fig_1.png",))
         raises("rename refuses to run without the recursive PDF ownership inventory",
-               rename_slug, missing_guard, "Needs_Ownership_2025", "New_Slug_2026")
+               _plan_slug_rename, missing_guard, "Needs_Ownership_2025", "New_Slug_2026")
         raises("rename also requires the exact clipping owner note",
-               rename_slug, missing_guard, "Needs_Ownership_2025", "New_Slug_2026",
+               _plan_slug_rename, missing_guard, "Needs_Ownership_2025", "New_Slug_2026",
                sources=sources)
 
         def canonical_rename_fixture(label, old_slug, names=("_fig_1.png",)):
@@ -5373,28 +5264,14 @@ continues here`
               (False, [{"path": os.path.realpath(dep_reference),
                         "references": ["Old_Dependency_2025.md",
                                        "Old_Dependency_2025_fig_1.png"]}]))
-        blocked_dependency = rename_slug(
-            dep_images, "Old_Dependency_2025", "New_Dependency_2026",
-            sources=dep_pdfs, owner_note=dep_owner)
-        check("external Markdown dependencies refuse every image move",
-              ([row["ok"] for row in blocked_dependency],
-               os.path.isfile(os.path.join(dep_images, dep_names[0])),
-               os.path.realpath(dep_reference) in
-               (blocked_dependency[0]["error"] or "")),
-              ([False], True, True))
         old_image_bytes = open(os.path.join(dep_images, dep_names[0]), "rb").read()
         with open(dep_reference, "w", encoding="utf-8") as fh:
             fh.write('The opener is `<!--`.\n\n'
                      '![[Old_Dependency_2025_fig_1.png]]\n\nThe closer is `-->`.\n')
-        literal_blocked = rename_slug(
-            dep_images, "Old_Dependency_2025", "New_Dependency_2026",
-            sources=dep_pdfs, owner_note=dep_owner)
-        check("literal comment examples cannot authorize retiring a still-referenced image",
-              ([row["ok"] for row in literal_blocked],
-               open(os.path.join(dep_images, dep_names[0]), "rb").read()
-               if os.path.isfile(os.path.join(dep_images, dep_names[0])) else None,
-               os.path.lexists(os.path.join(dep_images, "New_Dependency_2026_fig_1.png"))),
-              ([False], old_image_bytes, False))
+        literal_blocked = dependency_status(dep_images, dep_owner, "Old_Dependency_2025")
+        check("literal comment examples cannot certify a still-referenced image for retirement",
+              (literal_blocked["ok"], open(os.path.join(dep_images, dep_names[0]), "rb").read()),
+              (False, old_image_bytes))
         with open(dep_reference, "w", encoding="utf-8") as fh:
             fh.write("`[[Old_Dependency_2025]]`\n"
                      "<!-- ![[Old_Dependency_2025_fig_1.png]] -->\n")
@@ -5499,49 +5376,145 @@ continues here`
                open(handoff_new_image, "rb").read()),
               (True, 1, False, _PNG))
 
+        # These races exercise the supported two-owner handoff rather than a
+        # standalone move. Preparation must retain every old image; failed
+        # retirement must restore it without replacing a newer occupant.
+        def handoff_case(label, names=("_fig_1.png", "_fig_2.png")):
+            vault, images, pdfs, owner, old_names = canonical_rename_fixture(
+                label, "Old_Test_2025", names)
+            new_owner = os.path.join(vault, "Articles", "New_Test_2026.md")
+            new_names = [name.replace("Old_Test_2025", "New_Test_2026", 1)
+                         for name in old_names]
+            with open(new_owner, "w", encoding="utf-8") as fh:
+                fh.write("---\nsources:\n  - https://example.com/%s\n---\n" % label)
+                fh.write("".join("![[%s]]\n" % name for name in new_names))
+            args = {"attachments": images, "old_slug": "Old_Test_2025",
+                    "new_slug": "New_Test_2026", "sources": pdfs,
+                    "owner_note": owner, "new_owner_note": new_owner}
+            return (vault, args, [os.path.join(images, name) for name in old_names],
+                    [os.path.join(images, name) for name in new_names])
+
+        def failure(call):
+            try:
+                call()
+            except (OSError, ValueError) as exc:
+                return str(exc)
+            return ""
+
+        def current_bytes(paths):
+            return [open(path, "rb").read() if os.path.isfile(path) else None
+                    for path in paths]
+
+        real_publish = publish_new
+        _vault, handoff_args, old_paths, new_paths = handoff_case("changed-owner")
+
+        def change_owner_after_copy(*args, **kwargs):
+            result = real_publish(*args, **kwargs)
+            with open(handoff_args["owner_note"], "a", encoding="utf-8") as fh:
+                fh.write("\nConcurrent owner edit.\n")
+            return result
+
+        with patch.dict(globals(), publish_new=change_owner_after_copy):
+            error = failure(lambda: prepare_slug_rename(**handoff_args))
+        check("an owner edit during prepare retracts only new copies and retains old images",
+              ("owner-note changed" in error, current_bytes(old_paths), current_bytes(new_paths),
+               "Concurrent owner edit." in open(handoff_args["owner_note"], encoding="utf-8").read()),
+              (True, [_PNG, _PNG], [None, None], True))
+
+        _vault, handoff_args, old_paths, new_paths = handoff_case("late-destination")
+
+        def claim_destination_before_copy(staged, target, *args, **kwargs):
+            touch(target, b"another writer's destination")
+            return real_publish(staged, target, *args, **kwargs)
+
+        with patch.dict(globals(), publish_new=claim_destination_before_copy):
+            error = failure(lambda: prepare_slug_rename(**handoff_args))
+        check("a destination claimed after prepare preflight remains untouched",
+              (bool(error), current_bytes(old_paths), current_bytes(new_paths)),
+              (True, [_PNG, _PNG], [b"another writer's destination", None]))
+
+        _vault, handoff_args, old_paths, new_paths = handoff_case("changed-source")
+
+        def change_source_after_staging(*args, **kwargs):
+            touch(old_paths[0], b"another writer's source")
+            return real_publish(*args, **kwargs)
+
+        with patch.dict(globals(), publish_new=change_source_after_staging):
+            error = failure(lambda: prepare_slug_rename(**handoff_args))
+        check("a source changed after staging prevents prepare and retains the newer source",
+              (bool(error), current_bytes(old_paths), current_bytes(new_paths)),
+              (True, [b"another writer's source", _PNG], [None, None]))
+
+        _vault, handoff_args, old_paths, new_paths = handoff_case("partial-prepare")
+
+        def fail_second_copy(staged, target, *args, **kwargs):
+            if target == new_paths[1]:
+                raise OSError(28, "injected second-copy failure")
+            return real_publish(staged, target, *args, **kwargs)
+
+        with patch.dict(globals(), publish_new=fail_second_copy):
+            error = failure(lambda: prepare_slug_rename(**handoff_args))
+        check("partial prepare rolls back new copies while retaining the complete old set",
+              ("second-copy failure" in error, current_bytes(old_paths), current_bytes(new_paths)),
+              (True, [_PNG, _PNG], [None, None]))
+
+        race_vault, handoff_args, old_paths, new_paths = handoff_case("late-dependency")
+        prepare_slug_rename(**handoff_args)
+        real_remove = remove_expected
+
+        def reference_after_retirement(target, *args, **kwargs):
+            result = real_remove(target, *args, **kwargs)
+            with open(os.path.join(race_vault, "reference.md"), "w", encoding="utf-8") as fh:
+                fh.write("[[Old_Test_2025]]\n")
+            return result
+
+        with patch.dict(globals(), remove_expected=reference_after_retirement):
+            error = failure(lambda: finalize_slug_rename(**handoff_args))
+        check("a dependency arriving during finalize restores old images and preserves new copies",
+              ("dependencies block" in error, current_bytes(old_paths), current_bytes(new_paths)),
+              (True, [_PNG, _PNG], [_PNG, _PNG]))
+
+        _vault, handoff_args, old_paths, new_paths = handoff_case("partial-finalize")
+        prepare_slug_rename(**handoff_args)
+
+        def fail_second_retirement(target, *args, **kwargs):
+            if target == old_paths[1]:
+                raise OSError(28, "injected second-retirement failure")
+            return real_remove(target, *args, **kwargs)
+
+        with patch.dict(globals(), remove_expected=fail_second_retirement):
+            error = failure(lambda: finalize_slug_rename(**handoff_args))
+        check("partial finalize restores the complete old set and retains all verified copies",
+              ("second-retirement failure" in error, current_bytes(old_paths), current_bytes(new_paths)),
+              (True, [_PNG, _PNG], [_PNG, _PNG]))
+
+        _vault, handoff_args, old_paths, new_paths = handoff_case("reoccupied-old")
+        prepare_slug_rename(**handoff_args)
+
+        def reoccupy_retired_path(target, *args, **kwargs):
+            real_remove(target, *args, **kwargs)
+            touch(target, b"another writer's old-path occupant")
+            raise OSError("injected failure after old-path reoccupation")
+
+        with patch.dict(globals(), remove_expected=reoccupy_retired_path):
+            error = failure(lambda: finalize_slug_rename(**handoff_args))
+        retained = list(Path(handoff_args["attachments"]).parent.glob(
+            ".clipping-handoff-retire-*/.atomic-displaced"))
+        check("finalize rollback preserves a reoccupied old path and names retained recovery",
+              ("rollback was incomplete" in error, current_bytes(old_paths), current_bytes(new_paths),
+               [_path.read_bytes() for _path in retained]),
+              (True, [b"another writer's old-path occupant", _PNG], [_PNG, _PNG], [_PNG]))
+
         nfd_old = unicodedata.normalize("NFD", "Müller_Dependency_2025")
-        nfc_new = unicodedata.normalize("NFC", "Müller_Dependency_2025")
         nfd_vault, nfd_images, nfd_pdfs, nfd_owner, nfd_names = \
             canonical_rename_fixture("normalization", nfd_old)
         nfd_ref = os.path.join(nfd_vault, "reference.md")
         with open(nfd_ref, "w", encoding="utf-8") as fh:
             fh.write("![[%s]]\n" % nfd_names[0])
-        nfd_result = rename_slug(
-            nfd_images, nfd_old, nfc_new,
-            sources=nfd_pdfs, owner_note=nfd_owner)
-        check("an NFD-to-NFC pathname change still scans external dependencies",
-              ([row["ok"] for row in nfd_result],
-               os.path.isfile(os.path.join(nfd_images, nfd_names[0]))),
-              ([False], True))
-
-        race_vault, race_images, race_pdfs, race_owner, race_names = \
-            canonical_rename_fixture("late-reference", "Old_Race_2025")
-        race_reference = os.path.join(race_vault, "late.md")
-        with open(race_reference, "w", encoding="utf-8") as fh:
-            fh.write("No dependency yet.\n")
-        real_move = move_noreplace
-        inserted_dependency = {"done": False}
-
-        def add_dependency_after_move(src, dst, expected=None, **kwargs):
-            moved = real_move(src, dst, expected=expected, **kwargs)
-            if not inserted_dependency["done"]:
-                inserted_dependency["done"] = True
-                with open(race_reference, "w", encoding="utf-8") as fh:
-                    fh.write("[[Old_Race_2025]]\n")
-            return moved
-
-        with patch.dict(globals(), move_noreplace=add_dependency_after_move):
-            race_result = rename_slug(
-                race_images, "Old_Race_2025", "New_Race_2026",
-                sources=race_pdfs, owner_note=race_owner)
-        check("a dependency created during rename rolls the image move back",
-              ([row["ok"] for row in race_result],
-               os.path.isfile(os.path.join(race_images, race_names[0])),
-               os.path.lexists(os.path.join(
-                   race_images, "New_Race_2026_fig_1.png")),
-               os.path.realpath(race_reference) in
-               (race_result[0]["error"] or "")),
-              ([False], True, False, True))
+        nfd_result = dependency_status(nfd_images, nfd_owner, nfd_old)
+        check("an NFD old pathname retains its exact external dependency",
+              (nfd_result["ok"], os.path.isfile(os.path.join(nfd_images, nfd_names[0]))),
+              (False, True))
 
         pdf_vault, pdf_images, pdf_sources, pdf_owner, pdf_names = \
             canonical_rename_fixture("linked-pdf", "Linked_PDF_2025")
@@ -5549,7 +5522,7 @@ continues here`
         os.makedirs(outside_pdfs)
         touch(os.path.join(outside_pdfs, "Linked_PDF_2025.pdf"), b"%PDF-1.7\n")
         os.symlink(outside_pdfs, os.path.join(pdf_sources, "linked"))
-        linked_pdf_result = rename_slug(
+        linked_pdf_result = _plan_slug_rename(
             pdf_images, "Linked_PDF_2025", "New_Linked_2026",
             sources=pdf_sources, owner_note=pdf_owner)
         check("PDF ownership inventory follows linked source subfolders",
@@ -5558,16 +5531,15 @@ continues here`
               ([False], True))
 
         folder = figures("Old_Slug_2025")
-        out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
-        check("a clean rename renames the whole set",
-              ([e["ok"] for e in out], sorted(os.listdir(folder))),
-              ([True, True, True],
-               ["New_Slug_2026_fig_1.png", "New_Slug_2026_fig_2.png",
-                "New_Slug_2026_fig_3.png"]))
+        out = checked_plan(folder, "Old_Slug_2025", "New_Slug_2026")
+        check("clean handoff planning maps the whole set without changing it",
+              ([e["to"] for e in out], sorted(os.listdir(folder))),
+              (["New_Slug_2026_fig_1.png", "New_Slug_2026_fig_2.png", "New_Slug_2026_fig_3.png"],
+               ["Old_Slug_2025_fig_1.png", "Old_Slug_2025_fig_2.png", "Old_Slug_2025_fig_3.png"]))
         folder = figures("Old_Slug_2025", ("_fig_1.png", "_fig_2.png"))
         one_file_owner = clipping_note(
             "Old_Slug_2025", ("Old_Slug_2025_fig_1.png",))
-        out = rename_slug(folder, "Old_Slug_2025", "New_Slug_2026",
+        out = _plan_slug_rename(folder, "Old_Slug_2025", "New_Slug_2026",
                           sources=sources, owner_note=one_file_owner)
         check("one unattributed same-stem file blocks the whole clipping rename",
               ([entry["ok"] for entry in out], sorted(os.listdir(folder))),
@@ -5586,7 +5558,7 @@ continues here`
             "Old_Slug_2025",
             ("Old_Slug_2025_fig_1.png", legacy_missing,
              "Other_Slug_2025_fig_9.png", "Old_Slug_2025_fig_notes.md"))
-        out = rename_slug(folder, "Old_Slug_2025", "New_Slug_2026",
+        out = _plan_slug_rename(folder, "Old_Slug_2025", "New_Slug_2026",
                           sources=sources, owner_note=missing_owner)
         check("a missing legacy loose old-slug image embed blocks the whole rename",
               ([entry["ok"] for entry in out], sorted(os.listdir(folder))),
@@ -5603,28 +5575,28 @@ continues here`
         near_miss_missing = "Empty_Slug_2025_" + "figure_7.tif"
         broken_owner = clipping_note(
             "Empty_Slug_2025", (near_miss_missing,))
-        out = rename_slug(empty_folder, "Empty_Slug_2025", "New_Slug_2026",
+        out = _plan_slug_rename(empty_folder, "Empty_Slug_2025", "New_Slug_2026",
                           sources=sources, owner_note=broken_owner)
         check("an empty folder with a missing embedded figure is reported as failed",
               (len(out), out[0]["ok"], "exact attachment is missing" in
                (out[0]["error"] or "")), (1, False, True))
         check("renaming a stem with no figures is empty, not an error",
-              checked_rename(folder, "Nobody_Home_2020", "X_2021"), [])
+              checked_plan(folder, "Nobody_Home_2020", "X_2021"), [])
         folder = figures("müLLER_Trial_2025", ("_fig_1.png",))
-        out = checked_rename(folder, unicodedata.normalize("NFD", "Müller_Trial_2025"),
+        out = checked_plan(folder, unicodedata.normalize("NFD", "Müller_Trial_2025"),
                           "Muller_New_2026")
-        check("a different case and Unicode spelling still renames the real figure",
-              ([entry["ok"] for entry in out], sorted(os.listdir(folder))),
-              ([True], ["Muller_New_2026_fig_1.png"]))
+        check("different case and Unicode spellings still map the real figure without moving it",
+              ([entry["to"] for entry in out], sorted(os.listdir(folder))),
+              (["Muller_New_2026_fig_1.png"], ["müLLER_Trial_2025_fig_1.png"]))
         folder = figures("STRASSE_Trial_2025", ("_fig_1.png",))
         expansion_is_same_name = os.path.exists(
             os.path.join(folder, "Straße_Trial_2025_fig_1.png"))
-        out = checked_rename(folder, "Straße_Trial_2025", "New_Trial_2026")
+        out = checked_plan(folder, "Straße_Trial_2025", "New_Trial_2026")
         check("casefold expansion follows only when the filesystem says it is one name",
               ([entry["to"] for entry in out], [entry["ok"] for entry in out],
                sorted(os.listdir(folder))),
               ((["New_Trial_2026_fig_1.png"], [True],
-                ["New_Trial_2026_fig_1.png"])
+                ["STRASSE_Trial_2025_fig_1.png"])
                if expansion_is_same_name else
                ([], [], ["STRASSE_Trial_2025_fig_1.png"])))
         folder = figures("STRASSE_Trial_2025", ("_fig_1.png",))
@@ -5634,21 +5606,20 @@ continues here`
         folder = figures("Old_Slug_2025")
         touch(os.path.join(folder, "new_slug_2026_fig_2.webp"), b"other owner")
         before_set = sorted(os.listdir(folder))
-        for dry in (True, False):
-            out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026", dry_run=dry)
-            check("rename refuses another format in its destination slot (dry=%s)" % dry,
-                  ([entry["ok"] for entry in out], sorted(os.listdir(folder))),
-                  ([False, False, False], before_set))
+        out = checked_plan(folder, "Old_Slug_2025", "New_Slug_2026")
+        check("handoff planning refuses another format in its destination slot",
+              ([entry["ok"] for entry in out], sorted(os.listdir(folder))),
+              ([False, False, False], before_set))
         folder = figures("Old_Slug_2025")
         os.mkdir(os.path.join(folder, "Old_Slug_2025_fig_assets"))
         check("a matching directory refuses the rename instead of moving user content",
-              all(not entry["ok"] for entry in checked_rename(
+              all(not entry["ok"] for entry in checked_plan(
                   folder, "Old_Slug_2025", "New_Slug_2026")), True)
         folder = figures("Old_Slug_2025", ())
         backing = touch(os.path.join(folder, "backing.png"), _PNG)
         linked = os.path.join(folder, "Old_Slug_2025_fig_1.png")
         os.symlink(backing, linked)
-        out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
+        out = checked_plan(folder, "Old_Slug_2025", "New_Slug_2026")
         check("a matching symlink is not treated as a regular image move",
               ([entry["ok"] for entry in out], os.path.islink(linked),
                open(backing, "rb").read()), ([False], True, _PNG))
@@ -5664,26 +5635,24 @@ continues here`
         old = "_fig3.png"                # pre-convergence: no separator
         old_s1 = "_figS1.png"            # pre-convergence, supplementary
         folder = figures("Old_Slug_2025", ("_fig_1.png", "_fig_2.webp", old))
-        out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
-        check("the loose §8a glob takes the pre-convergence spelling too",
-              ([e["ok"] for e in out], sorted(os.listdir(folder))),
-              ([True, True, True],
-               sorted(["New_Slug_2026" + old, "New_Slug_2026_fig_1.png",
-                       "New_Slug_2026_fig_2.webp"])))
-        check("...and nothing is left stranded under the old stem",
-              _glob_slug(folder, "Old_Slug_2025", "_fig*"), [])
-        # a hand-named `_figure_3.png` is this stem's figure as well, and its
-        # tail is carried across verbatim rather than re-spelled
+        out = checked_plan(folder, "Old_Slug_2025", "New_Slug_2026")
+        check("the loose consumer plan includes pre-convergence spelling without moving it",
+              (sorted(e["to"] for e in out), sorted(os.listdir(folder))),
+              (sorted(["New_Slug_2026" + old, "New_Slug_2026_fig_1.png", "New_Slug_2026_fig_2.webp"]),
+               sorted(["Old_Slug_2025" + old, "Old_Slug_2025_fig_1.png", "Old_Slug_2025_fig_2.webp"])))
+        # Adversarial near-miss: a hand-named `_figure_3.png` matches this
+        # stem's loose consumer prefix; preserve its tail verbatim.
         folder = figures("Old_Slug_2025", ("_fig_1.png", "_figure_3.png"))
-        out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
-        check("...as is a hand-named `_figure_N`",
-              ([e["ok"] for e in out], sorted(os.listdir(folder))),
-              ([True, True],
-               ["New_Slug_2026_fig_1.png", "New_Slug_2026_figure_3.png"]))
+        out = checked_plan(folder, "Old_Slug_2025", "New_Slug_2026")
+        check("hand-named figure tails are mapped verbatim without moving them",
+              ([e["to"] for e in out], sorted(os.listdir(folder))),
+              # Both expected lists retain the hand-named tail unchanged.
+              (["New_Slug_2026_fig_1.png", "New_Slug_2026_figure_3.png"],
+               ["Old_Slug_2025_fig_1.png", "Old_Slug_2025_figure_3.png"]))
         # the ownership guard has to read the older spelling as well, or a
         # loose glob just widens what gets taken from the other producer
         folder = figures("Doe_Old_2025", ("_fig_1.png", old_s1))
-        out = checked_rename(folder, "Doe_Old_2025", "New_Note_2026")
+        out = checked_plan(folder, "Doe_Old_2025", "New_Note_2026")
         check("a pre-convergence supplementary label still refuses the set",
               ([e["ok"] for e in out], sorted(os.listdir(folder))),
               ([False, False],
@@ -5697,7 +5666,7 @@ continues here`
         # set back together.
         folder = figures("Old_Slug_2025")
         touch(os.path.join(folder, "New_Slug_2026_fig_2.png"), b"someone else's")
-        out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
+        out = checked_plan(folder, "Old_Slug_2025", "New_Slug_2026")
         check("one occupied destination refuses the whole set",
               [e["ok"] for e in out], [False, False, False])
         check("...naming the file that blocked it",
@@ -5711,181 +5680,18 @@ continues here`
         check("...and the occupied destination is untouched",
               open(os.path.join(folder, "New_Slug_2026_fig_2.png"), "rb").read(),
               b"someone else's")
-        out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026", dry_run=True)
-        check("--dry-run reports the same refusal the run would make",
+        out = checked_plan(folder, "Old_Slug_2025", "New_Slug_2026")
+        check("repeated planning reports the same occupied-slot refusal",
               [e["ok"] for e in out], [False, False, False])
-        check("...and is marked as a dry run",
-              all(e.get("dry_run") for e in out), True)
         folder = figures("Old_Slug_2025")
-        out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026", dry_run=True)
-        check("--dry-run on a clean set reports every file and writes nothing",
+        out = checked_plan(folder, "Old_Slug_2025", "New_Slug_2026")
+        check("planning a clean set reports every file and writes nothing",
               ([e["ok"] for e in out],
                sorted(os.listdir(folder))[0]),
               ([True, True, True], "Old_Slug_2025_fig_1.png"))
 
-        folder = figures("Old_Slug_2025", ("_fig_1.png",))
-        old_path = os.path.join(folder, "Old_Slug_2025_fig_1.png")
-        new_path = os.path.join(folder, "New_Slug_2026_fig_1.png")
-        changing_owner = clipping_note(
-            "Old_Slug_2025", ("Old_Slug_2025_fig_1.png",))
-        real_move = move_noreplace
-
-        def _change_note_after_move(src, dst, expected=None, **kwargs):
-            moved = real_move(src, dst, expected=expected, **kwargs)
-            with open(changing_owner, "a", encoding="utf-8") as fh:
-                fh.write("\nlate edit\n")
-            return moved
-
-        globals()["move_noreplace"] = _change_note_after_move
-        try:
-            out = rename_slug(folder, "Old_Slug_2025", "New_Slug_2026",
-                              sources=sources, owner_note=changing_owner)
-        finally:
-            globals()["move_noreplace"] = real_move
-        check("a note changed during rename retracts the image move",
-              (open(old_path, "rb").read(), os.path.lexists(new_path)),
-              (_PNG, False))
-        check("the stale ownership snapshot is reported",
-              "owner-note changed" in (out[0]["error"] or ""), True)
-
-        # Preflight is only an inventory. A competing writer can claim the
-        # destination after it, so the write itself must be exclusive.
-        folder = figures("Old_Slug_2025", ("_fig_1.png",))
-        old_path = os.path.join(folder, "Old_Slug_2025_fig_1.png")
-        new_path = os.path.join(folder, "New_Slug_2026_fig_1.png")
-        real_move = move_noreplace
-
-        def _late_destination(src, dst, expected=None, **kwargs):
-            touch(dst, b"late destination")
-            return real_move(src, dst, expected=expected, **kwargs)
-
-        globals()["move_noreplace"] = _late_destination
-        try:
-            out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
-        finally:
-            globals()["move_noreplace"] = real_move
-        check("a destination created after rename preflight is preserved",
-              (open(old_path, "rb").read(), open(new_path, "rb").read()),
-              (_PNG, b"late destination"))
-        check("...and the raced move is reported failed", [e["ok"] for e in out],
-              [False])
-
-        folder = figures("Old_Slug_2025", ("_fig_1.png",))
-        old_path = os.path.join(folder, "Old_Slug_2025_fig_1.png")
-        new_path = os.path.join(folder, "New_Slug_2026_fig_1.png")
-        real_move = move_noreplace
-
-        def _replace_source_after_plan(src, dst, expected=None, **kwargs):
-            os.unlink(src)
-            touch(src, b"late source identity")
-            if expected is not None and file_identity(src) == expected:
-                # Linux filesystems can immediately reuse the unlinked inode.
-                # This fixture exercises the expected-identity mismatch, so
-                # keep that mismatch deterministic just as atomic_move's own
-                # source-replacement self-test does.
-                expected = (expected[0], -1, expected[2])
-            return real_move(src, dst, expected=expected, **kwargs)
-
-        globals()["move_noreplace"] = _replace_source_after_plan
-        try:
-            out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
-        finally:
-            globals()["move_noreplace"] = real_move
-        check("a source replaced after planning is not silently renamed",
-              (open(old_path, "rb").read(), os.path.lexists(new_path)),
-              (b"late source identity", False))
-        check("...and the identity change is reported as a failure",
-              [entry["ok"] for entry in out], [False])
-
-        # On a host using the hard-link fallback, destination publication can
-        # succeed before unlinking the source fails. Both names are residue and
-        # must be retained and reported rather than mistaken for no mutation.
-        folder = figures("Old_Slug_2025", ("_fig_1.png",))
-        old_path = os.path.join(folder, "Old_Slug_2025_fig_1.png")
-        new_path = os.path.join(folder, "New_Slug_2026_fig_1.png")
-        real_move = move_noreplace
-
-        def _incomplete_move(src, dst, expected=None, **_kwargs):
-            os.link(src, dst)
-            raise MoveIncomplete(src, dst, OSError("injected unlink failure"))
-
-        globals()["move_noreplace"] = _incomplete_move
-        try:
-            out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
-        finally:
-            globals()["move_noreplace"] = real_move
-        check("an incomplete fallback move retains both figure names",
-              (open(old_path, "rb").read(), open(new_path, "rb").read()),
-              (_PNG, _PNG))
-        check("...and reports the residue explicitly",
-              "MOVE INCOMPLETE" in (out[0]["error"] or ""), True)
-
-        # Rollback is another forward move and has the same race. If the old
-        # name is reclaimed after its file moved, retain both entries and name
-        # the incomplete rollback instead of overwriting either one.
-        folder = figures("Old_Slug_2025", ("_fig_1.png", "_fig_2.png"))
-        old_one = os.path.join(folder, "Old_Slug_2025_fig_1.png")
-        new_one = os.path.join(folder, "New_Slug_2026_fig_1.png")
-        real_move, calls = move_noreplace, []
-
-        def _late_rollback_source(src, dst, expected=None, **kwargs):
-            calls.append((src, dst))
-            if len(calls) == 2:
-                touch(old_one, b"late source")
-                raise OSError(28, "injected second move failure")
-            return real_move(src, dst, expected=expected, **kwargs)
-
-        globals()["move_noreplace"] = _late_rollback_source
-        try:
-            out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
-        finally:
-            globals()["move_noreplace"] = real_move
-        check("a source recreated before rollback is never overwritten",
-              (open(old_one, "rb").read(), open(new_one, "rb").read()),
-              (b"late source", _PNG))
-        check("...and the incomplete rollback is reported",
-              any("ROLLBACK INCOMPLETE" in (e["error"] or "") for e in out), True)
-
-        # A rename that fails PART-WAY — a full disk, a vault mount that drops
-        # out — is put back, for the same reason a refusal stops the set: half
-        # a set under each slug is the state no re-run can repair. The shared
-        # exclusive-move primitive is swapped for this call so the second move
-        # can fail on demand without depending on the host filesystem.
-        folder = figures("Old_Slug_2025")
-        real_move, calls = move_noreplace, []
-
-        def _flaky_move(src, dst, expected=None, **kwargs):
-            calls.append(src)
-            if len(calls) == 2:
-                raise OSError(28, "No space left on device")
-            return real_move(src, dst, expected=expected, **kwargs)
-
-        globals()["move_noreplace"] = _flaky_move
-        try:
-            out = checked_rename(folder, "Old_Slug_2025", "New_Slug_2026")
-        finally:
-            globals()["move_noreplace"] = real_move
-        check("a rename that fails part-way is rolled back",
-              sorted(os.listdir(folder)),
-              ["Old_Slug_2025_fig_1.png", "Old_Slug_2025_fig_2.png",
-               "Old_Slug_2025_fig_3.png"])
-        check("...and no member is reported renamed",
-              [e["ok"] for e in out], [False, False, False])
-        check("...with the OS error named",
-              sum("No space left" in (e["error"] or "") for e in out), 1)
-
-        # A case-only rename is not a collision: it is the documented
-        # old-convention reprocess, and on an insensitive filesystem src and
-        # dst may be one file.
-        folder = figures("teslo_cancer_2026", ("_fig_1.png",))
-        out = checked_rename(folder, "teslo_cancer_2026", "Teslo_Cancer_2026")
-        check("a case-only rename is allowed", [e["ok"] for e in out], [True])
-        # ...whose collision preflight is decided by `_same_file`, not by the
-        # names. On an insensitive filesystem src and dst are one directory
-        # entry and `lexists(dst)` is true. A hard link exercises the
-        # same-inode predicate portably, but two distinct directory entries
-        # cannot reproduce the complete case-only rename: the portable folder
-        # inventory deliberately treats both spellings as competing entries.
+        # Handoff identity checks distinguish different files from two names
+        # for the same inode; portable spelling alone cannot establish that.
         one = touch(os.path.join(tmp, "one"), b"x")
         two = os.path.join(tmp, "two")
         check("_same_file: a path is itself", _same_file(one, one), True)
@@ -5900,7 +5706,7 @@ continues here`
 
         # Sources/Images is FLAT and shared. Two guards say the stem is a PDF's.
         folder = figures("Doe_Foo_2025", ("_fig_1.png", "_fig_S1.png"))
-        out = checked_rename(folder, "Doe_Foo_2025", "New_Note_2026")
+        out = checked_plan(folder, "Doe_Foo_2025", "New_Note_2026")
         check("a supplementary label refuses the set",
               [e["ok"] for e in out], [False, False])
         check("...naming the label as the reason",
@@ -5911,17 +5717,17 @@ continues here`
         for label in ("_fig_ED2.png", "_fig_SI3.png", "_fig_1-2.png",
                       "_fig_2.1.png"):
             folder = figures("Doe_Bar_2025", ("_fig_1.png", label))
-            out = checked_rename(folder, "Doe_Bar_2025", "New_Note_2026")
+            out = checked_plan(folder, "Doe_Bar_2025", "New_Note_2026")
             check("a %s label is figure-extract's" % label,
                   any(e["ok"] for e in out), False)
-        # ...and a plain integer label is this skill's own, so it renames
+        # ...and a plain integer label can pass with exact clipping ownership.
         folder = figures("Doe_Baz_2025", ("_fig_1.png", "_fig_12.png"))
-        out = checked_rename(folder, "Doe_Baz_2025", "New_Note_2026")
+        out = checked_plan(folder, "Doe_Baz_2025", "New_Note_2026")
         check("a plain integer label is this skill's", [e["ok"] for e in out],
               [True, True])
         folder = figures("Doe_Fig_S1_2025", ("_fig_1.png",))
         check("PDF-only label syntax inside a clipping title does not own its figures",
-              [e["ok"] for e in checked_rename(
+              [e["ok"] for e in checked_plan(
                   folder, "Doe_Fig_S1_2025", "Doe_Trial_2025")], [True])
 
         # ...and a `<stem>.pdf` on disk settles ownership outright
@@ -5929,23 +5735,23 @@ continues here`
         touch(os.path.join(sources, "sub", "Doe_Qux_2025.pdf"))
         folder = figures("Clipping_Topic_2025", ("_fig_1.png",))
         check("a PDF also reserves the destination stem before figures exist",
-              [entry["ok"] for entry in checked_rename(
+              [entry["ok"] for entry in checked_plan(
                   folder, "Clipping_Topic_2025", "Doe_Qux_2025", sources=sources)],
               [False])
         with open(os.path.join(folder, MANIFEST_FILE), "w",
                   encoding="utf-8") as fh:
             fh.write("Reserved_Paper_2025_fig_1.png\t" + hashlib.sha256(_PNG).hexdigest() + "\n")
         check("a missing figure's PDF manifest record still reserves the rename destination",
-              [entry["ok"] for entry in checked_rename(
+              [entry["ok"] for entry in checked_plan(
                   folder, "Clipping_Topic_2025", "Reserved_Paper_2025")], [False])
         with open(os.path.join(folder, MANIFEST_FILE), "w",
                   encoding="utf-8") as fh:
             fh.write("Reserved_Paper_2025_fig_1.webp\t" + hashlib.sha256(_PNG).hexdigest() + "\n")
         check("manifest ownership reserves the destination index across extensions",
-              [entry["ok"] for entry in checked_rename(
+              [entry["ok"] for entry in checked_plan(
                   folder, "Clipping_Topic_2025", "Reserved_Paper_2025")], [False])
         folder = figures("Doe_Qux_2025", ("_fig_1.png",))
-        out = checked_rename(folder, "Doe_Qux_2025", "New_Note_2026",
+        out = checked_plan(folder, "Doe_Qux_2025", "New_Note_2026",
                           sources=sources)
         check("a PDF of that stem refuses the rename",
               [e["ok"] for e in out], [False])
@@ -5954,19 +5760,19 @@ continues here`
         check("...and leaves the figures alone",
               os.listdir(folder), ["Doe_Qux_2025_fig_1.png"])
         folder = figures("Clipping_No_PDF_2025", ("_fig_1.png",))
-        check("...while a stem with no PDF renames normally",
-              [e["ok"] for e in checked_rename(
+        check("...while a stem with no PDF can be planned normally",
+              [e["ok"] for e in checked_plan(
                   folder, "Clipping_No_PDF_2025", "New_Note_2026")], [True])
         accented = "Müller_Topic_2026"
         touch(os.path.join(sources, "sub", unicodedata.normalize("NFD", accented) + ".pdf"))
         folder = figures(accented, ("_fig_1.png",))
-        out = checked_rename(folder, accented, "New_Note_2026", sources=sources)
+        out = checked_plan(folder, accented, "New_Note_2026", sources=sources)
         check("an NFD PDF filename still owns an NFC figure stem",
               [e["ok"] for e in out], [False])
         check("...and its figures stay under their original stem",
               os.listdir(folder), [accented + "_fig_1.png"])
         raises("a mistyped --sources path cannot silently disable ownership checks",
-                   checked_rename, folder, accented, "New_Note_2026",
+                   checked_plan, folder, accented, "New_Note_2026",
                sources=os.path.join(sources, "missing-folder"))
         scandir = os.scandir
 
@@ -5979,13 +5785,13 @@ continues here`
                   for name in os.listdir(folder)}
         with patch.object(os, "scandir", side_effect=unreadable_sources):
             raises("an incomplete PDF inventory cannot authorize an image rename",
-               checked_rename, folder, accented, "New_Note_2026", sources=sources)
+               checked_plan, folder, accented, "New_Note_2026", sources=sources)
         check("failed ownership enumeration preserves every image name and byte",
               {name: open(os.path.join(folder, name), "rb").read()
                for name in os.listdir(folder)}, before)
-        raises("rename_slug validates both slugs", checked_rename, folder,
+        raises("handoff planning validates both slugs", checked_plan, folder,
                "../old", "new")
-        raises("...including the new one", checked_rename, folder, "old",
+        raises("...including the new one", checked_plan, folder, "old",
                "../new")
 
         # --- the documented procedures, which are the other half of a guard --
@@ -6362,16 +6168,15 @@ def main(argv=None):
     r.add_argument("--owner-note", required=True,
                    help="the unchanged Articles/<old-slug>.md; every renamed "
                         "attachment must be an exact rendered filename-only embed")
-    r.add_argument("--new-owner-note",
+    r.add_argument("--new-owner-note", required=True,
                    help="published Articles/<new-slug>.md with the same web "
                         "origin and exact mapped new embeds; required for "
                         "prepare/finalize")
-    r.add_argument("--phase", choices=("immediate", "prepare", "finalize"),
+    r.add_argument("--phase", choices=("prepare", "finalize"),
                    required=True,
                    help="required: prepare publishes new-name copies while "
                         "retaining old names; finalize retires exact old copies "
-                        "after dependencies are clear; immediate is a deprecated "
-                        "compatibility path for an unreferenced set")
+                        "after dependencies are clear")
     r.add_argument("--dry-run", action="store_true")
 
     q = sub.add_parser(
@@ -6501,9 +6306,6 @@ def main(argv=None):
         return 0 if res["ok"] else 1
 
     try:
-        if args.phase != "immediate" and not args.new_owner_note:
-            raise ValueError("--new-owner-note is required with --phase %s" %
-                             args.phase)
         if args.phase == "prepare":
             report = prepare_slug_rename(
                 args.attachments, args.old_slug, args.new_slug,
@@ -6520,10 +6322,6 @@ def main(argv=None):
             print(json.dumps(dict(report, mode="rename"), indent=2,
                              ensure_ascii=False))
             return 0 if report["ok"] else 1
-        results = rename_slug(
-            args.attachments, args.old_slug, args.new_slug,
-            args.dry_run, sources=args.sources,
-            owner_note=args.owner_note, require_vault=True)
     except (OSError, UnicodeError, ValueError) as exc:
         print(json.dumps({"mode": "rename", "phase": args.phase,
                           "ok": False, "old_slug": args.old_slug,
@@ -6531,15 +6329,6 @@ def main(argv=None):
                           "results": [], "renamed": 0, "failed": 1},
                          indent=2, ensure_ascii=False))
         return 1
-    failed = [x for x in results if not x["ok"]]
-    print(json.dumps({"mode": "rename", "phase": "immediate",
-                      "warning": "--phase immediate is deprecated for clipping "
-                                 "reprocessing; use prepare then finalize",
-                      "ok": not failed, "old_slug": args.old_slug,
-                      "new_slug": args.new_slug, "results": results,
-                      "renamed": len(results) - len(failed),
-                      "failed": len(failed)}, indent=2, ensure_ascii=False))
-    return 1 if failed else 0
 
 
 if __name__ == "__main__":

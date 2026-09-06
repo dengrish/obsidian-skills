@@ -387,13 +387,9 @@ def source_names(source, stem):
     """
     if not source:
         return False
-    # `note_source` already strips a surrounding quote pair, but this is also
-    # called on values read some other way -- and the failure of being strict
-    # here is a `collision` on a note that is in fact ours, which stops a run
-    # for no reason.
+    # The metadata reader has already decoded the YAML scalar. Any remaining
+    # quote characters belong to its value, not an extra serialization layer.
     source = source.strip()
-    if len(source) >= 2 and source[0] == source[-1] and source[0] in "\"'":
-        source = source[1:-1].strip()
     m = _WIKILINK_RE.match(source)
     if not m:
         return False
@@ -831,7 +827,7 @@ def run_self_test():
     # `source_names` is what turns a note on disk into that third argument, and
     # it is the whole of the guard against overwriting somebody else's note.
     for src, stem, want in (
-            ('"[[Doe_Foo_2025.pdf]]"',                "Doe_Foo_2025",  True),
+            ('"[[Doe_Foo_2025.pdf]]"',                "Doe_Foo_2025",  False),
             ("[[Doe_Foo_2025.pdf]]",                  "Doe_Foo_2025",  True),
             ("[[Sources/PDFs/Doe_Foo_2025.pdf]]",     "Doe_Foo_2025",  True),
             ("[[Doe_Foo_2025.pdf|the paper]]",        "Doe_Foo_2025",  True),

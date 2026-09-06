@@ -82,17 +82,12 @@ available. This is a skill package, not an Obsidian community plugin or an MCP
 server. Ordinary chats
 without filesystem access cannot run the vault workflow.
 
-Use `obsidian:wiki-build` and `obsidian:wiki-lint` for the renamed Wiki skills.
-These replace `obsidian:wiki-builder` and `obsidian:wiki-linter`; update explicit
-invocations after upgrading. Suggestion logs use current skill names under
-`Reviews/`; existing logs can be explicitly migrated under the
-[shared protocol](shared/SUGGESTIONS.md). MOCs are
-fully generated nested outlines without marker comments. The current MOC
-layout is `MOCs/<discipline>.md`; existing
-root `<discipline>-moc.md` files need an explicitly requested
-[layout migration](skills/wiki-lint/references/hierarchy.md#migrate-the-legacy-layout),
-which updates only proven reference targets and honors the authorized
-hierarchy scope.
+Invoke the Wiki skills as `obsidian:wiki-build`, `obsidian:wiki-add`, and
+`obsidian:wiki-lint`. Suggestion logs use current skill names under `Reviews/`
+and follow the [shared protocol](shared/SUGGESTIONS.md). MOCs are fully generated
+nested outlines at `MOCs/<discipline>.md`, without marker comments. Unexpected
+root `<discipline>-moc.md` files are preserved and reported, not moved or
+replaced during routine maintenance.
 
 | Purpose | Codex | Claude Code |
 |---|---|---|
@@ -250,7 +245,7 @@ python3 -m venv .venv
 The convention suite checks shared contracts, schemas, examples, command
 quoting, skill routing and reachable references, and runs every bundled
 script self-test. Use `-v` for passing checks or `--json` for structured
-output. Registered unresolved defects appear as `PENDING`, never as passes.
+output. Every detected defect fails validation.
 
 The end-to-end suite exercises public commands in temporary vaults: PDF
 filing, figure repair, source renames, clipping reprocessing and the wiki

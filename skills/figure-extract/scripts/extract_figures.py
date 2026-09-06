@@ -1972,7 +1972,7 @@ def run_self_test():
         check("manual repair of tracked output succeeds", code, 0)
         repaired = open(owned_png, "rb").read()
         ok("manual repair changes the actual crop bytes", repaired != before)
-        recorded = load_manifest(tracked_path)
+        recorded = load_manifest(tracked_path)[0]
         check("manual repair preserves unrelated ownership",
               recorded["Unrelated_fig_8.png"], "a" * 64)
         check("manual repair preserves an equivalent record's original casing",

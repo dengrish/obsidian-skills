@@ -18,7 +18,7 @@ until both owner notes are safely public. Follow the complete
 [two-phase replacement procedure](duplicates-and-reprocessing.md#publish-an-approved-replacement)
 for prepare, any authorized dependency repair, the unchanged re-probe, and
 finalize. Keep old images until those checks pass; never use bare `cp`/`mv`,
-omit either owner guard, or use `--phase immediate`.
+omit either owner guard, or bypass prepare/finalize.
 
 The plan inventories the note in both directions: an old-slug image embed with
 no exact attachment is a blocking result, including legacy loose `_figN`

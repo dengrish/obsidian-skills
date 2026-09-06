@@ -34,8 +34,9 @@ placeholders. Do not summarize the old summary as if it were source prose.
 Regenerate the summary, `format`, `description` and `tags`; report that manual
 edits to those generated fields were replaced. Preserve `read:` as found, including an absent/unknown state, plus the capture URL,
 clipping date and unrelated user metadata. Report an absent/unknown review state;
-do not fill it with `false` to satisfy the generated schema. Apply only the targeted legacy migrations in
-[frontmatter](metadata-verification.md#frontmatter-for-the-polished-note).
+do not fill it with `false` to satisfy the generated schema. Follow the
+[frontmatter rules](metadata-verification.md#frontmatter-for-the-polished-note)
+and report conflicting or uninterpretable unrelated metadata without removing it.
 
 Retain existing figure numbers. An unchanged slug leaves existing attachments
 alone; new remote images use the next free number. A changed slug needs a

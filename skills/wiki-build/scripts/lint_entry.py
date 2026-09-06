@@ -477,7 +477,9 @@ def _check_field_order(fm, findings):
                 {"key": key, "report_only": True}))
         else:
             findings.append(_f("2-field-order", "warning",
-                               "key %r is not part of the entry schema" % key))
+                               "key %r is not part of the entry schema -- preserve "
+                               "this user metadata; a schema mismatch alone does "
+                               "not authorize deleting or repurposing it" % key))
 
     # An empty `parents:` is written `parents: []`, never bare: a bare key is
     # YAML null, and the vault pins the property as multitext, so Obsidian
@@ -1270,7 +1272,7 @@ def _check_alias_completeness(fm, sections, findings, filename):
 
 
 # NOTE: there is deliberately no _check_parents.  A populated `parents:` is the
-# expected steady state -- wiki-lint's Task 3 writes that field on every full
+# expected steady state -- wiki-lint's Task 3 writes that field on every
 # entry -- so flagging it fired on the whole vault after a single lint pass.  It
 # was redundant anyway: `parents` is in QUOTED_LIST_FIELDS, so _check_quoting
 # already reports an unquoted item, and it is in MANDATORY_KEYS, so

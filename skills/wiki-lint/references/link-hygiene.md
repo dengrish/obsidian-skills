@@ -10,8 +10,8 @@ Two directions: **backfill** links that could not exist when an earlier entry wa
 
 Existing MOC navigation links are outside this entity-link mechanism. Preserve
 qualified `[[MOCs/<discipline>]]` / `[[MOCs/misc]]` links and recognized legacy MOC links; inspect
-the MOC inventory when their target is missing or ambiguous, and route any
-layout repair to the authorized Task 3 migration. A MOC outside `Wiki/` is not
+the MOC inventory when their target is missing or ambiguous. Unexpected old
+root notes are preserved and reported outside routine generated ownership. A MOC outside `Wiki/` is not
 a missing entity to unlink. Do not add MOC links as entity backfill candidates
 or strip a valid `MOCs/` or disambiguating `Wiki/` prefix. `item10/moc` names
 an unknown bare or explicit MOC target, or a missing/unsafe explicit MOC

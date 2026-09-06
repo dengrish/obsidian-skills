@@ -1143,15 +1143,6 @@ def caption_placement(page, cap_rect, other_captions=()):
     )
 
 
-def side_caption_position(page, cap_rect, other_captions=()):
-    """"left" / "right" / None — where this caption's figure is.
-
-    Thin wrapper over `caption_placement` for callers that only want the
-    answer and not the evidence behind it.
-    """
-    return caption_placement(page, cap_rect, other_captions).side
-
-
 def clip_content(content, top, bottom, left, right):
     """Content rects clipped to a search region; degenerate results dropped."""
     out = []
@@ -2387,7 +2378,7 @@ def _st_header_doc(head=True, pages=4):
 def _st_two_column_doc():
     """A plain two-column US-Letter page: a chart and a caption in each column.
 
-    The layout that broke `side_caption_position`: EVERY caption on a
+    The two-column layout exercised by `caption_placement`: EVERY caption on a
     two-column page is narrower than half the page, so the width test admits
     all of them, and the neighbouring column's chart is a ≥30x30 drawing whose
     y-band overlaps the caption's. Figure 1's crop was then built out of
@@ -2975,20 +2966,20 @@ def run_self_test():
     page.insert_text((60, 300), "Figure 6. Beside it.", fontsize=8)
     caps = find_caption_blocks(page)
     check("a narrow caption with content to its right is a left caption",
-          side_caption_position(page, caps[0][2]), "left")
+          caption_placement(page, caps[0][2]).side, "left")
     doc.close()
     doc = fitz.open()
     page = doc.new_page(width=612, height=792)
     page.insert_text((60, 300), "Figure 6. Nothing beside it.", fontsize=8)
     caps = find_caption_blocks(page)
     check("a narrow caption with nothing beside it is a bottom caption",
-          side_caption_position(page, caps[0][2]), None)
+          caption_placement(page, caps[0][2]).side, None)
     doc.close()
     doc = _st_simple_doc("Figure 1. A caption wide enough to span the page "
                          "from the left margin to the right one, as most are.")
     caps = find_caption_blocks(doc[0])
     check("a page-width caption is a bottom caption",
-          side_caption_position(doc[0], caps[0][2]), None)
+          caption_placement(doc[0], caps[0][2]).side, None)
     doc.close()
 
     # A normal narrow side caption does not become a rescue merely because it
@@ -3027,7 +3018,7 @@ def run_self_test():
     top_cont = caps[0][2]
     check("a top-page continued caption without opposite-side content is not "
           "rescued as a side caption",
-          side_caption_position(page, top_cont), None)
+          caption_placement(page, top_cont).side, None)
     got = list(detect_figures(doc))
     ok("...and preserves the batch fixture's degenerate failure",
        got[0][3].is_empty and "degenerate rect" in got[0][5])
@@ -3155,7 +3146,7 @@ def run_self_test():
     ok("their aggregate is substantial top-band side evidence",
        top_anchor is not None and top_strength >= TOP_SIDE_RESCUE_STRENGTH)
     check("the aggregate selects the mirror-image side placement",
-          side_caption_position(page, multi_cap), "right")
+          caption_placement(page, multi_cap).side, "right")
     got = list(detect_figures(doc))[0]
     ok("...and the crop retains both separated panels without its caption",
        got[3].x0 <= 50 and got[3].x1 >= 252
@@ -3218,8 +3209,8 @@ def run_self_test():
            and r.y1 >= cap1.y0 and r.y0 <= cap1.y1
            for r in collect_content_rects(page)))
     check("the left column's caption is not read as a side caption",
-          side_caption_position(page, cap1, [cap2]), None)
-    check("...nor the right column's", side_caption_position(page, cap2, [cap1]),
+          caption_placement(page, cap1, [cap2]).side, None)
+    check("...nor the right column's", caption_placement(page, cap2, [cap1]).side,
           None)
     got = {g[1]: g for g in detect_figures(doc)}
     b1 = got["1"][3]
@@ -3254,9 +3245,9 @@ def run_self_test():
     caps = find_caption_blocks(page)
     by_num = {n: r for n, _, r in caps}
     check("a caption on the figure's side disqualifies the side reading",
-          side_caption_position(page, by_num["6"], [by_num["7"]]), None)
+          caption_placement(page, by_num["6"], [by_num["7"]]).side, None)
     check("...and with no such caption it is a side caption again",
-          side_caption_position(page, by_num["6"], []), "left")
+          caption_placement(page, by_num["6"], []).side, "left")
     doc.close()
 
     # Content that only CLIPS the caption's band on the way past is weak
@@ -3311,7 +3302,7 @@ def run_self_test():
     ok("...and the caption has a figure of its own directly above it",
        _bottom_evidence(cap5, collect_content_rects(page))[1] > 0.5)
     check("a caption with its own figure above it is a bottom caption",
-          side_caption_position(page, cap5), None)
+          caption_placement(page, cap5).side, None)
     place = caption_placement(page, cap5)
     ok("...on the scores, not a veto (side %.2f vs bottom %.2f)"
        % (place.side_score, place.bottom_score),
@@ -3329,7 +3320,7 @@ def run_self_test():
                       fontsize=8)
     caps2 = find_caption_blocks(page2)
     check("...and without it, the same caption reads as a side caption",
-          side_caption_position(page2, caps2[0][2]), "left")
+          caption_placement(page2, caps2[0][2]).side, "left")
     doc2.close()
     doc.close()
 
@@ -3351,7 +3342,7 @@ def run_self_test():
         page.insert_text((60, cap_y0 + 19), "it belongs to.", fontsize=8)
         caps = find_caption_blocks(page)
         check("a side caption at y0=%d (figure y=200-430) is a side caption"
-              % cap_y0, side_caption_position(page, caps[0][2]), "left")
+              % cap_y0, caption_placement(page, caps[0][2]).side, "left")
         got = list(detect_figures(doc))
         ok("...and its crop covers the figure, not the gap above the caption "
            "(y=%.0f-%.0f)" % (got[0][3].y0, got[0][3].y1),
@@ -3369,7 +3360,7 @@ def run_self_test():
     page.insert_text((60, 209), "above the figure's top edge.", fontsize=8)
     caps = find_caption_blocks(page)
     check("a caption starting above its figure's top edge is still a side "
-          "caption", side_caption_position(page, caps[0][2]), "left")
+          "caption", caption_placement(page, caps[0][2]).side, "left")
     got = list(detect_figures(doc))
     ok("...and its crop is the figure, not the gap above the caption",
        got[0][3].y0 <= 200 and got[0][3].y1 >= 430)
@@ -3399,7 +3390,7 @@ def run_self_test():
         caps = find_caption_blocks(page)
         cap = caps[0][2]
         check("a caption %.0fpt tall beside a 100pt figure is a side caption"
-              % cap.height, side_caption_position(page, cap), "left")
+              % cap.height, caption_placement(page, cap).side, "left")
         scores[n_lines] = caption_placement(page, cap).side_score
         got = list(detect_figures(doc))
         ok("...and its crop holds the figure (y=%.0f-%.0f)"
@@ -3433,8 +3424,8 @@ def run_self_test():
     caps = find_caption_blocks(page)
     by_num = {n: r for n, _, r in caps}
     check("an unrelated caption past the midline does not kill the side "
-          "reading", side_caption_position(page, by_num["14"],
-                                           [by_num["15"]]), "left")
+          "reading", caption_placement(page, by_num["14"],
+                                       [by_num["15"]]).side, "left")
     check("_caption_owns: a caption directly under the content",
           _caption_owns(by_num["15"], fitz.Rect(320, 480, 560, 620)), True)
     check("_caption_owns: a caption far below it",
@@ -3458,7 +3449,7 @@ def run_self_test():
         page.insert_text((60, 319), "above it.", fontsize=8)
         caps = find_caption_blocks(page)
         check("a %dpt-away decorative mark does not outweigh the figure "
-              "beside it" % gap, side_caption_position(page, caps[0][2]),
+              "beside it" % gap, caption_placement(page, caps[0][2]).side,
               "left")
         got = list(detect_figures(doc))
         ok("...and the crop is the figure, not the mark (x0 %.0f > 200)"
@@ -3552,7 +3543,7 @@ def run_self_test():
         page.insert_text((360, cap_y0 + 19), "of its figure.", fontsize=8)
         caps = find_caption_blocks(page)
         check("a right-hand side caption at y0=%d" % cap_y0,
-              side_caption_position(page, caps[0][2]), "right")
+              caption_placement(page, caps[0][2]).side, "right")
         got = list(detect_figures(doc))
         ok("...and its crop covers the figure to its left",
            got[0][3].y0 <= 200 and got[0][3].y1 >= 430 and got[0][3].x0 <= 52)
@@ -3572,7 +3563,7 @@ def run_self_test():
     caps = find_caption_blocks(page)
     by_num = {n: r for n, _, r in caps}
     check("a caption centred on a tall figure IS a side caption",
-          side_caption_position(page, by_num["8"], [by_num["9"]]), "left")
+          caption_placement(page, by_num["8"], [by_num["9"]]).side, "left")
     diag = {}
     bb = bbox_for_figure(page, by_num["8"],
                          [(n, r) for n, _, r in caps],

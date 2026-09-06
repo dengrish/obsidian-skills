@@ -135,10 +135,9 @@ target ambiguous. Preserve it until the intended owner is established.
 
 The **whole recognized discipline or misc MOC belongs to Task 3**. Within an authorized
 closure, regenerate its complete content from the derived placement plan and
-publish it through the shared safe-write protocol. Old marker comments,
+publish it through the shared safe-write protocol. Old comments,
 frontmatter, headings, and prose are obsolete generated formatting and are
-removed during regeneration. No marker pair, tree-span identification, or
-separate formatting approval is required. Whole-note ownership does not
+removed during regeneration under that whole-file ownership. This does not
 extend to unknown files in `MOCs/`, other vault notes, or suggestion logs.
 
 A discipline MOC is a nested bullet list, for example:
@@ -153,7 +152,7 @@ A discipline MOC is a nested bullet list, for example:
 
 For discipline trees, use two spaces per level. Each bullet is either a piped entry link with its
 canonical readable title or an unlinked category term. There are no trailing
-descriptions, marker comments, H1, or frontmatter. Drop a trailing title
+descriptions, comments, H1, or frontmatter. Drop a trailing title
 parenthetical that repeats this discipline's name, but retain a finer
 qualifier: `[[Wiki/clustering-machine-learning|Clustering]]` is suitable in the
 machine-learning MOC, while `[[Wiki/pruning-decision-trees|Pruning (decision trees)]]`
@@ -163,9 +162,10 @@ The link target always retains the entry path and slug.
 **Preflight paths before writing.** `MOCs/` must be a real directory under the
 selected vault; create it only when absent. Reject a non-directory occupant,
 directory or leaf symlink, unreadable path, case/NFC-equivalent folder or file
-collision, and duplicate canonical/legacy MOC ownership. Inventory existing
-canonical and legacy paths before initializing a missing file. A legacy owner
-requires the layout migration below; never silently create a second MOC.
+collision, and duplicate canonical/old-root MOC ownership. Inventory existing
+canonical paths and recognized old root occupants before initializing a missing
+file. Preserve an unexpected old root note and report its ownership conflict;
+never silently create a second MOC or move the old note during routine lint.
 Preserve the entire connected closure when ownership or readability is unsafe.
 
 Before introducing a new MOC basename, inspect links to any Wiki entry sharing
@@ -185,8 +185,7 @@ per-file guards do not make the group transactional.
 **Inactive discipline MOCs.** If a discipline has zero valid members, preserve its
 existing MOC byte-for-byte and report it as inactive, including stale links or
 obsolete formatting. Do not create an empty replacement or delete the file
-unless cleanup is explicitly requested. An authorized layout migration may
-still move an inactive MOC while preserving its content. These preserved
+unless cleanup is explicitly requested. These preserved
 findings do not prevent the active hierarchy from completing, but must not be
 described as repaired. **Misc is different:** refresh its entire list from all
 entries tagged only `#misc` in the authorized misc closure. If that list is empty,
@@ -194,41 +193,11 @@ clear an existing misc file to an empty file (no heading or comment) and keep it
 An explicit request can create empty misc; never apply the inactive-discipline
 preservation rule to retain stale misc members.
 
-## Migrate the legacy layout
-
-The former path is `<vault>/<discipline-slug>-moc.md`; the canonical path is
-`<vault>/MOCs/<discipline-slug>.md`. A request to migrate or reorganize MOCs into
-this layout authorizes the move and its proven reference repairs. Ordinary
-lint reports existing legacy owners and proposed mappings; installing a new
-plugin version alone does not authorize moving vault files.
-
-1. Inventory old and new paths, including portable equivalents. Snapshot the
-   complete old file. If both paths already exist, preserve both and report
-   duplicate ownership; equal bytes do not establish one owner.
-2. Before introducing the new basename, record affected bare entry-link owners.
-   Qualify proven Wiki destinations as needed. Identify actual links to the
-   exact old MOC in the authorized reference scope, including parents,
-   body/navigation links, transclusions, and relative Markdown links. Retarget
-   them while retaining labels, heading/block anchors, and surrounding text.
-   Check relative links inside the moved note too. Never replace matching
-   text in code, examples, URLs, or unrelated notes or guess ambiguous owners.
-   A required reference repair outside scope is a reported blocker.
-3. Publish the destination exclusively and conditionally update snapshotted
-   inbound files. In an authorized active Task 3 closure, regenerate the whole
-   MOC and parents together, removing obsolete marker/prose formatting. For a
-   path-only move or inactive MOC, preserve content except proven reference
-   adjustments; migration does not expand the hierarchy scope.
-4. Verify the destination and every changed reference before conditionally
-   removing the exact snapshotted old pathname. A later occupant survives.
-   If interrupted, recover the authorized mapping/closure from current files
-   and recorded snapshots; never overwrite either path to force completion.
-
 ## Read diagnostics and verify completion
 
 `hierarchy_diagnostic` describes current files; it never grants write scope.
 
-- `placement_gaps` records missing and represented disciplines per entry;
-  `placed_unparented` is its compatibility slug projection. Recompute included
+- `placement_gaps` records missing and represented disciplines per entry. Recompute included
   entries' complete unions; preserve out-of-scope findings.
 - `unresolved_parents` uses `missing`, `ambiguous`, `unparsed`,
   `unreadable`, `legacy-moc`, or `noncanonical-moc`. A real Wiki file outranks
@@ -241,8 +210,9 @@ plugin version alone does not authorize moving vault files.
   already produce a misc placement gap. Recompute only where valid membership
   and the authorized closure establish the complete parent union.
 - `moc_inventory_findings` and `legacy_moc_states` establish path ownership,
-  including unsafe/noncanonical paths, duplicates, legacy locations, unknown
-  MOC names, and inactive canonical MOCs. Whole-note ownership applies only
+  including unsafe/noncanonical paths, duplicates, unexpected old root occupants,
+  unknown MOC names, and inactive canonical MOCs. Old root notes are report-only
+  occupants outside generated ownership. Whole-note ownership applies only
   after a recognized discipline or misc pathname has a unique safe owner.
 - `moc_file_states` is `missing`, `empty`, `readable`, or `unreadable`.
   Missing/empty active files can be initialized; readable recognized files
@@ -251,15 +221,13 @@ plugin version alone does not authorize moving vault files.
 - `moc_consistency_findings` validates the **whole file**: bullet structure,
   depth, canonical targets/labels, entry coverage, duplicate placements,
   wrong-group links, discipline eponymous-root shape, misc list order/flatness, and parent-union
-  consistency. A `legacy-markers` finding identifies obsolete marker comments; standalone
-  old marker lines may be skipped for inference, but remain a repair finding.
-  Other prose, headings, fences, or frontmatter are malformed outline lines.
+  consistency. Comments, prose, headings, fences, and frontmatter are malformed
+  outline lines; none delimit a separately owned region.
   Exact union comparison requires every expected group MOC to be readable/empty and
   structurally parseable with usable placements; any unsafe linked ancestor
   or occurrence blocks inference, even if another occurrence is usable.
 - `self_parented` and `parent_cycles` identify edges to recompute from the
-  derived hierarchy. An empty `per_discipline` collection alone is not proof
-  of completed placement.
+  derived hierarchy. Their absence alone does not prove complete placement.
 
 After a completed closure, every included entry with valid membership has no placement gap,
 unresolved/invalid parent, self-parent, or cycle. Every active included MOC is

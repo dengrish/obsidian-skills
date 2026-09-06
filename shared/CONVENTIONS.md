@@ -9,7 +9,7 @@ this file disagree, this file is what a future edit should reconcile against.
 external values or content; consult §1's layout only when resolving folders or
 routes. Read the other sections when the active skill's workflow needs them;
 the contents below links directly to each subject. §5 (shared-module setup)
-and §10 (validation registries) are for development or troubleshooting, not
+and §10 (validation) are for development or troubleshooting, not
 required background for every vault run.
 
 **Contributor validation.** Run `python3 tests/test_conventions.py` after
@@ -29,8 +29,7 @@ remaining checks and packaging.
 2. [Frontmatter schemas](#2-frontmatter-schemas)
    — and [2a. Wiki entry](#2a-wiki-entry--wikimd),
    [2b. Source note](#2b-source-note--a-note-about-a-document),
-   [2c. The retired `topics:` variant](#2c-the-retired-topics-variant),
-   [2d. `read` — the user's review checkbox](#2d-read--the-users-review-checkbox)
+   [2c. `read` — the user's review checkbox](#2c-read--the-users-review-checkbox)
 3. [The discipline-tag enum](#3-the-discipline-tag-enum)
 4. [Slugs and filenames](#4-slugs-and-filenames)
 5. [Reaching `shared/scripts/` from a skill](#5-reaching-sharedscripts-from-a-skill)
@@ -38,10 +37,7 @@ remaining checks and packaging.
 7. [Source references](#7-source-references)
 8. [Figure naming and `Sources/Images/`](#8-figure-naming-and-sourcesimages)
 9. [Ownership split for linking](#9-ownership-split-for-linking)
-10. [Drift registry](#10-drift-registry)
-    — and [10a. Pending-defect registries](#10a-pending-defect-registries),
-    [10b. External skills](#10b-external-skills),
-    [10c. Paths that are deliberately not shipped](#10c-paths-that-are-deliberately-not-shipped)
+10. [Validation](#10-validation)
 
 ---
 
@@ -73,13 +69,11 @@ Suggestion logs use current skill names under `Reviews/`. The shared
 [SUGGESTIONS.md](SUGGESTIONS.md) owns attribution, open-item format, verified
 resolution cleanup, safe publication, and explicitly requested migration;
 do not duplicate those rules in skill-specific references.
-Existing root
-`<discipline>-moc.md` notes use the explicitly authorized
-[MOC layout migration](../skills/wiki-lint/references/hierarchy.md#migrate-the-legacy-layout);
-path migration remains separate from regenerating a recognized discipline
-MOC. Task 3 owns each recognized discipline MOC and `MOCs/misc.md` as a whole generated note and replaces obsolete comments or
-prose with the derived outline in its authorized active closure; it does not
-need marker-region or tree-span approval. This ownership does not extend to
+Unexpected root `<discipline>-moc.md` notes are preserved and reported; do not
+create a duplicate MOC or reinterpret their links as missing Wiki entries.
+Task 3 owns each recognized discipline MOC and `MOCs/misc.md` as a whole
+generated note and replaces obsolete comments or prose with the derived outline
+in its authorized active closure. This ownership does not extend to
 unknown files, unrelated notes, or suggestion logs.
 
 **Source routes.** Choose the skill by the requested result; these are not
@@ -564,7 +558,7 @@ read: false
   wiki-build's creation and body-change rules for entries it substantively
   rewrites or creates.
 - **`read` is a boolean, written `read: false` on creation.** It is the user's
-  review checkbox (`.obsidian/types.json` pins it as `checkbox`), and §2d is
+  review checkbox (`.obsidian/types.json` pins it as `checkbox`), and §2c is
   the whole rule for who may write it.
 
 **Quoting.** Canonical writers double-quote `title`, `description`, and every
@@ -582,20 +576,16 @@ booleans `true` and `false` — never `"false"`, never `yes`/`no`, never `0`/`1`
 a quoted value is a string and Obsidian's checkbox renders it as permanently
 checked.
 
-**`importance:` is retired.** It was measured across 123 generated entries at 97
-`high` / 7 `medium` / 1 `low` — a constant carrying no information — and left
-the schema. **New entries do not write the key at all. Legacy entries keep it,
-populated, in its historical slot between `tags:` and `parents:`; it is never
-stripped, never rewritten, and never flagged, at any severity.** It is not a
-required key and not an unexpected one — exactly the treatment a populated
-`parents:` gets. This is a one-line rule, not a migration.
+**Existing `importance:` values are preserved.** New entries omit this key.
+When present, keep its value unchanged between `tags:` and `parents:`; it is
+optional and is not a lint finding.
 
 **Body math has a canonical home too.** The vault-wide equation policy —
 coverage from the note's own prose, display form, notation, normalization —
 lives in `wiki-build/references/equations.md`, and wiki-lint enforces it
 vault-wide under its QC item 12. Both Wiki validators import the conservative
 `shared/scripts/equation_coverage.py` candidate floor; the executing agent
-still performs the complete semantic coverage review. Section 2d records what
+still performs the complete semantic coverage review. Section 2c records what
 that enforcement may and may not write.
 
 **Depended on by:** wiki-build (writes it), wiki-lint (validates and fixes
@@ -655,12 +645,6 @@ by producer:
   here goes looking for a URL the document does not print, or reconstructs a
   publisher landing page from a title.
 
-**The retired `url:` key.** This schema formerly carried a scalar `source` plus
-a `url` slot between it and `author` for the printed DOI/arXiv origin; both are
-gone — renamed and folded into the `sources` list above. A `url:` key on a note
-is now an off-schema key, and the list's shape is checked mechanically by
-`paper-summarize/scripts/note_lint.py` on the notes that skill writes.
-
 ```yaml
 ---
 title: Pancreatic cancer just met its match
@@ -711,32 +695,17 @@ read: false
 - `description` is ≤ 110 characters, same bar as a wiki entry's.
 - `tags` follows §3 exactly — block-form, `#`-prefixed, double-quoted, never a
   wikilink, or blank when no discipline applies.
-- `read` is the boolean of §2d, written `read: false` on creation, unquoted.
+- `read` is the boolean of §2c, written `read: false` on creation, unquoted.
 - `title` and `description` are unquoted unless the value contains a colon or
   another YAML metacharacter.
 
-**Two retired keys, and this schema is where they die.** A source note written
-by an older producer may carry `roots:` (a wikilink to a self-rooted discipline
-note) and/or `wiki:` (blank, or a wikilink into an index that no longer exists).
-Neither is part of this schema, nothing in this plugin reads either, and the
-notes they pointed into are gone — a `roots:` item is a permanently dangling
-link and a `wiki:` key is an empty slot. **Both are stripped, not preserved**,
-and a populated `roots:` is first migrated into `tags:`: its inner slug maps to
-a §3 enum member where one is unambiguous (`[[artificial-intelligence]]` →
-`"#machine-learning"`, the same expansion `scan_vault.py`'s `TAG_ALIASES`
-already applies), and is reported as unresolved where it is not; processing still completes.
+**Preserve unexpected metadata.** New notes use this schema. When updating an
+existing note, preserve fields outside the schema and report any that prevent
+a safe rewrite; do not silently delete them or infer a metadata migration.
+This does not authorize wiki-add to rewrite a reused source note: its
+existing-source boundary remains read-only.
 
-This is a deliberate exception to §1's *legacy files are left alone*, and the
-only one: it is the user's standing instruction, the keys carry no information
-that `tags:` does not carry better, and leaving them means every clipping note
-in the vault has one of two shapes forever. `topics:` (§2c) is **not** in this
-exception — it is recorded as retired but left in place, because nothing has
-been asked about it.
-This repair rule does not authorize wiki-add to rewrite a reused source note;
-its existing-source boundary remains read-only.
-
-**Depended on by:** clipping-clean (writes it for a cleaned clipping;
-strips the two retired keys on any note it rewrites), paper-summarize (writes
+**Depended on by:** clipping-clean (writes it for a cleaned clipping), paper-summarize (writes
 it for a summary note, and is the only producer whose `sources` opens with a
 wikilink and may carry a second, printed-origin URL item), wiki-add (writes new
 research extracts and reuses existing sources without edits), wiki-build
@@ -744,41 +713,7 @@ research extracts and reuses existing sources without edits), wiki-build
 filename stem is the source stem of §8 — but a **summary** note in the same
 folder is not an input to it, distinguished by `sources:` item 1 as §1 requires).
 
-### 2c. The retired `topics:` variant
-
-Notes about a document were once written under a different schema:
-
-<!-- canonical:frontmatter:retired-topics -->
-```
-title, type, source, url, author, published, created, description, topics
-```
-<!-- /canonical -->
-
-— classifying with `topics:` (free-form wikilinks into a vault-root registry
-note) instead of `tags:` (the closed 28-value enum of §3).
-
-**It is retired in favour of 2b**, and nothing in this plugin writes it: the
-producer that did is no longer part of the roster, and the vault-root registry
-it classified into has no reader here — nothing looks a topic up, nothing
-validates one. A vault that has been around a while may still hold notes in this
-shape; they are the user's files (§1) and are left alone.
-
-The schema is stated here, rather than deleted, so the test can **recognise** it
-if it reappears in a skill and report it as a retired schema rather than as an
-unrecognised one — see §10a. Any skill found stating this field order is
-restating a dead convention, not documenting a live one.
-
-**Nothing in the tree states it, which is the point and was also the problem.**
-A block no skill matches has no consumer, so for a while this one bound
-nothing: a field renamed inside it, or all eight of the others renamed, left the
-suite green with an identical check count. The harness now holds it to a fixture
-— the key list of a note actually written this way — and asserts both that this
-block still *is* that shape and that a note in that shape classifies as retired
-rather than as the live §2b schema it shares seven keys with. That makes this
-the one block the test pins rather than merely reads, which is right for a
-historical record: the old notes are not going to change.
-
-### 2d. `read` — the user's review checkbox
+### 2c. `read` — the user's review checkbox
 
 Both schemas carry it, it means the same thing in both, and it is the only
 field in this vault whose value is **the user's to set**. `.obsidian/types.json`
@@ -904,9 +839,7 @@ tags:
 ```
 
 - **Tags are not wikilinks.** They reference no note, need no target file, and
-  require no additional entry. (This is the load-bearing consequence of
-  replacing the old `roots:` field, which *was* a wikilink to a self-rooted
-  discipline note. Those notes no longer exist.)
+  require no additional entry.
 - **The quotes are mandatory.** An unquoted `- #machine-learning` parses as a
   YAML comment and the discipline is silently lost.
 - **Wiki cardinality: one or more.** Most entities have a single canonical
@@ -1127,7 +1060,7 @@ and wiki-lint (4a, 4b); wiki-add (4a, 4b and the existing URL-origin rule in 4c)
 The plugin installs as one tree, so a skill script can reach `shared/scripts/`
 by walking up from its own `__file__`. But a skill can also be **extracted
 alone**, and then there is no `shared/` above it. Three things must not happen:
-vendoring a second copy of the algorithm (§10 is what that costs), dying with
+vendoring a second copy of the algorithm, dying with
 a bare `ModuleNotFoundError` that tells the user nothing, or letting an
 unrelated module on `PYTHONPATH` shadow a sibling script module.
 
@@ -1746,7 +1679,7 @@ producer-mapped external-artifact repair is narrower: it rewrites only exact
 reported Wiki/MOC dependencies, re-runs the producer's probe, and leaves final
 artifact cleanup to that producer.
 Routine lint preserves `created:` and `updated:` and never changes the meaning
-of `read:`. The only permitted review-field edit is §2d's spelling normalization;
+of `read:`. The only permitted review-field edit is §2c's spelling normalization;
 unknown or absent review state is reported, not supplied. The run report is
 the audit trail. Routine lint creates no entries: an unresolved target becomes
 plain text and, when it looks like a real gap, a missing-entry candidate for
@@ -1794,172 +1727,11 @@ not produce a wrong entry; it produces perpetual churn across the whole vault.
 
 ---
 
-## 10. Drift registry
+## 10. Validation
 
-This section is the parking place for a convention that is temporarily violated
-somewhere in the tree. It exists so a known gap can be recorded *by name*,
-itemised in the run report, without weakening the check that found it — a
-registered entry downgrades that one assertion to `PENDING` instead of `FAIL`.
-
-**Registering a defect does not make the run exit 0.** A `PENDING` exits
-non-zero like a failure, and `--allow-pending` is the only way to ask for
-otherwise. It used to be the reverse — strict was opt-in — which meant a
-fictional name added to a block below turned a `FAIL` into `PASS-WITH-PENDING`
-and exit **0**: an unattended gate reading the exit code was greened by an edit
-to this file. Parking a defect buys a readable report, never a green light.
-
-**The pending-defect registries (§10a, §10b) are currently empty, and that is
-the intended steady state.** Every entry that has ever been parked in one has
-since been fixed and its line deleted. (§10c's block is different in kind — a
-registry of settled decisions, not parked defects — and legitimately holds a
-line.)
-
-**To park one:** add its key to the matching block below. The harness reads these
-blocks by name — a registry line whose violation no longer exists is reported as
-stale, with an instruction to delete it. The list can only shrink: a line is removed only by an explicit repository
-edit, and nothing keeps one alive but a real violation.
-
-**The key is not free-form prose.** Each block is consumed by a specific check,
-which looks up a specific string, and a line that is not that string registers
-nothing while looking as though it did — the failure stays a hard FAIL and the
-line reads like a fix. The shape is per block, not per section:
-
-| Block | Key shape |
-|---|---|
-| `canonical:slug-duplicates` | repo-relative file path — `skills/wiki-build/references/writing.md` |
-| `canonical:pending-figure-text` | repo-relative file path |
-| `canonical:pending-frontmatter` | repo-relative file path |
-| `canonical:pending-skill-edits` | the path **and** the pointer it holds, `<path> :: <token>` |
-| `canonical:external-skills` | the bare name, no path |
-| `canonical:absent-paths` (§10c) | the file **and** the path it names, `<path> :: <token>` — not a pending defect, see §10c |
-
-One key per line, nothing else on the line. The `canonical:external-skills`
-block is the one whose key is written bare —
-`flashcards-review`, never a path — because the name is the whole of what
-§10b matches on.
-
-`canonical:pending-skill-edits` is the one that does not follow its section's
-shape, and getting it wrong is worse than not registering at all: the check
-keys on the *pair*, because one file can point at several missing paths and
-parking the file alone would park every one of them. A path by itself matches
-no pointer, and a line that matches nothing is reported as stale — so the
-documented-looking form yields **two** FAILs, the unfixed pointer and the
-registry line, where the right form yields one PENDING.
-
-### 10a. Pending-defect registries
-
-Four checks park here, each with its own block, because each looks up a different
-kind of violation and a shared list would let a key silently satisfy the wrong
-one. **All four are empty, which is the intended steady state.**
-
-`canonical:slug-duplicates` — a second copy of the slug algorithm under `skills/`, pending
-removal (§4a). Registering one does **not** exempt it from the agreement test: a
-vendored copy that *disagrees* is still a hard failure.
-
-<!-- canonical:slug-duplicates -->
-```
-```
-<!-- /canonical -->
-
-`canonical:pending-figure-text` — a file still stating the over-strict `[stem]_fig_` glob
-that §8a forbids a consumer from matching on.
-
-**Its reach is narrower than that description.** The block is consulted for three
-of the check's shapes — a near-miss figure token (`_figure_1.png`, `_figs…`,
-`_fig-3.png` — a name §8b does not produce), a figure filename spelled with the
-wrong separator, and prose describing the old `_fig<numbers>` split as current. The strict-glob
-shapes it is named for, both the literal one and its prose form, are hard FAILs
-with no registry lookup, so a file stating that glob cannot be parked at all.
-
-<!-- canonical:pending-figure-text -->
-```
-```
-<!-- /canonical -->
-
-`canonical:pending-frontmatter` — a file still stating the retired `topics:` field order of
-§2c. This is the block §2c's *recognise it rather than mistake it for an
-unrecognised one* refers to: a registered file is reported as carrying a **retired**
-schema, an unregistered one as carrying an unknown schema.
-
-<!-- canonical:pending-frontmatter -->
-```
-```
-<!-- /canonical -->
-
-`canonical:pending-skill-edits` — a file still naming a stale path for `slugify.py`, from
-before it moved into `shared/scripts/` (§5). Two scripts once broke exactly this
-way when the module moved and their imports were not updated, which is why the
-harness runs every bundled script rather than trusting that it parses.
-
-<!-- canonical:pending-skill-edits -->
-```
-```
-<!-- /canonical -->
-
-### 10b. External skills
-
-A name used as a skill that is **not** a directory under `skills/` is a hard
-failure by default, because that is what the preamble's third bullet describes: a
-contract with a skill that is not installed is never enforced and never fails —
-the work just quietly does not happen. This block is the one exception, for a
-name that is deliberately outside the roster and expected to stay that way.
-
-**One block, two readers.** The contract-name-resolution check consults it
-over the files under `skills/` — except its routing-frame reader, which is
-plugin-wide; the skill-roster check consults it over every file in the
-plugin. Both report a registry line that matched nothing as stale, so a name
-is parkable only where the corpora that read it overlap. Register one for a
-reference living in `README.md` or in this file and, unless that reference
-is an explicit routing frame, the narrower check never sees it: it calls the
-line stale and fails, while the wider check reports the reference itself as
-PENDING. Outside `skills/`, reword the reference rather than registering it.
-
-**It is empty, and the bar for adding to it is high.** A tool that genuinely lives
-outside this plugin should be *named as what it is* rather than registered as a
-skill: the Obsidian Spaced Repetition plugin that owns a flashcard's scheduling
-attachments and retained block IDs is referred to by name and by its
-`.obsidian/plugins/` path, not as a skill, so it needs no entry here. Register a
-name only when it really is a skill, really is
-expected to be installed separately, and the reference cannot be reworded.
-
-<!-- canonical:external-skills -->
-```
-```
-<!-- /canonical -->
-
-### 10c. Paths that are deliberately not shipped
-
-A `references/…` or `scripts/…` pointer at a file that is not in the tree is a
-hard failure: it reads as an instruction to consult rules that are not there.
-This block is the exception, for the case where *not shipping the file is the
-fix* rather than the bug.
-
-**One line per (file, token) pair** — `<path> :: <token>`, the same shape as
-`canonical:pending-skill-edits` and for the same reason: one file can name
-several absent paths, and parking the file alone would park every one of them.
-
-**This is not a pending-defect registry.** A line here is a settled decision,
-reported as a pass, not a parked violation — it costs no `PENDING` and does not
-change the exit code. What keeps it honest is the same rule as every block above: a line
-that stops matching anything is reported as stale with an instruction to delete
-it, so the list can only shrink.
-
-**Registering a path does not excuse explaining it.** The file must still say,
-next to the pointer, why the file is not there — that sentence is what a reader
-hits. Until this block existed, that sentence was also the *only* thing the
-harness looked at: any of `no longer`, `used to ship` or `does not exist`,
-anywhere in the sentence around a broken pointer, turned it into two passes.
-An exemption that broad can be written by accident, and nothing counted how
-many had been.
-
-<!-- canonical:absent-paths -->
-```
-skills/clipping-clean/references/lottie-recovery.md :: scripts/lottie_to_gif.py
-```
-<!-- /canonical -->
-
-The one entry: clipping-clean's Lottie→GIF converter is written to a temp
-file at runtime and run from there. It is a documented optional rendering
-recipe, not a bundled script. A complete plugin install carries `scripts/`;
-the exception only covers this generated helper. The reference explains how
-to create and invoke it by its actual temporary path.
+Run the checks in the [development guide](../README.md#developing-and-packaging)
+after changing shared contracts or skills. The convention suite checks the
+current schemas, skill roster, references, and script interfaces and runs the
+bundled self-tests. Every detected defect is a failure; fix the cause before
+distributing the plugin. Keep historical decisions in Git history, not in
+runtime instructions or validation-exception registries.

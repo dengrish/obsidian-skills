@@ -515,28 +515,21 @@ def mark_reviewed(path, entries, dry_run=False, allowed_stems=None):
     return recorded
 
 
-def load_manifest(path, with_snapshot=False):
-    """{figure filename: sha256} recorded by earlier runs, or {} when absent.
+def load_manifest(path):
+    """Return ({figure filename: sha256}, snapshot), with {} when absent.
 
     The returned snapshot distinguishes a missing file from an existing empty
     manifest. Missing ownership records never claim occupied image names;
     explicit absent-manifest migration is handled by `adopt_legacy_files`.
     """
-    manifest, snapshot = read_manifest_snapshot(path)
-    return (manifest, snapshot) if with_snapshot else manifest
+    return read_manifest_snapshot(path)
 
 
-def save_manifest(path, manifest, expected=None, return_snapshot=False):
-    """Rewrite ownership records; False means the run must report failure.
-
-    ``return_snapshot`` lets a long batch carry the version just published
-    into the next conditional write. The default boolean result preserves the
-    small programmatic API used by older callers.
-    """
+def save_manifest(path, manifest, expected=None):
+    """Return the published snapshot, or False on a reported save failure."""
     try:
-        snapshot = write_manifest(path, manifest, MANIFEST_HEADER,
-                                  expected=expected)
-        return snapshot if return_snapshot else True
+        return write_manifest(path, manifest, MANIFEST_HEADER,
+                              expected=expected)
     except (OSError, ValueError) as e:
         print(f"note: could not write {path} ({e}) — the next run cannot tell "
               f"its own figures from another skill's", file=sys.stderr)
@@ -885,7 +878,7 @@ def _figure_slot_conflict(out_dir, stem, fig_suffix, out_path):
     )
 
 
-def _note_output(result, seen_hashes, out_path, fig_num, stem, manifest=None,
+def _note_output(result, seen_hashes, out_path, fig_num, stem, manifest,
                  digest=None):
     """Record a figure's bytes and report a byte-identical twin, if any.
 
@@ -911,9 +904,8 @@ def _note_output(result, seen_hashes, out_path, fig_num, stem, manifest=None,
             digest = _sha256(out_path)
         except OSError:
             return
-    if manifest is not None:
-        name = os.path.basename(out_path)
-        manifest[manifest_key(manifest, name) or name] = digest
+    name = os.path.basename(out_path)
+    manifest[manifest_key(manifest, name) or name] = digest
     first = seen_hashes.setdefault(digest, out_path)
     if os.path.basename(first) != os.path.basename(out_path):
         same_stem = os.path.basename(first).startswith(stem + "_fig")
@@ -921,7 +913,7 @@ def _note_output(result, seen_hashes, out_path, fig_num, stem, manifest=None,
 
 
 def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
-                reviewed=(), seen_hashes=None, manifest=None,
+                reviewed=(), seen_hashes=None, *, manifest,
                 chapter_pdfs=(), chapter_caption_cache=None,
                 manifest_commit=None):
     """Detect and extract every figure in one PDF.
@@ -935,9 +927,10 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
             stems is noticed instead of written silently. Pass the same dict
             to every call, seeded from `--out` by `seed_output_index`.
         manifest: {figure filename: sha256} this extractor wrote, from
-            `load_manifest`. Read before an "already exists" skip, so a file
-            another skill put at that name is reported rather than skipped;
-            updated in place with every figure written.
+            `load_manifest`'s records. Required even when empty. Read before
+            an "already exists" skip, so a file another skill put at that name
+            is reported rather than skipped; updated in place with every
+            figure written.
         manifest_commit: optional zero-argument callback invoked immediately
             after each published crop is added to ``manifest``. The CLI uses
             it to persist ownership incrementally instead of leaving an entire
@@ -1013,14 +1006,12 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                             pages. Also not an OCR problem.
         figures:    list  — figure labels seen (for logging)
     """
+    if not isinstance(manifest, dict):
+        raise TypeError("manifest must be an explicit ownership dictionary")
     stem = pdf_path.stem
     reviewed = set(reviewed)
     if seen_hashes is None:
         seen_hashes = {}
-    # `manifest is None` means "no ownership information was supplied", which
-    # is NOT the same as an empty manifest: an empty one says nothing on disk
-    # is ours, and every existing figure would be reported as another skill's.
-    # Callers that have no manifest get the old unconditional skip.
     result = {
         "extracted": 0,
         "skipped": 0,
@@ -1153,8 +1144,7 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
             # Prior-run idempotent skip: file existed before this run started.
             existed = os.path.lexists(out_path)
             if existed:
-                why, digest = (_foreign_occupant(manifest, out_path)
-                               if manifest is not None else ("", None))
+                why, digest = _foreign_occupant(manifest, out_path)
                 if why:
                     # NOT a skip. `Sources/Images/` is shared with
                     # clipping-clean, and a file at this name that this
@@ -1184,20 +1174,6 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                     _note_output(result, seen_hashes, out_path, fig_num, stem,
                                  manifest, digest=digest)
                     continue
-                # `manifest is None` preserves the programmatic API's legacy
-                # overwrite behavior, but publication still needs an exact
-                # byte snapshot to reject a different occupant that arrives
-                # while the replacement crop is rendering.
-                if digest is None:
-                    try:
-                        digest = _sha256(out_path)
-                    except OSError as exc:
-                        result["occupied"].append((
-                            fig_num, out_path,
-                            "its bytes cannot be snapshotted for overwrite (%s)" % exc,
-                        ))
-                        written_this_run[out_path] = raw_label
-                        continue
                 replace_digest = digest
             else:
                 # The semantic slot and exact path are both free. This caption
@@ -2149,32 +2125,36 @@ def run_self_test():
         check("_sha256 agrees for identical bytes", _sha256(d1), _sha256(d2))
         ok("_sha256 differs for different bytes", _sha256(d1) != _sha256(d3))
         seen, res = {}, {"duplicates": []}
-        _note_output(res, seen, d1, "1", "Doe_One_2025")
+        _note_output(res, seen, d1, "1", "Doe_One_2025", manifest={})
         check("the first figure is not a duplicate of itself",
               res["duplicates"], [])
-        _note_output(res, seen, d2, "1", "Doe_Two_2025")
+        _note_output(res, seen, d2, "1", "Doe_Two_2025", manifest={})
         check("a byte-identical figure under another stem",
               res["duplicates"], [("1", d1, False)])
         res["duplicates"] = []
-        _note_output(res, seen, d3, "2", "Doe_One_2025")
+        _note_output(res, seen, d3, "2", "Doe_One_2025", manifest={})
         check("different bytes are not a duplicate", res["duplicates"], [])
         # Same stem, same bytes: two captions the detector could not separate.
         d4 = os.path.join(tmp, "Doe_One_2025_fig_3.png")
         with open(d4, "wb") as fh:
             fh.write(b"same")
         res["duplicates"] = []
-        _note_output(res, seen, d4, "3", "Doe_One_2025")
+        _note_output(res, seen, d4, "3", "Doe_One_2025", manifest={})
         check("a byte-identical figure under the SAME stem is flagged apart",
               res["duplicates"], [("3", d1, True)])
         res["duplicates"] = []
-        _note_output(res, seen, os.path.join(tmp, "gone.png"), "9", "Doe_X_2025")
+        _note_output(res, seen, os.path.join(tmp, "gone.png"), "9", "Doe_X_2025", manifest={})
         check("a figure that is not on disk is not a duplicate",
               res["duplicates"], [])
+
+        # Geometry fixtures carry only ownership established by their own
+        # prior extractions, separately for each output directory.
+        geometry_manifests = defaultdict(dict)
 
         # --- process_pdf: which bucket each PDF lands in -------------------
         out = os.path.join(tmp, "Images")
         os.makedirs(out)
-        r = process_pdf(a, out, dpi=72)
+        r = process_pdf(a, out, dpi=72, manifest=geometry_manifests[os.fspath(out)])
         check("a normal PDF: figures found", r["figures"], ["1", "S2"])
         check("a normal PDF: figures written", r["extracted"], 2)
         check("a normal PDF: nothing failed", r["failures"], [])
@@ -2184,10 +2164,11 @@ def run_self_test():
            os.path.exists(os.path.join(out, "Doe_Figs_2025_fig_1.png"))
            and os.path.exists(os.path.join(out, "Doe_Figs_2025_fig_S2.png")))
         # Idempotent: the second run skips what the first wrote.
-        r2 = process_pdf(a, out, dpi=72)
+        r2 = process_pdf(a, out, dpi=72, manifest=geometry_manifests[os.fspath(out)])
         check("a re-run skips what exists", (r2["extracted"], r2["skipped"]),
               (0, 2))
-        r3 = process_pdf(a, out, dpi=72, overwrite=True)
+        r3 = process_pdf(a, out, dpi=72, overwrite=True,
+                         manifest=geometry_manifests[os.fspath(out)])
         check("--overwrite re-extracts", (r3["extracted"], r3["skipped"]),
               (2, 0))
         reviewed_manifest = {
@@ -2217,13 +2198,13 @@ def run_self_test():
                    ["Doe_Figs_2025_fig_1.png", "Doe_Figs_2025_fig_S2.png"]]))
 
         scan = process_pdf(_st_scan_pdf(os.path.join(tmp, "Doe_Scan_2025.pdf")),
-                           out, dpi=72)
+                           out, dpi=72, manifest=geometry_manifests[os.fspath(out)])
         check("a scan has no text", scan["had_text"], False)
         check("a scan is not an open error", scan["open_error"], "")
         check("a scan has no zero-page flag", scan["no_pages"], False)
 
         html = process_pdf(_st_html_pdf(os.path.join(tmp, "Doe_Html_2025.pdf")),
-                           out, dpi=72)
+                           out, dpi=72, manifest=geometry_manifests[os.fspath(out)])
         ok("an HTML page named .pdf is an open error, not a scan",
            bool(html["open_error"]))
         check("...and is not reported as textless (it has text)",
@@ -2231,13 +2212,13 @@ def run_self_test():
 
         zero = process_pdf(
             _st_zero_page_pdf(os.path.join(tmp, "Doe_Zero_2025.pdf")), out,
-            dpi=72)
+            dpi=72, manifest=geometry_manifests[os.fspath(out)])
         check("a zero-page PDF", zero["no_pages"], True)
         check("...and is not an open error", zero["open_error"], "")
 
         enc = process_pdf(
             _st_encrypted_pdf(os.path.join(tmp, "Doe_Enc_2025.pdf")), out,
-            dpi=72)
+            dpi=72, manifest=geometry_manifests[os.fspath(out)])
         ok("an encrypted PDF is reported, not raised through the run",
            "encrypted" in enc["open_error"])
         ok("...and says how to fix it", "qpdf" in enc["open_error"])
@@ -2249,13 +2230,14 @@ def run_self_test():
         # is the behaviour under test, not something to let leak into the
         # self-test's own output.
         with contextlib.redirect_stderr(io.StringIO()):
-            bad_open = process_pdf(Path(junk), out, dpi=72)
+            bad_open = process_pdf(Path(junk), out, dpi=72,
+                                   manifest=geometry_manifests[os.fspath(out)])
         ok("an unreadable file is an open error", bool(bad_open["open_error"]))
 
         # A caption with no room above it: detected, degenerate, NOT written.
         top = process_pdf(
             _st_top_caption_pdf(os.path.join(tmp, "Doe_Top_2025.pdf")), out,
-            dpi=72)
+            dpi=72, manifest=geometry_manifests[os.fspath(out)])
         check("a degenerate bbox is detected", top["figures"], ["3"])
         check("...and counted as a failure, not an extraction",
               (top["extracted"], len(top["failures"])), (0, 1))
@@ -2282,7 +2264,7 @@ def run_self_test():
         # with one colour in it.
         nxt = process_pdf(
             _st_next_page_figure_pdf(os.path.join(tmp, "Doe_Next_2025.pdf")),
-            out, dpi=72)
+            out, dpi=72, manifest=geometry_manifests[os.fspath(out)])
         check("a caption whose figure is overleaf is detected",
               nxt["figures"], ["4"])
         check("...and its all-white crop is NOT an extraction",
@@ -2300,7 +2282,7 @@ def run_self_test():
         # reading zero.
         twocol = process_pdf(
             _st_two_column_pdf(os.path.join(tmp, "Doe_TwoCol_2025.pdf")),
-            out, dpi=72)
+            out, dpi=72, manifest=geometry_manifests[os.fspath(out)])
         check("both captions on a two-column page are found",
               sorted(twocol["figures"]), ["1", "2"])
         check("a crop holding another figure's caption is flagged",
@@ -2327,7 +2309,8 @@ def run_self_test():
 
             globals()["detect_figures"] = collision_reason_detector
             dropped_reason = process_pdf(
-                collision_reason_pdf, out, dpi=72, dry_run=True)
+                collision_reason_pdf, out, dpi=72, dry_run=True,
+                manifest=geometry_manifests[os.fspath(out)])
         finally:
             globals()["detect_figures"] = original_detect_figures
         check("a dropped caption collision contributes no crop warning",
@@ -2351,7 +2334,8 @@ def run_self_test():
         mdoc.save(merged_collision_pdf)
         mdoc.close()
         merged_collision = process_pdf(
-            Path(merged_collision_pdf), out, dpi=72, dry_run=True)
+            Path(merged_collision_pdf), out, dpi=72, dry_run=True,
+            manifest=geometry_manifests[os.fspath(out)])
         check("merged normalized captions reach the batch collision report",
               merged_collision["collisions"],
               [("Supplementary Figure 1", "Extended Data Figure 1")])
@@ -2373,7 +2357,7 @@ def run_self_test():
             globals()["detect_figures"] = occupied_reason_detector
             occupied_reason = process_pdf(
                 occupied_reason_pdf, occupied_reason_out, dpi=72,
-                dry_run=True)
+                dry_run=True, manifest=geometry_manifests[os.fspath(occupied_reason_out)])
         finally:
             globals()["detect_figures"] = original_detect_figures
         check("an occupied semantic slot contributes no crop warning",
@@ -2383,11 +2367,12 @@ def run_self_test():
 
         # A suspicious bbox, and the ledger that stops it being re-flagged.
         tiny_pdf = _st_tiny_fig_pdf(os.path.join(tmp, "Doe_Tiny_2025.pdf"))
-        tiny = process_pdf(tiny_pdf, out, dpi=72)
+        tiny = process_pdf(tiny_pdf, out, dpi=72, manifest=geometry_manifests[os.fspath(out)])
         check("a tiny figure is flagged", [w[0] for w in tiny["warnings"]], ["1"])
         ok("...with a reason", "width" in tiny["warnings"][0][1])
         tiny2 = process_pdf(tiny_pdf, out, dpi=72, overwrite=True,
-                            reviewed={("Doe_Tiny_2025", "1")})
+                            reviewed={("Doe_Tiny_2025", "1")},
+                            manifest=geometry_manifests[os.fspath(out)])
         check("a reviewed bbox stops being nagged about",
               (len(tiny2["warnings"]), len(tiny2["reviewed"])), (0, 1))
 
@@ -2401,7 +2386,8 @@ def run_self_test():
                          fontsize=9)
         pdoc.save(partial_pdf)
         pdoc.close()
-        part = process_pdf(Path(partial_pdf), out, dpi=72)
+        part = process_pdf(Path(partial_pdf), out, dpi=72,
+                           manifest=geometry_manifests[os.fspath(out)])
         check("a cited figure with no caption is reported missing",
               part["missing"], ["2"])
         ok("...and the citation count is kept", part["referenced"] >= 2)
@@ -2413,7 +2399,8 @@ def run_self_test():
                            "Figure 9 shows the omitted result.", fontsize=9)
         rodoc.save(reference_only_pdf)
         rodoc.close()
-        reference_only = process_pdf(Path(reference_only_pdf), out, dpi=72)
+        reference_only = process_pdf(Path(reference_only_pdf), out, dpi=72,
+                                     manifest=geometry_manifests[os.fspath(out)])
         check("a reference-only PDF can be PARTIAL with zero captions",
               (reference_only["figures"], reference_only["missing"]),
               ([], ["9"]))
@@ -2456,7 +2443,7 @@ def run_self_test():
         chapter = process_pdf(
             Path(chapter_pdf), out, dpi=72,
             chapter_pdfs=[Path(chapter_pdf), Path(sibling_pdf)],
-            chapter_caption_cache={})
+            chapter_caption_cache={}, manifest=geometry_manifests[os.fspath(out)])
         check("a different-prefix reference in an established split chapter is "
               "reported separately only after an exact dot-style sibling "
               "caption is found", chapter["cross_chapter"], ["6.6"])
@@ -2465,7 +2452,8 @@ def run_self_test():
         check("the local reference count excludes the classified external label",
               chapter["referenced"], 2)
         unproved = process_pdf(Path(chapter_pdf), out, dpi=72,
-                               chapter_pdfs=[], chapter_caption_cache={})
+                               chapter_pdfs=[], chapter_caption_cache={},
+                               manifest=geometry_manifests[os.fspath(out)])
         check("an absent sibling leaves a foreign-prefix reference PARTIAL",
               unproved["missing"], ["6.6", "7-2"])
         wrong_sibling_pdf = os.path.join(
@@ -2478,7 +2466,8 @@ def run_self_test():
         wdoc.close()
         wrong = process_pdf(
             Path(chapter_pdf), out, dpi=72,
-            chapter_pdfs=[Path(wrong_sibling_pdf)], chapter_caption_cache={})
+            chapter_pdfs=[Path(wrong_sibling_pdf)], chapter_caption_cache={},
+            manifest=geometry_manifests[os.fspath(out)])
         check("a sibling without the exact caption leaves the reference PARTIAL",
               wrong["cross_chapter"], [])
         unreadable_sibling = Path(
@@ -2486,18 +2475,20 @@ def run_self_test():
         unreadable_sibling.write_bytes(b"not a PDF")
         unreadable = process_pdf(
             Path(chapter_pdf), out, dpi=72,
-            chapter_pdfs=[unreadable_sibling], chapter_caption_cache={})
+            chapter_pdfs=[unreadable_sibling], chapter_caption_cache={},
+            manifest=geometry_manifests[os.fspath(out)])
         check("an unreadable sibling cannot prove a cross-chapter reference",
               unreadable["cross_chapter"], [])
         ambiguous = process_pdf(
             Path(chapter_pdf), out, dpi=72,
             chapter_pdfs=[Path(sibling_pdf), Path(wrong_sibling_pdf)],
-            chapter_caption_cache={})
+            chapter_caption_cache={}, manifest=geometry_manifests[os.fspath(out)])
         check("two same-book sibling candidates remain ambiguous and PARTIAL",
               ambiguous["cross_chapter"], [])
         nonchapter_pdf = os.path.join(tmp, "Geron_ChapterExcerpt_2025.pdf")
         shutil.copyfile(chapter_pdf, nonchapter_pdf)
-        nonchapter = process_pdf(Path(nonchapter_pdf), out, dpi=72)
+        nonchapter = process_pdf(Path(nonchapter_pdf), out, dpi=72,
+                                 manifest=geometry_manifests[os.fspath(out)])
         check("the same reference remains PARTIAL without a canonical chapter "
               "identity", nonchapter["missing"], ["6.6", "7-2"])
         check("a mixed numeric caption scheme keeps every miss as PARTIAL",
@@ -2511,8 +2502,10 @@ def run_self_test():
         one = _st_fig_pdf(os.path.join(tmp, "Doe_One_2025.pdf"))
         two = _st_fig_pdf(os.path.join(tmp, "Doe_Two_2025.pdf"))
         seen = {}
-        r_one = process_pdf(one, dup_dir, dpi=72, seen_hashes=seen)
-        r_two = process_pdf(two, dup_dir, dpi=72, seen_hashes=seen)
+        r_one = process_pdf(one, dup_dir, dpi=72, seen_hashes=seen,
+                            manifest=geometry_manifests[os.fspath(dup_dir)])
+        r_two = process_pdf(two, dup_dir, dpi=72, seen_hashes=seen,
+                            manifest=geometry_manifests[os.fspath(dup_dir)])
         check("the first copy is not a duplicate", r_one["duplicates"], [])
         check("the second copy is",
               [(f, os.path.basename(o), same)
@@ -2522,8 +2515,10 @@ def run_self_test():
         dry_dir = os.path.join(tmp, "dryrun")
         os.makedirs(dry_dir)
         seen = {}
-        d_one = process_pdf(one, dry_dir, dpi=72, dry_run=True, seen_hashes=seen)
-        d_two = process_pdf(two, dry_dir, dpi=72, dry_run=True, seen_hashes=seen)
+        d_one = process_pdf(one, dry_dir, dpi=72, dry_run=True, seen_hashes=seen,
+                            manifest=geometry_manifests[os.fspath(dry_dir)])
+        d_two = process_pdf(two, dry_dir, dpi=72, dry_run=True, seen_hashes=seen,
+                            manifest=geometry_manifests[os.fspath(dry_dir)])
         check("a dry run counts what it would extract",
               (d_one["extracted"], d_two["extracted"]), (1, 1))
         check("a dry run writes nothing", os.listdir(dry_dir), [])
@@ -2601,10 +2596,16 @@ def run_self_test():
         ok("a name we have no record of writing is occupied too",
            [f for f, _p, _w in never["occupied"]] == ["1"]
            and "no record" in never["occupied"][0][2])
-        # ...and a caller with no manifest at all keeps the old behaviour,
-        # rather than reading an empty one as "none of this is mine".
-        check("no manifest supplied means no ownership claim either way",
-              process_pdf(own_pdf, own_dir, dpi=72)["skipped"], 1)
+        for ownership_args in ({}, {"manifest": None}):
+            refused = False
+            try:
+                process_pdf(own_pdf, own_dir, dpi=72, overwrite=True,
+                            **ownership_args)
+            except TypeError:
+                refused = True
+            check("missing ownership state refuses before changing an occupant",
+                  (refused, Path(occupied_path).read_bytes()),
+                  (True, foreign_bytes))
 
         # The semantic slot uses portable stem/label identity, not the exact
         # PNG pathname. Clipping-owned JPG/WebP spellings must therefore block
@@ -2896,16 +2897,19 @@ def run_self_test():
            not os.path.lexists(os.path.join(
                unverifiable_dir, "Doe_Unverifiable_2025_fig_1.png")))
 
+        absent_records, absent_snapshot = load_manifest(os.path.join(tmp, "nope.tsv"))
         check("load_manifest on a file that does not exist",
-              load_manifest(os.path.join(tmp, "nope.tsv")), {})
+              (absent_records, absent_snapshot[0]), ({}, False))
         man_path = os.path.join(tmp, "man.tsv")
-        save_manifest(man_path, {"a_fig_1.png": "a" * 64, "b_fig_2.png": "b" * 64})
-        check("a manifest round-trips", load_manifest(man_path),
-              {"a_fig_1.png": "a" * 64, "b_fig_2.png": "b" * 64})
+        published_snapshot = save_manifest(
+            man_path, {"a_fig_1.png": "a" * 64, "b_fig_2.png": "b" * 64})
+        check("a manifest and its published snapshot round-trip",
+              load_manifest(man_path),
+              ({"a_fig_1.png": "a" * 64, "b_fig_2.png": "b" * 64},
+               published_snapshot))
         ok("...and explains itself at the top",
            open(man_path, encoding="utf-8").read().startswith("#"))
-        planned_manifest, manifest_expected = load_manifest(
-            man_path, with_snapshot=True)
+        planned_manifest, manifest_expected = load_manifest(man_path)
         concurrent_manifest = open(man_path, encoding="utf-8").read()
         concurrent_manifest += "late_fig_3.png\t" + "c" * 64 + "\n"
         with open(man_path, "w", encoding="utf-8", newline="") as fh:
@@ -3020,14 +3024,15 @@ def run_self_test():
         foreign_twin = Path(seed_dir) / "Doe_Prior_2025_fig_2.png"
         shutil.copyfile(str(clipping), str(foreign_twin))
         mixed_result = {"duplicates": []}
-        _note_output(mixed_result, mixed_seen, str(foreign_twin), "2", "Doe_Prior_2025")
+        _note_output(mixed_result, mixed_seen, str(foreign_twin), "2", "Doe_Prior_2025", manifest={})
         check("duplicates against an unclaimed clipping remain reportable",
               mixed_result["duplicates"], [("2", str(clipping), False)])
         foreign_twin.unlink()
         twin_seen = seed_output_index(seed_dir)
         # `a` renders the same pixels the prior run left on disk, under its
         # own stem: the same document reaching the source tree twice.
-        twin = process_pdf(a, seed_dir, dpi=72, seen_hashes=twin_seen)
+        twin = process_pdf(a, seed_dir, dpi=72, seen_hashes=twin_seen,
+                           manifest=geometry_manifests[os.fspath(seed_dir)])
         check("a twin of a figure written by an EARLIER run is reported",
               [(f, os.path.basename(o), same)
                for f, o, same in twin["duplicates"]][0],
@@ -3210,7 +3215,7 @@ def run_self_test():
             check("explicit adoption never replaces the occupant: " + kind,
                   legacy_png.read_bytes(), original)
             check("only an explicitly selected complete PNG receives ownership: " + kind,
-                  load_manifest(legacy_out / MANIFEST_FILE),
+                  load_manifest(legacy_out / MANIFEST_FILE)[0],
                   {legacy_png.name: _sha256(legacy_png)} if kind == "valid" else {})
             if kind != "valid":
                 ok("invalid explicit adoptions are reported before extraction",
@@ -3567,7 +3572,7 @@ def run_self_test():
                   sorted(p.name for p in collision_out.glob("*.png")),
                   ["Doe_Unique_2025_fig_1.png"])
             check("migration does not claim a colliding source's figures",
-                  sorted(load_manifest(collision_out / MANIFEST_FILE)),
+                  sorted(load_manifest(collision_out / MANIFEST_FILE)[0]),
                   ["Doe_Unique_2025_fig_1.png"])
 
         # A one-file --src is only the requested extraction scope, not proof
@@ -3618,7 +3623,7 @@ def run_self_test():
               sorted(path.name for path in vault_images.glob("*.png")),
               ["Doe_OnlyHere_2025_fig_1.png"])
         check("the recursive manifest never claims the colliding stem",
-              sorted(load_manifest(vault_images / MANIFEST_FILE)),
+              sorted(load_manifest(vault_images / MANIFEST_FILE)[0]),
               ["Doe_OnlyHere_2025_fig_1.png"])
 
         external_out = Path(tmp) / "deliberate-external-one-off"
@@ -3780,7 +3785,7 @@ def run_self_test():
               sorted(p.name for p in damaged_out.glob("*.png")),
               ["A_Damaged_2025_fig_1.png", "B_Healthy_2025_fig_1.png"])
         check("completed crops retain ownership after a page-analysis failure",
-              load_manifest(damaged_out / MANIFEST_FILE),
+              load_manifest(damaged_out / MANIFEST_FILE)[0],
               {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                for p in damaged_out.glob("*.png")})
         code, so, se = run(["--src", str(damaged_src), "--out", str(damaged_out),
@@ -3804,7 +3809,7 @@ def run_self_test():
                 interrupted = True
         check("Ctrl-C still interrupts the batch", interrupted, True)
         check("Ctrl-C saves ownership for the crop already published",
-              load_manifest(interrupted_out / MANIFEST_FILE),
+              load_manifest(interrupted_out / MANIFEST_FILE)[0],
               {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                for p in interrupted_out.glob("*.png")})
         check("the interruption fixture really wrote a crop before stopping",
@@ -4035,8 +4040,7 @@ def main(argv=None):
     # rendering a PNG. A protected or malformed ledger is not a fresh run.
     manifest_file = os.path.join(out_dir, MANIFEST_FILE)
     try:
-        manifest, manifest_snapshot = load_manifest(manifest_file,
-                                                    with_snapshot=True)
+        manifest, manifest_snapshot = load_manifest(manifest_file)
         manifest_existed = manifest_snapshot[0]
         if not args.dry_run:
             check_manifest_writable(manifest_file)
@@ -4214,8 +4218,7 @@ def main(argv=None):
         if not adoptions_stable:
             return 1
         next_snapshot = save_manifest(
-            manifest_file, manifest, expected=manifest_snapshot,
-            return_snapshot=True)
+            manifest_file, manifest, expected=manifest_snapshot)
         if not next_snapshot:
             return 1
         manifest_snapshot = next_snapshot
@@ -4226,8 +4229,7 @@ def main(argv=None):
         """Persist the ownership of the crop just published, with CAS."""
         nonlocal manifest_snapshot
         next_snapshot = save_manifest(
-            manifest_file, manifest, expected=manifest_snapshot,
-            return_snapshot=True)
+            manifest_file, manifest, expected=manifest_snapshot)
         if not next_snapshot:
             manifest_commit_failed[0] = True
             raise OSError("the ownership manifest could not be updated")

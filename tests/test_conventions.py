@@ -5,19 +5,9 @@
     python3 tests/test_conventions.py                 # human-readable report
     python3 tests/test_conventions.py -v              # also list every passing check
     python3 tests/test_conventions.py --json          # machine-readable
-    python3 tests/test_conventions.py --allow-pending # PENDING exits 0
 
-Exit codes: 0 all checks passed, 1 at least one FAIL **or PENDING**, 2 the
-harness itself could not run (missing CONVENTIONS.md, unparseable canonical
-block).
-
-Strict is the DEFAULT: a registered pending defect exits non-zero like a FAIL,
-so an unattended CI gate that only reads the exit code cannot be greened by
-registering the regression.  `--allow-pending` is the explicit opt-out for a
-pass that is deliberately working around a parked defect; `--strict` is
-accepted and ignored (it names what is now the default).  It used to be the
-reverse -- strict was opt-in -- and CONVENTIONS.md §10 records why that
-changed.
+Exit codes: 0 all checks passed, 1 at least one failure, 2 the harness itself
+could not run (missing CONVENTIONS.md or an unparseable canonical block).
 
 WHY THIS FILE EXISTS
 --------------------
@@ -32,20 +22,6 @@ Everything canonical is READ FROM CONVENTIONS.md, never hardcoded here.  If a
 convention changes, it changes in one place and this test follows.  The only
 values written into this file are the *adversarial slug inputs*, which are test
 data rather than convention.
-
-THREE RESULT CLASSES
---------------------
-  PASS     the check held.
-  FAIL     drift.  Exit code 1.  Reported with file and line.
-  PENDING  a known, registered defect that a skill edit (not a shared-layer
-           edit) must fix, listed in CONVENTIONS.md §10 / §10a / §10b.  Loud,
-           itemised, and NOT a pass -- but not a hard failure either, because
-           the tree cannot be made green from inside `shared/` and `tests/`.
-           Anything of the same shape that is *not* registered is a FAIL, so
-           the registry can only ever shrink.  Deleting a registry line
-           strictly strengthens this test.  A registry line that stops
-           matching anything is itself a FAIL: an allowlist that outlives its
-           defect is a standing licence to reintroduce it.
 
 VACUITY IS A FAILURE, NOT A PASS
 --------------------------------
@@ -155,9 +131,6 @@ class Report:
     def fail(self, check, message, where=""):
         self._add(check, "FAIL", where, message)
 
-    def pending(self, check, message, where=""):
-        self._add(check, "PENDING", where, message)
-
     def saw(self, check, what, n):
         """Record that a sub-check examined ``n`` candidate sites.
 
@@ -183,7 +156,7 @@ class Report:
                               "broken." % what)
 
     def counts(self):
-        c = {"PASS": 0, "FAIL": 0, "PENDING": 0}
+        c = {"PASS": 0, "FAIL": 0}
         for _, s, _, _ in self.results:
             c[s] += 1
         return c
@@ -191,7 +164,7 @@ class Report:
     def by_status(self, status):
         return [r for r in self.results if r[1] == status]
 
-    def render(self, verbose=False, allow_pending=False):
+    def render(self, verbose=False):
         out = []
         w = max((len(c) for c in self.checks), default=10)
         out.append("=" * 78)
@@ -203,20 +176,16 @@ class Report:
         for check in self.checks:
             rs = [r for r in self.results if r[0] == check]
             n_fail = sum(1 for r in rs if r[1] == "FAIL")
-            n_pend = sum(1 for r in rs if r[1] == "PENDING")
             n_pass = sum(1 for r in rs if r[1] == "PASS")
             if n_fail:
                 mark, tail = "FAIL", "%d failed" % n_fail
-            elif n_pend:
-                mark, tail = "PEND", "%d pending" % n_pend
             else:
                 mark, tail = " ok ", "%d checked" % n_pass
             out.append("[%s] %-*s  %s" % (mark, w, check, tail))
             for c, s, where, msg in rs:
                 if s == "PASS" and not verbose:
                     continue
-                prefix = {"PASS": "       .", "FAIL": "       x",
-                          "PENDING": "       ~"}[s]
+                prefix = {"PASS": "       .", "FAIL": "       x"}[s]
                 out.append("%s %s" % (prefix, msg))
                 if where:
                     out.append("         at %s" % where)
@@ -224,113 +193,30 @@ class Report:
         cnt = self.counts()
         out.append("-" * 78)
         if cnt["FAIL"]:
-            out.append("RESULT: FAIL  (%d failed, %d pending, %d passed)"
-                       % (cnt["FAIL"], cnt["PENDING"], cnt["PASS"]))
+            out.append("RESULT: FAIL  (%d failed, %d passed)"
+                       % (cnt["FAIL"], cnt["PASS"]))
             out.append("")
             out.append("Failures, in order:")
             for i, (c, _, where, msg) in enumerate(self.by_status("FAIL"), 1):
                 out.append("  %2d. [%s] %s" % (i, c, msg))
                 if where:
                     out.append("      %s" % where)
-        elif cnt["PENDING"]:
-            # Not "PASS".  A pending defect is a real defect, and calling the
-            # run a pass is how the registry turns into a place to hide one.
-            out.append("RESULT: PASS-WITH-PENDING  (%d checks, %d pending "
-                       "defect(s) below -- %s)"
-                       % (cnt["PASS"], cnt["PENDING"],
-                          "exit 0 because --allow-pending was passed"
-                          if allow_pending else
-                          "this run exits NON-ZERO; `--allow-pending` is the "
-                          "opt-out"))
         else:
-            out.append("RESULT: PASS  (%d checks, 0 pending)" % cnt["PASS"])
-
-        if cnt["PENDING"]:
-            out.append("")
-            out.append("PENDING -- registered in %s, awaiting an edit inside skills/:"
-                       % rel(CONVENTIONS))
-            for i, (c, _, where, msg) in enumerate(self.by_status("PENDING"), 1):
-                out.append("  %2d. [%s] %s" % (i, c, msg))
-                if where:
-                    out.append("      %s" % where)
-            out.append("")
-            out.append("  These are NOT passes. Each is a real defect with a named fix;")
-            out.append("  deleting its line from CONVENTIONS.md §10 turns it into a FAIL,")
-            out.append("  and registering one does not make this run exit 0.")
+            out.append("RESULT: PASS  (%d checks)" % cnt["PASS"])
         out.append("=" * 78)
         return "\n".join(out)
 
-    def exit_code(self, allow_pending=False):
-        """1 unless the tree is actually clean.
-
-        A PENDING is a real defect with a line in CONVENTIONS.md, and the
-        strict exit code used to be opt-in: adding one fictional name to
-        `canonical:external-skills` turned a FAIL into `PASS-WITH-PENDING` and
-        exit **0**, so an unattended gate reading only the exit code was
-        greened by an edit to a markdown file.  Refusing by default puts the
-        opt-out where it belongs: on whoever wants to ignore the defect, in the
-        command line, where it is visible in CI config rather than in prose.
-        """
-        c = self.counts()
-        if c["FAIL"]:
-            return 1
-        return 0 if allow_pending else (1 if c["PENDING"] else 0)
+    def exit_code(self):
+        """Return nonzero whenever a check failed."""
+        return 1 if self.counts()["FAIL"] else 0
 
 
 class HarnessError(Exception):
     """The test itself cannot run (as opposed to a check failing)."""
 
 
-class Registry:
-    """A pending-defect allowlist read from a CONVENTIONS.md canonical block.
-
-    Registries exist so the test can be *green-when-correct* while a defect it
-    cannot fix from inside `shared/` and `tests/` is still outstanding.  Three
-    properties keep that from becoming a rug to sweep things under:
-
-    * a registered defect is reported as PENDING -- itemised, with file and
-      line, in its own section of the summary -- never as a pass;
-    * anything of the same shape that is NOT registered is a hard FAIL, so the
-      registry can only ever shrink;
-    * a registry line that stops matching anything is reported as stale, with
-      an instruction to delete it -- so the allowlist cannot outlive the defect
-      and quietly keep a real regression hidden.
-    """
-
-    def __init__(self, rep, check, conv_text, block, label):
-        self.rep, self.check, self.label = rep, check, label
-        self.block = block
-        self.keys = list(canonical_block(conv_text, block, required=False))
-        self.used = set()
-
-    def claims(self, key):
-        return key in self.keys
-
-    def hit(self, key, message, where=""):
-        self.used.add(key)
-        self.rep.pending(self.check,
-                         "%s  [registered in CONVENTIONS.md as `%s`]"
-                         % (message, self.block), where)
-
-    def finish(self):
-        for key in self.keys:
-            if key not in self.used:
-                # A FAIL, not a note.  An allowlist line that outlived its
-                # defect is a standing licence to reintroduce it, and a PASS
-                # is invisible without -v -- which is exactly how an allowlist
-                # quietly keeps a real regression hidden.
-                self.rep.fail(self.check,
-                              "registry line `%s` under `%s` no longer matches "
-                              "anything (%s is fixed) -- DELETE that line from "
-                              "CONVENTIONS.md so the check hardens. Until it is "
-                              "deleted it is a standing exemption for a defect "
-                              "that is no longer there."
-                              % (key, self.block, self.label),
-                              rel(CONVENTIONS))
-
-
 def rel(path):
-    """Return the repository-relative identifier used by registries and tests."""
+    """Return the repository-relative identifier used in diagnostics and tests."""
     return os.path.relpath(path, ROOT)
 
 
@@ -410,10 +296,8 @@ ANY_BLOCK_RE = re.compile(BLOCK_RE_TMPL % r"[a-z0-9:_-]+", re.S)
 def canonical_block_lines(text):
     """Line numbers inside any ``<!-- canonical:… -->`` block.
 
-    The contents of a canonical block are *keys*, not prose: a registry line
-    naming a path that is deliberately not shipped is the record of that
-    decision, not another statement of it.  A check that reads the block as
-    documentation reports the registry for registering the thing.
+    Canonical lists are parsed by their dedicated checks. Exclude them from
+    prose scans so enum values and schema keys are not mistaken for commands.
     """
     out = set()
     for m in ANY_BLOCK_RE.finditer(text):
@@ -2261,7 +2145,7 @@ def check_slug_single_implementation(rep, conv):
     # (b) THE STRUCTURAL RULE.  There is one implementation and it is not in a
     #     skill, so under skills/ the name `slugify.py` and the exported names
     #     `slugify`/`slug_stem` are violations on sight -- no agreement test,
-    #     no registry, no reprieve.  Whether such a file's answers happen to
+    #     always a failure. Whether such a file's answers happen to
     #     match today is beside the point: it owns what `import slugify`
     #     resolves to for every script beneath it.
     #
@@ -2270,8 +2154,6 @@ def check_slug_single_implementation(rep, conv):
     #     replaces the fingerprint scan as the load-bearing check: the copy
     #     most likely to disagree is the terse wrong one, and terse wrong
     #     copies are exactly what a syntactic scan cannot see.
-    pending = Registry(rep, check, conv, "slug-duplicates",
-                       "the vendored slug copy")
     n_scanned = n_producers = n_skill_modules = 0
 
     for path, text in walk_python_sources():
@@ -2373,21 +2255,10 @@ def check_slug_single_implementation(rep, conv):
                              + (["fingerprints: %s" % ", ".join(hits)]
                                 if fingerprinted else []))
             msg = "%s ships a second copy of the slug algorithm (%s)" % (r, note)
-            if pending.claims(r):
-                pending.hit(r, msg + (
-                    " -- and it DISAGREES with the canonical module (the hard "
-                    "failure above); registration parks the duplication, never "
-                    "a divergence" if disagreed else
-                    " -- verified above to agree with shared/scripts/slugify.py "
-                    "on every case, but it is still a second home for the fact, "
-                    "and the next edit to either copy is what re-opens the bug"
-                ), _where(vendored[0]))
-            else:
-                rep.fail(check, msg + " and is NOT registered in "
-                         "CONVENTIONS.md §10. Import it from shared/scripts/ "
-                         "via the §5 bootstrap instead -- divergent copies are "
-                         "the bug the shared layer exists to prevent.",
-                         _where(vendored[0]))
+            rep.fail(check, msg + ". Import it from shared/scripts/ "
+                     "via the §5 bootstrap instead -- divergent copies are "
+                     "the bug the shared layer exists to prevent.",
+                     _where(vendored[0]))
 
         # (d) claimed to be an implementation, but nothing in it would run.
         if not producers and not hard:
@@ -2418,7 +2289,6 @@ def check_slug_single_implementation(rep, conv):
             n_producers)
 
     _check_slug_claims(rep, check, canon)
-    pending.finish()
 
 
 # ===========================================================================
@@ -3573,8 +3443,6 @@ def check_figure_naming(rep, conv):
                            "needs rewriting" % sorted(declared_seps))
     canonical_sep = declared_seps.pop()
 
-    pending = Registry(rep, check, conv, "pending-figure-text",
-                       "stale figure-naming text")
 
     # (a) nobody may state the over-strict consumer glob -- except a producer
     #     globbing its OWN output, where `_fig_*` is exactly right.
@@ -3665,10 +3533,7 @@ def check_figure_naming(rep, conv):
                    "the drift costs checks rather than failing one."
                    % (r, snippet, canonical_sep))
             where = at(path, m.start(), text)
-            if pending.claims(r):
-                pending.hit(r, msg, where)
-            else:
-                rep.fail(check, msg, where)
+            rep.fail(check, msg, where)
     # The corpus, not the hit count: a healthy tree has zero near-miss tokens,
     # and demanding a non-empty hit list would make the check require its own
     # violation.
@@ -3693,11 +3558,6 @@ def check_figure_naming(rep, conv):
                               "current spelling (\"%s\")"
                        % (rel(path), snippet,
                           _fig_name_excused(text, m.start())), where)
-            elif pending.claims(rel(path)):
-                pending.hit(rel(path),
-                            "%s still spells a figure filename `%s`; every "
-                            "producer in CONVENTIONS.md §8b now writes `_fig%s<N>`"
-                            % (rel(path), snippet, canonical_sep), where)
             else:
                 rep.fail(check,
                          "%s spells a figure filename `%s`, but CONVENTIONS.md "
@@ -3768,7 +3628,7 @@ def check_figure_naming(rep, conv):
         rep.ok(check, "%d figure embed(s) carry an italic caption on the next "
                       "line (§8b)" % n_embeds)
 
-    # (d) a registered file that also *describes* the old split in prose.
+    # (d) prose must describe the current producer spelling.
     stale_prose = re.compile(
         r"no underscore before the number|_fig<numbers>|_fig[0-9]+_[0-9]")
     for skill, path, text in walk_skill_files():
@@ -3778,12 +3638,7 @@ def check_figure_naming(rep, conv):
                    "every producer now writes `_fig%s<N>` (CONVENTIONS.md §8b)"
                    % (r, canonical_sep))
             where = at(path, m.start(), text)
-            if pending.claims(r):
-                pending.hit(r, msg, where)
-            else:
-                rep.fail(check, msg, where)
-
-    pending.finish()
+            rep.fail(check, msg, where)
 
 
 PRODUCER_ROW_RE = re.compile(r"^\|\s*`([a-z-]+)`\s*\|\s*`([^`|]+)`\s*\|", re.M)
@@ -3820,27 +3675,7 @@ def _section_text(conv, number):
 SCHEMA_BLOCKS = {
     "wiki-entry": "frontmatter:wiki-entry",
     "source-note": "frontmatter:cleaned-note",
-    "retired-topics": "frontmatter:retired-topics",
 }
-
-#: Schemas CONVENTIONS.md documents only in order to retire them.  A statement
-#: matching one of these is a leftover, not a convention: PENDING when the file
-#: is registered, FAIL otherwise.
-RETIRED_SCHEMAS = {"retired-topics"}
-
-#: The key list of a note actually written under the retired `topics:` schema.
-#: A *fixture*, deliberately, and the one place in this file where a canonical
-#: block is pinned rather than merely read: nothing in the tree states this
-#: schema (that is what "retired" means), so `canonical:frontmatter:retired-
-#: topics` had no consumer and bound nothing -- renaming a field inside it, or
-#: renaming all eight of the others, left the suite green with an identical
-#: count.  §2c's whole job is that the harness can RECOGNISE this shape if it
-#: reappears in a skill and report it as retired rather than as unknown, and
-#: that is only testable against a note in the shape.  It is a historical
-#: record, so it does not drift: if this fixture and §2c ever disagree, one of
-#: them is wrong about what the old notes looked like.
-RETIRED_TOPICS_FIXTURE = ("title", "type", "source", "url", "author",
-                          "published", "created", "description", "topics")
 
 #: Keys tolerated inside a wiki-entry schema statement even though they are not
 #: in the canonical order: `importance` is retired-but-preserved and must sit in
@@ -3932,6 +3767,55 @@ def _list_slice_of(text, off, keys, members):
     return ""
 
 
+def _schema_field_lists(text, members, schemas):
+    """Complete schema-shaped lists, including unknown or misspelled keys.
+
+    A nonmember must not split a declared schema into passing subsequences.
+    Keep equally quoted or comma-separated tokens together before selecting
+    the schema. A larger record beginning with its own fields remains a slice,
+    unless its introducing text explicitly calls it a schema or field order.
+    """
+    tokens = [(m.group(0), m.start(), m.end()) for m in TOKEN_RE.finditer(text)]
+    groups, current = [], []
+    for token in tokens:
+        joined = False
+        if current:
+            previous = current[-1]
+            gap = text[previous[2]:token[1]]
+            wrapper = _wrap_of(text, previous[1], previous[2])
+            joined = (_is_list_gap(gap)
+                      and wrapper == _wrap_of(text, token[1], token[2])
+                      and (bool(wrapper) or bool(re.search(r"[,·|]", gap))))
+        if current and not joined:
+            groups.append(current)
+            current = []
+        current.append(token)
+    if current:
+        groups.append(current)
+
+    for group in groups:
+        keys = [token[0] for token in group]
+        known = [key for key in keys if key in members]
+        if len(known) < 5:
+            continue
+        name = _classify(known, schemas)
+        if not name:
+            continue
+        start, end = group[0][1], group[-1][2]
+        prefix = text[max(0, start - 200):start]
+        declared = re.search(
+            r"(?:\b(?:front[- ]?matter|schema(?:_order)?|fields?\s+order|"
+            r"(?:mandatory|required)_keys|canon)\b)"
+            r"[^\n:=]{0,60}(?:[:=]|\bis\b)[ \t\r\n([`\"']*\Z",
+            prefix, re.I)
+        # Without an explicit schema declaration, foreign fields outside the
+        # known run can belong to a larger API record. Foreign fields *inside*
+        # a run from the schema's first key to another schema key cannot turn
+        # that complete field list into an order-only slice.
+        if declared or (keys[0] == schemas[name][0] and keys[-1] in members):
+            yield keys, name, start, end
+
+
 def _canonical_schemas(conv):
     out = {}
     for name, block in SCHEMA_BLOCKS.items():
@@ -4010,49 +3894,6 @@ def _check_sequence(rep, check, keys, schema_name, schemas, where, what,
                % (what, schema_name), where)
 
 
-def _check_retired_schema(rep, check, schemas):
-    """§2c is still the shape it says it is, and still distinguishable.
-
-    Two assertions against :data:`RETIRED_TOPICS_FIXTURE`, because the block
-    has no other consumer:
-
-    * the block *is* that shape -- otherwise §2c is a record of something that
-      never existed, and the recognition it promises is recognition of the
-      wrong thing;
-    * a note in that shape classifies as `retired-topics` and not as the live
-      source-note schema it shares seven keys with -- which is the behaviour
-      §2c exists for, and which `_classify`'s thresholds could break without
-      anything else in this file noticing.
-    """
-    got = list(schemas["retired-topics"])
-    want = list(RETIRED_TOPICS_FIXTURE)
-    if got != want:
-        rep.fail(check,
-                 "CONVENTIONS.md §2c's retired `topics:` schema is now %s, but "
-                 "the notes it describes were written %s. §2c is a historical "
-                 "record kept so this harness can RECOGNISE the old shape if it "
-                 "reappears in a skill; edited to a shape no note ever had, it "
-                 "recognises nothing and reports the reappearance as an unknown "
-                 "schema instead of a retired one. Fix the block, or -- if the "
-                 "old notes really were written this way -- fix "
-                 "RETIRED_TOPICS_FIXTURE in tests/test_conventions.py and say "
-                 "why in the same commit."
-                 % (", ".join(got), ", ".join(want)), rel(CONVENTIONS))
-        return
-    name = _classify(list(RETIRED_TOPICS_FIXTURE), schemas)
-    if name != "retired-topics":
-        rep.fail(check,
-                 "a note in the retired `topics:` shape (%s) classifies as %r, "
-                 "not as `retired-topics`. §2c promises the opposite: that the "
-                 "old shape is recognised as retired rather than mistaken for "
-                 "the live source-note schema it shares seven keys with."
-                 % (", ".join(want), name), rel(CONVENTIONS))
-    else:
-        rep.ok(check, "a note in §2c's retired `topics:` shape still "
-                      "classifies as `retired-topics`, not as the live "
-                      "source-note schema", rel(CONVENTIONS))
-
-
 def check_frontmatter(rep, conv):
     check = "frontmatter-schema"
     schemas = _canonical_schemas(conv)
@@ -4060,29 +3901,14 @@ def check_frontmatter(rep, conv):
     all_fields = set().union(*[set(v) for v in schemas.values()]) | {"importance"}
     seen_any = {name: False for name in schemas}
     n_statements = [0]
-    pending = Registry(rep, check, conv, "pending-frontmatter",
-                       "the retired `topics:` schema")
     rep.ok(check, "the only key CONVENTIONS.md §2 lets a schema statement leave "
                   "out: %s" % "; ".join(
                       "%s -> %s" % (n, ", ".join(sorted(k)) or "none")
                       for n, k in sorted(optional.items())), rel(CONVENTIONS))
-    _check_retired_schema(rep, check, schemas)
 
     def handle(keys, name, where, what, order_only=""):
         seen_any[name] = True
         n_statements[0] += 1
-        if name in RETIRED_SCHEMAS:
-            msg = ("%s still states the retired `%s` frontmatter schema (%s). "
-                   "CONVENTIONS.md §2c retires it in favour of the source-note "
-                   "schema; the same skill's own skeleton already emits the new "
-                   "one, so the skill currently contradicts itself"
-                   % (what, name, ", ".join(keys)))
-            r = where.split(":")[0]
-            if pending.claims(r):
-                pending.hit(r, msg, where)
-            else:
-                rep.fail(check, msg, where)
-            return
         _check_sequence(rep, check, keys, name, schemas, where, what,
                         optional.get(name), order_only)
 
@@ -4101,13 +3927,10 @@ def check_frontmatter(rep, conv):
                 name = _classify(keys, schemas)
                 if not name:
                     continue
-                # The raw Web Clipper capture (title, source, author, ... --
-                # no `format:`, no `type:`, no `topics:`) is an EXTERNAL input
-                # format several files legitimately show, not a statement of
-                # any schema of ours.  Since the source-note rename (scalar
-                # `source` -> list `sources`) its keys subsequence into
-                # `retired-topics` rather than into the live schema, so it
-                # needs the exemption `yaml-example` already gives it.
+                # Raw Web Clipper captures use an external input schema.
+                # Their source/title/author fragments can resemble generated
+                # notes, but absence of our classification fields keeps them
+                # outside this output-schema check, as in `yaml-example`.
                 if ("source" in keys and "format" not in keys
                         and "type" not in keys and "topics" not in keys):
                     continue
@@ -4117,7 +3940,15 @@ def check_frontmatter(rep, conv):
                                   "`yaml-example` checks its required keys")
 
         # (b) prose / constant lists of field names, in any punctuation.
+        # Read complete lists first: an unknown key inside a declared schema
+        # is a violation, not permission to check only the fragment after it.
+        complete_lists = []
+        for values, name, off, end in _schema_field_lists(text, all_fields, schemas):
+            handle(values, name, at(path, off, text), "%s field list" % rel(path))
+            complete_lists.append((off, end))
         for values, off in maximal_runs(text, all_fields, min_len=5):
+            if any(start <= off < end for start, end in complete_lists):
+                continue
             name = _classify(values, schemas)
             if not name:
                 continue
@@ -4138,11 +3969,10 @@ def check_frontmatter(rep, conv):
 
     rep.saw(check, "frontmatter schema statements", n_statements[0])
     for name, seen in seen_any.items():
-        if not seen and name not in RETIRED_SCHEMAS:
+        if not seen:
             rep.fail(check, "no skill states the %s frontmatter schema -- "
                             "CONVENTIONS.md §2 documents a schema nothing "
                             "implements, or the extractor is broken" % name)
-    pending.finish()
 
 
 NUMBERED_FIELD = re.compile(r"^[ \t]*(\d+)\.[ \t]+`([a-z_][a-z_0-9]*)`", re.M)
@@ -4166,15 +3996,15 @@ def _enumerated_field_lists(text, members):
     out, cur = [], []
 
     def flush():
-        if len(cur) >= 5:
+        if sum(name in members for _number, name, _offset in cur) >= 5:
             out.append(([n for _, n, _ in cur], cur[0][2]))
         cur.clear()
 
     for num, name, off in hits:
         expected = cur[-1][0] + 1 if cur else 1
-        if name not in members or num != expected:
+        if num != expected:
             flush()
-            if name in members and num == 1:
+            if num == 1:
                 cur.append((num, name, off))
             continue
         cur.append((num, name, off))
@@ -4398,7 +4228,7 @@ def check_yaml_examples(rep, conv):
             if name == "wiki-entry":
                 n_entry += 1
                 quoted_lists = ("aliases", "sources", "tags", "parents")
-                # `read` is here because §2a/§2d name it with the never-quote
+                # `read` is here because §2a/§2c name it with the never-quote
                 # three: a quoted `read: "false"` is a STRING, and Obsidian's
                 # checkbox renders it permanently ticked -- the one value drift
                 # in an example that teaches a silently wrong vault state.
@@ -4904,8 +4734,6 @@ def _path_prefixes(token):
 def check_contract_fictions(rep, conv):
     check = "contract-name-resolution"
     skills = skill_names()
-    external = Registry(rep, check, conv, "external-skills",
-                        "the reference to a skill that does not ship here")
     tag_values = set(canonical_block(conv, "tag-enum"))
 
     texts = {}
@@ -4914,7 +4742,7 @@ def check_contract_fictions(rep, conv):
     blobs = {s: "\n".join(texts.get(s, {}).values()).lower() for s in skills}
     conv_low = conv.lower()
 
-    # (a) a name used as a skill must be a skill (or a registered external).
+    # (a) a name used as a skill must name a bundled skill.
     for skill in skills:
         for path, text in sorted(texts.get(skill, {}).items()):
             for off, sent in _sentences(text):
@@ -4932,21 +4760,12 @@ def check_contract_fictions(rep, conv):
                                      and re.search(LOOSE_AGENT_FRAME % esc, sent)):
                         continue
                     where = at(path, off + m.start(), text)
-                    if external.claims(name):
-                        external.hit(name,
-                                     "%s refers to `%s` as a skill; nothing in "
-                                     "this plugin implements it, so the "
-                                     "contract it names is never enforced and "
-                                     "never fails -- it just quietly does not "
-                                     "happen" % (rel(path), name), where)
-                    else:
-                        rep.fail(check,
-                                 "%s refers to `%s` as a skill, but there is no "
-                                 "skills/%s/ and it is not registered in "
-                                 "CONVENTIONS.md §10b. A contract with a skill "
-                                 "that does not exist is never enforced and "
-                                 "never fails -- it just quietly does not "
-                                 "happen." % (rel(path), name, name), where)
+                    rep.fail(check,
+                             "%s refers to `%s` as a skill, but there is no "
+                             "skills/%s/. A contract with a skill "
+                             "that does not exist is never enforced and "
+                             "never fails -- it just quietly does not "
+                             "happen." % (rel(path), name, name), where)
 
     # (b) a vault artifact attributed to another skill must be grounded --
     #     in that skill's own text, or in CONVENTIONS.md (which is now the
@@ -5008,19 +4827,13 @@ def check_contract_fictions(rep, conv):
             if name in skills:
                 continue
             where = at(path, m.start(1), text)
-            if external.claims(name):
-                external.hit(name, "%s routes work to `%s` (\"%s\"); nothing in "
-                                   "this plugin implements it"
-                             % (rel(path), name,
-                                " ".join(m.group(0).split())), where)
-            else:
-                rep.fail(check,
-                         "%s routes work to `%s` (\"%s\"), but there is no "
-                         "skills/%s/. A contract with a skill that does not "
-                         "exist is never enforced and never fails -- the work "
-                         "just quietly does not happen."
-                         % (rel(path), name, " ".join(m.group(0).split()), name),
-                         where)
+            rep.fail(check,
+                     "%s routes work to `%s` (\"%s\"), but there is no "
+                     "skills/%s/. A contract with a skill that does not "
+                     "exist is never enforced and never fails -- the work "
+                     "just quietly does not happen."
+                     % (rel(path), name, " ".join(m.group(0).split()), name),
+                     where)
     # The population guarded here is the corpus, not the hit count: a healthy
     # tree has zero routing frames pointing outside the roster, and demanding
     # a non-empty hit list would make the check demand its own violation.
@@ -5029,7 +4842,6 @@ def check_contract_fictions(rep, conv):
                   "a skill that ships here" % (n_routes, n_route_files))
 
     _check_ownership_split(rep, check, conv, skills, texts)
-    external.finish()
 
 
 #: A dispatch frame: work being handed to a named agent.  Deliberately narrow
@@ -5460,8 +5272,6 @@ def check_skill_roster(rep, conv):
     rep.ok(check, "roster read from skills/: %s" % ", ".join(sorted(roster)),
            rel(SKILLS_DIR))
 
-    external = Registry(rep, check, conv, "external-skills",
-                        "the reference to a skill that does not ship here")
 
     # (a) no file names a skill that is not a directory under skills/.
     seen, checked = set(), 0
@@ -5473,20 +5283,15 @@ def check_skill_roster(rep, conv):
                 continue
             seen.add((r, name))
             where = at(path, off, text)
-            if external.claims(name):
-                external.hit(name,
-                             "%s uses `%s` as a skill (%s); nothing in this "
-                             "plugin implements it" % (r, name, why), where)
-            else:
-                rep.fail(check,
-                         "%s uses `%s` as a skill (%s), but skills/ holds only "
-                         "%s. A name with no directory behind it routes work "
-                         "nowhere: the contract is never enforced, never "
-                         "fails, and the user gets silence. Either ship "
-                         "skills/%s/, route to a skill that exists, or delete "
-                         "the reference."
-                         % (r, name, why, ", ".join(sorted(roster)), name),
-                         where)
+            rep.fail(check,
+                     "%s uses `%s` as a skill (%s), but skills/ holds only "
+                     "%s. A name with no directory behind it routes work "
+                     "nowhere: the contract is never enforced, never "
+                     "fails, and the user gets silence. Either ship "
+                     "skills/%s/, route to a skill that exists, or delete "
+                     "the reference."
+                     % (r, name, why, ", ".join(sorted(roster)), name),
+                     where)
     rep.saw(check, "skill-name uses across the plugin", checked)
     if checked:
         rep.ok(check, "%d skill-name use(s) across the plugin, all resolving to "
@@ -5516,8 +5321,6 @@ def check_skill_roster(rep, conv):
     if counted:
         rep.ok(check, "%d stated roster count(s) agree with skills/ (%d skills)"
                % (counted, len(roster)))
-
-    external.finish()
 
 
 # ===========================================================================
@@ -5627,32 +5430,6 @@ def _enclosing_sentence(text, start, end):
     return text[a:m.start() if m else min(len(text), end + 200)]
 
 
-def _absent_paths(conv):
-    """``{(file, token)}`` registered in `canonical:absent-paths` (§10c).
-
-    A pointer at a file that does not ship is sometimes right --
-    `lottie-recovery.md` explains why its Lottie converter is
-    written to a temp file at runtime instead of shipping as `scripts/…`, and
-    reporting that as a broken pointer would report the fix as the bug.
-
-    It used to be enough for the *sentence* to sound like that explanation:
-    any of `no longer`, `used to ship`, `does not exist` and six more phrases,
-    anywhere in the sentence, turned a broken pointer into two passes.  That is
-    an exemption anyone can write by accident, it is invisible without `-v`,
-    and it grows.  The exemption now has to be written down in CONVENTIONS.md,
-    one line per (file, token) pair, where it is countable and reviewable --
-    and a line that stops matching is reported as stale, so the list can only
-    shrink.  The prose explanation is still required of the file; it is just no
-    longer what the harness takes as authority.
-    """
-    out = set()
-    for line in canonical_block(conv, "absent-paths", required=False):
-        if "::" in line:
-            f, tok = (p.strip() for p in line.split("::", 1))
-            out.add((f, tok))
-    return out
-
-
 def _exact_regular_file(path):
     """Like ``isfile``, but require every component's exact spelling.
 
@@ -5706,14 +5483,6 @@ def _resolve_ref(skill, token, nearby_skills=(), source_path=None):
 
 def check_reference_paths(rep, conv):
     check = "reference-paths"
-    pending = Registry(rep, check, conv, "pending-skill-edits",
-                       "the stale slugify.py path")
-    absent, absent_used = _absent_paths(conv), set()
-    claimed = {}
-    for line in pending.keys:
-        if "::" in line:
-            f, tok = (p.strip() for p in line.split("::", 1))
-            claimed[(f, tok)] = line
     all_skills = skill_names()
 
     # (a) every referenced path exists.
@@ -5734,7 +5503,7 @@ def check_reference_paths(rep, conv):
             if "<" in token or ">" in token:
                 continue                      # a shape, not a pointer
             if line_of(text, tstart) in in_block:
-                continue                      # registry key/example, not prose
+                continue                      # canonical data/example, not prose
             n_tokens += 1
             # Both the "deliberately absent" cue and the "resolve against the
             # skill named beside it" rescue are scoped to the token's own
@@ -5768,41 +5537,13 @@ def check_reference_paths(rep, conv):
                 continue
             where = at(path, tstart, text)
             r = rel(path)
-            if (r, token) in absent:
-                absent_used.add((r, token))
-                rep.ok(check, "%s names `%s`, which CONVENTIONS.md §10c "
-                              "registers as deliberately not shipped"
-                       % (r, token), where)
-                continue
-            key = claimed.get((r, token))
-            if key:
-                pending.hit(key,
-                            "%s points at `%s`, which no longer exists -- the "
-                            "file moved to shared/scripts/ and this reference "
-                            "was not updated with it" % (r, token), where)
-            else:
-                rep.fail(check,
-                         "%s points at `%s`, which does not exist under "
-                         "%s, under a skill named in the same "
-                         "sentence, or at the plugin root. A pointer at a "
-                         "missing file is read as an instruction to consult "
-                         "rules that are not there. If the file is deliberately "
-                         "not shipped, say so in the text AND register the pair "
-                         "`%s :: %s` in CONVENTIONS.md §10c -- prose alone no "
-                         "longer exempts a pointer."
-                         % (r, token,
-                            "skills/%s/" % skill if skill else
-                            "the document's directory",
-                            r, token), where)
-    for f, tok in sorted(absent - absent_used):
-        rep.fail(check,
-                 "CONVENTIONS.md §10c registers `%s :: %s` as deliberately "
-                 "absent, but %s no longer names that path. DELETE the line: an "
-                 "exemption that matches nothing is a standing licence for the "
-                 "next broken pointer at that name." % (f, tok, f),
-                 rel(CONVENTIONS))
-    # No `saw` for the §10c population: an empty registry is the intended
-    # steady state, and `vacuity()` turns an empty population into a FAIL.
+            rep.fail(check,
+                     "%s points at `%s`, which does not exist under %s, under "
+                     "a skill named in the same sentence, or at the plugin "
+                     "root. Fix the pointer; describe runtime-generated "
+                     "helpers by their actual scratch path."
+                     % (r, token, "skills/%s/" % skill if skill else
+                        "the document's directory"), where)
     rep.saw(check, "path references resolved", n_tokens)
     if n_tokens:
         rep.ok(check, "%d bundled-path reference(s) resolve on disk" % n_tokens)
@@ -5887,8 +5628,6 @@ def check_reference_paths(rep, conv):
         else:
             rep.fail(check, "%s is missing" % rel(p))
 
-    pending.finish()
-
 
 # ===========================================================================
 # check 7 -- the shared-layer bootstrap is copied verbatim
@@ -5897,14 +5636,9 @@ def check_reference_paths(rep, conv):
 def check_scripts_run(rep, conv):
     """Every bundled script parses and imports.
 
-    CONVENTIONS.md §10a records the exact regression this catches: two
-    wiki-build scripts did `sys.path.insert(...)` then
-    `from slugify import …`, and after the module moved to `shared/scripts/`
-    **both scripts failed at import**.  Every text-level check in this file
-    passed the whole time -- the files said all the right things; they just
-    could not run.  A skill whose bundled script dies on import degrades to
-    the model doing the work from memory, which is the failure the scripts
-    exist to prevent.
+    Text-level checks cannot prove that scripts run. Probe each script's
+    actual imports so missing dependencies or broken shared-module setup
+    cannot quietly force a skill to improvise its implementation.
     """
     check = "scripts-run"
     n = n_clean = 0
@@ -5930,9 +5664,8 @@ def check_scripts_run(rep, conv):
         elif res["timeout"] or res["import_error"] or res["crash"]:
             rep.fail(check,
                      "%s %s. The skill that bundles it will fall back to doing "
-                     "the work from memory, silently -- CONVENTIONS.md §10a "
-                     "records two scripts that broke exactly this way when a "
-                     "module moved." % (r, probe_failure(res, r)), r)
+                     "the work from memory. Fix the script's imports before "
+                     "distributing it." % (r, probe_failure(res, r)), r)
         else:
             n_clean += 1
             rep.ok(check, "%s compiles, imports with no import-time effects, "
@@ -6048,7 +5781,6 @@ def check_script_surface(rep, conv):
     """
     check = "script-surface"
     scripts = {os.path.basename(p): p for p in bundled_scripts()}
-    absent = _absent_paths(conv)
     surface = {}
     for base, path in scripts.items():
         try:
@@ -6068,8 +5800,6 @@ def check_script_surface(rep, conv):
                 token = LEADING_PLACEHOLDER.sub("", m.group(1))
                 if "<" in token or ">" in token:
                     continue      # `skills/<skill>/scripts/x.py` is a shape
-                if (rel(path), "scripts/" + m.group(2)) in absent:
-                    continue      # registered in CONVENTIONS.md §10c
                 named.append(m.group(2))
             # Bare-basename mentions -- `vault_index.py --compact`,
             # `paper_scan.py --test` -- the ordinary way running text names a
@@ -6082,8 +5812,7 @@ def check_script_surface(rep, conv):
             # not see it -- the suite was green while the documented command
             # exited 2.
             for m in _bare_script_re(scripts).finditer(line):
-                if (rel(path), "scripts/" + m.group(1)) not in absent:
-                    named.append(m.group(1))
+                named.append(m.group(1))
             named = list(dict.fromkeys(named))
             if not named:
                 continue
@@ -6097,8 +5826,7 @@ def check_script_surface(rep, conv):
                          "script (skills/*/scripts/ and shared/scripts/ hold "
                          "%d others). A documented command line naming a file "
                          "that is not there is read as an instruction to run "
-                         "it, and the run dies. If it is deliberately not "
-                         "shipped, register it in CONVENTIONS.md §10c."
+                         "it, and the run dies. Fix or remove the command."
                          % (rel(path), base, len(scripts)), at(path, i))
             known = [b for b in named if b in scripts]
             if not known:
@@ -6178,13 +5906,13 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/vault_artifacts.py": 39,
     "shared/scripts/yaml_scalars.py": 12,
     "skills/clipping-clean/scripts/dedup_index.py": 161,
-    "skills/clipping-clean/scripts/fetch_images.py": 551,
+    "skills/clipping-clean/scripts/fetch_images.py": 539,
     "skills/clipping-clean/scripts/slug.py": 133,  # device-name guards removed
     "skills/paper-summarize/scripts/note_lint.py": 227,
     "skills/paper-summarize/scripts/paper_scan.py": 158,
     "skills/paper-summarize/scripts/paper_text.py": 49,
     "skills/figure-extract/scripts/auto_fig_bbox.py": 346,
-    "skills/figure-extract/scripts/batch_extract.py": 353,
+    "skills/figure-extract/scripts/batch_extract.py": 354,
     "skills/figure-extract/scripts/extract_figures.py": 182,
     "skills/figure-extract/scripts/render_page.py": 66,
     "skills/pdf-organize/scripts/organize.py": 319,
@@ -6192,7 +5920,7 @@ SELFTEST_MIN_CASES = {
     "skills/wiki-build/scripts/find_collisions.py": 67,
     "skills/wiki-build/scripts/lint_entry.py": 319,
     "skills/wiki-build/scripts/vault_index.py": 79,
-    "skills/wiki-lint/scripts/scan_vault.py": 454,
+    "skills/wiki-lint/scripts/scan_vault.py": 452,
 }
 
 
@@ -6527,8 +6255,8 @@ def check_bootstrap(rep, conv):
     # having put that directory on sys.path.  Without this the check was
     # vacuous in the worst way -- delete the two marker comments from all
     # copies and it reported "no skill script has adopted the
-    # bootstrap yet" and passed, while CONVENTIONS.md §10a records that these
-    # exact scripts once died at import for exactly this reason.
+    # bootstrap yet" and passed, even though the dependent scripts could not
+    # import their shared modules.
     shared_paths = {
         os.path.basename(n)[:-3]: os.path.join(SHARED_DIR, "scripts", n)
         for n in os.listdir(os.path.join(SHARED_DIR, "scripts"))
@@ -6615,8 +6343,7 @@ def check_bootstrap(rep, conv):
                      "%s does `import %s` -- a module that lives in "
                      "shared/scripts/ -- but carries no §5 bootstrap. Nothing "
                      "puts shared/scripts/ on sys.path, so this script dies at "
-                     "import with ModuleNotFoundError. CONVENTIONS.md §10a "
-                     "records two scripts that failed exactly this way."
+                     "import with ModuleNotFoundError."
                      % (rel(path), needs[0]), rel(path))
             continue
 
@@ -7121,7 +6848,7 @@ def check_note_headings(rep, conv):
 def check_equation_policy(rep, conv):
     """The equation policy and its shared mechanical floor stay aligned.
 
-    wiki-build/references/equations.md owns the policy; CONVENTIONS §2d
+    wiki-build/references/equations.md owns the policy; CONVENTIONS §2c
     records it; wiki-lint's qc-items item 12 restates it. The builder lint
     and linter scanner also import one conservative candidate detector, whose
     public finding key is documented by the scanner contract. The one live
@@ -7154,11 +6881,11 @@ def check_equation_policy(rep, conv):
          "makes the policy findable from the canonical layer"),
         (CONVENTIONS, conv,
          r"reports the insertion under \*Notes for the user\*",
-         "CONVENTIONS.md §2d no longer records that a linter-inserted "
+         "CONVENTIONS.md §2c no longer records that a linter-inserted "
          "equation is reported under *Notes for the user* (the linter writes "
          "neither `read:` nor `updated:`)"),
         (CONVENTIONS, conv, r"resets `read: false`",
-         "CONVENTIONS.md §2d no longer records the builder half of the "
+         "CONVENTIONS.md §2c no longer records the builder half of the "
          "split: a merge that adds an equation resets `read: false`"),
         (eq_path, eq, r"resets `read: false`",
          "equations.md no longer states that a new equation added on a merge "
@@ -7263,7 +6990,19 @@ def check_moc_placement(rep, conv):
     for skill, path, text in walk_skill_files():
         if re.search(r"MOCs/(?:<discipline(?:-slug)?>|machine-learning)\.md", text):
             stated += 1
+        # Self-tests deliberately contain malformed placements and ordinary
+        # Wiki entries whose names collide with old navigation files. Their
+        # input/output fixtures are not placement instructions. Keep checking
+        # production code, module documentation, and all Markdown references.
+        fixture_lines = set()
+        if path.endswith(".py"):
+            for node in ast.parse(text, filename=path).body:
+                if (isinstance(node, ast.FunctionDef)
+                        and SELFTEST_FUNC.match("def " + node.name + "(")):
+                    fixture_lines.update(range(node.lineno, node.end_lineno + 1))
         for m in re.finditer(r"Wiki/[^\s`\]]*-moc", text):
+            if line_of(text, m.start()) in fixture_lines:
+                continue
             rep.fail(check,
                      "%s places a MOC under `Wiki/` (\"%s\") -- §3 puts MOC "
                      "files in MOCs/; a MOC written into Wiki/ is "
@@ -7654,12 +7393,6 @@ def main(argv=None):
     ap.add_argument("-v", "--verbose", action="store_true",
                     help="list passing checks individually, not just failures")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
-    ap.add_argument("--allow-pending", action="store_true",
-                    help="exit 0 when the only defects are ones CONVENTIONS.md "
-                         "§10 registers as pending (they are still reported)")
-    ap.add_argument("--strict", action="store_true",
-                    help="accepted and ignored: strict is now the default, and "
-                         "`--allow-pending` is the way to relax it")
     # Not for humans: this is how the harness re-enters itself as the child
     # half of `probe_module`.  Importing a module under test happens HERE, in
     # a process of its own, with a clock on it -- never in the process that
@@ -7715,16 +7448,15 @@ def main(argv=None):
 
     if args.json:
         print(json.dumps({
-            "ok": rep.exit_code(args.allow_pending) == 0,
+            "ok": rep.exit_code() == 0,
             "counts": rep.counts(),
             "examined": rep.examined,
             "results": [{"check": c, "status": s, "where": w, "message": m}
                         for c, s, w, m in rep.results],
         }, indent=2, ensure_ascii=False))
     else:
-        print(rep.render(verbose=args.verbose,
-                         allow_pending=args.allow_pending))
-    return rep.exit_code(args.allow_pending)
+        print(rep.render(verbose=args.verbose))
+    return rep.exit_code()
 
 
 if __name__ == "__main__":

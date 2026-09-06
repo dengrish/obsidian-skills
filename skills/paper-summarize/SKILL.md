@@ -181,8 +181,7 @@ table or supplement. Figure/table numbers do not appear in the prose or captions
 On creation write `read: false`; on an authorized rewrite preserve the existing
 review value and do not use format cleanup to discard unrelated user metadata.
 If an existing note cannot meet the format without a destructive metadata
-change, retain it and surface that conflict. Apply only the documented legacy
-migrations, preserving their information in tags or the report.
+change, retain it and surface that conflict.
 
 Save the complete draft at a unique path under the active run's `<scratch>`.
 Never put an unfinished note in `Articles/`. Use the

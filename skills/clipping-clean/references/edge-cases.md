@@ -5,7 +5,7 @@ Use the matching reference when a case arises; each procedure has one owner.
 | Situation | Read / outcome |
 |---|---|
 | Missing author/date/title, partial date, fuller byline, decorative title, paywall, failed fetch or differing canonical URL | [Metadata verification](metadata-verification.md#verify-against-the-captured-url). Preserve capture provenance; use the canonical empty author or explicit undated fallback, while a missing title blocks publication because it leaves no stable identity. |
-| Legacy metadata in an approved rewrite | [Frontmatter migrations](metadata-verification.md#frontmatter-for-the-polished-note). Preserve unrelated user fields and review state. |
+| Unrelated metadata in an approved rewrite | [Frontmatter preservation](metadata-verification.md#frontmatter-for-the-polished-note). Keep user fields and review state; report conflicts without silently converting or dropping them. |
 | No usable capture URL, empty or near-empty body | [Selection gates](../SKILL.md#1-select-the-captures-and-check-ownership). Do not publish a supposedly new or empty note. |
 | No images in the raw | Skip downloads; still [audit the source](completeness-audit.md), which may contain figures the clipper omitted. |
 | Huge body or large image | Do not truncate prose or resize images merely for size. [Image limits/failures](images.md#download-and-publish) govern guarded downloads; oversized responses become reported placeholders. |

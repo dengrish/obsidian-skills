@@ -78,21 +78,14 @@ The clipping-specific choices are:
 - `read`: `false` on creation; preserve an existing value or absent/unknown
   state on reprocessing and report the latter. Never manufacture a boolean.
   If a required format check cannot accept that state, retain the original and
-  leave the draft unpublished, per [review-state rules](../../../shared/CONVENTIONS.md#2d-read--the-users-review-checkbox).
+  leave the draft unpublished, per [review-state rules](../../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox).
 
 Regenerate `format`, description, tags and Summary on an approved rewrite, and
 report that manual edits to those generated fields were replaced. Preserve
-unrelated user metadata. The following are **specific migrations**, not a
-permission to strip every key outside the current schema:
+unrelated user metadata, and report conflicting or uninterpretable values
+without silently deleting or converting them. The generated schema is not
+permission to strip existing fields outside it.
 
-- Convert legacy scalar `source:` to current `sources:` without changing the
-  established capture URL. Current `sources:` takes precedence whenever present.
-- Drop retired `url:`; if its populated value differs from the retained origin,
-  report that value before dropping it.
-- Migrate populated `roots:` into `tags:` only where its inner slug unambiguously
-  maps through the shared `TAG_ALIASES`/discipline enum. Report unmapped values
-  for the user to place. Then remove `roots:` and obsolete `wiki:`.
-- Leave a legacy `topics:` and all other unrelated fields as found, per
-  [CONVENTIONS §2c](../../../shared/CONVENTIONS.md#2c-the-retired-topics-variant).
-
-The raw clipping is unchanged by these output migrations.
+Convert a raw Web Clipper scalar `source:` to output `sources:` without changing
+the established capture URL. Current `sources:` takes precedence whenever
+present. The raw clipping remains unchanged by this output conversion.

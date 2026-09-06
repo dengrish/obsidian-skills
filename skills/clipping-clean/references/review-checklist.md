@@ -102,8 +102,8 @@ suggested detector; do not edit an installed plugin during clipping processing.
 - [ ] Generated frontmatter follows the shared
   [source-note schema](../../../shared/CONVENTIONS.md#2b-source-note--a-note-about-a-document)
   and [clipping metadata rules](metadata-verification.md#frontmatter-for-the-polished-note).
-  Legacy migrations preserved their information in tags/report. Unrelated user
-  fields, including `topics:`, were not stripped to enforce a generated schema.
+  Unrelated user fields were preserved rather than stripped to enforce a
+  generated schema; conflicting or uninterpretable values were reported.
 - [ ] First current `sources:` item establishes web ownership; legacy `source:`
   is used only when current `sources:` is absent. This is not a PDF summary.
   The output has its one preserved capture URL, no substituted canonical URL.

@@ -46,7 +46,7 @@ read: false
   normalized to `https://doi.org/...` or `https://arxiv.org/abs/...`. Never on
   `Book`, never blank, never inferred from a title or ISBN. Basename conflicts
   must be resolved upstream; a path-qualified link does not fix note/image
-  namespace collisions. Do not write the retired `source`/`url` pair.
+  namespace collisions.
 - **Author:** block-form list in the printed order, without wikilink wrappers.
   For more than about eight authors, list the first three and a final `et al.`
   item. Preserve a collective byline rather than mining individuals from a
@@ -76,9 +76,7 @@ read: false
 The fixed schema describes generated notes, not permission to discard user
 metadata. Preserve unrelated fields on an existing note. If that conflicts with
 lint's strict format, leave the original intact and report the conflict rather
-than deleting properties to make lint pass. Apply only the shared schema's
-explicit legacy migrations; preserve a retired `topics:` and report any legacy
-value that cannot be migrated without guessing.
+than deleting properties to make lint pass.
 
 ## Section roles and headings
 

@@ -52,8 +52,7 @@ def fold_name(s):
     return unicodedata.normalize("NFC", s or "").casefold()
 
 
-# Disciplines are the fixed tag enum (VALID_TAGS below), not self-rooted notes — wiki-build
-# replaced roots: (a wikilink to a discipline note) with tags: (#-prefixed discipline slugs). See below.
+# Disciplines are the fixed tag enum (VALID_TAGS below).
 
 # ===========================================================================
 # NO SLUG IMPLEMENTATION LIVES HERE.  There is exactly one copy of the
@@ -1127,7 +1126,7 @@ MANDATORY_KEYS = [k for k in CANON if k not in ("aliases", "importance")]
 #: The bare YAML booleans `read:` may carry.  A quoted "false" is a STRING, and
 #: Obsidian's checkbox property renders any non-empty string as checked — so a
 #: note the user has not read displays as read, silently, which is the one
-#: failure this field cannot afford.  CONVENTIONS.md §2d.
+#: failure this field cannot afford.  CONVENTIONS.md §2c.
 READ_BOOLEANS = {"true", "false"}
 
 #: The spellings of YAML null a `read:` key can carry: a bare key, `null` in any
@@ -1676,11 +1675,6 @@ def image_index(images):
     return (None if walk_failed else names), findings
 
 
-# Legacy generated formatting, recognized only to report and remove on rewrite.
-MOC_TREE_START = "<!-- wiki-linter:moc-tree:start -->"
-MOC_TREE_END = "<!-- wiki-linter:moc-tree:end -->"
-
-
 def moc_file_state(path, *, _directory_fd=None, _texts=None):
     """Read one complete generated MOC through a stable regular-file snapshot.
 
@@ -1814,7 +1808,7 @@ def inventory_mocs(vault_root, entry_counts):
                                  entries=entry_counts.get(discipline, 0))
                 legacy.append(old_state)
                 finding("legacy-location", old_path,
-                        "legacy root MOC requires explicit migration to MOCs/",
+                        "unexpected old root MOC is outside generated ownership; preserve it and resolve ownership before creating a canonical MOC",
                         discipline=discipline, canonical_path=os.path.abspath(path))
             if not (entry_counts.get(discipline) or owners or old_names):
                 continue
@@ -2332,6 +2326,8 @@ def scan(wiki, images=None):
             # A real MOC file outranks any entry alias with its basename. Only
             # an actual same-named Wiki file makes the bare target ambiguous.
             return None, ("ambiguous" if owners else "moc"), None
+        if "/" not in target_key and basename_key in _legacy_moc_names:
+            return None, ("ambiguous" if owners else "moc"), None
         if not owners:
             return None, "missing", None
         lookup = target_key
@@ -2369,6 +2365,7 @@ def scan(wiki, images=None):
 
     def _entry_parent_target(record):
         if (fold_name(record["slug"]) in _moc_basename_owners
+                or fold_name(record["slug"]) in _legacy_moc_names
                 or fold_name(record["slug"]) in ambiguous_files):
             return _entry_vault_target(record)
         return record["slug"]
@@ -2395,8 +2392,9 @@ def scan(wiki, images=None):
             if state["state"] == "unreadable":
                 return None, "unreadable"
             return "@moc:" + key, None
-        if "/" not in key and key in _legacy_moc_names and status != "missing":
-            return None, "ambiguous"
+        if "/" not in key and key in _legacy_moc_names:
+            return None, ("legacy-moc" if status in {"missing", "moc"}
+                          else "ambiguous")
         if status == "parsed" and record is not None:
             if fold_name(record["slug"]) in ambiguous_files:
                 # The global hierarchy census cannot safely merge two physical
@@ -2405,9 +2403,6 @@ def scan(wiki, images=None):
             return record["slug"], None
         if status != "missing":
             return None, status
-        if ("/" not in key and key.endswith("-moc")
-                and key[:-4] in VALID_TAGS and key[:-4] != "misc"):
-            return None, "legacy-moc"
         if "/" in key:
             return None, "missing"
         if not alias_inventory_complete:
@@ -2531,7 +2526,7 @@ def scan(wiki, images=None):
         if [CANON.index(k) for k in known] != sorted(CANON.index(k) for k in known):
             problems.append((sl,"item2","fields out of schema order: "+", ".join(e["key_order"])))
         for k in e["key_order"]:
-            if k in CANON or k == "roots":        # roots gets a dedicated migration message below
+            if k in CANON:
                 continue
             if k.lower() in OBSIDIAN_KEYS:
                 # REPORT ONLY. See OBSIDIAN_KEYS: this is Obsidian's own
@@ -2547,7 +2542,7 @@ def scan(wiki, images=None):
                                  f'Preserve it and report it as optional user-owned configuration; '
                                  f'the lint run still completes'))
                 continue
-            problems.append((sl,"item2",f'unexpected frontmatter key "{k}"'))
+            problems.append((sl,"item2",f'unexpected frontmatter key "{k}" — preserve this user metadata; do not delete or repurpose it from a schema mismatch alone'))
         if len(e["key_order"]) != len(set(e["key_order"])):
             problems.append((sl,"item2","duplicate frontmatter key (stacked-body artifact?)"))
         # Every MANDATORY key must be PRESENT, whatever its value — a missing
@@ -2559,8 +2554,8 @@ def scan(wiki, images=None):
         # whole contribution to the surface and display-label maps — so the
         # entry came back from a whole-vault QC pass with nothing at all
         # against it, while a single-file lint_entry run on it reported two.
-        # `tags` and `read` keep their own messages below (a missing `tags:`
-        # may be a roots→tags migration, and a missing `read:` is report-only).
+        # `tags` and `read` keep their own messages below; a missing `read:`
+        # is report-only.
         for _k in MANDATORY_KEYS:
             if _k in e["key_order"] or _k in ("tags", "read", "title"):
                 continue
@@ -2583,7 +2578,7 @@ def scan(wiki, images=None):
                              "only from one unambiguous canonical name evidenced by the entry; "
                              "otherwise preserve and report it without blocking the run. DO NOT "
                              "invent one from the filename"))
-        # read: — the user's review checkbox (CONVENTIONS.md §2d).  Four
+        # read: — the user's review checkbox (CONVENTIONS.md §2c).  Four
         # distinct states, and they route three different ways, which is why
         # they are three messages rather than one:
         #   absent      -> REPORT ONLY.  The linter never writes this field, and
@@ -2709,13 +2704,8 @@ def scan(wiki, images=None):
                 else:
                     _parent_seen[_parent_identity] = _parent
         # No missing-importance: check — the field left the schema (see CANON above).
-        if "roots" in e["key_order"]:         # the schema replaced roots: with tags: — one targeted message
-            if "tags" in e["key_order"]:
-                problems.append((sl,"item2",'stale roots: key — the schema replaced roots: with tags:; remove roots: (tags: is already present)'))
-            else:
-                problems.append((sl,"item2",'old roots: key, no tags: key — migrate roots → tags (one or more #-prefixed discipline enum slugs, not a wikilink)'))
-        elif "tags" not in e["key_order"]:
-            problems.append((sl,"item2","missing tags: key (mandatory — present even when blank on a entry)"))
+        if "tags" not in e["key_order"]:
+            problems.append((sl,"item2","missing tags: key (mandatory — requires at least one discipline tag)"))
         if not e["type"]:
             problems.append((sl,"item2/type-enum",
                              "type: is blank or non-scalar — it must be one of the 15 canonical type values"))
@@ -2907,10 +2897,9 @@ def scan(wiki, images=None):
             if re.search(r"(?m)^\s*(?:`{3}|~{3,})", mask_body_comments(e["body"])):
                 problems.append((sl,"item6","fenced code block — mechanically allowed only after genuine Software classification; reclassification does not waive Software's artifact-wide relevance gate"))
             # API-identifier cap — ZERO backticked identifiers in a non-Software entry.
-            # (Rule change 2026-08-16: the one-name-only-signpost allowance is retired;
             # Software is the only mechanically eligible type; its separate
             # artifact-wide relevance gate can still reject the identifier. A
-            # bare extension and bracket special token are not identifiers.)
+            # bare extension and bracket special token are not identifiers.
             inline = re.findall(r"`([^`\n]+)`", re.sub(r"`{3}.*?`{3}", " ", e["prose"], flags=re.S))
             idtoks = [t.strip() for t in inline if t.strip()
                       and not re.fullmatch(r"\.[A-Za-z0-9]+", t.strip())   # not a bare file extension (.csv)
@@ -4284,8 +4273,7 @@ def scan(wiki, images=None):
                          + alias_gap_note))
     problems.current_path = ""
 
-    # The share of entries affected is the recurrence signal for wiki-build-improvement
-    # proposals — see references/backlogs.md.
+    # The share of entries affected supports evidenced skill suggestions.
     tally = {}                                   # item -> [issue_count, set_of_entries]
     for sl,item,_message,_path in problems:
         t = tally.setdefault(item, [0, set()])
@@ -4344,11 +4332,8 @@ def scan(wiki, images=None):
                   or len(_rename_targets[_fold_new]) > 1)
 
     # ---- Hierarchy diagnostic (Task 3): existing parent/MOC state ----------
-    # Reflects the EXISTING parents: from a prior run (blank on a never-linted vault). Under the MOC-root rule every
-    # tree is rooted at the discipline's own MOC note, so NOTHING self-parents and the correct count is zero: every
-    # slug reported here is stale parents: from a pre-MOC-root run or a hand-edit, which this run overwrites. That is
-    # why check_rooting fires at >=1 — the old >=3 was the anchor-entry model's tolerance for ~1 legitimate root per
-    # discipline, and there are no legitimate self-parents left to tolerate. See Task 3 / references/hierarchy.md.
+    # Reflect existing parents. Generated discipline trees root at their MOC,
+    # so a self-parent is always a relationship to recompute in Task 3.
     def _parent_targets(e):
         out = []
         for p in e.get("parents", []):
@@ -4414,15 +4399,6 @@ def scan(wiki, images=None):
         # File safety and whole-document tree structure use the same guarded read.
         # Reopening the pathname here could follow a later symlink swap.
         _moc_lines = _moc_texts[_moc_state["path"]].splitlines()
-        _legacy_marker_lines = [
-            i + 1 for i, line in enumerate(_moc_lines)
-            if MOC_TREE_START in line or MOC_TREE_END in line]
-        if _legacy_marker_lines:
-            _moc_add(
-                _moc_state, "legacy-markers",
-                "obsolete marker lines must be omitted when regenerating the complete MOC",
-                line=_legacy_marker_lines[0], lines=_legacy_marker_lines)
-
         _stack = []                 # one parsed node at each active bullet level
         _previous_level = 0
         _seen_placement = {}        # (slug, nearest parent) -> first line
@@ -4430,10 +4406,6 @@ def scan(wiki, images=None):
             _line = _moc_lines[_idx]
             _line_no = _idx + 1
             if not _line.strip():
-                continue
-            # Standalone legacy markers never delimit a protected region.
-            # Skip their formatting while checking all other file content.
-            if _line.strip() in {MOC_TREE_START, MOC_TREE_END}:
                 continue
             _bullet = _bullet_line.match(_line)
             if not _bullet:
@@ -4704,15 +4676,13 @@ def scan(wiki, images=None):
                 "missing_disciplines": missing,
                 "represented_disciplines": sorted(represented),
             })
-    placed_unparented = [gap["slug"] for gap in placement_gaps]
-
     unresolved_parents = []
     for _sl, _e in sorted(entries.items()):
         for _raw_parent in _e.get("parents", []):
             _match = re.match(r"\s*\[\[([^\]|#]+)", str(_raw_parent))
             if not _match:
                 # Frontmatter form checks own malformed non-wikilink list
-                # items. ``placed_unparented`` still exposes the resulting
+                # items. ``placement_gaps`` still exposes the resulting
                 # absence of a usable hierarchy edge.
                 continue
             _target = _match.group(1).split("^", 1)[0].strip()
@@ -4775,12 +4745,6 @@ def scan(wiki, images=None):
             _path.append(_nxt)
             _stack.append((_nxt, iter(sorted(_parent_of.get(_nxt, [])))))
     _cycles.sort()
-    per_disc, entries_per_disc = {}, {}
-    for sl,e in entries.items():
-        for d in _entry_moc_roots(e):
-            entries_per_disc[d] = entries_per_disc.get(d,0) + 1
-            if sl in selfp: per_disc[d] = per_disc.get(d,0) + 1
-
     def _public_problem(row):
         slug_value, item, message, path = row
         result = {"slug": slug_value, "item": item, "message": message}
@@ -4829,7 +4793,6 @@ def scan(wiki, images=None):
             # Report-only state from the hierarchy last written (or not yet
             # written). These worklists do not authorize Task 3 or its
             # transitive scope expansion.
-            "placed_unparented": placed_unparented,
             "placement_gaps": placement_gaps,
             "unresolved_parents": unresolved_parents,
             "parent_state_findings": parent_state_findings,
@@ -4842,11 +4805,6 @@ def scan(wiki, images=None):
             # slug. Any entry named here has no path to a MOC root, so Task 3
             # must break the cycle before it can place either end.
             "parent_cycles": _cycles,
-            "per_discipline": [{"discipline": d,
-                                "self_parent": per_disc[d],
-                                "entries": entries_per_disc.get(d, 0),
-                                "check_rooting": per_disc[d] >= 1}   # trees root at the discipline MOC, so ANY self-parent is stale
-                               for d in sorted(per_disc)],
         },
     }
 
@@ -5096,6 +5054,26 @@ def run_self_test():
         check("a one-entry vault scans clean",
               (res1["inventory"], res1["problems"]),
               ({"entries": 1, "slugs": ["solo"]}, []))
+
+        metadata_vault = os.path.join(tmp, "unexpected-metadata")
+        for name, drop_tags in (("tagged", False), ("missing-tags", True)):
+            content = _st_entry(
+                name.title(), "**%s** is a worked example." % name.title(),
+                extra_keys='roots:\n  - "[[physics]]"\n')
+            if drop_tags:
+                content = content.replace('tags:\n  - "#statistics"\n', '')
+            _st_write(metadata_vault, name + ".md", content)
+        metadata_res = scan(metadata_vault)
+        check("an unexpected property is reported and preserved without a metadata migration",
+              [('unexpected frontmatter key "roots"' in _st_msg(metadata_res, name, "item2"),
+                "preserve this user metadata" in _st_msg(metadata_res, name, "item2"),
+                "migrate" in _st_msg(metadata_res, name, "item2"))
+               for name in ("tagged", "missing-tags")],
+              [(True, True, False)] * 2)
+        check("unexpected metadata supplies neither missing tags nor inferred discipline membership",
+              (metadata_res["discipline_tags"],
+               "missing tags: key" in _st_msg(metadata_res, "missing-tags", "item2")),
+              ({"statistics": 1}, True))
 
         # ------------------------------------------------------------------
         # 2. item 10 -- the destructive one.  A target mis-called `dangling`
@@ -5845,8 +5823,6 @@ def run_self_test():
         check("...each once, not once per member", len(h["parent_cycles"]), 3)
         check("an ordinary parent edge is not a cycle",
               any("leaf" in c or "root" in c for c in h["parent_cycles"]), False)
-        check("check_rooting fires on the self-parent's discipline",
-              [d["check_rooting"] for d in h["per_discipline"]], [True])
         check("an unparsed Wiki file cannot serve as a hierarchy parent",
               [(x["slug"], x["target"], x["reason"])
                for x in h["unresolved_parents"]],
@@ -5908,20 +5884,18 @@ def run_self_test():
         _st_write(v, "chemistry-rooted.md", _st_entry(
             "Chemistry rooted", "**Chemistry rooted** is a worked example.",
             tags=('"#chemistry"',), parents=('"[[MOCs/chemistry]]"',)))
-        _st_write(vr, "MOCs/machine-learning.md",
-                  MOC_TREE_START + "\n- [[Wiki/rooted|Rooted]]\n" + MOC_TREE_END + "\n")
+        _st_write(vr, "MOCs/machine-learning.md", "- [[Wiki/rooted|Rooted]]\n")
         _st_write(vr, "MOCs/statistics.md", "- [[Wiki/statistics-rooted|Statistics rooted]]\n")
         _st_write(vr, "MOCs/mathematics.md", "")
         _st_write(vr, "MOCs/biology.md",
-                  "  " + MOC_TREE_START + "\n- [[Wiki/biology-rooted|Biology rooted]]\n"
-                  "  " + MOC_TREE_END + "\n")
+                  "  <!-- annotation -->\n- [[Wiki/biology-rooted|Biology rooted]]\n")
         _st_write(vr, "MOCs/chemistry.md", b"\xff\xfe")
         res = scan(v)
         h = res["hierarchy_diagnostic"]
         check("the vault root is derived from the scanned Wiki directory",
               res["vault_root"], os.path.abspath(vr))
         check("a tagged entry with no usable parent is report-only hierarchy backlog",
-              h["placed_unparented"],
+              [gap["slug"] for gap in h["placement_gaps"]],
               ["chemistry-rooted", "missing-entry-parent", "partial-multitag", "partial-via-entry",
                "physics-rooted", "placed-empty", "wrong-discipline-root"])
         check("placement gaps retain the missing discipline for partial unions and wrong roots",
@@ -5954,10 +5928,10 @@ def run_self_test():
                for x in h["moc_file_states"]
                if x["discipline"] == "chemistry"],
               [("unreadable", "UnicodeDecodeError")])
-        check("indented legacy markers are obsolete formatting without blocking the readable tree",
-              [x["lines"] for x in h["moc_consistency_findings"]
-               if x.get("discipline") == "biology" and x["kind"] == "legacy-markers"],
-              [[1, 3]])
+        check("an indented comment is malformed generated outline content",
+              [x["line"] for x in h["moc_consistency_findings"]
+               if x.get("discipline") == "biology" and x["kind"] == "malformed-line"],
+              [1])
         check("an empty active MOC reports every missing tagged entry",
               [x["slug"] for x in h["moc_consistency_findings"]
                if x.get("discipline") == "mathematics" and x["kind"] == "missing-entry"],
@@ -5980,8 +5954,8 @@ def run_self_test():
         # unreadable instead of importing an outside generated tree.
         _race_moc = os.path.join(vr, "race-moc.md")
         _race_target = os.path.join(vr, "race-target.md")
-        _st_write(vr, "race-moc.md", MOC_TREE_START + "\n" + MOC_TREE_END + "\n")
-        _st_write(vr, "race-target.md", MOC_TREE_START + "\n- outside\n" + MOC_TREE_END + "\n")
+        _st_write(vr, "race-moc.md", "- original\n")
+        _st_write(vr, "race-target.md", "- outside\n")
         if _have_moc_symlink:
             _real_open = os.open
             _swapped = []
@@ -6001,14 +5975,14 @@ def run_self_test():
         else:
             check("MOC open-race regression skipped without symlinks", True, True)
 
-        malformed = os.path.join(vr, "marker-shapes")
-        _st_write(malformed, "partial.md", MOC_TREE_START + "\n")
-        _st_write(malformed, "reversed.md", MOC_TREE_END + "\n" + MOC_TREE_START + "\n")
-        _st_write(malformed, "duplicate.md",
-                  MOC_TREE_START + "\n" + MOC_TREE_START + "\n" + MOC_TREE_END + "\n")
-        check("partial, reversed, and duplicate legacy markers remain readable content",
+        malformed = os.path.join(vr, "outline-shapes")
+        for name, content in (("prose", "A personal introduction.\n"),
+                              ("heading", "# A heading\n"),
+                              ("comment", "<!-- annotation -->\n")):
+            _st_write(malformed, name + ".md", content)
+        check("file readability does not imply valid generated outline content",
               [moc_file_state(os.path.join(malformed, name + ".md"))["state"]
-               for name in ("partial", "reversed", "duplicate")],
+               for name in ("prose", "heading", "comment")],
               ["readable"] * 3)
 
         # The complete generated tree supplies coverage and nearest linked
@@ -6048,8 +6022,8 @@ def run_self_test():
             "Partially blocked", "**Partially blocked** is a worked example.",
             tags=('"#machine-learning"',),
             parents=('"[[broad]]"', '"[[does-not-exist]]"')))
-        _st_write(v, "unmarked-union.md", _st_entry(
-            "Unmarked union", "**Unmarked union** is a worked example.",
+        _st_write(v, "multi-group-union.md", _st_entry(
+            "Multi-group union", "**Multi-group union** is a worked example.",
             tags=('"#machine-learning"', '"#physics"'),
             parents=('"[[MOCs/machine-learning]]"',)))
         _st_write(v, "suppressed.md", _st_entry(
@@ -6060,7 +6034,6 @@ def run_self_test():
             tags=('"#biology"',), parents=('"[[MOCs/biology]]"',)))
         _st_write(
             vr, "MOCs/machine-learning.md",
-            MOC_TREE_START + "\n"
             "- [[Wiki/broad|Broad]]\n"
             "  - [[Wiki/leaf|Leaf]]\n"
             "  - [[Wiki/duplicate|Duplicate]]\n"
@@ -6071,20 +6044,19 @@ def run_self_test():
             "  - [[Wiki/mismatch|Mismatch]]\n"
             "  - [[Wiki/partially-blocked|Partially blocked]]\n"
             "- [[qualified-handle|Qualified (machine learning)]]\n"
-            "- [[Wiki/unmarked-union|Unmarked union]]\n"
+            "- [[Wiki/multi-group-union|Multi-group union]]\n"
             "- [[Wiki/biology-only|Biology only]]\n"
             "- [[Wiki/does-not-exist|Does not exist]]\n"
             "  - [[Wiki/blocked-child|Blocked child]]\n"
             "  - [[Wiki/partially-blocked|Partially blocked]]\n"
-            + MOC_TREE_END + "\n")
+)
         _st_write(
             vr, "MOCs/statistics.md",
-            MOC_TREE_START + "\n"
             "  - [[Wiki/suppressed|Suppressed]]\n"
             "not a bullet\n"
             "- [[Wiki/suppressed|Suppressed]]\n"
-            + MOC_TREE_END + "\n")
-        _st_write(vr, "MOCs/physics.md", "- [[Wiki/unmarked-union|Unmarked union]]\n")
+)
+        _st_write(vr, "MOCs/physics.md", "- [[Wiki/multi-group-union|Multi-group union]]\n")
         res = scan(v)
         findings = res["hierarchy_diagnostic"]["moc_consistency_findings"]
         check("whole-file MOC consistency reports every deterministic issue class",
@@ -6093,7 +6065,7 @@ def run_self_test():
                "unresolved-link", "noncanonical-target", "noncanonical-label",
                "wrong-discipline-link", "missing-entry",
                "duplicate-placement", "parent-union-mismatch",
-               "eponymous-root", "legacy-markers"})
+               "eponymous-root"})
         check("a resolvable alias stays a placement while both canonical forms are reported",
               ([(x.get("slug"), x.get("target")) for x in findings
                 if x["kind"] == "noncanonical-target"],
@@ -6128,7 +6100,7 @@ def run_self_test():
               [(x["slug"], x["expected_parents"], x["actual_parents"])
                for x in findings if x["kind"] == "parent-union-mismatch"],
               [("mismatch", ["broad"], ["MOCs/machine-learning"]),
-               ("unmarked-union", ["MOCs/machine-learning", "MOCs/physics"],
+               ("multi-group-union", ["MOCs/machine-learning", "MOCs/physics"],
                 ["MOCs/machine-learning"])])
         check("malformed and missing-placement MOCs suppress union comparison",
               any(x["kind"] == "parent-union-mismatch"
@@ -6145,11 +6117,11 @@ def run_self_test():
               [(x.get("slug"), x.get("top_level_slugs")) for x in findings
                if x["kind"] == "eponymous-root"],
               [("machine-learning",
-                ["broad", "qualified-machine-learning", "unmarked-union",
+                ["broad", "qualified-machine-learning", "multi-group-union",
                  None, None])])
-        check("legacy markers do not block union comparison with an ordinary markerless tree",
+        check("complete generated trees supply the multi-discipline parent union",
               [x["slug"] for x in findings if x["kind"] == "parent-union-mismatch"
-               and "physics" in x.get("disciplines", [])], ["unmarked-union"])
+               and "physics" in x.get("disciplines", [])], ["multi-group-union"])
 
         # Canonical MOCs live outside Wiki, and their eponymous concepts remain
         # distinct even when both names appear in the same entry or tree.
@@ -6265,7 +6237,7 @@ def run_self_test():
             "Leaf", "**Leaf** is a worked example.",
             tags=('"#biology"',), parents=('"[[biology]]"',)))
         _st_write(vr, "MOCs/biology.md",
-                  MOC_TREE_START + "\n- [[Wiki/leaf|Leaf]]\n" + MOC_TREE_END + "\n")
+                  "- [[Wiki/leaf|Leaf]]\n")
         _st_write(v, "reader.md", _st_entry(
             "Reader", "**Reader** is a worked example. [[biology|Biology index]] "
             "and [[MOCs/biology|Biology index]] are navigation. "
@@ -6318,7 +6290,7 @@ def run_self_test():
             "Leaf", "**Leaf** is a worked example. [[leaf|Leaf map]] is navigation.",
             parents=('"[[MOCs/statistics]]"',)))
         _st_write(vr, "MOCs/statistics.md",
-                  MOC_TREE_START + "\n- [[Wiki/leaf|Leaf]]\n" + MOC_TREE_END + "\n")
+                  "- [[Wiki/leaf|Leaf]]\n")
         for _map in ("leaf", "other-map", "orphan-map"):
             _st_write(vr, "MOCs/" + _map + ".md", "A user-owned non-enum map.\n")
         _st_write(v, "alias-owner.md", _st_entry(
@@ -6386,7 +6358,7 @@ def run_self_test():
                [(row["slug"], row["reason"]) for row in h["unresolved_parents"]]),
               ([("MOCs/statistics", "missing")],
                [("legacy-rooted", "legacy-moc"), ("new-rooted", "missing")]))
-        check("legacy root bytes have their own safe-file state and explicit migration path",
+        check("unexpected old root bytes retain their safe-file state and conflicting canonical path",
               [(row["discipline"], row["state"], row["canonical_path"])
                for row in h["legacy_moc_states"]],
               [("statistics", "readable", os.path.join(vr, "MOCs/statistics.md"))])
@@ -6408,13 +6380,34 @@ def run_self_test():
               [("unexpected-moc", None), ("stale-moc", "biology"),
                ("legacy-location", "economics"), ("stale-moc", "physics"),
                ("legacy-location", "statistics")])
-        check("canonical and legacy copies remain visible together after a partial migration",
+        check("canonical and old root copies remain visible as separate owners",
               [row["discipline"] for row in h["legacy_moc_states"]],
               ["economics", "statistics"])
 
-        # Every byte of a canonical MOC belongs to the generated document.
-        # Legacy delimiters cannot hide coverage or malformed content before
-        # or after the former tree region.
+        _st_write(v, "old-map-reader.md", _st_entry(
+            "Old map reader", "**Old map reader** uses [[statistics-moc|Map]] "
+            "and [[statistics-moc|Map]] for navigation.",
+            related="[[statistics-moc|Map]]"))
+        old_map_res = scan(v)
+        check("an unexpected old root note stays a known body/footer owner without migration",
+              [key for key in _st_keys(old_map_res, "old-map-reader")
+               if key.startswith("item10/") or key == "item11"],
+              ["item10/moc"] * 3)
+        _st_write(v, "statistics-moc.md", _st_entry(
+            "Statistics moc", "**Statistics moc** is a worked example.",
+            aliases=('"specific-map"',)))
+        _st_write(v, "qualified-map-reader.md", _st_entry(
+            "Qualified map reader", "**Qualified map reader** uses "
+            "[[Wiki/statistics-moc|Statistics moc]] and [[specific-map|Map]]."))  # Wiki entry, not a MOC.
+        old_map_res = scan(v)
+        check("a Wiki file beside an old root owner requires qualified resolution",
+              ("item10/ambiguous" in _st_keys(old_map_res, "old-map-reader"),
+               "[[Wiki/statistics-moc|Map]]" in _st_msg(  # Wiki entry, not a MOC.
+                   old_map_res, "qualified-map-reader", "item10/alias"),
+               "item10/dangling" in _st_keys(old_map_res, "qualified-map-reader")),
+              (True, True, False))
+
+        # Every line of a canonical MOC must belong to its generated outline.
         v = os.path.join(tmp, "v6-whole-file", "Wiki")
         vr = os.path.dirname(v)
         for _name in ("First", "Middle", "Last"):
@@ -6424,48 +6417,27 @@ def run_self_test():
         _plain_tree = ("- [[Wiki/first|First]]\n"
                        "- [[Wiki/middle|Middle]]\n"
                        "- [[Wiki/last|Last]]\n")
-        _legacy_tree = ("- [[Wiki/first|First]]\n" + MOC_TREE_START + "\n"
-                        "- [[Wiki/middle|Middle]]\n" + MOC_TREE_END + "\n"
-                        "- [[Wiki/last|Last]]\n")
-        _st_write(vr, "MOCs/statistics.md", _legacy_tree)
-        res = scan(v)
-        check("bullets before and after legacy markers participate in complete coverage and parent unions",
-              [x["kind"] for x in res["hierarchy_diagnostic"]["moc_consistency_findings"]],
-              ["legacy-markers"])
-        _st_write(vr, "MOCs/statistics.md", "Personal introduction.\n" + _legacy_tree
+        _st_write(vr, "MOCs/statistics.md", "Personal introduction.\n" + _plain_tree
                   + "Personal conclusion.\n")
         res = scan(v)
-        check("prose outside former markers is malformed generated content and cannot be protected",
+        check("prose before and after the outline is malformed generated content",
               [(x["kind"], x.get("line"))
                for x in res["hierarchy_diagnostic"]["moc_consistency_findings"]],
-              [("malformed-line", 1), ("legacy-markers", 3), ("malformed-line", 7)])
+              [("malformed-line", 1), ("malformed-line", 5)])
         for _name, _wrapped in (
-                ("partial", MOC_TREE_START + "\n" + _plain_tree),
-                ("reversed", MOC_TREE_END + "\n" + _plain_tree + MOC_TREE_START + "\n"),
-                ("duplicated", MOC_TREE_START + "\n" + MOC_TREE_START + "\n"
-                 + _plain_tree + MOC_TREE_END + "\n"),
-                ("indented", "  " + MOC_TREE_START + "\n" + _plain_tree
-                 + "  " + MOC_TREE_END + "\n")):
-            _st_write(vr, "MOCs/statistics.md", _wrapped)
-            res = scan(v)
-            check("%s legacy markers are one formatting finding, with all tree placements retained" % _name,
-                  (res["hierarchy_diagnostic"]["moc_file_states"][0]["state"],
-                   [x["kind"] for x in res["hierarchy_diagnostic"]["moc_consistency_findings"]]),
-                  ("readable", ["legacy-markers"]))
-        for _name, _wrapped in (
-                ("fenced", "```markdown\n" + _legacy_tree + "```\n"),
-                ("frontmatter", "---\ntitle: Old map\n---\n" + _legacy_tree),
-                ("commented", "<!-- example\n" + _legacy_tree + "-->\n")):
+                ("fenced", "```markdown\n" + _plain_tree + "```\n"),
+                ("frontmatter", "---\ntitle: A map\n---\n" + _plain_tree),
+                ("commented", "<!-- annotation\n" + _plain_tree + "-->\n")):
             _st_write(vr, "MOCs/statistics.md", _wrapped)
             res = scan(v)
             _findings = res["hierarchy_diagnostic"]["moc_consistency_findings"]
             check("%s wrappers are validated as malformed whole-file content" % _name,
                   (res["hierarchy_diagnostic"]["moc_file_states"][0]["state"],
                    {x["kind"] for x in _findings}),
-                  ("readable", {"malformed-line", "legacy-markers"}))
+                  ("readable", {"malformed-line"}))
         _st_write(vr, "MOCs/statistics.md", _plain_tree)
         res = scan(v)
-        check("a markerless complete generated MOC is clean and repeated scans leave its bytes unchanged",
+        check("a complete generated MOC is clean and repeated scans leave its bytes unchanged",
               (res["hierarchy_diagnostic"]["moc_consistency_findings"], scan(v) == res,
                open(os.path.join(vr, "MOCs/statistics.md"), encoding="utf-8").read()),
               ([], True, _plain_tree))
@@ -6994,8 +6966,7 @@ def run_self_test():
               ("item12" in _st_keys(res, "tilde-dollar"),
                _st_msg(res, "tilde-dollar", "item12").startswith("1 unescaped")),
               (True, True))
-        check("ONE backticked identifier in a non-Software entry is over the zero cap "
-              "(the one-signpost allowance was retired 2026-08-16)",
+        check("one backticked identifier in a non-Software entry exceeds the zero cap",
               ("item6" in _st_keys(res, "capzero"),
                "cap is 0" in _st_msg(res, "capzero", "item6")), (True, True))
         check("...the same identifier in Software is mechanically exempt; "

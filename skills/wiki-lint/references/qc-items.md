@@ -59,7 +59,7 @@ ownership.
 | `item19` | Apply the format floor only after reading [flashcard maintenance](flashcards.md). |
 | `rename_candidates` | Propose with inbound count and collision warning; apply only with explicit authorization in the request and a complete reference rewrite. |
 | `collision_candidates` | Report; routine lint never merges existing entries. |
-| `hierarchy_diagnostic.parent_state_findings`, `moc_file_states`, `moc_inventory_findings`, `legacy_moc_states`, `moc_consistency_findings` | Use as report-only Task 3 inputs. Re-derive whole generated MOCs and complete parent unions from one authorized connected closure. Old markers/prose need no separate span approval; unsafe paths and unknown files remain protected. |
+| `hierarchy_diagnostic.parent_state_findings`, `moc_file_states`, `moc_inventory_findings`, `legacy_moc_states`, `moc_consistency_findings` | Use as report-only Task 3 inputs. Re-derive whole generated MOCs and complete parent unions from one authorized connected closure. Non-outline formatting needs no separate span approval; unsafe paths, unexpected old root occupants, and unknown files remain protected. |
 | Semantic-invalid alias | Propose the canonical owner and inbound rewrite; remove only through the approved alias-refactor protocol. |
 
 ## Source-independent item guide
@@ -100,10 +100,9 @@ Linter-specific routing:
 - Obsidian-owned appearance and publish properties are valid user state:
   report and preserve them. Preserve a populated legacy `importance:` without
   treating it as required or unexpected.
-- A retired `roots:` with no `tags:` is an evidence-preserving roots-to-tags
-  migration: convert only recognizable discipline-root targets to enum tags,
-  and report any unresolved target. When `tags:` already exists, remove only
-  the stale key. Never use either case to invent a discipline.
+- Preserve and report unexpected frontmatter properties. A schema mismatch
+  alone does not authorize deleting or repurposing user metadata; determine
+  required tags from the entry under the ordinary tag rules.
 
 The `parents:` and `read:` empty cases intentionally differ: `[]` re-spells an
 already empty list, while `false` would supply an answer the review field does
@@ -444,9 +443,8 @@ attachments, or an explicit request to delete that card. Visible metadata
 absence does not establish a fresh card; apply the [history-aware rewrite
 bar](flashcards.md) before changing a definition.
 
-**The checklist ends at 19.** The retired `importance:` item was last, so its
-removal created no numbering gap. Legacy populated `importance:` remains valid
-and preserved under item 2.
+**The checklist ends at 19.** Existing `importance:` remains valid and
+preserved under item 2.
 
 ## Source-dependent and proposal-only limits
 
