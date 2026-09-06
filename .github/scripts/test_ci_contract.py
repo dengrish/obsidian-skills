@@ -82,6 +82,21 @@ class CiContractTests(unittest.TestCase):
             with self.assertRaisesRegex(CI.ContractError, "simple name>=floor"):
                 CI.declared_floors(root / "requirements-dev.txt", root)
 
+    def test_exact_dependency_pins_are_preserved_and_conflicts_rejected(self):
+        with tempfile.TemporaryDirectory(prefix="obsidian-ci-pins-") as tmp:
+            root = Path(tmp)
+            requirements = root / "requirements.txt"
+            requirements.write_text("edgartools==5.56.0\nPyYAML>=6.0\n", encoding="utf-8")
+            self.assertEqual(CI.declared_floors(requirements, root),
+                             ["edgartools==5.56.0", "PyYAML==6.0"])
+            for line in ("edgartools>=5.55.0", "edgartools==5.55.0"):
+                requirements.write_text("edgartools==5.56.0\n" + line, encoding="utf-8")
+                with self.assertRaisesRegex(CI.ContractError, "conflicting"):
+                    CI.declared_floors(requirements, root)
+            requirements.write_text("edgartools==5.*\n", encoding="utf-8")
+            with self.assertRaises(CI.ContractError):
+                CI.declared_floors(requirements, root)
+
     def test_semver_order_includes_prereleases(self):
         precedence = (
             "1.0.0-alpha",

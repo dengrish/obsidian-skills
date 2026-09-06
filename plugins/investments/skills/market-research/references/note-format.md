@@ -125,8 +125,10 @@ it from the short brief. Organize each day's relevant material as follows:
 - **Screening and sources:** persist the universe definition, source/provider,
   price-history period, liquidity/filter/ranking rules, coverage, candidate counts
   when known, and the announcement and price-screen results. Explain changes to
-  the prior screen. Preserve direct evidence URLs, publisher/author, publication
-  and observation timestamps, and the facts supported. For social findings,
+  the prior screen. For a thematic expansion, retain the theme, actual checked
+  names, coverage and decisive exclusions. Preserve direct evidence URLs,
+  publisher/author, publication and observation timestamps, and the facts
+  supported. For social findings,
   identify the original claim, source/platform, deduplication and verification
   result; distinguish sampled conversations from representative measurements.
 - **Candidate assessments:** group details under H4 exchange:ticker/thesis IDs.
@@ -135,8 +137,10 @@ it from the short brief. Organize each day's relevant material as follows:
   invalidation, milestone and review-by date. Record the leading rejected or
   deferred candidates with their decisive reason and reconsideration condition;
   do not preserve every irrelevant search hit. Separate verified observations,
-  investment hypotheses and unresolved questions. Rejected names need not become
-  tracked theses merely to appear in this record.
+  management claims, estimates, investment hypotheses and unresolved questions.
+  Where relevant, retain the theme-to-company benefit and compact earnings
+  comparisons from the [research method](research-method.md).
+  Rejected names need not become tracked theses merely to appear in this record.
 - **Thesis updates:** keep the canonical complete ledger below. Put fuller
   supporting changes under Candidate assessments, linked from the update cell.
 - **Outcome review:** check daily for newly due and previously missing observations
@@ -168,13 +172,21 @@ cards under separate H4 or deeper headings in the same subsection, with durable
 links to and from their journal rows. Do not create empty tables merely to fill a
 template. These headings do not change the note's two H2 and six H3 outline.
 
-For calculations, preserve the critical dated inputs, units, currency, formula
-or measurement definition, benchmark, adjustment basis and provider. Distinguish
-a recorded provider metric from a calculation reproducible from retained data;
-a mutable URL alone does not preserve the data as they appeared today. Retain
-concise source observations or tables needed to check the conclusion, without
-copying entire paid datasets or copyrighted documents. Do not invent unavailable
-historical observations to make a record look complete.
+For claims that determine selection, status or risk, keep the source observation,
+its date and verification or unresolved conflict beside the claim. Short visible
+IDs such as `C1` can connect a claim, its evidence and later calculations within
+the note; qualify cross-note references by filename and section. These labels
+are ordinary body text, not new thesis or outcome IDs. Prose is sufficient when
+clear; an extra table is not required, and historical notes need no conversion.
+
+For decision-driving calculations, preserve the dated input values and their
+sources or claim IDs, units, currency, formula or measurement definition, result,
+cross-check and material limitations. Include periods, benchmark and adjustment
+basis where relevant. Distinguish a quoted provider metric from a calculation
+reproducible from retained data; a mutable URL alone does not preserve the data
+as they appeared today. Retain only the observations needed to check the
+conclusion, without copying entire paid datasets or copyrighted documents. Do not
+invent unavailable historical observations to make a record look complete.
 
 Published citations must not depend on the run's scratch files or other temporary
 downloads. Use original durable URLs or existing stable vault sources. When the

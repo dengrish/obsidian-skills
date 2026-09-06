@@ -3,7 +3,8 @@
 
 Outputs one JSON object. Exit 0 means complete within the declared query scope;
 exit 2 means invalid input, unavailable access or explicitly incomplete coverage.
-No accounts, trades, subscriptions, files or persistent caches are created.
+No accounts, trades, subscriptions or persistent caches are created. Optional
+filing parsing uses an isolated temporary worker and cleans its own files.
 Use check offline first; check --live makes bounded access probes. Neither
 configured keys nor a successful probe establishes comprehensive coverage.
 """
@@ -66,6 +67,15 @@ def parser():
         if name == 'sec-facts':
             sub.add_argument('--concepts', help='comma-separated XBRL concepts; defaults to a small financial set')
             sub.add_argument('--taxonomy', default='us-gaap', help='XBRL taxonomy, e.g. us-gaap or ifrs-full')
+    filing = commands.add_parser('sec-filing', help='read one verified SEC accession with optional local EdgarTools parsing')
+    filing.add_argument('--cik', required=True, help='SEC company identifier')
+    filing.add_argument('--accession', required=True, help='exact SEC accession; never defaults to latest')
+    filing.add_argument('--as-of', required=True, help='evidence cutoff with seconds and timezone')
+    filing.add_argument('--since', help='earliest filing date; use for accessions outside recent submissions')
+    filing.add_argument('--max-pages', type=int, default=10, help='maximum older submission pages')
+    filing.add_argument('--section', help='exact detected section key from an earlier response')
+    filing.add_argument('--offset', type=int, default=0, help='character offset in the selected rendered text')
+    filing.add_argument('--max-chars', type=int, default=20000, help='maximum returned characters, up to 100000')
     symbols = commands.add_parser('symbols', help='retrieve current Nasdaq and other-exchange security directories')
     symbols.add_argument('--symbols', help='optional comma-separated symbol filter')
     symbols.add_argument('--limit', type=int, default=20000)
@@ -130,15 +140,18 @@ def handlers():
     from market_prices import alpaca_bars, alpaca_actions, alpaca_calendar
     from market_news import news, alpha_calendar
     from market_fred import fred_series, fred_releases
+    from market_filings import sec_filing
     return {
         'sec-company': sec_company, 'sec-facts': sec_facts, 'symbols': nasdaq_symbols,
         'halts': nasdaq_halts, 'prices': alpaca_bars, 'actions': alpaca_actions,
         'sessions': alpaca_calendar, 'news': news, 'earnings': alpha_calendar,
         'fred-series': fred_series, 'fred-releases': fred_releases,
+        'sec-filing': sec_filing,
     }
 
 
 def check_sources(client, args):
+    from market_filings import dependency_status
     selected = [args.source] if args.source else list(REQUIRED)
     rows = []
     for source in selected:
@@ -186,7 +199,8 @@ def check_sources(client, args):
                             'fred': 'one DGS10 metadata and daily-vintage observation sample only'}[source]
         except DataError as exc:
             row.update(access='unavailable', error={'code': exc.code, 'message': str(exc)})
-    return {'data': rows, 'complete': all(row['configured'] and (not args.live or row['access'] == 'reachable')
+    return {'data': rows, 'optional_dependencies': {'sec_filing_parser': dependency_status()},
+            'complete': all(row['configured'] and (not args.live or row['access'] == 'reachable')
                                          for row in rows),
             'warnings': ['Configuration is not endpoint entitlement. A sample does not verify all endpoints, current data or source accuracy.',
                          'Rate budgets are per command; account quotas also apply across runs.']}

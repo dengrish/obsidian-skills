@@ -1,0 +1,3 @@
+# Optional local HTML/section parser for market_data.py sec-filing.
+# Network access remains in our bounded SEC transport; no MCP server is installed.
+edgartools==5.56.0

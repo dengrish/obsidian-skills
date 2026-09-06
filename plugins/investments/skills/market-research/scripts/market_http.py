@@ -100,7 +100,7 @@ def allowed_url(url):
             or parsed.fragment or parsed.port not in (None, 443) or parsed.query):
         raise DataError('unsafe_url', 'Retrieval requires an approved HTTPS provider resource.')
     patterns = {
-        'www.sec.gov': r'/files/company_tickers(?:_exchange)?\.json',
+        'www.sec.gov': r'(?:/files/company_tickers(?:_exchange)?\.json|/Archives/edgar/data/[1-9][0-9]{0,9}/[0-9]{18}/(?![^/]*\.\.)[A-Za-z0-9][A-Za-z0-9_.-]{0,199}\.html?)',
         'data.sec.gov': r'(?:/submissions/CIK\d{10}(?:-submissions-\d+)?\.json|/api/xbrl/companyfacts/CIK\d{10}\.json)',
         'www.nasdaqtrader.com': r'(?:/dynamic/[Ss]ym[Dd]ir/(?:nasdaqlisted|otherlisted)\.txt|/rss\.aspx)',
         'data.alpaca.markets': r'(?:/v2/stocks/bars|/v1/corporate-actions|/v1beta1/news)',
@@ -330,6 +330,20 @@ def run_self_test():
         def test_redirect_cannot_forward_keys(self):
             with self.assertRaises(DataError):
                 no_redirect_handler().redirect_request(None, None, 302, 'redirect', {}, 'https://example.com')
+
+        def test_sec_primary_html_allowlist_is_narrow(self):
+            base = 'https://www.sec.gov/Archives/edgar/data/320193/000032019326000001/'
+            self.assertEqual(allowed_url(base + 'aapl-20260101.htm'), 'www.sec.gov')
+            self.assertEqual(allowed_url(base + 'aapl_20260101.html'), 'www.sec.gov')
+            for suffix in ('../private.html', 'a/filing.htm', '%2e%2e.html', 'x.htm?download=1',
+                           'x.htm#fragment', '.hidden.htm', 'x..htm', 'filing.xml', 'a.htm.exe'):
+                with self.subTest(suffix=suffix), self.assertRaises(DataError):
+                    allowed_url(base + suffix)
+            for url in (base.replace('/320193/', '/0000320193/'),
+                        base.replace('000032019326000001', '0000320193-26-000001'),
+                        base.replace('www.sec.gov', 'data.sec.gov')):
+                with self.subTest(url=url), self.assertRaises(DataError):
+                    allowed_url(url + 'filing.htm')
 
         def test_headers_and_cross_provider_query_keys(self):
             client = self.client([])

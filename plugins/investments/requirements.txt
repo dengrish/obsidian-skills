@@ -1,2 +1,3 @@
 # Python 3.10+ standard library only; system IANA timezone data is required.
-# No third-party packages are required by the investment helpers.
+# Core retrieval, screening and notes need no third-party packages.
+# Optional filing parsing: skills/market-research/scripts/requirements-filings.txt.

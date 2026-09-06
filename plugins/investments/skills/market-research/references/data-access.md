@@ -4,13 +4,16 @@ Use [market_data.py](../scripts/market_data.py) for repeatable retrieval, then
 apply the [research method](research-method.md) to interpret the results and
 open issuer releases or filings for shortlisted ideas. The helper retrieves
 evidence; it does not rank stocks, calculate a track record, or publish notes.
-It works with Python 3.10+ in either host and needs no extra Python packages.
+Core retrieval works with Python 3.10+ in either host without extra packages.
+The optional `sec-filing` command uses pinned EdgarTools for local HTML parsing.
+Use the [offline screening guide](screening.md) for repeatable calculations on
+saved price/calendar responses.
 
 ## Setup and access checks
 
 | Source | Credential names | Commands and purpose |
 |---|---|---|
-| SEC EDGAR | `SEC_USER_AGENT`: application/name and a real contact email | `sec-company`: identity and filings; `sec-facts`: selected reported XBRL facts |
+| SEC EDGAR | `SEC_USER_AGENT`: application/name and a real contact email | `sec-company`: identity and filings; `sec-facts`: selected reported XBRL facts; optional `sec-filing`: one exact filing or section |
 | Nasdaq Trader | None | `symbols`: current exchange directories; `halts`: halt RSS |
 | Alpaca | `ALPACA_API_KEY`, `ALPACA_SECRET_KEY` | `prices`: historical bars; `actions`: corporate actions; `sessions`: paper exchange calendar; `news --provider alpaca`: bounded news sample |
 | Alpha Vantage | `ALPHA_VANTAGE_API_KEY` | `news` (default provider): news and provider sentiment; `earnings`: current earnings calendar |
@@ -68,6 +71,22 @@ access to every endpoint, real-time data, or complete market coverage. Missing
 credentials should limit only the affected source; continue with other usable
 sources and host web tools, recording gaps.
 
+### Optional filing parser
+
+The offline `check` also reports `optional_dependencies.sec_filing_parser`.
+A missing or incompatible EdgarTools installation does not fail the core-source
+check. For deeper filings, install the tested parser in the selected isolated
+environment during setup, not automatically during a scheduled research run:
+
+```bash
+'<venv>/bin/python' -m pip install -r '<skill>/scripts/requirements-filings.txt'
+```
+
+Use that interpreter for the data helper. This installs the Python library,
+not an external skill, MCP server or another research framework. No additional
+API key is needed. Existing `SEC_USER_AGENT` configuration still applies, and
+web reading remains available when the optional dependency is unavailable.
+
 ## Retrieval plan
 
 Use `market_data.py` with the configuration above for the evidence needed
@@ -83,9 +102,9 @@ skipped in Screening and sources. A successful setup probe is not today's resear
 | Review window and session | `sessions` for the last/next sessions and their opening/closing boundaries; verify exceptional closures against an exchange source. Reuse this calendar for price filtering and due outcome events. |
 | Accessible universe | `symbols` when establishing or refreshing the current directory-based screen or resolving instrument identity. Preserve membership dates and provider symbol mappings; it does not classify every non-ETF as an eligible common share. |
 | Announcement pass | `news --provider alpaca` for a bounded broad or ticker-specific news window when configured; use `news --provider alpha_vantage` selectively for additional coverage within its account quota. Use `earnings` for upcoming scheduled risks, then verify timing and results on issuer pages. Neither news feed must duplicate the other on every run. |
-| Price-history pass | `prices` for the declared universe and benchmarks over matching completed sessions. Compute the chosen measurements from retained inputs; the helper does not screen or rank. Use session-filtered minute data or another explicitly regular-session source for regular-session liquidity, not unfiltered daily volume. |
+| Price-history pass | `prices` for the declared universe and benchmarks over matching completed sessions, then the offline [screener](screening.md). Preserve its defined filters, coverage and exclusions. Its daily notional proxy is preliminary; verify regular-session liquidity separately for the shortlist. |
 | Intraday assessment | On open-market runs, use `prices --timeframe 1Min` or a timestamped host quote for the shortlist's morning reaction. Respect feed delay and the cutoff; keep snapshots separate from completed-session signals, and compare partial volume only with matching historical session/time windows. |
-| Shortlist and readiness | `sec-company` for relevant filings, then `sec-facts` when comparable reported fundamentals are needed. Open the actual filing/release for material claims and disclosures absent from XBRL. Check `halts` and current issuer/exchange notices before first readiness or when a trading-status concern arises; a current empty feed does not reconstruct an earlier cutoff or clear an older unresolved halt. |
+| Shortlist and readiness | `sec-company` for relevant filings, then `sec-facts` for comparable reported fundamentals and optional `sec-filing` for the exact filing's narrative/tables. Open material cited sections and issuer releases; a parser is not a factual verifier. Check `halts` and current issuer/exchange notices before first readiness or when a trading-status concern arises; a current empty feed does not reconstruct an earlier cutoff or clear an older unresolved halt. |
 | Corporate actions | `actions` when validating adjustments, unexplained price discontinuities, instrument changes or outcome inputs. Its process-date records need issuer corroboration; choose the relevant history and keep original raw observations. |
 | Macro context | `fred-releases` for relevant upcoming releases and `fred-series` for a small dated set of rates, credit, employment or inflation observations when they affect a thesis. Verify fresh announcements with the releasing agency. |
 | Outcome work | Use `sessions`, `prices` and relevant `actions` for due baselines/checkpoints returned by `market_notes.py outcomes`; retain fixed events, matching benchmark inputs and availability evidence. Do not refetch completed observations unless corrections or changed evidence require it. |
@@ -144,6 +163,44 @@ limitations in the daily Research record under the [note format](note-format.md)
 Do not paste entire feeds into notes or leave references pointing to scratch.
 Retrieval timestamps and digests support provenance; they do not prove that an
 article, revised dataset, or financial estimate was known at an earlier cutoff.
+
+## Exact filing and section extraction
+
+Select an accession from `sec-company` that is available by the research cutoff.
+Pass that exact accession and CIK to `sec-filing`; no latest-filing fallback is
+allowed. For older accessions, include `--since` and an adequate page budget so
+their metadata can be found. Replace the example with the selected filing:
+
+```bash
+python3 '<skill>/scripts/market_data.py' sec-filing --cik 320193 --accession '0000320193-23-000106' --as-of '2026-09-04T11:30:00-04:00' --since '2023-11-01' > '<scratch>/filing-text.json'
+```
+
+The adapter verifies the accession against SEC submissions and fetches only its
+validated primary HTML document through the existing bounded SEC transport.
+EdgarTools parses that HTML locally in a short-lived worker with no API keys.
+Its temporary library directories are cleaned; no user EdgarTools cache or
+installed skill is changed. Parsing is limited to 30 seconds in addition to the
+HTTP budget. The command neither downloads linked documents/images nor uses
+EdgarTools' network, latest-company, or persistent-data interfaces.
+
+The response identifies the filing, acceptance/filing-date availability basis,
+original URL, parser version, detected `data.sections`, source/text digests and
+rendered Markdown. Use a returned `section_id` when requesting `--section`; do
+not guess ambiguous 10-Q part/item numbers. Missing sections are
+explicitly incomplete. The parser's sections and tables are extraction aids,
+not guarantees of completeness or normalized financial statements. Use the
+original document for omitted or ambiguous content, especially table units and
+footnotes; earnings exhibits may require opening a separate issuer release.
+
+Output is paged by `--offset` and `--max-chars` (default 20,000, maximum 100,000).
+Follow `data.next_offset` while needed, keeping the same filing, section and
+cutoff, and require unchanged source and full-text digests when joining pages.
+Any echoed credentials are removed before parsing; a warning identifies this
+change, and the text digest then describes the redacted rendering.
+Excerpts remain incomplete rather than silently claiming the whole filing was
+read. Character positions are locations in rendered text, not PDF page numbers.
+Retain only decision-relevant excerpts and calculations in the daily note, with
+the durable SEC URL and section; do not publish the entire filing or cite scratch.
 
 ## Source-specific interpretation
 
@@ -291,7 +348,7 @@ Use a small relevant subset for macro context, not an automatic buying signal:
 | [CPIAUCSL](https://fred.stlouisfed.org/series/CPIAUCSL), [PCEPILFE](https://fred.stlouisfed.org/series/PCEPILFE) | Monthly headline CPI and core PCE price indexes; index levels are not inflation rates |
 
 For implementation or troubleshooting, the CLI delegates to
-[public data](../scripts/market_public.py), [prices](../scripts/market_prices.py),
+[public data](../scripts/market_public.py), [filing extraction](../scripts/market_filings.py), [prices](../scripts/market_prices.py),
 [news/calendars](../scripts/market_news.py), [macro data](../scripts/market_fred.py), and the shared
 [request transport](../scripts/market_http.py). These sibling modules have
 offline self-tests but no separate operational retrieval interface.

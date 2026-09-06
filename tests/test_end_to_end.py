@@ -181,7 +181,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(all(row['access'] == 'not_tested' for row in sources.values()))
         self.assertEqual(before, sorted(str(path.relative_to(self.vault)) for path in self.vault.rglob('*')))
 
-    def test_market_transport_providers_and_cli_preserve_scope_and_secrets(self):
+    def market_response(self, args, pages, expected=0):
         # Use the real CLI, transport and adapters from another directory. Only
         # the HTTPS opener is replaced; no production fixture/network overrides.
         driver = Path(self.scratch.name) / 'market fixture driver.py'
@@ -201,20 +201,83 @@ client = HttpClient(fixture['env'], opener=opener, sleeper=lambda _: None)
 raise SystemExit(main(fixture['args'], client))
 ''', encoding='utf-8')
 
-        def run(args, pages, expected):
-            key = 'DUMMY_SECRET_FOR_OFFLINE_TEST'
-            fixture = {'args': args, 'pages': pages, 'env': {
-                'ALPHA_VANTAGE_API_KEY': key, 'ALPACA_API_KEY': key, 'ALPACA_SECRET_KEY': key,
-                'FRED_API_KEY': key}}
-            response = subprocess.run(
-                [sys.executable, str(driver), str(ROOT / 'skills/market-research/scripts')],
-                input=json.dumps(fixture), cwd=self.vault, env=self.env,
-                capture_output=True, text=True, encoding='utf-8', timeout=30)
-            self.assertEqual(response.returncode, expected, response.stdout + response.stderr)
-            self.assertNotIn(key, response.stdout + response.stderr)
-            result = json.loads(response.stdout)
-            self.assertEqual(result['market_data'], 1)
-            return result
+        key = 'DUMMY_SECRET_FOR_OFFLINE_TEST'
+        fixture = {'args': args, 'pages': pages, 'env': {
+            'ALPHA_VANTAGE_API_KEY': key, 'ALPACA_API_KEY': key, 'ALPACA_SECRET_KEY': key,
+            'FRED_API_KEY': key, 'SEC_USER_AGENT': 'Fixture Research fixture@example.invalid'}}
+        response = subprocess.run(
+            [sys.executable, str(driver), str(ROOT / 'skills/market-research/scripts')],
+            input=json.dumps(fixture), cwd=self.vault, env=self.env,
+            capture_output=True, text=True, encoding='utf-8', timeout=30)
+        self.assertEqual(response.returncode, expected, response.stdout + response.stderr)
+        self.assertNotIn(key, response.stdout + response.stderr)
+        result = json.loads(response.stdout)
+        self.assertEqual(result['market_data'], 1)
+        return result
+
+    def test_market_retrieval_envelopes_feed_offline_screen(self):
+        # An explicitly synthetic calendar isolates the provider-to-calculator
+        # contract; these weekdays are not asserted to be real exchange dates.
+        day = datetime(2024, 6, 3).date()
+        final = datetime(2025, 9, 5).date()
+        dates = []
+        while day <= final:
+            if day.weekday() < 5:
+                dates.append(day)
+            day += timedelta(days=1)
+        sessions = self.market_response(
+            ['sessions', '--start', dates[0].isoformat(), '--end', '2025-09-06'],
+            [[{'date': day.isoformat(), 'open': '09:30', 'close': '16:00'} for day in dates]])
+        ny = ZoneInfo('America/New_York')
+        raw = {'STRONG': [], 'SPY': []}
+        for i, day in enumerate(dates):
+            for symbol in raw:
+                price = 100 + i if symbol == 'STRONG' else 100
+                raw[symbol].append({
+                    't': datetime.combine(day, time.min, ny).isoformat(),
+                    'o': price, 'h': price + 1, 'l': price - 1, 'c': price,
+                    'v': 1000000, 'n': 10000, 'vw': price})
+        prices = self.market_response(
+            ['prices', '--symbols', 'STRONG,SPY', '--start', '2024-06-03T00:00:00-04:00',
+             '--end', '2025-09-06T08:00:00-04:00', '--feed', 'sip', '--timeframe', '1Day',
+             '--adjustment', 'split', '--asof', '2025-09-05'],
+            [{'bars': raw, 'next_page_token': None}])
+        bundle = {
+            'market_screen_input': 1, 'as_of': '2025-09-06T12:00:00-04:00',
+            'universe': {'name': 'Synthetic contract fixture', 'membership_date': '2025-09-05',
+                         'source': 'https://example.invalid/fixture', 'instruments': [
+                             {'symbol': 'STRONG', 'exchange': 'NASDAQ',
+                              'security_type': 'common_stock', 'currency': 'USD'}]},
+            'benchmark': 'SPY', 'prices': [prices], 'sessions': sessions,
+        }
+        path = Path(self.scratch.name) / 'screen input.json'
+        path.write_text(json.dumps(bundle), encoding='utf-8')
+        result = json.loads(self.run_script('skills/market-research/scripts/market_screen.py',
+                                             '--input', path).stdout)
+        self.assertTrue(result['complete'])
+        self.assertEqual([row['symbol'] for row in result['candidates']], ['STRONG'])
+        self.assertEqual(result['reference_session'], final.isoformat())
+        metrics = result['candidates'][0]['metrics']
+        last_price = 100 + len(dates) - 1
+        self.assertEqual(metrics['price'], last_price)
+        self.assertEqual(metrics['ma50'], last_price - 24.5)
+        self.assertEqual(metrics['ma200'], last_price - 99.5)
+        self.assertEqual(metrics['average_daily_notional'], (last_price - 9.5) * 1000000)
+        june_price = 100 + dates.index(datetime(2025, 6, 5).date())
+        self.assertAlmostEqual(metrics['return_3m'], last_price / june_price - 1)
+        self.assertAlmostEqual(metrics['relative_return_3m'], metrics['return_3m'])
+        repeated = json.loads(self.run_script('skills/market-research/scripts/market_screen.py',
+                                               '--input', path).stdout)
+        self.assertEqual(result, repeated)
+        prices['complete'] = False
+        path.write_text(json.dumps(bundle), encoding='utf-8')
+        partial = json.loads(self.run_script('skills/market-research/scripts/market_screen.py',
+                                              '--input', path, expected=2).stdout)
+        self.assertFalse(partial['complete'])
+        self.assertEqual(partial['candidates'], result['candidates'])
+
+    def test_market_transport_providers_and_cli_preserve_scope_and_secrets(self):
+        run = self.market_response
 
         bars = run(['prices', '--symbols', 'AAPL,MSFT', '--start', '2025-09-01T00:00:00-04:00',
                     '--end', '2025-09-06T08:45:00-04:00', '--max-pages', '1'], [{
@@ -226,6 +289,40 @@ raise SystemExit(main(fixture['args'], client))
         self.assertEqual(len(bars['data']['bars']['AAPL']), 1)
         self.assertEqual(bars['source']['feed'], 'sip')
         self.assertEqual(len(bars['requests']), 1)
+
+        filing_args = ['sec-filing', '--cik', '320193', '--accession',
+                       '0000320193-25-000001', '--as-of', '2025-09-05T13:00:00Z']
+        filing_rows = {'accessionNumber': ['0000320193-25-000001'],
+                       'filingDate': ['2025-09-04'], 'form': ['10-K'],
+                       'acceptanceDateTime': ['2025-09-04T12:00:00Z'],
+                       'reportDate': ['2025-06-30'], 'primaryDocument': ['fixture.htm']}
+        submissions = {'cik': 320193, 'name': 'Synthetic Filing Company',
+                       'tickers': ['FIX'], 'exchanges': ['Nasdaq'],
+                       'filings': {'recent': filing_rows, 'files': []}}
+        filing_html = '''<html><body><h1>Item 7. Management Discussion</h1>
+<p>Revenue is in millions of USD. DUMMY_SECRET_FOR_OFFLINE_TEST</p>
+<table><tr><th>Period</th><th>Revenue</th></tr>
+<tr><td>2025</td><td>120</td></tr><tr><td>2024</td><td>100</td></tr></table>
+</body></html>'''
+        filing = run(filing_args, [submissions, filing_html], 0)
+        self.assertEqual(len(filing['requests']), 2)
+        self.assertEqual(filing['data']['filing']['accessionNumber'], '0000320193-25-000001')
+        self.assertIn('120', filing['data']['text'])
+        self.assertIn('REDACTED', filing['data']['text'])
+        self.assertNotIn('DUMMY_SECRET_FOR_OFFLINE_TEST', filing['data']['text'].replace('\\', ''))
+        self.assertTrue(filing['data']['sections'])
+        self.assertTrue(all(row['section_id'] and row['section_id'] != '[redacted]'
+                            for row in filing['data']['sections']))
+        self.assertEqual(len(filing['source']['html_sha256']), 64)
+        self.assertIsNone(filing['data']['next_offset'])
+        encoded_echo = run(filing_args, [submissions, filing_html.replace('_', '&#95;')], 2)
+        self.assertEqual(encoded_echo['error']['code'], 'credential_echo')
+        # A newly filed accession after the edition cutoff cannot be fetched,
+        # even if the caller explicitly asks for it.
+        filing_rows['acceptanceDateTime'] = ['2025-09-05T14:00:00Z']
+        after_cutoff = run(filing_args, [submissions], 2)
+        self.assertEqual(len(after_cutoff['requests']), 1)
+        self.assertFalse(after_cutoff['complete'])
 
         article = {'title': 'Synthetic issuer update', 'url': 'https://example.test/update',
                    'time_published': '20250905T123000', 'summary': 'DUMMY_SECRET_FOR_OFFLINE_TEST',

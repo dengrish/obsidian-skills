@@ -1,0 +1,550 @@
+{
+  "schema_version": 1,
+  "suite_id": "market-evidence-synthetic-v1",
+  "description": "Seven public synthetic research-quality regression cases, not real securities, future returns, or a claim of permanently held-out generalization. Each source contains only facts available by the cutoff; a future source has metadata only. Numeric answers use fact-referenced arithmetic. Per-question limitation codes are specified in the task where needed.",
+  "cases": [
+    {
+      "case_id": "case01",
+      "task": "Synthetic issuer Aster. Derive the standalone second quarter from the six-month and first-quarter statements; do not substitute year-to-date growth. For numeric answers use no reason codes. The boolean question asks for the relevant limitation code.",
+      "cutoff": "2025-08-08T11:30:00-04:00",
+      "sources": [
+        {
+          "source_id": "current",
+          "available_at": "2025-08-08T08:00:00-04:00",
+          "facts": [
+            {
+              "fact_id": "half_revenue",
+              "description": "Revenue for six months ended June 30, 2025.",
+              "value": 650,
+              "unit": "USD_million",
+              "period": "FY2025-H1",
+              "basis": "GAAP"
+            },
+            {
+              "fact_id": "first_revenue",
+              "description": "Revenue for first quarter ended March 31, 2025.",
+              "value": 300,
+              "unit": "USD_million",
+              "period": "FY2025-Q1",
+              "basis": "GAAP"
+            }
+          ]
+        },
+        {
+          "source_id": "prior",
+          "available_at": "2024-08-08T08:00:00-04:00",
+          "facts": [
+            {
+              "fact_id": "half_revenue",
+              "description": "Comparable six-month revenue in 2024.",
+              "value": 500,
+              "unit": "USD_million",
+              "period": "FY2024-H1",
+              "basis": "GAAP"
+            },
+            {
+              "fact_id": "first_revenue",
+              "description": "Comparable first-quarter revenue in 2024.",
+              "value": 250,
+              "unit": "USD_million",
+              "period": "FY2024-Q1",
+              "basis": "GAAP"
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "question_id": "quarter_revenue",
+          "prompt": "What is standalone Q2 2025 revenue?",
+          "answer_type": "number",
+          "unit": "USD_million",
+          "period": "FY2025-Q2",
+          "basis": "GAAP",
+          "options": []
+        },
+        {
+          "question_id": "quarter_growth",
+          "prompt": "What is standalone Q2 revenue year-over-year percentage growth (for example 10 means 10%)?",
+          "answer_type": "number",
+          "unit": "percent",
+          "period": "FY2025-Q2_vs_FY2024-Q2",
+          "basis": "GAAP",
+          "options": []
+        },
+        {
+          "question_id": "draft_claim",
+          "prompt": "A draft calls the 30% six-month revenue growth the standalone second-quarter growth. Is that claim correct?",
+          "answer_type": "boolean",
+          "unit": null,
+          "period": null,
+          "basis": null,
+          "options": []
+        }
+      ]
+    },
+    {
+      "case_id": "case02",
+      "task": "Synthetic issuer Birch. Units differ across the two releases. Preserve accounting basis. Numeric answers need no reason code; the draft-claim question asks for the relevant limitation code.",
+      "cutoff": "2025-08-08T11:30:00-04:00",
+      "sources": [
+        {
+          "source_id": "current",
+          "available_at": "2025-08-08T08:00:00-04:00",
+          "facts": [
+            {
+              "fact_id": "revenue",
+              "description": "Reported quarterly revenue.",
+              "value": 1.25,
+              "unit": "USD_billion",
+              "period": "FY2025-Q2",
+              "basis": "GAAP"
+            },
+            {
+              "fact_id": "gaap_eps",
+              "description": "GAAP diluted earnings per share.",
+              "value": 1.2,
+              "unit": "USD_per_share",
+              "period": "FY2025-Q2",
+              "basis": "GAAP"
+            },
+            {
+              "fact_id": "adjusted_eps",
+              "description": "Adjusted diluted earnings per share excludes recurring stock compensation and restructuring.",
+              "value": 2.4,
+              "unit": "USD_per_share",
+              "period": "FY2025-Q2",
+              "basis": "non-GAAP"
+            }
+          ]
+        },
+        {
+          "source_id": "prior",
+          "available_at": "2024-08-08T08:00:00-04:00",
+          "facts": [
+            {
+              "fact_id": "revenue",
+              "description": "Reported comparable quarterly revenue.",
+              "value": 1000,
+              "unit": "USD_million",
+              "period": "FY2024-Q2",
+              "basis": "GAAP"
+            },
+            {
+              "fact_id": "gaap_eps",
+              "description": "GAAP diluted earnings per share.",
+              "value": 0.8,
+              "unit": "USD_per_share",
+              "period": "FY2024-Q2",
+              "basis": "GAAP"
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "question_id": "revenue_growth",
+          "prompt": "Calculate comparable revenue growth after normalizing the stated units.",
+          "answer_type": "number",
+          "unit": "percent",
+          "period": "FY2025-Q2_vs_FY2024-Q2",
+          "basis": "GAAP",
+          "options": []
+        },
+        {
+          "question_id": "eps_growth",
+          "prompt": "Calculate comparable GAAP diluted EPS growth.",
+          "answer_type": "number",
+          "unit": "percent",
+          "period": "FY2025-Q2_vs_FY2024-Q2",
+          "basis": "GAAP",
+          "options": []
+        },
+        {
+          "question_id": "draft_claim",
+          "prompt": "A draft compares current adjusted EPS of 2.40 to prior GAAP EPS of 0.80 and calls this 200% GAAP EPS growth. Is that a comparable GAAP growth claim?",
+          "answer_type": "boolean",
+          "unit": null,
+          "period": null,
+          "basis": null,
+          "options": []
+        }
+      ]
+    },
+    {
+      "case_id": "case03",
+      "task": "Synthetic issuer Cedar announced at 08:00. Determine what can be verified from this frozen packet. A current consensus observation is not necessarily the pre-announcement consensus. Numeric extraction needs no reason code; an insufficient surprise needs its limitation code.",
+      "cutoff": "2025-08-08T11:30:00-04:00",
+      "sources": [
+        {
+          "source_id": "release",
+          "available_at": "2025-08-08T08:00:00-04:00",
+          "facts": [
+            {
+              "fact_id": "eps",
+              "description": "Adjusted diluted EPS announced at 08:00.",
+              "value": 1.1,
+              "unit": "USD_per_share",
+              "period": "FY2025-Q2",
+              "basis": "non-GAAP"
+            }
+          ]
+        },
+        {
+          "source_id": "estimates",
+          "available_at": "2025-08-08T09:15:00-04:00",
+          "facts": [
+            {
+              "fact_id": "eps",
+              "description": "Current provider consensus adjusted EPS.",
+              "value": 1.0,
+              "unit": "USD_per_share",
+              "period": "FY2025-Q2",
+              "basis": "non-GAAP"
+            },
+            {
+              "fact_id": "version",
+              "description": "Snapshot provenance.",
+              "value": "First available at 09:15 after the results announcement. No pre-announcement snapshot is available.",
+              "unit": null,
+              "period": null,
+              "basis": null
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "question_id": "earnings_surprise",
+          "prompt": "What percentage did reported EPS beat the verifiable pre-announcement consensus by?",
+          "answer_type": "number",
+          "unit": "percent",
+          "period": "FY2025-Q2",
+          "basis": "non-GAAP",
+          "options": []
+        },
+        {
+          "question_id": "reported_eps",
+          "prompt": "What adjusted diluted EPS did the issuer actually report?",
+          "answer_type": "number",
+          "unit": "USD_per_share",
+          "period": "FY2025-Q2",
+          "basis": "non-GAAP",
+          "options": []
+        }
+      ]
+    },
+    {
+      "case_id": "case04",
+      "task": "Synthetic issuer Delta. A watch thesis requires a COMPLETED regular-session close above USD 50 after today's catalyst before it can be ready. Evaluate only as of 11:30. The later_close entry is future availability metadata, with no realized future price. Numeric quote extraction needs no reason codes; the confirmation answer needs all relevant limitation codes.",
+      "cutoff": "2025-08-08T11:30:00-04:00",
+      "sources": [
+        {
+          "source_id": "thesis",
+          "available_at": "2025-08-07T18:00:00-04:00",
+          "facts": [
+            {
+              "fact_id": "condition",
+              "description": "Frozen confirmation rule.",
+              "value": "Completed regular-session close above USD 50 after the catalyst announced today at 06:00.",
+              "unit": null,
+              "period": null,
+              "basis": null
+            }
+          ]
+        },
+        {
+          "source_id": "prices",
+          "available_at": "2025-08-08T11:15:00-04:00",
+          "facts": [
+            {
+              "fact_id": "prior_close",
+              "description": "Previous completed regular-session close.",
+              "value": 49.5,
+              "unit": "USD",
+              "period": "2025-08-07",
+              "basis": "unadjusted_close"
+            },
+            {
+              "fact_id": "intraday",
+              "description": "Observed current regular-session quote at 11:15, not a completed daily bar.",
+              "value": 52,
+              "unit": "USD",
+              "period": "2025-08-08T11:15:00-04:00",
+              "basis": "unadjusted_quote"
+            }
+          ]
+        },
+        {
+          "source_id": "calendar",
+          "available_at": "2025-08-07T08:00:00-04:00",
+          "facts": [
+            {
+              "fact_id": "close_time",
+              "description": "Known regular-session schedule.",
+              "value": "Today the regular session is scheduled to end at 16:00 New York time.",
+              "unit": null,
+              "period": null,
+              "basis": null
+            }
+          ]
+        },
+        {
+          "source_id": "later_close",
+          "available_at": "2025-08-08T16:01:00-04:00",
+          "facts": []
+        }
+      ],
+      "questions": [
+        {
+          "question_id": "confirmation",
+          "prompt": "Has the stated completed-session purchase confirmation been observed by the cutoff?",
+          "answer_type": "boolean",
+          "unit": null,
+          "period": null,
+          "basis": null,
+          "options": []
+        },
+        {
+          "question_id": "current_quote",
+          "prompt": "What current quote is actually observable in the packet?",
+          "answer_type": "number",
+          "unit": "USD",
+          "period": "2025-08-08T11:15:00-04:00",
+          "basis": "unadjusted_quote",
+          "options": []
+        }
+      ]
+    },
+    {
+      "case_id": "case05",
+      "task": "Synthetic issuer Elm. The packet contains operating income but omits the latest revenue denominator. Avoid manufacturing a margin claim. Supported numeric answers need no reason codes; an insufficient margin needs the relevant limitation code.",
+      "cutoff": "2025-08-08T11:30:00-04:00",
+      "sources": [
+        {
+          "source_id": "current",
+          "available_at": "2025-08-08T08:00:00-04:00",
+          "facts": [
+            {
+              "fact_id": "operating_income",
+              "description": "Current quarterly operating income.",
+              "value": 80,
+              "unit": "USD_million",
+              "period": "FY2025-Q2",
+              "basis": "GAAP"
+            },
+            {
+              "fact_id": "revenue_gap",
+              "description": "Coverage limitation.",
+              "value": "The current quarter revenue figure is not present in this packet.",
+              "unit": null,
+              "period": null,
+              "basis": null
+            }
+          ]
+        },
+        {
+          "source_id": "prior",
+          "available_at": "2024-08-08T08:00:00-04:00",
+          "facts": [
+            {
+              "fact_id": "operating_income",
+              "description": "Comparable operating income.",
+              "value": 96,
+              "unit": "USD_million",
+              "period": "FY2024-Q2",
+              "basis": "GAAP"
+            },
+            {
+              "fact_id": "revenue",
+              "description": "Comparable revenue.",
+              "value": 800,
+              "unit": "USD_million",
+              "period": "FY2024-Q2",
+              "basis": "GAAP"
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "question_id": "operating_margin",
+          "prompt": "Calculate the latest quarter GAAP operating margin.",
+          "answer_type": "number",
+          "unit": "percent",
+          "period": "FY2025-Q2",
+          "basis": "GAAP",
+          "options": []
+        },
+        {
+          "question_id": "operating_income_growth",
+          "prompt": "Calculate year-over-year operating income growth.",
+          "answer_type": "number",
+          "unit": "percent",
+          "period": "FY2025-Q2_vs_FY2024-Q2",
+          "basis": "GAAP",
+          "options": []
+        }
+      ]
+    },
+    {
+      "case_id": "case06",
+      "task": "Synthetic companies Fir and Grove. Fir announced AI capital expenditure. Grove sells industrial cooling products but has no demonstrated contract/exposure to Fir's project in the checked evidence. Classify the indirect-beneficiary claim without treating sector adjacency as issuer evidence. Use the relevant limitation code for both questions.",
+      "cutoff": "2025-08-08T11:30:00-04:00",
+      "sources": [
+        {
+          "source_id": "fir",
+          "available_at": "2025-08-08T08:00:00-04:00",
+          "facts": [
+            {
+              "fact_id": "capex",
+              "description": "Fir announced planned AI infrastructure capital expenditure next year; suppliers not named.",
+              "value": 30,
+              "unit": "USD_billion",
+              "period": "FY2026",
+              "basis": "announced_plan"
+            }
+          ]
+        },
+        {
+          "source_id": "grove",
+          "available_at": "2025-08-08T08:00:00-04:00",
+          "facts": [
+            {
+              "fact_id": "business",
+              "description": "Grove segment description.",
+              "value": "Industrial cooling equipment for multiple end markets; no specific Fir project revenue or contract identified.",
+              "unit": null,
+              "period": null,
+              "basis": null
+            },
+            {
+              "fact_id": "exposure_gap",
+              "description": "Checked issuer disclosures and Fir announcement.",
+              "value": "No confirmed contract, named supplier role, attributable revenue amount or material exposure to this plan is established by these sources.",
+              "unit": null,
+              "period": null,
+              "basis": null
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "question_id": "classification",
+          "prompt": "Classify the statement that Grove will materially benefit from Fir's announced AI spending.",
+          "answer_type": "choice",
+          "unit": null,
+          "period": null,
+          "basis": null,
+          "options": [
+            "verified_issuer_catalyst",
+            "research_hypothesis"
+          ]
+        },
+        {
+          "question_id": "attributable_revenue",
+          "prompt": "How much FY2026 revenue can be attributed to this plan for Grove from the supplied evidence?",
+          "answer_type": "number",
+          "unit": "USD_million",
+          "period": "FY2026",
+          "basis": "attributable_revenue",
+          "options": []
+        }
+      ]
+    },
+    {
+      "case_id": "case07",
+      "task": "Synthetic shortlist Harbor and Iris. A ready idea requires both its stated confirmation and resolution of material contrary evidence. Watch remains appropriate when a thesis is plausible but not yet confirmed; neither thesis has expired or been invalidated. Select no ready ideas if neither qualifies. Use missing_confirmation for all three questions as the material readiness limitation; do not invent data to fill gaps.",
+      "cutoff": "2025-08-08T11:30:00-04:00",
+      "sources": [
+        {
+          "source_id": "harbor",
+          "available_at": "2025-08-08T08:00:00-04:00",
+          "facts": [
+            {
+              "fact_id": "business",
+              "description": "Verified operating evidence.",
+              "value": "Comparable quarterly revenue and gross margin improved; current evidence supports a plausible 3–12 month thesis.",
+              "unit": null,
+              "period": null,
+              "basis": null
+            },
+            {
+              "fact_id": "confirmation",
+              "description": "Frozen condition and current evidence.",
+              "value": "Requires a completed daily close above the prior range. No current comparable completed-session history is available; the condition is not verified.",
+              "unit": null,
+              "period": null,
+              "basis": null
+            }
+          ]
+        },
+        {
+          "source_id": "iris",
+          "available_at": "2025-08-08T08:00:00-04:00",
+          "facts": [
+            {
+              "fact_id": "business",
+              "description": "Material contrary evidence.",
+              "value": "An issuer customer-loss disclosure conflicts with the growth thesis. Its sales impact remains unresolved; a rising quote does not resolve it.",
+              "unit": null,
+              "period": null,
+              "basis": null
+            },
+            {
+              "fact_id": "confirmation",
+              "description": "Frozen condition.",
+              "value": "Material demand evidence must be reconciled before readiness; currently unresolved.",
+              "unit": null,
+              "period": null,
+              "basis": null
+            }
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "question_id": "ready_candidates",
+          "prompt": "Which candidates can be called ready using only this packet?",
+          "answer_type": "selection",
+          "unit": null,
+          "period": null,
+          "basis": null,
+          "options": [
+            "Harbor",
+            "Iris"
+          ]
+        },
+        {
+          "question_id": "harbor_state",
+          "prompt": "What is Harbor's supported current thesis state?",
+          "answer_type": "choice",
+          "unit": null,
+          "period": null,
+          "basis": null,
+          "options": [
+            "watch",
+            "ready",
+            "invalidated",
+            "expired"
+          ]
+        },
+        {
+          "question_id": "next_checks",
+          "prompt": "Which checks would address the actual blockers?",
+          "answer_type": "selection",
+          "unit": null,
+          "period": null,
+          "basis": null,
+          "options": [
+            "verify_completed_session_confirmation",
+            "resolve_customer_loss_impact",
+            "treat_intraday_quote_as_close",
+            "invent_missing_estimates"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,327 @@
+{
+  "schema_version": 1,
+  "suite_id": "market-evidence-synthetic-v1",
+  "input_sha256": "537ce1541e7515bbb0dad5f727bfb29a193af90da30395554d7b284067ad98c7",
+  "cases": [
+    {
+      "case_id": "case01",
+      "answers": [
+        {
+          "question_id": "quarter_revenue",
+          "status": "answered",
+          "value": 350,
+          "evidence_alternatives": [
+            [
+              "current.half_revenue",
+              "current.first_revenue"
+            ]
+          ],
+          "reason_codes": [],
+          "absolute_tolerance": 0
+        },
+        {
+          "question_id": "quarter_growth",
+          "status": "answered",
+          "value": 40,
+          "evidence_alternatives": [
+            [
+              "current.half_revenue",
+              "current.first_revenue",
+              "prior.half_revenue",
+              "prior.first_revenue"
+            ]
+          ],
+          "reason_codes": [],
+          "absolute_tolerance": 1e-06
+        },
+        {
+          "question_id": "draft_claim",
+          "status": "answered",
+          "value": false,
+          "evidence_alternatives": [
+            [
+              "current.half_revenue",
+              "current.first_revenue",
+              "prior.half_revenue",
+              "prior.first_revenue"
+            ]
+          ],
+          "reason_codes": [
+            "quarter_not_ytd"
+          ],
+          "absolute_tolerance": 0
+        }
+      ]
+    },
+    {
+      "case_id": "case02",
+      "answers": [
+        {
+          "question_id": "revenue_growth",
+          "status": "answered",
+          "value": 25,
+          "evidence_alternatives": [
+            [
+              "current.revenue",
+              "prior.revenue"
+            ]
+          ],
+          "reason_codes": [],
+          "absolute_tolerance": 1e-06
+        },
+        {
+          "question_id": "eps_growth",
+          "status": "answered",
+          "value": 50,
+          "evidence_alternatives": [
+            [
+              "current.gaap_eps",
+              "prior.gaap_eps"
+            ]
+          ],
+          "reason_codes": [],
+          "absolute_tolerance": 1e-06
+        },
+        {
+          "question_id": "draft_claim",
+          "status": "answered",
+          "value": false,
+          "evidence_alternatives": [
+            [
+              "current.adjusted_eps",
+              "prior.gaap_eps"
+            ],
+            [
+              "current.adjusted_eps",
+              "prior.gaap_eps",
+              "current.gaap_eps"
+            ]
+          ],
+          "reason_codes": [
+            "basis_mismatch"
+          ],
+          "absolute_tolerance": 0
+        }
+      ]
+    },
+    {
+      "case_id": "case03",
+      "answers": [
+        {
+          "question_id": "earnings_surprise",
+          "status": "insufficient",
+          "value": null,
+          "evidence_alternatives": [
+            [
+              "release.eps",
+              "estimates.version"
+            ],
+            [
+              "release.eps",
+              "estimates.version",
+              "estimates.eps"
+            ],
+            [
+              "estimates.version"
+            ]
+          ],
+          "reason_codes": [
+            "missing_preannouncement_consensus"
+          ],
+          "absolute_tolerance": 0
+        },
+        {
+          "question_id": "reported_eps",
+          "status": "answered",
+          "value": 1.1,
+          "evidence_alternatives": [
+            [
+              "release.eps"
+            ]
+          ],
+          "reason_codes": [],
+          "absolute_tolerance": 0
+        }
+      ]
+    },
+    {
+      "case_id": "case04",
+      "answers": [
+        {
+          "question_id": "confirmation",
+          "status": "answered",
+          "value": false,
+          "evidence_alternatives": [
+            [
+              "thesis.condition",
+              "prices.prior_close",
+              "prices.intraday",
+              "calendar.close_time"
+            ],
+            [
+              "thesis.condition",
+              "prices.intraday",
+              "calendar.close_time"
+            ]
+          ],
+          "reason_codes": [
+            "post_cutoff",
+            "missing_confirmation"
+          ],
+          "absolute_tolerance": 0
+        },
+        {
+          "question_id": "current_quote",
+          "status": "answered",
+          "value": 52,
+          "evidence_alternatives": [
+            [
+              "prices.intraday"
+            ]
+          ],
+          "reason_codes": [],
+          "absolute_tolerance": 0
+        }
+      ]
+    },
+    {
+      "case_id": "case05",
+      "answers": [
+        {
+          "question_id": "operating_margin",
+          "status": "insufficient",
+          "value": null,
+          "evidence_alternatives": [
+            [
+              "current.operating_income",
+              "current.revenue_gap"
+            ]
+          ],
+          "reason_codes": [
+            "missing_denominator"
+          ],
+          "absolute_tolerance": 0
+        },
+        {
+          "question_id": "operating_income_growth",
+          "status": "answered",
+          "value": -16.666666666666668,
+          "evidence_alternatives": [
+            [
+              "current.operating_income",
+              "prior.operating_income"
+            ]
+          ],
+          "reason_codes": [],
+          "absolute_tolerance": 1e-06
+        }
+      ]
+    },
+    {
+      "case_id": "case06",
+      "answers": [
+        {
+          "question_id": "classification",
+          "status": "answered",
+          "value": "research_hypothesis",
+          "evidence_alternatives": [
+            [
+              "fir.capex",
+              "grove.business",
+              "grove.exposure_gap"
+            ],
+            [
+              "fir.capex",
+              "grove.exposure_gap"
+            ]
+          ],
+          "reason_codes": [
+            "unproven_business_exposure"
+          ],
+          "absolute_tolerance": 0
+        },
+        {
+          "question_id": "attributable_revenue",
+          "status": "insufficient",
+          "value": null,
+          "evidence_alternatives": [
+            [
+              "grove.exposure_gap"
+            ],
+            [
+              "fir.capex",
+              "grove.exposure_gap"
+            ]
+          ],
+          "reason_codes": [
+            "unproven_business_exposure"
+          ],
+          "absolute_tolerance": 0
+        }
+      ]
+    },
+    {
+      "case_id": "case07",
+      "answers": [
+        {
+          "question_id": "ready_candidates",
+          "status": "answered",
+          "value": [],
+          "evidence_alternatives": [
+            [
+              "harbor.confirmation",
+              "iris.business",
+              "iris.confirmation"
+            ],
+            [
+              "harbor.confirmation",
+              "iris.confirmation"
+            ]
+          ],
+          "reason_codes": [
+            "missing_confirmation"
+          ],
+          "absolute_tolerance": 0
+        },
+        {
+          "question_id": "harbor_state",
+          "status": "answered",
+          "value": "watch",
+          "evidence_alternatives": [
+            [
+              "harbor.business",
+              "harbor.confirmation"
+            ]
+          ],
+          "reason_codes": [
+            "missing_confirmation"
+          ],
+          "absolute_tolerance": 0
+        },
+        {
+          "question_id": "next_checks",
+          "status": "answered",
+          "value": [
+            "verify_completed_session_confirmation",
+            "resolve_customer_loss_impact"
+          ],
+          "evidence_alternatives": [
+            [
+              "harbor.confirmation",
+              "iris.business",
+              "iris.confirmation"
+            ],
+            [
+              "harbor.confirmation",
+              "iris.business"
+            ]
+          ],
+          "reason_codes": [
+            "missing_confirmation"
+          ],
+          "absolute_tolerance": 0
+        }
+      ]
+    }
+  ]
+}

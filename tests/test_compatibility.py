@@ -411,6 +411,24 @@ class CompatibilityTests(unittest.TestCase):
                 self.assertNotIn(secret, result.stdout + result.stderr)
             self.assertEqual(config.read_bytes(), before)
 
+            # The optional parser must not make core research depend on site
+            # packages; missing it fails before any SEC network request.
+            self.assertFalse(data["optional_dependencies"]["sec_filing_parser"]["available"])
+            filing = invoke("sec-filing", "--cik", "320193", "--accession",
+                            "0000320193-23-000106", "--as-of", "2026-09-04T15:30:00Z",
+                            "--credentials-file", config)
+            self.assertEqual(filing.returncode, 2, filing.stdout + filing.stderr)
+            unavailable = json.loads(filing.stdout)
+            self.assertEqual(unavailable["requests"], [])
+            self.assertIn("parser", unavailable["error"]["message"].lower())
+
+            screen = install / "skills/market-research/scripts/market_screen.py"
+            screen_help = subprocess.run(
+                [sys.executable, "-I", "-S", "-B", str(screen), "--help"],
+                cwd=root, env=env, capture_output=True, text=True,
+                encoding="utf-8", timeout=30)
+            self.assertEqual(screen_help.returncode, 0, screen_help.stderr)
+
             # A selected partial file cannot silently pick up an unrelated
             # account from the process environment, including in an installed copy.
             config.write_text(json.dumps({"FRED_API_KEY": fixtures["FRED_API_KEY"]}),

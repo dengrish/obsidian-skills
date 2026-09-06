@@ -10,9 +10,12 @@ recommendations and trade execution are outside this skill's scope.
 
 Read [runtime setup](shared/RUNTIME.md) and the skill's
 [data-access guide](skills/market-research/references/data-access.md).
-Helpers use Python 3.10+ and the standard library, including system timezone
-data. PDF/image packages and the `knowledge` plugin are not required. Install
-the whole package to preserve its local helper paths.
+Core helpers use Python 3.10+ and the standard library, including system timezone
+data. The offline screener calculates consistent momentum, relative strength,
+trend and liquidity-proxy measurements from saved provider responses. Optional
+SEC filing/section extraction uses pinned EdgarTools; its setup is in the
+data-access guide. PDF/image packages and the `knowledge` plugin are not required.
+Install the whole package to preserve its local helper paths.
 
 Credentials remain outside the repository, plugin and vault. An explicitly
 selected private JSON credentials file can be passed to the bundled data

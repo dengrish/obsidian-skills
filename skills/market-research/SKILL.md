@@ -107,6 +107,10 @@ Do not describe a selective news search as a complete market scan. Run the
 research method's repeatable announcement and price-history passes, retaining
 their universe, filters and coverage in the research record. A materially changed
 screen needs an explanation so longitudinal comparisons remain interpretable.
+Use the bundled [offline screener](references/screening.md) for reproducible
+price measurements when its inputs are available. Also follow the research
+method's bounded thematic expansion to examine direct and second-order
+beneficiaries; these candidates face the same universe and readiness tests.
 
 Follow the bundled [data-access guide and retrieval plan](references/data-access.md#retrieval-plan)
 to assign configured sources to the session, universe, announcement, price,
@@ -117,8 +121,10 @@ and retrieval; otherwise use the configured environment. Keep secret values
 outside the conversation and plugin. Use the relevant commands; do not run
 every endpoint merely to exercise a script. Preserve coverage, cutoffs,
 partial-result warnings and material skipped/unavailable checks. Missing keys
-limit only the affected source. These helpers retrieve evidence; interpretation
-and screening still follow the research method.
+limit only the affected source. Retrieval helpers supply evidence; the offline
+screener calculates declared measurements and filters, while interpretation and
+final selection still follow the research method. Optional filing extraction
+must use an exact verified accession, never an implicit latest filing.
 
 Use available host web search, page-reading, and market-data capabilities for
 primary-source verification and coverage beyond the helpers. No paid feed or
@@ -199,9 +205,13 @@ python3 '<skill>/scripts/market_notes.py' outcomes --vault '<vault>' --draft '<s
 python3 '<skill>/scripts/market_notes.py' publish '<scratch>/daily.md' --vault '<vault>'
 ```
 
-Before publication, check citations, source timestamps, quote sessions/delays,
-arithmetic, setup counterarguments, and continuity against the previous active
-theses. Verify every brief candidate's state, conditions and risks agree with its
+Before publication, audit the claims that determine selection, readiness or risk
+against their retained evidence and calculations. Check citations, timestamps,
+quote sessions/delays, arithmetic, setup counterarguments and continuity against
+the previous active theses. Correct unsupported claims or downgrade the buying
+conclusion, then recheck the revised assessment; do not merely append a warning
+while leaving the same unsupported recommendation. Verify every brief
+candidate's state, conditions and risks agree with its
 detailed assessment and ledger, and that the brief makes no current-holdings or
 sell recommendation. The helper validates structure and preserves occupied files;
 it cannot establish factual accuracy or an investment edge. No mandatory human

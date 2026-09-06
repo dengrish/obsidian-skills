@@ -107,6 +107,15 @@ explicit private JSON file passed to the bundled script with `--credentials-file
 Credentials remain outside the plugin, repository and vault; no separate local
 credential launcher is required. Retrieval retains explicit feed and coverage limits.
 
+The [offline screener](skills/market-research/references/screening.md) calculates
+calendar-month momentum, benchmark-relative returns, moving averages and a
+clearly labeled daily liquidity proxy from saved Alpaca/calendar responses.
+The research method adds bounded thematic discovery and checks decision-critical
+claims and earnings comparisons before publication. Optional exact-accession SEC
+filing extraction uses pinned EdgarTools as a local parser, without delegating
+network requests or installing another framework. Core retrieval, screening and
+note handling remain standard-library-only.
+
 This product uses the FRED® API but is not endorsed or certified by the Federal
 Reserve Bank of St. Louis. Use of its FRED integration is subject to the
 [FRED API Terms of Use](https://fred.stlouisfed.org/docs/api/terms_of_use.html).
@@ -289,6 +298,7 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python tests/test_conventions.py
 .venv/bin/python tests/test_end_to_end.py
+.venv/bin/python tests/test_market_research_eval.py
 .venv/bin/python tools/build_plugin.py
 .venv/bin/python tests/test_compatibility.py
 .venv/bin/python tools/build_plugin.py --check
@@ -307,6 +317,13 @@ network content. The compatibility suite checks manifests, archive contents,
 execution from another working directory and platform-sensitive paths and
 interpreter handling. These tests do not establish prose quality, correct
 source interpretation or visually accurate crops; review those separately.
+
+The [research evaluation workflow](tools/market-research-evals.md) exports frozen
+financial evidence cases without answer keys, grades structured responses and
+compares runs under matching conditions. Its synthetic cases are regression
+checks; use fresh held-out documents for generalization tests. These measurements
+evaluate research quality, not investment returns. Subsequent recommendation
+performance continues to use the unchanged prospective outcome journal.
 
 When Claude Code is available, validate both manifests and skill trees:
 

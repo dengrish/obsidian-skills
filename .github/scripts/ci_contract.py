@@ -10,7 +10,7 @@ import subprocess
 
 REQUIREMENT = re.compile(
     r"(?P<name>[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)"
-    r"(?:\[[A-Za-z0-9._,-]+\])?\s*>=\s*"
+    r"(?:\[[A-Za-z0-9._,-]+\])?\s*(?:>=|==)\s*"
     r"(?P<version>[A-Za-z0-9](?:[A-Za-z0-9.!+_-]*[A-Za-z0-9])?)"
     r"(?:\s*;\s*(?P<marker>.+))?"
 )
@@ -59,7 +59,7 @@ def _inside(root, path):
 
 
 def declared_floors(requirements, repository):
-    """Return exact constraints for recursively included ``name>=floor`` lines."""
+    """Return exact constraints for recursive lower bounds and exact pins."""
     repository = repository.resolve()
     floors = {}
     active = set()
@@ -91,7 +91,7 @@ def declared_floors(requirements, repository):
             if not requirement:
                 raise ContractError(
                     "%s:%d must be a recursive include or one simple "
-                    "name>=floor requirement; extend this checker before using "
+                    "name>=floor or name==version requirement; extend this checker before using "
                     "another requirement form" %
                     (path.relative_to(repository), number))
             name = requirement.group("name")
