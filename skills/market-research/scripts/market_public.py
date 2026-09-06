@@ -162,8 +162,9 @@ def _filing_rows(payload):
 
 
 def _submissions(client, args, headers):
-    # Validate dates before even a symbol-directory request consumes access.
+    # Validate local bounds before even a symbol-directory request consumes access.
     since, cutoff = _window(args)
+    pages = _int_arg(args, 'max_pages', 10, 50)
     cik = _identity(client, args, headers)
     payload = client.get_json(SUBMISSIONS + f'CIK{cik}.json', headers=headers)
     if not isinstance(payload, dict) or _cik(payload.get('cik')) != cik:
@@ -177,7 +178,6 @@ def _submissions(client, args, headers):
     if not isinstance(filings, dict) or not isinstance(filings.get('files'), list):
         _bad('SEC submissions history descriptor is missing.')
     rows = _filing_rows(filings.get('recent'))
-    pages = _int_arg(args, 'max_pages', 10, 50)
     eligible = []
     for item in filings['files']:
         if not isinstance(item, dict):
@@ -232,9 +232,10 @@ def _filing_url(cik, accession):
 
 def sec_company(client, args):
     """Resolve a company and return filings within the declared recent/dated scope."""
+    forms = set(_csv(getattr(args, 'forms', None), re.compile(r'[A-Za-z0-9 /\-]{1,30}\Z')))
+    limit = _int_arg(args, 'limit', 1000, MAX_RECORDS)
     headers = _sec_headers(client)
     identity, rows, complete, warnings, since, cutoff = _submissions(client, args, headers)
-    forms = set(_csv(getattr(args, 'forms', None), re.compile(r'[A-Za-z0-9 /\-]{1,30}\Z')))
     selected, unproven = [], 0
     for row in rows:
         if forms and row['form'] not in forms:
@@ -246,7 +247,6 @@ def sec_company(client, args):
                        source_url=_filing_url(identity['cik'], row['accessionNumber']))
             selected.append(out)
     selected.sort(key=lambda row: (row['filingDate'], row.get('acceptanceDateTime') or '', row['accessionNumber']), reverse=True)
-    limit = _int_arg(args, 'limit', 1000, MAX_RECORDS)
     if len(selected) > limit:
         complete = False
         warnings.append('Filing record limit reached; refine since/forms or raise limit.')
@@ -266,6 +266,8 @@ def sec_facts(client, args):
     if not re.fullmatch(r'[a-z][a-z0-9-]{0,39}', taxonomy):
         raise DataError('invalid_input', 'Invalid taxonomy.')
     concepts = _csv(getattr(args, 'concepts', None), re.compile(r'[A-Za-z][A-Za-z0-9_]{0,149}\Z'), 50) or list(DEFAULT_CONCEPTS)
+    forms = set(_csv(getattr(args, 'forms', None), re.compile(r'[A-Za-z0-9 /\-]{1,30}\Z')))
+    limit = _int_arg(args, 'limit', 1000, MAX_RECORDS)
     headers = _sec_headers(client)
     identity, filings, complete, warnings, since, cutoff = _submissions(client, args, headers)
     acceptance = {row['accessionNumber']: row.get('acceptanceDateTime') for row in filings}
@@ -275,7 +277,6 @@ def sec_facts(client, args):
     taxonomy_data = payload['facts'].get(taxonomy, {})
     if not isinstance(taxonomy_data, dict):
         _bad('SEC taxonomy schema is invalid.')
-    forms = set(_csv(getattr(args, 'forms', None), re.compile(r'[A-Za-z0-9 /\-]{1,30}\Z')))
     selected, absent, unproven, scanned = [], [], 0, 0
     for concept in concepts:
         info = taxonomy_data.get(concept)
@@ -314,7 +315,6 @@ def sec_facts(client, args):
                                acceptance_at=accepted, source_url=_filing_url(identity['cik'], fact['accn']))
                     selected.append(out)
     selected.sort(key=lambda row: (row['filed'], row['end'], row['concept'], row['unit']), reverse=True)
-    limit = _int_arg(args, 'limit', 1000, MAX_RECORDS)
     if len(selected) > limit:
         complete = False
         warnings.append('Fact record limit reached; refine since/concepts or raise limit.')
@@ -599,6 +599,17 @@ def self_test():
     check(result['data']['facts'][1]['unit'] == 'USD' and result['data']['facts'][1]['fp'] == 'Q2', 'original fact units and period retained')
     result = sec_facts(Fake({base: missing_time, fact_url: facts}), args)
     check(len(result['data']['facts']) == 1 and not result['complete'], 'facts same-day date-only withheld')
+    for handler in (sec_company, sec_facts):
+        for identity_args in (args, symbol_args):
+            for key, value in (('limit', 0), ('limit', MAX_RECORDS + 1),
+                               ('max_pages', 0), ('max_pages', 51), ('forms', '8-K,?')):
+                invalid_args = copy.copy(identity_args)
+                setattr(invalid_args, key, value)
+                client = Fake({base: submission, fact_url: facts, TICKERS: {
+                    'fields': ['cik', 'name', 'ticker', 'exchange'],
+                    'data': [[1, 'Fixture', 'FIX', 'Nasdaq']]}})
+                fails(lambda: handler(client, invalid_args), 'invalid SEC selection rejected')
+                check(not client.calls, 'invalid SEC selection makes no requests')
     facts['facts']['us-gaap']['Assets']['units']['USD'][0]['val'] = float('nan')
     fails(lambda: sec_facts(Fake({base: submission, fact_url: facts}), args), 'nonfinite fact rejected')
     nasdaq = 'Symbol|Security Name|Market Category|Test Issue|Round Lot Size|ETF\nFIX|Fixture Common Stock|Q|N|100|N\nFIXW|Fixture Warrant|Q|N|100|N\nFile Creation Time: 0904202621:31|||||\n'

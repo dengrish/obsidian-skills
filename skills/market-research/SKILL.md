@@ -41,8 +41,9 @@ python3 '<skill>/scripts/market_notes.py' context --vault '<vault>'
 
 For the scheduled edition, freeze evidence at 11:30 New York time; record the
 actual generation time separately. Read news since the previous completed
-review's cutoff, including intervening after-hours releases. On the first run,
-cover the previous regular-session close through the cutoff, using older
+review's cutoff, including intervening after-hours releases and still-relevant
+unreviewed windows recorded under the research method's coverage rules. On the
+first run, cover the previous regular-session close through the cutoff, using older
 material only as identified background. Do not use later prices or news in a
 backdated scheduled edition. A late run must recover timestamped pre-cutoff
 evidence or state the data limitation. An explicitly
@@ -57,7 +58,8 @@ cutoff and describe the edition as early/manual.
 
 If today's recognized note already exists, read it and run the outcome inventory
 below before reusing it. The context's `valid` marker checks note structure, not
-cross-note journal consistency; both history and outcomes must be complete.
+cross-note journal consistency; history and cross-note journals must validate.
+Pending or unavailable market observations remain valid limitations.
 A successful routine retry returns the existing note without rewriting that
 day's judgments, creating a numbered duplicate, or starting a second market run.
 Report malformed history, inconsistent journals or an unsafe occupant instead of

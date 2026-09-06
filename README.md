@@ -285,7 +285,8 @@ output. Every detected defect fails validation.
 
 The end-to-end suite exercises public commands in temporary vaults: PDF
 filing, figure repair, source renames, clipping reprocessing and the wiki
-index/collision/lint/scan workflow. It does not edit a real vault or fetch
+index/collision/lint/scan workflow, plus market-note publication, retry and outcome
+continuity. It does not edit a real vault or fetch
 network content. The compatibility suite checks manifests, archive contents,
 execution from another working directory and platform-sensitive paths and
 interpreter handling. These tests do not establish prose quality, correct

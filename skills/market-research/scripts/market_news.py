@@ -192,10 +192,12 @@ def alpaca_news(client, args):
             symbols = row.get('symbols')
             if not isinstance(symbols, list) or not all(isinstance(s, str) and s for s in symbols):
                 raise ValueError('invalid symbols')
-            url = _text(row.get('url'), required=True)
-            parsed = urlsplit(url)
-            if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password:
-                raise ValueError('invalid article URL')
+            # Alpaca's article schema makes the publisher URL optional/nullable.
+            url = _text(row.get('url'))
+            if url is not None:
+                parsed = urlsplit(url)
+                if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password:
+                    raise ValueError('invalid article URL')
             # The provider documents updated-time sorting, but not the interval's
             # timestamp field. Preserve older-created revisions; exclude text
             # updated after the evidence cutoff rather than inventing its old version.
@@ -217,6 +219,8 @@ def alpaca_news(client, args):
         warnings.append('More provider results exist; this one-page sample is incomplete. Narrow the window for further retrieval.')
     if excluded:
         warnings.append('Records outside the evidence window or requested symbol were excluded.')
+    if any(row['url'] is None for row in data):
+        warnings.append('Some articles lack publisher URLs; retain their provider article IDs and verify material claims from primary sources.')
     return {'source': {'provider': 'alpaca', 'endpoint': ALPACA_NEWS},
             'query': {'symbol': symbol, 'since': _iso(since), 'as_of': _iso(cutoff),
                       'limit': limit, 'sort': sort, 'include_content': content},
@@ -457,6 +461,19 @@ def run_self_test():
                 self.assertEqual(result['complete'], token is None)
                 self.assertEqual(result['data'], [])
                 self.assertTrue(any('empty recent query' in w for w in result['warnings']))
+
+        def test_alpaca_optional_article_urls_preserve_neighboring_stories(self):
+            absent_url = self.alpaca_article(id=3)
+            del absent_url['url']
+            rows = [self.alpaca_article(), self.alpaca_article(id=2, url=None), absent_url]
+            result = alpaca_news(self.alpaca_client({'news': rows, 'next_page_token': None}),
+                                 self.news_args(limit=10, include_content=True))
+            self.assertEqual([row['id'] for row in result['data']], [1, 2, 3])
+            self.assertEqual([row['url'] for row in result['data']],
+                             ['https://example.org/news', None, None])
+            self.assertTrue(all(row['content'] == '<p>Fixture body.</p>' for row in result['data']))
+            self.assertEqual(result['excluded_record_count'], 0)
+            self.assertTrue(result['complete'])
 
         def test_alpaca_revisions_preserve_created_time_and_exclude_invalid_window(self):
             rows = [self.alpaca_article(created_at='2026-09-03T12:30:00Z'),

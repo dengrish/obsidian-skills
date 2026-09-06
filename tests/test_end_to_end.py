@@ -409,17 +409,19 @@ raise SystemExit(main(fixture['args'], client))
         self.run_script(script, "outcomes", "--vault", self.vault, "--draft", draft, expected=2)
         self.run_script(script, "publish", draft, "--vault", self.vault, expected=2)
         self.assertFalse((folder / f"{today}-market-research.md").exists())
-        # A timestamp correction must point to a new evidence card, not an alias
-        # of the old card that could leave its previously calculated returns current.
+        # A timestamp correction needs a newly written evidence card; neither an
+        # alias nor a different older card can document the current correction.
         old_record = link(update_day, 'Baseline evidence')
         alias_record = old_record.replace('-market-research#', '-market-research.md#')
-        ambiguous_correction = (recommendation_header
-            + f"| {thesis} | {first_day} | {stamp(baseline_day, 9, 31)} | "
-            + f"{alias_record} | {old_record} |\n\n" + review)
-        draft.write_text(daily(today, None, ambiguous_correction), encoding="utf-8")
-        self.run_script(script, "outcomes", "--vault", self.vault, "--draft", draft, expected=2)
-        self.run_script(script, "publish", draft, "--vault", self.vault, expected=2)
-        self.assertFalse((folder / f"{today}-market-research.md").exists())
+        for stale_card in (alias_record, link(month_note_day, 'Historical monthly result')):
+            ambiguous_correction = (recommendation_header
+                + f"| {thesis} | {first_day} | {stamp(baseline_day, 9, 31)} | "
+                + f"{stale_card} | {old_record} |\n\n" + review)
+            draft.write_text(daily(today, None, ambiguous_correction), encoding="utf-8")
+            rejected = self.run_script(script, "outcomes", "--vault", self.vault, "--draft", draft, expected=2)
+            self.assertIn("new detail card in the current draft", rejected.stdout)
+            self.run_script(script, "publish", draft, "--vault", self.vault, expected=2)
+            self.assertFalse((folder / f"{today}-market-research.md").exists())
         # A real section link is insufficient when that immutable evidence card
         # predates the observation it is supposed to support.
         stale_evidence = review.replace(link(today, 'Observed result'), old_record)
@@ -492,7 +494,24 @@ raise SystemExit(main(fixture['args'], client))
         refused = self.run_script(script, "publish", draft, "--vault", self.vault, expected=2)
         self.assertIn("carry active theses", refused.stdout)
         self.assertFalse(target.exists())
-        draft.write_text(daily(today, initial["as_of"], initial["now"], True), encoding="utf-8")
+        current = daily(today, initial["as_of"], initial["now"], True)
+        new_thesis = "NASDAQ:NEW@" + today.isoformat()
+        new_lesson = "lesson-" + today.isoformat() + "-01"
+        current = current.replace('\n\n### Outcome review',
+                                  f'\n| {new_thesis} | watch | Newly recorded synthetic idea. |\n\n### Outcome review')
+        current += ('\n#### Lesson records\n\n| Lesson | Status | Record |\n|---|---|---|\n'
+                    f'| {new_lesson} | provisional | [[Investments/{today}-market-research#Initial lesson]] |\n\n'
+                    '#### Initial lesson\n\nSynthetic provisional question; no investment claim.\n')
+        for identifier in (new_thesis, new_lesson):
+            backdated = identifier.replace(today.isoformat(), yesterday.isoformat())
+            draft.write_text(current.replace(identifier, backdated), encoding="utf-8")
+            rejected = self.run_script(script, "outcomes", "--vault", self.vault, "--draft", draft, expected=2)
+            self.assertIn("first-recorded note date", rejected.stdout)
+            rejected = self.run_script(script, "publish", draft, "--vault", self.vault, expected=2)
+            self.assertIn("first-recorded note date", rejected.stdout)
+            self.assertFalse(target.exists())
+            self.assertEqual(prior.read_bytes(), original_prior)
+        draft.write_text(current, encoding="utf-8")
         linted = json.loads(self.run_script(script, "lint", draft).stdout)
         self.assertEqual(linted["theses"][0]["id"], thesis)
         self.assertEqual(linted["theses"][0]["state"], "watch")

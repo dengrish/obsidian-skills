@@ -440,8 +440,13 @@ def outcomes(vault, draft=None, now=None):
         notes[day] = (history['current_note']['path'], note, data)
     first, recommendations, checkpoints, lessons = {}, {}, {}, {}
     monthly = None
+    introduced_theses = set()
     for note_day, (path, note, _) in sorted(notes.items()):
         for row in note['theses']:
+            if (unpublished_draft and note_day == day and row['id'] not in introduced_theses
+                    and THESIS.fullmatch(row['id'])[2] != note_day):
+                finding(path, 'new thesis ID must use its first-recorded note date: ' + row['id'])
+            introduced_theses.add(row['id'])
             if row['state'] == 'ready':
                 first.setdefault(row['id'], {'id': row['id'], 'first_ready': note_day,
                                              'first_ready_note': path})
@@ -479,10 +484,11 @@ def outcomes(vault, draft=None, now=None):
         elif changed and finalized:
             if replaces != previous['record']:
                 raise ValueError('changed finalized record must explicitly replace its previous Record link')
-            # Earlier releases accepted same-card corrections. Keep their immutable
-            # history readable; new rows must supply a distinct correction card.
-            if note_day == day and record_identity(item) == record_identity(previous):
-                raise ValueError('changed finalized record must link to a distinct new detail card')
+            # Earlier releases accepted reused correction cards. Keep their immutable
+            # history and retries readable; a new correction needs a newly written card.
+            if (unpublished_draft and note_day == day
+                    and Path(item['record_note']).name[:10] != note_day):
+                raise ValueError('changed finalized record must link to a distinct new detail card in the current draft')
         elif replaces not in ('-', previous['record']):
             raise ValueError('Replaces does not identify the previous Record link')
 
@@ -573,10 +579,18 @@ def outcomes(vault, draft=None, now=None):
                                 or row['Status'] not in ('provisional', 'supported', 'retired')):
                             raise ValueError('invalid lesson ID or status: ' + identifier)
                         previous = lessons.get(identifier)
+                        if (unpublished_draft and note_day == day and previous is None
+                                and match[1] != note_day):
+                            raise ValueError('new lesson ID must use its first-recorded note date: ' + identifier)
                         item = dict(id=identifier, status=row['Status'], **common)
                         if (previous is not None and item['status'] != previous['status']
                                 and record_identity(item) == record_identity(previous)):
                             raise ValueError('changed lesson status must link to a distinct new detail card')
+                        if (unpublished_draft and note_day == day and previous is not None
+                                and (item['status'] != previous['status']
+                                     or record_identity(item) != record_identity(previous))
+                                and Path(item['record_note']).name[:10] != note_day):
+                            raise ValueError('revised lesson must link to a new detail card in the current draft')
                         lessons[identifier] = item
                     else:
                         if row['Month'] != note_day[:7]:
@@ -963,6 +977,55 @@ def run_self_test():
                 with self.subTest(data=data), self.assertRaises(ValueError):
                     publish(self.draft, self.vault, self.now)
 
+        def test_new_draft_thesis_ids_use_the_first_recorded_note_date(self):
+            for state in sorted(STATES):
+                for introduced, complete in (('2026-09-04', False), ('2026-09-05', True)):
+                    with self.subTest(state=state, introduced=introduced):
+                        identifier = 'NYSE:ABC@' + introduced
+                        journals = ([self.journal('Recommendation records', [
+                            (identifier, '2026-09-05', 'pending', self.record_link('2026-09-05'), '-')])]
+                                    if state == 'ready' else [])
+                        self.outcome_note('2026-09-05', [(identifier, state, 'Synthetic first record')],
+                                          journals, draft=True)
+                        result = outcomes(self.vault, self.draft, self.now)
+                        self.assertEqual(result['complete'], complete, result['findings'])
+                        if not complete:
+                            self.assertIn('new thesis ID must use its first-recorded note date',
+                                          result['findings'][0]['error'])
+                            with self.assertRaisesRegex(ValueError, 'first-recorded note date'):
+                                publish(self.draft, self.vault, self.now)
+                            self.assertFalse((self.vault / 'Investments').exists())
+
+        def test_legacy_first_recorded_ids_remain_readable_and_keep_their_identity(self):
+            identifier = 'NYSE:ABC@2026-09-01'
+            lesson = 'lesson-2026-09-01-01'
+            prior = self.outcome_note('2026-09-04', [(identifier, 'watch', 'Earlier published ID')], [
+                self.journal('Lesson records', [(lesson, 'provisional', self.record_link('2026-09-04'))])])
+            original = prior.read_bytes()
+            self.outcome_note('2026-09-05', [(identifier, 'watch', 'Carry the stable ID')], [
+                self.journal('Lesson records', [(lesson, 'supported', self.record_link('2026-09-05'))])],
+                draft=True)
+            self.assertTrue(outcomes(self.vault, now=self.now)['complete'])
+            checked = outcomes(self.vault, self.draft, self.now)
+            self.assertTrue(checked['complete'], checked['findings'])
+            self.assertEqual(checked['active_lessons'][0]['id'], lesson)
+            self.assertEqual(publish(self.draft, self.vault, self.now)['status'], 'created')
+            self.assertEqual(publish(self.draft, self.vault, self.now)['status'], 'unchanged')
+            self.assertEqual(prior.read_bytes(), original)
+
+        def test_published_same_day_backdated_ids_allow_read_and_identical_retry(self):
+            identifier = 'NYSE:ABC@2026-09-01'
+            lesson = 'lesson-2026-09-01-01'
+            published = self.outcome_note('2026-09-05', [(identifier, 'watch', 'Published legacy identity')], [
+                self.journal('Lesson records', [(lesson, 'provisional', self.record_link('2026-09-05'))])])
+            original = published.read_bytes()
+            self.assertTrue(outcomes(self.vault, now=self.now)['complete'])
+            self.draft.write_bytes(original)
+            self.assertTrue(outcomes(self.vault, self.draft, self.now)['complete'])
+            self.assertEqual(publish(self.draft, self.vault, self.now)['status'], 'unchanged')
+            self.assertEqual(published.read_bytes(), original)
+            self.assertFalse(list(self.vault.glob('.market-research-stage-*')))
+
         def test_continuity_and_terminal_rows(self):
             thesis = 'NYSE:ABC@2026-09-02'
             self.prior('2026-09-02', [(thesis, 'watch', 'Original thesis')])
@@ -1336,6 +1399,78 @@ def run_self_test():
                         self.assertFalse(result['complete'])
                         self.assertIn('distinct new detail card', result['findings'][0]['error'])
 
+        def test_restoring_prior_values_requires_new_correction_cards(self):
+            identifier, _, original_baseline = self.baseline_fixture()
+            original_checkpoint = self.record_link('2024-03-01')
+            self.outcome_note('2024-03-01', journals=[self.journal('Checkpoint records', [
+                (identifier, '1m', 'observed', '2024-02-29T16:00:00-05:00', original_checkpoint, '-')])])
+            changed_baseline, changed_checkpoint = self.record_link('2024-04-01'), self.record_link('2024-04-02')
+            self.outcome_note('2024-04-01', journals=[self.journal('Recommendation records', [
+                (identifier, '2024-01-30', '2024-01-31T09:31:00-05:00', changed_baseline, original_baseline)])])
+            self.outcome_note('2024-04-02', journals=[self.journal('Checkpoint records', [
+                (identifier, '1m', 'observed', '2024-02-29T15:59:00-05:00', changed_checkpoint, original_checkpoint)])])
+            originals = {path: path.read_bytes() for path in (self.vault / 'Investments').iterdir()}
+            for title, fields, old_card, previous in (
+                    ('Recommendation records', (identifier, '2024-01-30', '2024-01-31T09:30:00-05:00'),
+                     original_baseline, changed_baseline),
+                    ('Checkpoint records', (identifier, '1m', 'observed', '2024-02-29T16:00:00-05:00'),
+                     original_checkpoint, changed_checkpoint)):
+                for card, complete in ((old_card, False), (self.record_link('2026-09-05'), True)):
+                    with self.subTest(title=title, card=card):
+                        self.outcome_note('2026-09-05', [(identifier, 'watch', 'Carry the original thesis')],
+                                          journals=[self.journal(title, [
+                            fields + (card, previous)])], draft=True)
+                        result = outcomes(self.vault, self.draft, self.now)
+                        self.assertEqual(result['complete'], complete, result['findings'])
+                        if not complete:
+                            self.assertIn('distinct new detail card', result['findings'][0]['error'])
+                            with self.assertRaisesRegex(ValueError, 'distinct new detail card'):
+                                publish(self.draft, self.vault, self.now)
+                            self.assertFalse((self.vault / 'Investments/2026-09-05-market-research.md').exists())
+            restored_baseline = self.record_link('2026-09-05').replace('#Outcome review', '#Restored baseline')
+            restored_checkpoint = self.record_link('2026-09-05').replace('#Outcome review', '#Restored checkpoint')
+            self.outcome_note('2026-09-05', [(identifier, 'watch', 'Carry the original thesis')], journals=[
+                self.journal('Recommendation records', [
+                    (identifier, '2024-01-30', '2024-01-31T09:30:00-05:00', restored_baseline, changed_baseline)]),
+                self.journal('Checkpoint records', [
+                    (identifier, '1m', 'observed', '2024-02-29T16:00:00-05:00', restored_checkpoint, changed_checkpoint)])],
+                draft=True)
+            self.draft.write_bytes(self.draft.read_bytes() + (
+                '\n#### Restored baseline\n\nSynthetic evidence corrects the mistaken update: '
+                + changed_baseline + '.\n\n#### Restored checkpoint\n\nSynthetic recalculation restores the prior value: '
+                + changed_checkpoint + '.\n').encode())
+            self.assertEqual(publish(self.draft, self.vault, self.now)['status'], 'created')
+            restored = outcomes(self.vault, now=self.now)
+            self.assertEqual(restored['recommendations'][0]['baseline_at'], '2024-01-31T09:30:00-05:00')
+            checkpoint = next(row for row in restored['checkpoints'] if row['horizon'] == '1m')
+            self.assertEqual(checkpoint['state'], 'observed')
+            self.assertEqual(checkpoint['observed_at'], '2024-02-29T16:00:00-05:00')
+            self.assertEqual(publish(self.draft, self.vault, self.now)['status'], 'unchanged')
+            self.assertEqual({path: path.read_bytes() for path in originals}, originals)
+
+        def test_published_same_day_legacy_corrections_allow_read_and_identical_retry(self):
+            identifier, _, baseline_link = self.baseline_fixture()
+            observation_link = self.record_link('2024-03-01')
+            self.outcome_note('2024-03-01', journals=[self.journal('Checkpoint records', [
+                (identifier, '1m', 'observed', '2024-02-29T16:00:00-05:00', observation_link, '-')])])
+            published = self.outcome_note('2026-09-05', journals=[
+                self.journal('Recommendation records', [
+                    (identifier, '2024-01-30', '2024-01-31T09:31:00-05:00', baseline_link, baseline_link)]),
+                self.journal('Checkpoint records', [
+                    (identifier, '1m', 'observed', '2024-02-29T15:59:00-05:00', observation_link, observation_link)])])
+            original = published.read_bytes()
+            indexed = outcomes(self.vault, now=self.now)
+            self.assertTrue(indexed['complete'], indexed['findings'])
+            self.assertEqual(next(row for row in indexed['checkpoints'] if row['horizon'] == '1m')['state'],
+                             'needs-recheck')
+            self.draft.write_bytes(original)
+            retry = outcomes(self.vault, self.draft, self.now)
+            self.assertTrue(retry['complete'], retry['findings'])
+            self.assertEqual(retry['checkpoints'], indexed['checkpoints'])
+            self.assertEqual(publish(self.draft, self.vault, self.now)['status'], 'unchanged')
+            self.assertEqual(published.read_bytes(), original)
+            self.assertFalse(list(self.vault.glob('.market-research-stage-*')))
+
         def test_legacy_same_card_baseline_changes_are_recheckable_without_rewriting(self):
             identifier, _, baseline_link = self.baseline_fixture(record_day='2024-02-02')
             observation_link = self.record_link('2024-03-01')
@@ -1588,6 +1723,25 @@ def run_self_test():
                         self.assertIn('distinct new detail card', result['findings'][0]['error'])
                         self.assertEqual(result['active_lessons'][0]['status'], 'provisional')
 
+        def test_lesson_revisions_cannot_reuse_an_older_version_card(self):
+            identifier = 'lesson-2026-08-01-01'
+            original_link = self.record_link('2026-08-01')
+            self.outcome_note('2026-08-01', journals=[self.journal('Lesson records', [
+                (identifier, 'provisional', original_link)])])
+            self.outcome_note('2026-08-02', journals=[self.journal('Lesson records', [
+                (identifier, 'supported', self.record_link('2026-08-02'))])])
+            for status in ('provisional', 'supported', 'retired'):
+                for card, complete in ((original_link, False), (self.record_link('2026-09-05'), True)):
+                    with self.subTest(status=status, card=card):
+                        self.outcome_note('2026-09-05', journals=[self.journal('Lesson records', [
+                            (identifier, status, card)])], draft=True)
+                        result = outcomes(self.vault, self.draft, self.now)
+                        self.assertEqual(result['complete'], complete, result['findings'])
+                        if not complete:
+                            self.assertIn('new detail card in the current draft', result['findings'][0]['error'])
+                            with self.assertRaisesRegex(ValueError, 'new detail card in the current draft'):
+                                publish(self.draft, self.vault, self.now)
+
         def test_invalid_lessons_and_misdated_monthly_summaries(self):
             for identifier, status in (('lesson-2026-09-05-00', 'provisional'),
                                        ('lesson-2026-09-05-001', 'provisional'),
@@ -1604,6 +1758,22 @@ def run_self_test():
             self.outcome_note('2026-09-05', journals=[self.journal('Lesson records', [
                 ('lesson-2026-09-05-100', 'provisional', self.record_link('2026-09-05'))])], draft=True)
             self.assertTrue(outcomes(self.vault, self.draft, self.now)['complete'])
+
+        def test_new_draft_lesson_ids_use_the_first_recorded_note_date(self):
+            for status in ('provisional', 'supported', 'retired'):
+                for introduced, complete in (('2026-09-04', False), ('2026-09-05', True)):
+                    with self.subTest(status=status, introduced=introduced):
+                        identifier = 'lesson-' + introduced + '-01'
+                        self.outcome_note('2026-09-05', journals=[self.journal('Lesson records', [
+                            (identifier, status, self.record_link('2026-09-05'))])], draft=True)
+                        result = outcomes(self.vault, self.draft, self.now)
+                        self.assertEqual(result['complete'], complete, result['findings'])
+                        if not complete:
+                            self.assertIn('new lesson ID must use its first-recorded note date',
+                                          result['findings'][0]['error'])
+                            with self.assertRaisesRegex(ValueError, 'first-recorded note date'):
+                                publish(self.draft, self.vault, self.now)
+                            self.assertFalse((self.vault / 'Investments').exists())
 
         def test_monthly_summary_cannot_point_to_an_older_month(self):
             self.prior('2026-08-31', [])

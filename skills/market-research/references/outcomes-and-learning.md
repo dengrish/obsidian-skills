@@ -232,9 +232,11 @@ leave their links unresolved.
 
 Lesson IDs use `lesson-YYYY-MM-DD-NN`, with their first-recorded date and a positive
 sequence starting at `01`: use at least two digits, without redundant leading
-zeros (`01` through `99`, then `100`, etc.). Keep the ID when revising a lesson.
+zeros (`01` through `99`, then `100`, etc.). An ID first introduced in a new draft
+uses that note's date, even when its evidence is older. Keep published IDs unchanged,
+including earlier records whose ID date was inaccurate. Keep the ID when revising a lesson.
 Status is `provisional`, `supported`, or `retired`. An updated row points to a new
-card that links the previous version and explains what changed; do not erase
+card in the current draft that links the previous version and explains what changed; do not erase
 contradictory or retired lessons. Later evidence may lower confidence or justify
 a new status, but the history remains visible.
 
@@ -279,8 +281,11 @@ observed updates use `-` in `Replaces`. Changing a finalized baseline or checkpo
 requires an explicit new row whose `Replaces` is the exact previous `Record` link.
 For a `needs-recheck` checkpoint, explicitly replace that prior link even if its
 stored observation was unavailable.
-The new `Record` must identify a distinct detail card; another spelling of the
-old note/section link is not a new card. The new detail card links the old one,
+The new `Record` must identify a distinct detail card in the current draft;
+another spelling of the old link or a return to an older card is not a new card.
+Restoring an earlier correct value is allowed when the new card documents why.
+Published historical rows remain readable without rewriting them.
+The new detail card links the old one,
 identifies the factual error, cites the corrected evidence, and explains affected
 calculations. Do not silently substitute a favorable observation or present a new
 convention as a factual correction.

@@ -213,6 +213,9 @@ and [calendar documentation](https://docs.alpaca.markets/us/reference/legacycale
 single-symbol filter and article bodies via `--include-content`. It retrieves
 one page of up to 50 articles; a next-page marker means incomplete coverage.
 Narrow the window to investigate further, retaining and deduplicating article IDs.
+An article may have no publisher URL; the helper preserves it with `url: null`
+and its provider ID. Verify material claims through the issuer or another
+primary source before citing them as evidence.
 It does not apply the bars' 15-minute guard: the provider decides news access.
 Compare a historical window with an explicit recent window to test entitlement.
 Only a returned article's creation time within the last 15 minutes demonstrates
@@ -222,6 +225,7 @@ and current text do not establish a historical text snapshot, and rows updated
 after the cutoff are excluded. Broad results include stocks and crypto and are
 not a liquid U.S. stock screen. REST access does not verify streaming access or
 complete Benzinga coverage. [News endpoint](https://docs.alpaca.markets/us/reference/news-3).
+The optional URL follows Alpaca's [official market-data schema](https://raw.githubusercontent.com/alpacahq/cli/main/api/specs/market-data-api.json).
 
 **Alpha Vantage.** Budget around the documented free allowance of 25 calls per
 day across the account; the helper does not track usage by other processes or

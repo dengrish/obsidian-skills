@@ -33,6 +33,13 @@ completed market-wide screen. Never fabricate universe membership, counts or
 missing price history. If one pass is unavailable, perform the other and prior
 thesis follow-up without claiming the missing pass found no opportunities.
 
+Carry material unreviewed announcement windows forward with their source, date
+range and next check while they remain relevant. Attempt catch-up on later runs;
+record what was recovered, remains unavailable or is closed as no longer relevant,
+with a reason. A newly completed screen does not fill an earlier gap. Preserve
+original publication times and identify late discovery in today's assessment;
+do not rewrite or backdate earlier judgments.
+
 Verify catalysts on issuer investor-relations releases and relevant filings,
 then corroborate timing and context with reliable reporting. An earnings release
 may precede its filing: absence from EDGAR does not establish no announcement.

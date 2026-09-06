@@ -199,7 +199,10 @@ Use this exact ledger only under `### Thesis updates`:
 ```
 
 The thesis ID is `EXCHANGE:TICKER@YYYY-MM-DD`, with uppercase exchange/ticker
-and the date first recorded. Verify the security and share class; do not merge
+and the date first recorded. An ID first introduced in a new draft uses that
+note's date; finding older source evidence does not backdate the thesis. Keep
+published IDs unchanged, including earlier records whose ID date was inaccurate.
+Verify the security and share class; do not merge
 same-symbol instruments or treat a ticker change as a different economic identity
 without checking. Keep the ID unchanged during that thesis. Use only these states:
 
