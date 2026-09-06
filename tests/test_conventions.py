@@ -5908,7 +5908,7 @@ SELFTEST_MIN_CASES = {
     "skills/clipping-clean/scripts/dedup_index.py": 161,
     "skills/clipping-clean/scripts/fetch_images.py": 539,
     "skills/clipping-clean/scripts/slug.py": 133,  # device-name guards removed
-    "skills/market-research/scripts/market_notes.py": 61,
+    "skills/market-research/scripts/market_notes.py": 64,
     "skills/market-research/scripts/market_credentials.py": 13,
     "skills/market-research/scripts/market_data.py": 20,
     "skills/market-research/scripts/market_fred.py": 10,

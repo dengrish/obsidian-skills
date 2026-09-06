@@ -211,7 +211,7 @@ def fred_series(client, args):
         lambda row: row['observation_date'], lambda row: row['observation_date'])
     warnings.extend([
         'Observation dates describe measured periods, not publication dates; values may be revised across vintages.',
-        'The explicit vintage has daily precision and does not establish availability at 09:00 or another intraday cutoff.',
+        'The explicit vintage has daily precision and does not establish availability at an intraday cutoff.',
         'Returned real-time bounds may be clipped to the requested vintage; they are not actual revision or release dates.',
         'The series metadata last_updated is a provider update time, not each observation\'s first publication time.',
     ])

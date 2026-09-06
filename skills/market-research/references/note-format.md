@@ -40,9 +40,9 @@ The following is a layout template; replace all illustrative values and prose:
 ---
 market_research: 1
 date: 2026-09-08
-as_of: "2026-09-08T09:00:00-04:00"
-generated_at: "2026-09-08T09:16:00-04:00"
-session: premarket
+as_of: "2026-09-08T11:30:00-04:00"
+generated_at: "2026-09-08T11:46:00-04:00"
+session: intraday
 coverage: limited
 ---
 # Market research — 2026-09-08

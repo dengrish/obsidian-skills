@@ -18,7 +18,7 @@ Choose by the requested result, not just the input's file type.
 | Build or enrich wiki entries from new evidence | [wiki-build](skills/wiki-build/SKILL.md) | PDF or URL-origin source note → entries in `Wiki/` |
 | Research and add missing requested topics | [wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md` → durable sources and new requested entries only |
 | Audit, correct or explicitly refactor existing wiki entries | [wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources or an exact producer mapping → scoped repairs, links, parents and MOCs |
-| Research premarket catalysts and developing momentum | [market-research](skills/market-research/SKILL.md) | current market evidence and earlier analyses → brief daily note in `Investments/` |
+| Research market catalysts and developing momentum | [market-research](skills/market-research/SKILL.md) | current market evidence and earlier analyses → brief daily note in `Investments/` |
 
 A PDF attached without a stated goal has no default workflow; ask what result
 the user wants. An inbox-wide request splits captured `.md` files and `.pdf`
@@ -153,8 +153,10 @@ guide. Shell examples use POSIX syntax.
 
 Recurring market research is configured separately in the active host when
 requested; installing or manually running the skill does not activate a job.
-Its default daily research time is 09:00 `America/New_York`, following New York's
-daylight-saving changes. Closed-market days produce a short status note.
+Its default daily research time is 08:30 `America/Los_Angeles`, equivalent to
+11:30 `America/New_York`, following daylight-saving changes. Normal trading days
+include a separate intraday assessment alongside completed-session trend data;
+closed-market days produce a short status note.
 
 ## Vault layout
 

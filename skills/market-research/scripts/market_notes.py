@@ -102,6 +102,11 @@ def ny_now(now=None):
     return current.astimezone(zone)
 
 
+def scheduled_cutoff(current):
+    """The daily 08:30 Pacific run uses an 11:30 New York evidence cutoff."""
+    return datetime.combine(current.date(), time(11, 30), current.tzinfo)
+
+
 def iso_date(value):
     if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
         raise ValueError('date must be YYYY-MM-DD')
@@ -383,7 +388,7 @@ def inventory(vault, day):
 def context(vault, now=None):
     current = ny_now(now)
     day = current.date().isoformat()
-    scheduled = datetime.combine(current.date(), time(9), current.tzinfo)
+    scheduled = scheduled_cutoff(current)
     result, _ = inventory(vault, day)
     return dict(result, date=day, now=current.isoformat(),
                 scheduled_cutoff=scheduled.isoformat(),
@@ -609,7 +614,7 @@ def outcomes(vault, draft=None, now=None):
     if draft_token is not None and atomic_move.regular_file_snapshot(draft) != draft_token:
         finding(draft, 'draft changed during outcome planning; rerun')
     cutoff = notes[day][1]['metadata']['as_of'] if day in notes else min(
-        current, datetime.combine(current.date(), time(9), current.tzinfo)).isoformat()
+        current, scheduled_cutoff(current)).isoformat()
     return {'complete': not findings, 'findings': findings, 'date': day,
             'as_of': cutoff,
             'calendar': 'unverified; due targets require exchange-calendar and completed-session verification',
@@ -777,14 +782,59 @@ def run_self_test():
             return identifier, first_link, baseline_link
 
         def test_clock_and_dst(self):
-            summer = context(self.vault, self.now)
-            winter = context(self.vault, datetime.fromisoformat('2026-12-01T13:00:00+00:00'))
-            self.assertEqual(summer['scheduled_cutoff'], '2026-09-05T09:00:00-04:00')
-            self.assertEqual(winter['scheduled_cutoff'], '2026-12-01T09:00:00-05:00')
-            self.assertEqual(winter['as_of'], winter['now'])
-            self.assertEqual(winter['timing'], 'early/manual')
+            for pacific, eastern, utc in (
+                    ('2026-09-05T08:30:00-07:00', '2026-09-05T11:30:00-04:00', '2026-09-05T15:30:00+00:00'),
+                    ('2026-12-01T08:30:00-08:00', '2026-12-01T11:30:00-05:00', '2026-12-01T16:30:00+00:00')):
+                with self.subTest(pacific=pacific):
+                    result = context(self.vault, datetime.fromisoformat(pacific))
+                    self.assertEqual(result['scheduled_cutoff'], eastern)
+                    self.assertEqual(result['now'], eastern)
+                    self.assertEqual(result['as_of'], eastern)
+                    self.assertEqual(iso_time(result['as_of']).astimezone(timezone.utc).isoformat(), utc)
             with self.assertRaises(ValueError):
                 ny_now(datetime(2026, 9, 5))
+
+        def test_early_exact_and_late_runs_agree_on_unsaved_note_cutoff(self):
+            for pacific, eastern_now, cutoff, timing in (
+                    ('2026-09-05T08:29:30-07:00', '11:29:30', '11:29:30', 'early/manual'),
+                    ('2026-09-05T08:30:00-07:00', '11:30:00', '11:30:00', 'scheduled-cutoff'),
+                    ('2026-09-05T10:15:22-07:00', '13:15:22', '11:30:00', 'scheduled-cutoff')):
+                with self.subTest(pacific=pacific):
+                    now = datetime.fromisoformat(pacific)
+                    result = context(self.vault, now)
+                    planned = outcomes(self.vault, now=now)
+                    self.assertEqual(result['current_note']['state'], 'missing')
+                    self.assertEqual(result['as_of'], '2026-09-05T' + cutoff + '-04:00')
+                    self.assertEqual(result['now'], '2026-09-05T' + eastern_now + '-04:00')
+                    self.assertEqual(result['timing'], timing)
+                    self.assertTrue(planned['complete'])
+                    self.assertEqual(planned['as_of'], result['as_of'])
+            self.assertFalse((self.vault / 'Investments').exists())
+
+        def test_note_date_uses_new_york_before_pacific_midnight(self):
+            now = datetime.fromisoformat('2026-09-05T23:50:00-07:00')
+            result = context(self.vault, now)
+            self.assertEqual(result['date'], '2026-09-06')
+            self.assertEqual(result['now'], '2026-09-06T02:50:00-04:00')
+            self.assertEqual(result['scheduled_cutoff'], '2026-09-06T11:30:00-04:00')
+            self.assertEqual(result['as_of'], result['now'])
+            planned = outcomes(self.vault, now=now)
+            self.assertEqual(planned['date'], result['date'])
+            self.assertEqual(planned['as_of'], result['as_of'])
+
+        def test_saved_nine_oclock_note_keeps_its_original_cutoff_and_bytes(self):
+            path = self.prior('2026-09-05', [])
+            original = path.read_bytes()
+            late = datetime.fromisoformat('2026-09-05T10:15:22-07:00')
+            self.assertEqual(context(self.vault, late)['current_note']['state'], 'valid')
+            for draft in (None, path):
+                with self.subTest(draft=draft):
+                    planned = outcomes(self.vault, draft=draft, now=late)
+                    self.assertTrue(planned['complete'])
+                    self.assertEqual(planned['as_of'], '2026-09-05T09:00:00-04:00')
+            self.assertEqual(publish(path, self.vault, late)['status'], 'unchanged')
+            self.assertEqual(path.read_bytes(), original)
+            self.assertEqual(lint_bytes(original)['metadata']['generated_at'], '2026-09-05T09:02:00-04:00')
 
         def test_missing_timezone_reports_json_error(self):
             import io

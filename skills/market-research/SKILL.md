@@ -26,8 +26,9 @@ flashcards, MOCs, or automatic source-document extraction to them.
 
 ## Establish the review window
 
-The intended daily run starts at **09:00 America/New_York**, observing daylight
-saving time. This is Eastern Time, not fixed UTC−05:00 throughout the year.
+The intended daily run starts at **08:30 America/Los_Angeles**, equivalent to
+**11:30 America/New_York**, observing daylight saving time. On a normal trading
+day this is an intraday review, with morning price action available to assess.
 Installing or manually invoking this skill does not schedule it. A host scheduler
 must separately invoke it with the selected vault and available research tools;
 create or change that schedule only when the user requests scheduling.
@@ -38,21 +39,21 @@ Use the helper to establish the date, cutoff, and existing record:
 python3 '<skill>/scripts/market_notes.py' context --vault '<vault>'
 ```
 
-For the scheduled edition, freeze evidence at 09:00 New York time; record the
+For the scheduled edition, freeze evidence at 11:30 New York time; record the
 actual generation time separately. Read news since the previous completed
 review's cutoff, including intervening after-hours releases. On the first run,
 cover the previous regular-session close through the cutoff, using older
-material only as identified background. Do not fill a missed morning with
-post-cutoff prices or news and call it a premarket prediction. A late run must
-recover timestamped pre-cutoff evidence or state the data limitation. An explicitly
+material only as identified background. Do not use later prices or news in a
+backdated scheduled edition. A late run must recover timestamped pre-cutoff
+evidence or state the data limitation. An explicitly
 requested intraday/manual review may use its actual cutoff and session label.
 
 Verify the exchange calendar and actual session, including exceptional closures;
 never derive holidays from weekdays alone. Run every calendar day when daily
 execution is requested. On a closed-market day, write a short follow-up with the
 last completed session and next scheduled session; do not present stale prices
-as current premarket trading. Before 09:00, use the helper's earlier actual cutoff
-and describe the edition as early/manual.
+as current trading. Before 11:30 New York time, use the helper's earlier actual
+cutoff and describe the edition as early/manual.
 
 If today's recognized note already exists, read it and run the outcome inventory
 below before reusing it. The context's `valid` marker checks note structure, not
@@ -144,14 +145,15 @@ For each selected idea, provide:
 - Why it could matter over the holding horizon, what the price may already assume,
   and the strongest counterargument. Compare relevant operating evidence with
   earlier quarters and corroborating industry evidence when available.
-- Verified regular-session trend evidence and any separately timestamped
-  premarket reaction; distinguish facts from the overreaction/reversal hypothesis.
+- Verified completed-session trend evidence and a separate timestamped intraday
+  or premarket snapshot; distinguish facts from the overreaction/reversal hypothesis.
 - An observable confirmation condition, invalidation condition, next milestone,
   and prospective 3–12 month buying window when first marked ready. Follow the
   research method's aging rules, preserving original watch dates and deadlines.
 
-Do not turn a premarket price spike into a confirmed closing breakout, assume an
-order will fill at the quoted price, or mark a hypothetical idea as a purchase.
+A premarket or intraday move cannot establish a confirmed closing breakout or
+full-session volume signal. Do not assume an order will fill at the quoted price
+or mark a hypothetical idea as a purchase.
 Use conditional buying conclusions without assuming holdings or prescribing
 portfolio allocations. Never place or cancel orders, transfer money, or change
 brokerage settings.

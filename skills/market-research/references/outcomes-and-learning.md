@@ -110,7 +110,9 @@ on or after that calendar target. Verify the session and its closing boundary,
 including early closes and exceptional closures. The helper's calendar target is
 only a research due date; it cannot establish that a trading session occurred.
 An outcome becomes observable only after that close and by a later review's cutoff.
-At a 09:00 review, today's future regular-session close is still pending.
+At the scheduled 11:30 ET review, today's close is normally still pending.
+Only a verified earlier session close with data available by the cutoff can
+already support that day's checkpoint; an intraday snapshot cannot replace it.
 
 Use the two-week checkpoint for early feedback on the initial price response,
 entry assumptions and newly available catalyst evidence. Keep its results separate

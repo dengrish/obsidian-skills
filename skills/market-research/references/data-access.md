@@ -83,7 +83,8 @@ skipped in Screening and sources. A successful setup probe is not today's resear
 | Review window and session | `sessions` for the last/next sessions and their opening/closing boundaries; verify exceptional closures against an exchange source. Reuse this calendar for price filtering and due outcome events. |
 | Accessible universe | `symbols` when establishing or refreshing the current directory-based screen or resolving instrument identity. Preserve membership dates and provider symbol mappings; it does not classify every non-ETF as an eligible common share. |
 | Announcement pass | `news --provider alpaca` for a bounded broad or ticker-specific news window when configured; use `news --provider alpha_vantage` selectively for additional coverage within its account quota. Use `earnings` for upcoming scheduled risks, then verify timing and results on issuer pages. Neither news feed must duplicate the other on every run. |
-| Price-history pass | `prices` for the declared universe and benchmarks over matching periods. Compute the chosen measurements from retained inputs; the helper does not screen or rank. Use session-filtered minute data or another explicitly regular-session source for regular-session liquidity, not unfiltered daily volume. |
+| Price-history pass | `prices` for the declared universe and benchmarks over matching completed sessions. Compute the chosen measurements from retained inputs; the helper does not screen or rank. Use session-filtered minute data or another explicitly regular-session source for regular-session liquidity, not unfiltered daily volume. |
+| Intraday assessment | On open-market runs, use `prices --timeframe 1Min` or a timestamped host quote for the shortlist's morning reaction. Respect feed delay and the cutoff; keep snapshots separate from completed-session signals, and compare partial volume only with matching historical session/time windows. |
 | Shortlist and readiness | `sec-company` for relevant filings, then `sec-facts` when comparable reported fundamentals are needed. Open the actual filing/release for material claims and disclosures absent from XBRL. Check `halts` and current issuer/exchange notices before first readiness or when a trading-status concern arises; a current empty feed does not reconstruct an earlier cutoff or clear an older unresolved halt. |
 | Corporate actions | `actions` when validating adjustments, unexplained price discontinuities, instrument changes or outcome inputs. Its process-date records need issuer corroboration; choose the relevant history and keep original raw observations. |
 | Macro context | `fred-releases` for relevant upcoming releases and `fred-series` for a small dated set of rates, credit, employment or inflation observations when they affect a thesis. Verify fresh announcements with the releasing agency. |
@@ -97,19 +98,25 @@ fallbacks instead of silently omitting a discovery pass or required evidence che
 ## Query and result contract
 
 Use explicit timestamps with seconds and a timezone, such as
-`2026-09-04T09:00:00-04:00`. Replace example dates with the actual review window.
+`2026-09-04T11:30:00-04:00`. Replace example dates with the actual review window.
 Save large JSON output in the run's owned scratch directory and read the full
 relevant subset; truncated terminal output is not the full result.
 
 ```bash
 python3 '<skill>/scripts/market_data.py' symbols > '<scratch>/symbols.json'
-python3 '<skill>/scripts/market_data.py' sec-company --symbol AAPL --as-of '2026-09-04T09:00:00-04:00' --since '2026-09-01' > '<scratch>/filings.json'
-python3 '<skill>/scripts/market_data.py' prices --symbols 'AAPL,MSFT,SPY' --start '2025-09-01T00:00:00-04:00' --end '2026-09-04T08:45:00-04:00' --adjustment split > '<scratch>/prices.json'
-python3 '<skill>/scripts/market_data.py' news --symbol AAPL --since '2026-09-03T16:00:00-04:00' --as-of '2026-09-04T09:00:00-04:00' > '<scratch>/news.json'
-python3 '<skill>/scripts/market_data.py' news --provider alpaca --symbol AAPL --since '2026-09-03T16:00:00-04:00' --as-of '2026-09-04T09:00:00-04:00' --sort LATEST --limit 10 --include-content > '<scratch>/alpaca-news.json'
+python3 '<skill>/scripts/market_data.py' sec-company --symbol AAPL --as-of '2026-09-04T11:30:00-04:00' --since '2026-09-01' > '<scratch>/filings.json'
+python3 '<skill>/scripts/market_data.py' prices --symbols 'AAPL,MSFT,SPY' --start '2025-09-01T00:00:00-04:00' --end '2026-09-04T11:15:00-04:00' --adjustment split > '<scratch>/prices.json'
+python3 '<skill>/scripts/market_data.py' prices --symbols 'AAPL,MSFT,SPY' --start '2026-09-04T09:30:00-04:00' --end '2026-09-04T11:15:00-04:00' --timeframe 1Min --adjustment split > '<scratch>/intraday.json'
+python3 '<skill>/scripts/market_data.py' news --symbol AAPL --since '2026-09-03T16:00:00-04:00' --as-of '2026-09-04T11:30:00-04:00' > '<scratch>/news.json'
+python3 '<skill>/scripts/market_data.py' news --provider alpaca --symbol AAPL --since '2026-09-03T16:00:00-04:00' --as-of '2026-09-04T11:30:00-04:00' --sort LATEST --limit 10 --include-content > '<scratch>/alpaca-news.json'
 python3 '<skill>/scripts/market_data.py' fred-series --series DGS10 --start '2026-01-01' --end '2026-09-03' --vintage-date '2026-09-03' > '<scratch>/treasury-yield.json'
 python3 '<skill>/scripts/market_data.py' fred-releases --start '2026-09-04' --end '2026-09-11' > '<scratch>/macro-releases.json'
 ```
+
+The SIP price examples end 15 minutes before the scheduled cutoff. Daily bars
+still exclude the current date; the minute request supplies a separate delayed
+intraday snapshot. Filter it to verified session boundaries and retain each
+observation time. A later retrieval does not move the edition's evidence cutoff.
 
 Run the helper with a command followed by `--help` for its filters. Each retrieval
 returns one JSON object with `market_data: 1`, `operation`, `complete`, and
@@ -177,7 +184,7 @@ and [halt RSS documentation](https://www.nasdaqtrader.com/Trader.aspx?id=TradeHa
 **Alpaca.** The default `sip` feed requests consolidated historical data ending
 at least 15 minutes before the current time; access still depends on account
 entitlement. There is no automatic fallback to `iex`, which covers one exchange
-and has different volume. Neither default establishes a real-time premarket
+and has different volume. Neither default establishes a real-time
 quote. Daily bars include only New York dates **before the requested end date**,
 even for a historical afternoon cutoff. Choose the following date to include a
 desired final day. The actual query end is returned. A `1Min` bar that straddles
@@ -247,7 +254,7 @@ dated requests when studying revisions. A pinned real-time interval can be clipp
 to the query date and is not each observation's original release or revision date.
 
 Vintages have **daily**, not intraday, resolution. A same-day vintage retrieved
-later does not prove availability by 09:00 ET. For historical morning context,
+later does not prove availability by an intraday cutoff. For historical context,
 a prior-day vintage is a conservative source-date proxy, not proof of exact FRED
 ingestion. Use archived pre-cutoff snapshots or separate agency publication-time
 evidence for same-day releases. Series-level `last_updated` is an update on FRED's

@@ -43,8 +43,8 @@ cutoff is a risk to monitor, not an outcome.
 
 When FRED is configured, use the [data-access guide](data-access.md) to add dated
 interest-rate, credit, employment and inflation context where it changes a buying
-thesis. Its daily vintages and source release dates do not establish 09:00 ET
-availability. Keep macro interpretation proportional to the stock-specific
+thesis. Its daily vintages and source release dates do not establish availability
+at an intraday cutoff. Keep macro interpretation proportional to the stock-specific
 evidence, retain comparable periods and units, and mention it in the Decision
 brief only when it materially changes the opportunity or risk.
 
@@ -166,8 +166,11 @@ thesis, confidence or risk assessment.
 
 ## Price confirmation and purchase risk
 
-Use completed **regular-session** daily bars for trend calculations. Keep any
-premarket quote separate, with its timestamp and identified prior regular close.
+Use completed **regular-session** daily bars for trend calculations. Keep the
+current intraday or premarket snapshot separate, with its timestamp, session,
+delay and identified prior regular close. On open-market runs, assess whether
+the morning reaction is holding, reversing or already extended at that observed
+time; do not substitute a partial day for a completed daily bar.
 Verify stock splits, dividend/return conventions and source adjustments before
 comparing periods or instruments; reconcile unlike feeds before combining them.
 
@@ -180,9 +183,10 @@ state another definition if used. Calculate from inspectable data or a provider'
 explicitly defined metric. Do not invent observations or report a 200-session
 average from insufficient history.
 
-Premarket volume needs a matched historical time window; do not compare it with
-full-session volume. A premarket tick above resistance cannot confirm a regular
-close above resistance. The
+Intraday and premarket volume need a matched historical session/time window;
+do not compare partial volume with full-session volume or call it a confirmed
+full-session breakout. A tick above resistance cannot confirm a regular close
+above resistance. The
 [SEC's extended-hours bulletin](https://www.investor.gov/introduction-investing/general-resources/news-alerts/alerts-bulletins/investor-bulletins-42)
 describes lower liquidity, wider spreads, volatility and fragmented prices;
 premarket prints can differ materially from regular-session execution.
