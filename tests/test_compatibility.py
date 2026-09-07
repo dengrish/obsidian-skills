@@ -29,7 +29,7 @@ PLUGIN_SKILLS = {
         "clipping-clean", "paper-summarize", "figure-extract", "pdf-organize",
         "wiki-add", "wiki-build", "wiki-lint",
     },
-    "investments": {"market-research"},
+    "investments": {"market-research", "feed-collect"},
 }
 
 
@@ -84,10 +84,11 @@ class CompatibilityTests(unittest.TestCase):
         conventions = load("convention_roster_counts", ROOT / "tests/test_conventions.py")
         canonical = (ROOT / "shared/CONVENTIONS.md").read_text(encoding="utf-8")
         for relative, intro, fails in (
-                ("README.md", "Eight skills are packaged as two plugins.", False),
+                ("README.md", "Nine skills are packaged as two plugins.", False),
                 ("plugins/knowledge/README.md", "Seven skills for organizing sources.", False),
                 ("plugins/knowledge/README.md", "Eight skills for organizing sources.", True),
-                ("plugins/investments/README.md", "One skill for market research.", False)):
+                ("plugins/investments/README.md", "Two skills for collection and market research.", False),
+                ("plugins/investments/README.md", "One skill for market research.", True)):
             with self.subTest(relative=relative, intro=intro):
                 report = conventions.Report()
                 prose = "# Overview\n\n" + intro + "\n\nUse the `wiki-build` skill.\n"
@@ -454,6 +455,27 @@ class CompatibilityTests(unittest.TestCase):
             help_result = invoke("check", "--credentials-file", private / "missing.json", "--help")
             self.assertEqual(help_result.returncode, 0, help_result.stdout + help_result.stderr)
             self.assertIn("--credentials-file", help_result.stdout)
+
+    def test_packaged_feed_collector_runs_without_repository_or_site_packages(self):
+        with tempfile.TemporaryDirectory(prefix="obsidian-feed-package-") as tmp:
+            root = Path(tmp).resolve()
+            install = root / "installed plugin"
+            with zipfile.ZipFile(ROOT / "investments.plugin") as archive:
+                archive.extractall(install)
+            script = install / "skills/feed-collect/scripts/feed_collect.py"
+            env = {key: value for key, value in os.environ.items()
+                   if key not in {"OBSIDIAN_VAULT_SHARED", "X_BEARER_TOKEN"}}
+            for option in ("--help", "--test"):
+                with self.subTest(option=option):
+                    result = subprocess.run(
+                        [sys.executable, "-I", "-S", "-B", str(script), option],
+                        cwd=root, env=env, capture_output=True, text=True,
+                        encoding="utf-8", timeout=60)
+                    self.assertEqual(result.returncode, 0,
+                                     result.stdout + result.stderr)
+                    if option == "--help":
+                        self.assertIn("collect", result.stdout)
+                        self.assertIn("reconcile", result.stdout)
 
     def test_packaging_derives_the_loose_and_archived_codex_manifest_once(self):
         build = load("build_plugin_single_manifest", ROOT / "tools/build_plugin.py")

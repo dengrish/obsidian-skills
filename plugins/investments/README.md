@@ -1,5 +1,10 @@
 # Investments
 
+[investments:feed-collect](skills/feed-collect/SKILL.md) records timestamped
+posts from selected public X accounts, with one maintained account note in
+`Investments/Sources/X/`. It preserves source content without summaries,
+sentiment labels or buying recommendations.
+
 [investments:market-research](skills/market-research/SKILL.md) finds buying
 opportunities in liquid U.S.-listed stocks for a 3–12 month momentum horizon.
 It records concise decision briefs, detailed research, and later evaluations
@@ -10,7 +15,7 @@ recommendations and trade execution are outside this skill's scope.
 
 Read [runtime setup](shared/RUNTIME.md) and the skill's
 [data-access guide](skills/market-research/references/data-access.md).
-Core helpers use Python 3.10+ and the standard library, including system timezone
+Both skills' core helpers use Python 3.10+ and the standard library, including system timezone
 data. A bounded directory-derived acquisition workflow feeds the offline screener
 with consistent momentum, relative strength, trend and liquidity-proxy inputs.
 Shortlist helpers separately verify regular-session coverage and sourced
@@ -18,6 +23,17 @@ market-cap eligibility; passing a screen is not a buying recommendation. Optiona
 SEC filing/section extraction uses pinned EdgarTools; its setup is in the
 data-access guide. PDF/image packages and the `knowledge` plugin are not required.
 Install the whole package to preserve its local helper paths.
+
+For direct X collection, maintain `Investments/x-accounts.md` and configure
+read-only API credentials under the
+[X API guide](skills/feed-collect/references/x-api.md). Routine collection uses
+saved cursors and cached responses to avoid rereading previously collected
+posts. An ambiguous paid request is recorded and stops instead of silently
+retrying. Collection state in `Investments/Sources/.feed-collect/` is durable,
+not temporary scratch. Source edits and removals use a separate reconciliation
+procedure; account notes are maintained records, not immutable research
+editions. Blogs and newsletters are not yet supported. Collection does not
+interpret content or automatically replace market-research's discovery inputs.
 
 For a smaller starting universe, configure a covered-creator roster in the vault's
 `market-research-sources.json` under the
@@ -37,7 +53,7 @@ FRED, subject to account access and coverage limits. Credentials are never
 included in plugin installation or publication.
 
 Use the same selected Obsidian vault as `knowledge` if desired. Published
-`Investments/` records remain immutable. Scheduled runs create one daily edition;
+dated market-research records remain immutable. Scheduled research runs create one daily edition;
 user-requested fresh reviews create timestamped manual editions under the
 [note format](skills/market-research/references/note-format.md#editions-and-retries).
 Both share the same thesis and outcome history. Private run receipts allow a
@@ -53,7 +69,7 @@ conservative provider cooldown after quota failure; it never invents historical
 consensus or changes an established cutoff.
 Exact SEC Form 4/4-A retrieval adds selective insider context without extra
 credentials or parser dependencies; no buying score is inferred from a filing.
-`Reviews/market-research-suggestions.md` keeps its existing name under the
+Each skill uses `Reviews/<skill>-suggestions.md` under the
 [shared protocol](shared/SUGGESTIONS.md).
 
 Scheduling is separate from installation. When requested, invoke

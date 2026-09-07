@@ -3,7 +3,7 @@
 This repository, https://github.com/dengrish/obsidian-skills, is the source of
 the `knowledge` and `investments` plugins for Codex and Claude Code. The
 marketplace remains `obsidian-skills`. Both hosts use `knowledge:` for the
-seven knowledge skills and `investments:market-research` for finance. Both
+seven knowledge skills and `investments:` for source collection and finance. Both
 plugins can use the same selected Obsidian vault.
 
 Keep shared contributor instructions in this file. `CLAUDE.md` imports it with

@@ -41,8 +41,14 @@ def _private_file(info):
         raise DataError('invalid_credentials_file', 'Credentials file is empty or exceeds the 32 KiB limit.')
 
 
-def load_credentials(path):
-    """Read one bounded, stable descriptor; never print a path, payload, or OS error."""
+def load_credentials(path, *, allowed_names=None):
+    """Read private JSON using the caller's explicit credential allowlist.
+
+    Existing market callers retain their provider-only schema. Other skills in
+    this plugin can reuse the same guarded reader without broadening that schema.
+    Never print a path, payload, or OS error.
+    """
+    names = frozenset(CREDENTIAL_NAMES if allowed_names is None else allowed_names)
     directory = descriptor = None
     try:
         if (not all(hasattr(os, name) for name in ('O_NOFOLLOW', 'O_DIRECTORY', 'getuid'))
@@ -82,7 +88,7 @@ def load_credentials(path):
         def object_pairs(pairs):
             result = {}
             for key, value in pairs:
-                if key not in CREDENTIAL_NAMES or key in result:
+                if key not in names or key in result:
                     raise DataError('invalid_credentials_file', 'Credentials JSON contains an unknown or duplicate setting.')
                 if (not isinstance(value, str) or not value.strip()
                         or any(unicodedata.category(ch) == 'Cc' for ch in value)):
@@ -148,6 +154,24 @@ def run_self_test():
         def test_empty_object_configures_no_provider(self):
             self.write(b'{}')
             self.assertEqual(load_credentials(self.path), {})
+
+        def test_explicit_other_skill_schema_does_not_change_market_defaults(self):
+            self.write(b'{"X_BEARER_TOKEN":"fixture-private-value"}')
+            self.rejected()
+            self.assertEqual(load_credentials(self.path, allowed_names={'X_BEARER_TOKEN'}),
+                             {'X_BEARER_TOKEN': 'fixture-private-value'})
+            self.write(b'{"X_BEARER_TOKEN":"fixture-private-value","OTHER":"extra"}')
+            with self.assertRaises(DataError):
+                load_credentials(self.path, allowed_names={'X_BEARER_TOKEN'})
+
+        def test_explicit_other_skill_schema_keeps_duplicate_and_private_file_guards(self):
+            self.write(b'{"X_BEARER_TOKEN":"fixture-private-value","X_BEARER_TOKEN":"other"}')
+            with self.assertRaises(DataError):
+                load_credentials(self.path, allowed_names={'X_BEARER_TOKEN'})
+            self.write(b'{"X_BEARER_TOKEN":"fixture-private-value"}')
+            self.path.chmod(0o644)
+            with self.assertRaises(DataError):
+                load_credentials(self.path, allowed_names={'X_BEARER_TOKEN'})
 
         def test_malformed_unknown_duplicate_and_nonstring_json(self):
             for payload in (b'{bad fixture-private-value', b'{"OTHER":"fixture-private-value"}',

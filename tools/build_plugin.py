@@ -135,10 +135,12 @@ def _package_inventory(root, snapshots=None):
                 owner = skill_owners.setdefault(skill, plugin)
                 if owner != plugin:
                     raise ValueError("skill %s appears in both plugins" % skill)
-    if skill_owners.get("market-research") != "investments":
-        raise ValueError("market-research must belong to investments")
+    investment_skills = {"market-research", "feed-collect"}
+    for skill in investment_skills:
+        if skill_owners.get(skill) != "investments":
+            raise ValueError("%s must belong to investments" % skill)
     if any(owner != "knowledge" for skill, owner in skill_owners.items()
-           if skill != "market-research"):
+           if skill not in investment_skills):
         raise ValueError("knowledge skills must belong to knowledge")
     return maps
 

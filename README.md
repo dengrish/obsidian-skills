@@ -1,12 +1,12 @@
 # Obsidian skills
 
-Eight skills are packaged as two independently installable plugins for Codex
+Nine skills are packaged as two independently installable plugins for Codex
 and Claude Code. Both can use the same selected Obsidian vault:
 
 | Plugin | Purpose | Namespace |
 |---|---|---|
 | **knowledge** | Organize sources and maintain a knowledge base | `knowledge:` |
-| **investments** | Research buying opportunities and evaluate earlier recommendations | `investments:` |
+| **investments** | Collect source posts, research buying opportunities and evaluate earlier recommendations | `investments:` |
 
 They share one GitHub repository and the `obsidian-skills` marketplace. Each
 plugin has its own version and includes its skills, references and shared helpers.
@@ -27,6 +27,7 @@ Choose by the requested result, not just the input's file type.
 | Build or enrich wiki entries from new evidence | [knowledge:wiki-build](skills/wiki-build/SKILL.md) | PDF or URL-origin source note → entries in `Wiki/` |
 | Research and add missing requested topics | [knowledge:wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md` → durable sources and new requested entries only |
 | Audit, correct or explicitly refactor existing wiki entries | [knowledge:wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources or an exact producer mapping → scoped repairs, links, parents and MOCs |
+| Record posts from selected X accounts without interpretation | [investments:feed-collect](skills/feed-collect/SKILL.md) | `Investments/x-accounts.md` → one maintained account note in `Investments/Sources/X/` |
 | Research market catalysts and developing momentum | [investments:market-research](skills/market-research/SKILL.md) | current market evidence and earlier analyses → brief daily note in `Investments/` |
 
 A PDF attached without a stated goal has no default workflow; ask what result
@@ -50,6 +51,8 @@ Inbox/*.md → clipping-clean → Articles/ cleaned clipping
 add-to-wiki.md → wiki-add → durable sources → missing requested entries in Wiki/
 
 Existing Wiki/ → wiki-lint → entry repairs, links, parents, MOCs and proposals
+
+Investments/x-accounts.md → feed-collect → account notes containing original posts
 
 Market evidence + prior Investments/ notes → market-research → daily research note
 ```
@@ -113,6 +116,19 @@ Personal source configuration stays in the vault; bundled normalization preserve
 attribution, cutoffs and sample limitations without turning extracted calls into
 buy recommendations. This mode retains independent news and earlier theses.
 
+[feed-collect](skills/feed-collect/SKILL.md) independently records timestamped
+posts from public X accounts selected in `Investments/x-accounts.md`, using the
+official API. It maintains one account note under `Investments/Sources/X/`,
+with durable cursors and recovery state under `Investments/Sources/.feed-collect/`.
+Routine updates request only posts after each completed cursor and reuse saved
+responses when publication needs retrying. Ambiguous paid requests stop for
+resolution instead of silently retrying. Source edits and removals have a
+separate reconciliation procedure. The collector does not summarize posts,
+select stocks or change the market-research schedule. Blogs and newsletters
+are future work, not supported inputs. Read its
+[X API guide](skills/feed-collect/references/x-api.md) for credentials, bounded
+backfills, coverage limitations and compliance maintenance.
+
 The [offline screener](skills/market-research/references/screening.md) calculates
 calendar-month momentum, benchmark-relative returns, moving averages and a
 clearly labeled daily liquidity proxy from saved Alpaca/calendar responses.
@@ -151,7 +167,8 @@ claude plugin install investments@obsidian-skills
 ```
 
 Invoke skills as `knowledge:wiki-build`, `knowledge:wiki-add`,
-`knowledge:wiki-lint`, or `investments:market-research`. Start a fresh
+`knowledge:wiki-lint`, `investments:feed-collect`, or
+`investments:market-research`. Start a fresh
 session/task after installation or updates to refresh the host's catalog.
 Each plugin uses its own packaged `skills/` and `shared/` resources; copying
 one SKILL.md or relying on a sibling installation is unsupported.
@@ -207,6 +224,11 @@ it and any per-run path overrides through [RUNTIME.md](shared/RUNTIME.md).
 │   └── Images/               flat folder for extracted/downloaded images
 ├── Wiki/                     entity notes, scanned recursively
 ├── Investments/              dated market research, separate from the Wiki
+│   ├── x-accounts.md         user-maintained X account roster
+│   ├── Sources/
+│   │   ├── X/                one maintained note per collected account
+│   │   └── .feed-collect/    durable collection cursors and recovery state
+│   └── Snapshots/            research evidence
 ├── MOCs/                     generated navigation outlines
 │   ├── <discipline>.md       e.g. machine-learning.md (no -moc suffix)
 │   └── misc.md               Wiki entries tagged #misc
@@ -312,6 +334,7 @@ python3 -m venv .venv
 .venv/bin/python tests/test_market_research_eval.py
 .venv/bin/python tests/test_market_comparison.py
 .venv/bin/python tests/test_market_acquire.py
+.venv/bin/python tests/test_feed_collect.py
 .venv/bin/python tests/test_compatibility.py
 .venv/bin/python tools/build_plugin.py --check
 .venv/bin/python tests/test_provenance.py
