@@ -231,6 +231,64 @@ raise SystemExit(main(fixture['args'], client))
         self.assertEqual(result['market_data'], 1)
         return result
 
+    def test_estimate_retrieval_archives_only_a_selected_observation_for_later_cutoffs(self):
+        args = ['estimates', '--symbol', 'IBM', '--period', '2027-03-31',
+                '--as-of', '2025-09-05T13:00:00Z']
+        result = self.market_response(args, [{'symbol': 'IBM', 'estimates': [{
+            'date': '2027-03-31', 'horizon': 'fiscal quarter', 'eps_estimate_average': '2.5000',
+            'eps_estimate_analyst_count': '12.0000', 'unrelated_text': 'DUMMY_SECRET_FOR_OFFLINE_TEST'}]}], 2)
+        self.assertTrue(result['coverage_complete'])
+        self.assertFalse(result['within_cutoff'])
+        capture = Path(self.scratch.name) / 'estimate response.json'
+        capture.write_text(json.dumps(result), encoding='utf-8')
+        helper = 'skills/market-research/scripts/market_estimate_history.py'
+        saved = json.loads(self.run_script(helper, 'save', '--input', capture, '--vault', self.vault,
+                                           '--period', '2027-03-31', '--horizon', 'fiscal quarter').stdout)
+        path = Path(saved['path'])
+        self.assertEqual(path.parent, self.vault.resolve() / 'Investments/Snapshots/Estimates')
+        original = path.read_bytes()
+        self.assertNotIn(b'DUMMY_SECRET', original)
+        self.assertNotIn(b'apikey', original)
+        retry = json.loads(self.run_script(helper, 'save', '--input', capture, '--vault', self.vault,
+                                           '--period', '2027-03-31', '--horizon', 'fiscal quarter').stdout)
+        self.assertEqual(retry['status'], 'unchanged')
+        self.assertEqual(path.read_bytes(), original)
+        early = json.loads(self.run_script(helper, 'history', '--vault', self.vault,
+                                          '--symbol', 'IBM', '--as-of', '2025-09-05T13:00:00Z').stdout)
+        self.assertEqual(early['snapshots'], [])
+        available = json.loads(self.run_script(helper, 'history', '--vault', self.vault,
+                                              '--symbol', 'IBM', '--as-of', datetime.now().astimezone().isoformat()).stdout)
+        self.assertEqual(len(available['snapshots']), 1)
+        context = json.loads(self.run_script('skills/market-research/scripts/market_notes.py',
+                                             'context', '--vault', self.vault).stdout)
+        self.assertTrue(context['complete'])
+        self.assertEqual(context['other_notes'], [])
+
+    def test_exact_ownership_metadata_flows_through_cli_without_optional_parser(self):
+        accession = '0000000002-25-000001'
+        metadata = {'cik': 1, 'name': 'Synthetic Issuer', 'tickers': ['FIX'], 'exchanges': ['NYSE'],
+                    'filings': {'files': [], 'recent': {
+                        'accessionNumber': [accession], 'filingDate': ['2025-02-03'],
+                        'acceptanceDateTime': ['2025-02-03T15:00:00Z'], 'reportDate': ['2025-02-01'],
+                        'form': ['4'], 'primaryDocument': ['xslF345X05/fixture.xml']}}}
+        xml = '''<ownershipDocument><documentType>4</documentType><periodOfReport>2025-02-01</periodOfReport>
+<issuer><issuerCik>1</issuerCik><issuerName>Synthetic Issuer</issuerName><issuerTradingSymbol>FIX</issuerTradingSymbol></issuer>
+<reportingOwner><reportingOwnerId><rptOwnerCik>2</rptOwnerCik><rptOwnerName>Fixture Owner</rptOwnerName></reportingOwnerId>
+<reportingOwnerRelationship><isDirector>1</isDirector><isOfficer>0</isOfficer><isTenPercentOwner>0</isTenPercentOwner><isOther>0</isOther></reportingOwnerRelationship></reportingOwner>
+<nonDerivativeTable><nonDerivativeTransaction><securityTitle><value>Common stock</value></securityTitle>
+<transactionDate><value>2025-02-01</value></transactionDate><transactionCoding><transactionFormType>4</transactionFormType><transactionCode>P</transactionCode><equitySwapInvolved>0</equitySwapInvolved></transactionCoding>
+<transactionAmounts><transactionShares><value>10.5</value></transactionShares><transactionPricePerShare><value>20.00</value></transactionPricePerShare><transactionAcquiredDisposedCode><value>A</value></transactionAcquiredDisposedCode></transactionAmounts>
+<postTransactionAmounts><sharesOwnedFollowingTransaction><value>110.5</value></sharesOwnedFollowingTransaction></postTransactionAmounts>
+<ownershipNature><directOrIndirectOwnership><value>D</value></directOrIndirectOwnership></ownershipNature></nonDerivativeTransaction></nonDerivativeTable></ownershipDocument>'''
+        result = self.market_response(['sec-ownership', '--cik', '1', '--accession', accession,
+                                      '--as-of', '2025-03-01T15:00:00Z'], [metadata, xml])
+        self.assertEqual(len(result['requests']), 2)
+        self.assertTrue(result['requests'][1]['url'].endswith('/1/000000000225000001/fixture.xml'))
+        row = result['data']['transactions'][0]
+        self.assertEqual(row['fields']['transaction_shares']['value'], '10.5')
+        self.assertIn('privately', row['transaction_code_label'])
+        self.assertEqual(result['data']['issuer']['cik'], '0000000001')
+
     def test_market_retrieval_envelopes_feed_offline_screen(self):
         # An explicitly synthetic calendar isolates the provider-to-calculator
         # contract; these weekdays are not asserted to be real exchange dates.

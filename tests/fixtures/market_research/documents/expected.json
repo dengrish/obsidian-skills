@@ -1,0 +1,287 @@
+{
+  "schema_version": 2,
+  "suite_id": "market-research-documents-v1",
+  "document_sha256": "b84fb6f8c67770048556aa14d8c70ae0669a2203149c535f98734ef092dd341b",
+  "oracle_sha256": "bb3cf0652e773bc45bba0d9f6402d4975244471afd43305fbaefb42b6441c24f",
+  "cases": [
+    {
+      "case_id": "doc01",
+      "answers": [
+        {
+          "question_id": "quarter_revenue",
+          "status": "answered",
+          "value": 550,
+          "evidence_alternatives": [
+            [
+              "rill:L3",
+              "rill:L9",
+              "rill:L10",
+              "rill:L11",
+              "rill:L13"
+            ]
+          ],
+          "reason_codes": [
+            "quarter_not_ytd"
+          ],
+          "absolute_tolerance": 0.001,
+          "numeric_fact_alternatives": [
+            [
+              "h1_current",
+              "q1_current"
+            ]
+          ]
+        },
+        {
+          "question_id": "quarter_growth",
+          "status": "answered",
+          "value": 37.5,
+          "evidence_alternatives": [
+            [
+              "rill:L3",
+              "rill:L9",
+              "rill:L10",
+              "rill:L11",
+              "rill:L13"
+            ]
+          ],
+          "reason_codes": [
+            "quarter_not_ytd"
+          ],
+          "absolute_tolerance": 0.001,
+          "numeric_fact_alternatives": [
+            [
+              "h1_current",
+              "q1_current",
+              "h1_prior",
+              "q1_prior"
+            ]
+          ]
+        }
+      ],
+      "observation_rules": {
+        "q1_current": {
+          "permitted_context": {
+            "rill:L3": "The release-wide accounting basis applies to the standalone Q1 figures in Note 1; the note explicitly overrides only the default unit."
+          },
+          "basis_aliases": {}
+        },
+        "q1_prior": {
+          "permitted_context": {
+            "rill:L3": "The release-wide accounting basis applies to the standalone Q1 figures in Note 1; the note explicitly overrides only the default unit."
+          },
+          "basis_aliases": {}
+        }
+      }
+    },
+    {
+      "case_id": "doc02",
+      "answers": [
+        {
+          "question_id": "reported_eps",
+          "status": "answered",
+          "value": 1.5,
+          "evidence_alternatives": [
+            [
+              "northlamp:L2",
+              "northlamp:L3",
+              "northlamp:L5"
+            ]
+          ],
+          "reason_codes": [],
+          "absolute_tolerance": 0.001,
+          "numeric_fact_alternatives": [
+            [
+              "gaap_current"
+            ]
+          ]
+        },
+        {
+          "question_id": "eps_growth",
+          "status": "answered",
+          "value": 36.36363636363635,
+          "evidence_alternatives": [
+            [
+              "northlamp:L2",
+              "northlamp:L3",
+              "northlamp:L5",
+              "northlamp:L6"
+            ]
+          ],
+          "reason_codes": [
+            "basis_mismatch"
+          ],
+          "absolute_tolerance": 0.001,
+          "numeric_fact_alternatives": [
+            [
+              "gaap_current",
+              "gaap_prior"
+            ]
+          ]
+        },
+        {
+          "question_id": "analytical_eps",
+          "status": "answered",
+          "value": 1.1,
+          "evidence_alternatives": [
+            [
+              "northlamp:L2",
+              "northlamp:L3",
+              "northlamp:L5",
+              "northlamp:L7"
+            ]
+          ],
+          "reason_codes": [
+            "basis_mismatch"
+          ],
+          "absolute_tolerance": 0.001,
+          "numeric_fact_alternatives": [
+            [
+              "gaap_current",
+              "disposal_gain"
+            ]
+          ]
+        }
+      ],
+      "observation_rules": {
+        "disposal_gain": {
+          "permitted_context": {
+            "northlamp:L2": "The release-wide per-diluted-share unit and three-month period contextualize the current-quarter footnote.",
+            "northlamp:L3": "The table labels the current quarter as FY2025 Q3."
+          },
+          "basis_aliases": {
+            "GAAP": "The footnote explicitly identifies the gain as included in current-quarter GAAP EPS. GAAP is a valid basis for this extracted component; this does not relabel the final analytical exclusion as GAAP."
+          }
+        }
+      }
+    },
+    {
+      "case_id": "doc03",
+      "answers": [
+        {
+          "question_id": "operating_margin",
+          "status": "insufficient",
+          "value": null,
+          "evidence_alternatives": [
+            [
+              "fenbridge:L4"
+            ]
+          ],
+          "reason_codes": [
+            "missing_denominator"
+          ],
+          "absolute_tolerance": 0.001,
+          "numeric_fact_alternatives": [],
+          "permitted_context": {
+            "fenbridge:L2": "Identifies the unit and quarter for the available numerator.",
+            "fenbridge:L3": "Shows that consolidated operating income is available even though consolidated revenue is not.",
+            "fenbridge:L5": "Explicitly rules out substituting selected segment revenue for the missing consolidated denominator.",
+            "fenbridge:L1": "The update title identifies the company and quarter covered by the missing-denominator statement.",
+            "fenbridge:L6": "Explains why the otherwise available dashboard percentage cannot establish consolidated GAAP operating margin."
+          }
+        },
+        {
+          "question_id": "margin_claim",
+          "status": "answered",
+          "value": false,
+          "evidence_alternatives": [
+            [
+              "fenbridge:L6"
+            ]
+          ],
+          "reason_codes": [
+            "ambiguous_evidence"
+          ],
+          "absolute_tolerance": 0.001,
+          "numeric_fact_alternatives": []
+        },
+        {
+          "question_id": "operating_income",
+          "status": "answered",
+          "value": 5,
+          "evidence_alternatives": [
+            [
+              "fenbridge:L2",
+              "fenbridge:L3"
+            ]
+          ],
+          "reason_codes": [],
+          "absolute_tolerance": 0.001,
+          "numeric_fact_alternatives": [
+            [
+              "income"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "doc04",
+      "answers": [
+        {
+          "question_id": "revenue_surprise",
+          "status": "insufficient",
+          "value": null,
+          "evidence_alternatives": [
+            [
+              "consensus:L3"
+            ]
+          ],
+          "reason_codes": [
+            "missing_preannouncement_consensus"
+          ],
+          "absolute_tolerance": 0.001,
+          "numeric_fact_alternatives": [],
+          "permitted_context": {
+            "demonstration:L1": "Establishes the issuer announcement time against which the consensus update is compared.",
+            "demonstration:L2": "Provides the actual quarter revenue whose surprise cannot be calculated without a pre-announcement estimate.",
+            "consensus:L1": "Identifies the company and quarter covered by the estimate page.",
+            "consensus:L2": "Identifies the displayed estimate that the required update notice disqualifies as a pre-announcement snapshot."
+          }
+        },
+        {
+          "question_id": "closing_breakout",
+          "status": "answered",
+          "value": false,
+          "evidence_alternatives": [
+            [
+              "thesis:L2",
+              "calendar:L2"
+            ]
+          ],
+          "reason_codes": [
+            "post_cutoff",
+            "missing_confirmation"
+          ],
+          "absolute_tolerance": 0.001,
+          "numeric_fact_alternatives": [],
+          "permitted_context": {
+            "calendar:L1": "Identifies the exchange session date for the required session hours.",
+            "quote:L1": "Dates and timestamps the available observation as intraday at the cutoff.",
+            "quote:L2": "Explicitly identifies the price move as not a completed-session closing observation."
+          }
+        },
+        {
+          "question_id": "reported_revenue",
+          "status": "answered",
+          "value": 120,
+          "evidence_alternatives": [
+            [
+              "demonstration:L2"
+            ]
+          ],
+          "reason_codes": [],
+          "absolute_tolerance": 0.001,
+          "numeric_fact_alternatives": [
+            [
+              "revenue"
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "packet_sha256": {
+    "raw": "6727ef66b1f1f53322e26ec5fb337e56f167ffb023017ec35a38f9aa45fea9fc",
+    "oracle": "61a9714a5f5b2bd71902a4a82cdccb97e21c469514bcc6e21a56a75164bdb696"
+  }
+}

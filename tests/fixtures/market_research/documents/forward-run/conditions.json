@@ -1,0 +1,6 @@
+{
+  "model": "inherited model; exact runtime identifier unavailable",
+  "tool_policy": "offline-packet-only",
+  "sampling": "unavailable; inherited settings",
+  "context_policy": "fresh agent; instructed packet-only access, not filesystem-enforced isolation"
+}

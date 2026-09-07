@@ -173,6 +173,9 @@ it from the short brief. Organize each day's relevant material as follows:
   prospective expectations snapshot for a material upcoming event. Later results
   refer back to the preserved pre-event snapshot; unchanged previews need no copy.
   Rejected names need not become tracked theses merely to appear in this record.
+  Link immutable estimate snapshots used in the assessment; their observation and
+  first-save times must both precede the edition's cutoff. Later captures belong
+  only to later assessments, not a backdated consensus comparison.
 - **Thesis updates:** keep the canonical complete ledger below. Put fuller
   supporting changes under Candidate assessments, linked from the update cell.
 - **Outcome review:** check daily for newly due and previously missing observations
@@ -203,6 +206,12 @@ When there are records to journal, place the canonical tables under the H4 headi
 cards under separate H4 or deeper headings in the same subsection, with durable
 links to and from their journal rows. Do not create empty tables merely to fill a
 template. These headings do not change the note's two H2 and six H3 outline.
+
+The separate mechanical comparison uses `Comparison cohorts` and
+`Comparison checkpoints` journals and visible evidence cards under Outcome review,
+as defined in the [comparison guide](comparison-strategy.md). Keep these distinct
+from ready recommendations and their counts; no extra top-level report or section
+is needed. Carry new records only, linking unchanged prior formations.
 
 For claims that determine selection, status or risk, keep the source observation,
 its date and verification or unresolved conflict beside the claim. Short visible

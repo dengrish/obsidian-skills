@@ -101,7 +101,7 @@ opportunities without reviewing current holdings, recommending sales, placing
 trades, or rewriting earlier records.
 Its optional [data retrieval helpers](skills/market-research/references/data-access.md)
 cover SEC filings/facts, Nasdaq directories/halts, Alpaca prices/actions/sessions/news,
-Alpha Vantage news/earnings calendars, and FRED macro series/release dates. Setup
+Alpha Vantage news/earnings calendars and estimates, and FRED macro series/release dates. Setup
 can be checked offline; keyed sources use local environment variables or an
 explicit private JSON file passed to the bundled script with `--credentials-file`.
 Credentials remain outside the plugin, repository and vault; no separate local
@@ -114,7 +114,10 @@ The research method adds bounded thematic discovery and checks decision-critical
 claims and earnings comparisons before publication. Optional exact-accession SEC
 filing extraction uses pinned EdgarTools as a local parser, without delegating
 network requests or installing another framework. Core retrieval, screening and
-note handling remain standard-library-only.
+note handling remain standard-library-only. Exact Form 4/4-A XML supplies selective
+insider context. Immutable selected estimate snapshots preserve what was observed
+and saved before each cutoff; a fixed monthly momentum comparison stays separate
+from discretionary recommendations in the daily research record.
 
 This product uses the FRED® API but is not endorsed or certified by the Federal
 Reserve Bank of St. Louis. Use of its FRED integration is subject to the
@@ -301,6 +304,7 @@ python3 -m venv .venv
 .venv/bin/python tools/build_plugin.py
 .venv/bin/python tests/test_end_to_end.py
 .venv/bin/python tests/test_market_research_eval.py
+.venv/bin/python tests/test_market_comparison.py
 .venv/bin/python tests/test_compatibility.py
 .venv/bin/python tools/build_plugin.py --check
 .venv/bin/python tests/test_provenance.py
@@ -322,10 +326,12 @@ source interpretation or visually accurate crops; review those separately.
 
 The [research evaluation workflow](tools/market-research-evals.md) exports frozen
 financial evidence cases without answer keys, grades structured responses and
-compares runs under matching conditions. Its synthetic cases are regression
-checks; use fresh held-out documents for generalization tests. These measurements
-evaluate research quality, not investment returns. Subsequent recommendation
-performance continues to use the unchanged prospective outcome journal.
+compares runs under matching conditions. Its document suite compares raw financial
+tables with curated evidence, separately checking source selection, extraction
+and arithmetic. These public synthetic cases are regression checks; use fresh
+held-out documents for generalization tests. They evaluate evidence handling,
+not investment returns. Subsequent performance uses the prospective recommendation
+and separate fixed-comparison journals.
 
 When Claude Code is available, validate both manifests and skill trees:
 

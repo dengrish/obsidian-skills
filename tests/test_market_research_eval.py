@@ -409,5 +409,401 @@ class EvaluationTests(unittest.TestCase):
             self.assertEqual(set(temp.iterdir()), set(paths.values()))
 
 
+class DocumentEvaluationTests(unittest.TestCase):
+    def setUp(self):
+        directory = evaluator.FIXTURES / "documents"
+        self.inputs = evaluator.read_json(directory / "inputs.json")
+        self.oracle = evaluator.read_json(directory / "oracle.json")
+        self.key = evaluator.read_json(directory / "expected.json")
+
+    def correct_run(self, condition="raw", label="baseline"):
+        # These hand-specified formulas validate the evaluator, not an agent.
+        # Oracle observations are used only to construct test responses.
+        current = operation("subtract", operation("divide", fact("h1_current"), {"constant": 1000}), fact("q1_current"))
+        prior = operation("subtract", operation("divide", fact("h1_prior"), {"constant": 1000}), fact("q1_prior"))
+        expressions = {
+            ("doc01", "quarter_revenue"): current,
+            ("doc01", "quarter_growth"): operation("pct_change", current, prior),
+            ("doc02", "reported_eps"): fact("gaap_current"),
+            ("doc02", "eps_growth"): operation("pct_change", fact("gaap_current"), fact("gaap_prior")),
+            ("doc02", "analytical_eps"): operation("subtract", fact("gaap_current"), fact("disposal_gain")),
+            ("doc03", "operating_income"): fact("income"),
+            ("doc04", "reported_revenue"): fact("revenue"),
+        }
+        responses = []
+        curated = {case["case_id"]: {f["fact_id"]: f for f in case["facts"]} for case in self.oracle["cases"]}
+        def raw(expression, case_id):
+            if expression is None:
+                return None
+            if "fact" in expression:
+                observation = curated[case_id][expression["fact"]]
+                return {"extract": {key: copy.deepcopy(observation[key])
+                                    for key in ("value", "unit", "period", "basis", "evidence")}}
+            if "constant" in expression:
+                return dict(expression)
+            return operation(expression["op"], *[raw(arg, case_id) for arg in expression["args"]])
+        for case, keyed in zip(self.inputs["cases"], self.key["cases"]):
+            answers = []
+            for question, expected in zip(case["questions"], keyed["answers"]):
+                expression = copy.deepcopy(expressions.get((case["case_id"], question["question_id"])))
+                answers.append({"question_id": question["question_id"], "status": expected["status"],
+                                "value": copy.deepcopy(expected["value"]),
+                                **{field: question[field] for field in ("unit", "period", "basis")},
+                                "evidence": copy.deepcopy(expected["evidence_alternatives"][0]),
+                                "reason_codes": expected["reason_codes"][:],
+                                "calculation": raw(expression, case["case_id"]) if condition == "raw" else expression})
+            responses.append({"case_id": case["case_id"], "answers": answers})
+        packet = evaluator.export_documents(self.inputs, condition, self.oracle if condition == "oracle" else None)
+        return {"schema_version": 2, "suite_id": self.inputs["suite_id"], "input_sha256": packet["input_sha256"],
+                "document_sha256": packet["document_sha256"], "evidence_condition": condition,
+                "run_id": label + "-" + condition, "variant": {"label": label, "instructions_sha256": "c" * 64},
+                "conditions": {"model": "synthetic-test", "tool_policy": "offline-packet-only",
+                               "sampling": "deterministic-test", "context_policy": "isolated-test"},
+                "responses": responses}
+
+    answer = staticmethod(EvaluationTests.answer)
+
+    def grade(self, run):
+        return evaluator.grade_documents(self.inputs, self.oracle, self.key, run)
+
+    def codes(self, run, case_id, question_id):
+        row = next(row for row in self.grade(run)["results"]
+                   if row["case_id"] == case_id and row["question_id"] == question_id)
+        return {issue["code"] for issue in row["errors"]}
+
+    def compare(self, left, right, pairing="raw-oracle"):
+        return evaluator.compare_documents(self.inputs, self.oracle, self.key, left, right, pairing)
+
+    def test_document_positive_and_abstention_controls_pass_in_both_conditions(self):
+        for condition in ("raw", "oracle"):
+            run = self.correct_run(condition)
+            result = self.grade(run)
+            self.assertEqual(result["questions"], 11)
+            self.assertEqual(result["passed_questions"], 11)
+            self.assertEqual(result["errors_by_category"], {})
+            self.assertIn("Explanations are unscored", result["scope"])
+        raw, oracle = self.correct_run(), self.correct_run("oracle")
+        self.assertEqual(raw["document_sha256"], oracle["document_sha256"])
+        self.assertNotEqual(raw["input_sha256"], oracle["input_sha256"])
+        self.assertTrue(all(row["baseline_passed"] and row["candidate_passed"]
+                            for row in self.compare(raw, oracle)["paired_results"]))
+
+    def test_raw_and_oracle_packets_are_separate_and_have_no_answers(self):
+        raw = evaluator.export_documents(self.inputs)
+        oracle = evaluator.export_documents(self.inputs, "oracle", self.oracle)
+        self.assertEqual(raw["cases"], self.inputs["cases"])
+        self.assertIn('<table id="consolidated-sales">', raw["cases"][0]["documents"][0]["content"])
+        self.assertNotIn("facts", raw["cases"][0])
+        self.assertNotIn("h1_current", json.dumps(raw))
+        self.assertNotIn("content", oracle["cases"][0]["documents"][0])
+        self.assertEqual(oracle["cases"][0]["facts"], self.oracle["cases"][0]["facts"])
+        for packet in (raw, oracle):
+            self.assertEqual(packet["input_sha256"], evaluator.fingerprint({key: value for key, value in packet.items()
+                                                                         if key != "input_sha256"}))
+            for key in ("numeric_fact_alternatives", "evidence_alternatives", "absolute_tolerance", "passed_questions",
+                        "observation_rules", "permitted_context", "basis_aliases"):
+                self.assertNotIn(key, json.dumps(packet))
+
+    def test_raw_extractions_allow_verified_context_without_changing_observation(self):
+        run = self.correct_run()
+        for qid in ("quarter_revenue", "quarter_growth"):
+            answer = self.answer(run, "doc01", qid)
+            current = answer["calculation"] if qid == "quarter_revenue" else answer["calculation"]["args"][0]
+            current["args"][1]["extract"]["evidence"].append("rill:L3")
+            if qid == "quarter_growth":
+                answer["calculation"]["args"][1]["args"][1]["extract"]["evidence"].append("rill:L3")
+            self.assertEqual(self.codes(run, "doc01", qid), set())
+        gain = self.answer(run, "doc02", "analytical_eps")["calculation"]["args"][1]["extract"]
+        for context in (["northlamp:L2"], ["northlamp:L3"], ["northlamp:L2", "northlamp:L3"]):
+            gain["evidence"] = ["northlamp:L7", *context]
+            with self.subTest(context=context):
+                self.assertEqual(self.codes(run, "doc02", "analytical_eps"), set())
+
+    def test_extraction_context_cannot_replace_required_value_line_or_add_unrelated_header(self):
+        for evidence in (["rill:L3"], ["rill:L3", "rill:L13", "rill:L9"]):
+            run = self.correct_run()
+            # L9 is valid for H1 and present in the answer, but not Q1 support.
+            self.answer(run, "doc01", "quarter_revenue")["calculation"]["args"][1]["extract"]["evidence"] = evidence
+            with self.subTest(evidence=evidence):
+                self.assertIn("extraction_error", self.codes(run, "doc01", "quarter_revenue"))
+
+    def test_component_basis_alias_is_local_and_final_analytical_basis_remains_required(self):
+        run = self.correct_run()
+        answer = self.answer(run, "doc02", "analytical_eps")
+        gain = answer["calculation"]["args"][1]["extract"]
+        gain["basis"] = "GAAP"
+        self.assertEqual(self.codes(run, "doc02", "analytical_eps"), set())
+        answer["basis"] = "GAAP"
+        self.assertEqual(self.codes(run, "doc02", "analytical_eps"), {"basis_error"})
+        answer["basis"] = "analytical_excluding_disposal_gain"
+        for field, wrong in (("basis", "company_adjusted"), ("period", "FY2024-Q3"),
+                             ("unit", "USD_million"), ("value", 0.5)):
+            old = gain[field]
+            gain[field] = wrong
+            with self.subTest(field=field):
+                self.assertIn("extraction_error", self.codes(run, "doc02", "analytical_eps"))
+            gain[field] = old
+        # A component label is not an alias for total reported GAAP EPS.
+        answer["calculation"]["args"][0]["extract"]["basis"] = "GAAP_component"
+        self.assertIn("extraction_error", self.codes(run, "doc02", "analytical_eps"))
+
+    def test_contextual_citations_accept_minimal_or_supported_expanded_abstentions(self):
+        for condition in ("raw", "oracle"):
+            for case in self.key["cases"]:
+                for expected in case["answers"]:
+                    context = expected.get("permitted_context", {})
+                    if not context:
+                        continue
+                    run = self.correct_run(condition)
+                    answer = self.answer(run, case["case_id"], expected["question_id"])
+                    # Every permitted contextual line can supplement the required support.
+                    for refs in ([ref] for ref in context):
+                        answer["evidence"] = expected["evidence_alternatives"][0] + refs
+                        self.assertEqual(self.codes(run, case["case_id"], expected["question_id"]), set())
+                    answer["evidence"] = expected["evidence_alternatives"][0] + list(context)
+                    self.assertEqual(self.codes(run, case["case_id"], expected["question_id"]), set())
+                    # All context together still cannot replace even one required line.
+                    for required in expected["evidence_alternatives"][0]:
+                        answer["evidence"] = [ref for ref in expected["evidence_alternatives"][0] if ref != required] + list(context)
+                        self.assertIn("source_selection_error", self.codes(run, case["case_id"], expected["question_id"]))
+
+    def test_optional_context_does_not_accept_citation_stuffing(self):
+        for case_id, qid, irrelevant in (("doc01", "quarter_revenue", "rill:L1"),
+                                         ("doc04", "revenue_surprise", "quote:L2"),
+                                         ("doc04", "closing_breakout", "demonstration:L2")):
+            run = self.correct_run()
+            self.answer(run, case_id, qid)["evidence"].append(irrelevant)
+            with self.subTest(question=qid):
+                self.assertIn("source_selection_error", self.codes(run, case_id, qid))
+
+    def test_private_rule_changes_preserve_packets_but_change_report_identity(self):
+        run = self.correct_run()
+        before = self.grade(run)
+        packets = {condition: evaluator.export_documents(self.inputs, condition, self.oracle)
+                   for condition in ("raw", "oracle")}
+        # An older exact-evidence key remains supported without weakening defaults.
+        for case in self.key["cases"]:
+            case.pop("observation_rules", None)
+            for answer in case["answers"]:
+                answer.pop("permitted_context", None)
+        after = self.grade(run)
+        self.assertEqual(after["passed_questions"], 11)
+        self.assertNotEqual(before["answer_key_sha256"], after["answer_key_sha256"])
+        for condition in ("raw", "oracle"):
+            self.assertEqual(packets[condition], evaluator.export_documents(self.inputs, condition, self.oracle))
+        self.answer(run, "doc03", "operating_margin")["evidence"].append("fenbridge:L3")
+        self.assertIn("source_selection_error", self.codes(run, "doc03", "operating_margin"))
+
+    def test_private_context_rules_must_be_attributed_and_reference_valid_evidence(self):
+        for context in ({"rill:L99": "Not a real line."}, {"rill:L3": ""}, ["rill:L3"]):
+            self.key["cases"][0]["observation_rules"]["q1_current"]["permitted_context"] = context
+            with self.subTest(context=context), self.assertRaisesRegex(ValueError, "context"):
+                self.grade(self.correct_run())
+        self.setUp()
+        self.key["cases"][0]["observation_rules"]["invented"] = {
+            "permitted_context": {}, "basis_aliases": {}}
+        with self.assertRaisesRegex(ValueError, "observation rules"):
+            self.grade(self.correct_run())
+        self.setUp()
+        self.key["cases"][1]["observation_rules"]["disposal_gain"]["basis_aliases"] = {"GAAP": ""}
+        with self.assertRaisesRegex(ValueError, "basis aliases"):
+            self.grade(self.correct_run())
+        self.setUp()
+        self.key["cases"][3]["answers"][0]["permitted_context"] = {"later_close:L1": "Future."}
+        with self.assertRaisesRegex(ValueError, "existing document lines"):
+            self.grade(self.correct_run())
+
+    def test_wrong_table_column_is_extraction_error_not_arithmetic_error(self):
+        run = self.correct_run()
+        answer = self.answer(run, "doc01", "quarter_revenue")
+        answer["calculation"]["args"][0]["args"][0]["extract"]["value"] = 700000
+        answer["value"] = 330  # Correct arithmetic over the wrongly read column.
+        codes = self.codes(run, "doc01", "quarter_revenue")
+        self.assertTrue({"numeric_error", "extraction_error"} <= codes)
+        self.assertNotIn("calculation_error", codes)
+        paired = self.compare(run, self.correct_run("oracle"))
+        row = paired["paired_results"][0]
+        self.assertIn("extraction_error", row["resolved_errors"])
+
+    def test_correct_extraction_with_wrong_arithmetic_is_separate(self):
+        run = self.correct_run()
+        self.answer(run, "doc01", "quarter_revenue")["value"] = 551
+        codes = self.codes(run, "doc01", "quarter_revenue")
+        self.assertEqual(codes, {"numeric_error", "calculation_error"})
+        oracle = self.correct_run("oracle")
+        self.answer(oracle, "doc01", "quarter_revenue")["value"] = 551
+        row = self.compare(run, oracle)["paired_results"][0]
+        self.assertFalse(row["baseline_passed"])
+        self.assertFalse(row["candidate_passed"])
+        self.assertEqual(row["resolved_errors"], [])
+
+    def test_correctly_read_wrong_period_is_source_selection_not_extraction(self):
+        run = self.correct_run()
+        answer = self.answer(run, "doc01", "quarter_revenue")
+        leaf = answer["calculation"]["args"][0]["args"][0]["extract"]
+        leaf.update(value=700000, period="FY2024-H1")
+        answer["value"] = 330
+        self.assertEqual(self.codes(run, "doc01", "quarter_revenue"), {"numeric_error", "source_selection_error"})
+
+    def test_correct_number_with_distractor_table_citation_still_fails(self):
+        run = self.correct_run()
+        answer = self.answer(run, "doc01", "quarter_revenue")
+        answer["calculation"]["args"][0]["args"][0]["extract"]["evidence"] = ["rill:L3", "rill:L5", "rill:L6"]
+        answer["evidence"] = ["rill:L3", "rill:L5", "rill:L6", "rill:L13"]
+        self.assertTrue({"extraction_error", "source_selection_error"} <= self.codes(run, "doc01", "quarter_revenue"))
+
+    def test_period_unit_and_footnote_errors_cannot_hide_behind_correct_values(self):
+        for field, value in (("period", "FY2025-Q2"), ("unit", "USD_million"), ("basis", "non-GAAP")):
+            run = self.correct_run()
+            answer = self.answer(run, "doc01", "quarter_revenue")
+            answer["calculation"]["args"][0]["args"][0]["extract"][field] = value
+            with self.subTest(field=field):
+                self.assertIn("extraction_error", self.codes(run, "doc01", "quarter_revenue"))
+        run = self.correct_run()
+        answer = self.answer(run, "doc02", "eps_growth")
+        answer["calculation"]["args"][1]["extract"]["evidence"].remove("northlamp:L6")
+        answer["evidence"].remove("northlamp:L6")
+        self.assertTrue({"source_selection_error", "extraction_error"} <= self.codes(run, "doc02", "eps_growth"))
+
+    def test_post_result_consensus_and_undefined_margin_are_not_verified(self):
+        run = self.correct_run()
+        self.answer(run, "doc04", "revenue_surprise").update(status="answered", value=1.694915,
+                                                            calculation={"constant": 1}, reason_codes=[])
+        self.assertIn("unsupported_claim", self.codes(run, "doc04", "revenue_surprise"))
+        self.answer(run, "doc03", "margin_claim")["value"] = True
+        self.assertIn("assessment_error", self.codes(run, "doc03", "margin_claim"))
+
+    def test_blanket_abstention_fails_seven_numeric_and_two_boolean_controls(self):
+        run = self.correct_run()
+        for case in run["responses"]:
+            for answer in case["answers"]:
+                answer.update(status="insufficient", value=None, calculation=None)
+        result = self.grade(run)
+        self.assertEqual(result["passed_questions"], 2)
+        self.assertEqual(result["errors_by_category"]["unwarranted_abstention"], 9)
+
+    def test_future_document_content_rejected_and_future_citation_identified(self):
+        self.inputs["cases"][3]["documents"][-1]["content"] = "Future close: 200."
+        with self.assertRaisesRegex(ValueError, "post-cutoff document"):
+            evaluator.export_documents(self.inputs)
+        self.inputs["cases"][3]["documents"][-1]["content"] = ""
+        run = self.correct_run()
+        self.answer(run, "doc04", "closing_breakout")["evidence"].append("later_close:L1")
+        self.assertTrue({"cutoff_error", "unknown_evidence"} <= self.codes(run, "doc04", "closing_breakout"))
+
+    def test_oracle_must_bind_the_corpus_and_real_nonfuture_locations(self):
+        self.oracle["document_sha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "does not match frozen documents"):
+            evaluator.export_documents(self.inputs, "oracle", self.oracle)
+        self.setUp()
+        for ref in ("rill:L99", "later_close:L1", "invented:L1"):
+            self.oracle["cases"][0]["facts"][0]["evidence"] = [ref]
+            with self.subTest(ref=ref), self.assertRaisesRegex(ValueError, "existing document lines"):
+                evaluator.export_documents(self.inputs, "oracle", self.oracle)
+
+    def test_packet_source_and_protocol_changes_invalidate_old_runs(self):
+        raw = self.correct_run()
+        self.inputs["cases"][0]["documents"][0]["content"] += "A changed footnote.\n"
+        with self.assertRaisesRegex(ValueError, "oracle evidence does not match"):
+            self.grade(raw)
+        self.setUp()
+        original_schema = evaluator.document_response_schema
+        def modified_schema(condition):
+            result = original_schema(condition)
+            result["extra_instruction"] = "A changed response protocol."
+            return result
+        with patch.object(evaluator, "document_response_schema", modified_schema):
+            with self.assertRaisesRegex(ValueError, "answer key does not match frozen packets"):
+                self.grade(raw)
+        raw["input_sha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "run does not match frozen packet"):
+            self.grade(raw)
+
+    def test_future_citation_in_calculation_cannot_hide_outside_answer_evidence(self):
+        run = self.correct_run()
+        self.answer(run, "doc04", "reported_revenue")["calculation"]["extract"]["evidence"] = ["later_close:L1"]
+        self.assertTrue({"cutoff_error", "unknown_evidence", "extraction_error"}
+                        <= self.codes(run, "doc04", "reported_revenue"))
+
+    def test_changed_oracle_requires_key_revision_even_for_raw_grading(self):
+        run = self.correct_run()
+        self.oracle["cases"][0]["facts"][0]["value"] = 999
+        with self.assertRaisesRegex(ValueError, "answer key does not match frozen evidence"):
+            self.grade(run)
+
+    def test_raw_and_oracle_expression_forms_cannot_be_interchanged(self):
+        raw, oracle = self.correct_run(), self.correct_run("oracle")
+        for condition, run in (("raw", raw), ("oracle", oracle)):
+            expression = fact("income") if condition == "raw" else {
+                "extract": {key: self.oracle["cases"][2]["facts"][0][key]
+                            for key in ("value", "unit", "period", "basis", "evidence")}}
+            self.answer(run, "doc03", "operating_income")["calculation"] = expression
+            with self.subTest(condition=condition):
+                self.assertIn("calculation_error", self.codes(run, "doc03", "operating_income"))
+
+    def test_complete_rosters_and_sane_keys_are_required(self):
+        run = self.correct_run()
+        run["responses"][0]["answers"].pop()
+        with self.assertRaisesRegex(ValueError, "every question"):
+            self.grade(run)
+        self.key["cases"][0]["answers"][0]["numeric_fact_alternatives"] = [["invented"]]
+        with self.assertRaisesRegex(ValueError, "known numeric"):
+            self.grade(self.correct_run())
+
+    def test_pairing_controls_refuse_confounded_comparisons(self):
+        raw, oracle = self.correct_run(), self.correct_run("oracle")
+        with self.assertRaisesRegex(ValueError, "same evidence condition"):
+            self.compare(raw, oracle, "method")
+        oracle["variant"]["instructions_sha256"] = "d" * 64
+        with self.assertRaisesRegex(ValueError, "identical research instructions"):
+            self.compare(raw, oracle)
+        for field in evaluator.CONDITION_FIELDS - {"tool_policy"}:
+            oracle = self.correct_run("oracle")
+            oracle["conditions"][field] = "different"
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "conditions differ"):
+                self.compare(raw, oracle)
+        oracle = self.correct_run("oracle")
+        oracle["run_id"] = raw["run_id"]
+        with self.assertRaisesRegex(ValueError, "run IDs must differ"):
+            self.compare(raw, oracle)
+        candidate = self.correct_run(label="candidate")
+        candidate["variant"]["instructions_sha256"] = "d" * 64
+        self.assertEqual(self.compare(raw, candidate, "method")["pairing"], "method")
+
+    def test_document_cli_never_reads_oracle_for_raw_export_and_reports_exit_codes(self):
+        with tempfile.TemporaryDirectory(prefix="market-doc-eval-cli-") as tmp:
+            directory = Path(tmp)
+            paths = {name: directory / (name + ".json") for name in ("inputs", "oracle", "expected", "raw", "curated")}
+            objects = {"inputs": self.inputs, "oracle": self.oracle, "expected": self.key,
+                       "raw": self.correct_run(), "curated": self.correct_run("oracle")}
+            paths["inputs"].write_text(json.dumps(self.inputs), encoding="utf-8")
+            def invoke(*args):
+                return subprocess.run([sys.executable, "-B", str(SCRIPT), *map(str, args)], cwd=directory,
+                                      capture_output=True, text=True, encoding="utf-8", timeout=30)
+            exported = invoke("export-documents", "--inputs", paths["inputs"], "--oracle", paths["oracle"])
+            self.assertEqual(exported.returncode, 0, exported.stderr)
+            self.assertEqual(set(directory.iterdir()), {paths["inputs"]})
+            self.assertEqual(json.loads(exported.stdout)["evidence_condition"], "raw")
+            for name in ("oracle", "raw", "curated"):
+                paths[name].write_text(json.dumps(objects[name]), encoding="utf-8")
+            exported = invoke("export-documents", "--condition", "oracle", "--inputs", paths["inputs"], "--oracle", paths["oracle"])
+            self.assertEqual(exported.returncode, 0, exported.stderr)
+            self.assertFalse(paths["expected"].exists())
+            paths["expected"].write_text(json.dumps(self.key), encoding="utf-8")
+            common = ("--inputs", paths["inputs"], "--oracle", paths["oracle"], "--expected", paths["expected"])
+            graded = invoke("grade-documents", *common, "--run", paths["raw"])
+            self.assertEqual(graded.returncode, 0, graded.stderr)
+            self.answer(objects["curated"], "doc02", "reported_eps")["value"] = 8
+            paths["curated"].write_text(json.dumps(objects["curated"]), encoding="utf-8")
+            compared = invoke("compare-documents", *common, "--pairing", "raw-oracle", "--baseline", paths["raw"], "--candidate", paths["curated"])
+            self.assertEqual(compared.returncode, 1, compared.stderr)
+            failed = invoke("grade-documents", *common, "--run", paths["curated"])
+            self.assertEqual(failed.returncode, 1, failed.stderr)
+            paths["raw"].write_text('{}', encoding="utf-8")
+            malformed = invoke("grade-documents", *common, "--run", paths["raw"])
+            self.assertEqual(malformed.returncode, 2, malformed.stderr)
+            self.assertEqual(malformed.stdout, "")
+
+
 if __name__ == "__main__":
     unittest.main()

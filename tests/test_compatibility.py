@@ -395,6 +395,7 @@ class CompatibilityTests(unittest.TestCase):
             before = config.read_bytes()
             script = install / "skills/market-research/scripts/market_data.py"
             env = {key: value for key, value in os.environ.items() if key not in fixtures}
+            env.pop('OBSIDIAN_VAULT_SHARED', None)
 
             def invoke(*args):
                 return subprocess.run(
@@ -429,6 +430,13 @@ class CompatibilityTests(unittest.TestCase):
                 cwd=root, env=env, capture_output=True, text=True,
                 encoding="utf-8", timeout=30)
             self.assertEqual(screen_help.returncode, 0, screen_help.stderr)
+
+            for helper in ('market_estimates.py', 'market_ownership.py',
+                           'market_estimate_history.py', 'market_comparison.py'):
+                isolated = subprocess.run(
+                    [sys.executable, '-I', '-S', '-B', str(script.parent / helper), '--test'],
+                    cwd=root, env=env, capture_output=True, text=True, encoding='utf-8', timeout=60)
+                self.assertEqual(isolated.returncode, 0, helper + ': ' + isolated.stdout + isolated.stderr)
 
             # A selected partial file cannot silently pick up an unrelated
             # account from the process environment, including in an installed copy.

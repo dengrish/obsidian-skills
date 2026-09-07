@@ -1,0 +1,142 @@
+{
+  "schema_version": 2,
+  "suite_id": "market-research-documents-v1",
+  "document_sha256": "b84fb6f8c67770048556aa14d8c70ae0669a2203149c535f98734ef092dd341b",
+  "oracle_sha256": "bb3cf0652e773bc45bba0d9f6402d4975244471afd43305fbaefb42b6441c24f",
+  "input_sha256": "6727ef66b1f1f53322e26ec5fb337e56f167ffb023017ec35a38f9aa45fea9fc",
+  "answer_key_sha256": "f9beb5c7ea66d1bc0bcf2b9bf7aced75fc2d756f710c82e532fa65da6f6d157f",
+  "evaluator_sha256": "8c3402bfed76347a60a697e11ab6e4040a907473874ab35d4862a014906b33ca",
+  "evidence_condition": "raw",
+  "run_id": "document-forward-raw-01",
+  "variant": {
+    "label": "investments-research-method",
+    "instructions_sha256": "44aadb3ef376f3b8793c811019cb2588196bde59a6be66b8af9fa1365e2489f7"
+  },
+  "conditions": {
+    "model": "inherited model; exact runtime identifier unavailable",
+    "tool_policy": "offline-packet-only",
+    "sampling": "unavailable; inherited settings",
+    "context_policy": "fresh agent; instructed packet-only access, not filesystem-enforced isolation"
+  },
+  "scope": "Synthetic document/evidence/calculation regression only; no investment-edge claim. Explanations are unscored.",
+  "questions": 11,
+  "passed_questions": 5,
+  "errors_by_category": {
+    "extraction_error": 3,
+    "source_selection_error": 6
+  },
+  "results": [
+    {
+      "case_id": "doc01",
+      "question_id": "quarter_revenue",
+      "passed": false,
+      "errors": [
+        {
+          "code": "extraction_error",
+          "detail": "extracted source, unit, period or basis has no verified observation"
+        },
+        {
+          "code": "source_selection_error",
+          "detail": "calculation does not use the relevant cited observations"
+        }
+      ]
+    },
+    {
+      "case_id": "doc01",
+      "question_id": "quarter_growth",
+      "passed": false,
+      "errors": [
+        {
+          "code": "extraction_error",
+          "detail": "extracted source, unit, period or basis has no verified observation"
+        },
+        {
+          "code": "extraction_error",
+          "detail": "extracted source, unit, period or basis has no verified observation"
+        },
+        {
+          "code": "source_selection_error",
+          "detail": "calculation does not use the relevant cited observations"
+        }
+      ]
+    },
+    {
+      "case_id": "doc02",
+      "question_id": "reported_eps",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "doc02",
+      "question_id": "eps_growth",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "doc02",
+      "question_id": "analytical_eps",
+      "passed": false,
+      "errors": [
+        {
+          "code": "extraction_error",
+          "detail": "extracted source, unit, period or basis has no verified observation"
+        },
+        {
+          "code": "source_selection_error",
+          "detail": "calculation does not use the relevant cited observations"
+        }
+      ]
+    },
+    {
+      "case_id": "doc03",
+      "question_id": "operating_margin",
+      "passed": false,
+      "errors": [
+        {
+          "code": "source_selection_error",
+          "detail": "missing, irrelevant or unsupported document location"
+        }
+      ]
+    },
+    {
+      "case_id": "doc03",
+      "question_id": "margin_claim",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "doc03",
+      "question_id": "operating_income",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "doc04",
+      "question_id": "revenue_surprise",
+      "passed": false,
+      "errors": [
+        {
+          "code": "source_selection_error",
+          "detail": "missing, irrelevant or unsupported document location"
+        }
+      ]
+    },
+    {
+      "case_id": "doc04",
+      "question_id": "closing_breakout",
+      "passed": false,
+      "errors": [
+        {
+          "code": "source_selection_error",
+          "detail": "missing, irrelevant or unsupported document location"
+        }
+      ]
+    },
+    {
+      "case_id": "doc04",
+      "question_id": "reported_revenue",
+      "passed": true,
+      "errors": []
+    }
+  ]
+}

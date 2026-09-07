@@ -1,0 +1,193 @@
+{
+  "schema_version": 2,
+  "suite_id": "market-research-documents-v1",
+  "document_sha256": "b84fb6f8c67770048556aa14d8c70ae0669a2203149c535f98734ef092dd341b",
+  "cases": [
+    {
+      "case_id": "doc01",
+      "facts": [
+        {
+          "fact_id": "h1_current",
+          "description": "Consolidated FY2025 H1 revenue",
+          "value": 920000,
+          "unit": "USD_thousand",
+          "period": "FY2025-H1",
+          "basis": "GAAP",
+          "evidence": [
+            "rill:L3",
+            "rill:L9",
+            "rill:L10",
+            "rill:L11"
+          ]
+        },
+        {
+          "fact_id": "h1_prior",
+          "description": "Consolidated FY2024 H1 revenue",
+          "value": 700000,
+          "unit": "USD_thousand",
+          "period": "FY2024-H1",
+          "basis": "GAAP",
+          "evidence": [
+            "rill:L3",
+            "rill:L9",
+            "rill:L10",
+            "rill:L11"
+          ]
+        },
+        {
+          "fact_id": "q1_current",
+          "description": "Consolidated FY2025 Q1 revenue",
+          "value": 370,
+          "unit": "USD_million",
+          "period": "FY2025-Q1",
+          "basis": "GAAP",
+          "evidence": [
+            "rill:L13"
+          ]
+        },
+        {
+          "fact_id": "q1_prior",
+          "description": "Consolidated FY2024 Q1 revenue",
+          "value": 300,
+          "unit": "USD_million",
+          "period": "FY2024-Q1",
+          "basis": "GAAP",
+          "evidence": [
+            "rill:L13"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "doc02",
+      "facts": [
+        {
+          "fact_id": "gaap_current",
+          "description": "Reported current-quarter GAAP diluted EPS",
+          "value": 1.5,
+          "unit": "USD_per_diluted_share",
+          "period": "FY2025-Q3",
+          "basis": "GAAP",
+          "evidence": [
+            "northlamp:L2",
+            "northlamp:L3",
+            "northlamp:L5"
+          ]
+        },
+        {
+          "fact_id": "gaap_prior",
+          "description": "Comparable restated prior-year-quarter GAAP diluted EPS",
+          "value": 1.1,
+          "unit": "USD_per_diluted_share",
+          "period": "FY2024-Q3",
+          "basis": "GAAP",
+          "evidence": [
+            "northlamp:L2",
+            "northlamp:L3",
+            "northlamp:L5",
+            "northlamp:L6"
+          ]
+        },
+        {
+          "fact_id": "disposal_gain",
+          "description": "After-tax disposal gain included in current GAAP diluted EPS",
+          "value": 0.4,
+          "unit": "USD_per_diluted_share",
+          "period": "FY2025-Q3",
+          "basis": "GAAP_component",
+          "evidence": [
+            "northlamp:L7"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "doc03",
+      "facts": [
+        {
+          "fact_id": "income",
+          "description": "Consolidated current-quarter GAAP operating income",
+          "value": 5,
+          "unit": "USD_million",
+          "period": "FY2025-Q3",
+          "basis": "GAAP",
+          "evidence": [
+            "fenbridge:L2",
+            "fenbridge:L3"
+          ]
+        },
+        {
+          "fact_id": "revenue_gap",
+          "description": "Current-quarter consolidated revenue is not supplied",
+          "value": "not_disclosed",
+          "unit": null,
+          "period": "FY2025-Q3",
+          "basis": "GAAP",
+          "evidence": [
+            "fenbridge:L4"
+          ]
+        },
+        {
+          "fact_id": "undefined_margin",
+          "description": "Dashboard margin has no identified period, segment or accounting definition",
+          "value": "ambiguous",
+          "unit": null,
+          "period": null,
+          "basis": null,
+          "evidence": [
+            "fenbridge:L6"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "doc04",
+      "facts": [
+        {
+          "fact_id": "revenue",
+          "description": "Issuer-reported current-quarter consolidated revenue",
+          "value": 120,
+          "unit": "USD_million",
+          "period": "FY2025-Q3",
+          "basis": "GAAP",
+          "evidence": [
+            "demonstration:L2"
+          ]
+        },
+        {
+          "fact_id": "consensus_gap",
+          "description": "Only a post-announcement display is available; no prior snapshot is supplied",
+          "value": "post_release_only",
+          "unit": null,
+          "period": "FY2025-Q3",
+          "basis": null,
+          "evidence": [
+            "consensus:L3"
+          ]
+        },
+        {
+          "fact_id": "confirmation",
+          "description": "The recorded condition requires the completed regular-session close",
+          "value": "regular_close_required",
+          "unit": null,
+          "period": null,
+          "basis": null,
+          "evidence": [
+            "thesis:L2"
+          ]
+        },
+        {
+          "fact_id": "session",
+          "description": "The verified regular-session close is 16:00 New York time",
+          "value": "16:00 America/New_York",
+          "unit": null,
+          "period": "2025-10-09",
+          "basis": null,
+          "evidence": [
+            "calendar:L2"
+          ]
+        }
+      ]
+    }
+  ]
+}

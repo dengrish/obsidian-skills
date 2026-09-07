@@ -29,6 +29,11 @@ Use the same selected Obsidian vault as `knowledge` if desired. Published
 user-requested fresh reviews create timestamped manual editions under the
 [note format](skills/market-research/references/note-format.md#editions-and-retries).
 Both share the same thesis and outcome history.
+A fixed monthly momentum comparison is recorded separately within those notes.
+Selected estimate observations persist as immutable source JSON under
+`Investments/Snapshots/Estimates/`, with availability times for future comparisons.
+Exact SEC Form 4/4-A retrieval adds selective insider context without extra
+credentials or parser dependencies; no buying score is inferred from a filing.
 `Reviews/market-research-suggestions.md` keeps its existing name under the
 [shared protocol](shared/SUGGESTIONS.md).
 

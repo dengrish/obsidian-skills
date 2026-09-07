@@ -135,6 +135,13 @@ screener calculates declared measurements and filters, while interpretation and
 final selection still follow the research method. Optional filing extraction
 must use an exact verified accession, never an implicit latest filing.
 
+For a shortlist whose expectations matter, read eligible archived estimates and
+capture relevant current periods under the data-access guide's
+[dated-snapshot workflow](references/data-access.md#dated-estimates-not-reconstructed-expectations).
+New observations saved after the cutoff are evidence for later reviews only;
+they never change the current edition's conclusions. Use exact Form 4/4-A
+accessions selectively when insider-disclosure context changes the buying case.
+
 Use available host web search, page-reading, and market-data capabilities for
 primary-source verification and coverage beyond the helpers. No paid feed or
 particular connector is assumed, and this skill does not install,
@@ -189,6 +196,14 @@ retraining or permission to edit plugin sources. The two- and five-year observat
 are diagnostics beyond the buying horizon, not extended holding or sell rules.
 Do not create another scheduled job or report series for these reviews.
 
+Also inspect the outcome helper's separate comparison inventory. When a monthly
+formation is due, follow the [fixed comparison strategy](references/comparison-strategy.md)
+to preserve its mechanical selection, empty result or unavailable coverage in
+this note's Outcome review. Evaluate due 3/6/12-month comparison windows without
+mixing them into ready recommendations. Reuse the declared screen inputs; do not
+change the strategy or its universe after seeing winners. This is a prospective
+diagnostic, not a claim of research outperformance or a portfolio instruction.
+
 ## Write and publish
 
 Follow the note format's two parts. The **Decision brief** is for the user:
@@ -203,7 +218,9 @@ reviews. Keep the complete tracking table here, not in the short brief.
 Preserve decision-relevant detail without padding, copying full articles, dumping
 entire feeds, or duplicating unchanged history. Link specific earlier records and
 state today's changes. Charts belong where they clarify verified evidence, usually
-in the record. All supporting data and citations remain ordinary visible Markdown.
+in the record. Keep conclusions, citations and journal cards visible in ordinary
+Markdown. Link preserved estimate snapshots from the record and summarize the
+relevant values; those source observations remain immutable JSON files.
 
 Stage the complete draft in the run's owned scratch directory. Stamp the finalized
 draft with the verified installed plugin's identity, following

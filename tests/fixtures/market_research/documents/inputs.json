@@ -1,0 +1,196 @@
+{
+  "schema_version": 2,
+  "suite_id": "market-research-documents-v1",
+  "description": "Four original synthetic HTML/text financial-document cases. Physical line citations, distractor tables, footnotes, missing/ambiguous evidence and point-in-time limits. No upstream corpus, real issuer data or future outcomes.",
+  "cases": [
+    {
+      "case_id": "doc01",
+      "task": "Read the original synthetic filing. Derive consolidated standalone Q2 figures; do not substitute segment revenue or six-month growth. Use quarter_not_ytd for both answers.",
+      "cutoff": "2025-08-08T11:30:00-04:00",
+      "documents": [
+        {
+          "document_id": "rill",
+          "available_at": "2025-08-08T07:00:00-04:00",
+          "media_type": "text/html",
+          "content": "<!doctype html>\n<html><body><h1>Rill Devices — Q2 FY2025 results</h1>\n<p>Consolidated results are GAAP; USD thousands unless a note states otherwise.</p>\n<table id=\"segment-sales\"><caption>Selected segment revenue</caption>\n<tr><th>Segment</th><th>Three months ended June 30, FY2025</th></tr>\n<tr><td>Consumer products</td><td>350,000</td></tr>\n</table>\n<table id=\"consolidated-sales\">\n<caption>Consolidated revenue — six months ended June 30</caption>\n<tr><th>Metric</th><th>FY2025 H1</th><th>FY2024 H1</th></tr>\n<tr><td>Revenue</td><td>920,000</td><td>700,000</td></tr>\n</table>\n<p>Note 1: Standalone Q1 consolidated revenue was USD 370 million for FY2025 and USD 300 million for FY2024. Selected segment revenue is not the consolidated total.</p>\n</body></html>\n"
+        }
+      ],
+      "questions": [
+        {
+          "question_id": "quarter_revenue",
+          "prompt": "What was consolidated standalone Q2 FY2025 revenue in USD millions?",
+          "answer_type": "number",
+          "unit": "USD_million",
+          "period": "FY2025-Q2",
+          "basis": "GAAP",
+          "options": []
+        },
+        {
+          "question_id": "quarter_growth",
+          "prompt": "What was year-over-year growth in consolidated standalone Q2 FY2025 revenue, in percent?",
+          "answer_type": "number",
+          "unit": "percent",
+          "period": "FY2025-Q2-vs-FY2024-Q2",
+          "basis": "GAAP",
+          "options": []
+        }
+      ]
+    },
+    {
+      "case_id": "doc02",
+      "task": "Read the table with its footnotes. Preserve GAAP versus company-adjusted versus your own analytical basis. Use basis_mismatch on the growth and analytical-exclusion questions; no reason code is needed for the direct reported GAAP EPS.",
+      "cutoff": "2025-11-06T11:30:00-05:00",
+      "documents": [
+        {
+          "document_id": "northlamp",
+          "available_at": "2025-11-06T07:00:00-05:00",
+          "media_type": "text/plain",
+          "content": "Northlamp Corporation — Q3 FY2025 earnings release\nAll EPS figures are USD per diluted share, for the three months ended September 30.\nMeasure | FY2025 Q3 | FY2024 Q3\nCompany-adjusted diluted EPS | 1.80 | 1.20\nGAAP diluted EPS | 1.50 | 1.10 [1]\n[1] Prior-year GAAP diluted EPS of 1.10 is restated on the current comparable basis; the formerly published 1.00 should not be used for this comparison.\n[2] Current-quarter GAAP diluted EPS includes a 0.40 after-tax gain per diluted share from the disposal of a warehouse. This is not the complete company-adjusted reconciliation.\n"
+        }
+      ],
+      "questions": [
+        {
+          "question_id": "reported_eps",
+          "prompt": "What is reported GAAP diluted EPS for FY2025 Q3?",
+          "answer_type": "number",
+          "unit": "USD_per_diluted_share",
+          "period": "FY2025-Q3",
+          "basis": "GAAP",
+          "options": []
+        },
+        {
+          "question_id": "eps_growth",
+          "prompt": "What is growth in GAAP diluted EPS using the comparable restated prior-year quarter?",
+          "answer_type": "number",
+          "unit": "percent",
+          "period": "FY2025-Q3-vs-FY2024-Q3",
+          "basis": "GAAP",
+          "options": []
+        },
+        {
+          "question_id": "analytical_eps",
+          "prompt": "Calculate FY2025 Q3 GAAP diluted EPS less the disclosed disposal gain per diluted share. Label this your analytical calculation, not GAAP or company-adjusted EPS.",
+          "answer_type": "number",
+          "unit": "USD_per_diluted_share",
+          "period": "FY2025-Q3",
+          "basis": "analytical_excluding_disposal_gain",
+          "options": []
+        }
+      ]
+    },
+    {
+      "case_id": "doc03",
+      "task": "Read this scoped operating update without borrowing a denominator from a segment or an undefined margin label. Use missing_denominator for the consolidated margin question and ambiguous_evidence for the undefined margin claim; no reason code for reported operating income.",
+      "cutoff": "2025-11-07T11:30:00-05:00",
+      "documents": [
+        {
+          "document_id": "fenbridge",
+          "available_at": "2025-11-07T07:00:00-05:00",
+          "media_type": "text/plain",
+          "content": "Fenbridge — FY2025 Q3 operating update\nAmounts below are USD millions. The financial update covers FY2025 Q3.\nConsolidated GAAP operating income: 5.\nConsolidated revenue is not disclosed in this update; no other current-quarter consolidated revenue source is supplied.\nSelected industrial-segment revenue: 30. This is not company-wide revenue.\nDashboard: Adjusted margin 18%. The dashboard does not identify the segment, period or accounting definition of this percentage.\n"
+        }
+      ],
+      "questions": [
+        {
+          "question_id": "operating_margin",
+          "prompt": "What is consolidated GAAP operating margin for FY2025 Q3?",
+          "answer_type": "number",
+          "unit": "percent",
+          "period": "FY2025-Q3",
+          "basis": "GAAP",
+          "options": []
+        },
+        {
+          "question_id": "margin_claim",
+          "prompt": "Does the 18% dashboard figure establish consolidated FY2025 Q3 GAAP operating margin?",
+          "answer_type": "boolean",
+          "unit": null,
+          "period": null,
+          "basis": null,
+          "options": []
+        },
+        {
+          "question_id": "operating_income",
+          "prompt": "What is consolidated GAAP operating income for FY2025 Q3?",
+          "answer_type": "number",
+          "unit": "USD_million",
+          "period": "FY2025-Q3",
+          "basis": "GAAP",
+          "options": []
+        }
+      ]
+    },
+    {
+      "case_id": "doc04",
+      "task": "Freeze evidence at the cutoff. Evaluate the claimed consensus beat and closing breakout without using later content. Use missing_preannouncement_consensus for the surprise question and post_cutoff plus missing_confirmation for the breakout question; no reason code for reported revenue.",
+      "cutoff": "2025-10-09T11:30:00-04:00",
+      "documents": [
+        {
+          "document_id": "demonstration",
+          "available_at": "2025-10-08T16:10:00-04:00",
+          "media_type": "text/plain",
+          "content": "Demonstration Systems — issuer earnings release published October 8 at 16:10 New York time\nFY2025 Q3 consolidated GAAP revenue: USD 120 million.\n"
+        },
+        {
+          "document_id": "consensus",
+          "available_at": "2025-10-09T10:05:00-04:00",
+          "media_type": "text/html",
+          "content": "<html><body><h1>Demonstration Systems — FY2025 Q3 consensus</h1>\n<p>Current displayed revenue estimate: USD 118 million.</p>\n<small>Updated October 9 at 10:05 New York time, after the October 8 earnings announcement. This page replaces its earlier display; no pre-announcement snapshot is supplied.</small>\n</body></html>\n"
+        },
+        {
+          "document_id": "thesis",
+          "available_at": "2025-10-07T11:30:00-04:00",
+          "media_type": "text/plain",
+          "content": "Previously recorded buying thesis\nConfirmation requires a completed regular-session closing price above the verified range; an intraday price is insufficient.\n"
+        },
+        {
+          "document_id": "calendar",
+          "available_at": "2025-10-09T07:00:00-04:00",
+          "media_type": "text/plain",
+          "content": "Verified fictional exchange session for October 9\nRegular session: 09:30 to 16:00 New York time. No early close or exceptional interruption is recorded.\n"
+        },
+        {
+          "document_id": "quote",
+          "available_at": "2025-10-09T11:20:00-04:00",
+          "media_type": "text/plain",
+          "content": "Intraday provider snapshot at 11:20 New York time on October 9\nPrice is 8% above the preceding regular-session close; this is not a completed-session closing observation.\n"
+        },
+        {
+          "document_id": "later_close",
+          "available_at": "2025-10-09T16:01:00-04:00",
+          "media_type": "text/plain",
+          "content": ""
+        }
+      ],
+      "questions": [
+        {
+          "question_id": "revenue_surprise",
+          "prompt": "What is the percentage revenue beat against pre-announcement consensus for FY2025 Q3?",
+          "answer_type": "number",
+          "unit": "percent",
+          "period": "FY2025-Q3",
+          "basis": "GAAP_vs_preannouncement_consensus",
+          "options": []
+        },
+        {
+          "question_id": "closing_breakout",
+          "prompt": "Has the required October 9 closing breakout been established at this cutoff?",
+          "answer_type": "boolean",
+          "unit": null,
+          "period": null,
+          "basis": null,
+          "options": []
+        },
+        {
+          "question_id": "reported_revenue",
+          "prompt": "What revenue does the issuer report for FY2025 Q3?",
+          "answer_type": "number",
+          "unit": "USD_million",
+          "period": "FY2025-Q3",
+          "basis": "GAAP",
+          "options": []
+        }
+      ]
+    }
+  ]
+}

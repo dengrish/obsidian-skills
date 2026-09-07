@@ -1,0 +1,93 @@
+{
+  "schema_version": 2,
+  "suite_id": "market-research-documents-v1",
+  "document_sha256": "b84fb6f8c67770048556aa14d8c70ae0669a2203149c535f98734ef092dd341b",
+  "oracle_sha256": "bb3cf0652e773bc45bba0d9f6402d4975244471afd43305fbaefb42b6441c24f",
+  "input_sha256": "6727ef66b1f1f53322e26ec5fb337e56f167ffb023017ec35a38f9aa45fea9fc",
+  "answer_key_sha256": "bda5270baa358095d4e7d6eb589d11a36cc3a914add1e16f3efe94bcf05a0347",
+  "evaluator_sha256": "27b28e30bf2193e9d8eba1100958878596dd96cce158dda28a83e5be0b75c15a",
+  "evidence_condition": "raw",
+  "run_id": "document-forward-raw-01",
+  "variant": {
+    "label": "investments-research-method",
+    "instructions_sha256": "44aadb3ef376f3b8793c811019cb2588196bde59a6be66b8af9fa1365e2489f7"
+  },
+  "conditions": {
+    "model": "inherited model; exact runtime identifier unavailable",
+    "tool_policy": "offline-packet-only",
+    "sampling": "unavailable; inherited settings",
+    "context_policy": "fresh agent; instructed packet-only access, not filesystem-enforced isolation"
+  },
+  "scope": "Synthetic document/evidence/calculation regression only; no investment-edge claim. Explanations are unscored.",
+  "questions": 11,
+  "passed_questions": 11,
+  "errors_by_category": {},
+  "results": [
+    {
+      "case_id": "doc01",
+      "question_id": "quarter_revenue",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "doc01",
+      "question_id": "quarter_growth",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "doc02",
+      "question_id": "reported_eps",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "doc02",
+      "question_id": "eps_growth",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "doc02",
+      "question_id": "analytical_eps",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "doc03",
+      "question_id": "operating_margin",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "doc03",
+      "question_id": "margin_claim",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "doc03",
+      "question_id": "operating_income",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "doc04",
+      "question_id": "revenue_surprise",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "doc04",
+      "question_id": "closing_breakout",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "doc04",
+      "question_id": "reported_revenue",
+      "passed": true,
+      "errors": []
+    }
+  ]
+}

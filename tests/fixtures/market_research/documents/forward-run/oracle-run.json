@@ -1,0 +1,318 @@
+{
+  "schema_version": 2,
+  "suite_id": "market-research-documents-v1",
+  "input_sha256": "61a9714a5f5b2bd71902a4a82cdccb97e21c469514bcc6e21a56a75164bdb696",
+  "document_sha256": "b84fb6f8c67770048556aa14d8c70ae0669a2203149c535f98734ef092dd341b",
+  "evidence_condition": "oracle",
+  "run_id": "document-forward-oracle-01",
+  "variant": {
+    "label": "investments-research-method",
+    "instructions_sha256": "44aadb3ef376f3b8793c811019cb2588196bde59a6be66b8af9fa1365e2489f7"
+  },
+  "conditions": {
+    "model": "inherited model; exact runtime identifier unavailable",
+    "tool_policy": "offline-packet-only",
+    "sampling": "unavailable; inherited settings",
+    "context_policy": "fresh agent; instructed packet-only access, not filesystem-enforced isolation"
+  },
+  "responses": [
+    {
+      "case_id": "doc01",
+      "answers": [
+        {
+          "question_id": "quarter_revenue",
+          "status": "answered",
+          "value": 550.0,
+          "unit": "USD_million",
+          "period": "FY2025-Q2",
+          "basis": "GAAP",
+          "evidence": [
+            "rill:L3",
+            "rill:L9",
+            "rill:L10",
+            "rill:L11",
+            "rill:L13"
+          ],
+          "reason_codes": [
+            "quarter_not_ytd"
+          ],
+          "calculation": {
+            "op": "subtract",
+            "args": [
+              {
+                "op": "divide",
+                "args": [
+                  {
+                    "fact": "h1_current"
+                  },
+                  {
+                    "constant": 1000
+                  }
+                ]
+              },
+              {
+                "fact": "q1_current"
+              }
+            ]
+          },
+          "explanation": "Normalize consolidated H1 revenue from USD thousands to USD millions, then subtract consolidated Q1 revenue: 920000 / 1000 - 370 = 550 USD million. This derives standalone Q2, not six-month or segment revenue."
+        },
+        {
+          "question_id": "quarter_growth",
+          "status": "answered",
+          "value": 37.5,
+          "unit": "percent",
+          "period": "FY2025-Q2-vs-FY2024-Q2",
+          "basis": "GAAP",
+          "evidence": [
+            "rill:L3",
+            "rill:L9",
+            "rill:L10",
+            "rill:L11",
+            "rill:L13"
+          ],
+          "reason_codes": [
+            "quarter_not_ytd"
+          ],
+          "calculation": {
+            "op": "pct_change",
+            "args": [
+              {
+                "op": "subtract",
+                "args": [
+                  {
+                    "op": "divide",
+                    "args": [
+                      {
+                        "fact": "h1_current"
+                      },
+                      {
+                        "constant": 1000
+                      }
+                    ]
+                  },
+                  {
+                    "fact": "q1_current"
+                  }
+                ]
+              },
+              {
+                "op": "subtract",
+                "args": [
+                  {
+                    "op": "divide",
+                    "args": [
+                      {
+                        "fact": "h1_prior"
+                      },
+                      {
+                        "constant": 1000
+                      }
+                    ]
+                  },
+                  {
+                    "fact": "q1_prior"
+                  }
+                ]
+              }
+            ]
+          },
+          "explanation": "Current standalone Q2 is 920000 / 1000 - 370 = 550 USD million; prior standalone Q2 is 700000 / 1000 - 300 = 400 USD million. Year-over-year Q2 growth is 100 * (550 / 400 - 1) = 37.5%."
+        }
+      ]
+    },
+    {
+      "case_id": "doc02",
+      "answers": [
+        {
+          "question_id": "reported_eps",
+          "status": "answered",
+          "value": 1.5,
+          "unit": "USD_per_diluted_share",
+          "period": "FY2025-Q3",
+          "basis": "GAAP",
+          "evidence": [
+            "northlamp:L2",
+            "northlamp:L3",
+            "northlamp:L5"
+          ],
+          "reason_codes": [],
+          "calculation": {
+            "fact": "gaap_current"
+          },
+          "explanation": "The supplied observation identifies reported FY2025 Q3 GAAP diluted EPS as USD 1.50 per diluted share."
+        },
+        {
+          "question_id": "eps_growth",
+          "status": "answered",
+          "value": 36.36363636363635,
+          "unit": "percent",
+          "period": "FY2025-Q3-vs-FY2024-Q3",
+          "basis": "GAAP",
+          "evidence": [
+            "northlamp:L2",
+            "northlamp:L3",
+            "northlamp:L5",
+            "northlamp:L6"
+          ],
+          "reason_codes": [
+            "basis_mismatch"
+          ],
+          "calculation": {
+            "op": "pct_change",
+            "args": [
+              {
+                "fact": "gaap_current"
+              },
+              {
+                "fact": "gaap_prior"
+              }
+            ]
+          },
+          "explanation": "Use the comparable restated FY2024 Q3 GAAP diluted EPS of USD 1.10: 100 * (1.50 / 1.10 - 1) = 36.363636...%. Company-adjusted figures or an unrestated prior-year basis would not support this GAAP comparison."
+        },
+        {
+          "question_id": "analytical_eps",
+          "status": "answered",
+          "value": 1.1,
+          "unit": "USD_per_diluted_share",
+          "period": "FY2025-Q3",
+          "basis": "analytical_excluding_disposal_gain",
+          "evidence": [
+            "northlamp:L2",
+            "northlamp:L3",
+            "northlamp:L5",
+            "northlamp:L7"
+          ],
+          "reason_codes": [
+            "basis_mismatch"
+          ],
+          "calculation": {
+            "op": "subtract",
+            "args": [
+              {
+                "fact": "gaap_current"
+              },
+              {
+                "fact": "disposal_gain"
+              }
+            ]
+          },
+          "explanation": "Own analytical calculation: reported GAAP diluted EPS of USD 1.50 less the included after-tax disposal gain of USD 0.40 per diluted share equals USD 1.10 per diluted share. This result is neither reported GAAP EPS nor company-adjusted EPS."
+        }
+      ]
+    },
+    {
+      "case_id": "doc03",
+      "answers": [
+        {
+          "question_id": "operating_margin",
+          "status": "insufficient",
+          "value": null,
+          "unit": "percent",
+          "period": "FY2025-Q3",
+          "basis": "GAAP",
+          "evidence": [
+            "fenbridge:L2",
+            "fenbridge:L3",
+            "fenbridge:L4"
+          ],
+          "reason_codes": [
+            "missing_denominator"
+          ],
+          "calculation": null,
+          "explanation": "Consolidated GAAP operating income is supplied, but FY2025 Q3 consolidated revenue is not. The missing matching denominator prevents calculating consolidated GAAP operating margin; segment revenue cannot substitute."
+        },
+        {
+          "question_id": "margin_claim",
+          "status": "answered",
+          "value": false,
+          "unit": null,
+          "period": null,
+          "basis": null,
+          "evidence": [
+            "fenbridge:L6"
+          ],
+          "reason_codes": [
+            "ambiguous_evidence"
+          ],
+          "calculation": null,
+          "explanation": "No. The dashboard margin lacks an identified period, segment scope, and accounting definition, so it cannot establish consolidated FY2025 Q3 GAAP operating margin."
+        },
+        {
+          "question_id": "operating_income",
+          "status": "answered",
+          "value": 5,
+          "unit": "USD_million",
+          "period": "FY2025-Q3",
+          "basis": "GAAP",
+          "evidence": [
+            "fenbridge:L2",
+            "fenbridge:L3"
+          ],
+          "reason_codes": [],
+          "calculation": {
+            "fact": "income"
+          },
+          "explanation": "The supplied observation identifies consolidated FY2025 Q3 GAAP operating income as USD 5 million."
+        }
+      ]
+    },
+    {
+      "case_id": "doc04",
+      "answers": [
+        {
+          "question_id": "revenue_surprise",
+          "status": "insufficient",
+          "value": null,
+          "unit": "percent",
+          "period": "FY2025-Q3",
+          "basis": "GAAP_vs_preannouncement_consensus",
+          "evidence": [
+            "demonstration:L2",
+            "consensus:L3"
+          ],
+          "reason_codes": [
+            "missing_preannouncement_consensus"
+          ],
+          "calculation": null,
+          "explanation": "Reported revenue is available, but the only consensus display follows the announcement and no pre-announcement snapshot is supplied. Therefore a beat against pre-announcement consensus cannot be calculated."
+        },
+        {
+          "question_id": "closing_breakout",
+          "status": "answered",
+          "value": false,
+          "unit": null,
+          "period": null,
+          "basis": null,
+          "evidence": [
+            "thesis:L2",
+            "calendar:L2"
+          ],
+          "reason_codes": [
+            "post_cutoff",
+            "missing_confirmation"
+          ],
+          "calculation": null,
+          "explanation": "No. The recorded condition requires a completed October 9 regular-session close, scheduled for 16:00 New York time, after the 11:30 cutoff. An intraday observation cannot establish that close. The later-close document is unavailable at the cutoff and its content is not used."
+        },
+        {
+          "question_id": "reported_revenue",
+          "status": "answered",
+          "value": 120,
+          "unit": "USD_million",
+          "period": "FY2025-Q3",
+          "basis": "GAAP",
+          "evidence": [
+            "demonstration:L2"
+          ],
+          "reason_codes": [],
+          "calculation": {
+            "fact": "revenue"
+          },
+          "explanation": "The issuer reports consolidated FY2025 Q3 GAAP revenue of USD 120 million."
+        }
+      ]
+    }
+  ]
+}
