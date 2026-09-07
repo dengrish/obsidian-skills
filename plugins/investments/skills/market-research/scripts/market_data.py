@@ -76,6 +76,12 @@ def parser():
     filing.add_argument('--section', help='exact detected section key from an earlier response')
     filing.add_argument('--offset', type=int, default=0, help='character offset in the selected rendered text')
     filing.add_argument('--max-chars', type=int, default=20000, help='maximum returned characters, up to 100000')
+    ownership = commands.add_parser('sec-ownership', help='read one verified SEC Form 4 or 4/A XML accession')
+    ownership.add_argument('--cik', required=True, help='SEC issuer company identifier')
+    ownership.add_argument('--accession', required=True, help='exact Form 4/4-A accession')
+    ownership.add_argument('--as-of', required=True, help='evidence cutoff with seconds and timezone')
+    ownership.add_argument('--since', help='earliest filing date; enables older submission pages')
+    ownership.add_argument('--max-pages', type=int, default=10)
     symbols = commands.add_parser('symbols', help='retrieve current Nasdaq and other-exchange security directories')
     symbols.add_argument('--symbols', help='optional comma-separated symbol filter')
     symbols.add_argument('--limit', type=int, default=20000)
@@ -115,6 +121,10 @@ def parser():
     earnings.add_argument('--symbol', help='optional one-symbol filter')
     earnings.add_argument('--horizon', choices=('3month', '6month', '12month'), default='3month')
     earnings.add_argument('--as-of', help='optional historical cutoff; current calendar cannot verify its vintage')
+    estimates = commands.add_parser('estimates', help='retrieve current EPS/revenue estimates; no historical vintage is implied')
+    estimates.add_argument('--symbol', required=True, help='one U.S. provider ticker')
+    estimates.add_argument('--period', action='append', help='optional fiscal period-end YYYY-MM-DD; repeat for several periods')
+    estimates.add_argument('--as-of', help='optional evidence cutoff; later observations remain explicitly ineligible')
     macro = commands.add_parser('fred-series', help='retrieve one FRED series at an explicit daily vintage')
     macro.add_argument('--series', required=True, help='FRED series ID, e.g. DGS10')
     macro.add_argument('--start', required=True, help='first observation date, YYYY-MM-DD')
@@ -142,12 +152,15 @@ def handlers():
     from market_news import news, alpha_calendar
     from market_fred import fred_series, fred_releases
     from market_filings import sec_filing
+    from market_ownership import sec_ownership
+    from market_estimates import alpha_estimates
     return {
         'sec-company': sec_company, 'sec-facts': sec_facts, 'symbols': nasdaq_symbols,
         'halts': nasdaq_halts, 'prices': alpaca_bars, 'actions': alpaca_actions,
         'sessions': alpaca_calendar, 'news': news, 'earnings': alpha_calendar,
         'fred-series': fred_series, 'fred-releases': fred_releases,
         'sec-filing': sec_filing,
+        'sec-ownership': sec_ownership, 'estimates': alpha_estimates,
     }
 
 

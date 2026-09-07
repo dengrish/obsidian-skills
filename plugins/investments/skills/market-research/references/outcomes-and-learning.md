@@ -65,6 +65,27 @@ changes. Full details remain in their original notes; do not copy the entire
 history into every daily note. Only decision-relevant learning belongs in the
 short Decision brief.
 
+## Separate prospective momentum comparison
+
+Use the [fixed comparison strategy](comparison-strategy.md) as a mechanical
+monthly diagnostic alongside recommendation outcomes. The ordinary outcomes
+index also returns `comparison_formation_due`,
+`comparison_formation_must_be_unavailable`, `comparison_cohorts`,
+`comparison_checkpoints` and `due_comparison_checkpoints`. Its two separate
+journals and visible cards live under Outcome review; they never create a
+ready thesis, recommendation baseline, sale or portfolio record. The reference
+defines its deterministic formation, input commands, 3/6/12-month windows and
+exact journal columns. Keep empty/unavailable months and missing members visible;
+do not backfill formations or assign them cash returns.
+
+Include its coverage, per-horizon counts and matched SPY results in monthly
+learning summaries. Link unchanged cohorts/checkpoints instead of copying them
+each day. A monthly comparison and an individually timed research pick are not a
+same-date experiment. Only compare matching formation and observation windows,
+universe eligibility, benchmark and return/cost conventions, with exposure and
+overlap disclosed. Unmatched or small-sample differences do not establish that
+the skill improved returns. Never tune the frozen strategy from observed results.
+
 ## Freeze the recommendation and price convention
 
 When an ID first becomes `ready`, create its recommendation record and a detail

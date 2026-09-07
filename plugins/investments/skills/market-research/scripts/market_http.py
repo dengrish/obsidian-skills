@@ -100,7 +100,7 @@ def allowed_url(url):
             or parsed.fragment or parsed.port not in (None, 443) or parsed.query):
         raise DataError('unsafe_url', 'Retrieval requires an approved HTTPS provider resource.')
     patterns = {
-        'www.sec.gov': r'(?:/files/company_tickers(?:_exchange)?\.json|/Archives/edgar/data/[1-9][0-9]{0,9}/[0-9]{18}/(?![^/]*\.\.)[A-Za-z0-9][A-Za-z0-9_.-]{0,199}\.html?)',
+        'www.sec.gov': r'(?:/files/company_tickers(?:_exchange)?\.json|/Archives/edgar/data/[1-9][0-9]{0,9}/[0-9]{18}/(?![^/]*\.\.)[A-Za-z0-9][A-Za-z0-9_.-]{0,199}\.(?:html?|xml))',
         'data.sec.gov': r'(?:/submissions/CIK\d{10}(?:-submissions-\d+)?\.json|/api/xbrl/companyfacts/CIK\d{10}\.json)',
         'www.nasdaqtrader.com': r'(?:/dynamic/[Ss]ym[Dd]ir/(?:nasdaqlisted|otherlisted)\.txt|/rss\.aspx)',
         'data.alpaca.markets': r'(?:/v2/stocks/bars|/v1/corporate-actions|/v1beta1/news)',
@@ -365,6 +365,17 @@ def run_self_test():
                     client.get_json(url)
             client.opener.open.assert_not_called()
 
+        def test_raw_ownership_xml_stays_inside_exact_sec_archive(self):
+            base = 'https://www.sec.gov/Archives/edgar/data/320193/000032019326000001/'
+            client = self.client([Reply(b'<ownershipDocument/>')])
+            self.assertEqual(client.get_text(base + 'form4.xml'), '<ownershipDocument/>')
+            client.opener.open.reset_mock()
+            for tail in ('xslF345X05/form4.xml', '../form4.xml', 'form..4.xml',
+                         'form4.xml?output=1', 'form4.xsl', 'form4.xml/other'):
+                with self.subTest(tail=tail), self.assertRaises(DataError):
+                    client.get_text(base + tail)
+            client.opener.open.assert_not_called()
+
         def test_redirect_cannot_forward_keys(self):
             with self.assertRaises(DataError):
                 no_redirect_handler().redirect_request(None, None, 302, 'redirect', {}, 'https://example.com')
@@ -374,7 +385,7 @@ def run_self_test():
             self.assertEqual(allowed_url(base + 'aapl-20260101.htm'), 'www.sec.gov')
             self.assertEqual(allowed_url(base + 'aapl_20260101.html'), 'www.sec.gov')
             for suffix in ('../private.html', 'a/filing.htm', '%2e%2e.html', 'x.htm?download=1',
-                           'x.htm#fragment', '.hidden.htm', 'x..htm', 'filing.xml', 'a.htm.exe'):
+                           'x.htm#fragment', '.hidden.htm', 'x..htm', 'filing.json', 'a.htm.exe'):
                 with self.subTest(suffix=suffix), self.assertRaises(DataError):
                     allowed_url(base + suffix)
             for url in (base.replace('/320193/', '/0000320193/'),

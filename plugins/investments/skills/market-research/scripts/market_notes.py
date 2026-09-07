@@ -67,6 +67,7 @@ if _here != _shared:
 import atomic_move
 import note_provenance
 from portable_names import portable_identity
+import market_comparison
 
 MAX_BYTES = 256 * 1024
 FIELDS = ('market_research', 'date', 'as_of', 'generated_at', 'session', 'coverage')
@@ -86,6 +87,9 @@ JOURNALS = {
     'Checkpoint records': ('Recommendation', 'Horizon', 'State', 'Observed at', 'Record', 'Replaces'),
     'Lesson records': ('Lesson', 'Status', 'Record'),
     'Monthly summaries': ('Month', 'Record'),
+    'Comparison cohorts': ('Cohort', 'State', 'Record'),
+    'Comparison checkpoints': ('Cohort', 'Horizon', 'State', 'Baseline at', 'Observed at',
+                               'Return', 'Benchmark return', 'Record', 'Replaces'),
 }
 
 
@@ -590,6 +594,8 @@ def outcomes(vault, draft=None, now=None, mode='scheduled', as_of=None):
         note_day = note['metadata']['date']
         as_of = iso_time(note['metadata']['as_of'])
         for title, columns in JOURNALS.items():
+            if title.startswith('Comparison '):
+                continue
             seen = set()
             for row in note['journals'].get(title, []):
                 try:
@@ -728,6 +734,8 @@ def outcomes(vault, draft=None, now=None, mode='scheduled', as_of=None):
         finding(history['current_note']['path'], 'daily-note history changed during outcome planning; rerun')
     if draft_token is not None and atomic_move.regular_file_snapshot(draft) != draft_token:
         finding(draft, 'draft changed during outcome planning; rerun')
+    comparison = comparison_outcomes(ordered, notes, edition_key, unpublished_draft, reference, current)
+    findings.extend(comparison.pop('findings'))
     cutoff = notes[edition_key][1]['metadata']['as_of'] if edition_key in notes else cutoff.isoformat()
     return {'complete': not findings, 'findings': findings, 'date': day,
             'as_of': cutoff, 'mode': mode, 'current_note': history['current_note'],
@@ -738,7 +746,125 @@ def outcomes(vault, draft=None, now=None, mode='scheduled', as_of=None):
             'checkpoints': planned, 'due_checkpoints': due,
             'active_lessons': [value for key, value in sorted(lessons.items()) if value['status'] != 'retired'],
             'retired_lessons': [value for key, value in sorted(lessons.items()) if value['status'] == 'retired'],
-            'latest_monthly_summary': monthly, 'monthly_review_due': monthly is None or monthly['month'] < day[:7]}
+            'latest_monthly_summary': monthly, 'monthly_review_due': monthly is None or monthly['month'] < day[:7],
+            **comparison}
+
+
+def comparison_outcomes(ordered, notes, edition_key, unpublished_draft, reference, current):
+    """Fold separate, immutable mechanical cohorts without creating ready theses."""
+    cohorts, observations, findings = {}, {}, []
+    activation = None
+    for position, (note_key, (path, note, _)) in enumerate(ordered):
+        note_day, cutoff = note['metadata']['date'], iso_time(note['metadata']['as_of'])
+        current_draft = unpublished_draft and note_key == edition_key
+        for title in ('Comparison cohorts', 'Comparison checkpoints'):
+            seen = set()
+            for row in note['journals'].get(title, []):
+                try:
+                    identifier = row['Cohort']
+                    key = (identifier, row.get('Horizon'))
+                    if key in seen:
+                        raise ValueError('duplicate comparison journal key')
+                    seen.add(key)
+                    target, section, record_cutoff = reference(row['Record'], note_key)
+                    target_note = notes[Path(target).stem]
+                    if not section:
+                        raise ValueError('comparison records require their exact detail section')
+                    card = market_comparison.read_card(target_note[2].decode('utf-8'), section,
+                                                       observation=title == 'Comparison checkpoints')
+                    if (iso_time(card['metadata']['As of']) != record_cutoff
+                            or record_cutoff > cutoff or card['metadata']['Cohort'] != identifier):
+                        raise ValueError('comparison card identity or evidence cutoff disagrees with its note')
+                    common = dict(record=row['Record'], record_note=target, record_section=section,
+                                  journal_note=path)
+                    if title == 'Comparison cohorts':
+                        if card['metadata']['State'] != row['State']:
+                            raise ValueError('comparison cohort state disagrees with its detail card')
+                        previous = cohorts.get(identifier)
+                        if previous is not None:
+                            if (target, section) != (previous['record_note'], previous['record_section']):
+                                raise ValueError('comparison formation is frozen; never replace a monthly cohort')
+                            continue
+                        if identifier != market_comparison.cohort_id(note['metadata']['as_of']) or target != path:
+                            raise ValueError('new comparison cohort must be formed in its current-month note; no backfill')
+                        if activation is not None and row['State'] != 'unavailable' and any(
+                                earlier[1][1]['metadata']['date'][:7] == note_day[:7]
+                                for earlier in ordered[activation:position]):
+                            raise ValueError('the first monthly formation was missed; record unavailable instead of later winners')
+                        activation = position if activation is None else activation
+                        cohorts[identifier] = dict(id=identifier, state=row['State'],
+                            as_of=card['metadata']['As of'], formation_note=path,
+                            generated_at=note['metadata']['generated_at'],
+                            producer=(note['provenance'] or {}).get('generated_by'),
+                            members=card['members'], universe=card['metadata']['Universe'],
+                            universe_sha256=card['metadata']['Universe SHA-256'], _card=card, **common)
+                    else:
+                        cohort = cohorts.get(identifier)
+                        if cohort is None or cohort['state'] != 'formed':
+                            raise ValueError('comparison checkpoint requires an earlier formed cohort')
+                        observation = market_comparison.validate_observation(card, cohort['_card'])
+                        if row['Horizon'] != observation['horizon'] or row['State'] != observation['state']:
+                            raise ValueError('comparison checkpoint state or horizon disagrees with its card')
+                        for label, field in (('Baseline at', 'baseline_at'), ('Observed at', 'observed_at')):
+                            if iso_time(row[label]) != iso_time(observation[field]):
+                                raise ValueError('comparison checkpoint timestamp disagrees with its card')
+                        if iso_time(observation['baseline_at']) < iso_time(cohort['generated_at']):
+                            raise ValueError('comparison baseline must follow known formation publication')
+                        for label, field in (('Return', 'return_value'), ('Benchmark return', 'benchmark_return')):
+                            value = None if row[label] == '-' else float(row[label])
+                            if value != observation[field]:
+                                raise ValueError('comparison journal return does not match recomputed member prices')
+                        item = dict(cohort=identifier, horizon=row['Horizon'], state=row['State'],
+                                    baseline_at=observation['baseline_at'], observed_at=observation['observed_at'],
+                                    return_value=observation['return_value'], benchmark_return=observation['benchmark_return'],
+                                    member_count=observation['member_count'], **common)
+                        previous = observations.get(key)
+                        changed = previous is not None and any(item[field] != previous[field] for field in
+                            ('state', 'baseline_at', 'observed_at', 'return_value', 'benchmark_return', 'record_note', 'record_section'))
+                        if previous is None and row['Replaces'] != '-':
+                            raise ValueError('first comparison observation must use Replaces -')
+                        if previous is not None and changed and previous['state'] == 'observed':
+                            if row['Replaces'] != previous['record']:
+                                raise ValueError('changed comparison observation must explicitly replace its previous Record')
+                        elif previous is not None and row['Replaces'] not in ('-', previous['record']):
+                            raise ValueError('comparison Replaces does not identify its previous Record')
+                        if current_draft and (previous is None or changed) and target != path:
+                            raise ValueError('new or changed comparison data requires a current draft detail card')
+                        observations[key] = item
+                except (ValueError, KeyError, TypeError, OverflowError) as exc:
+                    findings.append({'paths': [path], 'error': str(exc)})
+    planned, due = [], []
+    for identifier, cohort in sorted(cohorts.items()):
+        if cohort['state'] != 'formed':
+            continue
+        recorded = [row for (key, _), row in observations.items() if key == identifier]
+        baselines = {iso_time(row['baseline_at']) for row in recorded}
+        if len(baselines) > 1:
+            findings.append({'paths': [row['journal_note'] for row in recorded], 'error':
+                'comparison baseline events disagree; correct all affected windows together or mark them unavailable'})
+        baseline = ny_now(min(baselines)).date() if baselines else (
+            ny_now(iso_time(cohort['as_of'])).date() + timedelta(days=1))
+        for horizon in market_comparison.STRATEGY['horizons']:
+            target = market_comparison.month_target(baseline, int(horizon[:-1]))
+            previous = observations.get((identifier, horizon))
+            item = dict(previous or {}, cohort=identifier, horizon=horizon,
+                        state=previous['state'] if previous else 'due' if target <= current.date() else 'pending',
+                        target_date=target.isoformat(), target_basis='verified baseline event' if baselines else
+                        'earliest calendar date only; verify the actual post-publication opening and target session')
+            planned.append(item)
+            if item['state'] != 'observed' and target <= current.date():
+                due.append(item)
+    month = current.strftime('%Y-%m')
+    current_id = 'simple-momentum-v1@' + month
+    missed = activation is not None and any(
+        key != edition_key and value[1]['metadata']['date'][:7] == month
+        for key, value in ordered[activation:])
+    return {'findings': findings,
+            'comparison_formation_due': current_id not in cohorts,
+            'comparison_formation_must_be_unavailable': current_id not in cohorts and missed,
+            'comparison_cohorts': [{key: value for key, value in row.items() if not key.startswith('_')}
+                                  for _, row in sorted(cohorts.items())],
+            'comparison_checkpoints': planned, 'due_comparison_checkpoints': due}
 
 
 def publish_pinned(staged, target, stage_parent, folder_identity):

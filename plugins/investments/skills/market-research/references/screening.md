@@ -140,3 +140,14 @@ values in the note or an already authorized durable source, with source URLs and
 adjustment definitions. Do not cite temporary JSON paths after scratch cleanup
 or copy entire licensed feeds into the note. The existing outcome journal remains
 the record of subsequent recommendation performance.
+
+## Fixed comparison alongside discretionary discovery
+
+On the first research edition of each month, reuse the declared saved input for
+the [prospective mechanical comparison](comparison-strategy.md). It recomputes
+its own fixed momentum rules and preserves all decisive measurements, including
+exclusions, independently of the discretionary screen or analyst shortlist.
+Declare the accessible universe before ranking; disclose scope limits and
+prospective universe changes. An incomplete first formation stays unavailable
+for that month. This adds no daily market-wide fetch and never turns mechanical
+selection into a ready recommendation.

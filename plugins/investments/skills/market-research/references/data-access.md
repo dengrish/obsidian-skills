@@ -13,10 +13,10 @@ saved price/calendar responses.
 
 | Source | Credential names | Commands and purpose |
 |---|---|---|
-| SEC EDGAR | `SEC_USER_AGENT`: application/name and a real contact email | `sec-company`: identity and filings; `sec-facts`: selected reported XBRL facts; optional `sec-filing`: one exact filing or section |
+| SEC EDGAR | `SEC_USER_AGENT`: application/name and a real contact email | `sec-company`: identity and filings; `sec-facts`: selected reported XBRL facts; optional `sec-filing`: one exact filing or section; `sec-ownership`: exact Form 4/4-A XML |
 | Nasdaq Trader | None | `symbols`: current exchange directories; `halts`: halt RSS |
 | Alpaca | `ALPACA_API_KEY`, `ALPACA_SECRET_KEY` | `prices`: historical bars; `actions`: corporate actions; `sessions`: paper exchange calendar; `news --provider alpaca`: bounded news sample |
-| Alpha Vantage | `ALPHA_VANTAGE_API_KEY` | `news` (default provider): news and provider sentiment; `earnings`: current earnings calendar |
+| Alpha Vantage | `ALPHA_VANTAGE_API_KEY` | `news` (default provider): news and provider sentiment; `earnings`: current earnings calendar; `estimates`: current EPS/revenue estimates |
 | FRED / ALFRED | `FRED_API_KEY` | `fred-series`: metadata and observations at a daily vintage; `fred-releases`: source release-date calendar |
 
 API keys are sufficient; do not request account passwords. Supply the named
@@ -104,7 +104,7 @@ skipped in Screening and sources. A successful setup probe is not today's resear
 | Announcement pass | `news --provider alpaca` for a bounded broad or ticker-specific news window when configured; use `news --provider alpha_vantage` selectively for additional coverage within its account quota. Use `earnings` for upcoming scheduled risks, then verify timing and results on issuer pages. Neither news feed must duplicate the other on every run. |
 | Price-history pass | `prices` for the declared universe and benchmarks over matching completed sessions, then the offline [screener](screening.md). Preserve its defined filters, coverage and exclusions. Its daily notional proxy is preliminary; verify regular-session liquidity separately for the shortlist. |
 | Intraday assessment | On open-market runs, use `prices --timeframe 1Min` or a timestamped host quote for the shortlist's morning reaction. Respect feed delay and the cutoff; keep snapshots separate from completed-session signals, and compare partial volume only with matching historical session/time windows. |
-| Shortlist and readiness | `sec-company` for relevant filings, then `sec-facts` for comparable reported fundamentals and optional `sec-filing` for the exact filing's narrative/tables. Open material cited sections and issuer releases; a parser is not a factual verifier. Check `halts` and current issuer/exchange notices before first readiness or when a trading-status concern arises; a current empty feed does not reconstruct an earlier cutoff or clear an older unresolved halt. |
+| Shortlist and readiness | `sec-company` for relevant filings, then `sec-facts` for comparable reported fundamentals and optional `sec-filing` for the exact filing's narrative/tables. For expectations that matter, retrieve `estimates` and use the dated-snapshot workflow below. When insider activity changes the case, inspect an exact accession with `sec-ownership`. Open material cited sections and issuer releases; a parser is not a factual verifier. Check `halts` and current issuer/exchange notices before first readiness or when a trading-status concern arises; a current empty feed does not reconstruct an earlier cutoff or clear an older unresolved halt. |
 | Corporate actions | `actions` when validating adjustments, unexplained price discontinuities, instrument changes or outcome inputs. Its process-date records need issuer corroboration; choose the relevant history and keep original raw observations. |
 | Macro context | `fred-releases` for relevant upcoming releases and `fred-series` for a small dated set of rates, credit, employment or inflation observations when they affect a thesis. Verify fresh announcements with the releasing agency. |
 | Outcome work | Use `sessions`, `prices` and relevant `actions` for due baselines/checkpoints returned by `market_notes.py outcomes`; retain fixed events, matching benchmark inputs and availability evidence. Do not refetch completed observations unless corrections or changed evidence require it. |
@@ -204,6 +204,74 @@ Excerpts remain incomplete rather than silently claiming the whole filing was
 read. Character positions are locations in rendered text, not PDF page numbers.
 Retain only decision-relevant excerpts and calculations in the daily note, with
 the durable SEC URL and section; do not publish the entire filing or cite scratch.
+
+## Dated estimates, not reconstructed expectations
+
+Alpha Vantage's [EARNINGS_ESTIMATES](https://www.alphavantage.co/documentation/#earnings-estimates)
+supplies quarterly/annual EPS and revenue estimates, analyst counts and reported
+revision summaries. It uses the existing Alpha Vantage key; endpoint access and
+quotas still need checking. Select the fiscal periods relevant to a leading or
+tracked thesis, especially before earnings; do not query every screened stock.
+
+```bash
+python3 '<skill>/scripts/market_data.py' estimates --symbol IBM --period '2026-09-30' --as-of '<cutoff>' > '<scratch>/estimates.json'
+python3 '<skill>/scripts/market_estimate_history.py' save --input '<scratch>/estimates.json' --vault '<vault>' --period '2026-09-30' --horizon 'fiscal quarter'
+python3 '<skill>/scripts/market_estimate_history.py' history --vault '<vault>' --as-of '<cutoff>' --symbol IBM
+python3 '<skill>/scripts/market_estimate_history.py' compare --older '<older-snapshot.json>' --newer '<newer-snapshot.json>'
+```
+
+Replace the example period with the actual thesis period and add the selected
+`--credentials-file` to retrieval. Saving is separate from the read-only data
+helper: it preserves one selected period/horizon in an immutable JSON file under
+`Investments/Snapshots/Estimates/`, with observation/save times and source digest.
+It excludes arbitrary provider text, request credentials and the rest of the feed.
+Exact retries reuse the original snapshot; collisions never overwrite evidence.
+These are source records, not daily analyses or a mutable database. Link the
+specific snapshot and summarize only decision-relevant values in the daily note.
+
+The provider gives no historical vintage or publication time. A fiscal period end
+is not an availability date, and its trailing-window revision figures are current
+provider claims, not independently preserved past observations. `--as-of` therefore
+marks a later retrieval incomplete for that cutoff. When `coverage_complete` is
+true, the snapshot helper can still preserve it for a **later** review; do not use
+it in the earlier edition or shift that edition's cutoff. History exposes only
+records whose observation and first-save times are available by the requested
+cutoff. Do not replace a missing historical snapshot with current estimates.
+
+Compare the same instrument, fiscal period, horizon and definitions. The helper
+reports changes in preserved provider values, with percentages only from a
+positive earlier value; missing values stay unavailable. Currency and EPS
+accounting basis can be absent: independently establish them and comparable
+corporate-action treatment before calling a change an economic revision or
+calculating an earnings surprise. Keep provider estimates distinct from issuer
+guidance and actual results. A quota/entitlement error leaves an explicit gap;
+do not change subscriptions or repeatedly retry during the run.
+
+## Selective insider-disclosure context
+
+Use `sec-company --forms '4,4/A'` to discover relevant issuer accessions, then
+retrieve only the exact filing needed to check a claim:
+
+```bash
+python3 '<skill>/scripts/market_data.py' sec-ownership --cik '<issuer-cik>' --accession '<accession>' --as-of '<cutoff>' --since '<earliest-filing-date>' > '<scratch>/ownership.json'
+```
+
+This standard-library XML reader uses the same SEC contact and bounded transport;
+it does not require EdgarTools or an additional account. It verifies accession,
+issuer, form and cutoff, preserving reporting owners, relationship, derivative and
+non-derivative rows, transaction dates, ownership type, reported values, footnotes,
+amendment context and the 10b5-1 indicator when present. Inspect the original XML
+and relevant footnotes; `null` or an unparsed value is not zero. Keep a transaction
+date separate from when the filing became available.
+
+Under [SEC Form 4 instructions](https://www.sec.gov/files/form4.pdf), code `P`
+includes private as well as open-market purchases. Awards, tax withholding and
+option exercises are different events. Do not multiply a joint filing's rows by
+its owner count, equate derivative exercises with discretionary common-stock
+buying, or treat a 4/A as either an additional purchase or a complete replacement
+without reconciling its corrections. A 10b5-1 checkbox supplies plan context,
+not proof of discretionary timing. Use corroborated, material activity as context;
+no automatic insider-buy score or readiness promotion follows from a filing.
 
 ## Source-specific interpretation
 
