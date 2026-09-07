@@ -32,7 +32,7 @@ def utc(value):
     return value.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')
 
 
-def directory():
+def directory(*, padded=False):
     nasdaq = ('Symbol|Security Name|Market Category|Test Issue|Round Lot Size|ETF\n'
               'AAA|Fixture A Common Stock|Q|N|100|N\n'
               'BBB|Fixture B Common Stock|Q|N|100|N\n'
@@ -44,6 +44,9 @@ def directory():
              'CCC|Fixture C Common Stock|N|N|100|N\n'
              'FUND|Fixture Fund|N|Y|100|N\n'
              'File Creation Time: 0430202421:31|||||\n')
+    if padded:
+        nasdaq = nasdaq.replace('AAA|Fixture A Common Stock|', ' AAA | Fixture A Common Stock \t|')
+        other = other.replace('CCC|Fixture C Common Stock|', '\tCCC |Fixture C Common Stock |')
     rows, files = [], []
     for name, raw in (('nasdaqlisted.txt', nasdaq), ('otherlisted.txt', other)):
         securities, creation = market_public._directory(raw, name)
@@ -95,7 +98,8 @@ def prices(args):
 
 
 class FixtureProvider:
-    def __init__(self, *, news_error=None, request_budget=None, history_missing=None, all_illiquid=False):
+    def __init__(self, *, news_error=None, request_budget=None, history_missing=None, all_illiquid=False,
+                 padded_directory=False):
         self.client = SimpleNamespace(env={'ALPACA_API_KEY': 'not-a-real-fixture-key'}, requests=[],
                                       redaction_values=('not-a-real-fixture-key',))
         self.calls = []
@@ -103,6 +107,7 @@ class FixtureProvider:
         self.request_budget = request_budget
         self.history_missing = history_missing
         self.all_illiquid = all_illiquid
+        self.padded_directory = padded_directory
 
     def invoke(self, client, args):
         if self.request_budget is not None and len(self.calls) >= self.request_budget:
@@ -112,7 +117,7 @@ class FixtureProvider:
         client.requests.append({'url': 'https://example.invalid/fixture', 'status': 200,
                                 'observed_at': NOW.isoformat()})
         if args.command == 'symbols':
-            return directory()
+            return directory(padded=self.padded_directory)
         if args.command == 'sessions':
             return calendar(args)
         if args.command == 'news':
@@ -184,6 +189,141 @@ class AcquisitionTests(unittest.TestCase):
         self.assertFalse(self.read(result, 'news')['complete'])
         self.assertTrue(any(call['operation'] == 'prices' for call in provider.calls))
         self.assertEqual(result['stopped_sources'].get('alpaca:news'), 'access_denied')
+        news_operation = next(item for item in result['operations'] if item['operation'] == 'news')
+        self.assertEqual(news_operation['error'], {'code': 'access_denied',
+                                                 'message': 'Synthetic news endpoint failure.'})
+        self.assertEqual(self.read(result, 'manifest'), result)
+
+    def test_invalid_symbol_bars_do_not_discard_unrelated_discovery_candidates(self):
+        import market_prices
+
+        class MixedBarsProvider(FixtureProvider):
+            def invoke(self, client, args):
+                if args.command == 'symbols':
+                    result = super().invoke(client, args)
+                    row = result['data']['securities'][0]
+                    row['symbol'] = row['source_fields']['Symbol'] = 'KEY'
+                    return result
+                if args.command != 'prices':
+                    return super().invoke(client, args)
+                self.calls.append({'operation': 'prices', 'symbols': args.symbols,
+                                   'start': args.start, 'end': args.end})
+                raw = {symbol: [{key: row[key] for key in ('t', 'o', 'h', 'l', 'c', 'v', 'vw')}
+                                | {'n': 120} for row in rows]
+                       for symbol, rows in prices(args)['data']['bars'].items()}
+                if 'BBB' in raw:
+                    # Synthetic counterpart of the observed zero-volume/VWAP row.
+                    raw['BBB'][0].update(v=0, n=0, vw=0)
+                transport = SimpleNamespace(
+                    env={'ALPACA_API_KEY': 'fixture-key', 'ALPACA_SECRET_KEY': 'fixture-secret'},
+                    get_json=lambda *a, **kw: {'bars': raw, 'next_page_token': None})
+                with patch.object(market_prices, 'utc_now', return_value=NOW):
+                    return market_prices.alpaca_bars(transport, args)
+
+        result, _ = self.discover(MixedBarsProvider())
+        self.assertFalse(result['complete'])
+        filtered = self.read(result, 'prefilter')
+        self.assertEqual(filtered['coverage']['declared'], 5)
+        self.assertEqual(filtered['coverage']['measured'], 4)
+        self.assertEqual(filtered['coverage']['passing'], 3)
+        self.assertEqual([row['symbol'] for row in filtered['unavailable']], ['BBB'])
+        screen = self.read(result, 'screen')
+        # KEY is a public ticker here, not a credential field to erase.
+        self.assertEqual({row['symbol'] for row in screen['candidates']}, {'KEY', 'CCC', 'DDD'})
+        self.assertFalse(screen['complete'])
+        self.assertEqual(self.read(result, 'manifest'), result)
+
+    def test_original_padded_directories_pass_producer_universe_and_real_screen(self):
+        result, _ = self.discover(FixtureProvider(padded_directory=True))
+        self.assertTrue(result['complete'], result)
+        self.assertEqual({row['symbol'] for row in self.read(result, 'screen')['candidates']},
+                         {'AAA', 'BBB', 'CCC', 'DDD'})
+        rows = {row['symbol']: row for row in self.read(result, 'directory')['data']['securities']}
+        self.assertEqual(rows['AAA']['security_name'], 'Fixture A Common Stock')
+        self.assertEqual(rows['AAA']['source_fields']['Security Name'], ' Fixture A Common Stock \t')
+        self.assertEqual(rows['AAA']['source_fields']['Symbol'], ' AAA ')
+        self.assertEqual(rows['CCC']['source_fields']['Security Name'], 'Fixture C Common Stock ')
+        self.assertEqual(rows['CCC']['source_fields']['ACT Symbol'], '\tCCC ')
+        self.assertEqual(self.read(result, 'manifest'), result)
+
+    def test_real_downstream_validation_failure_preserves_public_cause_in_manifest(self):
+        envelope = directory()
+        envelope['data']['securities'][0]['security_name'] = 'Conflicting fixture identity'
+        with patch(__name__ + '.directory', return_value=envelope):
+            result, provider = self.discover()
+        self.assertFalse(result['complete'])
+        self.assertEqual(result['failed_stage'], 'universe')
+        self.assertEqual(result['last_completed_stage'], 'directory')
+        self.assertEqual(result['error'], {'code': 'invalid_input',
+            'message': 'Directory normalized values disagree with their original source fields.'})
+        self.assertEqual([call['operation'] for call in provider.calls], ['symbols'])
+        self.assertEqual(self.read(result, 'directory')['data'], envelope['data'])
+        self.assertEqual(self.read(result, 'manifest'), result)
+
+    def test_provider_failure_is_structured_redacted_and_retained_without_fallback_roster(self):
+        provider = FixtureProvider()
+        diagnostic = 'Provider refused not-a-real-fixture-key and https://example.invalid/?token=unlisted-query-secret'
+        def denied(client, args):
+            raise acquire.DataError('access_denied', diagnostic)
+        with patch.object(acquire, 'handlers', return_value={'symbols': denied}):
+            result = acquire.discover(provider.client, self.vault, self.work, AS_OF, SINCE, now=NOW)
+        self.assertFalse(result['complete'])
+        self.assertEqual(result['failed_stage'], 'directory')
+        self.assertEqual(result['error']['code'], 'access_denied')
+        self.assertEqual(result['operations'][0]['error'], result['error'])
+        self.assertEqual(self.read(result, 'directory')['error'], result['error'])
+        self.assertEqual(self.read(result, 'manifest'), result)
+        for value in [result, *(json.loads(path.read_text(encoding='utf-8'))
+                               for path in Path(result['scratch']).iterdir())]:
+            self.assertNotIn('not-a-real-fixture-key', json.dumps(value))
+            self.assertNotIn('unlisted-query-secret', json.dumps(value))
+
+    def test_downstream_public_diagnostic_is_redacted_before_manifest_and_library_return(self):
+        import market_universe
+        provider = FixtureProvider()
+        provider.client.redaction_values += ('loaded-fixture-secret',)
+        error = acquire.DataError('invalid_input',
+                                  'Fixture rejection: not-a-real-fixture-key / loaded-fixture-secret.')
+        with patch.object(market_universe, 'universe', side_effect=error):
+            result, _ = self.discover(provider)
+        self.assertEqual(result['error']['message'], 'Fixture rejection: [redacted] / [redacted].')
+        self.assertEqual(self.read(result, 'manifest'), result)
+
+    def test_storage_failure_keeps_prior_batches_and_hides_native_error_payload(self):
+        original_save = acquire.Scratch.save
+        def disk_full(scratch, name, value):
+            if name == 'liquidity-proxy-0002.json':
+                raise OSError('DO-NOT-ECHO-private-storage-path not-a-real-fixture-key')
+            return original_save(scratch, name, value)
+        with patch.object(acquire.Scratch, 'save', new=disk_full):
+            result, _ = self.discover()
+        self.assertFalse(result['complete'])
+        self.assertEqual(result['failed_stage'], 'liquidity-proxy')
+        self.assertEqual(result['last_completed_stage'], 'calendar-windows')
+        self.assertEqual(result['error']['code'], 'scratch_access')
+        self.assertEqual(len(result['preliminary_batches']), 1)
+        self.assertTrue(Path(result['preliminary_batches'][0]['path']).is_file())
+        self.assertEqual(self.read(result, 'manifest'), result)
+        self.assertNotIn('DO-NOT-ECHO', json.dumps(result))
+        self.assertNotIn('not-a-real-fixture-key', json.dumps(result))
+
+    def test_manifest_storage_failure_remains_explicit_without_losing_original_failure(self):
+        envelope = directory()
+        envelope['data']['securities'][0]['security_name'] = 'Conflicting fixture identity'
+        original_save = acquire.Scratch.save
+        def disk_full(scratch, name, value):
+            if name == 'manifest.json':
+                raise OSError('DO-NOT-ECHO-private-storage-path')
+            return original_save(scratch, name, value)
+        with patch(__name__ + '.directory', return_value=envelope), patch.object(acquire.Scratch, 'save', new=disk_full):
+            result, _ = self.discover()
+        self.assertFalse(result['complete'])
+        self.assertEqual(result['error']['code'], 'invalid_input')
+        self.assertEqual(result['manifest_error']['code'], 'scratch_access')
+        self.assertFalse(Path(result['outputs']['manifest']).exists())
+        self.assertTrue(Path(result['outputs']['directory']).is_file())
+        self.assertEqual(result['failed_stage'], 'universe')
+        self.assertNotIn('DO-NOT-ECHO', json.dumps(result))
 
     def test_news_outage_does_not_suppress_price_access(self):
         result, provider = self.discover(FixtureProvider(news_error='network_error'))
@@ -284,17 +424,21 @@ class AcquisitionTests(unittest.TestCase):
 
     def test_later_stage_failure_keeps_manifest_paths_operations_and_no_payload(self):
         import market_universe
-        provider = FixtureProvider()
-        with patch.object(market_universe, 'prefilter', side_effect=ValueError('DO-NOT-ECHO-private-provider-payload')):
-            result, _ = self.discover(provider)
-        self.assertFalse(result['complete'])
-        self.assertEqual(result['failed_stage'], 'prefilter')
-        self.assertEqual(result['last_completed_stage'], 'liquidity-proxy')
-        self.assertTrue(Path(result['scratch']).is_dir())
-        self.assertEqual(self.read(result, 'manifest'), result)
-        self.assertTrue(result['preliminary_batches'])
-        self.assertTrue(result['operations'])
-        self.assertNotIn('DO-NOT-ECHO', json.dumps(result))
+        for exception_type in (ValueError, TypeError, KeyError, OSError, OverflowError,
+                               RuntimeError, AttributeError, IndexError):
+            with self.subTest(exception_type=exception_type):
+                error = exception_type('DO-NOT-ECHO-private-provider-payload')
+                with patch.object(market_universe, 'prefilter', side_effect=error):
+                    result, _ = self.discover()
+                self.assertFalse(result['complete'])
+                self.assertEqual(result['failed_stage'], 'prefilter')
+                self.assertEqual(result['last_completed_stage'], 'liquidity-proxy')
+                self.assertTrue(Path(result['scratch']).is_dir())
+                self.assertEqual(self.read(result, 'manifest'), result)
+                self.assertTrue(result['preliminary_batches'])
+                self.assertTrue(result['operations'])
+                self.assertEqual(result['error']['code'], 'stage_failure')
+                self.assertNotIn('DO-NOT-ECHO', json.dumps(result))
 
     def test_oversized_duplicate_input_retains_full_measured_screen_and_original_batches(self):
         original_save = acquire.Scratch.save

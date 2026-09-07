@@ -79,7 +79,7 @@ def universe(envelope, as_of, batch_size=100):
         if not isinstance(row, dict) or not isinstance(row.get('source_fields'), dict):
             fail('Invalid directory row.')
         symbol, name = row.get('symbol'), row.get('security_name')
-        if not isinstance(symbol, str) or not isinstance(name, str) or not name:
+        if not isinstance(symbol, str) or not symbol or not isinstance(name, str) or not name:
             fail('Directory identity is missing.')
         if symbol in seen:
             fail('Conflicting or duplicate directory symbol; resolve identity before screening.')
@@ -88,7 +88,11 @@ def universe(envelope, as_of, batch_size=100):
         if directory not in ('nasdaqlisted.txt', 'otherlisted.txt'):
             fail('Unknown security directory.')
         symbol_field = 'Symbol' if directory == 'nasdaqlisted.txt' else 'ACT Symbol'
-        if (fields.get(symbol_field) != symbol or fields.get('Security Name') != name
+        raw_symbol, raw_name = fields.get(symbol_field), fields.get('Security Name')
+        # The directory adapter trims these identities but retains the raw row.
+        # Compare that declared normalization, without changing source evidence.
+        if (not isinstance(raw_symbol, str) or not isinstance(raw_name, str)
+                or raw_symbol.strip() != symbol or raw_name.strip() != name
                 or type(row.get('etf')) is not bool or type(row.get('test_issue')) is not bool
                 or fields.get('ETF') != ('Y' if row['etf'] else 'N')
                 or fields.get('Test Issue') != ('Y' if row['test_issue'] else 'N')):
@@ -540,6 +544,76 @@ def run_self_test():
             self.directory['data']['securities'][0]['etf'] = True
             with self.assertRaises(DataError):
                 universe(self.directory, cutoff)
+
+        def test_real_padded_names_preserve_source_fields(self):
+            # Names observed in the September 2026 live directories, including
+            # MDBH's ambiguous "common" wording: normalization must not weaken
+            # the separate conservative instrument classification.
+            raw = ('Symbol|Security Name|Market Category|Test Issue|Round Lot Size|ETF\n'
+                   'MDBH|MDB Capital Holdings, LLC - Class A common |Q|N|100|N\n'
+                   'MLCO|Melco Resorts & Entertainment Limited - American Depositary Shares |Q|N|100|N\n'
+                   'File Creation Time: 0401202510:00|||||\n')
+            other = ('ACT Symbol|Security Name|Exchange|ETF|Round Lot Size|Test Issue\n'
+                     'AA|Alcoa Corporation Common Stock |N|N|100|N\n'
+                     'File Creation Time: 0401202510:00|||||\n')
+            self.directory['data'] = {'securities': [], 'files': []}
+            for filename, text in [('nasdaqlisted.txt', raw), ('otherlisted.txt', other)]:
+                rows, info = parse_directory(text, filename)
+                self.directory['data']['securities'].extend(rows)
+                self.directory['data']['files'].append(info)
+            original = copy.deepcopy(self.directory)
+            out = universe(self.directory, cutoff)
+            self.assertTrue(out['complete'])
+            self.assertEqual(out['coverage'], {'directory_records': 3, 'classified': 2,
+                                               'excluded_or_unresolved': 1})
+            self.assertEqual([r['symbol'] for r in out['universe']['instruments']], ['MLCO', 'AA'])
+            self.assertEqual(out['exclusions'][0]['symbol'], 'MDBH')
+            self.assertEqual(out['exclusions'][0]['reason'], 'common_or_adr_classification_unresolved')
+            self.assertEqual(self.directory, original)
+            self.assertEqual(out['source_envelope'], original)
+            self.assertTrue(all(r['source_fields']['Security Name'].endswith(' ')
+                                for r in out['source_envelope']['data']['securities']))
+
+        def test_parser_identity_whitespace_contract(self):
+            for filename, header, symbol, suffix in [
+                    ('nasdaqlisted.txt', 'Symbol|Security Name|Market Category|Test Issue|Round Lot Size|ETF',
+                     'AAA', 'Q|N|100|N'),
+                    ('otherlisted.txt', 'ACT Symbol|Security Name|Exchange|ETF|Round Lot Size|Test Issue',
+                     'CCC', 'N|N|100|N')]:
+                for padding in (' ', '\t', '\u00a0'):
+                    with self.subTest(directory=filename, padding=repr(padding)):
+                        source_symbol = padding + symbol + padding
+                        source_name = padding + 'Fixture Common Stock' + padding
+                        raw = '%s\n%s|%s|%s\nFile Creation Time: 0401202510:00|||||\n' % (
+                            header, source_symbol, source_name, suffix)
+                        rows, _ = parse_directory(raw, filename)
+                        directory = fixture_directory()
+                        directory['data']['securities'] = rows
+                        out = universe(directory, cutoff)
+                        self.assertTrue(out['complete'])
+                        self.assertEqual(out['universe']['instruments'][0]['symbol'], symbol)
+                        self.assertEqual(rows[0]['security_name'], 'Fixture Common Stock')
+                        field = 'Symbol' if filename == 'nasdaqlisted.txt' else 'ACT Symbol'
+                        self.assertEqual(rows[0]['source_fields'][field], source_symbol)
+                        self.assertEqual(rows[0]['source_fields']['Security Name'], source_name)
+
+        def test_source_identity_conflicts_refused(self):
+            for key, value in [('Symbol', 'OTHER'), ('Security Name', 'Different Common Stock'),
+                               ('Symbol', None), ('Symbol', 12), ('Symbol', ''),
+                               ('Security Name', None), ('Security Name', []), ('Security Name', '')]:
+                with self.subTest(field=key, value=value):
+                    directory = fixture_directory()
+                    directory['data']['securities'][0]['source_fields'][key] = value
+                    with self.assertRaises(DataError):
+                        universe(directory, cutoff)
+            for key, value in [('symbol', 'OTHER'), ('symbol', ''), ('symbol', ' AAA '),
+                               ('security_name', 'Different Common Stock'),
+                               ('security_name', 'Fixture A Common Stock ')]:
+                with self.subTest(field=key, value=value):
+                    directory = fixture_directory()
+                    directory['data']['securities'][0][key] = value
+                    with self.assertRaises(DataError):
+                        universe(directory, cutoff)
 
         def test_hash_batches_stable_and_complete(self):
             rows = self.plan['universe']['instruments']

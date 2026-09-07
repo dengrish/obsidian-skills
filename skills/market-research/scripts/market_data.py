@@ -261,7 +261,9 @@ def main(argv=None, client=None):
                   'error': {'code': 'invalid_response', 'message': 'Unexpected provider data or local input; no complete result was assumed.'},
                   'requests': client.requests if client is not None else []}
         code = 2
-    print(json.dumps(redact(result, env, extra_values=redaction_values), ensure_ascii=False, allow_nan=False))
+    print(json.dumps(redact(result, env, extra_values=redaction_values,
+                            price_bars=getattr(args, 'command', None) == 'prices'),
+                     ensure_ascii=False, allow_nan=False))
     return code
 
 
@@ -332,16 +334,16 @@ def run_self_test():
             self.assertEqual(handler.call_args.args[1].vintage_date, '2026-09-03')
             self.assertNotIn('fixture-fred-secret', json.dumps(result))
 
-        def test_combined_price_adjustments_reach_the_provider(self):
+        def test_prices_cli_keeps_key_ticker_and_forwards_combined_adjustments(self):
             from datetime import datetime, timezone
             from market_prices import alpaca_bars
             frozen = datetime(2026, 9, 5, tzinfo=timezone.utc)
             client = SimpleNamespace(env={'ALPACA_API_KEY': 'fixture-id', 'ALPACA_SECRET_KEY': 'fixture-secret'},
                                      requests=[], get_json=Mock(return_value={
-                                         'bars': {'AAPL': [{'t': '2026-09-03T04:00:00Z', 'o': 10,
+                                         'bars': {'KEY': [{'t': '2026-09-03T04:00:00Z', 'o': 10,
                                                            'h': 11, 'l': 9, 'c': 10, 'v': 100,
                                                            'n': 10, 'vw': 10}]}, 'next_page_token': None}))
-            argv = ['prices', '--symbols', 'AAPL', '--start', '2026-09-03T04:00:00Z',
+            argv = ['prices', '--symbols', 'KEY', '--start', '2026-09-03T04:00:00Z',
                     '--end', '2026-09-04T12:00:00Z', '--adjustment', 'split,spin-off']
             output = io.StringIO()
             with contextlib.redirect_stdout(output), patch(__name__ + '.handlers', return_value={'prices': alpaca_bars}), \
@@ -349,6 +351,7 @@ def run_self_test():
                 self.assertEqual(main(argv, client), 0)
             self.assertEqual(client.get_json.call_args.kwargs['params']['adjustment'], 'split,spin-off')
             self.assertEqual(json.loads(output.getvalue())['query']['adjustment'], 'split,spin-off')
+            self.assertEqual(json.loads(output.getvalue())['data']['bars']['KEY'][0]['c'], 10)
             client.get_json.reset_mock()
             with contextlib.redirect_stdout(io.StringIO()), patch(__name__ + '.handlers', return_value={'prices': alpaca_bars}), \
                     patch('market_prices.utc_now', return_value=frozen):

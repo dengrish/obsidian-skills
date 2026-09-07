@@ -202,6 +202,7 @@ def alpaca_bars(client, args):
               "timeframe": timeframe, "adjustment": adjustment, "asof": asof,
               "feed": feed, "currency": "USD", "limit": 10000, "sort": "asc"}
     bars = {symbol: [] for symbol in symbols}
+    rejected = {}
     skipped = 0
 
     def decode(payload):
@@ -209,21 +210,33 @@ def alpaca_bars(client, args):
         values = payload.get("bars")
         if not isinstance(values, dict) or any(symbol not in bars for symbol in values):
             raise DataError("invalid_response", "Alpaca returned missing bars data or an unrequested symbol.")
-        parsed = {}
-        total = 0
-        for symbol, rows in values.items():
+        # Structural page failures still invalidate the page. Check these
+        # before recording any symbol-specific validation failures.
+        for rows in values.values():
             if not isinstance(rows, list):
                 raise DataError("invalid_response", "Alpaca symbol bars are not a list.")
-            total += len(rows)
+        if sum(len(rows) for rows in values.values()) > 10000:
+            raise DataError("invalid_response", "Alpaca exceeded the requested page size.")
+        parsed = {}
+        for symbol, rows in values.items():
             parsed[symbol] = []
+            if symbol in rejected:
+                continue
             for raw in rows:
-                bar = _bar(raw, timeframe, start, end)
+                try:
+                    bar = _bar(raw, timeframe, start, end)
+                except DataError as error:
+                    # One malformed security must not erase unrelated valid
+                    # symbols. Quarantine its whole history, across all pages;
+                    # never fill or infer prices/turnover for rejected bars.
+                    rejected[symbol] = {"symbol": symbol,
+                                        "error": {"code": error.code, "message": str(error)}}
+                    parsed[symbol] = []
+                    break
                 if bar is None:
                     skipped += 1
                 else:
                     parsed[symbol].append(bar)
-        if total > 10000:
-            raise DataError("invalid_response", "Alpaca exceeded the requested page size.")
         return parsed
 
     if end < start:
@@ -236,6 +249,8 @@ def alpaca_bars(client, args):
     seen = {symbol: set() for symbol in symbols}
     for page in pages:
         for symbol, rows in page.items():
+            if symbol in rejected:
+                continue
             for bar in rows:
                 key = bar["interval_start"]
                 if key in seen[symbol]:
@@ -252,8 +267,12 @@ def alpaca_bars(client, args):
         warnings.append("Some requested symbols have no usable bars; absence is not evidence of zero trading.")
     if skipped:
         warnings.append(f"Excluded {skipped} minute bars whose intervals cross the requested cutoff.")
+    if rejected:
+        complete = False
+        warnings.append("Symbols with invalid bars are unavailable for the entire request; "
+                        "other validated symbols are retained. Inspect data.rejected_symbols.")
     latest = max((bar["interval_start"] for rows in bars.values() for bar in rows), default=None)
-    return {
+    result = {
         "provider": "alpaca", "resource": "bars", "complete": complete,
         "warnings": list(dict.fromkeys(warnings)), "pagination": pagination,
         "source": {"url": BARS_URL, "documentation": "https://docs.alpaca.markets/us/reference/stockbars",
@@ -261,8 +280,13 @@ def alpaca_bars(client, args):
                    "coverage": "consolidated U.S. exchanges" if feed == "sip" else "IEX only",
                    "timestamp_basis": "left boundary of aggregation interval"},
         "query": params | {"requested_end": _iso(requested_end)},
-        "data": {"requested_symbols": symbols, "bars": bars, "missing_symbols": missing},
+        "data": {"requested_symbols": symbols, "bars": bars, "missing_symbols": missing,
+                 "rejected_symbols": [rejected[symbol] for symbol in symbols if symbol in rejected]},
     }
+    if rejected:
+        result["error"] = {"code": "invalid_response",
+            "message": "Some requested symbols contained invalid bars; their entire histories are unavailable. Other validated symbols are retained."}
+    return result
 
 
 def _dates(args):
@@ -517,21 +541,93 @@ def run_self_test():
             self.assertEqual(client.calls[0][1]["asof"], "2026-09-04")
 
         def test_invalid_price_and_future_bar(self):
-            for raw in (bar(o=float("nan")), bar(n=True), bar("2026-09-05T04:00:00Z")):
-                with self.subTest(raw=raw), self.assertRaises(DataError):
-                    alpaca_bars(FakeClient([page({"AAPL": [raw]})]), args())
+            missing_vwap = bar(); missing_vwap.pop("vw")
+            for raw in (bar(o=float("nan")), bar(n=True), bar(vw=0), bar(vw=-1),
+                        bar(vw=float("nan")), bar(vw=True), missing_vwap,
+                        bar("2026-09-05T04:00:00Z")):
+                with self.subTest(raw=raw):
+                    with self.assertRaises(DataError):
+                        _bar(raw, "1Day", parse_time(args().start), parse_time("2026-09-05T03:59:59.999999Z"))
+                    result = alpaca_bars(FakeClient([page({"AAPL": [raw], "MSFT": [bar()]})]), args())
+                    self.assertFalse(result["complete"])
+                    self.assertEqual(result["data"]["bars"]["AAPL"], [])
+                    self.assertEqual(len(result["data"]["bars"]["MSFT"]), 1)
+                    self.assertEqual(result["data"]["missing_symbols"], ["AAPL"])
+                    self.assertEqual(result["data"]["rejected_symbols"][0]["error"]["code"], "invalid_response")
 
         def test_open_and_close_must_be_within_the_bar_range(self):
             # Alpaca's open/close-eligible trades also update high/low. A
             # contradictory candle must not become a momentum/return input.
             for changes in ({"o": 97}, {"o": 106}, {"c": 97}, {"c": 106}):
-                with self.subTest(changes=changes), self.assertRaises(DataError):
-                    alpaca_bars(FakeClient([page({"AAPL": [bar(**changes)]})]), args(symbols="AAPL"))
+                with self.subTest(changes=changes):
+                    result = alpaca_bars(FakeClient([page({"AAPL": [bar(**changes)]})]), args(symbols="AAPL"))
+                    self.assertFalse(result["complete"])
+                    self.assertEqual(result["data"]["bars"]["AAPL"], [])
+                    self.assertEqual(result["data"]["rejected_symbols"][0]["error"]["message"],
+                                     "Alpaca bar volume, trade count, or range is invalid.")
             for changes in ({"o": 98, "c": 105}, {"o": 105, "c": 98},
                             {"o": 100, "h": 100, "l": 100, "c": 100, "vw": 100}):
                 with self.subTest(changes=changes):
                     result = alpaca_bars(FakeClient([page({"AAPL": [bar(**changes)]})]), args(symbols="AAPL"))
                     self.assertTrue(result["complete"])
+
+        def test_zero_volume_constant_price_placeholder_does_not_discard_other_symbols(self):
+            # Shape observed in live broad retrieval: flat positive OHLC, but
+            # zero volume, zero trades and zero VWAP. Do not infer turnover.
+            placeholder = bar(o=13.37, h=13.37, l=13.37, c=13.37, v=0, n=0, vw=0)
+            client = FakeClient([page({"AAPL": [placeholder], "MSFT": [bar()]})])
+            result = alpaca_bars(client, args())
+            self.assertFalse(result["complete"])
+            self.assertTrue(result["pagination"]["exhausted"])
+            self.assertEqual(result["data"]["requested_symbols"], ["AAPL", "MSFT"])
+            self.assertEqual(result["data"]["bars"]["AAPL"], [])
+            self.assertEqual(result["data"]["bars"]["MSFT"][0]["vw"], 101)
+            self.assertEqual(result["data"]["rejected_symbols"], [{"symbol": "AAPL", "error": {
+                "code": "invalid_response", "message": "Alpaca bar contains an invalid price or VWAP."}}])
+            self.assertEqual(result["error"]["code"], "invalid_response")
+
+        def test_later_invalid_bar_quarantines_previous_and_subsequent_pages(self):
+            client = FakeClient([
+                page({"AAPL": [bar("2026-09-03T04:00:00Z")]}, "second"),
+                page({"AAPL": [bar(vw=0)], "MSFT": [bar("2026-09-03T04:00:00Z")]}, "third"),
+                page({"AAPL": [bar()], "MSFT": [bar()]}),
+            ])
+            result = alpaca_bars(client, args())
+            self.assertFalse(result["complete"])
+            self.assertEqual(result["pagination"], {"pages": 3, "exhausted": True})
+            self.assertEqual(result["data"]["bars"]["AAPL"], [])
+            self.assertEqual(len(result["data"]["bars"]["MSFT"]), 2)
+            self.assertEqual(result["data"]["missing_symbols"], ["AAPL"])
+            self.assertEqual(len(result["data"]["rejected_symbols"]), 1)
+
+        def test_all_rejected_symbols_stay_missing_with_bounded_public_diagnostics(self):
+            client = FakeClient([page({"MSFT": [bar(t="DO-NOT-ECHO-provider-payload")] * 50,
+                                       "AAPL": [bar(vw=0)] * 50})])
+            result = alpaca_bars(client, args())
+            self.assertFalse(result["complete"])
+            self.assertEqual(result["data"]["bars"], {"AAPL": [], "MSFT": []})
+            self.assertEqual(result["data"]["missing_symbols"], ["AAPL", "MSFT"])
+            self.assertEqual([item["symbol"] for item in result["data"]["rejected_symbols"]], ["AAPL", "MSFT"])
+            self.assertIsNone(result["source"]["latest_bar_interval_start"])
+            self.assertNotIn("DO-NOT-ECHO", json.dumps(result))
+
+        def test_structural_page_failures_are_not_downgraded_to_symbol_quarantine(self):
+            for values in ({"ALIEN": [bar()], "AAPL": [bar(vw=0)]},
+                           {"AAPL": [bar(vw=0)], "MSFT": None},
+                           {"AAPL": [bar(vw=0)] * 10001}):
+                with self.subTest(values=list(values)), patch(__name__ + "._bar") as validate:
+                    with self.assertRaises(DataError):
+                        alpaca_bars(FakeClient([page(values)]), args())
+                    validate.assert_not_called()
+
+        def test_minute_symbol_quarantine_preserves_other_symbols_without_zero_fill(self):
+            stamp = "2026-09-05T12:44:00Z"
+            result = alpaca_bars(FakeClient([page({"AAPL": [bar(stamp, vw=0)], "MSFT": [bar(stamp)]})]),
+                                 args(timeframe="1Min"))
+            self.assertFalse(result["complete"])
+            self.assertEqual(result["data"]["bars"]["AAPL"], [])
+            self.assertEqual(len(result["data"]["bars"]["MSFT"]), 1)
+            self.assertEqual(result["data"]["missing_symbols"], ["AAPL"])
 
         def test_duplicate_bar_never_silently_succeeds(self):
             result = alpaca_bars(FakeClient([page({"AAPL": [bar(), bar()]})]), args(symbols="AAPL"))

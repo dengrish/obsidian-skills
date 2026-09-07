@@ -1,6 +1,6 @@
 {
   "name": "investments",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Research buying opportunities in liquid U.S.-listed stocks, track investment theses and recommendation outcomes, and write concise daily briefs with detailed research records in an Obsidian vault.",
   "repository": "https://github.com/dengrish/obsidian-skills",
   "author": {
