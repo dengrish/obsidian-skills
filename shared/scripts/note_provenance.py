@@ -33,13 +33,19 @@ def _unique_object(pairs):
     result = {}
     for key, value in pairs:
         if key in result:
-            raise ValueError('duplicate provenance JSON key: ' + key)
+            # Escaped JSON may contain lone surrogates or line breaks. Keep the
+            # diagnostic printable without turning malformed metadata into a
+            # second failure in a caller's UTF-8 report.
+            raise ValueError('duplicate provenance JSON key: ' + repr(key))
         result[key] = value
     return result
 
 
 def _json(text):
-    return json.loads(text, object_pairs_hook=_unique_object)
+    try:
+        return json.loads(text, object_pairs_hook=_unique_object)
+    except RecursionError as exc:
+        raise ValueError('provenance JSON nesting is too deep') from exc
 
 
 def _snapshot(item):
@@ -79,6 +85,8 @@ def validate_record(record):
     if not isinstance(digest, str) or not HEX256.fullmatch(digest):
         raise ValueError('invalid runtime SHA-256')
     status = record['source_status']
+    if not isinstance(status, str):
+        raise ValueError('invalid provenance source status')
     commit, url = record['source_commit'], record['source_url']
     if status == 'committed':
         if not isinstance(commit, str) or not COMMIT.fullmatch(commit):
@@ -162,6 +170,7 @@ def verified_record(plugin_root, skill):
     manifest = _json(manifest_bytes)
     if (not isinstance(manifest, dict) or set(manifest) != MANIFEST_FIELDS
             or type(manifest['schema']) is not int or manifest['schema'] != 1
+            or not isinstance(manifest['plugin'], str)
             or manifest['plugin'] not in {'knowledge', 'investments'}):
         raise ValueError('invalid bundled provenance manifest')
     qualified = str(manifest['plugin']) + ':' + skill
@@ -180,6 +189,12 @@ def verified_record(plugin_root, skill):
     for relative, digest in files.items():
         if not isinstance(relative, str):
             raise ValueError('invalid runtime inventory path')
+        try:
+            relative.encode('utf-8')
+        except UnicodeEncodeError:
+            # JSON permits lone surrogate escapes, but they cannot name an
+            # inventory entry or appear safely in a UTF-8 validation report.
+            raise ValueError('runtime inventory path must be valid UTF-8') from None
         path = PurePosixPath(relative)
         if (not relative or path.is_absolute() or '..' in path.parts
                 or path.as_posix() != relative or '\\' in relative
@@ -313,6 +328,29 @@ def run_self_test():
             body, metadata = split_provenance(stamp_text('', self.record))
             self.assertFalse(body.strip())
             self.assertEqual(metadata['generated_by'], self.record)
+
+        def test_nonstring_source_status_is_a_metadata_error(self):
+            for status in ([], {}, None, 1, True):
+                with self.subTest(status=status), self.assertRaisesRegex(ValueError, 'source status'):
+                    payload = {'schema': 1, 'generated_by': dict(self.record, source_status=status)}
+                    split_provenance('Definition.\n\n<!-- skill-provenance: '
+                                     + json.dumps(payload) + ' -->\n')
+
+        def test_deep_json_is_a_metadata_error(self):
+            depth = sys.getrecursionlimit() + 100
+            text = ('Definition.\n\n<!-- skill-provenance: {"schema":1,"generated_by":'
+                    + '[' * depth + '0' + ']' * depth + '} -->\n')
+            with self.assertRaisesRegex(ValueError, 'nesting is too deep'):
+                split_provenance(text)
+
+        def test_duplicate_json_key_diagnostic_is_utf8_safe(self):
+            for key in ('\\ud800', '\\n', 'résumé'):
+                text = ('Definition.\n\n<!-- skill-provenance: {"' + key
+                        + '":1,"' + key + '":2} -->\n')
+                with self.subTest(key=key), self.assertRaises(ValueError) as caught:
+                    split_provenance(text)
+                str(caught.exception).encode('utf-8')
+                self.assertNotIn('\n', str(caught.exception))
 
     result = unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromTestCase(ProvenanceTests))
     total = result.testsRun

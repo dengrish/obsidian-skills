@@ -231,8 +231,12 @@ from the draft's `as_of`; its optional `--as-of` must match that value.
 Before publication, audit the claims that determine selection, readiness or risk
 against their retained evidence and calculations. Check citations, timestamps,
 quote sessions/delays, arithmetic, setup counterarguments and continuity against
-the previous active theses. Correct unsupported claims or downgrade the buying
-conclusion, then recheck the revised assessment; do not merely append a warning
+the previous active theses. Where available, use a bounded independent checker
+with the draft, cutoff and original evidence in a fresh context; ask for supported,
+contradicted, unsupported or stale findings and recomputation of decisive values.
+If delegation is unavailable, perform a fresh evidence-first check yourself.
+Another model's agreement is not source verification. Correct unsupported claims
+or downgrade the buying conclusion, then recheck the revised assessment; do not merely append a warning
 while leaving the same unsupported recommendation. Verify every brief
 candidate's state, conditions and risks agree with its
 detailed assessment and ledger, and that the brief makes no current-holdings or

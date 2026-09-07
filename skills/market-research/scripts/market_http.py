@@ -243,12 +243,40 @@ class HttpClient:
             return result
         def constant(value):
             raise ValueError('nonfinite')
+        def unique_object(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError('duplicate object key')
+                result[key] = value
+            return result
         try:
-            return json.loads(self._get(url, params, headers), parse_float=number, parse_constant=constant)
+            result = json.loads(self._get(url, params, headers), parse_float=number,
+                                parse_constant=constant, object_pairs_hook=unique_object)
+            # The JSON decoder accepts lone surrogate escapes and structures
+            # too deep for downstream redaction/serialization. Reject these
+            # before provider fields can escape the CLI's safe error contract.
+            pending = [(result, 0)]
+            while pending:
+                value, depth = pending.pop()
+                if isinstance(value, str):
+                    value.encode('utf-8')
+                elif isinstance(value, (dict, list)):
+                    if depth >= 100:
+                        raise ValueError('excessive JSON nesting')
+                    if isinstance(value, dict):
+                        for key in value:
+                            key.encode('utf-8')
+                        children = value.values()
+                    else:
+                        children = value
+                    pending.extend((child, depth + 1) for child in children)
+            return result
         except (ValueError, RecursionError) as exc:
             if isinstance(exc, DataError):
                 raise
-            raise DataError('invalid_response', 'Provider did not return valid finite JSON data.') from None
+            raise DataError('invalid_response',
+                            'Provider did not return valid, unambiguous UTF-8 JSON within supported limits.') from None
 
 
 def run_self_test():
@@ -405,6 +433,38 @@ def run_self_test():
             with self.assertRaises(DataError) as result:
                 client.get_json('https://www.alphavantage.co/query')
             self.assertEqual(result.exception.code, 'invalid_response')
+
+        def test_duplicate_json_fields_cannot_replace_provider_evidence(self):
+            for payload in (b'{"cik":111,"cik":222}',
+                            b'{"data":[{"close":10,"close":20}]}',
+                            b'{"cik":111,"ci\\u006b":222}'):
+                with self.subTest(payload=payload):
+                    client = self.client([Reply(payload)])
+                    with self.assertRaises(DataError) as result:
+                        client.get_json('https://www.alphavantage.co/query')
+                    self.assertEqual(result.exception.code, 'invalid_response')
+
+        def test_json_strings_must_be_emittable_as_utf8(self):
+            for payload in (b'{"headline":"\\ud800"}', b'{"data":["\\udfff"]}',
+                            b'{"\\ud800":"value"}'):
+                with self.subTest(payload=payload):
+                    client = self.client([Reply(payload)])
+                    with self.assertRaises(DataError) as result:
+                        client.get_json('https://www.alphavantage.co/query')
+                    self.assertEqual(result.exception.code, 'invalid_response')
+            client = self.client([Reply(b'{"headline":"\\ud83d\\ude80"}')])
+            self.assertEqual(client.get_json('https://www.alphavantage.co/query')['headline'], '\U0001f680')
+
+        def test_json_nesting_is_safe_for_downstream_redaction(self):
+            # This depth is accepted by json.loads, but was not bounded before
+            # recursive output sanitization. Actual provider schemas are shallow.
+            client = self.client([Reply(b'[' * 101 + b'0' + b']' * 101)])
+            with self.assertRaises(DataError) as result:
+                client.get_json('https://www.alphavantage.co/query')
+            self.assertEqual(result.exception.code, 'invalid_response')
+            client = self.client([Reply(b'[' * 100 + b'0' + b']' * 100)])
+            value = client.get_json('https://www.alphavantage.co/query')
+            self.assertEqual(json.dumps(redact(value)), '[' * 100 + '0' + ']' * 100)
 
         def test_response_bounds_encoding_and_finiteness(self):
             for reply in (Reply(b'abc', {'Content-Length': '5'}), Reply(b'\xff'),

@@ -6,6 +6,7 @@ network, credentials or model-generated research is required.
 """
 
 import copy
+from datetime import datetime
 import hashlib
 import importlib.util
 import json
@@ -36,6 +37,7 @@ provenance = load("note_provenance", SHARED / "note_provenance.py")
 wiki = load("provenance_wiki_lint", ROOT / "skills/wiki-build/scripts/lint_entry.py")
 scanner = load("provenance_vault_scan", ROOT / "skills/wiki-lint/scripts/scan_vault.py")
 summary = load("provenance_summary_lint", ROOT / "skills/paper-summarize/scripts/note_lint.py")
+market = load("provenance_market_notes", ROOT / "skills/market-research/scripts/market_notes.py")
 
 
 def record(skill="knowledge:wiki-build", version="1.0.2"):
@@ -153,6 +155,31 @@ class NoteFormatTests(unittest.TestCase):
         self.assertIsNone(metadata["generated_by"])
         self.assertEqual(metadata["updated_by"], updater)
         self.assertEqual(provenance.stamp_text(original, updater, previous=original), original)
+
+    def test_malformed_market_provenance_is_reported_without_aborting_history(self):
+        folder = self.vault / "Investments"
+        folder.mkdir()
+        path = folder / "2026-09-05-market-research.md"
+        depth = sys.getrecursionlimit() + 100
+        payloads = [
+            (json.dumps({"schema": 1, "generated_by": dict(
+                record("investments:market-research"), source_status=status)}), "source status")
+            for status in ([], {})
+        ] + [
+            ('{"schema":1,"generated_by":' + '[' * depth + '0' + ']' * depth + '}',
+             "nesting is too deep"),
+            ('{"\\ud800":1,"\\ud800":2}', "duplicate provenance JSON key"),
+        ]
+        for payload, expected in payloads:
+            with self.subTest(expected=expected, prefix=payload[:60]):
+                data = ("Note.\n\n<!-- skill-provenance: " + payload + " -->\n").encode("utf-8")
+                path.write_bytes(data)
+                now = datetime.fromisoformat("2026-09-06T11:30:00-04:00")
+                for result in (market.context(self.vault, now), market.outcomes(self.vault, now=now)):
+                    self.assertFalse(result["complete"])
+                    self.assertTrue(any(expected in finding["error"] for finding in result["findings"]))
+                    json.dumps(result, ensure_ascii=False).encode("utf-8")
+                self.assertEqual(path.read_bytes(), data)
 
 
 class RuntimeCliTests(unittest.TestCase):
@@ -276,6 +303,43 @@ class RuntimeCliTests(unittest.TestCase):
         inspected = self.cli("inspect")
         self.assertNotEqual(inspected.returncode, 0)
         self.assertIn("manifest disagrees", inspected.stderr)
+
+    def test_malformed_manifest_values_are_validation_errors(self):
+        for key in ("source_status", "plugin"):
+            for value in ([], {}):
+                with self.subTest(key=key, value=value):
+                    original = self.manifest[key]
+                    self.manifest[key] = value
+                    self.write_manifest()
+                    with patch.dict(os.environ, {"OBSIDIAN_VAULT_SHARED": str(self.plugin / "shared/scripts")}):
+                        with self.assertRaises(ValueError):
+                            provenance.verified_record(self.plugin, "wiki-build")
+                    self.manifest[key] = original
+        self.write_manifest()
+
+    def test_non_utf8_inventory_paths_fail_before_runtime_comparison(self):
+        pristine = copy.deepcopy(self.manifest)
+        for relative in ("\ud800", "shared/\udfff.py", "skills/wiki-build/\ud800/SKILL.md"):
+            with self.subTest(relative=ascii(relative)):
+                self.manifest = copy.deepcopy(pristine)
+                self.manifest["files"][relative] = "c" * 64
+                # A matching inventory digest must not allow invalid path text
+                # to reach the mismatch diagnostic and break its UTF-8 output.
+                self.manifest["runtime_sha256"] = hashlib.sha256(json.dumps(
+                    self.manifest["files"], sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+                self.write_manifest()
+                with patch.dict(os.environ, {"OBSIDIAN_VAULT_SHARED": str(self.plugin / "shared/scripts")}):
+                    with self.assertRaisesRegex(ValueError, "inventory path must be valid UTF-8") as caught:
+                        provenance.verified_record(self.plugin, "wiki-build")
+                str(caught.exception).encode("utf-8")
+                inspected = self.cli("inspect")
+                self.assertEqual(inspected.returncode, 1)
+                self.assertEqual(inspected.stdout, "")
+                self.assertIn("inventory path must be valid UTF-8", inspected.stderr)
+                self.assertNotIn("Traceback", inspected.stderr)
+        self.manifest = pristine
+        self.write_manifest()
+        self.assertEqual(self.cli("inspect").returncode, 0)
 
 
 if __name__ == "__main__":

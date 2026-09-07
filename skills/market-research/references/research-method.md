@@ -107,6 +107,27 @@ unambiguous; do not create a ledger for every background fact or copy full
 articles, raw feeds or private deliberation transcripts. Link unchanged historical
 evidence instead of duplicating it every day.
 
+## Prepare for material upcoming events
+
+For a leading or tracked candidate with an upcoming earnings release or other
+decision-changing event, retain a compact prospective expectations snapshot under
+Candidate assessments. Verify the event, fiscal period and expected timing with
+its dated source; a calendar estimate is not a confirmed announcement or result.
+Preserve the few decisive prior-guidance, available pre-event consensus or
+operating observations with their dates, periods, units and definitions. Mark
+missing consensus as unavailable; do not substitute a guessed market expectation
+or a social "whisper" for it.
+
+State what result would strengthen or weaken the buying case and which unresolved
+premise the event can test. These are conditional tests, not invented probabilities
+or targets. Give the snapshot a specific heading so later editions can link it.
+Reuse an unchanged snapshot by link; record a material expectations change as a
+new dated update before the event. Afterward, compare results with the preserved
+pre-event observations, separating guidance, consensus and the research hypothesis.
+Never reconstruct a supposedly prior expectation from post-result commentary.
+Keep the next event/check short in the Decision brief; no separate calendar,
+report series or full earnings model is required.
+
 ## Four distinct setup tests
 
 For each shortlisted business, use its latest relevant release or transcript to
@@ -133,6 +154,16 @@ rate from a zero or negative base. Explain acquisitions, restatements, dilution,
 unusual items and changed definitions that prevent comparison. Missing metrics or
 transcripts stay explicit gaps. Finish with what changed the 3–12 month buying
 case and what would refute it; no separate earnings report or full model is needed.
+
+Test the durability of the improvement where it determines the thesis. Check for
+pull-forward purchases, restocking, shortages, subsidies or concentrated customer
+budgets against recurring demand and cash generation. Use relevant evidence such
+as retention, inventory, capacity commitments or customer spending; do not apply
+every metric to every business. When a changed disclosure or unanswered question
+could alter the case, compare the relevant current and prior filing section or
+transcript exchange, citing both. Distinguish business changes, omitted metrics
+and changed definitions from boilerplate or reformatting. Management tone alone
+does not establish dishonesty or business deterioration.
 
 **Earnings overreaction.** Assess whether the price move exceeds the plausible
 business impact, with a credible 3–12 month recovery mechanism and observable
@@ -168,15 +199,22 @@ For every leading idea, explain **why a purchase could still be attractive after
 the observed price reaction**. Compare the proposed improvement with what is
 already reflected in price and available dated expectations. Use relevant
 valuation/history/peer context only with comparable sourced inputs; distinguish
-an inference about expectations from an observed fact. An attractive company or
+an inference about expectations from an observed fact. If valuation determines the
+ranking, test how it changes under plausible, explicitly stated changes to the few
+decisive operating or multiple assumptions; missing inputs stay missing rather
+than receiving default values. An attractive company or
 rising price alone does not establish an attractive entry. Do not invent target
 prices, expected-return probabilities or precision unsupported by the evidence.
 
 Method references: the thematic extension draws on
-[Anthropic's idea-generation workflow](https://github.com/anthropics/financial-services/blob/main/plugins/vertical-plugins/equity-research/skills/idea-generation/SKILL.md)
-and [Mira's industry concept analysis](https://github.com/byteseek/Mira/blob/main/skills/industry-concept-analysis/SKILL.md);
+[Anthropic's idea-generation workflow](https://github.com/anthropics/financial-services/blob/69cbc81467a5dced793eee03dec4658aa24ef856/plugins/vertical-plugins/equity-research/skills/idea-generation/SKILL.md)
+and [Mira's industry concept analysis](https://github.com/byteseek/Mira/blob/adddce7c6f41be309855e3c7d047e309bbe58a3a/skills/industry-concept-analysis/SKILL.md);
 the compact earnings comparisons draw on
-[Anthropic's earnings workflow](https://github.com/anthropics/financial-services/blob/main/plugins/vertical-plugins/equity-research/skills/earnings-analysis/references/workflow.md).
+[Anthropic's earnings workflow](https://github.com/anthropics/financial-services/blob/69cbc81467a5dced793eee03dec4658aa24ef856/plugins/vertical-plugins/equity-research/skills/earnings-analysis/references/workflow.md).
+The prospective snapshot, durability and disclosure checks also draw on
+[Anthropic's earnings preview](https://github.com/anthropics/financial-services/blob/69cbc81467a5dced793eee03dec4658aa24ef856/plugins/vertical-plugins/equity-research/skills/earnings-preview/SKILL.md),
+[Mira's retrospective demand case](https://github.com/byteseek/Mira/blob/adddce7c6f41be309855e3c7d047e309bbe58a3a/cases/pton-2020-2022-failure-backtest/methodology-delta.md)
+and [InvestSkill's earnings-call analysis](https://github.com/yennanliu/InvestSkill/blob/c1a5b013a5d6341eed4060c406ec1e8330698320/plugins/us-stock-analysis/skills/earnings-call-analysis/SKILL.md).
 The applicable method is stated here; these upstream workflows are not runtime
 dependencies or evidence of investment performance.
 
