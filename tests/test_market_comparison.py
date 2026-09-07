@@ -3,7 +3,9 @@
 import copy
 from datetime import datetime, time, timedelta, timezone
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -133,7 +135,7 @@ class ComparisonTests(unittest.TestCase):
         self.card = comparison.form(self.bundle)
         self.temp = tempfile.TemporaryDirectory(prefix='.market-comparison-test-')
         self.addCleanup(self.temp.cleanup)
-        self.vault = Path(self.temp.name)
+        self.vault = Path(self.temp.name).resolve()
         self.folder = self.vault / 'Investments'
         self.folder.mkdir()
 
@@ -526,6 +528,255 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(output['members'], self.card['members'])
         self.assertIn('#### Comparison cohorts', output['journal_markdown'])
         self.assertEqual(list(self.folder.iterdir()), [])
+
+    def test_linked_formation_keeps_full_evidence_outside_the_readable_note(self):
+        rendered = comparison.formation_markdown(self.card, '2024-05-01-market-research', self.vault)
+        attachment = rendered['evidence_attachment']
+        path = Path(attachment['path'])
+        self.assertEqual(path.parent, self.folder / 'Snapshots' / 'Comparisons')
+        self.assertEqual(path.name, attachment['sha256'] + '.json')
+        raw, before = path.read_bytes(), path.stat().st_mtime_ns
+        self.assertEqual(comparison.hashlib.sha256(raw).hexdigest(), attachment['sha256'])
+        self.assertNotIn('History calendar', rendered['detail_markdown'])
+        self.assertNotIn('| Sources |', rendered['detail_markdown'])
+        self.assertNotIn('| NASDAQ | DDD |', rendered['detail_markdown'])
+        self.assertLess(len(rendered['detail_markdown']), 5000)
+        self.assertGreater(len(raw), len(rendered['detail_markdown']) * 3)
+        parsed = comparison.read_card(rendered['detail_markdown'], comparison.heading_for(self.card['metadata']['Cohort']),
+                                      vault=self.vault, note_key='2024-05-01-market-research')
+        self.assertEqual(parsed, self.card)
+        retried = comparison.formation_markdown(self.card, '2024-05-01-market-research', self.vault)
+        self.assertEqual(retried['evidence_attachment']['status'], 'unchanged')
+        self.assertEqual(path.stat().st_mtime_ns, before)
+        self.assertEqual(path.read_bytes(), raw)
+        self.assertEqual(list(self.vault.glob('.comparison-*')), [])
+
+    def test_partial_upstream_discovery_cannot_form_a_smaller_successful_cohort(self):
+        incomplete = copy.deepcopy(self.bundle)
+        incomplete['universe'].update(discovery_complete=False,
+            discovery_coverage={'declared': 7, 'passing': 4, 'unavailable': 3},
+            discovery_input_sha256='a' * 64)
+        self.assertFalse(comparison.market_screen.screen(incomplete)['complete'])
+        formed = comparison.form(incomplete)
+        self.assertEqual(formed['metadata']['State'], 'unavailable')
+        self.assertEqual(formed['members'], [])
+        self.assertTrue(all(row[-1] == 'unavailable' for row in formed['rows']))
+        self.assertNotEqual(formed['metadata']['Screen input SHA-256'], self.card['metadata']['Screen input SHA-256'])
+        rendered = comparison.formation_markdown(formed, '2024-05-01-market-research', self.vault)
+        restored = comparison.read_card(rendered['detail_markdown'], comparison.heading_for(formed['metadata']['Cohort']),
+                                       vault=self.vault, note_key='2024-05-01-market-research')
+        self.assertEqual(restored['metadata']['State'], 'unavailable')
+        self.assertEqual(restored['members'], [])
+
+    def test_complete_discovery_preserves_canonical_roster_hash_and_strict_boolean(self):
+        complete = copy.deepcopy(self.bundle)
+        complete['universe'].update(discovery_complete=True,
+            discovery_coverage={'declared': 4, 'passing': 4, 'unavailable': 0},
+            discovery_input_sha256='a' * 64)
+        formed = comparison.form(complete)
+        self.assertEqual(formed['metadata']['State'], 'formed')
+        self.assertEqual(formed['members'], self.card['members'])
+        self.assertEqual(formed['metadata']['Universe SHA-256'], self.card['metadata']['Universe SHA-256'])
+        for invalid in ('false', None, 1):
+            complete['universe']['discovery_complete'] = invalid
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                comparison.form(complete)
+
+    def test_linked_records_are_verified_by_the_ordinary_outcomes_index(self):
+        rendered = comparison.formation_markdown(self.card, '2024-05-01-market-research', self.vault)
+        path = self.folder / '2024-05-01-market-research.md'
+        path.write_text(note('2024-05-01', rendered['journal_markdown'] + '\n' + rendered['detail_markdown']), encoding='utf-8')
+        observed = comparison.evaluate(self.card, '2024-05-01T11:31:00-04:00', observation_fixture(), '3m')
+        compact = comparison.observation_markdown(observed, '2024-08-03-market-research', vault=self.vault)
+        draft = self.vault / 'draft.md'
+        draft.write_text(note('2024-08-03', compact['journal_markdown'] + '\n' + compact['detail_markdown']), encoding='utf-8')
+        result = market_notes.outcomes(self.vault, draft, comparison.parse_time('2024-08-03T11:32:00-04:00'))
+        self.assertTrue(result['complete'], result['findings'])
+        self.assertAlmostEqual(result['comparison_checkpoints'][0]['return_value'], 0.1)
+        self.assertEqual(len(result['comparison_cohorts'][0]['members']), 3)
+        Path(rendered['evidence_attachment']['path']).unlink()
+        result = market_notes.outcomes(self.vault, draft, comparison.parse_time('2024-08-03T11:32:00-04:00'))
+        self.assertFalse(result['complete'])
+        self.assertTrue(any('evidence' in row['error'] for row in result['findings']))
+
+    def test_attached_formation_publishes_from_scratch_before_its_note_exists(self):
+        rendered = comparison.formation_markdown(self.card, '2024-05-01-market-research', self.vault)
+        attachment = Path(rendered['evidence_attachment']['path'])
+        original, original_time = attachment.read_bytes(), attachment.stat().st_mtime_ns
+        draft = self.vault / 'not-the-daily-filename.md'
+        draft.write_text(note('2024-05-01', rendered['journal_markdown'] + '\n' + rendered['detail_markdown']),
+                         encoding='utf-8')
+        target = self.folder / '2024-05-01-market-research.md'
+        self.assertFalse(target.exists())
+        with patch.object(market_notes, 'require_publication_provenance'):
+            result = market_notes.publish(draft, self.vault, comparison.parse_time('2024-05-01T11:32:00-04:00'))
+            self.assertEqual(result['status'], 'created')
+            self.assertEqual(market_notes.publish(draft, self.vault,
+                             comparison.parse_time('2024-05-01T11:32:00-04:00'))['status'], 'unchanged')
+        self.assertEqual(target.read_bytes(), draft.read_bytes())
+        self.assertEqual(attachment.read_bytes(), original)
+        self.assertEqual(attachment.stat().st_mtime_ns, original_time)
+
+    def test_attachment_changed_after_initial_validation_cannot_publish(self):
+        rendered = comparison.formation_markdown(self.card, '2024-05-01-market-research', self.vault)
+        attachment = Path(rendered['evidence_attachment']['path'])
+        draft = self.vault / 'draft.md'
+        draft.write_text(note('2024-05-01', rendered['journal_markdown'] + '\n' + rendered['detail_markdown']),
+                         encoding='utf-8')
+        def changed_after_initial_checks(_):
+            attachment.write_bytes(attachment.read_bytes() + b' ')
+        with patch.object(market_notes, 'require_publication_provenance', side_effect=changed_after_initial_checks):
+            with self.assertRaisesRegex(RuntimeError, 'outcome evidence changed before publication'):
+                market_notes.publish(draft, self.vault, comparison.parse_time('2024-05-01T11:32:00-04:00'))
+        self.assertFalse((self.folder / '2024-05-01-market-research.md').exists())
+        self.assertEqual(len(list(self.vault.glob('.market-research-stage-*'))), 1)
+
+    def test_linked_evidence_rejects_owner_digest_summary_and_traversal_tampering(self):
+        rendered = comparison.formation_markdown(self.card, '2024-05-01-market-research', self.vault)
+        attachment = rendered['evidence_attachment']
+        heading = comparison.heading_for(self.card['metadata']['Cohort'])
+        def read(text=None, owner='2024-05-01-market-research', vault=None):
+            return comparison.read_card(text or rendered['detail_markdown'], heading,
+                                        vault=vault or self.vault, note_key=owner)
+        for text in (
+                rendered['detail_markdown'].replace('| Declared instruments | 4 |', '| Declared instruments | 3 |'),
+                rendered['detail_markdown'].replace('| NASDAQ | AAA |', '| NASDAQ | ZZZ |'),
+                rendered['detail_markdown'].replace(attachment['link'], attachment['link'].replace('Snapshots/', 'Snapshots/../')),
+                rendered['detail_markdown'].replace(attachment['link'], '[[/etc/passwd]]')):
+            with self.subTest(text=text[:80]), self.assertRaises(ValueError):
+                read(text)
+        with self.assertRaisesRegex(ValueError, 'owner'):
+            read(owner='2024-05-01-120000-market-research')
+        with self.assertRaisesRegex(ValueError, 'selected vault'):
+            comparison.read_card(rendered['detail_markdown'], heading, note_key='2024-05-01-market-research')
+        path = Path(attachment['path'])
+        original = path.read_bytes()
+        path.write_bytes(original.replace(b'"AAA"', b'"ZZZ"', 1))
+        with self.assertRaisesRegex(ValueError, 'SHA-256'):
+            read()
+        with self.assertRaisesRegex(ValueError, 'occupied by different bytes'):
+            comparison.save_evidence(self.card, self.vault, '2024-05-01-market-research')
+        self.assertNotEqual(path.read_bytes(), original)  # A failed retry never overwrites the occupant.
+
+    def test_compact_metadata_round_trip_preserves_unescaped_evidence_values(self):
+        self.bundle['universe']['name'] = 'Synthetic A&B | declared universe'
+        self.bundle['universe']['source'] = 'Synthetic source with A&B | classification notes'
+        card = comparison.form(self.bundle)
+        rendered = comparison.formation_markdown(card, '2024-05-01-market-research', self.vault)
+        parsed = comparison.read_card(rendered['detail_markdown'], comparison.heading_for(card['metadata']['Cohort']),
+                                      vault=self.vault, note_key='2024-05-01-market-research')
+        self.assertEqual(parsed, card)
+
+    def test_evidence_attachment_has_an_independent_bounded_size(self):
+        with patch.object(comparison, 'MAX_EVIDENCE_BYTES', 128):
+            with self.assertRaisesRegex(ValueError, 'attachment byte budget'):
+                comparison.save_evidence(self.card, self.vault, '2024-05-01-market-research')
+        self.assertEqual(list(self.folder.iterdir()), [])
+        rendered = comparison.formation_markdown(self.card, '2024-05-01-market-research', self.vault)
+        evidence = rendered['evidence_attachment']
+        with patch.object(comparison, 'MAX_EVIDENCE_BYTES', 128):
+            with self.assertRaisesRegex(ValueError, 'bounded regular'):
+                comparison.load_evidence(self.vault, evidence['link'], evidence['sha256'], '2024-05-01-market-research')
+
+    def test_attached_calendar_and_source_validation_is_not_replaced_by_a_digest(self):
+        rendered = comparison.formation_markdown(self.card, '2024-05-01-market-research', self.vault)
+        original = rendered['evidence_attachment']
+        value = json.loads(Path(original['path']).read_bytes())
+        value['metadata']['History calendar'] = '[]'
+        raw = comparison._canonical_evidence(value)
+        sha256 = comparison.hashlib.sha256(raw).hexdigest()
+        changed = Path(original['path']).with_name(sha256 + '.json')
+        changed.write_bytes(raw)
+        text = rendered['detail_markdown'].replace(original['sha256'], sha256)
+        with self.assertRaises((ValueError, comparison.DataError)):
+            comparison.read_card(text, comparison.heading_for(self.card['metadata']['Cohort']),
+                                 vault=self.vault, note_key='2024-05-01-market-research')
+
+    def test_linked_evidence_refuses_symlink_folders_files_and_portable_collisions(self):
+        rendered = comparison.formation_markdown(self.card, '2024-05-01-market-research', self.vault)
+        attachment = rendered['evidence_attachment']
+        path, outside = Path(attachment['path']), self.vault / 'outside.json'
+        original = path.read_bytes()
+        outside.write_bytes(original)
+        path.unlink(); path.symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, 'non-symlink'):
+            comparison.load_evidence(self.vault, attachment['link'], attachment['sha256'], '2024-05-01-market-research')
+        with self.assertRaisesRegex(ValueError, 'non-symlink'):
+            comparison.save_evidence(self.card, self.vault, '2024-05-01-market-research')
+        path.unlink(); path.write_bytes(original)
+        folder, moved = path.parent, self.vault / 'moved'
+        folder.rename(moved); folder.symlink_to(moved, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'never symlinks'):
+            comparison.load_evidence(self.vault, attachment['link'], attachment['sha256'], '2024-05-01-market-research')
+        folder.unlink(); moved.rename(folder)
+        collision = folder.parent / 'comparisons'
+        if not collision.exists():  # Also exercise portable aliases on case-sensitive hosts.
+            collision.mkdir()
+            with self.assertRaisesRegex(ValueError, 'portable-equivalent'):
+                comparison.load_evidence(self.vault, attachment['link'], attachment['sha256'], '2024-05-01-market-research')
+        self.assertEqual(outside.read_bytes(), original)
+
+    def test_evidence_directory_swap_during_read_is_detected(self):
+        rendered = comparison.formation_markdown(self.card, '2024-05-01-market-research', self.vault)
+        attachment = rendered['evidence_attachment']
+        folder = Path(attachment['path']).parent
+        actual_reader = comparison._read_evidence_bytes
+        def swapped(descriptor, name):
+            data = actual_reader(descriptor, name)
+            folder.rename(self.vault / 'displaced')
+            folder.mkdir()
+            return data
+        with patch.object(comparison, '_read_evidence_bytes', side_effect=swapped):
+            with self.assertRaisesRegex(ValueError, 'directory changed'):
+                comparison.load_evidence(self.vault, attachment['link'], attachment['sha256'], '2024-05-01-market-research')
+
+    def test_large_frozen_roster_uses_attachment_budget_without_trimming(self):
+        # Copy the already verified evidence schema; every new identity has an
+        # ineligible security class, so the fixed winners remain unchanged.
+        large = copy.deepcopy(self.card)
+        for index in range(2000):
+            large['rows'].append(['NASDAQ', 'X%04d' % index, 'etf', 'USD', None, None, None, None, 'excluded:type'])
+        large['metadata']['Universe SHA-256'] = comparison.digest(comparison.universe_definition(
+            large['metadata']['Universe'], large['metadata']['Membership date'], large['metadata']['Universe source'],
+            [dict(exchange=row[0], symbol=row[1], security_type=row[2], currency=row[3]) for row in large['rows']]))
+        with self.assertRaisesRegex(ValueError, 'note budget'):
+            comparison.formation_markdown(large, '2024-05-01-market-research')
+        rendered = comparison.formation_markdown(large, '2024-05-01-market-research', self.vault)
+        self.assertLess(len(rendered['detail_markdown']), 5000)
+        parsed = comparison.read_card(rendered['detail_markdown'], comparison.heading_for(large['metadata']['Cohort']),
+                                      vault=self.vault, note_key='2024-05-01-market-research')
+        self.assertEqual(len(parsed['rows']), 2004)
+        self.assertEqual(parsed['members'], self.card['members'])
+
+    def test_extracted_self_contained_plugin_creates_and_reads_linked_evidence(self):
+        install = self.vault / 'isolated installed plugin'
+        package = json.loads((ROOT / 'tools/package-files.json').read_text(encoding='utf-8'))['investments']
+        for destination, source in package.items():
+            target = install / destination
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / source, target)
+        source = self.vault / 'fixture.json'
+        source.write_text(json.dumps(self.bundle), encoding='utf-8')
+        script = install / 'skills/market-research/scripts/market_comparison.py'
+        env = {key: value for key, value in os.environ.items() if key not in ('OBSIDIAN_VAULT_SHARED', 'PYTHONPATH')}
+        result = subprocess.run([sys.executable, '-I', '-S', '-B', str(script), 'form', '--input', str(source),
+                                 '--vault', str(self.vault), '--note-key', '2024-05-01-market-research'],
+                                cwd=self.vault, env=env, capture_output=True, text=True, encoding='utf-8', timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        output = json.loads(result.stdout)
+        self.assertEqual(output['members'], self.card['members'])
+        self.assertTrue(Path(output['evidence_attachment']['path']).is_file())
+        first = self.folder / '2024-05-01-market-research.md'
+        first.write_text(note('2024-05-01', output['journal_markdown'] + '\n' + output['detail_markdown']), encoding='utf-8')
+        source.write_text(json.dumps(observation_fixture()), encoding='utf-8')
+        result = subprocess.run([sys.executable, '-I', '-S', '-B', str(script), 'evaluate', '--input', str(source),
+                                 '--vault', str(self.vault), '--cohort-note', str(first), '--cohort', 'simple-momentum-v1@2024-05',
+                                 '--horizon', '3m', '--note-key', '2024-08-03-market-research'],
+                                cwd=self.vault, env=env, capture_output=True, text=True, encoding='utf-8', timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        output = json.loads(result.stdout)
+        self.assertAlmostEqual(output['return_value'], 0.1)
+        self.assertTrue(Path(output['evidence_attachment']['path']).is_file())
 
 
 if __name__ == '__main__':

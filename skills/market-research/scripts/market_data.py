@@ -117,6 +117,7 @@ def parser():
     news.add_argument('--limit', type=int, help='Alpha Vantage: 1–1000, default 200; Alpaca: 1–50, default 50')
     news.add_argument('--sort', choices=('EARLIEST', 'LATEST'), default='EARLIEST')
     news.add_argument('--include-content', action='store_true', help='Alpaca only: request article bodies when available')
+    news.add_argument('--max-pages', type=int, default=10, help='Alpaca news page budget, 1–100; Alpha Vantage has no cursor')
     earnings = commands.add_parser('earnings', help='retrieve the current Alpha Vantage earnings calendar')
     earnings.add_argument('--symbol', help='optional one-symbol filter')
     earnings.add_argument('--horizon', choices=('3month', '6month', '12month'), default='3month')

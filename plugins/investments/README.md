@@ -11,8 +11,10 @@ recommendations and trade execution are outside this skill's scope.
 Read [runtime setup](shared/RUNTIME.md) and the skill's
 [data-access guide](skills/market-research/references/data-access.md).
 Core helpers use Python 3.10+ and the standard library, including system timezone
-data. The offline screener calculates consistent momentum, relative strength,
-trend and liquidity-proxy measurements from saved provider responses. Optional
+data. A bounded directory-derived acquisition workflow feeds the offline screener
+with consistent momentum, relative strength, trend and liquidity-proxy inputs.
+Shortlist helpers separately verify regular-session coverage and sourced
+market-cap eligibility; passing a screen is not a buying recommendation. Optional
 SEC filing/section extraction uses pinned EdgarTools; its setup is in the
 data-access guide. PDF/image packages and the `knowledge` plugin are not required.
 Install the whole package to preserve its local helper paths.
@@ -28,10 +30,17 @@ Use the same selected Obsidian vault as `knowledge` if desired. Published
 `Investments/` records remain immutable. Scheduled runs create one daily edition;
 user-requested fresh reviews create timestamped manual editions under the
 [note format](skills/market-research/references/note-format.md#editions-and-retries).
-Both share the same thesis and outcome history.
-A fixed monthly momentum comparison is recorded separately within those notes.
+Both share the same thesis and outcome history. Private run receipts allow a
+started review to finish across midnight within eight hours; completed declared
+checks bind to the exact final draft without requiring human review.
+A fixed monthly momentum comparison is recorded separately within those notes,
+with bulky evidence in verified immutable `Investments/Snapshots/Comparisons/` attachments.
+Existing inline comparison records remain readable.
 Selected estimate observations persist as immutable source JSON under
 `Investments/Snapshots/Estimates/`, with availability times for future comparisons.
+A small ordered estimate preflight reuses recent observations and records a
+conservative provider cooldown after quota failure; it never invents historical
+consensus or changes an established cutoff.
 Exact SEC Form 4/4-A retrieval adds selective insider context without extra
 credentials or parser dependencies; no buying score is inferred from a filing.
 `Reviews/market-research-suggestions.md` keeps its existing name under the

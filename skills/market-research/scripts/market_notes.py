@@ -15,10 +15,12 @@ import argparse
 import calendar
 from datetime import date, datetime, time, timedelta, timezone
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import stat
 import sys
@@ -70,6 +72,8 @@ from portable_names import portable_identity
 import market_comparison
 
 MAX_BYTES = 256 * 1024
+RUN_HOURS = 8
+CHECK_NAME = re.compile(r'[a-z][a-z0-9-]{0,63}\Z')
 FIELDS = ('market_research', 'date', 'as_of', 'generated_at', 'session', 'coverage')
 HEADINGS = ('Decision brief', 'Research record')
 SUBHEADINGS = {
@@ -379,7 +383,251 @@ def edition_identity(current, mode='scheduled', as_of=None):
     return cutoff.strftime('%Y-%m-%d-%H%M%S-market-research.md'), iso_time(cutoff.isoformat())
 
 
-def inventory(vault, day, edition=None, cutoff=None):
+def _run_bytes(value):
+    return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+
+
+def _run_write(folder_fd, name, data):
+    """Create private scratch state exclusively, relative to a pinned directory."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0)
+    descriptor = os.open(name, flags, 0o600, dir_fd=folder_fd)
+    with os.fdopen(descriptor, 'wb') as handle:
+        handle.write(data)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _run_read(folder_fd, name):
+    flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0)
+    descriptor = os.open(name, flags, dir_fd=folder_fd)
+    with os.fdopen(descriptor, 'rb') as handle:
+        before = os.fstat(handle.fileno())
+        if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+                or before.st_uid != os.getuid() or stat.S_IMODE(before.st_mode) != 0o600
+                or before.st_size > MAX_BYTES):
+            raise ValueError('run state must be a private, bounded, ordinary file: ' + name)
+        data = handle.read(MAX_BYTES + 1)
+        after = os.fstat(handle.fileno())
+    def token(item):
+        return (item.st_dev, item.st_ino, item.st_mode, item.st_nlink, item.st_uid,
+                item.st_size, item.st_mtime_ns, item.st_ctime_ns)
+    if (token(before) != token(after) or len(data) != before.st_size or len(data) > MAX_BYTES
+            or token(os.stat(name, dir_fd=folder_fd, follow_symlinks=False)) != token(after)):
+        raise ValueError('run state changed while reading: ' + name)
+    return data
+
+
+def _run_seal(payload, key):
+    return _run_bytes({'payload': payload, 'signature': hmac.new(key, _run_bytes(payload), hashlib.sha256).hexdigest()})
+
+
+def _run_unseal(data, key):
+    value = json.loads(data)
+    if (not isinstance(value, dict) or set(value) != {'payload', 'signature'}
+            or not isinstance(value['payload'], dict) or not isinstance(value['signature'], str)
+            or not re.fullmatch(r'[a-f0-9]{64}', value['signature'])
+            or not hmac.compare_digest(value['signature'],
+                hmac.new(key, _run_bytes(value['payload']), hashlib.sha256).hexdigest())):
+        raise ValueError('run receipt or check record was changed; start a fresh run')
+    return value['payload']
+
+
+def _run_open(receipt, vault, current):
+    """Receipts prevent accidental backfill; they are not an authorization boundary.
+
+    The private sibling key detects altered/untrusted JSON, not a malicious
+    process running as the same user. No path or completion assertion in a
+    document can authorize a run. Only prepare creates a receipt at live time.
+    """
+    path = Path(receipt).expanduser().absolute()
+    if (path.name != 'run.json' or path.resolve(strict=True) != path
+            or not re.fullmatch(r'\.market-run-[a-f0-9]{32}', path.parent.name)):
+        raise ValueError('run receipt must be the original helper-created ordinary scratch path')
+    root = Path(vault).expanduser().resolve(strict=True)
+    if not root.is_dir() or path.is_relative_to(root):
+        raise ValueError('run scratch must be outside the selected vault')
+    flags = os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0) | getattr(os, 'O_NOFOLLOW', 0)
+    descriptor = os.open(path.parent, flags)
+    try:
+        state = os.fstat(descriptor)
+        if (not stat.S_ISDIR(state.st_mode) or state.st_uid != os.getuid()
+                or stat.S_IMODE(state.st_mode) != 0o700):
+            raise ValueError('run directory must be private and owned by the current user')
+        key = _run_read(descriptor, 'key')
+        if len(key) != 32:
+            raise ValueError('invalid run key')
+        payload = _run_unseal(_run_read(descriptor, path.name), key)
+        expected = {'schema', 'id', 'vault', 'vault_identity', 'mode', 'started_at',
+                    'expires_at', 'as_of', 'edition', 'checks'}
+        root_stat = root.stat()
+        if (set(payload) != expected or payload['schema'] != 1
+                or payload['id'] != path.parent.name.removeprefix('.market-run-')
+                or payload['vault'] != str(root)
+                or payload['vault_identity'] != [root_stat.st_dev, root_stat.st_ino]):
+            raise ValueError('run receipt belongs to a different vault, directory or schema')
+        start, expiry, cutoff = (iso_time(payload[field]) for field in ('started_at', 'expires_at', 'as_of'))
+        instant = current.astimezone(timezone.utc)
+        if (expiry - start != timedelta(hours=RUN_HOURS) or not start <= instant <= expiry):
+            raise ValueError('run receipt is future-dated or expired; start a fresh run without backfilling')
+        edition, permitted = edition_identity(ny_now(start), payload['mode'],
+                                              payload['as_of'] if payload['mode'] == 'manual' else None)
+        if payload['edition'] != edition or cutoff > permitted or ny_now(cutoff).date() != ny_now(start).date():
+            raise ValueError('run receipt has an invalid cutoff or edition')
+        if (not isinstance(payload['checks'], list) or not payload['checks']
+                or len(payload['checks']) != len(set(payload['checks']))
+                or any(not isinstance(name, str) or not CHECK_NAME.fullmatch(name) for name in payload['checks'])):
+            raise ValueError('invalid declared run checks')
+        if path.parent.stat() != state:
+            raise ValueError('run directory changed while reading')
+        return descriptor, key, payload
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def run_identity(vault, current, mode=None, as_of=None, run_receipt=None):
+    if run_receipt is None:
+        mode = mode or 'scheduled'
+        edition, cutoff = edition_identity(current, mode, as_of)
+        return mode, edition, cutoff
+    descriptor, _, payload = _run_open(run_receipt, vault, current)
+    os.close(descriptor)
+    if ((mode is not None and mode != payload['mode'])
+            or (as_of is not None and iso_time(as_of) != iso_time(payload['as_of']))):
+        raise ValueError('mode/as_of must match the run receipt')
+    return payload['mode'], payload['edition'], iso_time(payload['as_of'])
+
+
+def prepare(vault, work_dir, now=None, mode='scheduled', checks=()):
+    """Freeze live run identity and create a clearly unfinished, canonical draft."""
+    current = ny_now(now)
+    result = context(vault, current, mode)
+    if not result['complete']:
+        raise ValueError('daily-note history is incomplete: ' + json.dumps(result['findings']))
+    root = Path(vault).expanduser().resolve(strict=True)
+    work = Path(work_dir).expanduser().resolve(strict=True)
+    if not work.is_dir() or work.is_relative_to(root):
+        raise ValueError('work-dir must be an existing owned scratch directory outside the vault')
+    names = list(dict.fromkeys(('final-review', *checks)))
+    if any(not CHECK_NAME.fullmatch(name) for name in names):
+        raise ValueError('check names must be lowercase letters/digits/hyphens, starting with a letter')
+    identifier = secrets.token_hex(16)
+    directory = work / ('.market-run-' + identifier)
+    directory.mkdir(mode=0o700)
+    flags = os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0) | getattr(os, 'O_NOFOLLOW', 0)
+    descriptor = os.open(directory, flags)
+    try:
+        key = secrets.token_bytes(32)
+        root_stat = root.stat()
+        payload = {'schema': 1, 'id': identifier, 'vault': str(root),
+                   'vault_identity': [root_stat.st_dev, root_stat.st_ino], 'mode': mode,
+                   'started_at': current.astimezone(timezone.utc).isoformat(),
+                   'expires_at': (current.astimezone(timezone.utc) + timedelta(hours=RUN_HOURS)).isoformat(),
+                   'as_of': result['as_of'], 'edition': Path(result['current_note']['path']).name,
+                   'checks': names}
+        _run_write(descriptor, 'key', key)
+        _run_write(descriptor, 'run.json', _run_seal(payload, key))
+        draft = ('---\nmarket_research: 1\ndate: {date}\nas_of: "{as_of}"\n'
+                 'generated_at: "{generated}"\nsession: unknown\ncoverage: unavailable\n---\n'
+                 '# Market research — {date}\n\n## Decision brief\n\n'
+                 'DRAFT — research and verification are incomplete.\n\n'
+                 '### Buying opportunities\n\nDRAFT — evaluate candidates.\n\n'
+                 '### Next checks\n\nDRAFT — verify the next session and dated events.\n\n'
+                 '## Research record\n\n### Screening and sources\n\n'
+                 'DRAFT — retain checked universe, evidence and coverage.\n\n'
+                 '### Candidate assessments\n\nDRAFT — assess evidence, confirmation and risks.\n\n'
+                 '### Thesis updates\n\nNo active theses.\n\n'
+                 '### Outcome review\n\nDRAFT — review continuity, due outcomes and comparisons.\n').format(
+                     date=result['date'], as_of=result['as_of'], generated=current.isoformat())
+        _run_write(descriptor, 'draft.md', draft.encode('utf-8'))
+    finally:
+        os.close(descriptor)
+    return dict(result, run_receipt=str(directory / 'run.json'), draft=str(directory / 'draft.md'),
+                expires_at=payload['expires_at'], declared_checks=names,
+                instructions='Replace every DRAFT placeholder; update generated_at at completion, stamp '
+                             'provenance, then complete all declared checks against those exact final bytes.')
+
+
+def run_check(receipt, vault, name, draft=None, now=None):
+    """Declare a launched checker or attest its completed review of exact bytes."""
+    if not CHECK_NAME.fullmatch(name):
+        raise ValueError('invalid check name')
+    current = ny_now(now)
+    descriptor, key, payload = _run_open(receipt, vault, current)
+    try:
+        declaration = 'check-' + name + '.json'
+        if draft is None:
+            if any(re.fullmatch('done-' + re.escape(name) + r'-[a-f0-9]{64}\.json', filename)
+                   for filename in os.listdir(descriptor)):
+                raise ValueError('this checker already completed; declare a distinct name for a new launch')
+            record = {'run': payload['id'], 'check': name, 'started_at': current.isoformat()}
+            try:
+                _run_write(descriptor, declaration, _run_seal(record, key))
+            except FileExistsError:
+                record = _run_unseal(_run_read(descriptor, declaration), key)
+                if (record.get('run') != payload['id'] or record.get('check') != name
+                        or not iso_time(payload['started_at']) <= iso_time(record['started_at']) <= current):
+                    raise ValueError('existing check declaration does not match this run')
+            return {'status': 'declared', 'check': name}
+        try:
+            declared = _run_unseal(_run_read(descriptor, declaration), key)
+            if (declared.get('run') != payload['id'] or declared.get('check') != name
+                    or not iso_time(payload['started_at']) <= iso_time(declared['started_at']) <= current):
+                raise ValueError('check declaration does not match this run')
+        except FileNotFoundError:
+            if name not in payload['checks']:
+                raise
+        data, _ = read_stable(draft)
+        note = lint_bytes(data)
+        if (note['metadata']['date'] != ny_now(iso_time(payload['as_of'])).date().isoformat()
+                or iso_time(note['metadata']['as_of']) != iso_time(payload['as_of'])
+                or not iso_time(payload['started_at']) <= iso_time(note['metadata']['generated_at']) <= current
+                or re.search(r'^DRAFT —', data.decode('utf-8'), re.M)):
+            raise ValueError('review requires a completed draft matching this run and its actual generation time')
+        require_publication_provenance(note['provenance'])
+        digest = hashlib.sha256(data).hexdigest()
+        record = {'run': payload['id'], 'check': name, 'draft_sha256': digest, 'completed_at': current.isoformat()}
+        filename = 'done-' + name + '-' + digest + '.json'
+        try:
+            _run_write(descriptor, filename, _run_seal(record, key))
+        except FileExistsError:
+            prior = _run_unseal(_run_read(descriptor, filename), key)
+            if any(prior.get(field) != record[field] for field in ('run', 'check', 'draft_sha256')):
+                raise ValueError('existing review completion conflicts with the current draft')
+        return {'status': 'completed', 'check': name, 'draft_sha256': digest,
+                'attestation': 'The caller reports the declared check finished; this is not a certification of factual truth.'}
+    finally:
+        os.close(descriptor)
+
+
+def require_run_checks(receipt, vault, data, current):
+    descriptor, key, payload = _run_open(receipt, vault, current)
+    try:
+        checks = {name: iso_time(payload['started_at']) for name in payload['checks']}
+        for filename in os.listdir(descriptor):
+            if filename.startswith('check-') and filename.endswith('.json'):
+                record = _run_unseal(_run_read(descriptor, filename), key)
+                name = filename[6:-5]
+                if (not CHECK_NAME.fullmatch(name) or record.get('run') != payload['id']
+                        or record.get('check') != name
+                        or not iso_time(payload['started_at']) <= iso_time(record['started_at']) <= current):
+                    raise ValueError('invalid launched-check declaration')
+                checks[name] = iso_time(record['started_at'])
+        digest = hashlib.sha256(data).hexdigest()
+        for name in sorted(checks):
+            try:
+                record = _run_unseal(_run_read(descriptor, 'done-' + name + '-' + digest + '.json'), key)
+            except FileNotFoundError as exc:
+                raise ValueError('declared check has not finished for the exact final draft: ' + name) from exc
+            if (record.get('run') != payload['id'] or record.get('check') != name
+                    or record.get('draft_sha256') != digest
+                    or not checks[name] <= iso_time(record['completed_at']) <= current):
+                raise ValueError('invalid review completion for exact final draft: ' + name)
+    finally:
+        os.close(descriptor)
+
+
+def inventory(vault, day, edition=None, cutoff=None, continuation=False):
     """Read all editions in evidence-time order; preserve omitted open theses."""
     vault, folder, folder_identity = output_folder(vault)
     edition = edition or day + '-market-research.md'
@@ -422,6 +670,8 @@ def inventory(vault, day, edition=None, cutoff=None):
         selected = Path(path).name == edition
         note_day = note['metadata']['date']
         if note_day > day:
+            if continuation:
+                result['later_notes'].append(path)
             continue
         later = cutoff is not None and not selected and (stamp >= cutoff or generated > cutoff)
         if later:
@@ -452,12 +702,12 @@ def inventory(vault, day, edition=None, cutoff=None):
     return result, (folder_identity, tuple((str(path),) for path in paths), tokens)
 
 
-def context(vault, now=None, mode='scheduled', as_of=None):
+def context(vault, now=None, mode=None, as_of=None, run_receipt=None):
     current = ny_now(now)
-    day = current.date().isoformat()
-    scheduled = scheduled_cutoff(current)
-    edition, cutoff = edition_identity(current, mode, as_of)
-    result, _ = inventory(vault, day, edition, cutoff)
+    mode, edition, cutoff = run_identity(vault, current, mode, as_of, run_receipt)
+    day = ny_now(cutoff).date().isoformat()
+    scheduled = scheduled_cutoff(ny_now(cutoff))
+    result, _ = inventory(vault, day, edition, cutoff, continuation=run_receipt is not None)
     return dict(result, date=day, now=current.isoformat(), mode=mode,
                 scheduled_cutoff=scheduled.isoformat(),
                 as_of=result['current_note'].get('as_of', cutoff.isoformat()),
@@ -480,22 +730,25 @@ def horizon_target(day, horizon):
     return day + timedelta(days=14) if horizon == '2w' else month_target(day, int(horizon[:-1]))
 
 
-def outcomes(vault, draft=None, now=None, mode='scheduled', as_of=None):
+def outcomes(vault, draft=None, now=None, mode=None, as_of=None, run_receipt=None):
     """Rebuild the prospective journal without a mutable index or any writes."""
     current = ny_now(now)
-    day = current.date().isoformat()
     draft_data, draft_token = None, None
     if draft is not None:
         draft_data, draft_token = read_stable(draft)
-        draft_note = lint_bytes(draft_data, day)
-        if mode == 'manual':
+        draft_note = lint_bytes(draft_data)
+        if mode == 'manual' or run_receipt is not None:
             if as_of is not None and iso_time(as_of) != iso_time(draft_note['metadata']['as_of']):
                 raise ValueError('manual --as-of must match the draft as_of')
             as_of = draft_note['metadata']['as_of']
-    edition, cutoff = edition_identity(current, mode, as_of)
+    mode, edition, cutoff = run_identity(vault, current, mode, as_of, run_receipt)
+    day = ny_now(cutoff).date().isoformat()
+    if draft is not None and draft_note['metadata']['date'] != day:
+        raise ValueError('frontmatter date does not match the daily filename')
     if draft is not None:
         cutoff = iso_time(draft_note['metadata']['as_of'])
-    history, snapshot = inventory(vault, day, edition, cutoff)
+    research_day = ny_now(cutoff).date()
+    history, snapshot = inventory(vault, day, edition, cutoff, continuation=run_receipt is not None)
     findings, notes = list(history['findings']), {}
     edition_key = Path(edition).stem
     def finding(path, error):
@@ -513,7 +766,7 @@ def outcomes(vault, draft=None, now=None, mode='scheduled', as_of=None):
         notes[Path(path).stem] = (path, note, data)
     unpublished_draft = draft is not None and edition_key not in notes
     if (unpublished_draft and mode == 'scheduled'
-            and iso_time(draft_note['metadata']['as_of']) > scheduled_cutoff(current)):
+            and iso_time(draft_note['metadata']['as_of']) > scheduled_cutoff(ny_now(cutoff))):
         finding(history['current_note']['path'],
                 'new scheduled notes must not use evidence after 11:30 New York time; '
                 'a later cutoff requires a manual edition')
@@ -721,20 +974,21 @@ def outcomes(vault, draft=None, now=None, mode='scheduled', as_of=None):
             stale = prior is not None and (prior['_baseline_version'] != baseline_version(baseline)
                                           or prior['_needs_card_recheck'])
             state = ('needs-recheck' if stale else prior['state'] if prior else
-                     'needs-baseline' if target is None else 'due' if target <= current.date() else 'pending')
+                     'needs-baseline' if target is None else 'due' if target <= research_day else 'pending')
             item = dict({key: value for key, value in (prior or {}).items() if not key.startswith('_')},
                         recommendation=identifier, horizon=horizon, state=state,
                         target_date=target.isoformat() if target else None,
                         baseline_at=baseline['baseline_at'], current_baseline_record=baseline['record'],
                         first_ready_producer=baseline['first_ready_producer'])
             planned.append(item)
-            if stale or (target is not None and target <= current.date() and state != 'observed'):
+            if stale or (target is not None and target <= research_day and state != 'observed'):
                 due.append(item)
-    if inventory(vault, day, edition, cutoff)[1] != snapshot:
+    if inventory(vault, day, edition, cutoff, continuation=run_receipt is not None)[1] != snapshot:
         finding(history['current_note']['path'], 'daily-note history changed during outcome planning; rerun')
     if draft_token is not None and atomic_move.regular_file_snapshot(draft) != draft_token:
         finding(draft, 'draft changed during outcome planning; rerun')
-    comparison = comparison_outcomes(ordered, notes, edition_key, unpublished_draft, reference, current)
+    comparison = comparison_outcomes(ordered, notes, edition_key, unpublished_draft, reference,
+                                     ny_now(cutoff), vault)
     findings.extend(comparison.pop('findings'))
     cutoff = notes[edition_key][1]['metadata']['as_of'] if edition_key in notes else cutoff.isoformat()
     return {'complete': not findings, 'findings': findings, 'date': day,
@@ -750,7 +1004,7 @@ def outcomes(vault, draft=None, now=None, mode='scheduled', as_of=None):
             **comparison}
 
 
-def comparison_outcomes(ordered, notes, edition_key, unpublished_draft, reference, current):
+def comparison_outcomes(ordered, notes, edition_key, unpublished_draft, reference, current, vault=None):
     """Fold separate, immutable mechanical cohorts without creating ready theses."""
     cohorts, observations, findings = {}, {}, []
     activation = None
@@ -771,7 +1025,8 @@ def comparison_outcomes(ordered, notes, edition_key, unpublished_draft, referenc
                     if not section:
                         raise ValueError('comparison records require their exact detail section')
                     card = market_comparison.read_card(target_note[2].decode('utf-8'), section,
-                                                       observation=title == 'Comparison checkpoints')
+                                                       observation=title == 'Comparison checkpoints',
+                                                       vault=vault, note_key=Path(target).stem)
                     if (iso_time(card['metadata']['As of']) != record_cutoff
                             or record_cutoff > cutoff or card['metadata']['Cohort'] != identifier):
                         raise ValueError('comparison card identity or evidence cutoff disagrees with its note')
@@ -831,7 +1086,7 @@ def comparison_outcomes(ordered, notes, edition_key, unpublished_draft, referenc
                         if current_draft and (previous is None or changed) and target != path:
                             raise ValueError('new or changed comparison data requires a current draft detail card')
                         observations[key] = item
-                except (ValueError, KeyError, TypeError, OverflowError) as exc:
+                except (ValueError, KeyError, TypeError, OverflowError, OSError) as exc:
                     findings.append({'paths': [path], 'error': str(exc)})
     planned, due = [], []
     for identifier, cohort in sorted(cohorts.items()):
@@ -892,7 +1147,7 @@ def publish_pinned(staged, target, stage_parent, folder_identity):
         os.close(folder_fd)
 
 
-def publish(draft, vault, now=None, mode='scheduled', as_of=None):
+def publish(draft, vault, now=None, mode=None, as_of=None, run_receipt=None):
     # Distinct edition filenames no longer collide atomically. Serialize helper
     # publishers on the existing vault directory, without a persistent lock file.
     # Advisory locks are released by the OS even after an interrupted process.
@@ -905,34 +1160,36 @@ def publish(draft, vault, now=None, mode='scheduled', as_of=None):
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise ValueError('another market-note publication is in progress; rerun context after it finishes') from exc
-        return _publish(draft, root, now, mode, as_of)
+        return _publish(draft, root, now, mode, as_of, run_receipt)
     finally:
         os.close(descriptor)
 
 
-def _publish(draft, vault, now=None, mode='scheduled', as_of=None):
+def _publish(draft, vault, now=None, mode=None, as_of=None, run_receipt=None):
     data, expected = read_stable(draft)
     note = lint_bytes(data)
     current = ny_now(now)
-    day = current.date().isoformat()
-    if note['metadata']['date'] != day:
+    if run_receipt is None and note['metadata']['date'] != current.date().isoformat():
         raise ValueError('publication creates only today\'s New York note; no historical backfill')
     if iso_time(note['metadata']['generated_at']) > current:
         raise ValueError('generated_at is in the future')
-    if mode == 'manual':
+    if mode == 'manual' or run_receipt is not None:
         if as_of is not None and iso_time(as_of) != iso_time(note['metadata']['as_of']):
             raise ValueError('manual --as-of must match the draft as_of')
         as_of = note['metadata']['as_of']
-    edition, cutoff = edition_identity(current, mode, as_of)
+    mode, edition, cutoff = run_identity(vault, current, mode, as_of, run_receipt)
+    day = ny_now(cutoff).date().isoformat()
+    if note['metadata']['date'] != day:
+        raise ValueError('draft date does not match its live run receipt')
     cutoff = iso_time(note['metadata']['as_of'])
-    history, baseline = inventory(vault, day, edition, cutoff)
+    history, baseline = inventory(vault, day, edition, cutoff, continuation=run_receipt is not None)
     target = Path(history['current_note']['path'])
     if not history['complete']:
         raise ValueError('daily-note history is incomplete: ' + json.dumps(history['findings'], ensure_ascii=False))
     if history['current_note']['state'] == 'valid':
         existing, _ = read_stable(target)
         if existing == data:
-            planned = outcomes(vault, draft, current, mode, as_of)
+            planned = outcomes(vault, draft, current, mode, as_of, run_receipt)
             if not planned['complete']:
                 raise ValueError('outcome journal is incomplete: ' + json.dumps(planned['findings'], ensure_ascii=False))
             return {'status': 'unchanged', 'path': str(target)}
@@ -946,14 +1203,16 @@ def _publish(draft, vault, now=None, mode='scheduled', as_of=None):
                and latest.get(row['id']) in {'invalidated', 'expired'}]
     if revived:
         raise ValueError('terminal theses require a new linked thesis ID, not revival: ' + ', '.join(revived))
-    planned = outcomes(vault, draft, current, mode, as_of)
+    planned = outcomes(vault, draft, current, mode, as_of, run_receipt)
     if not planned['complete']:
         raise ValueError('outcome journal is incomplete: ' + json.dumps(planned['findings'], ensure_ascii=False))
     require_publication_provenance(note['provenance'])
+    if run_receipt is not None:
+        require_run_checks(run_receipt, vault, data, current)
     vault, folder, folder_identity = output_folder(vault, create=True)
     # Folder creation changes an absent-folder baseline, but does not adopt files.
     if baseline[0] is None:
-        checked, baseline = inventory(vault, day, edition, cutoff)
+        checked, baseline = inventory(vault, day, edition, cutoff, continuation=run_receipt is not None)
         if not checked['complete'] or baseline[1]:
             raise ValueError('Investments was populated concurrently; rerun context')
     stage_dir = Path(tempfile.mkdtemp(prefix='.market-research-stage-', dir=vault))
@@ -965,9 +1224,17 @@ def _publish(draft, vault, now=None, mode='scheduled', as_of=None):
             os.fsync(handle.fileno())
         if atomic_move.regular_file_snapshot(draft) != expected:
             raise ValueError('draft changed after validation')
-        _, checked = inventory(vault, day, edition, cutoff)
+        # Re-read content-addressed comparison attachments as well as journals;
+        # the Markdown inventory alone cannot detect a deleted/altered JSON file.
+        checked_outcomes = outcomes(vault, draft, current, mode, as_of, run_receipt)
+        if not checked_outcomes['complete']:
+            raise ValueError('outcome evidence changed before publication: '
+                             + json.dumps(checked_outcomes['findings'], ensure_ascii=False))
+        _, checked = inventory(vault, day, edition, cutoff, continuation=run_receipt is not None)
         if checked != baseline or output_folder(vault)[2] != folder_identity:
             raise ValueError('daily-note history changed after planning; rerun context')
+        if run_receipt is not None:
+            require_run_checks(run_receipt, vault, data, current)
         actual = publish_pinned(staged, target, vault, folder_identity)
         try:
             stable_folder = output_folder(vault)[2] == folder_identity
@@ -1076,6 +1343,202 @@ def run_self_test():
                     context(self.vault, now, mode='manual', as_of=invalid)
             with self.assertRaisesRegex(ValueError, 'only supported'):
                 context(self.vault, now, as_of=first['as_of'])
+
+        def prepared(self, now=None, mode='manual', checks=()):
+            scratch = tempfile.TemporaryDirectory(prefix='.market-run-tests-')
+            self.addCleanup(scratch.cleanup)
+            return prepare(self.vault, scratch.name, now or self.now, mode, checks)
+
+        def completed_run_draft(self, prepared, completed, checks=('final-review',)):
+            self.draft.write_bytes(self.note(day=prepared['date'], as_of=prepared['as_of'],
+                                            generated=completed.isoformat()))
+            for check in checks:
+                run_check(prepared['run_receipt'], self.vault, check, self.draft, completed)
+
+        def test_prepare_creates_private_live_receipt_and_canonical_skeleton(self):
+            prepared = self.prepared(checks=('evidence-audit', 'independent-review'))
+            receipt = Path(prepared['run_receipt'])
+            self.assertEqual(prepared['declared_checks'], ['final-review', 'evidence-audit', 'independent-review'])
+            self.assertEqual(stat.S_IMODE(receipt.parent.stat().st_mode), 0o700)
+            for child in (receipt, receipt.parent / 'key', Path(prepared['draft'])):
+                self.assertEqual(stat.S_IMODE(child.stat().st_mode), 0o600)
+            self.assertFalse(receipt.is_relative_to(self.vault))
+            skeleton = lint_bytes(Path(prepared['draft']).read_bytes())
+            self.assertEqual(skeleton['metadata']['as_of'], self.now.isoformat())
+            with self.assertRaisesRegex(ValueError, 'completed draft'):
+                run_check(receipt, self.vault, 'final-review', prepared['draft'], self.now)
+
+        def test_live_manual_run_can_publish_after_midnight_with_original_identity(self):
+            started = iso_time('2026-09-30T23:55:00-04:00')
+            completed = iso_time('2026-10-01T00:25:00-04:00')
+            prepared = self.prepared(started, checks=('independent-review',))
+            self.completed_run_draft(prepared, completed, ('final-review', 'independent-review'))
+            frozen = context(self.vault, completed, run_receipt=prepared['run_receipt'])
+            self.assertEqual(frozen['date'], '2026-09-30')
+            self.assertEqual(frozen['as_of'], prepared['as_of'])
+            planned = outcomes(self.vault, self.draft, completed, run_receipt=prepared['run_receipt'])
+            self.assertTrue(planned['complete'], planned['findings'])
+            self.assertEqual(planned['date'], '2026-09-30')
+            result = publish(self.draft, self.vault, completed, run_receipt=prepared['run_receipt'])
+            self.assertEqual(Path(result['path']).name, '2026-09-30-235500-market-research.md')
+            saved = Path(result['path']).read_bytes()
+            self.assertEqual(lint_bytes(saved)['metadata']['generated_at'], completed.isoformat())
+            self.assertEqual(publish(self.draft, self.vault, completed,
+                                     run_receipt=prepared['run_receipt'])['status'], 'unchanged')
+            self.draft.write_bytes(saved.replace(b'Wait for confirmation.', b'An unauthorized replacement.'))
+            with self.assertRaisesRegex(ValueError, 'different bytes'):
+                publish(self.draft, self.vault, completed, run_receipt=prepared['run_receipt'])
+            self.assertEqual(Path(result['path']).read_bytes(), saved)
+
+        def test_run_age_uses_elapsed_utc_time_across_both_dst_changes(self):
+            for start, end in (('2026-03-07T23:55:00-05:00', '2026-03-08T08:55:00-04:00'),
+                               ('2026-11-01T00:30:00-04:00', '2026-11-01T07:30:00-05:00')):
+                with self.subTest(start=start):
+                    started, completed = iso_time(start), iso_time(end)
+                    prepared = self.prepared(started)
+                    result = context(self.vault, completed, run_receipt=prepared['run_receipt'])
+                    self.assertEqual(result['as_of'], start)
+                    with self.assertRaisesRegex(ValueError, 'expired'):
+                        context(self.vault, completed + timedelta(seconds=1), run_receipt=prepared['run_receipt'])
+
+        def test_run_receipt_rejects_future_foreign_and_mismatched_identity(self):
+            prepared = self.prepared()
+            receipt = prepared['run_receipt']
+            with self.assertRaisesRegex(ValueError, 'future-dated'):
+                context(self.vault, self.now - timedelta(seconds=1), run_receipt=receipt)
+            foreign = self.vault / 'foreign'
+            foreign.mkdir()
+            with self.assertRaisesRegex(ValueError, 'different vault'):
+                context(foreign, self.now, run_receipt=receipt)
+            for kwargs in ({'mode': 'scheduled'}, {'as_of': '2026-09-05T09:02:00-04:00'}):
+                with self.subTest(kwargs=kwargs), self.assertRaisesRegex(ValueError, 'must match'):
+                    context(self.vault, self.now, run_receipt=receipt, **kwargs)
+
+        def test_receipt_cannot_authorize_retroactive_cutoff_or_changed_vault(self):
+            prepared = self.prepared()
+            receipt = Path(prepared['run_receipt'])
+            raw = receipt.read_bytes()
+            record = json.loads(raw)
+            record['payload']['as_of'] = '2026-09-04T09:03:00-04:00'
+            receipt.write_text(json.dumps(record), encoding='utf-8')
+            with self.assertRaisesRegex(ValueError, 'was changed'):
+                context(self.vault, self.now, run_receipt=receipt)
+            receipt.write_bytes(raw)
+            # The fixture root cannot be moved inside itself; replace its identity
+            # by checking a signed original path against a patched directory stat.
+            foreign = self.vault / 'foreign'
+            foreign.mkdir()
+            real_stat = Path.stat
+            with patch.object(Path, 'stat', side_effect=lambda p, *a, **kw:
+                              foreign.lstat() if p == self.vault else real_stat(p, *a, **kw), autospec=True):
+                with self.assertRaisesRegex(ValueError, 'different vault'):
+                    context(self.vault, self.now, run_receipt=receipt)
+
+        def test_run_state_rejects_symlinks_hardlinks_and_unprivate_permissions(self):
+            prepared = self.prepared()
+            receipt = Path(prepared['run_receipt'])
+            original = receipt.read_bytes()
+            outside = receipt.parent.parent / 'outside.json'
+            outside.write_bytes(original)
+            outside.chmod(0o600)
+            receipt.unlink()
+            receipt.symlink_to(outside)
+            with self.assertRaises(ValueError):
+                context(self.vault, self.now, run_receipt=receipt)
+            receipt.unlink()
+            os.link(outside, receipt)
+            with self.assertRaisesRegex(ValueError, 'ordinary file'):
+                context(self.vault, self.now, run_receipt=receipt)
+            receipt.unlink()
+            receipt.write_bytes(original)
+            receipt.chmod(0o644)
+            with self.assertRaisesRegex(ValueError, 'private'):
+                context(self.vault, self.now, run_receipt=receipt)
+            receipt.chmod(0o600)
+            receipt.parent.chmod(0o755)
+            with self.assertRaisesRegex(ValueError, 'directory must be private'):
+                context(self.vault, self.now, run_receipt=receipt)
+
+        def test_prepare_refuses_vault_scratch_and_unsafe_check_names(self):
+            with self.assertRaisesRegex(ValueError, 'outside the vault'):
+                prepare(self.vault, self.vault, self.now, 'manual')
+            scratch = tempfile.TemporaryDirectory(prefix='.market-run-tests-')
+            self.addCleanup(scratch.cleanup)
+            for name in ('../check', '', 'Check', 'x/y'):
+                with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'check names'):
+                    prepare(self.vault, scratch.name, self.now, 'manual', (name,))
+
+        def test_all_declared_checkers_must_finish_before_publication(self):
+            prepared = self.prepared(checks=('independent-review',))
+            completed = self.now + timedelta(minutes=5)
+            self.completed_run_draft(prepared, completed)
+            with self.assertRaisesRegex(ValueError, 'independent-review'):
+                publish(self.draft, self.vault, completed, run_receipt=prepared['run_receipt'])
+            run_check(prepared['run_receipt'], self.vault, 'independent-review', self.draft, completed)
+            run_check(prepared['run_receipt'], self.vault, 'extra-audit', now=completed)
+            with self.assertRaisesRegex(ValueError, 'extra-audit'):
+                publish(self.draft, self.vault, completed, run_receipt=prepared['run_receipt'])
+            run_check(prepared['run_receipt'], self.vault, 'extra-audit', self.draft, completed)
+            with self.assertRaisesRegex(ValueError, 'distinct name'):
+                run_check(prepared['run_receipt'], self.vault, 'extra-audit', now=completed)
+            self.assertEqual(publish(self.draft, self.vault, completed,
+                                     run_receipt=prepared['run_receipt'])['status'], 'created')
+
+        def test_review_completion_binds_all_bytes_including_generation_and_provenance(self):
+            prepared = self.prepared()
+            completed = self.now + timedelta(minutes=5)
+            self.completed_run_draft(prepared, completed)
+            original = self.draft.read_bytes()
+            stamped = note_provenance.stamp_text(original.decode(), self.generator).encode()
+            for changed in (original.replace(b'Wait for confirmation.', b'Changed factual claim.'),
+                            original.replace(completed.isoformat().encode(),
+                                             (completed - timedelta(seconds=1)).isoformat().encode()), stamped):
+                with self.subTest(changed=changed[-80:]):
+                    self.draft.write_bytes(changed)
+                    with self.assertRaisesRegex(ValueError, 'exact final draft'):
+                        publish(self.draft, self.vault, completed, run_receipt=prepared['run_receipt'])
+            run_check(prepared['run_receipt'], self.vault, 'final-review', self.draft, completed)
+            self.assertEqual(publish(self.draft, self.vault, completed,
+                                     run_receipt=prepared['run_receipt'])['status'], 'created')
+
+        def test_tampered_check_completion_and_undeclared_completion_fail(self):
+            prepared = self.prepared()
+            completed = self.now + timedelta(minutes=5)
+            self.completed_run_draft(prepared, completed)
+            with self.assertRaises(FileNotFoundError):
+                run_check(prepared['run_receipt'], self.vault, 'unlaunched', self.draft, completed)
+            done = next(Path(prepared['run_receipt']).parent.glob('done-final-review-*.json'))
+            raw = json.loads(done.read_bytes())
+            raw['payload']['completed_at'] = '2026-09-05T09:07:59-04:00'
+            done.write_text(json.dumps(raw), encoding='utf-8')
+            with self.assertRaisesRegex(ValueError, 'was changed'):
+                publish(self.draft, self.vault, completed, run_receipt=prepared['run_receipt'])
+
+        def test_midnight_continuation_cannot_publish_before_a_later_day_edition(self):
+            start = iso_time('2026-09-05T23:55:00-04:00')
+            completed = iso_time('2026-09-06T00:20:00-04:00')
+            prepared = self.prepared(start)
+            later = self.prior('2026-09-06', [])
+            later.write_bytes(self.note(day='2026-09-06', as_of='2026-09-06T00:05:00-04:00',
+                                       generated='2026-09-06T00:06:00-04:00'))
+            self.completed_run_draft(prepared, completed)
+            inventory_result = context(self.vault, completed, run_receipt=prepared['run_receipt'])
+            self.assertFalse(inventory_result['complete'])
+            self.assertEqual(inventory_result['later_notes'], [str(later)])
+            with self.assertRaisesRegex(ValueError, 'out of order'):
+                publish(self.draft, self.vault, completed, run_receipt=prepared['run_receipt'])
+
+        def test_scheduled_receipt_keeps_fixed_cutoff_and_no_receipt_retains_backfill_guard(self):
+            started = iso_time('2026-09-05T11:45:00-04:00')
+            prepared = self.prepared(started, mode='scheduled')
+            self.assertEqual(prepared['as_of'], '2026-09-05T11:30:00-04:00')
+            completed = started + timedelta(minutes=10)
+            self.completed_run_draft(prepared, completed)
+            self.assertEqual(publish(self.draft, self.vault, completed,
+                                     run_receipt=prepared['run_receipt'])['status'], 'created')
+            tomorrow = completed + timedelta(days=1)
+            with self.assertRaisesRegex(ValueError, 'no historical backfill'):
+                publish(self.draft, self.vault, tomorrow)
 
         def test_manual_scheduled_manual_editions_preserve_history_and_first_ready(self):
             identifier = 'NYSE:ABC@2026-09-05'
@@ -1717,12 +2180,12 @@ def run_self_test():
             self.prior('2026-09-03', [])
             self.draft.write_bytes(self.note())
             original, calls = inventory, 0
-            def changed(vault, day, *edition_args):
+            def changed(vault, day, *edition_args, **edition_kwargs):
                 nonlocal calls
                 calls += 1
                 if calls == 2:
                     self.prior('2026-09-04', [('NYSE:ABC@2026-09-04', 'watch', 'Concurrent thesis')])
-                return original(vault, day, *edition_args)
+                return original(vault, day, *edition_args, **edition_kwargs)
             with patch.dict(globals(), {'inventory': changed}):
                 with self.assertRaisesRegex(RuntimeError, 'history changed'):
                     publish(self.draft, self.vault, self.now)
@@ -2684,22 +3147,40 @@ def main(argv=None):
     publish_parser.add_argument('draft')
     publish_parser.add_argument('--vault', required=True)
     for run_parser in (context_parser, outcomes_parser, publish_parser):
-        run_parser.add_argument('--mode', choices=('scheduled', 'manual'), default='scheduled')
+        run_parser.add_argument('--mode', choices=('scheduled', 'manual'),
+                                help='default scheduled, or infer from --run-receipt')
         run_parser.add_argument('--as-of', help='fixed manual run timestamp returned by context')
+        run_parser.add_argument('--run-receipt', help='live bounded receipt returned by prepare')
+    prepare_parser = commands.add_parser('prepare')
+    prepare_parser.add_argument('--vault', required=True)
+    prepare_parser.add_argument('--work-dir', required=True, help='owned external scratch directory')
+    prepare_parser.add_argument('--mode', choices=('scheduled', 'manual'), default='scheduled')
+    prepare_parser.add_argument('--check', action='append', default=[], help='declared checker name; repeatable')
+    for command in ('review-start', 'review-complete'):
+        check_parser = commands.add_parser(command)
+        check_parser.add_argument('--vault', required=True)
+        check_parser.add_argument('--run-receipt', required=True)
+        check_parser.add_argument('--check', required=True)
+        if command == 'review-complete':
+            check_parser.add_argument('--draft', required=True, help='the exact final stamped draft actually checked')
     args = parser.parse_args(argv)
     if args.test:
         return 0 if run_self_test() else 1
     try:
         if args.command == 'context':
-            result = context(args.vault, mode=args.mode, as_of=args.as_of)
+            result = context(args.vault, mode=args.mode, as_of=args.as_of, run_receipt=args.run_receipt)
         elif args.command == 'outcomes':
-            result = outcomes(args.vault, args.draft, mode=args.mode, as_of=args.as_of)
+            result = outcomes(args.vault, args.draft, mode=args.mode, as_of=args.as_of, run_receipt=args.run_receipt)
         elif args.command == 'lint':
             result = lint_bytes(read_stable(args.note)[0])
         elif args.command == 'publish':
-            result = publish(args.draft, args.vault, mode=args.mode, as_of=args.as_of)
+            result = publish(args.draft, args.vault, mode=args.mode, as_of=args.as_of, run_receipt=args.run_receipt)
+        elif args.command == 'prepare':
+            result = prepare(args.vault, args.work_dir, mode=args.mode, checks=args.check)
+        elif args.command in ('review-start', 'review-complete'):
+            result = run_check(args.run_receipt, args.vault, args.check, getattr(args, 'draft', None))
         else:
-            parser.error('choose context, outcomes, lint, publish or --test')
+            parser.error('choose prepare, context, outcomes, lint, review-start, review-complete, publish or --test')
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get('complete', True) else 2
     except (ValueError, OSError, UnicodeError, RuntimeError) as exc:

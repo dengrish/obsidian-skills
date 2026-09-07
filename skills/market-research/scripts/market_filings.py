@@ -258,6 +258,13 @@ def _text_for_credential_check(html):
     class TextOnly(HTMLParser):
         def handle_data(self, data):
             parts.append(data)
+
+        def unknown_decl(self, data):
+            # Recent HTMLParser versions silently accept marked declarations
+            # that older versions reject. Never skip text in such a section
+            # while claiming the entire document passed the credential check.
+            raise DataError('invalid_document',
+                            'The primary HTML contains an unsupported marked declaration; no text was returned.')
     scanner = TextOnly(convert_charrefs=True)
     try:
         scanner.feed(html)

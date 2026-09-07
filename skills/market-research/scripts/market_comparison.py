@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Form and evaluate an immutable monthly momentum diagnostic from saved data.
 
-Offline only. Prints JSON and visible Markdown snippets, never writes a vault,
-fetches data, infers missing returns, rebalances holdings, or places trades.
+Offline only. Prints JSON and visible Markdown snippets; --vault preserves
+create-only comparison evidence attachments. Never writes daily notes, fetches
+data, infers missing returns, rebalances holdings, or places trades.
 """
 from __future__ import annotations
 
@@ -60,6 +61,7 @@ if _here != _shared:
 # --- end bootstrap ---
 
 import market_screen
+import market_evidence as evidence_store
 from market_http import DataError, parse_date, parse_time
 
 STRATEGY = {
@@ -87,6 +89,13 @@ META = ('Cohort', 'State', 'As of', 'Strategy SHA-256', 'Universe', 'Membership 
 OBS_META = ('Cohort', 'Horizon', 'State', 'As of', 'Baseline at', 'Observed at',
             'Return convention', 'Sources', 'Calendar', 'Corporate actions', 'Reason')
 MAX_CARD_BYTES = 120 * 1024
+MAX_EVIDENCE_BYTES = 32 * 1024 * 1024
+EVIDENCE_FOLDER = ('Investments', 'Snapshots', 'Comparisons')
+EVIDENCE_LINK = re.compile(r'\[\[Investments/Snapshots/Comparisons/([0-9a-f]{64})\.json\]\]\Z')
+COMPACT_META = tuple(key for key in META if key not in ('Sources', 'History calendar')) + (
+    'Declared instruments', 'Selected instruments', 'Evidence', 'Evidence SHA-256')
+COMPACT_OBS_META = tuple(key for key in OBS_META if key not in ('Sources', 'Calendar', 'Corporate actions')) + (
+    'Evidence', 'Evidence SHA-256')
 
 
 def ny_zone():
@@ -106,10 +115,22 @@ def fail(message):
 
 def parse_json(raw):
     try:
-        return json.loads(raw, object_pairs_hook=market_screen._unique_object,
-                          parse_constant=lambda value: fail('JSON non-finite constants are not allowed'))
+        value = json.loads(raw, object_pairs_hook=market_screen._unique_object,
+                           parse_constant=lambda value: fail('JSON non-finite constants are not allowed'))
     except RecursionError:
         fail('comparison JSON nesting exceeds the supported depth')
+    # Python versions have different decoder recursion limits. Keep this input
+    # boundary deterministic before recursive hashing/serialization happens.
+    pending = [(value, 0)]
+    while pending:
+        item, depth = pending.pop()
+        if depth > 100:
+            fail('comparison JSON nesting exceeds the supported depth')
+        if isinstance(item, dict):
+            pending.extend((child, depth + 1) for child in item.values())
+        elif isinstance(item, list):
+            pending.extend((child, depth + 1) for child in item)
+    return value
 
 
 def number(value, positive=False):
@@ -141,6 +162,82 @@ def record_link(note_key, heading):
     if not isinstance(note_key, str) or not NOTE.fullmatch(note_key):
         fail('note-key must be the exact canonical daily filename without .md')
     return '[[Investments/' + note_key + '#' + heading + ']]'
+
+
+def _canonical_evidence(value):
+    return evidence_store.canonical(value)
+
+
+def _evidence_directory(vault, create=False):
+    return evidence_store.pinned_directory(vault, EVIDENCE_FOLDER, create)
+
+
+def _read_evidence_bytes(descriptor, name):
+    return evidence_store.read_bytes(descriptor, name, MAX_EVIDENCE_BYTES)
+
+
+def _evidence_card(raw, sha256, note_key, observation=False):
+    if hashlib.sha256(raw).hexdigest() != sha256:
+        fail('comparison evidence SHA-256 does not match its immutable attachment')
+    value = parse_json(raw.decode('utf-8'))
+    kind = 'checkpoint' if observation else 'formation'
+    fields = OBS_META if observation else META
+    if (not isinstance(value, dict) or set(value) != {
+            'market_comparison_evidence', 'note_key', 'kind', 'metadata', 'rows'}
+            or type(value['market_comparison_evidence']) is not int or value['market_comparison_evidence'] != 1
+            or not isinstance(note_key, str) or not NOTE.fullmatch(note_key)
+            or value['note_key'] != note_key or value['kind'] != kind
+            or not isinstance(value['metadata'], dict) or set(value['metadata']) != set(fields)
+            or not isinstance(value['rows'], list) or raw != _canonical_evidence(value)):
+        fail('comparison evidence schema, canonical bytes, kind or exact owner note does not match')
+    card = {'metadata': {key: value['metadata'][key] for key in fields}, 'rows': value['rows']}
+    if note_key[:10] != parse_time(card['metadata']['As of']).astimezone(ny_zone()).date().isoformat():
+        fail('comparison evidence owner date disagrees with its cutoff')
+    # An observation needs its original formation for full validation; every
+    # indexing/evaluation caller still invokes validate_observation with it.
+    return card if observation else validate_formation(card)
+
+
+def save_evidence(card, vault, note_key, observation=False):
+    """Create one content-addressed attachment, or verify an exact identical retry."""
+    record_link(note_key, 'comparison evidence')  # Validate the canonical owner.
+    if not observation:
+        validate_formation(card)
+    value = {'market_comparison_evidence': 1, 'note_key': note_key,
+             'kind': 'checkpoint' if observation else 'formation',
+             'metadata': card['metadata'], 'rows': card['rows']}
+    raw = _canonical_evidence(value)
+    if len(raw) > MAX_EVIDENCE_BYTES:
+        fail('comparison evidence exceeds its attachment byte budget; do not trim the universe after ranking')
+    sha256 = hashlib.sha256(raw).hexdigest()
+    _evidence_card(raw, sha256, note_key, observation)
+    return evidence_store.write(value, vault, EVIDENCE_FOLDER, MAX_EVIDENCE_BYTES)
+
+
+def load_evidence(vault, link, sha256, note_key, observation=False):
+    matched = EVIDENCE_LINK.fullmatch(link) if isinstance(link, str) else None
+    if matched is None or not isinstance(sha256, str) or not DIGEST.fullmatch(sha256) or matched[1] != sha256:
+        fail('comparison evidence requires its exact safe content-addressed vault link and digest')
+    try:
+        with _evidence_directory(vault) as (_, descriptor, check):
+            raw = _read_evidence_bytes(descriptor, sha256 + '.json')
+            card = _evidence_card(raw, sha256, note_key, observation)
+            check()
+            return card
+    except OSError as exc:
+        raise ValueError('comparison evidence cannot be safely read: %s' % exc) from exc
+
+
+def _compact_metadata(card, evidence, observation=False):
+    meta = card['metadata']
+    fields = COMPACT_OBS_META if observation else COMPACT_META
+    retained = {key: meta[key] for key in fields if key in meta}
+    if not observation:
+        retained.update({'Declared instruments': str(len(card['rows'])),
+                         'Selected instruments': ', '.join(row[0] + ':' + row[1] for row in card['rows']
+                                                         if row[-1] == 'selected') or '-'})
+    retained.update({'Evidence': evidence['link'], 'Evidence SHA-256': evidence['sha256']})
+    return retained
 
 
 def cohort_id(as_of):
@@ -243,8 +340,12 @@ def form(bundle):
         fail('comparison formation requires a saved screen input object')
     prepared = copy.deepcopy(bundle)
     universe = prepared['universe']
-    prepared['universe'] = universe_definition(universe['name'], universe['membership_date'], universe['source'],
-                                                universe['instruments'])
+    identity = universe_definition(universe['name'], universe['membership_date'], universe['source'],
+                                   universe['instruments'])
+    # Ranking rules may be replaced by the fixed strategy; missing upstream
+    # directory/liquidity coverage must never be replaced by a smaller success.
+    prepared['universe'] = identity | {key: universe[key] for key in
+        ('discovery_complete', 'discovery_coverage', 'discovery_input_sha256') if key in universe}
     prepared['benchmark'], prepared['rules'] = 'SPY', dict(STRATEGY['rules'])
     screen = market_screen.screen(prepared)
     cutoff = parse_time(screen['as_of']).astimezone(ny_zone())
@@ -269,7 +370,7 @@ def form(bundle):
               else 'Top up to three eligible names; equal weights over the actual selected count.')
     metadata = dict(zip(META, [cohort_id(screen['as_of']), state, screen['as_of'], digest(STRATEGY),
         screen['universe']['name'], screen['universe']['membership_date'], screen['universe']['source'],
-        digest(screen['universe']), screen['input_sha256'], hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        digest(identity), screen['input_sha256'], hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         screen['reference_session'], screen['sources']['symbol_mapping_date'],
         json.dumps(source_records(prepared['prices'] + [prepared['sessions']]), separators=(',', ':')),
         json.dumps([[row['date'], row['open_at'], row['close_at']] for row in prepared['sessions']['data']['sessions']],
@@ -365,27 +466,37 @@ def validate_formation(card):
     return card
 
 
-def formation_markdown(card, note_key):
+def formation_markdown(card, note_key, vault=None):
     validate_formation(card)
     meta = card['metadata']
     heading = heading_for(meta['Cohort'])
-    detail = '#### ' + heading + '\n\n' + table(('Field', 'Value'), meta.items())
-    if card['rows']:
-        detail += '\n\n' + table(FORMATION_COLUMNS, card['rows'])
+    evidence = save_evidence(card, vault, note_key) if vault is not None else None
+    visible = _compact_metadata(card, evidence) if evidence else meta
+    rows = [row for row in card['rows'] if row[-1] == 'selected'] if evidence else card['rows']
+    detail = '#### ' + heading + '\n\n' + table(('Field', 'Value'), visible.items())
+    if rows:
+        detail += '\n\n' + table(FORMATION_COLUMNS, rows)
     detail += ('\n\nFixed monthly strategy diagnostic, not a purchase recommendation. '
                'Coverage is only the declared universe. Daily notional includes extended hours. '
                'Empty/unavailable cohorts have no simulated cash return.\n')
+    if evidence:
+        detail += ('\nThe immutable evidence attachment retains the full declared roster, source queries, '
+                   'calendar boundaries and exclusion measurements. Its digest and exact owner note '
+                   'are verified whenever this record is indexed.\n')
     if len(detail.encode('utf-8')) > MAX_CARD_BYTES:
         fail('comparison evidence exceeds the note budget; record formation unavailable, do not trim the universe after ranking')
-    return {'detail_markdown': detail, 'journal_markdown': '#### Comparison cohorts\n\n' + table(
+    result = {'detail_markdown': detail, 'journal_markdown': '#### Comparison cohorts\n\n' + table(
         ('Cohort', 'State', 'Record'), [(meta['Cohort'], meta['State'], record_link(note_key, heading))]) + '\n'}
+    if evidence:
+        result['evidence_attachment'] = evidence
+    return result
 
 
 def _unescape(value):
     return value.replace('&#124;', '|').replace('&amp;', '&')
 
 
-def read_card(text, section, observation=False):
+def read_card(text, section, observation=False, *, vault=None, note_key=None):
     """Read only helper-shaped visible tables in one uniquely named detail card."""
     lines = text.splitlines()
     starts = [i for i, line in enumerate(lines) if line == '#### ' + section]
@@ -402,9 +513,12 @@ def read_card(text, section, observation=False):
         elif current:
             tables.append(current); current = []
     fields, columns = (OBS_META, OBSERVATION_COLUMNS) if observation else (META, FORMATION_COLUMNS)
+    compact_fields = COMPACT_OBS_META if observation else COMPACT_META
     if not 1 <= len(tables) <= 2 or tables[0][:2] != [['Field', 'Value'], ['---', '---']]:
         fail('comparison detail requires its exact metadata table')
-    if any(len(row) != 2 for row in tables[0][2:]) or tuple(row[0] for row in tables[0][2:]) != fields:
+    actual_fields = tuple(row[0] for row in tables[0][2:])
+    attached = actual_fields == compact_fields
+    if any(len(row) != 2 for row in tables[0][2:]) or actual_fields not in (fields, compact_fields):
         fail('comparison metadata fields are missing, duplicated or reordered')
     metadata, rows = dict(tables[0][2:]), []
     if len(tables) == 2:
@@ -418,6 +532,16 @@ def read_card(text, section, observation=False):
                 row[index] = None if row[index] == '-' else number(float(row[index]))
             rows.append(row)
     card = {'metadata': metadata, 'rows': rows}
+    if attached:
+        card = load_evidence(vault, metadata['Evidence'], metadata['Evidence SHA-256'], note_key, observation)
+        expected = _compact_metadata(card, {'link': metadata['Evidence'], 'sha256': metadata['Evidence SHA-256']}, observation)
+        # Apply the same visible escaping/decoding as the table renderer: a
+        # metadata source may contain an ampersand, pipe, or line break.
+        expected = {key: _unescape(scalar(value)) for key, value in expected.items()}
+        visible_rows = card['rows'] if observation else [row for row in card['rows'] if row[-1] == 'selected']
+        if metadata != expected or rows != visible_rows:
+            fail('comparison visible summary or measurements disagree with its verified evidence attachment')
+        return card
     return card if observation else validate_formation(card)
 
 
@@ -570,12 +694,14 @@ def validate_observation(observation, cohort):
     return observation
 
 
-def observation_markdown(observation, note_key, replaces='-'):
+def observation_markdown(observation, note_key, replaces='-', vault=None):
     if observation.get('state') == 'pending':
         return {'detail_markdown': None, 'journal_markdown': None}
     meta = observation['metadata']
     heading = heading_for(meta['Cohort'], meta['Horizon'])
-    detail = ('#### ' + heading + '\n\n' + table(('Field', 'Value'), meta.items())
+    evidence = save_evidence(observation, vault, note_key, observation=True) if vault is not None else None
+    visible = _compact_metadata(observation, evidence, observation=True) if evidence else meta
+    detail = ('#### ' + heading + '\n\n' + table(('Field', 'Value'), visible.items())
               + '\n\n' + table(OBSERVATION_COLUMNS, observation['rows'])
               + '\n\nMember return = endpoint split-adjusted daily close / baseline split-adjusted '
                 'daily open - 1. Cohort return is the arithmetic mean across the original selected '
@@ -587,7 +713,10 @@ def observation_markdown(observation, note_key, replaces='-'):
         ('Cohort', 'Horizon', 'State', 'Baseline at', 'Observed at', 'Return', 'Benchmark return', 'Record', 'Replaces'),
         [(meta['Cohort'], meta['Horizon'], meta['State'], meta['Baseline at'], meta['Observed at'],
           observation['return_value'], observation['benchmark_return'], record_link(note_key, heading), replaces)]) + '\n'
-    return {'detail_markdown': detail, 'journal_markdown': journal}
+    result = {'detail_markdown': detail, 'journal_markdown': journal}
+    if evidence:
+        result['evidence_attachment'] = evidence
+    return result
 
 
 def load_json(path):
@@ -619,6 +748,7 @@ def main(argv=None):
     observe.add_argument('--replaces', default='-')
     for command in (make, missing, observe):
         command.add_argument('--note-key', required=True)
+        command.add_argument('--vault', help='selected vault; preserve immutable evidence and emit compact cards')
     args = parser.parse_args(argv)
     try:
         if args.test:
@@ -626,19 +756,20 @@ def main(argv=None):
         if args.command is None:
             fail('provide form, unavailable or evaluate; use --help for the input contract')
         if args.command == 'form':
-            result = form(load_json(args.input)); result.update(formation_markdown(result, args.note_key))
+            result = form(load_json(args.input)); result.update(formation_markdown(result, args.note_key, args.vault))
         elif args.command == 'unavailable':
-            result = unavailable(args.as_of, args.reason); result.update(formation_markdown(result, args.note_key))
+            result = unavailable(args.as_of, args.reason); result.update(formation_markdown(result, args.note_key, args.vault))
         else:
             import market_notes
             data, _ = market_notes.read_stable(args.cohort_note)
             note = market_notes.lint_bytes(data)
-            card = read_card(data.decode('utf-8'), heading_for(args.cohort))
+            card = read_card(data.decode('utf-8'), heading_for(args.cohort), vault=args.vault,
+                             note_key=Path(args.cohort_note).stem)
             result = evaluate(card, note['metadata']['generated_at'], load_json(args.input), args.horizon)
-            result.update(observation_markdown(result, args.note_key, args.replaces))
+            result.update(observation_markdown(result, args.note_key, args.replaces, args.vault))
         print(json.dumps({'market_comparison': 1, **result}, ensure_ascii=False, allow_nan=False))
         return 0
-    except (ValueError, KeyError, TypeError, OSError, RecursionError, DataError) as exc:
+    except (ValueError, KeyError, TypeError, OSError, RecursionError, DataError, evidence_store.PublicationError) as exc:
         print(json.dumps({'market_comparison': 1, 'error': str(exc)}))
         return 2
 

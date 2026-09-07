@@ -145,7 +145,7 @@ def news(client, args):
 
 
 def alpaca_news(client, args):
-    """One bounded page for access checks or narrow windows; never imply wire completeness."""
+    """Follow bounded cursors, preserving revisions, duplicates and partial coverage."""
     symbol = _symbol(getattr(args, 'symbol', None))
     since, cutoff = parse_time(args.since), parse_time(args.as_of)
     if since > cutoff or cutoff > utc_now():
@@ -167,8 +167,73 @@ def alpaca_news(client, args):
         params['symbols'] = symbol
     headers = {'APCA-API-KEY-ID': required_env(client.env, 'ALPACA_API_KEY'),
                'APCA-API-SECRET-KEY': required_env(client.env, 'ALPACA_SECRET_KEY')}
-    payload = client.get_json(ALPACA_NEWS, params=params, headers=headers)
+    budget = getattr(args, 'max_pages', 1)
+    if type(budget) is not int or not 1 <= budget <= 100:
+        raise DataError('invalid_input', 'Alpaca news max-pages must be from 1 through 100.')
+    data, seen, seen_tokens = [], {}, set()
+    excluded = provider_count = duplicate_count = pages = 0
+    token, failure = None, None
+    for _ in range(budget):
+        try:
+            payload = client.get_json(ALPACA_NEWS, params=dict(params), headers=headers)
+            rows, omitted, following = _alpaca_page(payload, limit, symbol, since, cutoff, content)
+            # Validate the whole page before retaining it. Same-ID revisions can
+            # change between page requests; never silently choose one version.
+            if any(row['id'] in seen and seen[row['id']] != row for row in rows):
+                raise DataError('invalid_response', 'A news article changed between pages; retain earlier evidence and recheck the unresolved window.')
+            page_seen = {}
+            for row in rows:
+                if row['id'] in page_seen and page_seen[row['id']] != row:
+                    raise DataError('invalid_response', 'Conflicting versions of one news article occurred within a page.')
+                page_seen[row['id']] = row
+        except DataError as exc:
+            if pages == 0:
+                raise
+            failure = {'code': exc.code, 'message': str(exc)}
+            break
+        pages += 1
+        provider_count += len(payload['news'])
+        excluded += omitted
+        for row in rows:
+            if row['id'] in seen:
+                duplicate_count += 1
+            else:
+                data.append(row)
+                seen[row['id']] = row
+        token = following
+        if token is None:
+            break
+        if token in seen_tokens:
+            failure = {'code': 'pagination', 'message': 'Provider repeated a news cursor; remaining coverage is unknown.'}
+            break
+        seen_tokens.add(token)
+        params['page_token'] = token
     retrieved = utc_now()
+    warnings = ['This is a current provider response, not a historical article-text snapshot or a complete market news wire.',
+                'EARLIEST/LATEST sort by provider update time, not publication time; interval timestamp semantics are not documented.',
+                'An empty recent query does not establish real-time delivery or the absence of announcements.']
+    if token is not None:
+        warnings.append('More provider results exist or a page failed; retained results are partial. Resume with an appropriate budget or narrower window.')
+    if failure:
+        warnings.append(failure['message'])
+    if excluded:
+        warnings.append('Records outside the evidence window or requested symbol were excluded.')
+    if any(row['url'] is None for row in data):
+        warnings.append('Some articles lack publisher URLs; retain their provider article IDs and verify material claims from primary sources.')
+    return {'source': {'provider': 'alpaca', 'endpoint': ALPACA_NEWS},
+            'query': {'symbol': symbol, 'since': _iso(since), 'as_of': _iso(cutoff),
+                      'limit': limit, 'sort': sort, 'include_content': content, 'max_pages': budget},
+            'retrieved_at': _iso(retrieved), 'point_in_time_verified': False,
+            'complete': token is None and failure is None and not excluded, 'warnings': warnings,
+            'pagination': {'pages': pages, 'exhausted': token is None and failure is None, 'error': failure},
+            'provider_record_count': provider_count, 'excluded_record_count': excluded,
+            'duplicate_record_count': duplicate_count,
+            'first_published_in_window_count': sum(parse_time(row['published_at']) >= since for row in data),
+            'older_updated_count': sum(parse_time(row['published_at']) < since for row in data),
+            'returned_record_count': len(data), 'data': data}
+
+
+def _alpaca_page(payload, limit, symbol, since, cutoff, content):
     if not isinstance(payload, dict) or not isinstance(payload.get('news'), list):
         raise DataError('invalid_response', 'Alpaca returned an invalid news page.')
     if 'next_page_token' not in payload:
@@ -212,23 +277,7 @@ def alpaca_news(client, args):
                          'content': _text(row.get('content')) if content else None})
     except (ValueError, TypeError, DataError):
         raise DataError('invalid_response', 'Alpaca returned malformed news records; no complete result was assumed.') from None
-    warnings = ['This is a current provider response, not a historical article-text snapshot or a complete market news wire.',
-                'EARLIEST/LATEST sort by provider update time, not publication time; interval timestamp semantics are not documented.',
-                'An empty recent query does not establish real-time delivery or the absence of announcements.']
-    if token is not None:
-        warnings.append('More provider results exist; this one-page sample is incomplete. Narrow the window for further retrieval.')
-    if excluded:
-        warnings.append('Records outside the evidence window or requested symbol were excluded.')
-    if any(row['url'] is None for row in data):
-        warnings.append('Some articles lack publisher URLs; retain their provider article IDs and verify material claims from primary sources.')
-    return {'source': {'provider': 'alpaca', 'endpoint': ALPACA_NEWS},
-            'query': {'symbol': symbol, 'since': _iso(since), 'as_of': _iso(cutoff),
-                      'limit': limit, 'sort': sort, 'include_content': content},
-            'retrieved_at': _iso(retrieved), 'point_in_time_verified': False,
-            'complete': token is None and not excluded, 'warnings': warnings,
-            'pagination': {'pages': 1, 'exhausted': token is None},
-            'provider_record_count': len(payload['news']), 'excluded_record_count': excluded,
-            'returned_record_count': len(data), 'data': data}
+    return data, excluded, token
 
 
 def alpha_news(client, args):
@@ -474,6 +523,44 @@ def run_self_test():
             self.assertTrue(all(row['content'] == '<p>Fixture body.</p>' for row in result['data']))
             self.assertEqual(result['excluded_record_count'], 0)
             self.assertTrue(result['complete'])
+
+        def test_alpaca_pagination_deduplicates_and_counts_older_updates(self):
+            from unittest.mock import Mock
+            client = self.alpaca_client({})
+            older = self.alpaca_article(id=2, created_at='2026-09-03T12:30:00Z')
+            client.get_json = Mock(side_effect=[
+                {'news': [self.alpaca_article()], 'next_page_token': 'second'},
+                {'news': [self.alpaca_article(), older], 'next_page_token': None}])
+            result = alpaca_news(client, self.news_args(limit=10, max_pages=3))
+            self.assertTrue(result['complete'])
+            self.assertEqual(result['pagination']['pages'], 2)
+            self.assertEqual(result['duplicate_record_count'], 1)
+            self.assertEqual(result['first_published_in_window_count'], 1)
+            self.assertEqual(result['older_updated_count'], 1)
+            self.assertEqual(client.get_json.call_args.kwargs['params']['page_token'], 'second')
+
+        def test_alpaca_page_failure_and_conflicting_revision_preserve_earlier_page(self):
+            from unittest.mock import Mock
+            for next_page in (DataError('rate_limited', 'Stop source.'),
+                              {'news': [self.alpaca_article(headline='Changed')], 'next_page_token': None},
+                              {'news': [], 'next_page_token': 'second'}):
+                client = self.alpaca_client({})
+                client.get_json = Mock(side_effect=[
+                    {'news': [self.alpaca_article()], 'next_page_token': 'second'}, next_page])
+                result = alpaca_news(client, self.news_args(limit=10, max_pages=3))
+                self.assertFalse(result['complete'])
+                self.assertFalse(result['pagination']['exhausted'])
+                self.assertEqual(result['data'][0]['title'], 'Fixture announcement')
+                self.assertEqual(client.get_json.call_count, 2)
+
+        def test_alpaca_page_budget_retains_partial_and_rejects_invalid_budget(self):
+            client = self.alpaca_client({'news': [self.alpaca_article()], 'next_page_token': 'second'})
+            result = alpaca_news(client, self.news_args(limit=10, max_pages=1))
+            self.assertFalse(result['complete'])
+            self.assertEqual(len(result['data']), 1)
+            for limit in (0, 101, True):
+                with self.assertRaises(DataError):
+                    alpaca_news(client, self.news_args(limit=10, max_pages=limit))
 
         def test_alpaca_revisions_preserve_created_time_and_exclude_invalid_window(self):
             rows = [self.alpaca_article(created_at='2026-09-03T12:30:00Z'),

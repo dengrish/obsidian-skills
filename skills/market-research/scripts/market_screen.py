@@ -254,6 +254,9 @@ def screen(bundle):
     universe = bundle.get("universe")
     if not isinstance(universe, dict):
         _fail("Provide a declared instrument universe.")
+    discovery_complete = universe.get("discovery_complete", True)
+    if not isinstance(discovery_complete, bool):
+        _fail("Discovery coverage must be an explicit JSON boolean when supplied.")
     _text(universe.get("name"), "universe name")
     _text(universe.get("source"), "universe source")
     membership = parse_date(universe.get("membership_date"))
@@ -339,6 +342,8 @@ def screen(bundle):
     warnings = list(WARNINGS) + source_warnings + bundle["sessions"].get("warnings", [])
     if not complete:
         warnings.append("At least one saved price response has incomplete provider coverage; passing rows remain provisional.")
+    if not discovery_complete:
+        warnings.append("The preceding directory or daily-proxy discovery stage was incomplete; a complete shortlist history does not establish complete universe coverage.")
     if membership > cutoff.astimezone(ZoneInfo("America/New_York")).date():
         warnings.append("Universe membership is dated after the cutoff; this is a retrospective current-universe calculation.")
     definition = {"rules": rules, "benchmark": benchmark, "return_basis": "split_adjusted_price",
@@ -360,7 +365,7 @@ def screen(bundle):
                   "sort_direction": "descending", "tie_break": ["exchange", "symbol"],
                   "required_history": "every supplied scheduled session from earliest required anchor through reference"}
     return {
-        "market_screen": 1, "complete": complete and not unavailable and not benchmark_missing,
+        "market_screen": 1, "complete": discovery_complete and complete and not unavailable and not benchmark_missing,
         "as_of": _iso(cutoff), "reference_session": reference.isoformat(),
         "input_sha256": _digest(bundle), "rules_sha256": _digest(rules),
         "calculator_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),

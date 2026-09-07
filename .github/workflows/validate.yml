@@ -133,3 +133,5 @@ jobs:
         run: python tests/test_market_research_eval.py
       - name: Test prospective momentum comparison
         run: python tests/test_market_comparison.py
+      - name: Run market acquisition workflows
+        run: python tests/test_market_acquire.py

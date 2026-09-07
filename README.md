@@ -305,6 +305,7 @@ python3 -m venv .venv
 .venv/bin/python tests/test_end_to_end.py
 .venv/bin/python tests/test_market_research_eval.py
 .venv/bin/python tests/test_market_comparison.py
+.venv/bin/python tests/test_market_acquire.py
 .venv/bin/python tests/test_compatibility.py
 .venv/bin/python tools/build_plugin.py --check
 .venv/bin/python tests/test_provenance.py

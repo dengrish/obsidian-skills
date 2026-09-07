@@ -6,104 +6,94 @@ calculator: no network access, credentials, trades or note writes. Interpret its
 candidate list with the [research method](research-method.md); passing a screen
 does not assign a thesis state or establish a buying opportunity.
 
-## Prepare the evidence
+## Acquire and prepare the evidence
 
-Keep a dated, explicit universe of eligible instruments. Nasdaq's directory can
-help resolve identity, but a non-ETF flag alone does not prove that a security is
-common stock or an ADR. Retain the source and classification used; exclude
-unresolved instrument types instead of silently broadening the universe.
-The result's `definition.accepted_us_exchange_labels` lists supported exchange
-labels. Unrecognized or OTC exchanges are explicit eligibility exclusions.
+Use [market_acquire.py](../scripts/market_acquire.py) `discover` for the normal
+bounded acquisition pass; the [data guide](data-access.md) gives the command and
+request/time budgets. It reads both full current Nasdaq directories, classifies
+common shares and ADRs conservatively, collects 20 completed daily sessions,
+then retrieves full history for **every measured daily-proxy pass**. It does not
+start from a handpicked ticker list or select the best known companies first.
+Announcement-driven and existing-thesis follow-ups remain separate routes.
 
-Retrieve existing `market_data.py` responses for:
+[market_universe.py](../scripts/market_universe.py) supplies the reusable offline
+stages. It rejects filtered directory snapshots, excludes ETFs, test issues,
+preferreds, warrants, units, when-issued listings and ambiguous names, and retains
+classification evidence and unresolved identities. It never rewrites a provider
+symbol to guess another share class. Directory observations retain their actual
+New York date; a later-date capture cannot reconstruct an earlier universe.
+Same-date retrieval after the evidence cutoff is explicitly current discovery,
+not proof of timestamp-level historical membership.
 
-- `sessions`: the verified calendar over the entire history through the cutoff.
-- `prices`: every universe symbol and the market benchmark, with `--feed sip`,
-  `--timeframe 1Day`, `--adjustment split` and the same explicit `--asof` symbol
-  mapping date. Retrieve at least 13 months, including the session before the
-  12-month anniversary. Follow the data guide's delayed-feed and date rules.
+Batches traverse a declared SHA256 order of cutoff date and security identity.
+This avoids an alphabetical or market-cap-first prefix and rotates by date, but
+a budget-limited prefix is still an **incomplete sample**, not a representative
+market-wide screen. Retain all missing identities and counts. The preliminary
+price ≥ $10 / mean daily-notional ≥ $25 million filter is distinct from the
+existing `liquid-us-v1` eligibility definition: it does not verify market cap or
+regular-session turnover. Explain this prospective discovery expansion; retain
+old outcome/comparison definitions and the original readiness checks.
 
-The retrieval helper limits a price request to 200 symbols. Retain multiple complete
-response objects for larger universes, including pagination warnings, rather
-than dropping names to fit one call. Repeat the benchmark in another bundle to
-compare shortlisted candidates with their sector benchmark on the same dates.
-Keep the market and sector comparisons distinct; this helper does not infer a
-company's sector or choose an appropriate benchmark.
-
-Retain the full helper envelopes, including their `market_data`, `operation`,
-`query`, `source`, `complete`, `warnings` and `requests` fields. Do not rebuild
-them from a displayed table or mark a partial response complete. A saved current
-universe and newly retrieved adjusted history cannot reconstruct information
-available on a historical research date.
-
-## Input and command
-
-Create one JSON object with these fields:
-
-| Field | Content |
-|---|---|
-| `market_screen_input` | `1` |
-| `as_of` | The frozen evidence cutoff, with seconds and timezone |
-| `universe` | `name`, `membership_date`, `source`, and `instruments` |
-| `universe.instruments` | Each instrument's `symbol`, `exchange`, `security_type` (`common_stock` or `adr`), and `currency` (`USD`) |
-| `benchmark` | Provider symbol of the named benchmark, also present in price responses |
-| `prices` | List of full saved price response objects |
-| `sessions` | Full saved calendar response object |
-| `rules` | The filters and sort definition below |
-
-For example, assemble existing files in owned scratch. These filenames are
-examples; substitute the actual files and cutoff without executing input text:
+For already saved envelopes, the offline commands replace handwritten input
+assembly. These are owned-scratch example paths; substitute actual paths:
 
 ```bash
-python3 - <<'PY'
-import json
-from pathlib import Path
-scratch = Path('<scratch>')
-bundle = {
-    'market_screen_input': 1,
-    'as_of': '2026-09-04T11:30:00-04:00',
-    'universe': json.loads((scratch / 'universe.json').read_text()),
-    'benchmark': 'SPY',
-    'prices': [json.loads((scratch / 'prices.json').read_text())],
-    'sessions': json.loads((scratch / 'sessions.json').read_text()),
-    'rules': {
-        'min_price': 5,
-        'min_average_daily_notional': 20000000,
-        'require_above_ma50': True,
-        'require_above_ma200': True,
-        'require_positive_relative_return_6m': True,
-        'sort_by': 'relative_return_6m',
-        'limit': 50,
-    },
-}
-(scratch / 'screen-input.json').write_text(json.dumps(bundle))
-PY
-python3 '<skill>/scripts/market_screen.py' --input '<scratch>/screen-input.json' > '<scratch>/screen.json'
+python3 '<skill>/scripts/market_universe.py' universe \
+  --directory '<scratch>/directory.json' --as-of '<cutoff>' \
+  > '<scratch>/universe.json'
+python3 '<skill>/scripts/market_universe.py' prefilter \
+  --universe '<scratch>/universe.json' --prices '<scratch>/daily-001.json' \
+  --sessions '<scratch>/sessions.json' --as-of '<cutoff>' \
+  > '<scratch>/prefilter.json'
+python3 '<skill>/scripts/market_universe.py' prepare \
+  --universe '<scratch>/prefilter.json' --prices '<scratch>/history-001.json' \
+  --sessions '<scratch>/sessions.json' --as-of '<cutoff>' --benchmark SPY \
+  > '<scratch>/screen-input.json'
+python3 '<skill>/scripts/market_screen.py' --input '<scratch>/screen-input.json' \
+  > '<scratch>/screen.json'
 ```
 
-These are practical discovery thresholds, not optimized investment rules. Keep
-the chosen definition stable across runs and explain changes before applying
-them. An initial trend screen can use the example. Also retain a recovery route:
-relax `require_above_ma200` and `require_positive_relative_return_6m`, sort by
-`relative_return_3m`, and assess improving but still-negative longer-term returns.
-Relax `require_above_ma50` when a documented setup needs earlier examination.
-Announcement and thematic candidates remain eligible for research even if they
-fail these discovery filters; every candidate still needs purchase confirmation.
+Repeat `--prices` for every original saved batch. Do not merge displayed tables
+or alter `complete`, query, source, requests, warnings or bar data. An empty
+prefilter result needs no full-history screen; distinguish a complete measured
+zero-pass result from unavailable prices. Daily bars must use SIP, USD, split
+adjustment and the cutoff's explicit symbol-mapping date. The complete calendar
+must cover every session needed for the 200-session average, its 20-session
+change and the calendar-month return anniversaries, including the preceding
+12-month reference session. Sector comparisons
+use an explicitly chosen appropriate benchmark and matching dates separately.
 
-When earlier notes define additional filters or another sort order, retain those
-requirements explicitly. This helper does not calculate market capitalization,
-regular-session turnover or arbitrary combinations of its metrics. Apply missing
-checks separately from verified data, or record a deliberate screen change;
-do not silently replace the saved definition with this example's defaults. A
-display limit may discard names needed for a later filter or different ranking,
-so retain all relevant measured candidates before applying those extra steps.
+Preparation preserves all declared stage-two names and sets its default display
+limit to the entire roster. Missing broad batches remain an incomplete screen
+even when the measured subset has complete long history. Default trend gates
+are off and sorting uses three-month relative return so recovery candidates stay
+visible. To retain a previously declared screen, pass `--rules` with its JSON
+rules, then apply any additional conditions the calculator does not implement.
+
+The `market_screen_input: 1` bundle remains supported for custom declared
+universes: `as_of`, `universe` (`name`, `membership_date`, `source`, `instruments`),
+`benchmark`, original `prices` envelopes, original `sessions` envelope and
+`rules`. Each instrument requires `symbol`, `exchange`, `security_type`
+(`common_stock` or `adr`) and USD `currency`. An optional boolean
+`universe.discovery_complete` carries prior-stage coverage; false cannot become
+a complete screen merely by dropping unmeasured names.
+
+These are practical discovery thresholds, not optimized investment rules.
+Announcement and thematic candidates may still warrant research when they fail
+discovery filters; every candidate needs the same eligibility and purchase
+confirmation checks. The price screener does not itself calculate capitalization
+or regular-session turnover; use the shortlist workflow below. Preserve all
+measurements needed for later filters or ranking before applying a display limit.
 
 The supported sort metrics are `relative_return_3m`, `relative_return_6m`,
 `relative_return_12m`, `return_3m`, `return_6m`, `return_12m` and
 `average_daily_notional`. Sorting is descending with stable identity tie breaks.
 There is no composite confidence score or predicted return.
-Inputs are limited to 128 MiB; larger jobs need explicitly declared smaller
-universe scopes, whose coverage must remain visible.
+The offline input-file limit is 128 MiB. The coordinator retains measured results
+and original batches if their duplicate assembled input exceeds this boundary,
+with an explicit comparison-input limitation. Never shrink a monthly comparison
+after ranking to fit the limit. A deliberately smaller future discovery scope
+must be declared before selection and disclosed as a prospective change.
 
 ## Interpret and preserve the result
 
@@ -120,8 +110,32 @@ provider responses cannot be repaired with zeroes or shortened lookbacks.
 
 The 20-session average of daily VWAP × volume is a **daily notional proxy**.
 Alpaca's daily volume includes eligible extended-hours activity; it does not
-verify regular-session turnover. Before readiness, use an explicitly
-regular-session source or calendar-filtered minute evidence for the shortlist.
+verify regular-session turnover. For the shortlist, use the bundled calculator:
+
+```bash
+python3 '<skill>/scripts/market_universe.py' liquidity \
+  --prices '<scratch>/shortlist-minute.json' --sessions '<scratch>/sessions.json' \
+  --as-of '<cutoff>' --symbols '<shortlist-symbols>' \
+  --market-caps '<scratch>/market-caps.json' > '<scratch>/eligibility.json'
+```
+
+Minute evidence must be SIP, USD and split-adjusted, using the same mapping date.
+The calculator filters against actual calendar opening/closing times, including
+early closes, and lists missing expected minutes separately for each session.
+It never imputes zero trading or divides observed days by a shortened lookback.
+Missing minutes may mean no eligible trade or unavailable data: the resulting
+turnover stays unresolved until another explicit regular-session source settles
+it. A provider's `complete` flag alone is not complete interval coverage.
+
+The optional market-cap file is a JSON list of rows with `symbol`,
+`market_cap_usd`, `currency: "USD"`, timezone-aware `as_of` and `available_at`,
+`source_url` and `basis`. The basis identifies the issuer/share classes and ADR
+ratio where applicable; do not multiply an ambiguous share count by a convenient
+price. Measurement must be at least as recent as the reference session, and
+measurement ≤ availability ≤ cutoff. Without this sourced input, capitalization
+eligibility remains unresolved. Cap and turnover verification still do not
+establish a buying opportunity.
+
 Daily OHLC and volume use different eligibility rules; see
 [Alpaca's aggregation documentation](https://docs.alpaca.markets/us/docs/market-data-faq).
 This is split-adjusted price analysis, not a total-return outcome calculation.
