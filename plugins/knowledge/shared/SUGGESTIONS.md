@@ -105,10 +105,10 @@ write, and empty canonical logs are kept rather than deleted.
 A report-only, preview, or no-apply run writes no logs or setup files. On an
 apply-capable run in an established vault, initialize any missing canonical
 skill logs for the skills shipped in the current plugin's `skills/` directory.
-The knowledge plugin initializes its seven skill logs; the investments plugin
-initializes `Reviews/market-research-suggestions.md`. Neither requires the
-other plugin or initializes its logs. Preserve any existing logs from either
-plugin; create the Wiki note-content log only when needed by a Wiki workflow.
+Derive the roster from that installed package rather than a fixed list. Neither
+plugin requires the other or initializes its logs. Preserve any existing logs
+from either plugin; create the Wiki note-content log only when needed by a
+Wiki workflow.
 This initialization does not authorize adding issues to unrelated producer logs.
 
 Use the shared [safe-write protocol](SAFE_WRITES.md): snapshot complete log

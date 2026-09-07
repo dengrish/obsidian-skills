@@ -65,7 +65,7 @@ publication stages follow [SAFE_WRITES.md](SAFE_WRITES.md) separately.
 | `Sources/PDFs/<Work>/` | book-chapter PDFs, e.g. `Sources/PDFs/Prince_UDL_2026/`. The folder is what pdf-organize creates when it splits a book. paper-summarize's batch **scans** it — a book is only recognisable as one when a chapter turns up beside it — and then **skips** every chapter it finds, so a sweep never becomes a book's worth of summaries | pdf-organize, the user | figure-extract, paper-summarize (scans, skips), wiki-build, wiki-add |
 | `Sources/Images/` | **flat**; every figure and downloaded image, all extensions, whatever it came from | figure-extract, clipping-clean, wiki-add (new research images only); **pdf-organize** renames in place only within an approved source rename (§1a) | wiki-build, wiki-add, paper-summarize, clipping-clean (its `rename` path re-reads the folder — §8a), wiki-lint (with `--images`, validates embeds and reports nested/staging residue without opening or deleting files) |
 | `Wiki/` | wiki entries, one `.md` per entity (walked **recursively**) | wiki-build, wiki-add (missing requested entries only), wiki-lint | wiki-build, wiki-add, wiki-lint |
-| `Investments/` | **flat**; market analyses whose naming and schema follow the independent `investments:market-research` note format | market-research only; earlier dated records remain unchanged | market-research (longitudinal evidence and thesis review) |
+| `Investments/` | dated market analyses at the top level, plus research evidence and source collections in dedicated subfolders; each investments skill governs its own format | market-research (immutable dated records and evidence snapshots), feed-collect (maintained source collections); the user maintains `x-accounts.md` | the investments skills within their own scope |
 | `add-to-wiki.md` at the *vault root* | requested-topic queue | the user; wiki-add checks off successful or already-existing items only | wiki-add |
 | `MOCs/` | **flat**; fully generated `<discipline>.md` nested outlines plus `misc.md` for Wiki entries tagged `#misc`; no `-moc` suffix, marker comments, H1, or frontmatter | wiki-lint | wiki-lint (navigation/hierarchy diagnostics only; reads each before an in-place update) |
 | `Reviews/` | `<current-skill>-suggestions.md` for installed skills, plus `Reviews/wiki-notes-suggestions.md` for Wiki note-content improvements; open issues only | skills under the attribution and setup rules in [SUGGESTIONS.md](SUGGESTIONS.md) | skills consuming the relevant outputs or verifying a fix |
@@ -118,6 +118,14 @@ rename and refactor planning: if an operation requires changing an investment
 record, report the dependency and retain its existing target. General
 authorization to repair dependencies does not waive this history rule.
 market-research never places trades.
+
+**Feed collection route.** `investments:feed-collect` reads
+`Investments/x-accounts.md` and maintains one source-only X account note under
+`Investments/Sources/X/`. Its resumable collection state in
+`Investments/Sources/.feed-collect/` is durable workflow data, not scratch.
+These account notes may be updated for new posts and source compliance; the
+immutability rule above applies to dated market-research records, not the
+source collection. They remain outside knowledge intake and maintenance.
 
 An interrupted or partial wiki-build run is resumed by **wiki-build** with
 explicit resume/re-run intent; wiki-lint can repair only the
