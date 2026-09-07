@@ -146,7 +146,18 @@ makes overall coverage partial. If the duplicate assembled input exceeds 128 MiB
 the coordinator preserves the measured screen and every original source batch,
 marks the assembly/comparison limitation explicitly, and never shrinks the cohort
 to fit. A later validation or storage failure retains the named scratch directory,
-last completed stage, operations and available artifacts in a manifest.
+last completed stage, operations and available artifacts in a manifest. Known
+validation/provider errors retain their sanitized code and explanation; storage
+errors have a safe category, while unexpected exception details stay hidden.
+Provider diagnostics also remain with their operation records, including partial
+news coverage. Credentials are redacted before the manifest is saved or returned.
+Invalid price bars quarantine the affected symbol's entire requested history,
+including bars on earlier or later pages; valid histories for other symbols remain
+available. Such results stay incomplete and list safe per-symbol diagnostics in
+`data.rejected_symbols`, with the affected names also retained in
+`requested_symbols` and `missing_symbols`. Do not treat these unavailable names
+as measured eligibility failures. Structural page errors still stop that page;
+minute-based liquidity checks remain unverified for an incomplete source envelope.
 See [screening](screening.md) for offline preparation, existing-definition
 compatibility, regular-session liquidity and sourced market-cap verification.
 

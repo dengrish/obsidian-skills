@@ -31,10 +31,11 @@ class ArtifactTooLarge(ValueError):
     """An intact source/result does not fit one bounded scratch artifact."""
 
 
-def _error_code(result):
+def _error(result):
     pagination = result.get('pagination')
     error = result.get('error') or (pagination.get('error') if isinstance(pagination, dict) else None)
-    return error.get('code') if isinstance(error, dict) else None
+    return ({key: error[key] for key in ('code', 'message') if isinstance(error.get(key), str)}
+            if isinstance(error, dict) else None)
 
 
 class Acquisition:
@@ -62,14 +63,19 @@ class Acquisition:
                        'message': 'Provider adapter returned an invalid result; no complete coverage was assumed.'}}
         result = redact(dict(result, market_data=1, operation=args.command,
                              requests=self.client.requests[first:]), self.client.env,
-                        extra_values=getattr(self.client, 'redaction_values', ()))
-        code = _error_code(result)
+                        extra_values=getattr(self.client, 'redaction_values', ()),
+                        price_bars=args.command == 'prices')
+        error = _error(result)
+        code = error.get('code') if error else None
         if code in STOP_CODES:
             scope = source + ':' + args.command if code in {'access_denied', 'network_error'} else source
             self.stopped[scope] = code
-        self.operations.append({'operation': args.command, 'source': source,
-                                'complete': result['complete'], 'error_code': code,
-                                'requests': len(result['requests'])})
+        operation = {'operation': args.command, 'source': source,
+                     'complete': result['complete'], 'error_code': code,
+                     'requests': len(result['requests'])}
+        if error:
+            operation['error'] = error
+        self.operations.append(operation)
         return result
 
 
@@ -114,8 +120,17 @@ class Scratch:
         return str(self.root / name)
 
 
-def _batches(run, plan, start, end, mapping, scratch, prefix, benchmarks=()):
-    results, attempted = [], []
+def _save(scratch, name, value):
+    """Expose storage failures without native exception paths or payloads."""
+    try:
+        return scratch.save(name, value)
+    except OSError:
+        raise DataError('scratch_access', 'Acquisition artifact could not be saved; preserve the named scratch directory and its earlier artifacts.') from None
+
+
+def _batches(run, plan, start, end, mapping, scratch, prefix, benchmarks=(), attempted=None):
+    results = []
+    attempted = [] if attempted is None else attempted
     benchmarks = list(dict.fromkeys(benchmarks))
     capacity = 200 - len(benchmarks)
     if capacity < 1:
@@ -129,21 +144,28 @@ def _batches(run, plan, start, end, mapping, scratch, prefix, benchmarks=()):
             result = run.fetch(['prices', '--symbols', ','.join(symbols), '--start', start,
                                 '--end', end, '--adjustment', 'split', '--asof', mapping,
                                 '--max-pages', '20'])
-            path = scratch.save('%s-%04d.json' % (prefix, len(attempted) + 1), result)
+            path = _save(scratch, '%s-%04d.json' % (prefix, len(attempted) + 1), result)
             attempted.append({'symbols': group, 'path': path, 'complete': result['complete']})
             if isinstance(result.get('data', {}).get('bars'), dict):
                 results.append(result)
     return results, attempted
 
 
-def _finish(scratch, result):
+def _finish(scratch, result, client):
     """Retain a discoverable manifest even after a later stage fails safely."""
     result['outputs']['manifest'] = str(scratch.root / 'manifest.json')
+    # Library callers and retained manifests need the same protection as stdout.
+    result = redact(result, client.env, extra_values=getattr(client, 'redaction_values', ()))
     try:
-        scratch.save('manifest.json', result)
-    except (ValueError, TypeError, OSError, OverflowError):
+        _save(scratch, 'manifest.json', result)
+    except DataError as exc:
         result['complete'] = False
-        result['manifest_error'] = 'Manifest could not be saved; preserve the named scratch directory and its earlier artifacts.'
+        result['manifest_error'] = redact({'code': exc.code, 'message': str(exc)}, client.env,
+                                           extra_values=getattr(client, 'redaction_values', ()))
+    except Exception:
+        result['complete'] = False
+        result['manifest_error'] = {'code': 'manifest_failure',
+            'message': 'Manifest could not be saved; preserve the named scratch directory and its earlier artifacts.'}
     return result
 
 
@@ -171,27 +193,33 @@ def discover(client, vault, work_dir, as_of, news_since, *, batch_size=100, benc
                            'A broad directory screen is not a verified investment recommendation; partial batches remain unavailable.']}
     try:
         directory = run.fetch(['symbols'])
-        outputs['directory'] = scratch.save('directory.json', directory)
+        outputs['directory'] = _save(scratch, 'directory.json', directory)
         result['last_completed_stage'] = stage
         if not directory['complete']:
             result['reason'] = 'A complete directory was unavailable; no smaller roster was silently substituted.'
-            return _finish(scratch, result)
+            result['failed_stage'] = stage
+            if _error(directory):
+                result['error'] = _error(directory)
+            return _finish(scratch, result, client)
         stage = 'universe'
         roster = universe(directory, as_of, batch_size=batch_size)
-        outputs['universe'] = scratch.save('universe.json', roster)
+        outputs['universe'] = _save(scratch, 'universe.json', roster)
         result['last_completed_stage'] = stage
         stage = 'calendar'
         calendar = run.fetch(['sessions', '--start', start[:10], '--end', day.isoformat()])
-        outputs['calendar'] = scratch.save('calendar.json', calendar)
+        outputs['calendar'] = _save(scratch, 'calendar.json', calendar)
         result['last_completed_stage'] = stage
         stage = 'news'
         news = run.fetch(['news', '--provider', 'alpaca', '--since', news_since, '--as-of', as_of,
                            '--limit', '50', '--max-pages', '10'])
-        outputs['news'] = scratch.save('news.json', news)
+        outputs['news'] = _save(scratch, 'news.json', news)
         result['last_completed_stage'] = stage
         if not calendar['complete']:
             result['reason'] = 'Calendar unavailable; no session-based screen was inferred.'
-            return _finish(scratch, result)
+            result['failed_stage'] = 'calendar'
+            if _error(calendar):
+                result['error'] = _error(calendar)
+            return _finish(scratch, result, client)
         stage = 'calendar-windows'
         _, _, required_days, _ = _calendar(calendar, cutoff)
         history_start = datetime.combine(required_days[0], datetime.min.time(), ny).isoformat()
@@ -200,28 +228,30 @@ def discover(client, vault, work_dir, as_of, news_since, *, batch_size=100, benc
         result['liquidity_start'] = recent
         result['last_completed_stage'] = stage
         stage = 'liquidity-proxy'
-        daily, result['preliminary_batches'] = _batches(run, roster, recent, end, day.isoformat(), scratch, stage)
+        daily, result['preliminary_batches'] = _batches(run, roster, recent, end, day.isoformat(), scratch, stage,
+                                                        attempted=result['preliminary_batches'])
         result['last_completed_stage'] = stage
         stage = 'prefilter'
         filtered = prefilter(roster, daily, calendar, as_of)
-        outputs['prefilter'] = scratch.save('prefilter.json', filtered)
+        outputs['prefilter'] = _save(scratch, 'prefilter.json', filtered)
         result['last_completed_stage'] = stage
         stage = 'history'
-        history, result['history_batches'] = _batches(run, filtered, history_start, end, day.isoformat(), scratch, stage, [benchmark])
+        history, result['history_batches'] = _batches(run, filtered, history_start, end, day.isoformat(), scratch, stage, [benchmark],
+                                                     attempted=result['history_batches'])
         result['last_completed_stage'] = stage
         if history:
             stage = 'screen-input'
             bundle = prepare(filtered, history, calendar, as_of, benchmark=benchmark, validate=False)
             stage = 'screen'
             measured = screen(bundle)
-            outputs['screen'] = scratch.save('screen.json', measured)
+            outputs['screen'] = _save(scratch, 'screen.json', measured)
             result['last_completed_stage'] = stage
             result['coverage'] = measured['coverage']
             result['complete'] = bool(filtered['complete'] and measured['complete'] and news['complete'])
             result['price_screen_complete'] = measured['complete']
             stage = 'screen-input'
             try:
-                outputs['screen_input'] = scratch.save('screen-input.json', bundle)
+                outputs['screen_input'] = _save(scratch, 'screen-input.json', bundle)
                 result['comparison_input_available'] = True
                 result['last_completed_stage'] = stage
             except ArtifactTooLarge:
@@ -241,11 +271,16 @@ def discover(client, vault, work_dir, as_of, news_since, *, batch_size=100, benc
                                 'investment opportunities exist outside the checked eligibility rules.')
         else:
             result['reason'] = 'No usable full-history batch: preserve the complete declared roster and unresolved coverage; do not claim no opportunities.'
-    except (ValueError, TypeError, KeyError, OSError, OverflowError, RuntimeError):
+    except DataError as exc:
+        # DataError is the adapters' deliberately public diagnostic contract.
+        # Never substitute arbitrary exception text for this safe explanation.
+        result.update(complete=False, failed_stage=stage,
+                      error={'code': exc.code, 'message': str(exc)})
+    except Exception:
         result.update(complete=False, failed_stage=stage, error={
             'code': 'stage_failure',
             'message': 'Provider evidence, validation or scratch access failed at this stage; preserve the named scratch and earlier artifacts. No complete result was assumed.'})
-    return _finish(scratch, result)
+    return _finish(scratch, result, client)
 
 
 def main(argv=None):
@@ -287,7 +322,9 @@ def main(argv=None):
                             redaction_values=secrets)
         result = discover(client, args.vault, args.work_dir, args.as_of, args.news_since, batch_size=args.batch_size)
         code = 0 if result['complete'] else 2
-    except (ValueError, TypeError, KeyError, OSError, OverflowError, RuntimeError):
+    except DataError as exc:
+        result, code = {'complete': False, 'error': {'code': exc.code, 'message': str(exc)}}, 2
+    except Exception:
         result, code = {'complete': False, 'error': 'Acquisition input, provider evidence or scratch access failed; retain the owned scratch artifacts and inspect the last completed stage.'}, 2
     print(json.dumps(redact(result, env, extra_values=secrets), ensure_ascii=False, allow_nan=False))
     return code
@@ -344,6 +381,26 @@ def run_self_test():
                     result = discover(client, vault, temp, '2026-09-06T23:00:00-04:00', '2026-09-04T16:00:00-04:00')
                 self.assertFalse(result['complete'])
                 self.assertEqual(fetch.call_count, 1)
+
+        def test_public_failure_is_redacted_in_returned_and_retained_manifest(self):
+            with tempfile.TemporaryDirectory() as temp:
+                vault = Path(temp) / 'vault'; vault.mkdir()
+                client = SimpleNamespace(env={'ALPACA_API_KEY': 'secret-fixture'}, requests=[])
+                with patch.object(Acquisition, 'fetch', return_value={'complete': True}), \
+                        patch('market_universe.universe', side_effect=DataError('invalid_input', 'Safe detail: secret-fixture.')):
+                    result = discover(client, vault, temp, '2026-09-06T23:00:00-04:00', '2026-09-04T16:00:00-04:00')
+                self.assertEqual(result['failed_stage'], 'universe')
+                self.assertEqual(result['last_completed_stage'], 'directory')
+                self.assertEqual(result['error'], {'code': 'invalid_input', 'message': 'Safe detail: [redacted].'})
+                self.assertEqual(json.loads(Path(result['outputs']['manifest']).read_text(encoding='utf-8')), result)
+
+        def test_storage_diagnostic_never_repeats_native_exception_payload(self):
+            scratch = Mock()
+            scratch.save.side_effect = OSError('DO-NOT-ECHO-private-path')
+            with self.assertRaises(DataError) as raised:
+                _save(scratch, 'result.json', {})
+            self.assertEqual(raised.exception.code, 'scratch_access')
+            self.assertNotIn('DO-NOT-ECHO', str(raised.exception))
 
     outcome = unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromTestCase(Tests))
     failed = len(outcome.failures) + len(outcome.errors) + len(getattr(outcome, 'unexpectedSuccesses', ()))

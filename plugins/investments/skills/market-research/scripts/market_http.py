@@ -67,8 +67,26 @@ SECRET_FIELDS = {'apikey', 'api_key', 'token', 'access_token', 'secret', 'key'}
 CREDENTIAL_NAMES = ('ALPACA_API_KEY', 'ALPACA_SECRET_KEY', 'ALPHA_VANTAGE_API_KEY', 'SEC_USER_AGENT', 'FRED_API_KEY')
 
 
-def redact(value, env=None, *, extra_values=()):
-    """Sanitize even echoed provider payloads before any JSON leaves the CLI."""
+def redact(value, env=None, *, extra_values=(), price_bars=False):
+    """Sanitize payloads; only validated prices callers may opt in to ticker keys.
+
+    The exception is confined to a normalized Alpaca envelope's data.bars map.
+    Its row contents still receive ordinary credential and string redaction.
+    """
+    ticker_keys = False
+    if (price_bars is True and isinstance(value, dict)
+            and value.get('operation') == 'prices' and value.get('provider') == 'alpaca'
+            and value.get('resource') == 'bars' and isinstance(value.get('data'), dict)
+            and isinstance(value.get('query'), dict)):
+        symbols, bars = value['data'].get('requested_symbols'), value['data'].get('bars')
+        ticker_keys = (isinstance(symbols, list) and 1 <= len(symbols) <= 200
+                       and all(isinstance(symbol, str) and re.fullmatch(r'[A-Z][A-Z0-9./-]{0,19}', symbol)
+                               for symbol in symbols)
+                       and len(set(symbols)) == len(symbols)
+                       and value['query'].get('symbols') == ','.join(symbols)
+                       and isinstance(bars, dict) and not set(bars) - set(symbols)
+                       and all(isinstance(rows, list) and all(isinstance(row, dict) for row in rows)
+                               for rows in bars.values()))
     values = [str((env or {}).get(key, '')) for key in CREDENTIAL_NAMES] + list(extra_values)
     secrets = sorted({spelling for value in values for spelling in (str(value), str(value).strip())
                       if spelling}, key=len, reverse=True)
@@ -78,12 +96,14 @@ def redact(value, env=None, *, extra_values=()):
         spellings.update((secret, urllib.parse.quote(secret, safe=''), urllib.parse.quote_plus(secret),
                           *json_spellings, *(value.replace('/', '\\/') for value in json_spellings)))
     spellings = sorted(spellings, key=len, reverse=True)
-    def clean(item):
+    def clean(item, path=()):
         if isinstance(item, dict):
-            return {clean(str(key)): ('[redacted]' if str(key).lower() in SECRET_FIELDS else clean(val))
+            symbol_map = ticker_keys and path == ('data', 'bars')
+            return {clean(str(key)): ('[redacted]' if str(key).lower() in SECRET_FIELDS and not symbol_map
+                                     else clean(val, path + (str(key),)))
                     for key, val in item.items()}
         if isinstance(item, (list, tuple)):
-            return [clean(val) for val in item]
+            return [clean(val, path + (index,)) for index, val in enumerate(item)]
         if not isinstance(item, str):
             return item
         for spelling in spellings:
@@ -504,6 +524,46 @@ def run_self_test():
             self.assertNotIn('dummy', encoded)
             self.assertNotIn('person@example.test', encoded)
             self.assertNotIn('unknown', encoded)
+
+        def test_price_ticker_keys_require_explicit_normalized_envelope_opt_in(self):
+            value = {'operation': 'prices', 'provider': 'alpaca', 'resource': 'bars',
+                     'query': {'symbols': 'KEY'},
+                     'data': {'requested_symbols': ['KEY'], 'bars': {'KEY': []}},
+                     'credentials': {'KEY': 'unknown-private-value'}}
+            self.assertEqual(redact(value)['data']['bars']['KEY'], '[redacted]')
+            result = redact(value, price_bars=True)
+            self.assertEqual(result['data']['bars']['KEY'], [])
+            self.assertEqual(result['credentials']['KEY'], '[redacted]')
+            # Even an aliased copy of the same map has no exception elsewhere.
+            value['other'] = value['data']['bars']
+            self.assertEqual(redact(value, price_bars=True)['other']['KEY'], '[redacted]')
+            self.assertEqual(redact({'KEY': 'unknown-private-value'}, price_bars=True), {'KEY': '[redacted]'})
+
+        def test_price_ticker_rows_keep_nested_and_known_secret_redaction(self):
+            value = {'operation': 'prices', 'provider': 'alpaca', 'resource': 'bars',
+                     'query': {'symbols': 'KEY'}, 'data': {'requested_symbols': ['KEY'], 'bars': {'KEY': [
+                         {'c': 10, 'note': 'fixture-private-value', 'nested': {'KEY': 'unknown-private-value'},
+                          'url': 'https://example.invalid/?token=unknown-url-private-value'}]}}}
+            result = redact(value, {'ALPACA_API_KEY': 'fixture-private-value'}, price_bars=True)
+            self.assertIsInstance(result['data']['bars']['KEY'], list)
+            self.assertEqual(result['data']['bars']['KEY'][0]['c'], 10)
+            self.assertNotIn('private-value', json.dumps(result))
+
+        def test_malformed_or_unrequested_price_maps_never_exempt_sensitive_fields(self):
+            base = {'operation': 'prices', 'provider': 'alpaca', 'resource': 'bars',
+                    'query': {'symbols': 'KEY'}, 'data': {'requested_symbols': ['KEY'], 'bars': {'KEY': []}}}
+            changes = [('operation', 'symbols'), ('provider', 'untrusted'), ('resource', 'news')]
+            for field, replacement in changes:
+                value = json.loads(json.dumps(base)); value[field] = replacement
+                self.assertEqual(redact(value, price_bars=True)['data']['bars']['KEY'], '[redacted]')
+            for rows in ('unknown-private-value', {'secret': 'unknown-private-value'}, ['unknown-private-value']):
+                value = json.loads(json.dumps(base)); value['data']['bars']['KEY'] = rows
+                self.assertEqual(redact(value, price_bars=True)['data']['bars']['KEY'], '[redacted]')
+            for symbols in ([], ['OTHER'], ['KEY', 'KEY'], ['key'], None):
+                value = json.loads(json.dumps(base)); value['data']['requested_symbols'] = symbols
+                self.assertEqual(redact(value, price_bars=True)['data']['bars']['KEY'], '[redacted]')
+            value = json.loads(json.dumps(base)); value['query']['symbols'] = 'OTHER'
+            self.assertEqual(redact(value, price_bars=True)['data']['bars']['KEY'], '[redacted]')
 
         def test_displaced_credentials_are_redacted_from_request_records(self):
             client = self.client([Reply()], redaction_values=('former+private-value',))
