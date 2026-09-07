@@ -195,6 +195,16 @@ distinguish continuation from a failed rebound. Check adverse news and upcoming
 earnings. Say no material new catalyst was found in the checked sources, not
 that none exists.
 
+After initial ranking, use a bounded completion pass for the most promising
+candidates. Identify the few unresolved facts that could actually change the
+buying conclusion, prioritize their retrieval, and distinguish an adverse finding
+from an unperformed check. Complete instrument/market-cap and regular-session
+liquidity eligibility, current price/session and relevant adverse-event checks
+before first readiness. Do not spend the entire run expanding leads while leaving
+these basic checks unfinished. Keep genuine missing evidence as watch/unavailable;
+do not relax the bar or force a recommendation to produce an actionable-looking
+brief. Carry the precise next check into the ledger so repeated runs advance it.
+
 For every leading idea, explain **why a purchase could still be attractive after
 the observed price reaction**. Compare the proposed improvement with what is
 already reflected in price and available dated expectations. Use relevant
@@ -233,6 +243,28 @@ evidence and setup tests before promotion.
 - **Stocktwits:** use ticker discussion and available attention/sentiment measures
   as context. Its [sentiment documentation](https://help.stocktwits.com/c/faqs/articles/using-sentiment-on-stocktwits)
   describes community activity, not a probability of investment success.
+
+Use a small, explicit social budget: normally up to three targeted searches per
+platform for the strongest candidates, not a full ticker-by-platform sweep. Start
+with an already configured read-only connector when available; otherwise use
+public search/page reading. Do not assume a recommended but uninstalled connector
+is available. No new account, subscription, browser login or access bypass is
+part of a research run.
+
+Track each platform as usable, limited or unavailable, with the checked window
+and material reason. After an access block or unusable timestamp result, stop
+repeating equivalent queries for that platform during the run. A new source or
+changed access can justify another bounded attempt. For inaccessible chatter,
+challenge the same thesis using issuer disclosures, SEC filings, customer or
+supplier evidence and attributable reporting. Say that these are alternatives,
+not a measured social feed. Social access is not a prerequisite for readiness
+when the material company, price and risk evidence is otherwise complete.
+
+An empty query and an inaccessible source mean different things. Neither proves
+that no discussion or contrary evidence exists. Relative timestamps, live ticker
+widgets and reposts cannot provide historical sentiment or an attention baseline.
+Retain only attributable, cutoff-eligible claims that add something beyond the
+primary-source news already checked; no filler social section or fabricated score.
 
 Record platform, original permalink/post identifier, author or public handle,
 original timestamp, retrieval time and the material claim. Verify company/ticker

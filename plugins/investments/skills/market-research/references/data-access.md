@@ -114,6 +114,51 @@ and bounded social research; there are no bundled X, Reddit or Stocktwits adapte
 Disclose inaccessible sources or inadequate history and use the research method's
 fallbacks instead of silently omitting a discovery pass or required evidence check.
 
+## Coordinated discovery
+
+Use `market_acquire.py discover` for a new broad price/news pass, after the run
+receipt has frozen the cutoff and the prior note has established the news window:
+
+```bash
+python3 '<skill>/scripts/market_acquire.py' discover --vault '<vault>' --work-dir '<scratch>' --as-of '<cutoff>' --news-since '<previous-cutoff-or-unreviewed-window-start>' --max-requests 250 --max-seconds 300
+```
+
+Pass the same explicit `--credentials-file` when one is selected. This command
+calls the bundled adapters directly with one shared transport request/time budget,
+never copies helpers, publishes a report or chooses a buy. It writes full source
+envelopes, directory-derived universe, recent turnover prefilter, full-history
+screen inputs/results and a manifest in a new private acquisition directory.
+The result gives exact paths and coverage. Retain unresolved identities when a
+budget ends; do not describe the returned subset as a complete market scan.
+
+The two-stage pass first retrieves a 450-calendar-day exchange calendar. From its
+verified session boundaries it derives the exact last 20 completed sessions for
+the price/daily-turnover proxy and the full required lookback for every passing
+security and SPY. It retains all moving-average and anniversary observations
+without retrieving unnecessary older prices. Physical requests reserve benchmark
+slots within the provider's 200-symbol limit; splitting a batch never removes a
+declared name. Batches use a declared date-dependent identity hash instead of
+an alphabetical first page; partial traversal is still limited coverage.
+Repeated snapshots preserve original request times and do not become fresh data.
+If a fully assessed prefilter has no passes, the manifest records complete empty
+eligibility without pretending full histories were missing; a news gap still
+makes overall coverage partial. If the duplicate assembled input exceeds 128 MiB,
+the coordinator preserves the measured screen and every original source batch,
+marks the assembly/comparison limitation explicitly, and never shrinks the cohort
+to fit. A later validation or storage failure retains the named scratch directory,
+last completed stage, operations and available artifacts in a manifest.
+See [screening](screening.md) for offline preparation, existing-definition
+compatibility, regular-session liquidity and sourced market-cap verification.
+
+News uses bounded provider cursors and exact article-ID deduplication. Earlier
+validated pages survive a later failure, while changing versions of one article
+remain a conflict. Counts distinguish original publications from older updated
+articles. A news-only access/network failure does not disable reachable prices;
+a provider rate-limit or exhausted shared budget conservatively stops that source.
+The coordinator does not spend Alpha Vantage calls on discovery that Alpaca can
+supply. Perform primary-source verification and candidate-specific checks after
+screening; avoid repeating successful retrieval merely to exercise a command.
+
 ## Query and result contract
 
 Use explicit timestamps with seconds and a timezone, such as
@@ -155,7 +200,8 @@ Do not silently discard an error, impute missing prices as zero, or interpret a
 failed request as no announcement. The per-command defaults are 100 HTTP attempts
 and 120 seconds; `--max-requests` and `--max-seconds` can bound a larger retrieval.
 Responses are limited to 20 MiB each. These are local bounds, not shared account
-quota tracking. Requests use verified HTTPS and fixed read-only endpoints, do
+quota tracking. The acquisition coordinator shares them across its stages; the
+estimate preflight additionally reuses snapshots and records provider cooldowns. Requests use verified HTTPS and fixed read-only endpoints, do
 not follow redirects or inherit HTTP proxies, and never call order/holding APIs.
 
 Retain relevant dated values, citations, query/feed/adjustment information and
@@ -206,6 +252,32 @@ Retain only decision-relevant excerpts and calculations in the daily note, with
 the durable SEC URL and section; do not publish the entire filing or cite scratch.
 
 ## Dated estimates, not reconstructed expectations
+
+For a small, already-justified shortlist, prefer the bounded capture helper to
+ad hoc calls. Prepare an ordered JSON list of objects containing exact `symbol`,
+`period` (fiscal period-end), `horizon` (`fiscal quarter` or `fiscal year`) and
+`reason`. Order by tracked decision relevance and proximity of the next verified
+event, not by the ease of obtaining a response. Keep the plan in owned scratch.
+
+```bash
+python3 '<skill>/scripts/market_capture.py' capture --vault '<vault>' --plan '<scratch>/estimate-plan.json' --work-dir '<scratch>' --max-calls 3 --reuse-hours 24
+```
+
+Add the selected `--credentials-file`. On a **fresh manual** run this optional
+preflight occurs before `market_notes.py prepare`; the helper returns only after
+its latest save is available at a real whole-second cutoff. An immediate prepare
+can therefore use the capture without backdating it. Do not reopen an already
+frozen edition. For a fixed scheduled or manual cutoff, pass `--as-of '<cutoff>'`;
+new late captures remain available only to subsequent editions.
+
+The helper reuses sufficiently recent matching snapshots before spending calls,
+requests at most the stated number of uncached symbols in priority order, and
+stops on the first quota error. A secret-free, immutable local cooldown receipt
+under `Investments/Snapshots/ProviderStatus/` prevents repeated calls on subsequent
+runs. Its conservative retry delay is **not** a verified provider reset time or
+an account-wide usage meter. Other clients may consume the same account quota.
+Existing eligible snapshots remain usable during cooldown. No subscription, key,
+login or scheduled task is changed; failed access stays a bounded coverage gap.
 
 Alpha Vantage's [EARNINGS_ESTIMATES](https://www.alphavantage.co/documentation/#earnings-estimates)
 supplies quarterly/annual EPS and revenue estimates, analyst counts and reported
@@ -350,7 +422,10 @@ and [calendar documentation](https://docs.alpaca.markets/us/reference/legacycale
 
 `news --provider alpaca` checks a bounded explicit window, with an optional
 single-symbol filter and article bodies via `--include-content`. It retrieves
-one page of up to 50 articles; a next-page marker means incomplete coverage.
+up to 50 articles per page, following cursors within `--max-pages` (default ten).
+An unexhausted cursor, conflicting article revision or failed page means partial
+coverage; previously validated pages remain available. Exact article-ID duplicates
+are counted once, while different IDs sharing a URL remain distinguishable.
 Narrow the window to investigate further, retaining and deduplicating article IDs.
 An article may have no publisher URL; the helper preserves it with `url: null`
 and its provider ID. Verify material claims through the issuer or another

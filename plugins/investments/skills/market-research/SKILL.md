@@ -33,17 +33,30 @@ Installing or manually invoking this skill does not schedule it. A host schedule
 must separately invoke it with the selected vault and available research tools;
 create or change that schedule only when the user requests scheduling.
 
-Use the helper to establish the date, cutoff, and existing record:
+For a scheduled retry, inspect `context` first and reuse a valid existing edition
+under the rules below. For a fresh run, use `prepare` to create the canonical
+draft and a private run receipt in owned scratch:
 
 ```bash
-python3 '<skill>/scripts/market_notes.py' context --vault '<vault>'
+python3 '<skill>/scripts/market_notes.py' prepare --vault '<vault>' --mode manual --work-dir '<scratch>' --check independent-review
 ```
 
-The default `scheduled` mode creates or reuses the daily scheduled edition. For
-a user-requested fresh review, use `context --mode manual`, then preserve its
-`as_of` value with `--mode manual --as-of '<cutoff>'` on subsequent context and
-outcome calls. Manual editions use their actual cutoff and a timestamped filename;
-see [edition naming and retries](references/note-format.md#editions-and-retries).
+Use `--mode scheduled` for the scheduled task. The independent-review declaration
+is appropriate when a checker will actually be launched; omit it when delegation
+is unavailable. `final-review` is always declared. Use the returned receipt with
+`context`, `outcomes` and publication via `--run-receipt '<run>/run.json'`; it fixes
+the evidence cutoff, mode and filename for up to eight elapsed hours, including
+across New York midnight. It does not permit retrospective backfill. Register a
+later checker with `review-start` when launching it; every declared check must
+finish against the final draft before publication. Details and retries are in
+[edition naming and run receipts](references/note-format.md#editions-and-retries).
+
+On a fresh manual run, a small estimate plan justified by earlier watch notes or
+explicitly named candidates may be [captured first](references/data-access.md#dated-estimates-not-reconstructed-expectations),
+**before** `prepare` freezes the cutoff. Do not query all screened names or move an
+already frozen cutoff. New candidates discovered later may only contribute late
+snapshots to future editions. Scheduled cutoffs remain at or before 11:30 ET;
+late captures cannot be used as earlier consensus.
 
 For the scheduled edition, freeze evidence at 11:30 New York time; record the
 actual generation time separately. Read news since the previous completed
@@ -95,7 +108,7 @@ from memory. Earlier notes are dated evidence, not text to revise retrospectivel
 Run the outcome inventory before researching new candidates:
 
 ```bash
-python3 '<skill>/scripts/market_notes.py' outcomes --vault '<vault>'
+python3 '<skill>/scripts/market_notes.py' outcomes --vault '<vault>' --run-receipt '<run>/run.json'
 ```
 
 Read its active lesson records and latest monthly summary, including supporting
@@ -116,8 +129,12 @@ Do not describe a selective news search as a complete market scan. Run the
 research method's repeatable announcement and price-history passes, retaining
 their universe, filters and coverage in the research record. A materially changed
 screen needs an explanation so longitudinal comparisons remain interpretable.
-Use the bundled [offline screener](references/screening.md) for reproducible
-price measurements when its inputs are available. Also follow the research
+Use the bundled [directory and acquisition workflow](references/screening.md)
+for a broad, reproducible price pass. Do not substitute a familiar-name watchlist
+for the accessible universe. The helpers classify the directory conservatively,
+fetch recent turnover proxies in bounded batches, then acquire full histories for
+the passes. They preserve unqueried identities and explicit coverage gaps. Reuse
+the offline screener for existing dated inputs rather than rebuilding its glue. Also follow the research
 method's bounded thematic expansion to examine direct and second-order
 beneficiaries; these candidates face the same universe and readiness tests.
 
@@ -222,28 +239,22 @@ in the record. Keep conclusions, citations and journal cards visible in ordinary
 Markdown. Link preserved estimate snapshots from the record and summarize the
 relevant values; those source observations remain immutable JSON files.
 
-Stage the complete draft in the run's owned scratch directory. Stamp the finalized
-draft with the verified installed plugin's identity, following
-[note provenance](../../shared/PROVENANCE.md), then validate and publish the stamped
-copy. Here `<plugin>` is the installed plugin root containing this skill and its
-own `shared/` directory; it is never the development checkout or another plugin.
+Finish the draft in owned scratch, with the actual completion time, then stamp
+its verified installed-plugin identity under [note provenance](../../shared/PROVENANCE.md).
+Use `--vault` when forming/evaluating comparison cards: their bulky calendars,
+source metadata and full rosters belong in immutable digest-verified attachments,
+with a concise visible summary in the note. Preserve historical inline records.
+Here `<plugin>` means this skill's installed root, never the development checkout.
 
 ```bash
-python3 '<plugin>/shared/scripts/note_provenance.py' stamp --plugin '<plugin>' --skill market-research --draft '<scratch>/daily.md' --output '<scratch>/daily-stamped.md'
-python3 '<skill>/scripts/market_notes.py' lint '<scratch>/daily-stamped.md'
-python3 '<skill>/scripts/market_notes.py' outcomes --vault '<vault>' --draft '<scratch>/daily-stamped.md'
-python3 '<skill>/scripts/market_notes.py' publish '<scratch>/daily-stamped.md' --vault '<vault>'
+python3 '<plugin>/shared/scripts/note_provenance.py' stamp --plugin '<plugin>' --skill market-research --draft '<run>/draft.md' --output '<run>/daily-stamped.md'
+python3 '<skill>/scripts/market_notes.py' lint '<run>/daily-stamped.md'
+python3 '<skill>/scripts/market_notes.py' outcomes --vault '<vault>' --draft '<run>/daily-stamped.md' --run-receipt '<run>/run.json'
 ```
 
-Each new edition must identify this verified bundle as its creator; do not copy
-an earlier note's provenance or use `--previous` for a new edition. Keep its final
-metadata footer separate from all financial evidence. Existing notes and
-byte-identical retries retain their original attribution, including absent
-provenance on historical notes; never relabel them as current output.
-
-For a manual edition, include `--mode manual --as-of '<cutoff>'` on the draft
-outcome check and `--mode manual` on publication. Publication derives the target
-from the draft's `as_of`; its optional `--as-of` must match that value.
+Each new edition must identify this bundle as its creator. Never use `--previous`
+for a new edition or relabel an unchanged historical note. The metadata footer
+remains separate from financial evidence.
 
 Before publication, audit the claims that determine selection, readiness or risk
 against their retained evidence and calculations. Check citations, timestamps,
@@ -252,7 +263,9 @@ the previous active theses. Where available, use a bounded independent checker
 with the draft, cutoff and original evidence in a fresh context; ask for supported,
 contradicted, unsupported or stale findings and recomputation of decisive values.
 If delegation is unavailable, perform a fresh evidence-first check yourself.
-Another model's agreement is not source verification. Correct unsupported claims
+Wait for every checker that was launched; a time limit or midnight is not a
+reason to publish while it is still running. Another model's agreement is not
+source verification. Correct unsupported claims
 or downgrade the buying conclusion, then recheck the revised assessment; do not merely append a warning
 while leaving the same unsupported recommendation. Verify every brief
 candidate's state, conditions and risks agree with its
@@ -263,6 +276,21 @@ review is required to publish the research note. Follow [safe writes](../../shar
 preserve reported recovery stages on failure, and read back the published note.
 Ensure its citations and retained evidence remain usable after owned scratch is
 cleaned; no published reference should point to a run's temporary files.
+
+Only after the checks above have finished and any findings are resolved, record
+their completion for the **exact stamped draft**, then publish it. For example,
+a run that declared an independent checker completes both checks:
+
+```bash
+python3 '<skill>/scripts/market_notes.py' review-complete --vault '<vault>' --run-receipt '<run>/run.json' --draft '<run>/daily-stamped.md' --check independent-review
+python3 '<skill>/scripts/market_notes.py' review-complete --vault '<vault>' --run-receipt '<run>/run.json' --draft '<run>/daily-stamped.md' --check final-review
+python3 '<skill>/scripts/market_notes.py' publish '<run>/daily-stamped.md' --vault '<vault>' --run-receipt '<run>/run.json'
+```
+
+A receipt records completed declared checks, not proof of factual truth. Any edit
+to the draft, completion time or provenance requires restamping/revalidation and
+fresh completion records for the revised bytes. Repeated independent launches
+need distinct check names. Do not clear a pending checker to bypass the gate.
 
 At closeout, including a successful same-day retry, maintain
 `Reviews/market-research-suggestions.md` under the

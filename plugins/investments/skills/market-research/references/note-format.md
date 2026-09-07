@@ -23,13 +23,47 @@ safety limit is not a writing target.
   whole-second time in `as_of`. A user-requested fresh review may create another
   edition on the same day without replacing an earlier note or changing the schedule.
 
-For a manual review, run `context --mode manual` once to freeze the actual cutoff.
-Reuse its `as_of` with `--mode manual --as-of '<cutoff>'` for later context and
-outcome calls, including retry and draft checks. An explicit cutoff must be a
-nonfuture timestamp on today's New York date, with whole seconds. Use the same
-value in draft frontmatter. `publish --mode manual` derives the filename from the
-draft; an optional `--as-of` must match. Neither the schema nor the two-part layout
-changes. Identify the edition's cutoff clearly in the brief.
+Start a run with the installed `market_notes.py prepare --vault '<vault>'
+--work-dir '<scratch>' --mode manual --check evidence-audit` (use `scheduled` for
+scheduled work). It freezes the live cutoff and creates a canonical, unfinished
+`draft.md` plus a private `run.json` receipt in an exclusive subdirectory of the
+owned external scratch folder. Complete any permitted estimate preflight before
+this step; a scheduled evidence cutoff never moves to admit late captures.
+The receipt includes `final-review` automatically. Declare `--check
+independent-review` too when delegating that check; register any additional checker
+with `review-start --vault '<vault>' --run-receipt '<receipt>' --check '<name>'`
+before launching it. A new checker launch after a completed review uses a distinct
+name so that the older completion cannot stand in for the running check.
+
+Pass the returned `--run-receipt '<receipt>'` to later `context`, `outcomes` and
+`publish` calls. They infer the fixed mode and cutoff; explicit values must agree.
+Use the returned date, cutoff and exact H1 in the draft. A live run may finish
+after New York midnight, keeping its original edition name and cutoff while
+recording its actual later `generated_at`. The receipt lasts **eight elapsed
+hours**, including across daylight-saving changes, and is bound to the selected
+vault's real directory identity. It cannot insert an earlier edition after a
+later one has already published. An expired/interrupted run starts a fresh current
+edition; it never extends or rewrites its receipt to backfill an old date.
+
+Before publication, replace all `DRAFT —` placeholders, record the actual completion
+time, and stamp the final draft with installed-plugin provenance. Complete the
+evidence audit and final review of that draft, and wait for every launched
+independent checker to return and resolve its findings. Then record each completed
+check with `review-complete --vault '<vault>' --run-receipt '<receipt>' --check
+'<name>' --draft '<final-stamped-draft>'`. This is an agent completion attestation,
+not a required human review or a certification that claims are true. Do not attest
+completion while a checker is running. Publication requires every declared check
+to match the **exact final draft bytes**; any later wording, timestamp or provenance
+change requires reviewing and recording completion for the changed draft again.
+The private receipt/key detect accidental or untrusted state edits; they are not
+an authorization boundary against another process running as the same user. Keep
+them in owned scratch and clean them with the run, never in the vault or report.
+
+The earlier no-receipt interface remains available for compatible reads and
+retries: `context --mode manual` freezes a nonfuture, whole-second cutoff on the
+current New York date; reuse it with `--mode manual --as-of '<cutoff>'`. Without a
+live receipt, publication still refuses historical backfill. Neither the schema
+nor the two-part layout changes. Identify the edition's cutoff clearly in the brief.
 
 History and journals include earlier available editions from the same day,
 ordered chronologically; later cutoffs and notes generated after the selected
@@ -44,8 +78,9 @@ Use these six frontmatter keys, in this order. `market_research` is the integer
 schema version `1`; `date` is an ISO date. Quote `as_of` and `generated_at` as ISO
 datetimes with explicit UTC offsets, using New York's offset for each timestamp.
 `as_of` is the latest permitted evidence timestamp, not the retrieval time of a
-page. It must not follow `generated_at` or belong to another New York date.
-Record the actual completion time in `generated_at`, not the scheduled start.
+page. It must not follow `generated_at` and must belong to the note's New York date.
+Record the actual completion time in `generated_at`, not the scheduled start; a
+bounded live run that crosses midnight can have a later generation date.
 
 `session` is `premarket`, `closed`, `intraday`, `after-hours`, or `unknown`, based
 on the verified exchange session at the cutoff. `coverage` is `normal`, `limited`,

@@ -2,8 +2,9 @@
 
 Use [market_comparison.py](../scripts/market_comparison.py) to form and evaluate
 one fixed monthly **strategy diagnostic** alongside discretionary research. The
-helper is offline: it reads saved evidence and prints JSON plus visible Markdown
-cards/journals. It never writes notes, fetches data, places trades or creates
+helper is offline: it reads saved evidence, preserves immutable JSON attachments
+under `Investments/Snapshots/Comparisons/`, and prints compact Markdown cards and
+journals. It never writes daily notes, fetches data, places trades or creates
 ready recommendations. Publish its records through the ordinary daily-note workflow.
 
 ## Fixed definition and formation
@@ -36,7 +37,7 @@ inspect `comparison_formation_due` and
 
 - Already formed: link its original card when useful; do not copy unchanged rows.
 - Due: reuse the complete saved screen input at this edition's frozen cutoff.
-- Missing data, unavailable access, oversized evidence, or a missed first monthly
+- Missing data, unavailable access, evidence beyond the bounded attachment limit, or a missed first monthly
   formation: record **unavailable** now. Preserve that month; do not select later.
 - Complete screen with no eligible names: record **empty**. Empty/unavailable
   months have no simulated cash return and remain part of the coverage census.
@@ -45,9 +46,12 @@ Do not backfill earlier months. A month with no published review has no formatio
 disclose gaps in summaries. The helper overrides discretionary `rules`/`benchmark`
 and recomputes selection from the full saved `market_screen_input` bundle. It
 retains every declared instrument's decisive metrics/status, source/query/digest
-evidence, membership, mapping, cutoff and calculator/strategy hashes in a visible
-card. No raw feed archive or temporary-path citation is needed. If that evidence
-cannot fit the daily note, record unavailable rather than trimming the universe.
+evidence, membership, mapping, cutoff and calculator/strategy hashes in a linked
+JSON attachment. The visible card shows selected members, the declared instrument
+count, defining metadata, a vault-relative attachment link and its SHA-256. Full
+calendar JSON and the unselected roster stay out of the daily note. No raw feed
+archive or temporary-path citation is needed. If complete evidence exceeds the
+32 MiB attachment limit, record unavailable rather than trimming the universe.
 The universe hash binds its name, dated membership, source and complete instrument
 identities/classifications in canonical exchange/symbol order. Card validation
 checks that roster, fixed source-query conventions and fully elapsed daily bars;
@@ -59,9 +63,9 @@ eligible instrument, including SPY; a reference-day-only query is insufficient.
 
 ```bash
 python3 '<skill>/scripts/market_comparison.py' form \
-  --input '<scratch>/screen-input.json' --note-key '<exact-daily-note-stem>'
+  --input '<scratch>/screen-input.json' --note-key '<exact-daily-note-stem>' --vault '<vault>'
 python3 '<skill>/scripts/market_comparison.py' unavailable \
-  --as-of '<cutoff>' --reason '<specific limitation>' --note-key '<exact-daily-note-stem>'
+  --as-of '<cutoff>' --reason '<specific limitation>' --note-key '<exact-daily-note-stem>' --vault '<vault>'
 ```
 
 Use only the applicable command. Add its `journal_markdown` and `detail_markdown`
@@ -71,6 +75,24 @@ state `formed`, `empty` or `unavailable`. Its first card and membership are
 immutable, independent of ready-thesis IDs. Subsequent observations may not
 redefine formation. A future strategy needs a new supported definition/ID
 introduced prospectively while preserving readers for previous definitions.
+
+Pass `--vault` for every live formation/evaluation. The helper creates only
+`Investments/Snapshots/Comparisons/<SHA-256>.json`, binding the exact owning daily
+note stem and record kind to the complete canonical evidence. It stages complete
+bytes privately, publishes exclusively, and verifies an identical retry without
+changing the original. Unexpected occupants, symlinks, portable-name collisions,
+directory replacements and different bytes stop the write. The daily note remains
+unpublished until its independent review and normal publication checks finish;
+an attachment left by an interrupted run can be verified and reused on retry.
+Publication briefly pins the process working directory; use these single-threaded
+CLIs, never invoke their writers concurrently from multiple threads.
+
+Every outcomes/indexing read verifies the attachment's path, owner, content hash
+and visible summary before running the same full roster, query, calendar and
+return checks as an inline card. A missing or altered attachment makes the
+comparison incomplete; never infer its contents from the brief. Historical
+inline cards remain readable without migration. Omitting `--vault` is retained
+only for offline fixtures and historical-format compatibility, not live notes.
 
 ## Fixed return windows and retained evidence
 
@@ -112,12 +134,13 @@ or invent proceeds, dividends or a terminal value.
 python3 '<skill>/scripts/market_comparison.py' evaluate \
   --cohort-note '<vault>/Investments/<original-daily-note>.md' \
   --cohort 'simple-momentum-v1@YYYY-MM' --horizon 3m \
-  --input '<scratch>/comparison-input.json' --note-key '<exact-daily-note-stem>'
+  --input '<scratch>/comparison-input.json' --note-key '<exact-daily-note-stem>' --vault '<vault>'
 ```
 
-The card retains original identities, split-adjusted opening/closing inputs,
-individual returns, source/query evidence, verified calendar dates/session
-markers and corporate-action explanations. For each instrument, return is
+The visible card retains original identities, split-adjusted opening/closing
+inputs and individual returns; its immutable attachment also retains source/query
+evidence, verified calendar dates/session markers and corporate-action explanations.
+For each instrument, return is
 `endpoint close / baseline open - 1`; the basket is the arithmetic mean of
 original selected members' returns, representing equal initial weights with no
 interim rebalance. SPY uses the same sessions and convention. This is **gross

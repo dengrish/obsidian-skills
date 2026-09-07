@@ -43,9 +43,21 @@ def _unique_object(pairs):
 
 def _json(text):
     try:
-        return json.loads(text, object_pairs_hook=_unique_object)
+        value = json.loads(text, object_pairs_hook=_unique_object)
     except RecursionError as exc:
         raise ValueError('provenance JSON nesting is too deep') from exc
+    # Decoder recursion limits differ across supported Python releases. Bound
+    # metadata explicitly rather than relying on one interpreter's stack limit.
+    pending = [(value, 0)]
+    while pending:
+        item, depth = pending.pop()
+        if depth > 32:
+            raise ValueError('provenance JSON nesting is too deep')
+        if isinstance(item, dict):
+            pending.extend((child, depth + 1) for child in item.values())
+        elif isinstance(item, list):
+            pending.extend((child, depth + 1) for child in item)
+    return value
 
 
 def _snapshot(item):

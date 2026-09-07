@@ -17,8 +17,10 @@ improvement, distinguishing later developments from the original momentum thesis
 ## Daily observations and monthly synthesis
 
 Run `market_notes.py outcomes --vault '<vault>'` to rebuild the recommendation,
-checkpoint and lesson index from published editions. For manual runs, pass
-`--mode manual --as-of '<cutoff>'` using the context's fixed cutoff, as described
+checkpoint and lesson index from published editions. For a prepared run, pass
+`--run-receipt '<run>/run.json'` to preserve its mode and fixed cutoff across
+midnight. Without a receipt, manual runs retain the same-day
+`--mode manual --as-of '<cutoff>'` interface, as described
 under [editions and retries](note-format.md#editions-and-retries). Earlier
 available same-day editions participate in the same chronology and journals;
 another edition never creates a second first-ready event for the same thesis.
@@ -342,7 +344,8 @@ are performed within the normal research workflow, without a mandatory human gat
 
 Before publication, run both `lint` and
 `outcomes --vault '<vault>' --draft '<scratch>/daily.md'` using the bundled helper.
-For manual editions, include the same `--mode manual --as-of '<cutoff>'` used
+For prepared editions, use the same `--run-receipt '<run>/run.json'`. Without a
+receipt, manual editions include the same `--mode manual --as-of '<cutoff>'` used
 during planning.
 Resolve missing recommendation records, inconsistent first-ready dates, broken
 references, future observations or conflicting corrections before publishing.
