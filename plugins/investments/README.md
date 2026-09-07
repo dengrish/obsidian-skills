@@ -19,6 +19,16 @@ SEC filing/section extraction uses pinned EdgarTools; its setup is in the
 data-access guide. PDF/image packages and the `knowledge` plugin are not required.
 Install the whole package to preserve its local helper paths.
 
+For a smaller starting universe, configure a covered-creator roster in the vault's
+`market-research-sources.json` under the
+[ShadowAlpha guide](skills/market-research/references/shadowalpha.md).
+The host's authenticated read-only MCP supplies posts and extracted predictions;
+the bundled offline helper validates and deduplicates them. Curated mode checks
+nominated companies in depth without running the broad directory acquisition.
+It retains independent news leads and prior theses, and applies the same buying
+criteria. Each host needs its own working connector; no subscription, portfolio
+or trading automation is created by this plugin.
+
 Credentials remain outside the repository, plugin and vault. An explicitly
 selected private JSON credentials file can be passed to the bundled data
 script with `--credentials-file`; otherwise it uses configured environment

@@ -110,6 +110,7 @@
     "skills/market-research/references/outcomes-and-learning.md": "skills/market-research/references/outcomes-and-learning.md",
     "skills/market-research/references/research-method.md": "skills/market-research/references/research-method.md",
     "skills/market-research/references/screening.md": "skills/market-research/references/screening.md",
+    "skills/market-research/references/shadowalpha.md": "skills/market-research/references/shadowalpha.md",
     "skills/market-research/scripts/market_acquire.py": "skills/market-research/scripts/market_acquire.py",
     "skills/market-research/scripts/market_capture.py": "skills/market-research/scripts/market_capture.py",
     "skills/market-research/scripts/market_comparison.py": "skills/market-research/scripts/market_comparison.py",
@@ -127,6 +128,7 @@
     "skills/market-research/scripts/market_prices.py": "skills/market-research/scripts/market_prices.py",
     "skills/market-research/scripts/market_public.py": "skills/market-research/scripts/market_public.py",
     "skills/market-research/scripts/market_screen.py": "skills/market-research/scripts/market_screen.py",
+    "skills/market-research/scripts/market_social.py": "skills/market-research/scripts/market_social.py",
     "skills/market-research/scripts/market_universe.py": "skills/market-research/scripts/market_universe.py",
     "skills/market-research/scripts/requirements-filings.txt": "skills/market-research/scripts/requirements-filings.txt"
   }

@@ -129,12 +129,18 @@ Do not describe a selective news search as a complete market scan. Run the
 research method's repeatable announcement and price-history passes, retaining
 their universe, filters and coverage in the research record. A materially changed
 screen needs an explanation so longitudinal comparisons remain interpretable.
-Use the bundled [directory and acquisition workflow](references/screening.md)
-for a broad, reproducible price pass. Do not substitute a familiar-name watchlist
-for the accessible universe. The helpers classify the directory conservatively,
-fetch recent turnover proxies in bounded batches, then acquire full histories for
-the passes. They preserve unqueried identities and explicit coverage gaps. Reuse
-the offline screener for existing dated inputs rather than rebuilding its glue. Also follow the research
+Before discovery, read `market-research-sources.json` at the vault root when it
+exists or the task specifies it. For `curated_social` mode, follow
+[curated ShadowAlpha discovery](references/shadowalpha.md): the configured roster
+nominates a small universe for both announcement and price-history checks.
+Do not run the broad directory acquisition in that mode or silently expand it
+when social access fails. An invalid or explicitly requested missing configuration
+is a setup limitation; preserve prior-thesis work without inventing a substitute.
+Without a configuration or an explicit smaller-universe instruction, use the
+bundled [directory and acquisition workflow](references/screening.md) for the
+broad price pass. Its bounded helpers preserve unqueried identities and coverage
+gaps; do not silently substitute familiar names for its declared universe. Reuse
+the offline screener for dated inputs. In either mode, also follow the research
 method's bounded thematic expansion to examine direct and second-order
 beneficiaries; these candidates face the same universe and readiness tests.
 
@@ -170,7 +176,8 @@ price levels. A tool failure is not evidence that nothing happened.
 
 Use a bounded scan of accessible X, Reddit and Stocktwits content to discover
 leads and challenge shortlisted theses, under the research method's social-source
-rules. Social popularity alone never establishes a buying opportunity. Missing
+rules; use the ShadowAlpha guide when that connector supplies the configured
+roster. Social popularity alone never establishes a buying opportunity. Missing
 access is an explicit coverage gap; do not imply that a feed is installed or that
 sampled searches provide continuous or comprehensive monitoring.
 

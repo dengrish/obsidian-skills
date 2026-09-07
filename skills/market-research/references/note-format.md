@@ -196,6 +196,10 @@ it from the short brief. Organize each day's relevant material as follows:
   supported. For social findings,
   identify the original claim, source/platform, deduplication and verification
   result; distinguish sampled conversations from representative measurements.
+  For curated discovery, preserve the roster/configuration and nomination
+  dispositions required by the [ShadowAlpha guide](shadowalpha.md), including
+  provider classifications versus your verified interpretation. Do not repeat
+  source endorsements in the brief or treat extracted calls as recommendations.
 - **Candidate assessments:** group details under H4 exchange:ticker/thesis IDs.
   Retain the setup type, expected vs reported facts when verified, quarter-to-quarter
   changes, trend/benchmark observations, pricing assumptions, risks, confirmation,

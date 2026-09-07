@@ -8,7 +8,7 @@ does not assign a thesis state or establish a buying opportunity.
 
 ## Acquire and prepare the evidence
 
-Use [market_acquire.py](../scripts/market_acquire.py) `discover` for the normal
+Use [market_acquire.py](../scripts/market_acquire.py) `discover` for the broad
 bounded acquisition pass; the [data guide](data-access.md) gives the command and
 request/time budgets. It reads both full current Nasdaq directories, classifies
 common shares and ADRs conservatively, collects 20 completed daily sessions,
@@ -94,6 +94,41 @@ and original batches if their duplicate assembled input exceeds this boundary,
 with an explicit comparison-input limitation. Never shrink a monthly comparison
 after ranking to fit the limit. A deliberately smaller future discovery scope
 must be declared before selection and disclosed as a prospective change.
+
+## Curated universe inputs
+
+When [curated discovery](shadowalpha.md) is selected, omit the broad acquisition
+coordinator. Freeze the nominated roster and reasons before price ranking, adding
+prior active theses and explicitly requested companies. Resolve identities with
+`symbols` and issuer evidence, then retrieve original `sessions` and `prices`
+envelopes for those names and the benchmark through the data-access guide.
+Use the custom `market_screen_input: 1` contract above; label its universe
+`curated-social-v1`, retain dated membership evidence and all verified nominated
+identities, and list unresolved instruments outside the input with their reasons;
+never invent the required exchange/security type. Disclose unmeasured names rather
+than dropping them. If no eligible identities remain, skip the price calculator
+and record an empty nominated universe; do not add filler stocks. Set
+`discovery_complete` false when the nomination source/window has unresolved gaps.
+Only a fully measured nominated subset can be described as fully price-checked;
+this does not establish complete creator timelines or market-wide coverage.
+
+Supply all `rules` explicitly so custom inputs do not inherit the calculator's
+stricter default trend gates: `min_price: 10`,
+`min_average_daily_notional: 25000000`, `require_above_ma50: false`,
+`require_above_ma200: false`, `require_positive_relative_return_6m: false`,
+`sort_by: "relative_return_3m"`, and `limit` equal to the full verified roster
+length. These discovery settings preserve recovery candidates for interpretation;
+they do not relax buying readiness. Retain measured exclusions and missing data
+for all nominations, not just the sorted passing rows.
+
+Keep the same calendar, adjustment, mapping-date and full-history requirements;
+a short list is not permission to shorten a 200-session average. The shortlist
+still needs regular-session liquidity and sourced market-cap checks below.
+Do not feed a socially selected subset into a previously broad fixed comparison
+as if its universe were unchanged. Record a due formation as unavailable with the
+scope mismatch when matching declared inputs are absent; continue evaluating
+earlier comparison cohorts normally. Do not fetch a broad universe solely to
+hide that limitation or redefine the comparison after seeing today's choices.
 
 ## Interpret and preserve the result
 

@@ -107,6 +107,12 @@ explicit private JSON file passed to the bundled script with `--credentials-file
 Credentials remain outside the plugin, repository and vault; no separate local
 credential launcher is required. Retrieval retains explicit feed and coverage limits.
 
+An optional [ShadowAlpha roster](skills/market-research/references/shadowalpha.md)
+supports a smaller curated discovery universe via the host's read-only MCP.
+Personal source configuration stays in the vault; bundled normalization preserves
+attribution, cutoffs and sample limitations without turning extracted calls into
+buy recommendations. This mode retains independent news and earlier theses.
+
 The [offline screener](skills/market-research/references/screening.md) calculates
 calendar-month momentum, benchmark-relative returns, moving averages and a
 clearly labeled daily liquidity proxy from saved Alpaca/calendar responses.

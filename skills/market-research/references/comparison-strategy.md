@@ -17,6 +17,14 @@ identity, dated membership and classifications in the formation record. Explain
 prospective scope changes, never narrow it after seeing which names win. No
 additional market-wide daily fetch is required.
 
+In `curated_social` mode, the nominated universe is a discretionary shortlist,
+not an independent universe for this fixed comparison. Do not form
+`simple-momentum-v1` from it. If due, record unavailable with the scope mismatch
+unless the previously declared independent input is already available at this
+cutoff. Do not acquire a broad universe solely for this diagnostic. Continue due
+observations for earlier cohorts unchanged. A future comparison of the curated
+pipeline would require a separately supported prospective definition.
+
 Eligible instruments are USD common stocks/ADRs on the screener's supported U.S.
 exchanges, priced at least $10, above their 200-session moving average, with a
 20-session mean daily VWAP × volume of at least $25 million and a positive
