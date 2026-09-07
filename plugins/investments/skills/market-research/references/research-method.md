@@ -7,6 +7,14 @@ purchase; it is not an instruction to sell an existing holding.
 
 ## Repeatable discovery and evidence
 
+Choose the discovery scope before either pass. An explicit curated-source
+configuration uses the [ShadowAlpha workflow](shadowalpha.md); otherwise use
+the declared broad directory screen. In curated mode both passes assess the
+nominated names, alongside prior theses and bounded independent-news leads.
+This is a selective idea pipeline, not a complete market scan. Switching modes
+is a prospective scope change; preserve earlier recommendation and comparison
+cohorts unchanged.
+
 Run two distinct discovery passes, then revisit earlier theses:
 
 - **Announcements:** check the earnings/corporate-event calendar and material
@@ -245,7 +253,10 @@ evidence and setup tests before promotion.
   describes community activity, not a probability of investment success.
 
 Use a small, explicit social budget: normally up to three targeted searches per
-platform for the strongest candidates, not a full ticker-by-platform sweep. Start
+platform for the strongest candidates, not a full ticker-by-platform sweep.
+Configured ShadowAlpha discovery instead uses its roster and combined request
+budget under the [curated-source guide](shadowalpha.md); do not apply this
+three-search default to that planned multi-author ingestion. Start
 with an already configured read-only connector when available; otherwise use
 public search/page reading. Do not assume a recommended but uninstalled connector
 is available. No new account, subscription, browser login or access bypass is

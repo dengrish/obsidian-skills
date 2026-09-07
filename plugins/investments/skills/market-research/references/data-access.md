@@ -110,13 +110,16 @@ skipped in Screening and sources. A successful setup probe is not today's resear
 | Outcome work | Use `sessions`, `prices` and relevant `actions` for due baselines/checkpoints returned by `market_notes.py outcomes`; retain fixed events, matching benchmark inputs and availability evidence. Do not refetch completed observations unless corrections or changed evidence require it. |
 
 Use host search/page-reading for primary releases, transcripts, agency announcements
-and bounded social research; there are no bundled X, Reddit or Stocktwits adapters.
+and bounded social research. Configured ShadowAlpha MCP access follows the
+[curated-source guide](shadowalpha.md), with offline normalization in
+`market_social.py`; it does not use `market_data.py` or its credentials. There
+are no direct bundled X, Reddit or Stocktwits network adapters.
 Disclose inaccessible sources or inadequate history and use the research method's
 fallbacks instead of silently omitting a discovery pass or required evidence check.
 
 ## Coordinated discovery
 
-Use `market_acquire.py discover` for a new broad price/news pass, after the run
+In broad mode, use `market_acquire.py discover` for a new price/news pass, after the run
 receipt has frozen the cutoff and the prior note has established the news window:
 
 ```bash
