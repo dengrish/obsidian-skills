@@ -16,7 +16,9 @@ safety limit is not a writing target.
 
 - **Scheduled:** `YYYY-MM-DD-market-research.md`, one edition per calendar day.
   Helpers default to `--mode scheduled`; the daily schedule keeps its established
-  cutoff, and successful retries reuse the existing edition.
+  cutoff, and successful retries reuse the existing edition. A new scheduled
+  draft cannot use evidence after 11:30 New York time; use a manual edition for
+  a later cutoff. Earlier published cutoffs remain unchanged on retries.
 - **Manual:** `YYYY-MM-DD-HHMMSS-market-research.md`, using the New York date and
   whole-second time in `as_of`. A user-requested fresh review may create another
   edition on the same day without replacing an earlier note or changing the schedule.
@@ -167,7 +169,9 @@ it from the short brief. Organize each day's relevant material as follows:
   do not preserve every irrelevant search hit. Separate verified observations,
   management claims, estimates, investment hypotheses and unresolved questions.
   Where relevant, retain the theme-to-company benefit and compact earnings
-  comparisons from the [research method](research-method.md).
+  comparisons from the [research method](research-method.md), including a linked
+  prospective expectations snapshot for a material upcoming event. Later results
+  refer back to the preserved pre-event snapshot; unchanged previews need no copy.
   Rejected names need not become tracked theses merely to appear in this record.
 - **Thesis updates:** keep the canonical complete ledger below. Put fuller
   supporting changes under Candidate assessments, linked from the update cell.

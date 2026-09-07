@@ -46,6 +46,15 @@ that day's Research record and register its link. Include counts of recommendati
 never-ready watches, observed/pending/unavailable/recheck windows, and the relevant
 per-horizon sample sizes. Group comparable setups and distinguish company-specific
 results from broad market/sector moves. A count of zero is a valid first summary.
+Use the helper's `first_ready_producer` to distinguish the releases that originated
+recommendations. Group by its `runtime_sha256`, retaining `plugin_version` and
+the available source-commit link as readable labels; version numbers alone can
+be reused. This is the creator of the earliest actual ready note, not a later
+observer, editor or baseline correction. Keep unknown creators in an explicit
+unknown group; do not backfill them from a newer note. Compare like horizons,
+setups, benchmarks and market conditions and report sample sizes and overlap.
+A release difference in small or differently exposed cohorts does not establish
+that a skill change caused better returns. No new journal columns are needed.
 If the review cannot be completed, leave it due and record the limitation rather
 than registering a completed summary. The ordinary daily run retries it.
 
@@ -284,9 +293,10 @@ lessons are not lost between monthly consolidations.
 Old daily notes remain immutable. First observations and pending/unavailable-to-
 observed updates use `-` in `Replaces`. Changing a finalized baseline or checkpoint
 requires an explicit new row whose `Replaces` is the exact previous `Record` link.
-When a pending or unavailable baseline/checkpoint first becomes observed, link a
-new detail card in the current draft. An older missing-data card cannot support
-the newly obtained values even if its cutoff was already after the opening or
+Whenever a baseline/checkpoint is first recorded as observed, link a new detail
+card in the current draft, including when it has no earlier journal row.
+An older missing-data card cannot support the newly obtained values even if its
+cutoff was already after the opening or
 closing event. Published historical rows and identical retries remain readable.
 For a `needs-recheck` checkpoint, explicitly replace that prior link even if its
 stored observation was unavailable.

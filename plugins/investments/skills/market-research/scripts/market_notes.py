@@ -508,6 +508,11 @@ def outcomes(vault, draft=None, now=None, mode='scheduled', as_of=None):
             finding(path, 'generated_at is in the future')
         notes[Path(path).stem] = (path, note, data)
     unpublished_draft = draft is not None and edition_key not in notes
+    if (unpublished_draft and mode == 'scheduled'
+            and iso_time(draft_note['metadata']['as_of']) > scheduled_cutoff(current)):
+        finding(history['current_note']['path'],
+                'new scheduled notes must not use evidence after 11:30 New York time; '
+                'a later cutoff requires a manual edition')
     if draft is not None:
         if iso_time(draft_note['metadata']['generated_at']) > current:
             raise ValueError('draft generated_at is in the future')
@@ -534,7 +539,8 @@ def outcomes(vault, draft=None, now=None, mode='scheduled', as_of=None):
             introduced_theses.add(row['id'])
             if row['state'] == 'ready':
                 first.setdefault(row['id'], {'id': row['id'], 'first_ready': note_day,
-                                             'first_ready_note': path})
+                                             'first_ready_note': path,
+                                             'first_ready_producer': (note['provenance'] or {}).get('generated_by')})
 
     def reference(raw, note_key):
         match = re.fullmatch(r'\[\[(?:Investments/)?(\d{4}-\d{2}-\d{2}(?:-\d{6})?-market-research)'
@@ -618,7 +624,7 @@ def outcomes(vault, draft=None, now=None, mode='scheduled', as_of=None):
                             or record_identity(item) != record_identity(previous))
                         finalized = previous is not None and previous['baseline_at'] not in ('pending', 'unavailable')
                         correction(row, item, previous, changed, finalized, note_key,
-                                   first_observation=previous is not None and not finalized
+                                   first_observation=not finalized
                                    and baseline not in ('pending', 'unavailable'))
                         item['version_note'] = path if previous is None or changed else previous['version_note']
                         recommendations[identifier] = item
@@ -657,7 +663,7 @@ def outcomes(vault, draft=None, now=None, mode='scheduled', as_of=None):
                             previous['state'] == 'observed' or previous['_needs_card_recheck']
                             or previous['_baseline_version'] != item['_baseline_version'])
                         correction(row, item, previous, changed, finalized, note_key,
-                                   first_observation=previous is not None and previous['state'] == 'unavailable'
+                                   first_observation=(previous is None or previous['state'] == 'unavailable')
                                    and item['state'] == 'observed')
                         # Legacy same-card changes cannot make unchanged evidence current.
                         # Repeats retain this flag until an explicit distinct-card correction.
@@ -713,7 +719,8 @@ def outcomes(vault, draft=None, now=None, mode='scheduled', as_of=None):
             item = dict({key: value for key, value in (prior or {}).items() if not key.startswith('_')},
                         recommendation=identifier, horizon=horizon, state=state,
                         target_date=target.isoformat() if target else None,
-                        baseline_at=baseline['baseline_at'], current_baseline_record=baseline['record'])
+                        baseline_at=baseline['baseline_at'], current_baseline_record=baseline['record'],
+                        first_ready_producer=baseline['first_ready_producer'])
             planned.append(item)
             if stale or (target is not None and target <= current.date() and state != 'observed'):
                 due.append(item)
@@ -1209,6 +1216,35 @@ def run_self_test():
             self.assertEqual(path.read_bytes(), original)
             self.assertEqual(lint_bytes(original)['metadata']['generated_at'], '2026-09-05T09:02:00-04:00')
 
+        def test_new_scheduled_edition_cannot_extend_its_evidence_cutoff(self):
+            now = iso_time('2026-09-05T14:02:00-04:00')
+            self.draft.write_bytes(self.note(as_of='2026-09-05T13:00:00-04:00',
+                                            generated=now.isoformat()))
+            planned = outcomes(self.vault, self.draft, now)
+            self.assertFalse(planned['complete'])
+            self.assertTrue(any('after 11:30 New York' in row['error'] for row in planned['findings']))
+            with self.assertRaisesRegex(ValueError, 'after 11:30 New York'):
+                publish(self.draft, self.vault, now)
+            self.assertFalse((self.vault / 'Investments').exists())
+            self.assertTrue(outcomes(self.vault, self.draft, now, mode='manual')['complete'])
+            published = Path(publish(self.draft, self.vault, now, mode='manual')['path'])
+            self.assertEqual(published.name, '2026-09-05-130000-market-research.md')
+
+        def test_early_scheduled_cutoff_and_historical_late_retry_remain_valid(self):
+            now = iso_time('2026-09-05T14:02:00-04:00')
+            self.draft.write_bytes(self.note(as_of='2026-09-05T11:29:59-04:00',
+                                            generated=now.isoformat()))
+            self.assertTrue(outcomes(self.vault, self.draft, now)['complete'])
+            published = Path(publish(self.draft, self.vault, now)['path'])
+            # Old releases permitted this cutoff. Keep immutable history and
+            # exact retries readable without allowing new scheduled editions.
+            historical = self.note(as_of='2026-09-05T13:00:00-04:00', generated=now.isoformat())
+            published.write_bytes(historical)
+            self.assertTrue(outcomes(self.vault, now=now)['complete'])
+            self.assertTrue(outcomes(self.vault, published, now)['complete'])
+            self.assertEqual(publish(published, self.vault, now)['status'], 'unchanged')
+            self.assertEqual(published.read_bytes(), historical)
+
         def test_missing_timezone_reports_json_error(self):
             import io
             from contextlib import redirect_stdout
@@ -1305,6 +1341,54 @@ def run_self_test():
                 self.assertEqual(publish(current, self.vault, self.now)['status'], 'unchanged')
             self.assertEqual(current.read_bytes(), original)
             self.assertIsNone(lint_bytes(original)['provenance'])
+
+        def test_outcomes_keep_first_ready_producer_across_later_versions_and_corrections(self):
+            origin = dict(self.generator, plugin_version='1.0.0', runtime_sha256='a' * 64)
+            newer = dict(self.generator, plugin_version='2.0.0', runtime_sha256='b' * 64)
+            for provenance_state in ('known', 'absent', 'unknown-edited'):
+                with self.subTest(provenance_state=provenance_state):
+                    identifier, _, baseline_link = self.baseline_fixture()
+                    folder = self.vault / 'Investments'
+                    first = folder / '2024-01-30-market-research.md'
+                    initial = first.read_text(encoding='utf-8')
+                    if provenance_state == 'known':
+                        initial = note_provenance.stamp_text(initial, origin)
+                    elif provenance_state == 'unknown-edited':
+                        initial = initial.rstrip() + '\n\n<!-- skill-provenance: ' + json.dumps(
+                            {'schema': 1, 'generated_by': None, 'updated_by': newer}) + ' -->\n'
+                    first.write_text(initial, encoding='utf-8')
+                    expected_producer = origin if provenance_state == 'known' else None
+                    # A prior watch's author is not the producer of first readiness.
+                    watch = folder / '2024-01-30-070000-market-research.md'
+                    watch.write_text(note_provenance.stamp_text(self.note('2024-01-30',
+                        [(identifier, 'watch', 'Confirmation still pending')],
+                        as_of='2024-01-30T07:00:00-05:00',
+                        generated='2024-01-30T07:02:00-05:00').decode('utf-8'), newer), encoding='utf-8')
+                    baseline_path = folder / '2024-01-31-market-research.md'
+                    baseline_path.write_text(note_provenance.stamp_text(
+                        baseline_path.read_text(encoding='utf-8'), newer), encoding='utf-8')
+                    reminder = self.outcome_note('2024-02-01', [(identifier, 'ready', 'Confirmation rechecked')])
+                    reminder.write_text(note_provenance.stamp_text(
+                        reminder.read_text(encoding='utf-8'), newer), encoding='utf-8')
+                    originals = {path: path.read_bytes() for path in folder.iterdir()}
+                    result = outcomes(self.vault, now=self.now)
+                    self.assertTrue(result['complete'], result['findings'])
+                    self.assertEqual(result['recommendations'][0]['first_ready_producer'], expected_producer)
+                    self.assertEqual(result['recommendations'][0]['first_ready_note'], str(first))
+                    self.assertTrue(all(row['first_ready_producer'] == expected_producer
+                                        for row in result['checkpoints']))
+                    self.outcome_note('2026-09-05', [(identifier, 'watch', 'Carry the same buying thesis')], [
+                        self.journal('Recommendation records', [(identifier, '2024-01-30',
+                            '2024-01-31T09:31:00-05:00', self.record_link('2026-09-05'), baseline_link)])], draft=True)
+                    self.draft.write_text(note_provenance.stamp_text(
+                        self.draft.read_text(encoding='utf-8'), newer), encoding='utf-8')
+                    corrected = outcomes(self.vault, self.draft, self.now)
+                    self.assertTrue(corrected['complete'], corrected['findings'])
+                    self.assertEqual(corrected['recommendations'][0]['first_ready_producer'], expected_producer)
+                    self.assertEqual(corrected['recommendations'][0]['baseline_at'], '2024-01-31T09:31:00-05:00')
+                    self.assertTrue(all(row['first_ready_producer'] == expected_producer
+                                        for row in corrected['due_checkpoints']))
+                    self.assertEqual({path: path.read_bytes() for path in originals}, originals)
 
         def test_publisher_rejects_shared_helpers_from_another_bundle(self):
             with patch(__name__ + '._shared', str(self.vault)), \
@@ -2125,6 +2209,40 @@ def run_self_test():
             self.assertEqual(checkpoint['state'], 'observed')
             self.assertEqual(checkpoint['record'], self.record_link('2026-09-05'))
             self.assertEqual(old_path.read_bytes(), original)
+
+        def test_first_observations_need_current_cards_without_prior_journal_rows(self):
+            identifier, _, baseline_link = self.baseline_fixture()
+            older = self.outcome_note('2024-03-01')
+            old_link = self.record_link('2024-03-01')
+            original = older.read_bytes()
+            for record, complete in ((old_link, False), (self.record_link('2026-09-05'), True)):
+                with self.subTest(kind='first checkpoint', record=record):
+                    self.outcome_note('2026-09-05', [(identifier, 'watch', 'Carry the earlier thesis')], [
+                        self.journal('Checkpoint records', [(identifier, '1m', 'observed',
+                            '2024-02-29T16:00:00-05:00', record, '-')])], draft=True)
+                    result = outcomes(self.vault, self.draft, self.now)
+                    self.assertEqual(result['complete'], complete, result['findings'])
+                    if not complete:
+                        with self.assertRaisesRegex(ValueError, 'current draft'):
+                            publish(self.draft, self.vault, self.now)
+            # Recover an older ready state with no structured recommendation
+            # record yet. Its first baseline still needs today's evidence card.
+            first = self.vault / 'Investments/2024-01-30-market-research.md'
+            first.write_bytes(self.note('2024-01-30', [(identifier, 'ready', 'Original setup')]))
+            baseline_path = self.vault / 'Investments/2024-01-31-market-research.md'
+            baseline_path.write_bytes(self.note('2024-01-31', [(identifier, 'watch', 'Original follow-up')],
+                                               as_of='2024-01-31T16:00:00-05:00',
+                                               generated='2024-01-31T16:02:00-05:00'))
+            for record, complete in ((baseline_link, False), (self.record_link('2026-09-05'), True)):
+                with self.subTest(kind='first baseline', record=record):
+                    self.outcome_note('2026-09-05', [(identifier, 'watch', 'Carry the earlier thesis')], [
+                        self.journal('Recommendation records', [(identifier, '2024-01-30',
+                            '2024-01-31T09:30:00-05:00', record, '-')])], draft=True)
+                    result = outcomes(self.vault, self.draft, self.now)
+                    self.assertEqual(result['complete'], complete, result['findings'])
+            self.assertEqual(older.read_bytes(), original)
+            self.assertEqual(publish(self.draft, self.vault, self.now)['status'], 'created')
+            self.assertEqual(publish(self.draft, self.vault, self.now)['status'], 'unchanged')
 
         def test_baseline_cannot_predate_known_first_ready_generation(self):
             identifier, _, _ = self.baseline_fixture()
