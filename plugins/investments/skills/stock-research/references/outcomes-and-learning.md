@@ -207,8 +207,8 @@ the `Record` links point to. The helper indexes these tables; prose explains the
 Keep one row per recommendation/checkpoint/lesson/month in each journal per note.
 A `Record` is an unpiped filename-qualified wikilink to an existing dated market
 note and its actual section, or the current draft. Use its exact recognized
-filename, for example `[[Investments/2026-09-08-market-research#Section]]` or
-`[[Investments/2026-09-08-143015-market-research#Section]]`; never point to a future note,
+filename, for example `[[Investments/2026-09-08-stock-research#Section]]` or
+`[[Investments/2026-09-08-143015-stock-research#Section]]`; never point to a future note,
 missing heading, external URL or scratch file. A record link must identify the
 detail supporting that row, not merely a generic note with no relevant evidence.
 Use distinct descriptive headings so the references remain retrievable. For a
@@ -219,7 +219,7 @@ at or after that event; an older pending card cannot contain a later observation
 
 | Recommendation | First ready | Baseline at | Record | Replaces |
 |---|---|---|---|---|
-| NASDAQ:EXAMPLE@2026-09-08 | 2026-09-08 | pending | [[Investments/2026-09-08-market-research#Original recommendation EXAMPLE]] | - |
+| NASDAQ:EXAMPLE@2026-09-08 | 2026-09-08 | pending | [[Investments/2026-09-08-stock-research#Original recommendation EXAMPLE]] | - |
 
 `Recommendation` uses the unchanged thesis ID. `First ready` is the date of its
 first published ready state, which may be later than the date in the thesis ID.
@@ -236,7 +236,7 @@ to its new baseline card while retaining the original recommendation link there.
 
 | Recommendation | Horizon | State | Observed at | Record | Replaces |
 |---|---|---|---|---|---|
-| NASDAQ:EXAMPLE@2026-09-08 | 2w | unavailable | - | [[Investments/2026-09-24-market-research#EXAMPLE two-week data gap]] | - |
+| NASDAQ:EXAMPLE@2026-09-08 | 2w | unavailable | - | [[Investments/2026-09-24-stock-research#EXAMPLE two-week data gap]] | - |
 
 The stable checkpoint key is the recommendation ID plus `Horizon`, one of
 `2w`, `1m`, `3m`, `6m`, `12m`, `24m`, `60m`. The helper returns the same tokens in
@@ -265,7 +265,7 @@ leave their links unresolved.
 
 | Lesson | Status | Record |
 |---|---|---|
-| lesson-2026-10-10-01 | provisional | [[Investments/2026-10-10-market-research#Lesson on earnings confirmation]] |
+| lesson-2026-10-10-01 | provisional | [[Investments/2026-10-10-stock-research#Lesson on earnings confirmation]] |
 
 Lesson IDs use `lesson-YYYY-MM-DD-NN`, with their first-recorded date and a positive
 sequence starting at `01`: use at least two digits, without redundant leading
@@ -300,7 +300,7 @@ edits skill sources. No mandatory human review is added to daily publication.
 
 | Month | Record |
 |---|---|
-| 2026-10 | [[Investments/2026-10-10-market-research#October learning summary]] |
+| 2026-10 | [[Investments/2026-10-10-stock-research#October learning summary]] |
 
 Register the review only when completed. `Month` must match both the containing
 note and the linked summary note's New York month, including a delayed first

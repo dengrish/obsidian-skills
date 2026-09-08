@@ -100,78 +100,30 @@ skipped in Screening and sources. A successful setup probe is not today's resear
 | Stage | Commands and use |
 |---|---|
 | Review window and session | `sessions` for the last/next sessions and their opening/closing boundaries; verify exceptional closures against an exchange source. Reuse this calendar for price filtering and due outcome events. |
-| Accessible universe | `symbols` when establishing or refreshing the current directory-based screen or resolving instrument identity. Preserve membership dates and provider symbol mappings; it does not classify every non-ETF as an eligible common share. |
-| Announcement pass | `news --provider alpaca` for a bounded broad or ticker-specific news window when configured; use `news --provider alpha_vantage` selectively for additional coverage within its account quota. Use `earnings` for upcoming scheduled risks, then verify timing and results on issuer pages. Neither news feed must duplicate the other on every run. |
-| Price-history pass | `prices` for the declared universe and benchmarks over matching completed sessions, then the offline [screener](screening.md). Preserve its defined filters, coverage and exclusions. Its daily notional proxy is preliminary; verify regular-session liquidity separately for the shortlist. |
+| Feed nominations and identity | `stock_feed.py context` reads local collection outputs. Use `symbols` only when useful for resolving a nominated instrument; preserve exact provider symbols, security type and dated identity evidence. Directory membership does not add candidates. |
+| Candidate announcements | `news --provider alpaca --symbol '<symbol>'` for a bounded candidate-specific news window when configured; use `news --provider alpha_vantage` selectively for additional coverage within its account quota. Use `earnings` for upcoming scheduled risks, then verify timing and results on issuer pages. Neither news feed must duplicate the other on every run. |
+| Candidate price history | `prices` for the nominated stocks, prior active theses and benchmarks over matching completed sessions, then the offline [screener](screening.md). Preserve its defined filters, coverage and exclusions. Its daily notional proxy is preliminary; verify regular-session liquidity separately for the shortlist. |
 | Intraday assessment | On open-market runs, use `prices --timeframe 1Min` or a timestamped host quote for the shortlist's morning reaction. Respect feed delay and the cutoff; keep snapshots separate from completed-session signals, and compare partial volume only with matching historical session/time windows. |
 | Shortlist and readiness | `sec-company` for relevant filings, then `sec-facts` for comparable reported fundamentals and optional `sec-filing` for the exact filing's narrative/tables. For expectations that matter, retrieve `estimates` and use the dated-snapshot workflow below. When insider activity changes the case, inspect an exact accession with `sec-ownership`. Open material cited sections and issuer releases; a parser is not a factual verifier. Check `halts` and current issuer/exchange notices before first readiness or when a trading-status concern arises; a current empty feed does not reconstruct an earlier cutoff or clear an older unresolved halt. |
 | Corporate actions | `actions` when validating adjustments, unexplained price discontinuities, instrument changes or outcome inputs. Its process-date records need issuer corroboration; choose the relevant history and keep original raw observations. |
 | Macro context | `fred-releases` for relevant upcoming releases and `fred-series` for a small dated set of rates, credit, employment or inflation observations when they affect a thesis. Verify fresh announcements with the releasing agency. |
 | Outcome work | Use `sessions`, `prices` and relevant `actions` for due baselines/checkpoints returned by `market_notes.py outcomes`; retain fixed events, matching benchmark inputs and availability evidence. Do not refetch completed observations unless corrections or changed evidence require it. |
 
-Use host search/page-reading for primary releases, transcripts, agency announcements
-and bounded social research. Configured ShadowAlpha MCP access follows the
-[curated-source guide](shadowalpha.md), with offline normalization in
-`market_social.py`; it does not use `market_data.py` or its credentials. There
-are no direct bundled X, Reddit or Stocktwits network adapters.
-Disclose inaccessible sources or inadequate history and use the research method's
-fallbacks instead of silently omitting a discovery pass or required evidence check.
+Use host search/page-reading for primary releases, transcripts, agency
+announcements and material counterarguments about the nominated companies.
+Social posts already come from `feed-collect`; do not query X, ShadowAlpha,
+Reddit or Stocktwits as an independent discovery pass or fetch missing source
+posts through paid APIs. An inaccessible post remains a collection limitation.
+Missing market access limits the affected check, not the existence of an idea.
 
-## Coordinated discovery
+## Scope of retained acquisition helpers
 
-In broad mode, use `market_acquire.py discover` for a new price/news pass, after the run
-receipt has frozen the cutoff and the prior note has established the news window:
-
-```bash
-python3 '<skill>/scripts/market_acquire.py' discover --vault '<vault>' --work-dir '<scratch>' --as-of '<cutoff>' --news-since '<previous-cutoff-or-unreviewed-window-start>' --max-requests 250 --max-seconds 300
-```
-
-Pass the same explicit `--credentials-file` when one is selected. This command
-calls the bundled adapters directly with one shared transport request/time budget,
-never copies helpers, publishes a report or chooses a buy. It writes full source
-envelopes, directory-derived universe, recent turnover prefilter, full-history
-screen inputs/results and a manifest in a new private acquisition directory.
-The result gives exact paths and coverage. Retain unresolved identities when a
-budget ends; do not describe the returned subset as a complete market scan.
-
-The two-stage pass first retrieves a 450-calendar-day exchange calendar. From its
-verified session boundaries it derives the exact last 20 completed sessions for
-the price/daily-turnover proxy and the full required lookback for every passing
-security and SPY. It retains all moving-average and anniversary observations
-without retrieving unnecessary older prices. Physical requests reserve benchmark
-slots within the provider's 200-symbol limit; splitting a batch never removes a
-declared name. Batches use a declared date-dependent identity hash instead of
-an alphabetical first page; partial traversal is still limited coverage.
-Repeated snapshots preserve original request times and do not become fresh data.
-If a fully assessed prefilter has no passes, the manifest records complete empty
-eligibility without pretending full histories were missing; a news gap still
-makes overall coverage partial. If the duplicate assembled input exceeds 128 MiB,
-the coordinator preserves the measured screen and every original source batch,
-marks the assembly/comparison limitation explicitly, and never shrinks the cohort
-to fit. A later validation or storage failure retains the named scratch directory,
-last completed stage, operations and available artifacts in a manifest. Known
-validation/provider errors retain their sanitized code and explanation; storage
-errors have a safe category, while unexpected exception details stay hidden.
-Provider diagnostics also remain with their operation records, including partial
-news coverage. Credentials are redacted before the manifest is saved or returned.
-Invalid price bars quarantine the affected symbol's entire requested history,
-including bars on earlier or later pages; valid histories for other symbols remain
-available. Such results stay incomplete and list safe per-symbol diagnostics in
-`data.rejected_symbols`, with the affected names also retained in
-`requested_symbols` and `missing_symbols`. Do not treat these unavailable names
-as measured eligibility failures. Structural page errors still stop that page;
-minute-based liquidity checks remain unverified for an incomplete source envelope.
-See [screening](screening.md) for offline preparation, existing-definition
-compatibility, regular-session liquidity and sourced market-cap verification.
-
-News uses bounded provider cursors and exact article-ID deduplication. Earlier
-validated pages survive a later failure, while changing versions of one article
-remain a conflict. Counts distinguish original publications from older updated
-articles. A news-only access/network failure does not disable reachable prices;
-a provider rate-limit or exhausted shared budget conservatively stops that source.
-The coordinator does not spend Alpha Vantage calls on discovery that Alpaca can
-supply. Perform primary-source verification and candidate-specific checks after
-screening; avoid repeating successful retrieval merely to exercise a command.
+The bundled directory/acquisition utilities remain available for inspecting
+previous saved inputs and maintaining historical comparisons. The current skill
+uses feed nominations only: do not run `market_acquire.py discover` or collect a
+broad price/news universe. Use targeted commands for the nominated stocks,
+benchmarks and due historical outcome instruments. A provider response containing
+other symbols does not nominate those companies.
 
 ## Query and result contract
 

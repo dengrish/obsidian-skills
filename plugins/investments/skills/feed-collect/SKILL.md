@@ -64,7 +64,7 @@ Do not substitute webpage previews or referenced originals' images for attachmen
 The supported adapter is X only. Other links to blogs, newsletters, X Articles
 or paywalled pages remain source links; do not crawl them or invent their text.
 Future adapters can share the source-note/state pattern but require their own
-supported acquisition and permissions. This skill neither invokes market-research
+supported acquisition and permissions. This skill neither invokes stock-research
 nor changes its configured discovery sources or schedule.
 
 ## Collect the past three days

@@ -74,14 +74,14 @@ import market_comparison
 MAX_BYTES = 256 * 1024
 RUN_HOURS = 8
 CHECK_NAME = re.compile(r'[a-z][a-z0-9-]{0,63}\Z')
-FIELDS = ('market_research', 'date', 'as_of', 'generated_at', 'session', 'coverage')
+FIELDS = ('stock_research', 'date', 'as_of', 'generated_at', 'session', 'coverage')
 HEADINGS = ('Decision brief', 'Research record')
 SUBHEADINGS = {
     'Decision brief': ('Buying opportunities', 'Next checks'),
     'Research record': ('Screening and sources', 'Candidate assessments', 'Thesis updates', 'Outcome review'),
 }
 ATX = re.compile(r' {0,3}(#{1,6})(?:[ \t]+(.*)|[ \t]*)$')
-DAILY = re.compile(r'(\d{4}-\d{2}-\d{2})(?:-(\d{6}))?-market-research\.md\Z')
+DAILY = re.compile(r'(\d{4}-\d{2}-\d{2})(?:-(\d{6}))?-(?:stock|market)-research\.md\Z')
 THESIS = re.compile(r'([A-Z][A-Z0-9]{1,15}:[A-Z][A-Z0-9.-]{0,14})@(\d{4}-\d{2}-\d{2})(?:-(\d{6}))?\Z')
 STATES = {'watch', 'ready', 'invalidated', 'expired'}
 ACTIVE = {'watch', 'ready'}
@@ -189,7 +189,7 @@ def note_sections(body_lines):
             raise ValueError('outcome journal headings must use the exact prescribed H4: ' + title)
         headings.append((index, level, title))
     if len([item for item in headings if item[1] == 1]) != 1:
-        raise ValueError('expected exactly one dated Market research H1')
+        raise ValueError('expected exactly one dated Stock research H1')
     parts = [(index, title) for index, level, title in headings if level == 2]
     if tuple(title for _, title in parts) != HEADINGS:
         raise ValueError('expected exactly two parts, in order: ' + ', '.join(HEADINGS))
@@ -278,11 +278,12 @@ def lint_bytes(data, expected_date=None):
         raise ValueError('frontmatter is not closed') from exc
     pairs = [line.split(': ', 1) for line in lines[1:end]]
     if (any(len(pair) != 2 for pair in pairs)
-            or tuple(pair[0] for pair in pairs) != FIELDS):
+            or tuple(pair[0] for pair in pairs) not in (FIELDS, ('market_research', *FIELDS[1:]))):
         raise ValueError('frontmatter must use these exact ordered fields: ' + ', '.join(FIELDS))
     meta = dict(pairs)
-    if meta['market_research'] != '1':
-        raise ValueError('unsupported market_research schema version')
+    schema = 'stock_research' if 'stock_research' in meta else 'market_research'
+    if meta[schema] != '1':
+        raise ValueError('unsupported stock_research schema version')
     day = iso_date(meta['date'])
     if expected_date is not None and day.isoformat() != expected_date:
         raise ValueError('frontmatter date does not match the daily filename')
@@ -302,9 +303,15 @@ def lint_bytes(data, expected_date=None):
     if '<!--' in body or re.search(r'^ {0,3}(?:`{3,}|~{3,})', body, re.M):
         raise ValueError('daily research notes must not hide state in comments or code fences')
     body_lines = body.splitlines()
-    if not body_lines or body_lines[0] != '# Market research — ' + day.isoformat():
-        raise ValueError('expected dated Market research H1')
+    title = 'Stock research' if schema == 'stock_research' else 'Market research'
+    if not body_lines or body_lines[0] != '# ' + title + ' — ' + day.isoformat():
+        raise ValueError('expected dated Stock research H1')
     sections = note_sections(body_lines)
+    if schema == 'stock_research':
+        # The same pure parser drives publication of every analyzed stock.
+        # Historical notes keep their original, pre-dossier layout.
+        from stock_dossiers import candidates
+        candidates(data)
     ledger = sections['Thesis updates']
     rows = []
     if ledger != 'No active theses.':
@@ -334,7 +341,7 @@ def active_provenance():
     expected_shared = (plugin_root / 'shared' / 'scripts').resolve(strict=True)
     if Path(_shared).resolve(strict=True) != expected_shared:
         raise ValueError('publication provenance requires shared helpers from the executing plugin bundle')
-    return note_provenance.verified_record(plugin_root, 'market-research')
+    return note_provenance.verified_record(plugin_root, 'stock-research')
 
 
 def require_publication_provenance(metadata):
@@ -344,7 +351,7 @@ def require_publication_provenance(metadata):
                          'the installed plugin\'s note_provenance helper before publication')
     if metadata.get('generated_by') != active_provenance() or 'updated_by' in metadata:
         raise ValueError('new market-note provenance must identify the executing installed '
-                         'market-research bundle as its creator, without an update record')
+                         'stock-research bundle as its creator, without an update record')
 
 
 def output_folder(vault, create=False):
@@ -374,13 +381,13 @@ def edition_identity(current, mode='scheduled', as_of=None):
         if as_of is not None:
             raise ValueError('--as-of is only supported with --mode manual')
         cutoff = min(current, scheduled_cutoff(current))
-        return current.date().isoformat() + '-market-research.md', cutoff
+        return current.date().isoformat() + '-stock-research.md', cutoff
     cutoff = ny_now(iso_time(as_of)) if as_of is not None else current.replace(microsecond=0)
     if (cutoff.date() != current.date() or cutoff.astimezone(timezone.utc) > current.astimezone(timezone.utc)
             or cutoff.microsecond):
         raise ValueError('manual as_of must be a nonfuture timestamp on today\'s New York date, with whole seconds')
     # Fixed offsets compare as instants even during the repeated fall-back hour.
-    return cutoff.strftime('%Y-%m-%d-%H%M%S-market-research.md'), iso_time(cutoff.isoformat())
+    return cutoff.strftime('%Y-%m-%d-%H%M%S-stock-research.md'), iso_time(cutoff.isoformat())
 
 
 def _run_bytes(value):
@@ -527,9 +534,9 @@ def prepare(vault, work_dir, now=None, mode='scheduled', checks=()):
                    'checks': names}
         _run_write(descriptor, 'key', key)
         _run_write(descriptor, 'run.json', _run_seal(payload, key))
-        draft = ('---\nmarket_research: 1\ndate: {date}\nas_of: "{as_of}"\n'
+        draft = ('---\nstock_research: 1\ndate: {date}\nas_of: "{as_of}"\n'
                  'generated_at: "{generated}"\nsession: unknown\ncoverage: unavailable\n---\n'
-                 '# Market research — {date}\n\n## Decision brief\n\n'
+                 '# Stock research — {date}\n\n## Decision brief\n\n'
                  'DRAFT — research and verification are incomplete.\n\n'
                  '### Buying opportunities\n\nDRAFT — evaluate candidates.\n\n'
                  '### Next checks\n\nDRAFT — verify the next session and dated events.\n\n'
@@ -584,6 +591,8 @@ def run_check(receipt, vault, name, draft=None, now=None):
                 or not iso_time(payload['started_at']) <= iso_time(note['metadata']['generated_at']) <= current
                 or re.search(r'^DRAFT —', data.decode('utf-8'), re.M)):
             raise ValueError('review requires a completed draft matching this run and its actual generation time')
+        if 'stock_research' not in note['metadata']:
+            raise ValueError('new editions must use stock_research; historical market_research records are read-only')
         require_publication_provenance(note['provenance'])
         digest = hashlib.sha256(data).hexdigest()
         record = {'run': payload['id'], 'check': name, 'draft_sha256': digest, 'completed_at': current.isoformat()}
@@ -630,7 +639,7 @@ def require_run_checks(receipt, vault, data, current):
 def inventory(vault, day, edition=None, cutoff=None, continuation=False):
     """Read all editions in evidence-time order; preserve omitted open theses."""
     vault, folder, folder_identity = output_folder(vault)
-    edition = edition or day + '-market-research.md'
+    edition = edition or day + '-stock-research.md'
     result = {'complete': True, 'findings': [], 'prior_notes': [], 'later_notes': [], 'other_notes': [],
               'current_note': {'path': str(folder / edition), 'state': 'missing'},
               'thesis_history': [], 'active_theses': []}
@@ -800,7 +809,7 @@ def outcomes(vault, draft=None, now=None, mode=None, as_of=None, run_receipt=Non
                                              'first_ready_producer': (note['provenance'] or {}).get('generated_by')})
 
     def reference(raw, note_key):
-        match = re.fullmatch(r'\[\[(?:Investments/)?(\d{4}-\d{2}-\d{2}(?:-\d{6})?-market-research)'
+        match = re.fullmatch(r'\[\[(?:Investments/)?(\d{4}-\d{2}-\d{2}(?:-\d{6})?-(?:stock|market)-research)'
                              r'(?:\.md)?(?:#([^\[\]|\\#\r\n]+))?\]\]', raw)
         if not match or match[1] not in notes or positions[match[1]] > positions[note_key]:
             raise ValueError('Record must link to a known, nonfuture dated market note or section: ' + raw)
@@ -1206,6 +1215,8 @@ def _publish(draft, vault, now=None, mode=None, as_of=None, run_receipt=None):
     planned = outcomes(vault, draft, current, mode, as_of, run_receipt)
     if not planned['complete']:
         raise ValueError('outcome journal is incomplete: ' + json.dumps(planned['findings'], ensure_ascii=False))
+    if 'stock_research' not in note['metadata']:
+        raise ValueError('new editions must use stock_research; historical market_research records are read-only')
     require_publication_provenance(note['provenance'])
     if run_receipt is not None:
         require_run_checks(run_receipt, vault, data, current)
@@ -1215,7 +1226,7 @@ def _publish(draft, vault, now=None, mode=None, as_of=None, run_receipt=None):
         checked, baseline = inventory(vault, day, edition, cutoff, continuation=run_receipt is not None)
         if not checked['complete'] or baseline[1]:
             raise ValueError('Investments was populated concurrently; rerun context')
-    stage_dir = Path(tempfile.mkdtemp(prefix='.market-research-stage-', dir=vault))
+    stage_dir = Path(tempfile.mkdtemp(prefix='.stock-research-stage-', dir=vault))
     staged = stage_dir / target.name
     try:
         with staged.open('xb') as handle:
@@ -1266,15 +1277,15 @@ def run_self_test():
             self.provenance_gate = patch(__name__ + '.require_publication_provenance')
             self.provenance_gate.start()
             self.addCleanup(self.provenance_gate.stop)
-            self.generator = {'skill': 'investments:market-research', 'plugin_version': '1.2.0',
+            self.generator = {'skill': 'investments:stock-research', 'plugin_version': '1.2.0',
                               'source_commit': None, 'source_url': None,
                               'source_status': 'unavailable', 'runtime_sha256': 'f' * 64}
 
         def note(self, day='2026-09-05', rows=(), as_of=None, generated=None):
             ledger = ('| Thesis | State | Update / next check |\n| --- | --- | --- |\n'
                       + '\n'.join('| %s | %s | %s |' % row for row in rows)) if rows else 'No active theses.'
-            return ('---\nmarket_research: 1\ndate: %s\nas_of: "%s"\ngenerated_at: "%s"\n'
-                    'session: premarket\ncoverage: limited\n---\n\n# Market research — %s\n\n'
+            return ('---\nstock_research: 1\ndate: %s\nas_of: "%s"\ngenerated_at: "%s"\n'
+                    'session: premarket\ncoverage: limited\n---\n\n# Stock research — %s\n\n'
                     '## Decision brief\n\nWait for confirmation.\n\n'
                     '### Buying opportunities\n\nNo qualifying opportunity.\n\n'
                     '### Next checks\n\nVerify the next session.\n\n'
@@ -1286,12 +1297,12 @@ def run_self_test():
         def prior(self, day, rows):
             folder = self.vault / 'Investments'
             folder.mkdir(exist_ok=True)
-            path = folder / (day + '-market-research.md')
+            path = folder / (day + '-stock-research.md')
             path.write_bytes(self.note(day, rows))
             return path
 
         def record_link(self, day):
-            return '[[Investments/' + day + '-market-research#Outcome review]]'
+            return '[[Investments/' + day + '-stock-research#Outcome review]]'
 
         def journal(self, title, rows):
             columns = JOURNALS[title]
@@ -1315,7 +1326,7 @@ def run_self_test():
                 self.journal('Recommendation records', [(identifier, first_day, baseline_day + 'T09:30:00-05:00',
                                                          baseline_link, '-')])])
             # The fixture baseline session is observed in a later intraday review.
-            path = self.vault / 'Investments' / (record_day + '-market-research.md')
+            path = self.vault / 'Investments' / (record_day + '-stock-research.md')
             path.write_bytes(path.read_bytes().replace((record_day + 'T09:00:00-04:00').encode(),
                                                        (record_day + 'T16:00:00-05:00').encode())
                              .replace((record_day + 'T09:02:00-04:00').encode(),
@@ -1328,7 +1339,7 @@ def run_self_test():
             self.assertTrue(first['complete'])
             self.assertEqual(first['as_of'], '2026-09-05T14:05:06-04:00')
             self.assertEqual(Path(first['current_note']['path']).name,
-                             '2026-09-05-140506-market-research.md')
+                             '2026-09-05-140506-stock-research.md')
             later = now + timedelta(minutes=20)
             retry = context(self.vault, later, mode='manual', as_of=first['as_of'])
             self.assertEqual(retry['current_note'], first['current_note'])
@@ -1380,7 +1391,7 @@ def run_self_test():
             self.assertTrue(planned['complete'], planned['findings'])
             self.assertEqual(planned['date'], '2026-09-30')
             result = publish(self.draft, self.vault, completed, run_receipt=prepared['run_receipt'])
-            self.assertEqual(Path(result['path']).name, '2026-09-30-235500-market-research.md')
+            self.assertEqual(Path(result['path']).name, '2026-09-30-235500-stock-research.md')
             saved = Path(result['path']).read_bytes()
             self.assertEqual(lint_bytes(saved)['metadata']['generated_at'], completed.isoformat())
             self.assertEqual(publish(self.draft, self.vault, completed,
@@ -1612,7 +1623,7 @@ def run_self_test():
             terminal = publish(self.draft, self.vault, noon, mode='manual')['path']
             later = iso_time('2026-09-05T13:02:00-04:00')
             renewal = first + '-130000'
-            record = '[[Investments/2026-09-05-130000-market-research#Outcome review]]'
+            record = '[[Investments/2026-09-05-130000-stock-research#Outcome review]]'
             self.draft.write_bytes(self.note(rows=[(renewal, 'ready', 'Distinct new catalyst; [[Investments/'
                 + Path(terminal).stem + '#Thesis updates]] preserves the failed thesis.')],
                 as_of='2026-09-05T13:00:00-04:00', generated=later.isoformat())
@@ -1676,7 +1687,7 @@ def run_self_test():
             with self.assertRaisesRegex(ValueError, 'must match'):
                 publish(self.draft, self.vault, self.now, mode='manual', as_of='2026-09-05T09:01:00-04:00')
             self.assertEqual(saved.read_bytes(), original)
-            saved.rename(saved.with_name('2026-09-05-090001-market-research.md'))
+            saved.rename(saved.with_name('2026-09-05-090001-stock-research.md'))
             result = context(self.vault, self.now, mode='manual', as_of=cutoff)
             self.assertFalse(result['complete'])
             self.assertTrue(any('filename time' in finding['error'] for finding in result['findings']))
@@ -1716,12 +1727,12 @@ def run_self_test():
             earlier.write_bytes(earlier.read_bytes() + b'\n#### Unused older card\n\nOriginal evidence.\n')
             now = iso_time('2026-09-05T13:02:00-04:00')
             base = self.note(as_of='2026-09-05T13:00:00-04:00', generated=now.isoformat())
-            old = '[[Investments/2026-09-05-market-research#Unused older card]]'
+            old = '[[Investments/2026-09-05-stock-research#Unused older card]]'
             self.draft.write_bytes(base + ('\n' + self.journal('Lesson records', [(lesson, 'supported', old)])).encode())
             rejected = outcomes(self.vault, self.draft, now, mode='manual')
             self.assertFalse(rejected['complete'])
             self.assertTrue(any('current draft' in finding['error'] for finding in rejected['findings']))
-            new = '[[Investments/2026-09-05-130000-market-research#Outcome review]]'
+            new = '[[Investments/2026-09-05-130000-stock-research#Outcome review]]'
             self.draft.write_bytes(base + ('\n' + self.journal('Lesson records', [(lesson, 'supported', new)])).encode())
             self.assertTrue(outcomes(self.vault, self.draft, now, mode='manual')['complete'])
             publish(self.draft, self.vault, now, mode='manual')
@@ -1729,7 +1740,7 @@ def run_self_test():
         def test_same_day_future_edition_references_are_rejected(self):
             lesson = 'lesson-2026-09-05-01'
             first = self.outcome_note('2026-09-05', journals=[self.journal('Lesson records', [
-                (lesson, 'provisional', '[[Investments/2026-09-05-130000-market-research#Outcome review]]')])])
+                (lesson, 'provisional', '[[Investments/2026-09-05-130000-stock-research#Outcome review]]')])])
             late = iso_time('2026-09-05T13:02:00-04:00')
             self.draft.write_bytes(self.note(as_of='2026-09-05T13:00:00-04:00', generated=late.isoformat()))
             result = outcomes(self.vault, self.draft, late, mode='manual')
@@ -1817,7 +1828,7 @@ def run_self_test():
             self.assertFalse((self.vault / 'Investments').exists())
             self.assertTrue(outcomes(self.vault, self.draft, now, mode='manual')['complete'])
             published = Path(publish(self.draft, self.vault, now, mode='manual')['path'])
-            self.assertEqual(published.name, '2026-09-05-130000-market-research.md')
+            self.assertEqual(published.name, '2026-09-05-130000-stock-research.md')
 
         def test_early_scheduled_cutoff_and_historical_late_retry_remain_valid(self):
             now = iso_time('2026-09-05T14:02:00-04:00')
@@ -1938,7 +1949,7 @@ def run_self_test():
                 with self.subTest(provenance_state=provenance_state):
                     identifier, _, baseline_link = self.baseline_fixture()
                     folder = self.vault / 'Investments'
-                    first = folder / '2024-01-30-market-research.md'
+                    first = folder / '2024-01-30-stock-research.md'
                     initial = first.read_text(encoding='utf-8')
                     if provenance_state == 'known':
                         initial = note_provenance.stamp_text(initial, origin)
@@ -1948,12 +1959,12 @@ def run_self_test():
                     first.write_text(initial, encoding='utf-8')
                     expected_producer = origin if provenance_state == 'known' else None
                     # A prior watch's author is not the producer of first readiness.
-                    watch = folder / '2024-01-30-070000-market-research.md'
+                    watch = folder / '2024-01-30-070000-stock-research.md'
                     watch.write_text(note_provenance.stamp_text(self.note('2024-01-30',
                         [(identifier, 'watch', 'Confirmation still pending')],
                         as_of='2024-01-30T07:00:00-05:00',
                         generated='2024-01-30T07:02:00-05:00').decode('utf-8'), newer), encoding='utf-8')
-                    baseline_path = folder / '2024-01-31-market-research.md'
+                    baseline_path = folder / '2024-01-31-stock-research.md'
                     baseline_path.write_text(note_provenance.stamp_text(
                         baseline_path.read_text(encoding='utf-8'), newer), encoding='utf-8')
                     reminder = self.outcome_note('2024-02-01', [(identifier, 'ready', 'Confirmation rechecked')])
@@ -2053,7 +2064,7 @@ def run_self_test():
             self.draft.write_bytes(self.note().replace(b'Wait for confirmation.', b'Still wait.'))
             with self.assertRaises(ValueError):
                 publish(self.draft, self.vault, self.now)
-            self.assertFalse(list(self.vault.glob('.market-research-stage-*')))
+            self.assertFalse(list(self.vault.glob('.stock-research-stage-*')))
 
         def test_identical_retry_still_validates_history_and_outcomes(self):
             identifier = 'NYSE:ABC@2026-09-05'
@@ -2073,7 +2084,7 @@ def run_self_test():
                     with self.assertRaisesRegex(ValueError, 'history is incomplete|outcome journal is incomplete'):
                         publish(self.draft, self.vault, self.now)
                     self.assertEqual({path.name: path.read_bytes() for path in folder.iterdir()}, before)
-                    self.assertFalse(list(self.vault.glob('.market-research-stage-*')))
+                    self.assertFalse(list(self.vault.glob('.stock-research-stage-*')))
 
         def test_no_backfill_or_future_generation(self):
             for data in (self.note('2026-09-04'), self.note(generated='2026-09-05T09:04:00-04:00')):
@@ -2128,7 +2139,7 @@ def run_self_test():
             self.assertTrue(outcomes(self.vault, self.draft, self.now)['complete'])
             self.assertEqual(publish(self.draft, self.vault, self.now)['status'], 'unchanged')
             self.assertEqual(published.read_bytes(), original)
-            self.assertFalse(list(self.vault.glob('.market-research-stage-*')))
+            self.assertFalse(list(self.vault.glob('.stock-research-stage-*')))
 
         def test_continuity_and_terminal_rows(self):
             thesis = 'NYSE:ABC@2026-09-02'
@@ -2174,7 +2185,7 @@ def run_self_test():
                     with self.assertRaisesRegex(ValueError, 'history is incomplete'):
                         publish(self.draft, self.vault, self.now)
                     self.assertEqual({path.name: path.read_bytes() for path in folder.iterdir()}, before)
-                    self.assertFalse(list(self.vault.glob('.market-research-stage-*')))
+                    self.assertFalse(list(self.vault.glob('.stock-research-stage-*')))
 
         def test_history_rechecked_before_publication(self):
             self.prior('2026-09-03', [])
@@ -2189,8 +2200,8 @@ def run_self_test():
             with patch.dict(globals(), {'inventory': changed}):
                 with self.assertRaisesRegex(RuntimeError, 'history changed'):
                     publish(self.draft, self.vault, self.now)
-            self.assertFalse((self.vault / 'Investments/2026-09-05-market-research.md').exists())
-            self.assertEqual(len(list(self.vault.glob('.market-research-stage-*'))), 1)
+            self.assertFalse((self.vault / 'Investments/2026-09-05-stock-research.md').exists())
+            self.assertEqual(len(list(self.vault.glob('.stock-research-stage-*'))), 1)
 
         def test_malformed_history_and_foreign_notes(self):
             bad = self.prior('2026-09-04', [])
@@ -2205,10 +2216,38 @@ def run_self_test():
                 publish(self.draft, self.vault, self.now)
             self.assertEqual(other.read_text(encoding='utf-8'), 'User note')
 
+        def test_historical_market_note_keeps_active_thesis_without_migration(self):
+            path = self.prior('2026-09-04', [('NASDAQ:ABC@2026-09-04', 'watch', 'Await primary verification.')])
+            old = path.with_name('2026-09-04-market-research.md')
+            data = path.read_bytes().replace(b'stock_research:', b'market_research:').replace(b'# Stock research', b'# Market research')
+            path.unlink()
+            old.write_bytes(data)
+            state = context(self.vault, self.now)
+            self.assertTrue(state['complete'], state['findings'])
+            self.assertEqual(state['active_theses'][0]['id'], 'NASDAQ:ABC@2026-09-04')
+            self.assertIn(str(old), state['prior_notes'])
+            self.assertTrue(outcomes(self.vault, now=self.now)['complete'])
+            self.assertEqual(old.read_bytes(), data)
+
+        def test_historical_market_malformed_note_is_not_ignored(self):
+            folder = self.vault / 'Investments'
+            folder.mkdir()
+            old = folder / '2026-09-04-market-research.md'
+            old.write_text('Malformed historical record', encoding='utf-8')
+            state = context(self.vault, self.now)
+            self.assertFalse(state['complete'])
+            self.assertIn(str(old), state['findings'][0]['paths'])
+
+        def test_historical_schema_cannot_create_a_new_edition(self):
+            self.draft.write_bytes(self.note().replace(b'stock_research:', b'market_research:').replace(b'# Stock research', b'# Market research'))
+            with self.assertRaisesRegex(ValueError, 'historical market_research records are read-only'):
+                publish(self.draft, self.vault, self.now)
+            self.assertFalse((self.vault / 'Investments/2026-09-05-stock-research.md').exists())
+
         def test_noncanonical_filename_collision(self):
             folder = self.vault / 'Investments'
             folder.mkdir()
-            occupant = folder / '2026-09-05-MARKET-RESEARCH.md'
+            occupant = folder / '2026-09-05-STOCK-RESEARCH.md'
             occupant.write_bytes(self.note())
             state = context(self.vault, self.now)
             self.assertFalse(state['complete'])
@@ -2235,7 +2274,7 @@ def run_self_test():
             self.draft.write_bytes(self.note())
             folder = self.vault / 'Investments'
             folder.mkdir()
-            target = folder / '2026-09-05-market-research.md'
+            target = folder / '2026-09-05-stock-research.md'
             target.symlink_to(self.vault / 'absent')
             self.assertFalse(context(self.vault, self.now)['complete'])
             target.unlink()
@@ -2257,10 +2296,10 @@ def run_self_test():
             with patch.object(atomic_move, 'publish_new', side_effect=conflict):
                 with self.assertRaisesRegex(RuntimeError, 'preserve recovery stage'):
                     publish(self.draft, self.vault, self.now)
-            stages = list(self.vault.glob('.market-research-stage-*'))
+            stages = list(self.vault.glob('.stock-research-stage-*'))
             self.assertEqual(len(stages), 1)
-            self.assertEqual((stages[0] / '2026-09-05-market-research.md').read_bytes(), self.note())
-            self.assertEqual((self.vault / 'Investments/2026-09-05-market-research.md').read_text(encoding='utf-8'), 'competing writer')
+            self.assertEqual((stages[0] / '2026-09-05-stock-research.md').read_bytes(), self.note())
+            self.assertEqual((self.vault / 'Investments/2026-09-05-stock-research.md').read_text(encoding='utf-8'), 'competing writer')
 
         def test_folder_swap_cannot_redirect_publication(self):
             self.draft.write_bytes(self.note())
@@ -2277,8 +2316,8 @@ def run_self_test():
                     publish(self.draft, self.vault, self.now)
             self.assertEqual(Path.cwd(), cwd)
             self.assertEqual(list(unrelated.iterdir()), [])
-            self.assertEqual((moved / '2026-09-05-market-research.md').read_bytes(), self.note())
-            self.assertEqual(len(list(self.vault.glob('.market-research-stage-*'))), 1)
+            self.assertEqual((moved / '2026-09-05-stock-research.md').read_bytes(), self.note())
+            self.assertEqual(len(list(self.vault.glob('.stock-research-stage-*'))), 1)
 
         def test_outcome_calendar_targets_and_leap_years(self):
             for start, months, expected in (('2024-01-31', 1, '2024-02-29'),
@@ -2530,7 +2569,7 @@ def run_self_test():
                             self.assertIn('distinct new detail card', result['findings'][0]['error'])
                             with self.assertRaisesRegex(ValueError, 'distinct new detail card'):
                                 publish(self.draft, self.vault, self.now)
-                            self.assertFalse((self.vault / 'Investments/2026-09-05-market-research.md').exists())
+                            self.assertFalse((self.vault / 'Investments/2026-09-05-stock-research.md').exists())
             restored_baseline = self.record_link('2026-09-05').replace('#Outcome review', '#Restored baseline')
             restored_checkpoint = self.record_link('2026-09-05').replace('#Outcome review', '#Restored checkpoint')
             self.outcome_note('2026-09-05', [(identifier, 'watch', 'Carry the original thesis')], journals=[
@@ -2573,7 +2612,7 @@ def run_self_test():
             self.assertEqual(retry['checkpoints'], indexed['checkpoints'])
             self.assertEqual(publish(self.draft, self.vault, self.now)['status'], 'unchanged')
             self.assertEqual(published.read_bytes(), original)
-            self.assertFalse(list(self.vault.glob('.market-research-stage-*')))
+            self.assertFalse(list(self.vault.glob('.stock-research-stage-*')))
 
         def test_legacy_same_card_baseline_changes_are_recheckable_without_rewriting(self):
             identifier, _, baseline_link = self.baseline_fixture(record_day='2024-02-02')
@@ -2676,7 +2715,7 @@ def run_self_test():
                     if not complete:
                         with self.assertRaisesRegex(ValueError, 'explicitly replace'):
                             publish(self.draft, self.vault, next_now)
-                        self.assertFalse((self.vault / 'Investments/2026-09-06-market-research.md').exists())
+                        self.assertFalse((self.vault / 'Investments/2026-09-06-stock-research.md').exists())
             self.assertEqual(publish(self.draft, self.vault, next_now)['status'], 'created')
             self.assertEqual(publish(self.draft, self.vault, next_now)['status'], 'unchanged')
             repaired = outcomes(self.vault, now=next_now)
@@ -2752,7 +2791,7 @@ def run_self_test():
 
         def test_late_baseline_observation_requires_a_current_evidence_card(self):
             identifier, _, old_link = self.baseline_fixture()
-            old_path = self.vault / 'Investments/2024-01-31-market-research.md'
+            old_path = self.vault / 'Investments/2024-01-31-stock-research.md'
             observed = old_path.read_bytes()
             for unavailable in ('pending', 'unavailable'):
                 original = observed.replace(b'2024-01-31T09:30:00-05:00', unavailable.encode())
@@ -2767,7 +2806,7 @@ def run_self_test():
                         if not complete:
                             with self.assertRaisesRegex(ValueError, 'current draft'):
                                 publish(self.draft, self.vault, self.now)
-                            self.assertFalse((self.vault / 'Investments/2026-09-05-market-research.md').exists())
+                            self.assertFalse((self.vault / 'Investments/2026-09-05-stock-research.md').exists())
                 self.assertEqual(old_path.read_bytes(), original)
             self.assertEqual(publish(self.draft, self.vault, self.now)['status'], 'created')
             self.assertEqual(publish(self.draft, self.vault, self.now)['status'], 'unchanged')
@@ -2790,7 +2829,7 @@ def run_self_test():
                     if not complete:
                         with self.assertRaisesRegex(ValueError, 'current draft'):
                             publish(self.draft, self.vault, self.now)
-                        self.assertFalse((self.vault / 'Investments/2026-09-05-market-research.md').exists())
+                        self.assertFalse((self.vault / 'Investments/2026-09-05-stock-research.md').exists())
             self.assertEqual(publish(self.draft, self.vault, self.now)['status'], 'created')
             self.assertEqual(publish(self.draft, self.vault, self.now)['status'], 'unchanged')
             checkpoint = next(row for row in outcomes(self.vault, now=self.now)['checkpoints']
@@ -2816,9 +2855,9 @@ def run_self_test():
                             publish(self.draft, self.vault, self.now)
             # Recover an older ready state with no structured recommendation
             # record yet. Its first baseline still needs today's evidence card.
-            first = self.vault / 'Investments/2024-01-30-market-research.md'
+            first = self.vault / 'Investments/2024-01-30-stock-research.md'
             first.write_bytes(self.note('2024-01-30', [(identifier, 'ready', 'Original setup')]))
-            baseline_path = self.vault / 'Investments/2024-01-31-market-research.md'
+            baseline_path = self.vault / 'Investments/2024-01-31-stock-research.md'
             baseline_path.write_bytes(self.note('2024-01-31', [(identifier, 'watch', 'Original follow-up')],
                                                as_of='2024-01-31T16:00:00-05:00',
                                                generated='2024-01-31T16:02:00-05:00'))
@@ -2835,7 +2874,7 @@ def run_self_test():
 
         def test_baseline_cannot_predate_known_first_ready_generation(self):
             identifier, _, _ = self.baseline_fixture()
-            first = self.vault / 'Investments/2024-01-30-market-research.md'
+            first = self.vault / 'Investments/2024-01-30-stock-research.md'
             first.write_bytes(first.read_bytes().replace(b'2024-01-30T09:02:00-04:00',
                                                         b'2024-02-01T12:00:00-05:00'))
             result = outcomes(self.vault, now=self.now)
@@ -3017,21 +3056,21 @@ def run_self_test():
             path.write_bytes(path.read_bytes() + b'\n#### Finding\n\nFirst detail.\n\n#### Finding\n\nSecond detail.\n')
             self.outcome_note('2026-09-05', journals=[self.journal('Lesson records', [
                 ('lesson-2026-09-05-01', 'provisional',
-                 '[[Investments/2026-09-04-market-research#Finding]]')])], draft=True)
+                 '[[Investments/2026-09-04-stock-research#Finding]]')])], draft=True)
             result = outcomes(self.vault, self.draft, self.now)
             self.assertFalse(result['complete'])
             self.assertIn('exactly one heading', result['findings'][0]['error'])
 
         def test_new_records_need_anchors_without_invalidating_older_note_links(self):
             identifier = 'lesson-2026-09-04-01'
-            old_link = '[[Investments/2026-09-04-market-research]]'
+            old_link = '[[Investments/2026-09-04-stock-research]]'
             old = self.outcome_note('2026-09-04', journals=[self.journal('Lesson records', [
                 (identifier, 'provisional', old_link)])])
             original = old.read_bytes()
             legacy = outcomes(self.vault, now=self.now)
             self.assertTrue(legacy['complete'], legacy['findings'])
             self.assertIsNone(legacy['active_lessons'][0]['record_section'])
-            for link in (old_link, '[[Investments/2026-09-05-market-research]]'):
+            for link in (old_link, '[[Investments/2026-09-05-stock-research]]'):
                 with self.subTest(link=link):
                     self.outcome_note('2026-09-05', journals=[self.journal('Lesson records', [
                         (identifier, 'provisional', link)])], draft=True)
@@ -3040,7 +3079,7 @@ def run_self_test():
                     self.assertIn('specific section anchor', result['findings'][0]['error'])
                     with self.assertRaisesRegex(ValueError, 'specific section anchor'):
                         publish(self.draft, self.vault, self.now)
-            updated_link = '[[Investments/2026-09-05-market-research#Updated lesson evidence]]'
+            updated_link = '[[Investments/2026-09-05-stock-research#Updated lesson evidence]]'
             self.outcome_note('2026-09-05', journals=[self.journal('Lesson records', [
                 (identifier, 'supported', updated_link)])], draft=True)
             self.draft.write_bytes(self.draft.read_bytes()
@@ -3052,7 +3091,7 @@ def run_self_test():
             self.assertEqual(old.read_bytes(), original)
 
         def test_published_same_day_note_links_allow_read_and_identical_retry(self):
-            link = '[[Investments/2026-09-05-market-research]]'
+            link = '[[Investments/2026-09-05-stock-research]]'
             published = self.outcome_note('2026-09-05', journals=[self.journal('Lesson records', [
                 ('lesson-2026-09-05-01', 'provisional', link)])])
             original = published.read_bytes()
@@ -3065,7 +3104,7 @@ def run_self_test():
             self.assertEqual(retry['active_lessons'], indexed['active_lessons'])
             self.assertEqual(publish(self.draft, self.vault, self.now)['status'], 'unchanged')
             self.assertEqual(published.read_bytes(), original)
-            self.assertFalse(list(self.vault.glob('.market-research-stage-*')))
+            self.assertFalse(list(self.vault.glob('.stock-research-stage-*')))
 
         def test_due_baselines_include_terminal_recommendations_once(self):
             identifier, first_day = 'NYSE:ABC@2026-09-03', '2026-09-03'
@@ -3101,8 +3140,8 @@ def run_self_test():
             identifier, _, _ = self.baseline_fixture()
             valid = (identifier, '1m', 'unavailable', '-', self.record_link('2026-09-05'), '-')
             for rows in ([valid, valid], [('NYSE:UNKNOWN@2024-01-30', *valid[1:])],
-                         [(*valid[:4], '[[Investments/2026-09-06-market-research]]', '-')],
-                         [(*valid[:4], '[[Investments/2026-09-05-market-research#Missing]]', '-')],
+                         [(*valid[:4], '[[Investments/2026-09-06-stock-research]]', '-')],
+                         [(*valid[:4], '[[Investments/2026-09-05-stock-research#Missing]]', '-')],
                          [(*valid[:4], 'https://example.com', '-')]):
                 self.outcome_note('2026-09-05', journals=[self.journal('Checkpoint records', rows)], draft=True)
                 self.assertFalse(outcomes(self.vault, self.draft, self.now)['complete'])

@@ -69,7 +69,7 @@ if _here != _shared:
 import atomic_move
 import note_provenance
 from portable_names import portable_identity
-sys.path.insert(2, str(ROOT / 'skills/market-research/scripts'))
+sys.path.insert(2, str(ROOT / 'skills/stock-research/scripts'))
 from market_credentials import load_credentials
 import feed_media
 

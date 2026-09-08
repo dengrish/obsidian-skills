@@ -99,5 +99,5 @@ instead of breaking links or deleting unknown content. Shared assets still used
 by another collected post remain in place.
 
 This is source-compliance maintenance, not general vault orphan cleanup. It does
-not permit changing immutable market-research records or renaming assets used by
+not permit changing immutable stock-research records or renaming assets used by
 another workflow. An ambiguous API or download error does not prove deletion.

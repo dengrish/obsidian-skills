@@ -78,7 +78,7 @@ STRATEGY = {
     'costs': 'gross; excludes dividends, fees, spreads and slippage',
 }
 COHORT = re.compile(r'simple-momentum-v1@(\d{4}-\d{2})\Z')
-NOTE = re.compile(r'\d{4}-\d{2}-\d{2}(?:-\d{6})?-market-research\Z')
+NOTE = re.compile(r'\d{4}-\d{2}-\d{2}(?:-\d{6})?-(?:stock|market)-research\Z')
 DIGEST = re.compile(r'[0-9a-f]{64}\Z')
 FORMATION_COLUMNS = ('Exchange', 'Symbol', 'Type', 'Currency', 'Price', 'MA200',
                      'Daily notional', 'Relative 6m', 'Selection')

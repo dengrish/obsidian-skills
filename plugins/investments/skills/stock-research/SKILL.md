@@ -1,9 +1,9 @@
 ---
-name: market-research
-description: Find buying opportunities in liquid U.S.-listed stocks for a 3–12 month momentum horizon, track earlier buying theses, and write a short decision brief with a detailed research record in Investments/. Use for morning opportunity research; current-holdings reviews, sell recommendations, and trade execution are outside its scope.
+name: stock-research
+description: Analyze investment ideas in feed-collect outputs for 3–12 month buying opportunities in liquid U.S.-listed stocks. Write a daily decision brief and research record, maintain one note per analyzed stock, and track earlier theses. Does not collect feeds, review holdings, recommend sales, or execute trades.
 ---
 
-# Market research
+# Stock research
 
 Find a small number of evidence-backed **long-only buying opportunities** and
 explain what would justify considering a purchase, waiting for confirmation, or
@@ -14,13 +14,20 @@ is a useful result. A thesis becoming invalid is a change to its buying rational
 not a recommendation to sell an assumed holding. Do not review the user's current
 portfolio, recommend sales or rebalancing, or place trades; those are separate tasks.
 
+The user runs `feed-collect`, then this skill. Read its saved account notes and
+collection receipts; do not invoke collection, call X or ShadowAlpha, or broaden
+the idea source independently. Continue earlier theses even when their accounts
+are no longer followed. An explicitly user-named stock is a labeled override,
+not permission to add other stocks.
+
 Read [runtime setup](../../shared/RUNTIME.md) and
 [input safety](../../shared/INPUT_SAFETY.md).
 Resolve the selected vault and this skill's actual directory. Follow the
 [research method](references/research-method.md) when screening and the
 [note format](references/note-format.md) when reading or writing daily records.
-Use [outcomes and learning](references/outcomes-and-learning.md) for the daily
-checkpoint inventory, recommendation records and evidence-based lesson updates.
+Use [stock note maintenance](references/stock-notes.md) for the continuously
+updated notes in `Investments/Stocks/`. Use
+[outcomes and learning](references/outcomes-and-learning.md) for the daily checkpoint inventory, recommendation records and evidence-based lesson updates.
 Investment notes have their own schema; do not apply Wiki/source-note fields,
 flashcards, MOCs, or automatic source-document extraction to them.
 
@@ -95,7 +102,11 @@ note for each active thesis and intervening relevant updates before changing its
 status. Reuse recorded screen definitions, dated observations and pending checks;
 the short briefs alone are not sufficient research memory. Search earlier notes
 for each proposed ticker, including invalidated ideas; do not research only past
-winners. Inspect relevant existing user market notes listed outside the recognized
+winners. Read the existing stock note through `stock_dossiers.py context --vault '<vault>'
+--ticker '<ticker>' --as-of '<cutoff>'` as a navigation aid. Its latest assessment
+is usable only when available by this cutoff; follow its dated report links for
+earlier context. The daily history and outcome journals remain authoritative.
+Inspect relevant existing user market notes listed outside the recognized
 naming pattern as read-only background and identify gaps in their history.
 
 The helper reports malformed or unreadable recognized history explicitly. Do not
@@ -120,29 +131,35 @@ records before relying on the inventory; do not silently start a new track recor
 
 ## Research and rank
 
+Read the [feed intake and screening guide](references/screening.md) and take a
+read-only snapshot at the run's frozen cutoff:
+
+```bash
+python3 '<skill>/scripts/stock_feed.py' context --vault '<vault>' --cutoff '<cutoff>' > '<scratch>/feed-context.json'
+```
+
+The default window is the preceding 72 hours. When earlier research identifies
+unreviewed saved posts, pass an earlier `--since` to recover that window and label
+late discovery. This reads local material only; it does not spend X API calls,
+collect missing posts, or alter the account roster or collection state. Read its
+coverage diagnostics before interpreting the posts. Missing, stale, partial,
+changed or unpublished account output is a limitation, not a clean empty result.
+
+Triage substantive stock ideas from the eligible posts, preserving source links,
+authors, timestamps and disposition. Verify company/share-class identity rather
+than treating every cashtag as a valid nomination. Distinguish the collector
+account's own view from a quoted or reposted author's claim; repeated copies are
+one originating piece of evidence. Carry prior open theses separately. Reuse
+previously assessed posts by link; a new run need not re-research unchanged claims.
+
+Use this nominated set for targeted announcement, business, price and risk checks.
 Default to liquid U.S.-listed common stocks and ADRs, identifying exchange,
-company, share class, and currency. Prioritize established mid/large-cap names
-with usable daily price history and meaningful regular-session dollar turnover;
-state the screen and accessible universe. Exclude OTC/penny stocks, leveraged
-products, options, and short-sale strategies unless the user changes the scope.
-Do not describe a selective news search as a complete market scan. Run the
-research method's repeatable announcement and price-history passes, retaining
-their universe, filters and coverage in the research record. A materially changed
-screen needs an explanation so longitudinal comparisons remain interpretable.
-Before discovery, read `market-research-sources.json` at the vault root when it
-exists or the task specifies it. For `curated_social` mode, follow
-[curated ShadowAlpha discovery](references/shadowalpha.md): the configured roster
-nominates a small universe for both announcement and price-history checks.
-Do not run the broad directory acquisition in that mode or silently expand it
-when social access fails. An invalid or explicitly requested missing configuration
-is a setup limitation; preserve prior-thesis work without inventing a substitute.
-Without a configuration or an explicit smaller-universe instruction, use the
-bundled [directory and acquisition workflow](references/screening.md) for the
-broad price pass. Its bounded helpers preserve unqueried identities and coverage
-gaps; do not silently substitute familiar names for its declared universe. Reuse
-the offline screener for dated inputs. In either mode, also follow the research
-method's bounded thematic expansion to examine direct and second-order
-beneficiaries; these candidates face the same universe and readiness tests.
+company, share class and currency. Exclude OTC/penny stocks, leveraged products,
+options and short-sale strategies unless the user changes the scope. This is a
+selective feed-based review, never a complete market scan. Do not fetch a broad
+universe, independently nominate names from news/social search, or add unmentioned
+thematic beneficiaries. Competitor and industry evidence can test a nominated
+stock's thesis without turning those companies into new candidates.
 
 Follow the bundled [data-access guide and retrieval plan](references/data-access.md#retrieval-plan)
 to assign configured sources to the session, universe, announcement, price,
@@ -174,12 +191,11 @@ When reliable market data are unavailable, label coverage limited/unavailable,
 retain prior theses with uncertainty, and avoid actionable rankings or invented
 price levels. A tool failure is not evidence that nothing happened.
 
-Use a bounded scan of accessible X, Reddit and Stocktwits content to discover
-leads and challenge shortlisted theses, under the research method's social-source
-rules; use the ShadowAlpha guide when that connector supplies the configured
-roster. Social popularity alone never establishes a buying opportunity. Missing
-access is an explicit coverage gap; do not imply that a feed is installed or that
-sampled searches provide continuous or comprehensive monitoring.
+Use the collected posts as leads and arguments, not financial verification.
+Targeted web research supplies primary evidence and material counterarguments for
+the nominated stocks. Popularity, author confidence, claimed returns and repeated
+mentions never substitute for a buying case. No additional social-monitoring pass
+is required; unavailable source text or attachments stay explicit limitations.
 
 Apply the relevant setup-specific evidence tests in the research method. Prefer
 **zero to three leading buying ideas**, ranked by the quality of the catalyst, price
@@ -221,9 +237,10 @@ are diagnostics beyond the buying horizon, not extended holding or sell rules.
 Do not create another scheduled job or report series for these reviews.
 
 Also inspect the outcome helper's separate comparison inventory. When a monthly
-formation is due, follow the [fixed comparison strategy](references/comparison-strategy.md)
-to preserve its mechanical selection, empty result or unavailable coverage in
-this note's Outcome review. Evaluate due 3/6/12-month comparison windows without
+formation is due, follow the [fixed comparison strategy](references/comparison-strategy.md).
+The feed-nominated list is not its independent universe: record the scope
+limitation unless matching previously declared inputs are already available.
+Evaluate due 3/6/12-month comparison windows without
 mixing them into ready recommendations. Reuse the declared screen inputs; do not
 change the strategy or its universe after seeing winners. This is a prospective
 diagnostic, not a claim of research outperformance or a portfolio instruction.
@@ -235,9 +252,13 @@ lead with the buying conclusion and what changed, present zero to three candidat
 with their conditions and key risks, then the next checks. Aim for 200–350 words,
 fewer on a quiet/closed day; do not hide material uncertainty to meet that default.
 The **Research record** is durable evidence for future runs and can be much longer.
-Retain relevant sources and observation times, screening results, candidate and
-rejection rationales, calculations, social findings, thesis continuity and outcome
-reviews. Keep the complete tracking table here, not in the short brief.
+Retain relevant sources and observation times, feed coverage and nomination
+dispositions, candidate and rejection rationales, calculations, verified source
+claims, thesis continuity and outcome reviews. Keep the complete tracking table
+here, not in the short brief. Every substantive
+stock assessment must use the note format's exact H4/Status structure and link its
+`Investments/Stocks/<TICKER>` note, including watch or rejected ideas. This section
+will supply that stock note's latest assessment after daily publication.
 
 Preserve decision-relevant detail without padding, copying full articles, dumping
 entire feeds, or duplicating unchanged history. Link specific earlier records and
@@ -254,7 +275,7 @@ with a concise visible summary in the note. Preserve historical inline records.
 Here `<plugin>` means this skill's installed root, never the development checkout.
 
 ```bash
-python3 '<plugin>/shared/scripts/note_provenance.py' stamp --plugin '<plugin>' --skill market-research --draft '<run>/draft.md' --output '<run>/daily-stamped.md'
+python3 '<plugin>/shared/scripts/note_provenance.py' stamp --plugin '<plugin>' --skill stock-research --draft '<run>/draft.md' --output '<run>/daily-stamped.md'
 python3 '<skill>/scripts/market_notes.py' lint '<run>/daily-stamped.md'
 python3 '<skill>/scripts/market_notes.py' outcomes --vault '<vault>' --draft '<run>/daily-stamped.md' --run-receipt '<run>/run.json'
 ```
@@ -300,13 +321,27 @@ fresh completion records for the revised bytes. Repeated independent launches
 need distinct check names. Do not clear a pending checker to bypass the gate.
 
 At closeout, including a successful same-day retry, maintain
-`Reviews/market-research-suggestions.md` under the
+`Reviews/stock-research-suggestions.md` under the
 [shared suggestion-log rules](../../shared/SUGGESTIONS.md). On apply-capable
 runs, create it if missing; retain the standard empty state when there are no
 open issues. Record evidenced workflow defects, keeping investment ideas and
 outcome learning in the daily notes.
 
-Clean owned scratch that is no longer needed, and return the note link with the main
-conclusion and any material limitation. A scheduler should notify on a new
-completed daily note, a material thesis change, or a blocked run; an unchanged
-same-day retry should stay quiet. Do not modify plugin sources during a market run.
+After daily publication, update the [stock notes](references/stock-notes.md) for
+every stock substantively assessed today, including rejected and deferred ideas:
+
+```bash
+python3 '<skill>/scripts/stock_dossiers.py' sync --vault '<vault>' --daily-note '<published-daily-note>' --work-dir '<scratch>'
+```
+
+The daily report retains the dated evidence and outcome journals; a stock note
+summarizes its latest available assessment and links its history. Preserve earlier
+daily notes and never use a later dossier state to reconstruct an earlier judgment.
+Report incomplete dossier publication separately and resume it without creating
+another daily edition. Do not claim the run complete until these updates succeed
+or their exact remaining blockers are identified.
+
+Clean owned scratch that is no longer needed, and return the daily note link,
+created/updated stock notes, the main conclusion and any material limitation.
+A scheduler should notify on a new completed daily note, a material thesis change, or a blocked run; an unchanged
+same-day retry should stay quiet. Do not modify plugin sources during a research run.
