@@ -91,14 +91,14 @@ class FeedCollectionTests(unittest.TestCase):
     def test_resume_then_incremental_run_does_not_purchase_known_pages(self):
         provider = Provider(page([post(105), post(104)], 'page-two'))
         first = self.collect(provider, max_requests=2)
-        self.assertEqual(provider.calls[1][1]['exclude'], 'retweets,replies')
+        self.assertEqual(provider.calls[1][1]['exclude'], 'replies')
         self.assertEqual(first['partial_accounts'], 1)
         self.assertIsNone(self.state()['accounts']['actual']['since_id'])
         resume = Provider(page([post(103)]))
         self.collect(resume, max_requests=1)
         self.assertEqual(len(resume.calls), 1)
         self.assertEqual(resume.calls[0][1]['pagination_token'], 'page-two')
-        self.assertEqual(resume.calls[0][1]['exclude'], 'retweets,replies')
+        self.assertEqual(resume.calls[0][1]['exclude'], 'replies')
         self.assertEqual(self.state()['accounts']['actual']['since_id'], '105')
         original_note = self.note.read_bytes()
         none = Provider()
@@ -107,35 +107,127 @@ class FeedCollectionTests(unittest.TestCase):
         self.assertEqual(self.note.read_bytes(), original_note)
         fresh = Provider(page([post(106, '2026-09-07T13:00:00Z')]))
         self.collect(fresh, until=LATER)
-        self.assertEqual(fresh.calls[0][1]['since_id'], '105')
-        self.assertEqual(fresh.calls[0][1]['exclude'], 'retweets,replies')
+        self.assertEqual(fresh.calls[0][1]['start_time'], FIRST)
+        self.assertNotIn('since_id', fresh.calls[0][1])
+        self.assertEqual(fresh.calls[0][1]['exclude'], 'replies')
         self.assertNotIn('pagination_token', fresh.calls[0][1])
         self.assertEqual(set(self.state()['accounts']['actual']['posts']), {'103', '104', '105', '106'})
         self.assertEqual(self.roster.read_bytes(), self.roster_bytes)
         self.assertEqual([p.name for p in self.note.parent.glob('*.md')], ['actual.md'])
 
-    def test_only_original_and_quote_posts_are_recorded_despite_provider_leaks(self):
+    def test_original_quote_and_repost_rows_are_recorded_but_any_reply_is_excluded(self):
         quote = post(106, text='Original quote commentary')
         quote['referenced_posts'] = [{'id': '80', 'type': 'quoted'}]
         reply = post(107, text='Excluded reply body')
         reply['referenced_tweets'] = [{'id': '81', 'type': 'replied_to'}]
-        repost = post(108, text='Excluded repost body')
+        repost = post(108, text='RT @source: Included repost body')
         repost['referenced_posts'] = [{'id': '82', 'type': 'retweeted'}]
         quote_reply = post(109, text='Excluded quote reply body')
         quote_reply['referenced_tweets'] = [*quote['referenced_posts'], *reply['referenced_tweets']]
-        result = self.collect(Provider(page([post(105), quote, reply, repost, quote_reply])), max_posts=5)
+        repost_reply = post(110, text='Excluded repost reply body')
+        repost_reply['referenced_posts'] = [*repost['referenced_posts'], *reply['referenced_tweets']]
+        provider = Provider(page([post(105), quote, reply, repost, quote_reply, repost_reply]))
+        result = self.collect(provider, max_posts=6)
         account = self.state()['accounts']['actual']
-        self.assertEqual(set(account['posts']), {'105', '106'})
-        self.assertEqual(account['since_id'], '109')
-        self.assertEqual(result['returned_posts'], 5)
-        self.assertEqual(result['newly_stored_posts'], 2)
+        self.assertEqual(set(account['posts']), {'105', '106', '108'})
+        self.assertEqual(account['since_id'], '110')
+        self.assertEqual(result['returned_posts'], 6)
+        self.assertEqual(result['newly_stored_posts'], 3)
         self.assertIn('Original quote commentary', self.note.read_text(encoding='utf-8'))
-        for raw in (reply, repost, quote_reply):
+        self.assertIn('Included repost body', self.note.read_text(encoding='utf-8'))
+        self.assertEqual(len(provider.calls), 2)
+        self.assertEqual(provider.calls[1][1]['expansions'], 'attachments.media_keys')
+        for raw in (reply, quote_reply, repost_reply):
             self.assertNotIn(raw['text'], self.state_path.read_text(encoding='utf-8'))
             self.assertNotIn(raw['text'], self.note.read_text(encoding='utf-8'))
         fresh = Provider(page([]))
         self.collect(fresh, until=LATER)
-        self.assertEqual(fresh.calls[0][1]['since_id'], '109')
+        self.assertEqual(fresh.calls[0][1]['start_time'], FIRST)
+        self.assertNotIn('since_id', fresh.calls[0][1])
+
+    def test_repost_wrappers_keep_distinct_identity_and_time_without_fetching_originals(self):
+        first = post(108, '2026-09-07T10:00:00Z', text='RT @source: Preserved API excerpt…')
+        first['referenced_tweets'] = [{'id': '82', 'type': 'retweeted'}]
+        second = post(109, '2026-09-07T11:00:00Z', text=first['text'])
+        second['referenced_tweets'] = deepcopy(first['referenced_tweets'])
+        provider = Provider(page([first, deepcopy(first), second]))
+        result = self.collect(provider)
+        self.assertEqual(len(provider.calls), 2)  # Identity lookup and one timeline page only.
+        self.assertEqual(provider.calls[1][1]['expansions'], 'attachments.media_keys')
+        self.assertEqual(result['newly_stored_posts'], 2)
+        self.assertEqual(result['row_counts']['duplicate_rows'], 1)
+        account = self.state()['accounts']['actual']
+        self.assertEqual(set(account['posts']), {'108', '109'})
+        self.assertEqual(account['since_id'], '109')
+        for raw in (first, second):
+            saved = account['posts'][raw['id']]
+            self.assertEqual(saved['created_at'], raw['created_at'])
+            self.assertEqual(saved['text'], raw['text'])
+            self.assertEqual(saved['references'], raw['referenced_tweets'])
+        note = self.note.read_text(encoding='utf-8')
+        self.assertEqual(note.count('Reposted by @actual'), 2)
+        self.assertEqual(note.count('[Source post](https://x.com/i/web/status/82)'), 2)
+        self.assertIn('## 2026-09-07 10:00:00 UTC', note)
+        self.assertIn('## 2026-09-07 11:00:00 UTC', note)
+        self.assertIn('https://x.com/i/web/status/108', note)
+        self.assertIn('https://x.com/i/web/status/109', note)
+        self.assertRegex(note.lower(), r'incomplete|truncated')
+        self.assertNotIn('replies/reposts are excluded', note.lower())
+
+    def test_malformed_saved_repost_reference_blocks_before_paid_requests(self):
+        repost = post(108, text='RT @source: Preserved repost body')
+        repost['referenced_tweets'] = [{'id': '82', 'type': 'retweeted'}]
+        self.collect(Provider(page([repost])))
+        original = self.state()
+        original_note = self.note.read_bytes()
+        for malformed in ([{'id': '82)\n[unsafe](https://example.com)', 'type': 'retweeted'}],
+                          [{'id': '82', 'type': ['retweeted']}],
+                          [{'type': 'retweeted'}], 'not-a-reference-list'):
+            with self.subTest(references=malformed):
+                state = deepcopy(original)
+                state['accounts']['actual']['posts']['108']['references'] = malformed
+                self.state_path.write_text(json.dumps(state), encoding='utf-8')
+                before = self.state_path.read_bytes()
+                provider = Provider()
+                with self.assertRaisesRegex(feed.FeedError, 'invalid_post_references'):
+                    self.collect(provider, until=LATER)
+                self.assertEqual(provider.calls, [])
+                self.assertEqual(self.state_path.read_bytes(), before)
+                self.assertEqual(self.note.read_bytes(), original_note)
+
+    def test_legacy_window_resumes_original_filter_then_advances_without_backfilling(self):
+        self.collect(Provider(page([post(105)], 'page-two')), max_requests=2)
+        state = self.state()
+        old_window = state['accounts']['actual']['window']
+        old_window['exclude'] = 'retweets,replies'
+        self.state_path.write_text(json.dumps(state), encoding='utf-8')
+        legacy_repost = post(103, text='Repost unexpectedly returned under the old exclusion filter')
+        legacy_repost['referenced_posts'] = [{'id': '82', 'type': 'retweeted'}]
+        resumed = Provider(page([post(104), legacy_repost]))
+        result = self.collect(resumed, max_requests=1)
+        self.assertEqual(len(resumed.calls), 1)
+        self.assertEqual(result['returned_posts'], 2)
+        self.assertEqual(result['row_counts']['excluded_reposts'], 1)
+        self.assertNotIn(legacy_repost['text'], self.note.read_text(encoding='utf-8'))
+        query = resumed.calls[0][1]
+        self.assertEqual(query['exclude'], 'retweets,replies')
+        self.assertEqual(query['pagination_token'], 'page-two')
+        self.assertEqual(query['start_time'], old_window['start'])
+        self.assertEqual(query['end_time'], old_window['end'])
+        self.assertEqual(self.state()['accounts']['actual']['since_id'], '105')
+        no_new_window = Provider()
+        self.collect(no_new_window)
+        self.assertEqual(no_new_window.calls, [])
+        repost = post(106, '2026-09-07T13:00:00Z', text='New repost after old collection window')
+        repost['referenced_posts'] = [{'id': '82', 'type': 'retweeted'}]
+        fresh = Provider(page([repost]))
+        self.collect(fresh, until=LATER)
+        self.assertEqual(len(fresh.calls), 1)
+        self.assertEqual(fresh.calls[0][1]['exclude'], 'replies')
+        self.assertEqual(fresh.calls[0][1]['start_time'], FIRST)
+        self.assertNotIn('since_id', fresh.calls[0][1])
+        self.assertNotIn('pagination_token', fresh.calls[0][1])
+        self.assertEqual(set(self.state()['accounts']['actual']['posts']), {'104', '105', '106'})
 
     def test_withheld_reply_is_excluded_without_requiring_its_body(self):
         withheld_reply = post(105)
@@ -150,7 +242,7 @@ class FeedCollectionTests(unittest.TestCase):
     def test_incompatible_saved_filter_blocks_without_repeating_paid_pages(self):
         self.collect(Provider(page([post(105)], 'page-two')), max_requests=2)
         original = self.state()
-        for incompatible in (None, 'retweets'):
+        for incompatible in (None, '', 'retweets', 'replies,retweets'):
             with self.subTest(exclude=incompatible):
                 state = deepcopy(original)
                 state['accounts']['actual']['window']['exclude'] = incompatible
@@ -174,6 +266,66 @@ class FeedCollectionTests(unittest.TestCase):
             self.collect(provider)
         self.assertEqual(provider.calls, [])
         self.assertEqual(self.state_path.read_bytes(), before)
+
+    def test_pending_filter_must_match_window_even_when_both_values_are_supported(self):
+        with self.assertRaises(feed.FeedError):
+            self.collect(Provider(TimeoutError()))
+        original = self.state()
+        for window_filter, pending_filter in (('replies', 'retweets,replies'),
+                                               ('retweets,replies', 'replies')):
+            with self.subTest(window=window_filter, pending=pending_filter):
+                state = deepcopy(original)
+                state['accounts']['actual']['window']['exclude'] = window_filter
+                state['pending']['query']['exclude'] = pending_filter
+                self.state_path.write_text(json.dumps(state), encoding='utf-8')
+                before = self.state_path.read_bytes()
+                provider = Provider()
+                with self.assertRaisesRegex(feed.FeedError, 'incompatible_saved_timeline_filter'):
+                    self.collect(provider)
+                self.assertEqual(provider.calls, [])
+                self.assertEqual(self.state_path.read_bytes(), before)
+
+    def test_legacy_unresolved_pending_request_still_blocks_paid_replay(self):
+        with self.assertRaises(feed.FeedError):
+            self.collect(Provider(TimeoutError()))
+        state = self.state()
+        state['accounts']['actual']['window']['exclude'] = 'retweets,replies'
+        state['pending']['query']['exclude'] = 'retweets,replies'
+        self.state_path.write_text(json.dumps(state), encoding='utf-8')
+        before = self.state_path.read_bytes()
+        provider = Provider()
+        with self.assertRaisesRegex(feed.FeedError, 'unresolved_request'):
+            self.collect(provider)
+        self.assertEqual(provider.calls, [])
+        self.assertEqual(self.state_path.read_bytes(), before)
+
+    def test_saved_legacy_response_is_consumed_offline_without_changing_its_query(self):
+        repost = post(105, text='Unexpected repost saved before the filter migration')
+        repost['referenced_tweets'] = [{'id': '82', 'type': 'retweeted'}]
+        provider = Provider(page([repost]))
+        real_apply = feed.apply_response
+
+        def interrupted(store):
+            if store.data['pending']['kind'] == 'timeline':
+                raise RuntimeError('saved legacy response awaiting processing')
+            return real_apply(store)
+
+        with patch.object(feed, 'apply_response', side_effect=interrupted), self.assertRaises(RuntimeError):
+            self.collect(provider)
+        state = self.state()
+        state['accounts']['actual']['window']['exclude'] = 'retweets,replies'
+        state['pending']['query']['exclude'] = 'retweets,replies'
+        self.state_path.write_text(json.dumps(state), encoding='utf-8')
+        with patch.object(feed, 'request_json', side_effect=AssertionError('Offline publish made a paid call')):
+            result = feed.execute(self.args(command='publish'))
+        self.assertEqual(result['requests'], 0)
+        state = self.state()
+        self.assertIsNone(state['pending'])
+        self.assertEqual(state['requests'][-1]['query']['exclude'], 'retweets,replies')
+        self.assertEqual(state['requests'][-1]['row_counts']['excluded_reposts'], 1)
+        self.assertEqual(state['accounts']['actual']['since_id'], '105')
+        self.assertEqual(state['accounts']['actual']['posts'], {})
+        self.assertNotIn(repost['text'], self.note.read_text(encoding='utf-8'))
 
     def test_saved_success_is_replayed_offline_after_processing_interruption(self):
         provider = Provider(page([post(105)]))
@@ -439,13 +591,13 @@ class FeedCollectionTests(unittest.TestCase):
         self.assertEqual(saved['created_at'], '2026-09-07T11:59:59.987654Z')
         self.assertEqual(saved['source_created_at'], original_time)
 
-    def test_incremental_timeline_accepts_an_edit_with_original_creation_time(self):
+    def test_id_based_sample_updates_accept_an_edit_with_original_creation_time(self):
         with patch.object(feed, 'now', return_value=FIRST):
-            self.collect(Provider(page([post(105, text='Source before a later edit.')])))
+            self.collect(Provider(page([post(105, text='Source before a later edit.')])), latest=1)
         edited = post(110, text='Updated source returned directly by the timeline.')
         edited['edit_history_post_ids'] = ['105', '110']
         with patch.object(feed, 'now', return_value=LATER):
-            self.collect(Provider(page([edited])), until=LATER)
+            self.collect(Provider(page([edited])), until=LATER, latest=1)
         posts = self.state()['accounts']['actual']['posts']
         self.assertEqual(set(posts), {'110'})
         self.assertEqual(posts['110']['first_retrieved_at'], LATER)
@@ -600,6 +752,19 @@ class FeedCollectionTests(unittest.TestCase):
         self.collect(again, latest=10)
         self.assertEqual(again.calls, [])
 
+    def test_latest_sample_counts_repost_wrappers_toward_target_without_extra_paid_pages(self):
+        repost = post(109, text='RT @source: A repost counts as one retained account event')
+        repost['referenced_tweets'] = [{'id': '82', 'type': 'retweeted'}]
+        provider = Provider(page([repost, post(108)], 'older-not-needed'))
+        result = self.collect(provider, latest=2)
+        self.assertEqual(len(provider.calls), 2)
+        self.assertEqual(result['returned_posts'], 2)
+        self.assertEqual(result['stored_posts'], 2)
+        self.assertEqual(self.state()['accounts']['actual']['sample']['status'], 'target_reached')
+        again = Provider()
+        self.collect(again, latest=2)
+        self.assertEqual(again.calls, [])
+
     def test_resumed_sample_reaches_target_then_checks_current_requested_cutoff(self):
         self.collect(Provider(page([post(110)], 'older')), latest=2, max_requests=2)
         provider = Provider(page([post(109)], 'intentionally-omitted'),
@@ -644,7 +809,8 @@ class FeedCollectionTests(unittest.TestCase):
         provider = Provider(page([post(109)]), page([post(111, '2026-09-07T13:00:00Z')]))
         result = self.collect(provider, until=LATER)
         self.assertEqual(len(provider.calls), 2)
-        self.assertEqual(provider.calls[1][1]['since_id'], '110')
+        self.assertEqual(provider.calls[1][1]['start_time'], FIRST)
+        self.assertNotIn('since_id', provider.calls[1][1])
         self.assertEqual(result['accounts'][0]['status'], 'bounded_window_complete')
         self.assertEqual(result['accounts'][0]['completed_through'], LATER)
 
@@ -664,14 +830,17 @@ class FeedCollectionTests(unittest.TestCase):
         window = state['accounts']['actual']['window']
         window.pop('fields')  # Exact released 1.7.0 window layout.
         window.pop('since_id')
+        window['exclude'] = 'retweets,replies'
         self.state_path.write_text(json.dumps(state), encoding='utf-8')
         original_start = window['start']
         resumed = Provider(page([post(108)]), page([post(value, '2026-08-01T12:00:00Z') for value in range(107, 100, -1)], 'older'))
         self.collect(resumed, latest=10)
         self.assertEqual(resumed.calls[0][1]['pagination_token'], 'old-page')
         self.assertEqual(resumed.calls[0][1]['start_time'], original_start)
+        self.assertEqual(resumed.calls[0][1]['exclude'], 'retweets,replies')
         self.assertNotIn('expansions', resumed.calls[0][1])
         self.assertEqual(resumed.calls[1][1]['end_time'], original_start)
+        self.assertEqual(resumed.calls[1][1]['exclude'], 'replies')
         self.assertNotIn('start_time', resumed.calls[1][1])
         self.assertNotIn('since_id', resumed.calls[1][1])
         self.assertEqual(resumed.calls[1][1]['expansions'], 'attachments.media_keys')
@@ -702,7 +871,8 @@ class FeedCollectionTests(unittest.TestCase):
         self.assertEqual(len(provider.calls), 1)
         query = provider.calls[0][1]
         self.assertEqual(query['pagination_token'], pending['next_token'])
-        self.assertEqual(query['since_id'], '110')
+        self.assertEqual(query['start_time'], FIRST)
+        self.assertNotIn('since_id', query)
         account = self.state()['accounts']['actual']
         self.assertEqual(set(account['posts']), {str(value) for value in range(101, 121)})
         self.assertEqual(account['completed_at'], LATER)
@@ -800,17 +970,40 @@ class FeedCollectionTests(unittest.TestCase):
         repost['referenced_tweets'] = [{'id': '30', 'type': 'retweeted'}]
         rows = [initial, edited, reply, deepcopy(reply), repost, post(108), post(108)]
         result = self.collect(Provider(page(rows)))
-        expected = {'excluded_replies': 2, 'excluded_reposts': 1, 'duplicate_rows': 2,
-                    'merged_versions': 1, 'newly_stored_posts': 1, 'updated_existing_posts': 0}
+        expected = {'excluded_replies': 2, 'excluded_reposts': 0, 'duplicate_rows': 2,
+                    'merged_versions': 1, 'newly_stored_posts': 2, 'updated_existing_posts': 0}
         self.assertEqual(result['row_counts'], expected)
         self.assertEqual(sum(expected.values()), result['returned_posts'])
-        self.assertEqual(result['unexpected_filter_rows'], 3)
+        self.assertEqual(result['unexpected_filter_rows'], 2)
         request = self.state()['requests'][-1]
         self.assertEqual(request['row_counts'], expected)
-        self.assertEqual(request['query']['exclude'], 'retweets,replies')
+        self.assertEqual(request['query']['exclude'], 'replies')
         self.assertEqual(request['query']['pagination_token'], 'two')
         self.assertNotIn(initial['text'], json.dumps(request))
         self.assertNotIn(edited['text'], json.dumps(request))
+
+    def test_historical_excluded_repost_counts_remain_readable_and_unchanged(self):
+        excluded = post(105, text='Historical excluded row body')
+        excluded['referenced_tweets'] = [{'id': '30', 'type': 'replied_to'}]
+        self.collect(Provider(page([excluded])))
+        state = self.state()
+        request = state['requests'][-1]
+        request['query']['exclude'] = 'retweets,replies'
+        request['row_counts']['excluded_replies'] = 0
+        request['row_counts']['excluded_reposts'] = 1
+        self.state_path.write_text(json.dumps(state), encoding='utf-8')
+        before = self.state_path.read_bytes()
+        status = feed.execute(self.args(command='status'))
+        self.assertEqual(status['accounts'][0]['row_counts']['excluded_reposts'], 1)
+        self.assertEqual(status['accounts'][0]['accounted_returned_rows'], 1)
+        self.assertEqual(self.state_path.read_bytes(), before)
+        repost = post(106, '2026-09-07T13:00:00Z', text='Current included repost body')
+        repost['referenced_tweets'] = [{'id': '30', 'type': 'retweeted'}]
+        result = self.collect(Provider(page([repost])), until=LATER)
+        self.assertEqual(result['row_counts']['excluded_reposts'], 0)
+        self.assertEqual(result['row_counts']['newly_stored_posts'], 1)
+        self.assertEqual(self.state()['requests'][-2], request)
+        self.assertEqual(set(self.state()['accounts']['actual']['posts']), {'106'})
 
     def test_capacity_headroom_refuses_before_any_paid_request(self):
         provider = Provider()

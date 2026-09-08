@@ -1,11 +1,14 @@
 # Investments
 
 [investments:feed-collect](skills/feed-collect/SKILL.md) records timestamped
-posts from selected public X accounts, with one maintained account note in
-`Investments/Sources/X/`. It preserves source content without summaries,
+original posts, quote posts and reposts from selected public X accounts, excluding
+replies, with one maintained account note in `Investments/Sources/X/`.
+It preserves source content without summaries,
 sentiment labels or buying recommendations. Attached photos are saved in
 `Sources/Images/` and embedded locally; direct PDFs are saved in `Sources/PDFs/`
 and linked. The collector owns those files through durable receipts.
+Reposts keep their own timestamps and original-source links; returned snippets
+may be truncated, and referenced originals are not fetched separately.
 
 [investments:market-research](skills/market-research/SKILL.md) finds buying
 opportunities in liquid U.S.-listed stocks for a 3–12 month momentum horizon.
@@ -28,10 +31,13 @@ Install the whole package to preserve its local helper paths.
 
 For direct X collection, maintain `Investments/x-accounts.md` and configure
 read-only API credentials under the
-[X API guide](skills/feed-collect/references/x-api.md). Routine collection uses
-saved cursors and cached responses to avoid rereading previously collected
-posts. An explicit `--latest N` establishes a per-account initial sample with
-separate paid-read limits; later updates continue forward. Attachment downloads
+[X API guide](skills/feed-collect/references/x-api.md). Routine collection gathers
+all available eligible posts from the past three days, using saved progress and
+cached responses to avoid repeat reads. Previously saved older posts remain in
+the notes. There is no default request or returned-post cap; explicit budgets
+and provider limits can leave partial coverage. An explicit `--latest N`
+establishes a per-account historical sample and can reach older posts; omitting
+it restores the three-day policy. Attachment downloads
 have their own budgets and can resume from saved URLs without X post rereads.
 An ambiguous paid request is recorded and stops instead of silently
 retrying. Collection state in `Investments/Sources/.feed-collect/` is durable,

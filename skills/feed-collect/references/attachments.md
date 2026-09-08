@@ -11,7 +11,9 @@ New timeline windows and explicitly authorized reconciliation requests use
 `media.fields=media_key,type,url,alt_text,width,height`. Match `includes.media`
 only to the returned primary post's own `attachments.media_keys`. Save photos;
 do not download videos, animated-video variants or unrelated expanded media.
-A quote post's own attachments are eligible, but the quoted post is not fetched.
+A quote post or repost is eligible only for attachment metadata matched to its
+returned primary row. Do not fetch or expand referenced originals or their media,
+or infer attachments from a reference ID or the text's `RT @handle` prefix.
 
 Treat missing or conflicting attachment metadata as incomplete. Earlier records
 may contain media keys without URLs. Webpage-card thumbnails in `entities.urls`

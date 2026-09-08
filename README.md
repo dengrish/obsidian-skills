@@ -52,7 +52,7 @@ add-to-wiki.md → wiki-add → durable sources → missing requested entries in
 
 Existing Wiki/ → wiki-lint → entry repairs, links, parents, MOCs and proposals
 
-Investments/x-accounts.md → feed-collect → account notes containing original posts
+Investments/x-accounts.md → feed-collect → account notes containing posts, quote posts and reposts
 
 Market evidence + prior Investments/ notes → market-research → daily research note
 ```
@@ -117,15 +117,21 @@ attribution, cutoffs and sample limitations without turning extracted calls into
 buy recommendations. This mode retains independent news and earlier theses.
 
 [feed-collect](skills/feed-collect/SKILL.md) independently records timestamped
-posts from public X accounts selected in `Investments/x-accounts.md`, using the
-official API. It maintains one account note under `Investments/Sources/X/`,
+original posts, quote posts and reposts from public X accounts selected in
+`Investments/x-accounts.md`, using the official API and excluding replies.
+It maintains one account note under `Investments/Sources/X/`,
 with durable cursors and recovery state under `Investments/Sources/.feed-collect/`.
-An explicit latest-post sample has a separate target for each account and a
-bounded paid-row budget. Photo attachments are saved in `Sources/Images/` and
-embedded; directly linked PDFs go to `Sources/PDFs/`. Download receipts allow
+Ordinary runs collect all available eligible posts from the past three days,
+reusing saved progress and retaining previously saved older posts. There is no
+default request or returned-post cap; explicit budgets and provider limits can
+leave partial coverage. An explicitly requested latest-post sample can reach
+older history and has a separate target for each account. Photo attachments are
+saved in `Sources/Images/` and embedded; directly linked PDFs go to `Sources/PDFs/`. Download receipts allow
 attachment retries without rereading paid X posts.
-Routine updates request only posts after each completed cursor and reuse saved
-responses when publication needs retrying. Ambiguous paid requests stop for
+Reposts retain their own timestamps and original-source links; returned text may
+be truncated, and referenced originals are not fetched separately.
+Routine updates avoid replaying saved pages and reuse saved responses when
+publication needs retrying. Ambiguous paid requests stop for
 resolution instead of silently retrying. Source edits and removals have a
 separate reconciliation procedure. The collector does not summarize posts,
 select stocks or change the market-research schedule. Blogs and newsletters
@@ -339,6 +345,7 @@ python3 -m venv .venv
 .venv/bin/python tests/test_market_comparison.py
 .venv/bin/python tests/test_market_acquire.py
 .venv/bin/python tests/test_feed_collect.py
+.venv/bin/python tests/test_feed_recent.py
 .venv/bin/python tests/test_feed_media.py
 .venv/bin/python tests/test_feed_attachments.py
 .venv/bin/python tests/test_compatibility.py

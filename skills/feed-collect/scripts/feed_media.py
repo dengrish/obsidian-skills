@@ -279,7 +279,7 @@ def fetch_asset(url, kind, budget):
         if time.monotonic() >= deadline:
             raise MediaError('asset_download_timeout')
         budget['requests'] += 1
-        connection, response, wire = _request(host, path, addresses, deadline)
+        connection, response, _ = _request(host, path, addresses, deadline)
         try:
             if response.status in {301, 302, 303, 307, 308}:
                 location = response.getheader('Location')
@@ -299,7 +299,10 @@ def fetch_asset(url, kind, budget):
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise MediaError('asset_download_timeout')
-                wire.settimeout(min(15, remaining))
+                # HTTPResponse may have closed its file (and the detached
+                # socket) after the previous read completed the body. The
+                # deadline reader bounds actual socket reads; let HTTPResponse
+                # return EOF without touching an already closed descriptor.
                 chunk = response.read1(min(65536, limit + 1 - size,
                                            budget['max_bytes'] + 1 - budget['bytes']))
                 if not chunk:

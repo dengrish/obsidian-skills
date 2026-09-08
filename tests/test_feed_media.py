@@ -2,6 +2,7 @@
 """Independent offline coverage of attachment acquisition and ownership."""
 from copy import deepcopy
 import base64
+import http.client
 import io
 import json
 import os
@@ -10,6 +11,7 @@ import socket
 import struct
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 import zlib
@@ -421,6 +423,140 @@ class AssetTests(unittest.TestCase):
         self.asset().write_bytes(png())
         self.assertEqual(self.collect()['reused'], 1)
         self.assertIn('![[', '\n'.join(media.render_assets(self.posts[0], self.receipts)))
+
+
+class HTTPTransportTests(unittest.TestCase):
+    def fetch_response(self, reply, *, kind='pdf', budget=None, after_headers=None):
+        """Keep the real response reader and socket makefile lifetime offline."""
+        if budget is None:
+            budget = {'maximum': 1, 'requests': 0, 'bytes': 0, 'max_bytes': media.RUN_LIMIT}
+        wire, peer = socket.socketpair()
+        peer.settimeout(2)
+        errors, opened = [], []
+
+        def serve():
+            try:
+                with peer:
+                    request = b''
+                    while b'\r\n\r\n' not in request:
+                        chunk = peer.recv(4096)
+                        if not chunk:
+                            raise AssertionError('client closed before sending request headers')
+                        request += chunk
+                    peer.sendall(reply)
+            except (BrokenPipeError, ConnectionResetError):
+                pass  # A byte limit or deadline may intentionally stop the reader.
+            except Exception as exc:
+                errors.append(exc)
+
+        def request(host, path, addresses, deadline):
+            connection = http.client.HTTPConnection(host, 443)
+            opened.append(connection)
+            connection.sock = media._deadline_socket(wire, deadline)
+            connection.request('GET', path, headers={'Connection': 'close'})
+            response = connection.getresponse()
+            opened.append(response)
+            self.assertIsInstance(response, http.client.HTTPResponse)
+            # HTTPConnection detaches this socket after parsing the headers;
+            # its raw makefile must keep the descriptor alive for body reads.
+            self.assertIsNone(connection.sock)
+            self.assertGreaterEqual(wire.fileno(), 0)
+            if after_headers is not None:
+                after_headers()
+            return connection, response, wire
+
+        server = threading.Thread(target=serve, daemon=True)
+        server.start()
+        try:
+            with patch.object(media, '_target', return_value=('example.com', '/asset', [])), \
+                    patch.object(media, '_request', side_effect=request):
+                return media.fetch_asset('https://example.com/asset', kind, budget)
+        finally:
+            try:
+                if len(opened) == 2:
+                    self.assertTrue(opened[1].isclosed())
+                    self.assertIsNone(opened[0].sock)
+                    self.assertEqual(wire.fileno(), -1)
+            finally:
+                for item in reversed(opened):
+                    item.close()
+                wire.close()
+                server.join(3)
+                peer.close()
+            self.assertFalse(server.is_alive(), 'offline HTTP fixture did not finish')
+            self.assertEqual(errors, [])
+
+    @staticmethod
+    def reply(body, framing, content_type='application/pdf'):
+        headers = ['HTTP/1.1 200 OK', 'Connection: close', 'Content-Type: ' + content_type]
+        if framing == 'length':
+            headers.append('Content-Length: ' + str(len(body)))
+        elif framing == 'chunked':
+            headers.append('Transfer-Encoding: chunked')
+            pieces = [body[i:i + 4093] for i in range(0, len(body), 4093)]
+            body = b''.join(('%x\r\n' % len(piece)).encode() + piece + b'\r\n' for piece in pieces)
+            body += b'0\r\nX-Archive: complete\r\n\r\n'
+        return ('\r\n'.join(headers) + '\r\n\r\n').encode() + body
+
+    def test_complete_content_length_chunked_and_connection_delimited_bodies(self):
+        # A valid uncompressed PNG exceeds both the reader buffer and the
+        # downloader's per-read size; the PDF also covers a tiny buffered body.
+        raster = b'\0' + b'\x80' * (30000 * 3)
+        large_png = png(compressed=zlib.compress(raster, level=0), header=(30000, 1, 8, 2, 0, 0, 0))
+        for framing in ('length', 'chunked', 'close'):
+            for body, kind, mime in ((pdf(), 'pdf', 'application/pdf'), (large_png, 'image', 'image/png')):
+                with self.subTest(framing=framing, kind=kind):
+                    budget = {'maximum': 1, 'requests': 0, 'bytes': 7,
+                              'max_bytes': len(body) + 7}
+                    result = self.fetch_response(self.reply(body, framing, mime), kind=kind, budget=budget)
+                    self.assertEqual(result, {'data': body, 'content_type': mime,
+                                              'final_url': 'https://example.com/asset'})
+                    self.assertEqual(budget['requests'], 1)
+                    self.assertEqual(budget['bytes'], len(body) + 7)
+
+    def test_truncated_content_length_is_rejected(self):
+        body = pdf()
+        with self.assertRaisesRegex(media.MediaError, 'asset_truncated_download'):
+            self.fetch_response(self.reply(body, 'length')[:-9])
+
+    def test_truncated_chunked_body_is_rejected(self):
+        headers = b'HTTP/1.1 200 OK\r\nConnection: close\r\nTransfer-Encoding: chunked\r\n\r\n'
+        for body in (b'8\r\nshort', b'8\r\n12345678\r\n'):
+            with self.subTest(body=body), self.assertRaises((media.MediaError, http.client.IncompleteRead)):
+                self.fetch_response(headers + body)
+
+    def test_run_byte_budget_stops_real_response_reads(self):
+        for framing in ('length', 'chunked', 'close'):
+            with self.subTest(framing=framing):
+                budget = {'maximum': 1, 'requests': 0, 'bytes': 17, 'max_bytes': 80}
+                with self.assertRaisesRegex(media.MediaError, 'asset_download_byte_limit'):
+                    self.fetch_response(self.reply(pdf(), framing), budget=budget)
+                self.assertEqual(budget['bytes'], budget['max_bytes'] + 1)
+
+    def test_attachment_byte_limit_stops_unknown_length_responses(self):
+        for framing in ('chunked', 'close'):
+            with self.subTest(framing=framing):
+                budget = {'maximum': 1, 'requests': 0, 'bytes': 0, 'max_bytes': 1000}
+                with patch.object(media, 'PDF_LIMIT', 80), \
+                        self.assertRaisesRegex(media.MediaError, 'asset_download_byte_limit'):
+                    self.fetch_response(self.reply(pdf(), framing), budget=budget)
+                self.assertEqual(budget['bytes'], 81)
+
+    def test_body_reads_share_the_total_deadline(self):
+        ticks = [0]
+        def monotonic():
+            current = ticks[0]
+            if current:
+                ticks[0] += 1
+            return current
+        def nearly_expired():
+            ticks[0] = 59
+        body = pdf() * 1000
+        budget = {'maximum': 1, 'requests': 0, 'bytes': 0, 'max_bytes': len(body)}
+        with patch.object(media.time, 'monotonic', side_effect=monotonic), \
+                self.assertRaisesRegex(media.MediaError, 'asset_download_timeout'):
+            self.fetch_response(self.reply(body, 'length'), budget=budget, after_headers=nearly_expired)
+        self.assertLess(budget['bytes'], len(body))
 
 
 class NetworkTests(unittest.TestCase):
