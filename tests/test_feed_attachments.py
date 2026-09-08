@@ -105,11 +105,12 @@ class AttachmentWorkflowTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), receipt['sha256'])
             prefix = '!' if receipt['kind'] == 'image' else ''
             self.assertIn(prefix + '[[' + receipt['path'] + ']]', note)
-            self.assertIn('"retrieved_at": "' + receipt['retrieved_at'] + '"', note)
-            self.assertIn('"sha256": "' + receipt['sha256'] + '"', note)
+            self.assertTrue(receipt['retrieved_at'])
+            self.assertNotIn('"retrieved_at":', note)
+            self.assertNotIn('"sha256":', note)
             if receipt['kind'] == 'pdf':
                 self.assertNotIn('![[' + receipt['path'] + ']]', note)
-        self.assertIn('"local_attachments":', note)
+        self.assertNotIn('"local_attachments":', note)
         self.assertNotIn('"cache_name":', note)
         self.assertNotIn('"recovery_path":', note)
         self.assertEqual(state['accounts']['actual']['posts']['105']['text'], 'Exact original source text.')

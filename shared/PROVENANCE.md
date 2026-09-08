@@ -13,6 +13,13 @@ installed distribution before producing a record; missing or inconsistent
 provenance blocks stamping and publication of the affected note. It does not
 authorize modifying a cache, fetching code, or installing an update.
 
+For `feed-collect` account notes only, keep this same verified producer record
+in the private collection state alongside the note's publication digest. These
+notes contain properties and posts, with no provenance footer or metadata
+section. The collector preserves a known creator when migrating its existing
+footer to state and records the current updater on substantive changes. This
+exception does not apply to market-research reports or suggestion logs.
+
 ## Stamp the reviewed draft
 
 After the note's content is settled, use the same Python environment as the

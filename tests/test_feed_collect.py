@@ -428,14 +428,21 @@ class FeedCollectionTests(unittest.TestCase):
         self.assertIn(r'\[\[Not a wiki link\]\]', note)
         self.assertIn('&lt;script&gt;unsafe()&lt;/script&gt;', note)
         self.assertEqual(self.state()['accounts']['actual']['posts']['105']['text'], original)
-        self.assertEqual(note.count('<!-- skill-provenance:'), 1)
+        self.assertEqual(note.count('<!-- skill-provenance:'), 0)
         self.assertNotIn('<script>', note)
 
     def test_readable_properties_keep_identity_and_check_times_in_state(self):
         self.collect(Provider(page([post(105, text='A brief original post.\nSecond line.')])))
         note = self.note.read_text(encoding='utf-8')
         meta = yaml.safe_load(note.split('---', 2)[1])
-        self.assertEqual(meta, {'sources': ['X'], 'authors': ['[@actual](https://x.com/actual)']})
+        self.assertEqual(meta['sources'], ['X'])
+        self.assertEqual(meta['authors'], ['[@actual](https://x.com/actual)'])
+        self.assertEqual(set(meta), {'sources', 'authors', 'created', 'updated', 'description'})
+        self.assertEqual(str(meta['created']), self.state()['accounts']['actual']['note']['created'])
+        self.assertEqual(meta['created'], meta['updated'])
+        self.assertEqual(meta['description'], '')
+        self.assertNotIn('Source metadata', note)
+        self.assertTrue(note.split('---', 2)[2].lstrip().startswith('## 2026-'))
         self.assertNotIn('First retrieved:', note)
         self.assertNotIn('Last checked:', note)
         self.assertIn('A brief original post.  \nSecond line.', note)
@@ -444,6 +451,119 @@ class FeedCollectionTests(unittest.TestCase):
         saved = account['posts']['105']
         self.assertTrue(saved['first_retrieved_at'])
         self.assertTrue(saved['last_checked_at'])
+
+    def test_description_is_offline_sourced_and_safely_serialized(self):
+        self.collect(Provider(page([post(105)])))
+        description = 'Public author: studies \"AI\".\n---\nauthors: [intruder]'
+        with patch.object(feed, 'request_json', side_effect=AssertionError('no paid profile request')):
+            result = feed.execute(self.args(command='describe', account='actual', description=description,
+                                           description_source=['https://example.org/author']))
+        self.assertEqual(result['requests'], 0)
+        meta = yaml.safe_load(self.note.read_text(encoding='utf-8').split('\n---\n', 1)[0].removeprefix('---\n'))
+        self.assertEqual(meta['description'], description)
+        self.assertEqual(meta['authors'], ['[@actual](https://x.com/actual)'])
+        self.assertEqual(self.state()['accounts']['actual']['profile']['sources'], ['https://example.org/author'])
+        self.assertNotIn('https://example.org/author', self.note.read_text(encoding='utf-8'))
+        self.assertEqual(feed.execute(self.args(command='plan'))['missing_descriptions'], [])
+
+    def test_description_without_evidence_preserves_note_and_state(self):
+        self.collect(Provider(page([post(105)])))
+        before = self.state_path.read_bytes(), self.note.read_bytes()
+        for sources in ([], ['file:///etc/passwd'], ['https://user:password@example.org']):
+            with self.subTest(sources=sources), self.assertRaises(feed.FeedError):
+                feed.execute(self.args(command='describe', account='actual', description='Background.', description_source=sources))
+            self.assertEqual((self.state_path.read_bytes(), self.note.read_bytes()), before)
+
+    def test_note_dates_and_provenance_change_only_with_visible_content(self):
+        with patch.object(feed, 'now', return_value=FIRST):
+            self.collect(Provider(page([post(105)])))
+        original = self.note.read_bytes()
+        first = deepcopy(self.state()['accounts']['actual']['note'])
+        self.assertEqual(first['created'], '2026-09-07')
+        self.assertEqual(first['updated'], '2026-09-07')
+        self.assertEqual(first['provenance']['generated_by'], RECORD)
+        newer = dict(RECORD, runtime_sha256='1' * 64)
+        with patch.object(feed, 'now', return_value='2026-09-08T12:00:00Z'):
+            with feed.Store(self.vault) as store:
+                self.assertFalse(feed.publish_account(store, store.data['accounts']['actual'], self.vault, newer))
+            self.assertEqual(self.note.read_bytes(), original)
+            self.assertEqual(self.state()['accounts']['actual']['note'], first)
+            with patch.object(feed, 'provenance', return_value=newer):
+                feed.execute(self.args(command='describe', account='actual', description='A public research author.',
+                                       description_source=['https://example.org/author']))
+        current = self.state()['accounts']['actual']['note']
+        self.assertEqual(current['created'], first['created'])
+        self.assertEqual(current['updated'], '2026-09-08')
+        self.assertEqual(current['provenance']['generated_by'], RECORD)
+        self.assertEqual(current['provenance']['updated_by'], newer)
+        self.assertNotIn('skill-provenance', self.note.read_text(encoding='utf-8'))
+
+    def test_owned_legacy_footer_migrates_to_state_without_losing_creator(self):
+        self.collect(Provider(page([post(105)])))
+        legacy = feed.note_provenance.stamp_text('# @actual\n\nOld introduction.\n', RECORD)
+        self.note.write_text(legacy, encoding='utf-8')
+        with feed.Store(self.vault) as store:
+            account = store.data['accounts']['actual']
+            account.pop('note')
+            account['published_sha256'] = feed.digest(legacy.encode())
+            store.save()
+        newer = dict(RECORD, runtime_sha256='2' * 64)
+        with patch.object(feed, 'provenance', return_value=newer):
+            feed.execute(self.args(command='publish'))
+        current = self.state()['accounts']['actual']['note']
+        self.assertEqual(current['provenance']['generated_by'], RECORD)
+        self.assertEqual(current['provenance']['updated_by'], newer)
+        self.assertNotIn('skill-provenance', self.note.read_text(encoding='utf-8'))
+        self.assertNotIn('Old introduction', self.note.read_text(encoding='utf-8'))
+        self.assertIn('Literal source post.', self.note.read_text(encoding='utf-8'))
+
+    def test_unscoped_publish_does_not_recreate_paused_notes(self):
+        self.collect(Provider(page([post(105)])))
+        self.roster.write_text('- [ ] @Actual\n- [x] @Other\n', encoding='utf-8')
+        self.note.unlink()
+        self.assertEqual(feed.execute(self.args(command='publish'))['published_notes'], 0)
+        self.assertFalse(self.note.exists())
+        self.assertEqual(feed.execute(self.args(command='publish', account='actual'))['published_notes'], 1)
+        self.assertTrue(self.note.exists())
+
+    def test_offline_regeneration_preserves_note_dates_and_producer(self):
+        with patch.object(feed, 'now', return_value=FIRST):
+            self.collect(Provider(page([post(105)])))
+        before = self.note.read_bytes()
+        metadata = self.state()['accounts']['actual']['note']
+        self.note.unlink()
+        with patch.object(feed, 'now', return_value='2026-09-10T12:00:00Z'):
+            result = feed.execute(self.args(command='publish'))
+        self.assertEqual(result['published_notes'], 1)
+        self.assertEqual(self.note.read_bytes(), before)
+        self.assertEqual(self.state()['accounts']['actual']['note'], metadata)
+
+    def test_publication_recovery_commits_prepared_dates_without_rewriting(self):
+        with patch.object(feed, 'now', return_value=FIRST):
+            self.collect(Provider(page([post(105)])))
+        original_save = feed.Store.save
+        prepared = False
+        def interrupt_closeout(store):
+            nonlocal prepared
+            account = store.data['accounts']['actual']
+            if 'prepared_note' in account:
+                prepared = True
+            elif prepared:
+                raise OSError('simulated interruption before state closeout')
+            return original_save(store)
+        with patch.object(feed.Store, 'save', interrupt_closeout):
+            with self.assertRaisesRegex(OSError, 'before state closeout'):
+                feed.execute(self.args(command='describe', account='actual', description='Public researcher.',
+                                       description_source=['https://example.org/bio']))
+        before = self.note.read_bytes()
+        prepared = self.state()['accounts']['actual']['prepared_note']
+        with patch.object(feed, 'now', return_value='2026-09-10T12:00:00Z'):
+            result = feed.execute(self.args(command='publish'))
+        self.assertEqual(result['published_notes'], 0)
+        self.assertEqual(self.note.read_bytes(), before)
+        account = self.state()['accounts']['actual']
+        self.assertNotIn('prepared_note', account)
+        self.assertEqual(account['note'], prepared)
 
     def test_duplicate_provider_rows_create_one_local_entry(self):
         raw = post(105)
@@ -700,7 +820,7 @@ class FeedCollectionTests(unittest.TestCase):
         self.assertIsNone(account['window'])
         self.assertEqual(account['since_id'], '110')
         self.assertEqual(result['partial_accounts'], 0)
-        self.assertIn('initial-sample-target-reached', self.note.read_text(encoding='utf-8'))
+        self.assertEqual(result['accounts'][0]['sample_status'], 'target_reached')
         again = Provider()
         self.collect(again, latest=10)
         self.assertEqual(again.calls, [])
@@ -801,7 +921,7 @@ class FeedCollectionTests(unittest.TestCase):
         self.assertIn('request_budget_exhausted', row['deferred_reasons'])
         self.assertEqual(result['deferred_accounts'], ['actual'])
         self.assertEqual(result['partial_accounts'], 1)
-        self.assertIn('Collection status: partial.', self.note.read_text(encoding='utf-8'))
+        self.assertNotIn('Collection status:', self.note.read_text(encoding='utf-8'))
         self.assertEqual(feed.execute(self.args(command='status'))['accounts'][0]['forward_status'], 'pending')
 
     def test_resumed_normal_window_requeues_forward_interval_before_reporting_complete(self):

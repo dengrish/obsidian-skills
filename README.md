@@ -429,3 +429,5 @@ Generated Markdown notes record the producing skill, plugin version, source
 commit link and verified runtime fingerprint under the shared
 [provenance contract](shared/PROVENANCE.md). Existing notes are not backfilled
 with a guessed creator, and unchanged notes stay unchanged.
+Feed account notes keep this provenance in private collection state instead of
+a note footer; their visible content is properties and timestamped posts.

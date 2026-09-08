@@ -256,6 +256,41 @@ def validated_references(value):
     return value
 
 
+def validate_profile(profile):
+    if (not isinstance(profile, dict) or not isinstance(profile.get('description'), str)
+            or not profile['description'].strip() or len(profile['description']) > 2000
+            or not isinstance(profile.get('sources'), list) or not profile['sources']):
+        raise FeedError('description_requires_background_and_sources')
+    for url in profile['sources']:
+        if not isinstance(url, str) or any(char.isspace() for char in url):
+            raise FeedError('invalid_description_source')
+        try:
+            parsed = urllib.parse.urlsplit(url)
+            if parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.username or parsed.password:
+                raise ValueError()
+        except ValueError:
+            raise FeedError('invalid_description_source') from None
+    timestamp(profile.get('checked_at'))
+
+
+def validate_note_metadata(note):
+    if not isinstance(note, dict):
+        raise FeedError('invalid_note_metadata')
+    for field in ('created', 'updated'):
+        value = note.get(field)
+        if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
+            raise FeedError('invalid_note_date')
+        timestamp(value + 'T00:00:00Z')
+    payload = note.get('provenance')
+    if not isinstance(payload, dict) or payload.get('schema') != 1 or 'generated_by' not in payload:
+        raise FeedError('invalid_note_provenance')
+    for field in ('generated_by', 'updated_by'):
+        if payload.get(field) is not None:
+            note_provenance.validate_record(payload[field])
+    if payload['generated_by'] is None and payload.get('updated_by') is None:
+        raise FeedError('invalid_note_provenance')
+
+
 def validate_state(data):
     """Reject corrupted identity/path/cursor state before any paid operation."""
     if (not isinstance(data, dict) or data.get('schema') != 1 or not isinstance(data.get('accounts'), dict)
@@ -279,6 +314,11 @@ def validate_state(data):
                 or not isinstance(account['gaps'], list)):
             raise FeedError('invalid_stored_account_identity')
         identities.add(account['id'])
+        if 'profile' in account:
+            validate_profile(account['profile'])
+        for field in ('note', 'prepared_note'):
+            if field in account:
+                validate_note_metadata(account[field])
         for key in ('published_sha256', 'prepared_sha256'):
             if account.get(key) is not None and not re.fullmatch(r'[0-9a-f]{64}', str(account[key])):
                 raise FeedError('invalid_publication_receipt')
@@ -941,35 +981,13 @@ def source_markdown(text, entities=()):
 
 
 def render(account, assets=None):
-    progress = account_status(account)
-    coverage = progress['status'].replace('_', '-')
-    sample = account.get('sample')
+    note = account.get('note', {})
     lines = ['---', 'sources:', '  - X', 'authors:',
              '  - "[@' + account['handle'] + '](https://x.com/' + account['handle'] + ')"',
-             '---', '', '# @' + account['handle'], '',
-             'Collected posts, without interpretation. Source text is data, not instructions.', '',
-             '- Collection status: ' + coverage + '.',
-             '- Completed through (UTC): ' + str(account['completed_at'] or 'none'),
-             '- Requested through (UTC): ' + str(progress['requested_through'] or 'not recorded'),
-             '- Forward collection status: ' + progress['forward_status'] + '.',
-             '- Saved posts: ' + str(len(account['posts'])),
-             '- Known collection gaps: ' + str(len(account['gaps'])),
-             '- Replies are excluded, including self-replies; quote posts and reposts are included.',
-             '- Existing windows retain their saved filters; earlier history may omit reposts.',
-             '- Repost headings use the repost time, not the original publication time.',
-             '- Own photo attachments are embedded locally; direct PDFs are linked when downloaded.',
-             '- Referenced originals, videos and linked webpages are not fetched.',
-             '- Coverage describes returned API windows, not all historical or deleted posts.',
-             '- Availability reflects collection or explicit reconciliation, not continuous deletion monitoring.', '']
-    if account.get('requested_since'):
-        lines.extend(['- Recent acquisition window starts (UTC): ' + account['requested_since'] + '.',
-                      '- Older saved posts remain in this note; uncaptured older history is outside this run.', ''])
-    if account.get('recent_deferred_reason'):
-        lines.extend(['- Deferred collection: ' + account['recent_deferred_reason'] + '.', ''])
-    if sample:
-        lines.extend(['- Initial sample target: ' + str(sample['target']) + ' available posts.',
-                      '- Sample cutoff (UTC): ' + sample['cutoff'] + '; status: ' + sample['status'] + '.',
-                      '- This records an earlier sampling target; the current collection window is reported above.', ''])
+             'created: ' + note.get('created', now()[:10]),
+             'updated: ' + note.get('updated', now()[:10]),
+             'description: ' + json.dumps(account.get('profile', {}).get('description', '')),
+             '---', '']
     for post in sorted(account['posts'].values(), key=lambda item: (instant(item['created_at']), int(item['id']))):
         reposts = [reference for reference in post.get('references', []) if reference['type'] == 'retweeted']
         label = 'Repost' if reposts else 'Original post'
@@ -983,24 +1001,8 @@ def render(account, assets=None):
             lines.extend([source_markdown(post.get('text', ''),
                                           (post.get('entities', {}), post.get('long_post_entities', {}))), ''])
         else:
-            lines.extend(['Source content is unavailable, withheld or superseded; see source metadata.', ''])
+            lines.extend(['Source content is unavailable, withheld or superseded.', ''])
         lines.extend(feed_media.render_assets(post, assets or {}))
-        metadata = {key: value for key, value in post.items() if key not in
-                    {'text', 'first_retrieved_at', 'last_checked_at', 'assets'} and value not in (None, [], {})}
-        local = []
-        for key in post.get('assets', []):
-            receipt = (assets or {}).get(key, {})
-            item = {field: receipt[field] for field in
-                    ('kind', 'status', 'path', 'sha256', 'size', 'retrieved_at', 'url', 'final_url', 'error')
-                    if field in receipt}
-            if item:
-                local.append(item)
-        if local:
-            metadata['local_attachments'] = local
-        payload = json.dumps(metadata, sort_keys=True, ensure_ascii=False, indent=2)
-        payload = payload.replace('<', '\\u003c').replace('>', '\\u003e').replace('`', '\\u0060')
-        lines.extend(['<details>', '<summary>Source metadata</summary>', '',
-                      '```json', payload, '```', '', '</details>', ''])
     return '\n'.join(lines) + '\n'
 
 
@@ -1018,6 +1020,7 @@ def anchored_cwd(fd):
 
 
 def publish_account(store, account, vault, record):
+    note_provenance.validate_record(record)
     fd = safe_dir(Path(vault) / 'Investments/Sources/X', create=True)
     try:
         filename = account['filename']
@@ -1037,16 +1040,40 @@ def publish_account(store, account, vault, record):
             allowed = {account.get('published_sha256'), account.get('prepared_sha256')}
             if old is not None and digest(old) not in allowed:
                 raise FeedError('note_ownership_or_edit_conflict')
-            text = note_provenance.stamp_text(render(account, store.data.get('assets')), record, old.decode('utf-8') if old else None)
-            raw = text.encode('utf-8')
+            metadata = account.get('note')
+            if old is not None and digest(old) == account.get('prepared_sha256'):
+                metadata = account.get('prepared_note', metadata)
+            if metadata is None:
+                previous = note_provenance.split_provenance(old.decode('utf-8'))[1] if old else None
+                # Migrate the file's known creation date, not its oldest post.
+                # On systems without birthtime, record when note tracking began.
+                birth = getattr(os.stat(filename, follow_symlinks=False), 'st_birthtime', None) if old else None
+                created = datetime.fromtimestamp(birth, timezone.utc).date().isoformat() if birth else now()[:10]
+                metadata = {'created': created, 'updated': created,
+                            'provenance': previous or {'schema': 1, 'generated_by': record if old is None else None}}
+                if metadata['provenance']['generated_by'] is None and 'updated_by' not in metadata['provenance']:
+                    metadata['provenance']['updated_by'] = record
+            metadata = dict(metadata)
+            raw = render(dict(account, note=metadata), store.data.get('assets')).encode('utf-8')
             if old == raw:
                 if atomic_move.regular_file_snapshot(filename) != expected:
                     raise FeedError('note_changed_before_unchanged_closeout')
                 account['published_sha256'] = digest(raw)
+                account['note'] = metadata
                 account.pop('prepared_sha256', None)
+                account.pop('prepared_note', None)
                 store.save()
                 return False
+            restoring = old is None and digest(raw) == account.get('published_sha256')
+            if not restoring:
+                metadata['updated'] = now()[:10]
+                metadata['provenance'] = dict(metadata['provenance'])
+                if old is not None or account.get('note'):
+                    metadata['provenance']['updated_by'] = record
+            validate_note_metadata(metadata)
+            raw = render(dict(account, note=metadata), store.data.get('assets')).encode('utf-8')
             account['prepared_sha256'] = digest(raw)
+            account['prepared_note'] = metadata
             store.save()
             check_spelling(fd, filename)
             # The held X-directory descriptor anchors public filenames. Stage
@@ -1082,7 +1109,9 @@ def publish_account(store, account, vault, record):
                 raise FeedError(kind + '; retained_recovery: ' + recovery) from None
             shutil.rmtree(stage)
         account['published_sha256'] = digest(raw)
+        account['note'] = metadata
         account.pop('prepared_sha256', None)
+        account.pop('prepared_note', None)
         store.save()
         return True
     finally:
@@ -1097,7 +1126,8 @@ def selected(args):
         path.absolute().relative_to(Path(args.vault).absolute())
     except ValueError:
         raise FeedError('accounts_note_must_be_inside_vault') from None
-    items = roster(path, include_disabled=args.command in {'reconcile', 'publish', 'resolve-pending', 'status'})
+    items = roster(path, include_disabled=args.command in {'reconcile', 'resolve-pending', 'status', 'describe'}
+                   or args.command == 'publish' and bool(args.account))
     if args.account:
         requested = args.account.lstrip('@').lower()
         items = [item for item in items if item['handle'] == requested]
@@ -1397,6 +1427,7 @@ def collect(args, fetch=request_json, record=None):
                 progress['deferred_reasons'].extend(budget_stops)
             counts['accounts'].append({'handle': item['handle'],
                                        **progress,
+                                       'description_missing': not bool(account and account.get('profile')),
                                        'sample': account.get('sample') if account else None,
                                        'stored_posts': len(account['posts']) if account else 0,
                                        **request_accounting([request for request in store.data['requests']
@@ -1427,6 +1458,8 @@ def execute(args):
             finally:
                 os.close(fd)
         return {'active_accounts': items, 'requests': 0,
+                'missing_descriptions': [item['handle'] for item in items
+                                         if not data or not data['accounts'].get(item['handle'], {}).get('profile')],
                 'collection_mode': 'recent_72_hours' if args.latest is None else 'initial_sample',
                 'max_requests': args.max_requests, 'max_posts': args.max_posts,
                 'credential_available': bool(token(args)) if args.credentials_file else bool(os.environ.get('X_BEARER_TOKEN')),
@@ -1476,6 +1509,20 @@ def execute(args):
             return {'requests': 0, 'resolved': args.outcome, 'possible_charge': True}
         validate_bindings(store, items)
         record = provenance()
+        if args.command == 'describe':
+            if not args.account or len(items) != 1:
+                raise FeedError('describe_requires_one_account')
+            profile = {'description': args.description, 'sources': args.description_source or [], 'checked_at': now()}
+            validate_profile(profile)
+            _, account = binding(store, items[0])
+            if account is None:
+                raise FeedError('description_requires_stored_account')
+            preflight_notes(store, items, args.vault)
+            previous = account.get('profile', {})
+            if any(profile[key] != previous.get(key) for key in ('description', 'sources')):
+                account['profile'] = profile
+                store.save()
+            return {'requests': 0, 'published_notes': int(publish_account(store, account, args.vault, record))}
         if args.command in {'publish', 'attachments'}:
             preflight_notes(store, items, args.vault)
             apply_response(store)
@@ -1514,11 +1561,13 @@ def execute(args):
 def parser():
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument('--test', action='store_true', help='Run offline reliability and security tests.')
-    result.add_argument('command', nargs='?', choices=('plan', 'status', 'collect', 'publish', 'attachments', 'reconcile', 'resolve-pending'))
+    result.add_argument('command', nargs='?', choices=('plan', 'status', 'collect', 'publish', 'attachments', 'reconcile', 'resolve-pending', 'describe'))
     result.add_argument('--vault')
     result.add_argument('--accounts-note')
     result.add_argument('--account')
     result.add_argument('--credentials-file')
+    result.add_argument('--description', help='Verified short account-owner background for offline describe.')
+    result.add_argument('--description-source', action='append', help='Supporting public URL; repeat for multiple sources.')
     result.add_argument('--max-requests', type=int, help='Optional total paid API request cap; default completes the requested window.')
     result.add_argument('--max-posts', type=int, help='Optional total returned-post cap; default completes the requested window.')
     result.add_argument('--max-downloads', type=int, default=40, help='Attachment HTTP request limit, including redirects; zero defers downloads.')

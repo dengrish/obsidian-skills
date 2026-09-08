@@ -7,6 +7,9 @@ It preserves source content without summaries,
 sentiment labels or buying recommendations. Attached photos are saved in
 `Sources/Images/` and embedded locally; direct PDFs are saved in `Sources/PDFs/`
 and linked. The collector owns those files through durable receipts.
+Account notes contain only properties and timestamped posts. Properties include
+stable note creation and update dates and a short sourced owner description;
+source metadata, collection status and skill provenance stay in private state.
 Reposts keep their own timestamps and original-source links; returned snippets
 may be truncated, and referenced originals are not fetched separately.
 

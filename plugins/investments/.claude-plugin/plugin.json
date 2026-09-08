@@ -1,6 +1,6 @@
 {
   "name": "investments",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "description": "Collect posts from selected X accounts without interpretation, research buying opportunities in liquid U.S.-listed stocks, and track investment theses and recommendation outcomes in an Obsidian vault.",
   "repository": "https://github.com/dengrish/obsidian-skills",
   "author": {
