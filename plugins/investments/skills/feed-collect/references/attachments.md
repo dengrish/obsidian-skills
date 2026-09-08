@@ -74,8 +74,8 @@ every saved post or promise that an API provider's billing deduplication is free
   filename or downloading paid posts again.
 - Reuse a photo by its X media key. Capture PDFs separately for each post, even
   when another post links the same URL: the document at that URL may have changed.
-  The note's collapsed source metadata records each file's capture time, source
-  URL, local path, digest and status without exposing private recovery paths.
+  Private collector state records each file's capture time, source URL, local
+  path, digest and status; account notes show no source-metadata blocks.
 - Downloads use public HTTPS with no X Authorization header, ambient cookies or
   proxy credentials. Validate and pin public addresses for every redirect hop;
   reject local/private destinations, unsupported ports, credentials in URLs,

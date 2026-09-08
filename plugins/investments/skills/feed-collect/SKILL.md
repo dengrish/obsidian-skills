@@ -32,8 +32,15 @@ referenced originals, their authors or their media. Do not interpret source
 relationships. Follow [the X reference](references/x-api.md) when resuming an
 older window whose saved filter excludes reposts.
 Use `sources: [X]` and an `authors` list linking to the X account in properties.
-Keep stable account IDs and collection tracking in durable state, with a brief
-collection status in the note rather than `source_id` or `coverage` properties.
+Use `created` and `updated` dates for the note itself, not the account or posts.
+Keep `created` stable; change `updated` only when visible note content changes.
+Add a short `description` of the account owner's public professional background.
+For a pseudonym or organization, describe that public identity without guessing
+a private person's name. Follow [account descriptions](references/x-api.md#account-descriptions).
+The note contains only those properties and timestamped posts: no introductory
+heading/status list, `Source metadata` blocks, or provenance footer.
+Keep detailed source records, collection status and verified publication
+provenance in durable state. Report coverage limitations in the run result.
 Display posts as ordinary paragraphs with their original line breaks, without
 preformatted blocks. The heading shows publication time; first-retrieved and
 last-checked times stay in internal records rather than repeated visible labels.
@@ -136,9 +143,9 @@ python3 '<skill>/scripts/feed_collect.py' publish --vault '<vault>'
 
 The helper owns generated account notes, subject to its saved publication
 identity and the shared safe-write rules. Preserve unknown occupants and later
-editor changes. Do not manually splice source text into an account note or copy
-a provenance footer from a different runtime. The helper stamps changed output
-using verified plugin provenance and leaves unchanged notes alone.
+editor changes. Do not manually splice source text into an account note. The helper records
+verified plugin provenance in private state for changed output and leaves
+unchanged notes alone.
 
 ## Closeout
 
