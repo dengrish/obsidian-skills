@@ -247,6 +247,7 @@ def alpaca_bars(client, args):
             client, BARS_URL, params, headers, budget, decode)
     warnings.extend(page_warnings)
     seen = {symbol: set() for symbol in symbols}
+    duplicate_symbols = set()
     for page in pages:
         for symbol, rows in page.items():
             if symbol in rejected:
@@ -254,6 +255,7 @@ def alpaca_bars(client, args):
             for bar in rows:
                 key = bar["interval_start"]
                 if key in seen[symbol]:
+                    duplicate_symbols.add(symbol)
                     complete = False
                     warnings.append("A duplicate symbol/bar interval was returned; only the first is retained.")
                     continue
@@ -281,6 +283,7 @@ def alpaca_bars(client, args):
                    "timestamp_basis": "left boundary of aggregation interval"},
         "query": params | {"requested_end": _iso(requested_end)},
         "data": {"requested_symbols": symbols, "bars": bars, "missing_symbols": missing,
+                 "duplicate_symbols": [symbol for symbol in symbols if symbol in duplicate_symbols],
                  "rejected_symbols": [rejected[symbol] for symbol in symbols if symbol in rejected]},
     }
     if rejected:

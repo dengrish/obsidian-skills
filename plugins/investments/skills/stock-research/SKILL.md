@@ -41,8 +41,19 @@ must separately invoke it with the selected vault and available research tools;
 create or change that schedule only when the user requests scheduling.
 
 For a scheduled retry, inspect `context` first and reuse a valid existing edition
-under the rules below. For a fresh run, use `prepare` to create the canonical
-draft and a private run receipt in owned scratch:
+under the rules below. Before a **fresh manual** run freezes its cutoff, identify
+the bounded candidates already justified by prior watch/deferred notes, the
+user's request or already-collected feed posts. Resolve their quoted securities
+and [capture any needed raw-price evidence](references/capitalization.md#capture-before-freezing-the-cutoff).
+Reuse eligible archived observations first. A small justified
+[estimate plan](references/data-access.md#dated-estimates-not-reconstructed-expectations)
+may also be captured now. This planning pass does not collect feeds, discover
+unrelated stocks or establish the final nomination set; recheck the inputs at
+the frozen cutoff. The capture helpers return after their saves are eligible
+at a real whole-second cutoff.
+
+Then use `prepare` to create the canonical draft and a private run receipt in
+owned scratch:
 
 ```bash
 python3 '<skill>/scripts/market_notes.py' prepare --vault '<vault>' --mode manual --work-dir '<scratch>' --check independent-review
@@ -58,12 +69,11 @@ later checker with `review-start` when launching it; every declared check must
 finish against the final draft before publication. Details and retries are in
 [edition naming and run receipts](references/note-format.md#editions-and-retries).
 
-On a fresh manual run, a small estimate plan justified by earlier watch notes or
-explicitly named candidates may be [captured first](references/data-access.md#dated-estimates-not-reconstructed-expectations),
-**before** `prepare` freezes the cutoff. Do not query all screened names or move an
-already frozen cutoff. New candidates discovered later may only contribute late
-snapshots to future editions. Scheduled cutoffs remain at or before 11:30 ET;
-late captures cannot be used as earlier consensus.
+Never move an already frozen cutoff to admit a late capture. New candidates
+discovered later may contribute late price or estimate snapshots only to future
+editions. Scheduled cutoffs remain at or before 11:30 ET: a capture made after
+that deadline cannot supply earlier evidence, even if its bar describes an
+earlier trading interval. Use an eligible archive or retain the limitation.
 
 For the scheduled edition, freeze evidence at 11:30 New York time; record the
 actual generation time separately. Read news since the previous completed
@@ -105,7 +115,11 @@ for each proposed ticker, including invalidated ideas; do not research only past
 winners. Read the existing stock note through `stock_dossiers.py context --vault '<vault>'
 --ticker '<ticker>' --as-of '<cutoff>'` as a navigation aid. Its latest assessment
 is usable only when available by this cutoff; follow its dated report links for
-earlier context. The daily history and outcome journals remain authoritative.
+earlier context. Inspect the helper's history findings separately: a verified
+current assessment does not establish that every older linked report is intact.
+Use a verified preserved original when supplied; never adopt altered legacy
+bytes, silently rewrite their fingerprints or treat a successful update as
+history reconciliation. The daily history and outcome journals remain authoritative.
 Inspect relevant existing user market notes listed outside the recognized
 naming pattern as read-only background and identify gaps in their history.
 
@@ -176,8 +190,11 @@ final selection still follow the research method. Optional filing extraction
 must use an exact verified accession, never an implicit latest filing.
 Complete the shortlist's [dated capitalization check](references/capitalization.md)
 using an existing sourced cap or a labeled estimate from verified outstanding
-shares and a matching raw price. Missing provider market-cap fields do not require
-abandoning this check; ambiguous share bases remain unresolved.
+shares and a matching raw price. Select cutoff-eligible archived price evidence
+through the bundled capture helper; retain its observation time, availability
+and evidence link rather than constructing an earlier availability timestamp.
+Missing provider market-cap fields do not require abandoning this check;
+ambiguous share bases remain unresolved.
 
 For a shortlist whose expectations matter, read eligible archived estimates and
 capture relevant current periods under the data-access guide's

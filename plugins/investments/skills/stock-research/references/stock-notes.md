@@ -13,6 +13,16 @@ ownership and recovery data, not scratch. Preserve them with the stock notes;
 do not delete or edit them during cleanup. Temporary update plans are separate
 and remain in owned scratch until publication succeeds.
 
+New publications also preserve one exact copy of the validated daily bytes at
+`Investments/.stock-research/dossiers/evidence/<SHA256>.md`, shared by that daily
+report's dossiers. These private, content-addressed evidence snapshots are durable
+original evidence, not editable replacement reports. They are created before the
+write-ahead receipt and reused only when their bytes match exactly; an existing
+conflicting or unsafe occupant is never replaced. The receipt remains schema 1;
+new history rows add `evidence_snapshot: true`, while legacy rows remain readable
+without that field. Reading or retrying an already committed legacy row does not
+backfill snapshots, change its original hash or upgrade its evidence contract.
+
 ## Coverage and content
 
 Create or update a stock note for every substantively evaluated stock, including
@@ -46,11 +56,31 @@ python3 '<skill>/scripts/stock_dossiers.py' context --vault '<vault>' --ticker A
 ```
 
 Use its current assessment only when available by the new edition's cutoff.
-For an earlier cutoff, follow eligible historical daily links instead. Do not
+For an earlier cutoff, follow eligible verified `history[].evidence_note` paths instead. Do not
 backfill a prior judgment from a dossier updated with later information. The daily
 history/outcome inventory governs recommendation clocks, failures and prior
 lessons; a dossier is a convenient current view, not an independent source of
 financial facts. Preserve immutable daily reports when correcting a dossier.
+
+Inspect `history_complete` and `history_diagnostics` separately from `status`.
+A valid latest assessment can have `status: current` and incomplete history.
+Changed, missing or unsafe source paths are explicitly quarantined in diagnostics,
+with their original expected hashes retained. Do not follow those public links as
+verified evidence. When an exact preserved snapshot is available, its path is
+returned as `evidence_note` and, for the latest assessment, `current_source`; the
+public-source conflict remains visible. Without verified original evidence for a
+row, that row is omitted from usable `history`, not deleted from its receipt.
+When the latest row has no verified original evidence, `status: unverified-current`
+withholds `current`. Modified stock-note bytes still fail the ownership check.
+
+The helper never treats a fresh source hash as reconciliation. Cosmetic byte
+changes, including line endings, and material edits both remain conflicts; it
+does not normalize whitespace, code or tables to infer equivalence. An archive
+preserves the originally validated assessment without endorsing edited source
+bytes. All context, including diagnostics and archive paths, is filtered by both
+the recorded assessment cutoff and generation time. A snapshot does not make a
+later judgment available to an earlier edition. Pending publications must still
+be recovered before reading context.
 
 ## Publish after the daily report
 
@@ -67,7 +97,11 @@ Update every substantive assessment with the normal batch command:
 python3 '<skill>/scripts/stock_dossiers.py' sync --vault '<vault>' --daily-note '<published-daily-note>' --work-dir '<scratch>'
 ```
 
-Inspect `complete`, `analyzed`, `results` and `failures`. A failure includes its
+Inspect `complete`, `analyzed`, `results`, `failures`, `history_complete` and
+`history_diagnostics`; individual prepare/publish results use the same history
+audit. `complete` confirms the requested writes, not repaired historical evidence.
+A valid new dated assessment may update a verified owned stock note while older
+conflicts remain quarantined and explicitly reported. A failure includes its
 retained `recovery_draft` where available; successful stock writes need not be
 repeated manually. A clean run with no substantive assessments has no dossiers to
 create, not missing publications. Re-running sync is safe and should complete
@@ -94,6 +128,20 @@ resume the missing stock updates from the already published daily report; never
 rewrite the report or create a fresh daily edition merely to repair this step.
 A scheduled retry that reuses an existing report must also finish its outstanding
 stock-note updates before reporting a complete run.
+
+If the public daily changes, disappears or becomes unsafe during a pending
+publication, retry `publish` with the retained original update plan. Only that
+plan-bound pending receipt can authorize recovery from its exact contracted
+evidence snapshot. The helper verifies the predecessor, source digest, assessment,
+identity and frozen provenance before completing the saved transaction; it leaves
+the public occupant untouched and reports its conflict after recovery. A fresh
+plan, an orphan snapshot or a legacy pending row without a snapshot contract
+cannot use this fallback. Normal `sync` still needs the public daily to discover
+its assessments, so use the targeted original-plan `publish` command above when
+that report can no longer be safely read. Replaying the exact committed plan then
+returns `unchanged` without copying source bytes or repairing history; diagnostics
+still describe any unresolved paths. Preserve unresolved pending artifacts
+if their original evidence is unavailable; do not rehash or recreate the report.
 
 The helper owns only its verified generated notes. Preserve unfamiliar occupants,
 manual changes, identity conflicts and unsafe paths; report the exact blocker
