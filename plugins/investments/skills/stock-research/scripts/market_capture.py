@@ -196,6 +196,26 @@ def _work_folder(path, vault):
     return work
 
 
+def _coverage_diagnostic(payload, item):
+    """Explain normalized coverage failure without returning raw provider text."""
+    same_period = [row for row in payload['data'] if row['fiscal_period_end'] == item['period']]
+    selected = next((row for row in same_period if row['horizon'] == item['horizon']), None)
+    if not same_period:
+        reason = 'requested_period_missing_or_invalid' if payload['invalid_record_count'] else 'requested_period_missing'
+    elif selected is None:
+        reason = 'requested_horizon_missing_or_invalid' if payload['invalid_record_count'] else 'requested_horizon_missing'
+    elif not market_estimates.has_current_estimate(selected):
+        reason = 'current_estimate_missing'
+    else:
+        reason = 'incomplete_provider_response'
+    return {'reason': reason, 'observed_at': payload['observed_at'],
+            'within_cutoff': payload['within_cutoff'],
+            'provider_record_count': payload['provider_record_count'],
+            'invalid_record_count': payload['invalid_record_count'],
+            'missing_periods': payload['missing_periods'],
+            'returned_horizons': sorted({row['horizon'] for row in same_period})}
+
+
 def capture(vault, plan_path, work_dir, *, max_calls=3, reuse_hours=24, as_of=None,
             client=None, clock=utc_now, sleep=time.sleep):
     if (type(max_calls) is not int or not 0 <= max_calls <= 10
@@ -212,16 +232,22 @@ def capture(vault, plan_path, work_dir, *, max_calls=3, reuse_hours=24, as_of=No
     for item in plan:
         symbol = item['symbol']
         if symbol not in cached:
-            cached[symbol] = history.estimate_history(vault, _iso(cutoff or current), symbol, now=current)['snapshots']
+            # A retry can reuse a recent late snapshot without making it
+            # eligible for the frozen edition or spending another symbol call.
+            cached[symbol] = history.estimate_history(vault, _iso(current), symbol, now=current)['snapshots']
         matching = [record for record in cached[symbol]
                     if record['snapshot']['record']['fiscal_period_end'] == item['period']
                     and record['snapshot']['record']['horizon'] == item['horizon']
                     and parse_time(record['snapshot']['observed_at']) >= current - timedelta(hours=reuse_hours)]
         row = dict(item, status='pending', snapshot=None, available_at=None, eligible_at_cutoff=None)
         if matching:
-            selected = matching[-1]
-            row.update(status='reused', snapshot=selected['path'], available_at=selected['snapshot']['available_at'],
-                       eligible_at_cutoff=True if cutoff is not None else None)
+            eligible = [record for record in matching
+                        if cutoff is None or parse_time(record['snapshot']['available_at']) <= cutoff]
+            selected = (eligible or matching)[-1]
+            within_cutoff = bool(eligible) if cutoff is not None else None
+            row.update(status='reused' if within_cutoff is not False else 'reused_future_only',
+                       snapshot=selected['path'], available_at=selected['snapshot']['available_at'],
+                       eligible_at_cutoff=within_cutoff)
         else:
             missing.setdefault(symbol, []).append(len(result))
         result.append(row)
@@ -252,7 +278,8 @@ def capture(vault, plan_path, work_dir, *, max_calls=3, reuse_hours=24, as_of=No
             payload = redact(payload, client.env, extra_values=getattr(client, 'redaction_values', ()))
             if payload.get('coverage_complete') is not True:
                 for index in indexes:
-                    result[index]['status'] = 'coverage_unavailable'
+                    result[index].update(status='coverage_unavailable',
+                                         coverage=_coverage_diagnostic(payload, result[index]))
                 continue
             saved_payload = work / ('estimates-' + symbol + '-' + uuid.uuid4().hex + '.json')
             with saved_payload.open('xb') as handle:
@@ -263,7 +290,7 @@ def capture(vault, plan_path, work_dir, *, max_calls=3, reuse_hours=24, as_of=No
                 row = result[index]
                 if not any(item['fiscal_period_end'] == row['period'] and item['horizon'] == row['horizon']
                            for item in payload['data']):
-                    row['status'] = 'coverage_unavailable'
+                    row.update(status='coverage_unavailable', coverage=_coverage_diagnostic(payload, row))
                     continue
                 saved = history.save_snapshot(saved_payload, vault, row['period'], row['horizon'], now=clock())
                 available = saved['snapshot']['available_at']
@@ -493,10 +520,63 @@ def run_self_test():
             self.assertTrue(later['items'][0]['eligible_at_cutoff'])
             self.assertEqual(len(self.calls), 1)
 
+        def test_same_frozen_cutoff_retry_reuses_late_snapshot_without_another_call(self):
+            cutoff = _iso(self.instant - timedelta(seconds=1))
+            first = self.run_capture(as_of=cutoff)
+            path = Path(first['items'][0]['snapshot'])
+            before = path.read_bytes()
+            self.instant += timedelta(minutes=5)
+            result = self.run_capture(as_of=cutoff)
+            self.assertEqual(self.calls, ['AAA'])
+            self.assertEqual(result['unique_symbol_calls'], 0)
+            self.assertEqual(result['items'][0]['status'], 'reused_future_only')
+            self.assertFalse(result['items'][0]['eligible_at_cutoff'])
+            self.assertFalse(result['complete'])
+            self.assertEqual(result['as_of'], cutoff)
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(history.estimate_history(self.vault, cutoff, 'AAA', now=self.instant)['snapshots'], [])
+
+        def test_eligible_cache_is_preferred_over_a_newer_future_only_snapshot(self):
+            first = self.run_capture()
+            self.instant += timedelta(hours=2)
+            cutoff = _iso(self.instant)
+            self.instant += timedelta(hours=2)
+            self.run_capture(reuse_hours=1)
+            self.assertEqual(self.calls, ['AAA', 'AAA'])
+            result = self.run_capture(as_of=cutoff)
+            self.assertEqual(result['items'][0]['snapshot'], first['items'][0]['snapshot'])
+            self.assertEqual(result['items'][0]['status'], 'reused')
+            self.assertTrue(result['items'][0]['eligible_at_cutoff'])
+            self.assertEqual(self.calls, ['AAA', 'AAA'])
+
         def test_unknown_matching_horizon_stays_unavailable(self):
             result = self.run_capture([self.item('AAA', horizon='fiscal year')])
             self.assertEqual(result['items'][0]['status'], 'coverage_unavailable')
+            self.assertEqual(result['items'][0]['coverage']['reason'], 'requested_horizon_missing')
+            self.assertEqual(result['items'][0]['coverage']['returned_horizons'], ['fiscal quarter'])
             self.assertFalse(result['complete'])
+
+        def test_incomplete_success_retains_actionable_normalized_coverage_diagnostics(self):
+            valid = {'date': '2026-11-30', 'horizon': 'fiscal quarter', 'eps_estimate_average': '2.50'}
+            cases = [
+                ([dict(valid, date='2027-02-28')], 'requested_period_missing', 0),
+                ([dict(valid, eps_estimate_average=None)], 'current_estimate_missing', 0),
+                ([dict(valid, eps_estimate_average=self.secret)], 'requested_period_missing_or_invalid', 1),
+                ([valid, {'untrusted': self.secret}], 'incomplete_provider_response', 1),
+            ]
+            for rows, reason, invalid in cases:
+                self.replies['AAA'] = {'symbol': 'AAA', 'estimates': rows}
+                with self.subTest(reason=reason):
+                    result = self.run_capture(as_of=_iso(self.instant - timedelta(seconds=1)))
+                    item = result['items'][0]
+                    self.assertEqual(item['status'], 'coverage_unavailable')
+                    self.assertEqual(item['coverage']['reason'], reason)
+                    self.assertEqual(item['coverage']['provider_record_count'], len(rows))
+                    self.assertEqual(item['coverage']['invalid_record_count'], invalid)
+                    self.assertFalse(item['coverage']['within_cutoff'])
+                    self.assertIsNone(item['snapshot'])
+                    self.assertNotIn(self.secret, json.dumps(result))
+                    self.assertFalse(result['cooldown']['active'])
 
         def test_zero_budget_allows_cache_only_without_transport(self):
             self.run_capture()

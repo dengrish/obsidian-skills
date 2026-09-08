@@ -174,6 +174,10 @@ limit only the affected source. Retrieval helpers supply evidence; the offline
 screener calculates declared measurements and filters, while interpretation and
 final selection still follow the research method. Optional filing extraction
 must use an exact verified accession, never an implicit latest filing.
+Complete the shortlist's [dated capitalization check](references/capitalization.md)
+using an existing sourced cap or a labeled estimate from verified outstanding
+shares and a matching raw price. Missing provider market-cap fields do not require
+abandoning this check; ambiguous share bases remain unresolved.
 
 For a shortlist whose expectations matter, read eligible archived estimates and
 capture relevant current periods under the data-access guide's
