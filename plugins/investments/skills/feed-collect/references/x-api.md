@@ -36,28 +36,64 @@ to a market-only credentials file, whose schema intentionally rejects them.
 API credentials, stored post bodies and collector state do not belong in Git.
 
 The [official timeline guide](https://docs.x.com/x-api/posts/timelines/integrate)
-documents `GET /2/users/{id}/tweets`, incremental IDs and pagination. Every timeline
-request uses `exclude=retweets,replies`, including resumed pages, to avoid retrieving
-those posts. This also excludes self-replies and thread continuations; quote posts
-remain unless they are also replies. The documented timeline ceiling with replies
-excluded is **800 recent posts**, not a complete historical archive. A normal
-first run starts with seven days. The explicit `--latest N` sample can reach
-older posts within the provider's available timeline, subject to its separate
-paid-read budget. A long offline interval or provider visibility limits can
-leave gaps even when pagination ends.
+documents `GET /2/users/{id}/tweets`, incremental IDs and pagination. New timeline
+windows use `exclude=replies`: original posts, quote posts and reposts are eligible,
+but replies, self-replies and thread continuations are not. The documented timeline
+ceiling with replies excluded is **800 recent posts**, not a complete historical
+archive. This can limit coverage even within a three-day window for a prolific
+account. Provider visibility limits or deleted posts can also leave gaps even
+when pagination ends.
 
-## Initial samples and incremental updates
+An unfinished window created with `exclude=retweets,replies` retains that exact
+filter when resumed. Only newly opened windows switch to including reposts.
+Do not reset cursors, change a query mid-pagination or reread completed intervals
+to recover previously excluded reposts. Historical repost coverage remains
+limited by the filter used at the time of collection.
+
+## Three-day collection and saved progress
+
+An ordinary run requests every available eligible post at most **72 hours old
+at the start of the run**, across all enabled accounts. The helper freezes the
+time bounds for the invocation; the upper cutoff leaves a 30-second API indexing
+buffer, so the newest few seconds are picked up on a later run. An explicit
+`--until` instead sets a reproducible historical cutoff with a three-day lookback.
+There is no normal bootstrap or older-history catch-up period.
+
+Saved completion boundaries and pagination prevent overlapping paid requests.
+The collector does not request the entire three-day window again each time.
+After a long pause, it skips acquisition outside the current window and shows
+the recent acquisition bounds rather than claiming continuous history. Existing older
+posts remain saved; the time limit does not delete note content or state.
+
+Previously saved successful responses are applied offline before any new paid
+request. Unfinished windows and recent tails omitted by a sample are resumed
+only where their saved bounds support the current window without replaying known
+pages. An older window that cannot safely continue under the new time policy is
+deferred with its recovery evidence, not restarted from its newest page. Inspect
+reported deferrals and gaps rather than assuming that every eligible post was
+available. An ambiguous in-flight request still blocks automatic collection.
+
+Saved pagination tokens can expire. A rejected or expired token remains an
+explicit recovery/gap condition; never restart from the newest page automatically
+or describe the interrupted interval as complete. [X pagination notes](https://docs.x.com/x-api/fundamentals/pagination#notes)
+
+## Explicit historical samples
 
 `--latest N` establishes an initial sample target for each account, not a limit
-on the lifetime size of its note. Future runs continue forward from the saved
-boundary. Once established, that target is fixed: repeat the same `--latest N`
-or omit it for ordinary forward updates. A different N is rejected; it does not
-reset the sample or silently resume intentionally omitted older history.
+on the lifetime size of its note. Use it only when the user requests a sample:
+it can retrieve posts older than three days within the provider's available
+timeline. Once established, the target is fixed: repeat the same `--latest N`
+to continue it. Omitting the option uses the three-day policy and does not
+silently continue an unfinished older sample. A different N is rejected; it does
+not reset the sample or silently resume intentionally omitted older history.
+A sample superseded by an ordinary run is no longer an active historical target;
+its status remains in state rather than silently restarting it later.
 Stop when the target is reached, the provider is exhausted or a budget
-is reached; report those outcomes separately. Replies, reposts and duplicates
-consume a returned-row budget even when they do not count toward the target.
-The API's minimum page size is five. When fewer originals remain to reach the
-target, the final page can contain up to four extra originals; retain purchased
+is reached; report those outcomes separately. The target counts posts eligible
+under each window's saved filter, including reposts in new windows. Excluded rows
+and duplicates consume a returned-row budget without counting toward the target.
+The API's minimum page size is five. When fewer eligible posts remain to reach the
+target, the final page can contain up to four extra eligible posts; retain purchased
 posts and report the actual count rather than discard them or claim exactly N.
 Initial-sample status and forward completion are reported separately. When a
 saved older window finishes, continue toward the current requested cutoff while
@@ -74,13 +110,9 @@ date. Once recorded, the boundary can be resumed without reentering it. An
 unknown boundary limits older-history extension; it does not authorize repeat
 paid reads. Completing a sample leaves older-history omission explicit.
 
-Saved pagination tokens can expire. A rejected or expired token remains an
-explicit recovery/gap condition; never restart from the newest page automatically
-or describe the interrupted interval as complete. [X pagination notes](https://docs.x.com/x-api/fundamentals/pagination#notes)
-
 ## Paid-read discipline
 
-The helper's request and post limits are hard bounds for each invocation, not a
+Explicit request and post budgets are hard bounds for each invocation, not a
 promise of a dollar charge. Check [current X pricing](https://docs.x.com/x-api/getting-started/pricing)
 and set a spending limit in the developer console. User lookup and other resource
 types may be billable too. Avoid extra profile/metric refreshes and referenced-post
@@ -89,26 +121,43 @@ windows request only primary-post attachment metadata in the same response;
 see [attachments](attachments.md). Do not change a saved page's query schema
 mid-pagination to add media fields.
 
-Defaults are 25 requests and 1,000 returned posts per invocation, shared across
-the roster. `--max-requests` and `--max-posts` can set a smaller explicit budget.
-Requests rotate among accounts so a busy feed does not consume every run. New
-accounts also need an initial user lookup, which counts against the request
-budget. Deferred or unfinished accounts remain visible in the result.
+There is **no default request or returned-post cap**. Ordinary collection follows
+the three-day window through pagination for every enabled account. Optional
+`--max-requests` and `--max-posts` impose whole-run budgets, not per-account
+allowances; reaching either can leave accounts unfinished. Do not raise an
+explicit budget automatically. Deferred or unfinished accounts remain visible
+in the result and may resume from saved progress within a later run's window.
+
+A request is one call to X: fetching a page uses one, even if the page is empty,
+and looking up a new account uses one too. For example, checking 21 known
+accounts with one page each uses 21 requests; if each returns 10 posts, that is
+210 returned posts. Provider charges and limits still apply without a helper
+budget. Attachment downloads retain separate download-count and byte limits.
+
+Ordinary collection has no fixed post quota per account. It requests up to 100
+posts per page, reducing that size to an explicit remaining shared post budget.
+Accounts take one page per turn and return for additional pages or unfinished windows
+while the requested window remains unfinished and any explicit budgets permit.
+A saved rotation position determines where the next run starts; budgets are not
+divided into equal per-account allocations.
 
 - Resolve a handle once, then collect by its stable user ID.
 - Retain successful pages before generating notes. Publication is offline.
-- Resume the saved window and next page after a budget stop or interruption.
-  For ordinary collection, advance the completed boundary after exhausting that
-  window. An initial sample may instead stop at its target and advance to its
+- Resume a compatible saved window and next page after a budget stop or
+  interruption, respecting the three-day policy for ordinary collection.
+  Advance the completed boundary after exhausting the requested window.
+  An explicit initial sample may instead stop at its target and advance to its
   sample cutoff while preserving the unconsumed older cursor as intentionally
-  omitted history. Preserve
-  its exclusion filter; an incompatible saved filter blocks further requests
-  instead of silently restarting or reusing a cursor with a different query.
+  omitted history. Preserve its supported saved exclusion filter; an unknown
+  filter blocks further requests instead of silently restarting or reusing a
+  cursor with a different query.
 - Deduplicate post IDs locally, including repeated rows returned by X. This
   prevents duplicate records; it cannot undo a provider's charge for duplicates
-  that the provider itself returned. Unexpected reply/repost rows are not added
-  to the account record, but still count toward the returned-post budget and
-  cursor advancement so they do not cause repeated requests.
+  that the provider itself returned. Replies, and reposts excluded by an older
+  window's filter, are not added to the account record, but still count toward
+  the returned-post budget and cursor advancement so they do not cause repeated
+  requests. Keep each repost's own ID rather than deduplicating it against the
+  original post it references.
 - Keep the request's safe filtering/paging parameters and its non-overlapping
   row-accounting totals after processing. Source text and credentials do not
   belong in these operational receipts. Old request records without this
@@ -123,7 +172,14 @@ source creation time and first retrieval time in UTC. Prefer returned complete
 long-post text to a short preview, without reconstructing missing text. Preserve
 reference IDs and available attachment metadata. The collector downloads its own
 photo attachments and directly linked PDFs under [the attachment rules](attachments.md).
-It does not fetch quoted posts separately, transcribe videos or crawl linked pages.
+For a repost, the heading time and stored ID describe the repost event, not the
+referenced original's publication. Label it `Reposted by @handle` and link the
+original using its returned reference ID; do not attribute the original's words
+to the reposting account. [X warns that repost text can be truncated](https://docs.x.com/x-api/posts/timelines/integrate).
+Keep the returned text and disclose that it may be incomplete. Do not add
+referenced-post or original-author expansions, retrieve the original separately,
+or reconstruct its text or attachments. The same no-extra-fetch rule applies
+to quoted posts. The collector does not transcribe videos or crawl linked pages.
 Readable post text uses ordinary Markdown paragraphs with source markup escaped
 and original line breaks preserved; source metadata is collapsed below it.
 Render HTTP(S) URLs as explicit clickable links without changing their original
