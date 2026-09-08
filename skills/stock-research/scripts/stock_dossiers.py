@@ -219,6 +219,14 @@ class Store:
             self.stocks = self._child(self.investments, 'Stocks', create)
             self.private = self._child(self.investments, '.stock-research', create, True)
             self.receipts = self._child(self.private, 'dossiers', create, True)
+            self.evidence_invalid = False
+            try:
+                self.evidence = self._child(self.receipts, 'evidence', create, True)
+            except (OSError, ValueError):
+                if create:
+                    raise
+                self.evidence = None
+                self.evidence_invalid = True
         except BaseException:
             self.close()
             raise
@@ -246,7 +254,8 @@ class Store:
         checks = ((self.vault, self.root), (self.vault / 'Investments', self.investments),
                   (self.vault / 'Investments/Stocks', self.stocks),
                   (self.vault / 'Investments/.stock-research', self.private),
-                  (self.vault / 'Investments/.stock-research/dossiers', self.receipts))
+                  (self.vault / 'Investments/.stock-research/dossiers', self.receipts),
+                  (self.vault / 'Investments/.stock-research/dossiers/evidence', self.evidence))
         for path, fd in checks:
             if fd is not None:
                 item = path.lstat()
@@ -338,7 +347,9 @@ def _validate_record(record, ticker):
         raise ValueError('stock history is empty')
     last = None
     for row in record['history']:
-        if set(row) != {'daily_note', 'daily_sha256', 'as_of', 'generated_at', 'heading', 'status'}:
+        fields = {'daily_note', 'daily_sha256', 'as_of', 'generated_at', 'heading', 'status'}
+        if (not isinstance(row, dict) or set(row) not in (fields, fields | {'evidence_snapshot'})
+                or ('evidence_snapshot' in row and row['evidence_snapshot'] is not True)):
             raise ValueError('invalid stock history row')
         _daily_name(row['daily_note'])
         cutoff = market_notes.iso_time(row['as_of'])
@@ -364,6 +375,9 @@ def _validate_record(record, ticker):
     note_provenance.validate_record(provenance['generated_by'])
     if 'updated_by' in provenance:
         note_provenance.validate_record(provenance['updated_by'])
+    if any(provenance[key]['skill'] != 'investments:stock-research'
+           for key in ('generated_by', 'updated_by') if key in provenance):
+        raise ValueError('dossier receipt provenance must be investments:stock-research')
 
 
 def _daily_name(value):
@@ -378,6 +392,11 @@ def _daily(store, name):
     data, _ = store.read(store.investments, basename)
     if data is None:
         raise ValueError('publish the immutable daily report before updating stock notes')
+    return _daily_content(data, name)
+
+
+def _daily_content(data, name):
+    basename = _daily_name(name)
     linted = market_notes.lint_bytes(data)
     if (linted['provenance'] is None
             or linted['provenance']['generated_by']['skill'] != 'investments:stock-research'):
@@ -386,6 +405,64 @@ def _daily(store, name):
     if not basename.startswith(meta['date']):
         raise ValueError('daily filename and report date disagree')
     return data, meta, candidates(data)
+
+
+def _evidence_path(digest):
+    return 'Investments/.stock-research/dossiers/evidence/' + digest + '.md'
+
+
+def _archive_daily(store, data):
+    """Create exact original evidence once; never replace an existing occupant."""
+    name = _hash(data) + '.md'
+    existing, _ = store.read(store.evidence, name)
+    if existing is not None:
+        if existing != data:
+            raise ValueError('dossier evidence snapshot changed; preserve it: ' + name)
+    else:
+        store.write(store.evidence, name, data, None, True)
+
+
+def _history_audit(store, record, cutoff=None):
+    """Separate usable original evidence from quarantined paths, without repairs."""
+    history, diagnostics = [], []
+    for row in record['history'] if record else []:
+        if cutoff is not None and (market_notes.iso_time(row['as_of']) > cutoff
+                                   or market_notes.iso_time(row['generated_at']) > cutoff):
+            continue
+        sources = [(store.investments, _daily_name(row['daily_note']), row['daily_note'])]
+        if row.get('evidence_snapshot'):
+            path = _evidence_path(row['daily_sha256'])
+            sources.append((store.evidence, Path(path).name, path))
+        verified = None
+        for fd, name, path in sources:
+            reason = None
+            try:
+                data, _ = store.read(fd, name)
+                if data is None:
+                    reason = ('unsafe-or-invalid' if path != row['daily_note'] and store.evidence_invalid
+                              else 'missing')
+                elif _hash(data) != row['daily_sha256']:
+                    reason = 'changed'
+                else:
+                    _, meta, entries = _daily_content(data, row['daily_note'])
+                    item = next((item for item in entries if item['ticker'] == record['ticker']), None)
+                    if (meta['as_of'] != row['as_of'] or meta['generated_at'] != row['generated_at']
+                            or item is None or item['heading'] != row['heading'] or item['status'] != row['status']):
+                        reason = 'metadata-conflict'
+                    else:
+                        verified = path
+            except (OSError, ValueError, RuntimeError):
+                # Do not expose content or a symlink target in a diagnostic.
+                reason = 'unsafe-or-invalid'
+            if reason:
+                diagnostics.append({'daily_note': row['daily_note'], 'path': path,
+                                    'expected_sha256': row['daily_sha256'], 'reason': reason,
+                                    'quarantined': True})
+        if verified:
+            history.append({**row, 'evidence_note': verified})
+    store.stable()
+    return {'history': history, 'history_complete': not diagnostics,
+            'history_diagnostics': diagnostics}
 
 
 def _same_company(prior, item):
@@ -430,6 +507,7 @@ def prepare(vault, daily_note, ticker, exchange=None, company=None, heading=None
                                        for row in prior['history'])
         if prior and not already_synced:
             _same_company(prior, item)
+        audit = _history_audit(store, prior)
         value = {'schema': 1, 'vault': str(store.vault), 'daily_note': daily,
                  'daily_sha256': _hash(data), 'ticker': ticker,
                  'expected_sha256': prior['published_sha256'] if prior else None}
@@ -445,12 +523,13 @@ def prepare(vault, daily_note, ticker, exchange=None, company=None, heading=None
             if _read(target)[0] != data:
                 raise ValueError('dossier draft failed readback')
         return {'status': 'prepared', 'draft': str(draft) if draft else None, 'plan': value,
-                'path': str(store.vault / 'Investments/Stocks' / (ticker + '.md'))}
+                'path': str(store.vault / 'Investments/Stocks' / (ticker + '.md')), **audit}
 
 
 def _render(item, meta, daily, daily_digest, prior, previous, provenance):
     row = {'daily_note': daily, 'daily_sha256': daily_digest, 'as_of': meta['as_of'],
-           'generated_at': meta['generated_at'], 'heading': item['heading'], 'status': item['status']}
+           'generated_at': meta['generated_at'], 'heading': item['heading'], 'status': item['status'],
+           'evidence_snapshot': True}
     record = {key: item[key] for key in ('ticker', 'exchange', 'company', 'company_id', 'status')}
     if prior and record['company_id'] is None:
         record['company_id'] = prior['company_id']
@@ -484,30 +563,53 @@ def publish(vault, draft, provenance=None):
         raise ValueError('invalid dossier publication plan')
     if plan['vault'] != str(Path(vault).expanduser().resolve(strict=True)):
         raise ValueError('dossier plan belongs to another vault')
+    _daily_name(plan['daily_note'])
+    if (not isinstance(plan['daily_sha256'], str) or not re.fullmatch('[a-f0-9]{64}', plan['daily_sha256'])
+            or (plan['expected_sha256'] is not None and
+                (not isinstance(plan['expected_sha256'], str) or not re.fullmatch('[a-f0-9]{64}', plan['expected_sha256'])))):
+        raise ValueError('invalid dossier plan digest')
     # Provenance overrides exist only for fixture callers; the CLI always verifies its installed bundle.
     producer = provenance if provenance is not None else market_notes.active_provenance()
     note_provenance.validate_record(producer)
     if producer['skill'] != 'investments:stock-research':
         raise ValueError('dossier producer must be investments:stock-research')
     with Store(vault, create=True) as store:
-        daily, meta, entries = _daily(store, plan['daily_note'])
-        if _hash(daily) != plan['daily_sha256']:
-            raise ValueError('immutable daily report changed after planning')
-        item = next((entry for entry in entries if entry['ticker'] == plan['ticker']), None)
-        if item is None:
-            raise ValueError('stock assessment disappeared from the daily report')
-        receipt, receipt_token, note_token = store.load(item['ticker'])
-        prior = receipt['committed']
-        if prior:
-            latest = prior['history'][-1]
+        receipt, receipt_token, note_token = store.load(plan['ticker'])
+        prior, pending = receipt['committed'], receipt['pending']
+        if prior and not pending:
             previous_publication = next((row for row in prior['history']
                                          if row['daily_note'] == plan['daily_note']
                                          and row['daily_sha256'] == plan['daily_sha256']), None)
             if previous_publication:
-                if receipt['pending']:
-                    raise ValueError('a later dossier update is pending; finish it before replaying this older report')
-                return {'status': 'unchanged', 'superseded': previous_publication != latest,
-                        'path': str(store.vault / 'Investments/Stocks' / (item['ticker'] + '.md'))}
+                # An already committed plan needs no source copying or new write.
+                return {'status': 'unchanged', 'superseded': previous_publication != prior['history'][-1],
+                        'path': str(store.vault / 'Investments/Stocks' / (plan['ticker'] + '.md')),
+                        **_history_audit(store, prior)}
+        if pending:
+            tail = pending['record']['history'][-1]
+            if tail['daily_note'] != plan['daily_note'] or tail['daily_sha256'] != plan['daily_sha256']:
+                raise ValueError('another dossier update is pending; recover it first')
+            if plan['expected_sha256'] != (prior['published_sha256'] if prior else None):
+                raise ValueError('stock snapshot changed after planning; prepare again')
+            if pending['record']['history'][:-1] != (prior['history'] if prior else []):
+                raise ValueError('pending dossier history does not extend its exact predecessor')
+        try:
+            daily, meta, entries = _daily(store, plan['daily_note'])
+            if _hash(daily) != plan['daily_sha256']:
+                raise ValueError('immutable daily report changed after planning')
+        except (OSError, ValueError, RuntimeError):
+            # Only a validated, plan-bound write-ahead transaction authorizes this
+            # recovery. An orphan archive is never a substitute for a fresh source.
+            if not pending or not tail.get('evidence_snapshot'):
+                raise
+            daily, _ = store.read(store.evidence, plan['daily_sha256'] + '.md')
+            if daily is None or _hash(daily) != plan['daily_sha256']:
+                raise ValueError('pending dossier original evidence is unavailable; preserve recovery artifacts')
+            daily, meta, entries = _daily_content(daily, plan['daily_note'])
+        item = next((entry for entry in entries if entry['ticker'] == plan['ticker']), None)
+        if item is None:
+            raise ValueError('stock assessment disappeared from the daily report')
+        if prior:
             _same_company(prior, item)
             if market_notes.iso_time(meta['as_of']) <= market_notes.iso_time(prior['as_of']):
                 raise ValueError('stale or equal-cutoff assessment cannot replace a newer stock snapshot')
@@ -516,13 +618,19 @@ def publish(vault, draft, provenance=None):
         if plan['expected_sha256'] != (prior['published_sha256'] if prior else None):
             raise ValueError('stock snapshot changed after planning; prepare again')
         previous, _ = store.read(store.stocks, item['ticker'] + '.md')
-        pending = receipt['pending']
         if pending:
-            tail = pending['record']['history'][-1]
-            if tail['daily_note'] != plan['daily_note'] or tail['daily_sha256'] != plan['daily_sha256']:
-                raise ValueError('another dossier update is pending; recover it first')
             record, text = pending['record'], pending['document']
+            frozen_provenance = record['provenance'].get('updated_by', record['provenance']['generated_by'])
+            rebuilt, rebuilt_text = _render(item, meta, plan['daily_note'], plan['daily_sha256'],
+                                            prior, previous, frozen_provenance)
+            if not tail.get('evidence_snapshot'):
+                rebuilt['history'][-1].pop('evidence_snapshot')
+            if rebuilt != record or rebuilt_text != text:
+                raise ValueError('pending dossier does not match its original assessment, identity and provenance')
+            if tail.get('evidence_snapshot'):
+                _archive_daily(store, daily)
         else:
+            _archive_daily(store, daily)
             record, text = _render(item, meta, plan['daily_note'], plan['daily_sha256'], prior, previous, producer)
             _validate_record(record, item['ticker'])
             receipt = {'schema': 1, 'committed': prior, 'pending': {'record': record, 'document': text}}
@@ -533,7 +641,8 @@ def publish(vault, draft, provenance=None):
                     _bytes({'schema': 1, 'committed': record, 'pending': None}), receipt_token, True)
         store.load(item['ticker'])
         return {'status': 'updated' if prior else 'created',
-                'path': str(store.vault / 'Investments/Stocks' / (item['ticker'] + '.md'))}
+                'path': str(store.vault / 'Investments/Stocks' / (item['ticker'] + '.md')),
+                **_history_audit(store, record)}
 
 
 def context(vault, ticker, as_of):
@@ -546,19 +655,29 @@ def context(vault, ticker, as_of):
             raise ValueError('stock publication is incomplete; recover the pending daily update first')
         record = receipt['committed']
         if record is None:
-            return {'status': 'missing', 'ticker': ticker, 'history': [], 'current': None}
-        history = [row for row in record['history'] if market_notes.iso_time(row['as_of']) <= cutoff
-                   and market_notes.iso_time(row['generated_at']) <= cutoff]
-        for row in history:
-            data, _, _ = _daily(store, row['daily_note'])
-            if _hash(data) != row['daily_sha256']:
-                raise ValueError('immutable stock history report changed: ' + row['daily_note'])
+            return {'status': 'missing', 'ticker': ticker, 'current': None,
+                    'current_source': None, **_history_audit(store, None)}
+        audit = _history_audit(store, record, cutoff)
         available = (market_notes.iso_time(record['as_of']) <= cutoff
                      and market_notes.iso_time(record['updated']) <= cutoff)
+        latest = next((row for row in audit['history']
+                       if row['daily_sha256'] == record['history'][-1]['daily_sha256']
+                       and row['daily_note'] == record['history'][-1]['daily_note']), None)
+        status = 'current' if available and latest else 'unverified-current' if available else 'newer-than-cutoff'
+        warning = None
+        if status == 'newer-than-cutoff':
+            warning = 'Read only eligible verified evidence; the current stock snapshot contains later information.'
+        elif status == 'unverified-current':
+            warning = 'The latest daily evidence is unverified; the current assessment is withheld.'
+        if audit['history_diagnostics']:
+            warning = (warning + ' ' if warning else '') + 'Quarantined paths are not trusted; use only history evidence_note paths. Publication does not resolve these conflicts.'
         note, _ = store.read(store.stocks, ticker + '.md')
-        return {'status': 'current' if available else 'newer-than-cutoff', 'ticker': ticker,
-                'history': history, 'current': note.decode() if available else None,
-                'warning': None if available else 'Read eligible immutable daily reports; the current stock snapshot contains later information.'}
+        if note is None or _hash(note) != record['published_sha256']:
+            raise ValueError('stock note changed while reading context; preserve it: ' + ticker)
+        store.stable()
+        return {'status': status, 'ticker': ticker, 'current': note.decode() if status == 'current' else None,
+                'current_source': latest['evidence_note'] if status == 'current' else None,
+                'warning': warning, **audit}
 
 
 def sync(vault, daily_note, work_dir, provenance=None):
@@ -580,7 +699,9 @@ def sync(vault, daily_note, work_dir, provenance=None):
             failures.append({'ticker': item['ticker'], 'error': str(exc), 'recovery_draft': str(draft)})
         else:
             shutil.rmtree(folder)
-    return {'complete': not failures, 'analyzed': len(entries), 'results': results, 'failures': failures}
+    return {'complete': not failures, 'analyzed': len(entries), 'results': results, 'failures': failures,
+            'history_complete': not failures and all(row['history_complete'] for row in results),
+            'history_diagnostics': [item for row in results for item in row['history_diagnostics']]}
 
 
 def run_self_test():

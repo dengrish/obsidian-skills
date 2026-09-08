@@ -345,6 +345,7 @@ python3 -m venv .venv
 .venv/bin/python tests/test_market_research_eval.py
 .venv/bin/python tests/test_market_comparison.py
 .venv/bin/python tests/test_market_acquire.py
+.venv/bin/python tests/test_market_price_capture.py
 .venv/bin/python tests/test_stock_feed.py
 .venv/bin/python tests/test_stock_dossiers.py
 .venv/bin/python tests/test_feed_collect.py

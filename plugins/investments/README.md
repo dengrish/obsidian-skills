@@ -81,6 +81,11 @@ Selected estimate observations persist as immutable source JSON under
 A small ordered estimate preflight reuses recent observations and records a
 conservative provider cooldown after quota failure; it never invents historical
 consensus or changes an established cutoff.
+For a fresh manual review, bounded raw-price capture can precede the research
+cutoff too. Verified observations are archived and reused for dated size checks;
+late captures cannot be backdated into a fixed scheduled edition. Stock notes
+keep usable current assessments separate from conflicts in older report links,
+and new updates preserve the exact original report as evidence.
 Exact SEC Form 4/4-A retrieval adds selective insider context without extra
 credentials or parser dependencies; no buying score is inferred from a filing.
 Each skill uses `Reviews/<skill>-suggestions.md` under the

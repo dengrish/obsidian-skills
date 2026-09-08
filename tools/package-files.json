@@ -119,6 +119,7 @@
     "skills/stock-research/scripts/market_acquire.py": "skills/stock-research/scripts/market_acquire.py",
     "skills/stock-research/scripts/market_capture.py": "skills/stock-research/scripts/market_capture.py",
     "skills/stock-research/scripts/market_capitalization.py": "skills/stock-research/scripts/market_capitalization.py",
+    "skills/stock-research/scripts/market_price_capture.py": "skills/stock-research/scripts/market_price_capture.py",
     "skills/stock-research/scripts/market_comparison.py": "skills/stock-research/scripts/market_comparison.py",
     "skills/stock-research/scripts/market_credentials.py": "skills/stock-research/scripts/market_credentials.py",
     "skills/stock-research/scripts/market_data.py": "skills/stock-research/scripts/market_data.py",

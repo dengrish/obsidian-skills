@@ -5992,6 +5992,7 @@ SELFTEST_MIN_CASES = {
     "skills/stock-research/scripts/market_acquire.py": 4,
     "skills/stock-research/scripts/market_capture.py": 19,
     "skills/stock-research/scripts/market_capitalization.py": 19,
+    "skills/stock-research/scripts/market_price_capture.py": 5,
     "skills/stock-research/scripts/market_evidence.py": 3,
     "skills/stock-research/scripts/market_universe.py": 39,
     "skills/stock-research/scripts/market_credentials.py": 13,

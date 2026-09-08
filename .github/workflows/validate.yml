@@ -135,6 +135,10 @@ jobs:
         run: python tests/test_market_comparison.py
       - name: Run market acquisition workflows
         run: python tests/test_market_acquire.py
+      - name: Check price capture and cutoff-aware replay
+        run: python tests/test_market_price_capture.py
+      - name: Check stock-note history and publication recovery
+        run: python tests/test_stock_dossiers.py
       - name: Run source collection workflows without network access
         run: python tests/test_feed_collect.py
       - name: Check rolling three-day source collection
