@@ -137,3 +137,7 @@ jobs:
         run: python tests/test_market_acquire.py
       - name: Run source collection workflows without network access
         run: python tests/test_feed_collect.py
+      - name: Run source attachment workflows without network access
+        run: python tests/test_feed_media.py
+      - name: Check attachment collection and note integration
+        run: python tests/test_feed_attachments.py

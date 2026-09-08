@@ -44,6 +44,11 @@ Use `--allow-unorganized` only for a deliberate one-off exception and explain
 that downstream source identity will depend on the current name. The shared
 rule is [conventions §1a](../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first).
 
+Ordinary folder sweeps exclude feed-owned `x-<post-id>-<asset-hash>.pdf`
+attachments. If one is explicitly selected, preserve its name and use the
+reported `--allow-unorganized` exception; do not rename a collector-owned file
+or treat its original photo attachments as extractor-owned figures.
+
 `--src` accepts a single PDF or a recursively scanned folder. Recursive
 inventory follows directory symlinks and preserves distinct logical paths;
 a symlink loop or unreadable subtree makes the scope incomplete and blocks the

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Independent offline forward tests for paid X collection and vault safety."""
 from copy import deepcopy
-import html
 import json
 import os
 from pathlib import Path
@@ -9,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'skills/feed-collect/scripts'))
@@ -69,6 +69,7 @@ class FeedCollectionTests(unittest.TestCase):
 
     def args(self, command='collect', until=FIRST, **values):
         args = feed.parser().parse_args([command, '--vault', str(self.vault), '--until', until])
+        args.max_downloads = 0  # This suite mocks paid X reads, not attachment HTTP.
         for key, value in values.items():
             setattr(args, key, value)
         return args
@@ -222,6 +223,36 @@ class FeedCollectionTests(unittest.TestCase):
         self.assertEqual(provider.calls, [])
         self.assertEqual(self.note.read_text(encoding='utf-8'), 'User note, not generated collection.\n')
 
+    def test_account_note_case_alias_blocks_paid_reads_without_changing_occupant(self):
+        self.collect(Provider(page([post(105)])))
+        alias = self.note.with_name('Actual.md')
+        self.note.rename(alias)
+        before = alias.read_bytes()
+        provider = Provider(page([post(106, '2026-09-07T13:00:00Z')]))
+        with self.assertRaises(feed.FeedError):
+            self.collect(provider, until=LATER)
+        self.assertEqual(provider.calls, [])
+        self.assertEqual(alias.read_bytes(), before)
+
+    def test_case_aliased_state_is_not_reported_as_an_empty_collection(self):
+        self.collect(Provider(page([post(105)])))
+        alias = self.state_path.with_name('State.json')
+        self.state_path.rename(alias)
+        before = alias.read_bytes()
+        with self.assertRaises(feed.FeedError):
+            feed.execute(self.args(command='status'))
+        self.assertEqual(alias.read_bytes(), before)
+
+    def test_plan_and_status_report_lost_state_instead_of_empty_history(self):
+        self.collect(Provider(page([post(105)])))
+        before = self.note.read_bytes()
+        self.state_path.unlink()
+        for command in ('plan', 'status'):
+            with self.assertRaisesRegex(feed.FeedError, 'missing_existing_state_requires_recovery'):
+                feed.execute(self.args(command=command))
+        self.assertEqual(self.note.read_bytes(), before)
+        self.assertFalse(self.state_path.exists())
+
     def test_abandoned_window_is_not_retrieved_again(self):
         self.collect(Provider(page([post(105)])))
         with self.assertRaises(feed.FeedError):
@@ -240,11 +271,27 @@ class FeedCollectionTests(unittest.TestCase):
         raw['note_post'] = {'text': original}
         self.collect(Provider(page([raw])))
         note = self.note.read_text(encoding='utf-8')
-        body = note.split('<pre style="white-space: pre-wrap;">\n', 1)[1].split('\n</pre>', 1)[0]
-        self.assertEqual(html.unescape(body), original)
+        self.assertNotIn('<pre', note)
+        self.assertIn(r'\`\`\`', note)
+        self.assertIn(r'\[\[Not a wiki link\]\]', note)
+        self.assertIn('&lt;script&gt;unsafe()&lt;/script&gt;', note)
         self.assertEqual(self.state()['accounts']['actual']['posts']['105']['text'], original)
         self.assertEqual(note.count('<!-- skill-provenance:'), 1)
         self.assertNotIn('<script>', note)
+
+    def test_readable_properties_keep_identity_and_check_times_in_state(self):
+        self.collect(Provider(page([post(105, text='A brief original post.\nSecond line.')])))
+        note = self.note.read_text(encoding='utf-8')
+        meta = yaml.safe_load(note.split('---', 2)[1])
+        self.assertEqual(meta, {'sources': ['X'], 'authors': ['[@actual](https://x.com/actual)']})
+        self.assertNotIn('First retrieved:', note)
+        self.assertNotIn('Last checked:', note)
+        self.assertIn('A brief original post.  \nSecond line.', note)
+        account = self.state()['accounts']['actual']
+        self.assertEqual(account['id'], '12')
+        saved = account['posts']['105']
+        self.assertTrue(saved['first_retrieved_at'])
+        self.assertTrue(saved['last_checked_at'])
 
     def test_duplicate_provider_rows_create_one_local_entry(self):
         raw = post(105)
@@ -252,6 +299,26 @@ class FeedCollectionTests(unittest.TestCase):
         self.assertEqual(result['returned_posts'], 2)
         self.assertEqual(set(self.state()['accounts']['actual']['posts']), {'105'})
         self.assertEqual(self.note.read_text(encoding='utf-8').count('https://x.com/i/web/status/105'), 1)
+
+    def test_source_urls_remain_clickable_without_requests_or_remote_embeds(self):
+        url = 'https://example.com/report_name?q=a_b&next=%2Fpath#section_2'
+        original = 'Read (' + url + ').\n![chart](https://example.com/chart.png)\nhttps://t.co/Example'
+        provider = Provider(page([post(105, text=original)]))
+        self.collect(provider)
+        note = self.note.read_text(encoding='utf-8')
+        self.assertIn('<https://example.com/report_name?q=a_b&next=%2Fpath#section_2>', note)
+        self.assertIn(r'!\[chart\](<https://example.com/chart.png>)', note)
+        self.assertIn('<https://t.co/Example>', note)
+        self.assertEqual(len(provider.calls), 2)
+        self.assertEqual(self.state()['accounts']['actual']['posts']['105']['text'], original)
+
+    def test_known_url_entity_preserves_trailing_url_punctuation(self):
+        source = post(105, text='Read https://example.com/path. and https://example.com/a_(b).')
+        source['entities'] = {'urls': [{'url': 'https://example.com/path.'}]}
+        self.collect(Provider(page([source])))
+        note = self.note.read_text(encoding='utf-8')
+        self.assertIn('<https://example.com/path.>', note)
+        self.assertIn('<https://example.com/a_(b)>.', note)
 
     def test_paused_account_keeps_note_and_cannot_trigger_network(self):
         self.collect(Provider(page([post(105)])))
@@ -296,8 +363,8 @@ class FeedCollectionTests(unittest.TestCase):
         self.collect(Provider(page([post(105)])))
         real_render = feed.render
 
-        def editor_writes_during_render(account):
-            output = real_render(account)
+        def editor_writes_during_render(account, assets=None):
+            output = real_render(account, assets)
             self.note.write_text('A newer editor change.\n', encoding='utf-8')
             return output
 
@@ -344,6 +411,17 @@ class FeedCollectionTests(unittest.TestCase):
         with self.assertRaisesRegex(feed.FeedError, 'identity_mismatch'):
             self.collect(blocked)
         self.assertEqual(blocked.calls, [])
+
+    def test_duplicate_known_roster_aliases_fail_before_paid_collection(self):
+        self.collect(Provider(page([post(105)])))
+        self.roster.write_text('- [x] @actual\n- [x] @renamed <!-- x-user-id: 12 -->\n', encoding='utf-8')
+        before_state, before_note = self.state_path.read_bytes(), self.note.read_bytes()
+        provider = Provider()
+        with self.assertRaisesRegex(feed.FeedError, 'duplicate_account_identity'):
+            self.collect(provider, until=LATER)
+        self.assertEqual(provider.calls, [])
+        self.assertEqual(self.state_path.read_bytes(), before_state)
+        self.assertEqual(self.note.read_bytes(), before_note)
 
     def test_empty_existing_state_is_not_adopted_as_a_fresh_collection(self):
         self.collect(Provider(page([post(105)])))
@@ -418,6 +496,384 @@ class FeedCollectionTests(unittest.TestCase):
             self.collect(Provider(page(rows)))
         self.assertEqual(self.state()['accounts']['actual']['posts'], {})
         self.assertIn('response', self.state()['pending'])
+
+    def test_reconciliation_batch_distinguishes_missing_edit_from_returned_version(self):
+        original = post(105, text='Old source body.')
+        latest = post(110, text='Current source body.')
+        for row in (original, latest):
+            row['edit_history_post_ids'] = ['105', '110']
+        self.collect(Provider(page([latest])))
+        missing = lambda identity: {'resource_id': str(identity),
+                                   'type': 'https://api.x.com/2/problems/resource-not-found'}
+        for returned, absent, expected_status in ((latest, 105, 'available'), (original, 110, 'unavailable')):
+            with self.subTest(returned=returned['id'], missing=absent):
+                provider = Provider({'data': [returned], 'errors': [missing(absent)]})
+                with patch.object(feed, 'request_json', side_effect=provider):
+                    result = feed.execute(self.args(command='reconcile', account='actual', ids='105,110',
+                                                    allow_paid_reread=True))
+                self.assertEqual(len(provider.calls), 1)
+                self.assertEqual(result['returned_posts'], 1)
+                self.assertIsNone(self.state()['pending'])
+                saved = self.state()['accounts']['actual']['posts']
+                self.assertEqual(set(saved), {'110'})
+                self.assertEqual(saved['110']['status'], expected_status)
+                self.assertNotIn(original['text'], self.note.read_text(encoding='utf-8'))
+                if expected_status == 'unavailable':
+                    self.assertNotIn(latest['text'], self.state_path.read_text(encoding='utf-8'))
+                    self.assertNotIn(latest['text'], self.note.read_text(encoding='utf-8'))
+
+    def test_reconciliation_still_rejects_direct_returned_and_missing_contradiction(self):
+        latest = post(110)
+        latest['edit_history_post_ids'] = ['105', '110']
+        self.collect(Provider(page([latest])))
+        provider = Provider({'data': [latest], 'errors': [{'resource_id': '110',
+                             'type': 'https://api.x.com/2/problems/resource-not-found'}]})
+        with patch.object(feed, 'request_json', side_effect=provider), \
+                self.assertRaisesRegex(feed.FeedError, 'contradictory_reconciliation_response'):
+            feed.execute(self.args(command='reconcile', account='actual', ids='105,110', allow_paid_reread=True))
+        self.assertIn('response', self.state()['pending'])
+        self.assertEqual(self.state()['accounts']['actual']['posts']['110']['status'], 'available')
+
+    def test_latest_sample_reads_beyond_seven_days_and_parks_older_cursor(self):
+        rows = [post(identity, '2026-08-01T12:00:00Z') for identity in range(110, 100, -1)]
+        provider = Provider(page(rows, 'older-pages'))
+        result = self.collect(provider, latest=10)
+        query = provider.calls[1][1]
+        self.assertNotIn('start_time', query)
+        self.assertEqual(query['max_results'], 10)
+        self.assertEqual(query['expansions'], 'attachments.media_keys')
+        account = self.state()['accounts']['actual']
+        self.assertEqual(account['sample']['status'], 'target_reached')
+        self.assertEqual(account['sample']['deferred_window']['next_token'], 'older-pages')
+        self.assertIsNone(account['window'])
+        self.assertEqual(account['since_id'], '110')
+        self.assertEqual(result['partial_accounts'], 0)
+        self.assertIn('initial-sample-target-reached', self.note.read_text(encoding='utf-8'))
+        again = Provider()
+        self.collect(again, latest=10)
+        self.assertEqual(again.calls, [])
+        fresh = Provider(page([post(111, '2026-09-07T13:00:00Z')]))
+        self.collect(fresh, latest=10, until=LATER)
+        self.assertEqual(fresh.calls[0][1]['since_id'], '110')
+        self.assertNotIn('pagination_token', fresh.calls[0][1])
+        self.assertEqual(len(self.state()['accounts']['actual']['posts']), 11)
+
+    def test_latest_target_is_per_account_but_rows_have_one_invocation_budget(self):
+        self.roster.write_text('- [x] @actual\n- [x] @second\n', encoding='utf-8')
+        calls = []
+        def provider(path, query, bearer):
+            calls.append((path, deepcopy(query)))
+            if '/by/username/' in path:
+                name = path.rsplit('/', 1)[1]
+                return {'data': {'id': '12' if name == 'actual' else '13', 'username': name}}
+            rows = [post(value) for value in range(110, 100, -1)]
+            if '/13/' in path:
+                for row in rows:
+                    row['author_id'] = '13'
+                    row['id'] = str(int(row['id']) + 100)
+            return page(rows, 'older')
+        result = self.collect(provider, latest=10, max_posts=20)
+        self.assertEqual(result['returned_posts'], 20)
+        self.assertEqual([len(a['posts']) for a in self.state()['accounts'].values()], [10, 10])
+        self.assertEqual([query['max_results'] for path, query in calls if '/tweets' in path], [10, 10])
+
+    def test_latest_filters_short_pages_then_keeps_minimum_page_overshoot(self):
+        reply = post(109, text='Must not be archived')
+        reply['referenced_tweets'] = [{'id': '30', 'type': 'replied_to'}]
+        first = Provider(page([reply, *[post(value) for value in range(108, 101, -1)]], 'two'))
+        result = self.collect(first, latest=10, max_posts=10)
+        self.assertEqual(result['returned_posts'], 8)
+        self.assertEqual(self.state()['accounts']['actual']['sample']['status'], 'in_progress')
+        second = Provider(page([post(value) for value in range(101, 96, -1)], 'three'))
+        result = self.collect(second, latest=10, max_posts=5)
+        self.assertEqual(second.calls[0][1]['pagination_token'], 'two')
+        self.assertEqual(second.calls[0][1]['max_results'], 5)
+        self.assertEqual(result['stored_posts'], 12)
+        self.assertEqual(self.state()['accounts']['actual']['sample']['status'], 'target_reached')
+
+    def test_latest_exhausted_quiet_account_reports_shortfall_without_repeating(self):
+        result = self.collect(Provider(page([post(105, '2026-01-01T00:00:00Z')])), latest=10)
+        account = self.state()['accounts']['actual']
+        self.assertEqual(account['sample']['status'], 'available_history_exhausted')
+        self.assertEqual(result['stored_posts'], 1)
+        again = Provider()
+        self.collect(again, latest=10)
+        self.assertEqual(again.calls, [])
+
+    def test_resumed_sample_reaches_target_then_checks_current_requested_cutoff(self):
+        self.collect(Provider(page([post(110)], 'older')), latest=2, max_requests=2)
+        provider = Provider(page([post(109)], 'intentionally-omitted'),
+                            page([post(111, '2026-09-07T13:00:00Z')]))
+        result = self.collect(provider, latest=2, until=LATER)
+        self.assertEqual(len(provider.calls), 2)
+        self.assertEqual(provider.calls[0][1]['pagination_token'], 'older')
+        self.assertEqual(provider.calls[0][1]['end_time'], FIRST)
+        self.assertEqual(provider.calls[1][1]['since_id'], '110')
+        self.assertEqual(provider.calls[1][1]['end_time'], LATER)
+        self.assertNotIn('pagination_token', provider.calls[1][1])
+        account = self.state()['accounts']['actual']
+        self.assertEqual(account['sample']['status'], 'target_reached')
+        self.assertEqual(account['sample']['cutoff'], FIRST)
+        self.assertEqual(account['sample']['deferred_window']['next_token'], 'intentionally-omitted')
+        self.assertEqual(account['completed_at'], LATER)
+        self.assertEqual(account['since_id'], '111')
+        row = result['accounts'][0]
+        self.assertEqual(row['status'], 'initial_sample_target_reached')
+        self.assertEqual(row['forward_status'], 'complete')
+        self.assertEqual(row['requested_through'], LATER)
+        self.assertEqual(result['deferred_accounts'], [])
+
+    def test_resumed_sample_reports_current_cutoff_deferred_when_request_budget_ends(self):
+        self.collect(Provider(page([post(110)], 'older')), latest=2, max_requests=2)
+        result = self.collect(Provider(page([post(109)], 'omitted')), latest=2, until=LATER, max_requests=1)
+        row = result['accounts'][0]
+        self.assertEqual(row['sample_status'], 'target_reached')
+        self.assertEqual(row['status'], 'partial')
+        self.assertEqual(row['forward_status'], 'pending')
+        self.assertEqual(row['completed_through'], FIRST)
+        self.assertEqual(row['requested_through'], LATER)
+        self.assertIn('requested_cutoff_not_reached', row['deferred_reasons'])
+        self.assertIn('request_budget_exhausted', row['deferred_reasons'])
+        self.assertEqual(result['deferred_accounts'], ['actual'])
+        self.assertEqual(result['partial_accounts'], 1)
+        self.assertIn('Collection status: partial.', self.note.read_text(encoding='utf-8'))
+        self.assertEqual(feed.execute(self.args(command='status'))['accounts'][0]['forward_status'], 'pending')
+
+    def test_resumed_normal_window_requeues_forward_interval_before_reporting_complete(self):
+        self.collect(Provider(page([post(110)], 'older')), max_requests=2)
+        provider = Provider(page([post(109)]), page([post(111, '2026-09-07T13:00:00Z')]))
+        result = self.collect(provider, until=LATER)
+        self.assertEqual(len(provider.calls), 2)
+        self.assertEqual(provider.calls[1][1]['since_id'], '110')
+        self.assertEqual(result['accounts'][0]['status'], 'bounded_window_complete')
+        self.assertEqual(result['accounts'][0]['completed_through'], LATER)
+
+    def test_active_empty_sample_has_in_progress_status_and_fixed_target(self):
+        result = self.collect(Provider(page([], 'older')), latest=10, max_requests=2)
+        row = result['accounts'][0]
+        self.assertEqual(row['status'], 'initial_sample_in_progress')
+        self.assertIn('initial_sample_incomplete', row['deferred_reasons'])
+        provider = Provider()
+        with self.assertRaisesRegex(feed.FeedError, 'initial_sample_target_already_fixed'):
+            self.collect(provider, latest=20)
+        self.assertEqual(provider.calls, [])
+
+    def test_legacy_partial_window_keeps_query_fields_and_cursor_then_expands_older_history(self):
+        self.collect(Provider(page([post(110), post(109)], 'old-page')), max_requests=2)
+        state = self.state()
+        window = state['accounts']['actual']['window']
+        window.pop('fields')  # Exact released 1.7.0 window layout.
+        window.pop('since_id')
+        self.state_path.write_text(json.dumps(state), encoding='utf-8')
+        original_start = window['start']
+        resumed = Provider(page([post(108)]), page([post(value, '2026-08-01T12:00:00Z') for value in range(107, 100, -1)], 'older'))
+        self.collect(resumed, latest=10)
+        self.assertEqual(resumed.calls[0][1]['pagination_token'], 'old-page')
+        self.assertEqual(resumed.calls[0][1]['start_time'], original_start)
+        self.assertNotIn('expansions', resumed.calls[0][1])
+        self.assertEqual(resumed.calls[1][1]['end_time'], original_start)
+        self.assertNotIn('start_time', resumed.calls[1][1])
+        self.assertNotIn('since_id', resumed.calls[1][1])
+        self.assertEqual(resumed.calls[1][1]['expansions'], 'attachments.media_keys')
+        account = self.state()['accounts']['actual']
+        self.assertEqual(len(account['posts']), 10)
+        self.assertEqual(account['since_id'], '110')
+        self.assertEqual(account['completed_at'], FIRST)
+
+    def test_legacy_satisfied_partial_sample_is_parked_without_any_paid_reads(self):
+        self.collect(Provider(page([post(105)], 'old-page')), max_requests=2)
+        before = self.state()['accounts']['actual']['window']
+        provider = Provider()
+        self.collect(provider, latest=1)
+        self.assertEqual(provider.calls, [])
+        account = self.state()['accounts']['actual']
+        self.assertEqual(account['sample']['deferred_window'], before)
+        self.assertEqual(account['since_id'], '105')
+
+    def test_sample_adoption_does_not_skip_pending_forward_posts_using_old_history(self):
+        self.collect(Provider(page([post(value) for value in range(110, 100, -1)])))
+        self.collect(Provider(page([post(120, '2026-09-07T13:00:00Z')], 'remaining-new-posts')),
+                     until=LATER, max_requests=1)
+        pending = self.state()['accounts']['actual']['window']
+        provider = Provider(page([post(value, '2026-09-07T12:30:00Z') for value in range(119, 110, -1)]))
+        # A new target cannot drop the unfinished forward interval, even when
+        # old saved posts already exceed the target. Page minimums still apply.
+        result = self.collect(provider, latest=10, until=LATER)
+        self.assertEqual(len(provider.calls), 1)
+        query = provider.calls[0][1]
+        self.assertEqual(query['pagination_token'], pending['next_token'])
+        self.assertEqual(query['since_id'], '110')
+        account = self.state()['accounts']['actual']
+        self.assertEqual(set(account['posts']), {str(value) for value in range(101, 121)})
+        self.assertEqual(account['completed_at'], LATER)
+        self.assertEqual(account['sample']['status'], 'target_reached')
+        self.assertNotIn('deferred_window', account['sample'])
+        self.assertEqual(result['accounts'][0]['forward_status'], 'complete')
+
+    def test_sample_adoption_keeps_oldest_boundary_after_draining_forward_window(self):
+        self.collect(Provider(page([post(110)])))
+        oldest_boundary = self.state()['accounts']['actual']['history_before']
+        self.collect(Provider(page([post(120, '2026-09-07T13:00:00Z')], 'remaining-new-posts')),
+                     until=LATER, max_requests=1)
+        provider = Provider(page([post(119, '2026-09-07T12:30:00Z')]),
+                            page([post(100, '2026-08-01T12:00:00Z')]))
+        self.collect(provider, latest=10, until=LATER)
+        self.assertEqual(len(provider.calls), 2)
+        self.assertEqual(provider.calls[0][1]['pagination_token'], 'remaining-new-posts')
+        self.assertEqual(provider.calls[1][1]['end_time'], oldest_boundary)
+        self.assertNotIn('since_id', provider.calls[1][1])
+        self.assertNotIn('start_time', provider.calls[1][1])
+        account = self.state()['accounts']['actual']
+        self.assertEqual(account['completed_at'], LATER)
+        self.assertEqual(account['sample']['status'], 'available_history_exhausted')
+
+    def test_legacy_completed_empty_window_requires_known_nonoverlapping_bound(self):
+        self.collect(Provider(page([])))
+        state = self.state()
+        state['accounts']['actual'].pop('history_before')
+        self.state_path.write_text(json.dumps(state), encoding='utf-8')
+        provider = Provider()
+        with self.assertRaisesRegex(feed.FeedError, 'requires_history_before'):
+            self.collect(provider, latest=10)
+        self.assertEqual(provider.calls, [])
+        boundary = '2026-08-31T12:00:00Z'
+        older = Provider(page([post(105, '2026-08-01T12:00:00Z')]))
+        self.collect(older, latest=10, history_before=boundary)
+        self.assertEqual(older.calls[0][1]['end_time'], boundary)
+        self.assertNotIn('since_id', older.calls[0][1])
+        self.assertEqual(self.state()['accounts']['actual']['sample']['status'], 'available_history_exhausted')
+
+    def test_saved_latest_response_is_consumed_without_charging_its_rows_again(self):
+        provider = Provider(page([post(105, '2026-08-01T12:00:00Z')], 'older'))
+        real_apply = feed.apply_response
+        def crash(store):
+            if store.data['pending']['kind'] == 'timeline':
+                raise RuntimeError('offline interruption')
+            return real_apply(store)
+        with patch.object(feed, 'apply_response', side_effect=crash), self.assertRaises(RuntimeError):
+            self.collect(provider, latest=1)
+        no_calls = Provider()
+        result = self.collect(no_calls, latest=1)
+        self.assertEqual(no_calls.calls, [])
+        self.assertEqual(result['returned_posts'], 0)
+        self.assertEqual(result['resumed_returned_posts'], 1)
+        self.assertEqual(result['processed_rows'], 1)
+        self.assertEqual(sum(result['row_counts'].values()), 1)
+
+    def test_abandoned_older_sample_does_not_reset_forward_progress(self):
+        self.collect(Provider(page([post(105)])))
+        with self.assertRaises(feed.FeedError):
+            self.collect(Provider(TimeoutError()), latest=10)
+        self.assertLess(feed.instant(self.state()['accounts']['actual']['window']['end']), feed.instant(FIRST))
+        feed.execute(self.args(command='resolve-pending', outcome='abandon'))
+        account = self.state()['accounts']['actual']
+        self.assertEqual(account['sample']['status'], 'abandoned')
+        self.assertEqual(account['completed_at'], FIRST)
+        fresh = Provider(page([post(106, '2026-09-07T13:00:00Z')]))
+        self.collect(fresh, latest=10, until=LATER)
+        self.assertEqual(fresh.calls[0][1]['start_time'], FIRST)
+        self.assertNotIn('since_id', fresh.calls[0][1])
+
+    def test_legacy_accounting_is_reported_unknown_without_reconstructing_paid_rows(self):
+        self.collect(Provider(page([post(105)])))
+        state = self.state()
+        for request in state['requests']:
+            request.pop('row_counts', None)
+            request.pop('query', None)
+        self.state_path.write_text(json.dumps(state), encoding='utf-8')
+        before = self.state_path.read_bytes()
+        status = feed.execute(self.args(command='status'))
+        account = status['accounts'][0]
+        self.assertEqual(account['legacy_unclassified_rows'], 1)
+        self.assertEqual(account['accounted_returned_rows'], 1)
+        self.assertEqual(sum(account['row_counts'].values()), 0)
+        self.assertEqual(self.state_path.read_bytes(), before)
+
+    def test_row_accounting_is_mutually_exclusive_and_retains_safe_query(self):
+        initial = post(105)
+        self.collect(Provider(page([initial], 'two')), max_requests=2)
+        edited = post(106, text='Edited source')
+        edited['edit_history_post_ids'] = ['105', '106']
+        reply = post(110)
+        reply['referenced_tweets'] = [{'id': '30', 'type': 'retweeted'}, {'id': '31', 'type': 'replied_to'}]
+        repost = post(109)
+        repost['referenced_tweets'] = [{'id': '30', 'type': 'retweeted'}]
+        rows = [initial, edited, reply, deepcopy(reply), repost, post(108), post(108)]
+        result = self.collect(Provider(page(rows)))
+        expected = {'excluded_replies': 2, 'excluded_reposts': 1, 'duplicate_rows': 2,
+                    'merged_versions': 1, 'newly_stored_posts': 1, 'updated_existing_posts': 0}
+        self.assertEqual(result['row_counts'], expected)
+        self.assertEqual(sum(expected.values()), result['returned_posts'])
+        self.assertEqual(result['unexpected_filter_rows'], 3)
+        request = self.state()['requests'][-1]
+        self.assertEqual(request['row_counts'], expected)
+        self.assertEqual(request['query']['exclude'], 'retweets,replies')
+        self.assertEqual(request['query']['pagination_token'], 'two')
+        self.assertNotIn(initial['text'], json.dumps(request))
+        self.assertNotIn(edited['text'], json.dumps(request))
+
+    def test_capacity_headroom_refuses_before_any_paid_request(self):
+        provider = Provider()
+        with feed.Store(self.vault, create=True) as store:
+            before = self.state_path.read_bytes()
+            with patch.object(feed, 'API_RESPONSE_LIMIT', 1024), patch.object(feed, 'LIMIT', len(before) + 2048):
+                with self.assertRaisesRegex(feed.FeedError, 'state_capacity_headroom_required; no_api_request_made'):
+                    feed.paid_request(store, 'user', 'actual', '/2/users/by/username/actual', {},
+                                      'offline-token', provider)
+            self.assertIsNone(store.data['pending'])
+            self.assertEqual(provider.calls, [])
+            self.assertEqual(self.state_path.read_bytes(), before)
+
+    def test_oversized_successful_response_is_durable_in_private_recovery(self):
+        nested = 'Received source text must survive.'
+        for _ in range(90):
+            nested = [nested]
+        response = {'data': {'id': '12', 'username': 'actual'}, 'extra_metadata': nested}
+        self.assertLess(len(json.dumps(response, separators=(',', ':')).encode()), 1024)
+        calls = []
+        def provider(path, query, bearer):
+            calls.append(path)
+            return deepcopy(response)
+        with feed.Store(self.vault, create=True) as store:
+            limit = len(self.state_path.read_bytes()) + 9000
+            with patch.object(feed, 'API_RESPONSE_LIMIT', 1024), patch.object(feed, 'LIMIT', limit):
+                with self.assertRaisesRegex(feed.FeedError, 'state_capacity_reached; preserved_recovery=') as caught:
+                    feed.paid_request(store, 'user', 'actual', '/2/users/by/username/actual', {},
+                                      'offline-token', provider)
+            recovery = Path(str(caught.exception).split('preserved_recovery=', 1)[1])
+            self.assertTrue(recovery.is_relative_to(self.state_path.parent))
+            self.assertEqual(recovery.stat().st_mode & 0o777, 0o700)
+            saved = recovery / 'state.json'
+            self.assertEqual(saved.stat().st_mode & 0o777, 0o600)
+            self.assertGreater(saved.stat().st_size, limit)
+            recovered = json.loads(saved.read_text(encoding='utf-8'))
+            self.assertEqual(recovered['pending']['response'], response)
+            disk = self.state()
+            self.assertNotIn('response', disk['pending'])
+            self.assertEqual(recovered['pending']['request_id'], disk['pending']['request_id'])
+            self.assertEqual(len(calls), 1)
+        with feed.Store(self.vault) as reopened:
+            with self.assertRaisesRegex(feed.FeedError, 'unresolved_request_blocks_network'):
+                feed.paid_request(reopened, 'user', 'actual', '/2/users/by/username/actual', {},
+                                  'offline-token', provider)
+        self.assertEqual(len(calls), 1)
+
+    def test_only_primary_post_photo_expansions_are_saved_and_reused(self):
+        raw = post(105)
+        raw['attachments'] = {'media_keys': ['photo', 'video']}
+        raw['referenced_tweets'] = [{'id': '90', 'type': 'quoted'}]
+        response = page([raw])
+        response['includes'] = {'media': [
+            {'media_key': 'photo', 'type': 'photo', 'url': 'https://pbs.twimg.com/media/original.jpg', 'alt_text': 'Source alt'},
+            {'media_key': 'video', 'type': 'video', 'preview_image_url': 'https://pbs.twimg.com/preview.jpg'},
+            {'media_key': 'quoted', 'type': 'photo', 'url': 'https://pbs.twimg.com/quoted.jpg'}]}
+        self.collect(Provider(response))
+        saved = self.state()['accounts']['actual']['posts']['105']
+        self.assertEqual([item['media_key'] for item in saved['media']], ['photo', 'video'])
+        self.assertNotIn('preview_image_url', saved['media'][1])
+        with patch.object(feed, 'request_json', side_effect=Provider({'data': [raw]})):
+            feed.execute(self.args(command='reconcile', account='actual', ids='105', allow_paid_reread=True))
+        self.assertEqual(self.state()['accounts']['actual']['posts']['105']['media'], saved['media'])
 
 
 if __name__ == '__main__':

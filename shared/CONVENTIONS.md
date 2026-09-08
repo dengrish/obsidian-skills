@@ -61,9 +61,9 @@ publication stages follow [SAFE_WRITES.md](SAFE_WRITES.md) separately.
 |---|---|---|---|
 | `Inbox/` | **everything new, unsorted** — Web Clipper `.md` captures and dropped-in documents alike. The **file extension is the dispatch**, and it is the whole of it: `.md` to one skill, `.pdf` to the other, **anything else to neither** | the user, the user's clipper | clipping-clean (`.md` only), pdf-organize (`.pdf` only) |
 | `Articles/` | **flat**; notes *about* a document — cleaned clippings, PDF reading notes and marked research extracts, one schema (§2b), with origin identified by `sources:` item 1 | clipping-clean, paper-summarize, wiki-add (new research extracts only); pdf-organize repairs source references during an authorized PDF rename | wiki-build, wiki-add (source reuse), clipping-clean (dedup index), paper-summarize (dedup and collision check), pdf-organize (authorized rename preflight), wiki-lint (exact producer-mapped dependency repair only) |
-| `Sources/PDFs/` | organized source documents, recursive. Everything pdf-organize produces lands here — but the user may also drop a file in directly, so every derived-content consumer checks the canonical stem before deriving files or references (§1a) | pdf-organize (renames an `Inbox/` file **and moves it here**; also organizes wiki-add acquisitions), the user | figure-extract, paper-summarize, wiki-build, wiki-add |
+| `Sources/PDFs/` | organized source documents, recursive; feed-owned raw attachments use the separate route below. Knowledge consumers check the canonical stem before deriving files or references (§1a) | pdf-organize (renames an `Inbox/` file **and moves it here**; also organizes wiki-add acquisitions), feed-collect (raw linked PDFs), the user | figure-extract, paper-summarize, wiki-build, wiki-add; feed-collect within its own scope |
 | `Sources/PDFs/<Work>/` | book-chapter PDFs, e.g. `Sources/PDFs/Prince_UDL_2026/`. The folder is what pdf-organize creates when it splits a book. paper-summarize's batch **scans** it — a book is only recognisable as one when a chapter turns up beside it — and then **skips** every chapter it finds, so a sweep never becomes a book's worth of summaries | pdf-organize, the user | figure-extract, paper-summarize (scans, skips), wiki-build, wiki-add |
-| `Sources/Images/` | **flat**; every figure and downloaded image, all extensions, whatever it came from | figure-extract, clipping-clean, wiki-add (new research images only); **pdf-organize** renames in place only within an approved source rename (§1a) | wiki-build, wiki-add, paper-summarize, clipping-clean (its `rename` path re-reads the folder — §8a), wiki-lint (with `--images`, validates embeds and reports nested/staging residue without opening or deleting files) |
+| `Sources/Images/` | **flat**; every figure and downloaded image, all extensions, whatever it came from | figure-extract, clipping-clean, wiki-add (new research images only), feed-collect (original photo attachments); **pdf-organize** renames in place only within an approved source rename (§1a) | wiki-build, wiki-add, paper-summarize, clipping-clean (its `rename` path re-reads the folder — §8a), wiki-lint (with `--images`, validates embeds and reports nested/staging residue without opening or deleting files); feed-collect within its own scope |
 | `Wiki/` | wiki entries, one `.md` per entity (walked **recursively**) | wiki-build, wiki-add (missing requested entries only), wiki-lint | wiki-build, wiki-add, wiki-lint |
 | `Investments/` | dated market analyses at the top level, plus research evidence and source collections in dedicated subfolders; each investments skill governs its own format | market-research (immutable dated records and evidence snapshots), feed-collect (maintained source collections); the user maintains `x-accounts.md` | the investments skills within their own scope |
 | `add-to-wiki.md` at the *vault root* | requested-topic queue | the user; wiki-add checks off successful or already-existing items only | wiki-add |
@@ -126,6 +126,16 @@ market-research never places trades.
 These account notes may be updated for new posts and source compliance; the
 immutability rule above applies to dated market-research records, not the
 source collection. They remain outside knowledge intake and maintenance.
+
+The collector also owns downloaded photo attachments in flat `Sources/Images/`
+and direct PDF attachments in `Sources/PDFs/`. These use deterministic
+`x-<post-id>-<asset-hash>.<ext>` names and receipts in its durable state, rather
+than knowledge figure numbers or inferred document titles. Keep them out of
+routine knowledge intake, renaming and orphan cleanup. An explicit request to
+use one as a knowledge source does not authorize renaming the collector's file
+or changing its receipt. Use full vault-relative links and preserve foreign
+references during any authorized source-compliance cleanup. This narrow raw
+attachment route does not require the knowledge plugin or its PDF organizer.
 
 An interrupted or partial wiki-build run is resumed by **wiki-build** with
 explicit resume/re-run intent; wiki-lint can repair only the
@@ -1327,7 +1337,7 @@ png, jpg, gif, webp, svg, avif, bmp, tiff, ico
 
 ### 8b. The producer conventions
 
-All three producers write the **same** shape — `_fig_` then the number — and
+All three knowledge producers write the **same** shape — `_fig_` then the number — and
 differ only in where the number comes from:
 
 | Producer | Pattern | Number form | Example |
@@ -1335,6 +1345,10 @@ differ only in where the number comes from:
 | `figure-extract` | `[pdf_stem]_fig_<N>.png` | caption label, dots → **dashes** | `Figure 1.2` → `..._fig_1-2.png` |
 | `clipping-clean` | `<note_stem>_fig_<N>.<ext>` | sequential counter from 1, in body order | `Teslo_Pancreatic_Cancer_2026_fig_3.webp` |
 | `wiki-add` | `<note_stem>_fig_<N>.<ext>` | sequential counter from 1, in research-extract body order | `Doe_Topic_2026_fig_1.png` |
+
+Feed-owned attachments follow the separate source-collection route in §1.
+They are not numbered knowledge figures and never enter the PDF extractor's
+`.figure-manifest.tsv`; their source URLs and content digests live in feed state.
 
 **figure-extract's `auto_fig_bbox.py`, `extract_figures.py` and
 `render_page.py` own PDF figure cropping.** Call those helpers instead of
@@ -1482,7 +1496,7 @@ malformed or ambiguous records rather than treating them as permission to write.
 Older output sometimes placed the number directly after `_fig`. Existing
 images keep those names; reading them does not authorize renaming or deletion.
 The broad glob preserves their visibility and keeps naming anomalies visible
-to the unused-figure diagnostic. All new output follows §8b. The legacy form
+to the unused-figure diagnostic. All new knowledge figure output follows §8b. The legacy form
 is a reading compatibility rule, not another permitted producer convention.
 
 **Depended on by:** figure-extract (produces), clipping-clean

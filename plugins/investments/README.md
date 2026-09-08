@@ -3,7 +3,9 @@
 [investments:feed-collect](skills/feed-collect/SKILL.md) records timestamped
 posts from selected public X accounts, with one maintained account note in
 `Investments/Sources/X/`. It preserves source content without summaries,
-sentiment labels or buying recommendations.
+sentiment labels or buying recommendations. Attached photos are saved in
+`Sources/Images/` and embedded locally; direct PDFs are saved in `Sources/PDFs/`
+and linked. The collector owns those files through durable receipts.
 
 [investments:market-research](skills/market-research/SKILL.md) finds buying
 opportunities in liquid U.S.-listed stocks for a 3–12 month momentum horizon.
@@ -28,7 +30,10 @@ For direct X collection, maintain `Investments/x-accounts.md` and configure
 read-only API credentials under the
 [X API guide](skills/feed-collect/references/x-api.md). Routine collection uses
 saved cursors and cached responses to avoid rereading previously collected
-posts. An ambiguous paid request is recorded and stops instead of silently
+posts. An explicit `--latest N` establishes a per-account initial sample with
+separate paid-read limits; later updates continue forward. Attachment downloads
+have their own budgets and can resume from saved URLs without X post rereads.
+An ambiguous paid request is recorded and stops instead of silently
 retrying. Collection state in `Investments/Sources/.feed-collect/` is durable,
 not temporary scratch. Source edits and removals use a separate reconciliation
 procedure; account notes are maintained records, not immutable research

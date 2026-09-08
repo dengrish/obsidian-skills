@@ -120,6 +120,10 @@ buy recommendations. This mode retains independent news and earlier theses.
 posts from public X accounts selected in `Investments/x-accounts.md`, using the
 official API. It maintains one account note under `Investments/Sources/X/`,
 with durable cursors and recovery state under `Investments/Sources/.feed-collect/`.
+An explicit latest-post sample has a separate target for each account and a
+bounded paid-row budget. Photo attachments are saved in `Sources/Images/` and
+embedded; directly linked PDFs go to `Sources/PDFs/`. Download receipts allow
+attachment retries without rereading paid X posts.
 Routine updates request only posts after each completed cursor and reuse saved
 responses when publication needs retrying. Ambiguous paid requests stop for
 resolution instead of silently retrying. Source edits and removals have a
@@ -335,6 +339,8 @@ python3 -m venv .venv
 .venv/bin/python tests/test_market_comparison.py
 .venv/bin/python tests/test_market_acquire.py
 .venv/bin/python tests/test_feed_collect.py
+.venv/bin/python tests/test_feed_media.py
+.venv/bin/python tests/test_feed_attachments.py
 .venv/bin/python tests/test_compatibility.py
 .venv/bin/python tools/build_plugin.py --check
 .venv/bin/python tests/test_provenance.py
