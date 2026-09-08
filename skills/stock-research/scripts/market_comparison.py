@@ -480,9 +480,19 @@ def formation_markdown(card, note_key, vault=None):
                'Coverage is only the declared universe. Daily notional includes extended hours. '
                'Empty/unavailable cohorts have no simulated cash return.\n')
     if evidence:
-        detail += ('\nThe immutable evidence attachment retains the full declared roster, source queries, '
-                   'calendar boundaries and exclusion measurements. Its digest and exact owner note '
-                   'are verified whenever this record is indexed.\n')
+        retained = []
+        if card['rows']:
+            retained.append('%d declared instrument rows with their recorded measurements and dispositions' % len(card['rows']))
+        if parse_json(meta['Sources']):
+            retained.append('source queries')
+        if parse_json(meta['History calendar']):
+            retained.append('history calendar boundaries')
+        detail += '\nThe immutable evidence attachment retains the strategy, cutoff and formation reason. '
+        if retained:
+            detail += 'It also preserves ' + ', '.join(retained) + '. '
+        else:
+            detail += 'No instrument rows, source queries or history calendar were available for this formation. '
+        detail += 'Its digest and exact owner note are verified whenever this record is indexed.\n'
     if len(detail.encode('utf-8')) > MAX_CARD_BYTES:
         fail('comparison evidence exceeds the note budget; record formation unavailable, do not trim the universe after ranking')
     result = {'detail_markdown': detail, 'journal_markdown': '#### Comparison cohorts\n\n' + table(

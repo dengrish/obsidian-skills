@@ -5,6 +5,7 @@ No accounts, network requests, live vaults or copied production data are used.
 """
 from datetime import date, datetime, time, timedelta, timezone
 import contextlib
+import copy
 import io
 import json
 import os
@@ -20,7 +21,9 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'skills/stock-research/scripts'))
 import market_acquire as acquire
+import market_capitalization
 import market_public
+import market_universe
 
 NY = ZoneInfo('America/New_York')
 AS_OF = '2024-05-01T11:30:00-04:00'
@@ -480,6 +483,244 @@ class AcquisitionTests(unittest.TestCase):
             self.assertNotIn(secret, stdout.getvalue() + stderr.getvalue())
             loader.assert_not_called()
             self.assertEqual(stderr.getvalue(), '')
+
+
+class IndependentEvidenceBoundaryTests(unittest.TestCase):
+    """Hand-calculated cases independent of the adapter's embedded fixtures."""
+
+    def test_liquidity_query_shards_do_not_transfer_coverage_between_symbols(self):
+        cutoff = '2026-03-10T11:30:00-04:00'
+        # A deliberately synthetic pair of two-minute sessions spans the real
+        # New York offset change; this fixture makes no holiday assertion.
+        openings = [datetime(2026, 3, day, 9, 30, tzinfo=NY) for day in (6, 9)]
+        sessions = [{'date': opened.date().isoformat(), 'open_at': utc(opened),
+                     'close_at': utc(opened + timedelta(minutes=2))} for opened in openings]
+        cal = {'market_data': 1, 'operation': 'sessions', 'provider': 'alpaca', 'resource': 'calendar',
+               'complete': True, 'query': {'start': '2026-03-06', 'end': '2026-03-10'},
+               'source': {}, 'data': {'sessions': sessions}}
+
+        def shard(symbol, opened):
+            return {'market_data': 1, 'operation': 'prices', 'provider': 'alpaca', 'resource': 'bars',
+                    'complete': True, 'query': {'symbols': symbol, 'start': utc(opened),
+                        'end': utc(opened + timedelta(minutes=2) - timedelta(microseconds=1)),
+                        'requested_end': utc(opened + timedelta(minutes=2)), 'asof': '2026-03-10',
+                        'feed': 'sip', 'timeframe': '1Min', 'adjustment': 'split', 'currency': 'USD'},
+                    'source': {'feed': 'sip'}, 'data': {'requested_symbols': [symbol], 'bars': {symbol: [
+                        {'t': utc(opened), 'interval_start': utc(opened),
+                         'interval_end': utc(opened + timedelta(minutes=1)),
+                         'new_york_date': opened.date().isoformat(), 'o': 100, 'h': 100, 'l': 100,
+                         'c': 100, 'vw': 100, 'v': 500000}]}}}
+
+        first, second = shard('AAA', openings[0]), shard('BBB', openings[1])
+        result = market_universe.liquidity([first, second], cal, cutoff, ['AAA', 'BBB'], session_count=2)
+        for row in result['candidates']:
+            self.assertFalse(row['liquidity_source_complete'])
+            self.assertIsNone(row['liquidity_eligible'])
+        # One observed $50m minute on each day / two days = $50m. Identical
+        # overlapping responses must not create an additional $25m contribution.
+        second = shard('AAA', openings[1])
+        result = market_universe.liquidity([first, second, first], cal, cutoff, ['AAA'], session_count=2)
+        row = result['candidates'][0]
+        self.assertTrue(row['liquidity_source_complete'])
+        self.assertEqual(row['average_regular_notional_lower_bound_usd'], 50000000)
+        self.assertIsNone(row['average_regular_notional_usd'])
+        self.assertTrue(row['liquidity_eligible'])
+        self.assertFalse(row['eligibility_verified'])  # No capitalization evidence supplied.
+        self.assertEqual([session['observed_minutes'] for session in row['sessions']], [1, 1])
+
+    def test_namespaced_rss_extension_preserves_halt_filter_and_later_schedule(self):
+        # RSS 2.0 explicitly permits namespaced extension elements. The parser
+        # must ignore their structure without weakening known halt-field checks.
+        rss = '''<rss version="2.0" xmlns:h="http://www.nasdaqtrader.com/" xmlns:media="http://search.yahoo.com/mrss/">
+<channel><title>Synthetic halts</title><link>https://example.invalid/halts</link><description>Fixture</description>
+<pubDate>Mon, 09 Mar 2026 13:35:00 GMT</pubDate><h:numItems>2</h:numItems>
+<item><title>Old halt</title><h:HaltDate>03/06/2026</h:HaltDate><h:HaltTime>15:59:00</h:HaltTime>
+<h:IssueSymbol>OLD</h:IssueSymbol><h:IssueName><![CDATA[ Société A & B ]]></h:IssueName><h:Market>NYSE American</h:Market>
+<h:ResumptionDate>03/09/2026</h:ResumptionDate><h:ResumptionQuoteTime>09:31:00</h:ResumptionQuoteTime>
+<media:group><media:content url="https://example.invalid/unused.png" medium="image"/></media:group></item>
+<item><title>Later halt</title><h:HaltDate>03/09/2026</h:HaltDate><h:HaltTime>09:30:00 .001</h:HaltTime>
+<h:IssueSymbol>LATE</h:IssueSymbol><h:IssueName>Later Company</h:IssueName><h:Market>NASDAQ</h:Market></item>
+</channel></rss>'''
+        client = SimpleNamespace(get_text=lambda *args, **kwargs: rss)
+        args = SimpleNamespace(date=None, as_of='2026-03-09T13:30:00Z', symbols=None, limit=20)
+        result = market_public.nasdaq_halts(client, args)
+        self.assertTrue(result['complete'])
+        self.assertFalse(result['query']['point_in_time'])
+        self.assertEqual([row['symbol'] for row in result['data']['halts']], ['OLD'])
+        row = result['data']['halts'][0]
+        self.assertEqual(row['source_fields']['IssueName'], ' Société A & B ')
+        self.assertEqual(row['scheduled_quote_resumption_at'], '2026-03-09T09:31:00-04:00')
+        self.assertTrue(any('later updates' in warning for warning in result['warnings']))
+
+
+class IndependentCapitalizationBoundaryTests(unittest.TestCase):
+    """Reviewed synthetic issuer cases, without provider or helper fixtures."""
+
+    cutoff = '2025-04-02T14:00:00Z'
+
+    def plan(self):
+        source = 'https://example.invalid/issuer/common-share-disclosure'
+        return {'symbol': 'ABC', 'issuer_cik': '0000000017', 'share_count_basis': 'outstanding_common',
+                'classes': [{'class_id': 'A', 'shares': 100000000, 'uncertainty_shares': 0,
+                             'precision_basis': 'The synthetic disclosure gives an exact integer count.',
+                             'observed_on': '2025-03-01', 'available_at': '2025-03-07T14:00:00Z',
+                             'source_url': source,
+                             'conversion': {'kind': 'same_common', 'shares_per_price_unit': 1,
+                                            'available_at': '2025-03-07T14:00:00Z', 'source_url': source,
+                                            'basis': 'Quoted common class A is the issuer sole common class.'}}],
+                'price': {'symbol': 'ABC', 'class_id': 'A', 'usd': 30, 'currency': 'USD',
+                          'adjustment': 'raw', 'as_of': '2025-04-01T20:00:00Z',
+                          'available_at': '2025-04-01T20:15:00Z', 'source_url': 'https://example.invalid/raw-quote'},
+                'review': {'through': '2025-04-01T20:00:00Z', 'available_at': '2025-04-01T19:00:00Z',
+                           'latest_filings_checked': True, 'all_common_classes_included': True,
+                           'corporate_actions_checked': True, 'unquantified_changes': False,
+                           'unsupported_complexity': False, 'source_urls': [source],
+                           'basis': 'Synthetic latest filings, classes and completed share changes reviewed through price time.'},
+                'changes': []}
+
+    def calculate(self, plan):
+        result = market_capitalization.calculate([plan], self.cutoff)
+        self.assertTrue(result['complete'], result['unresolved'])
+        return result['market_caps'][0]
+
+    def liquidity(self, cap):
+        opened = datetime(2025, 4, 1, 9, 30, tzinfo=NY)
+        closed = opened + timedelta(minutes=2)
+        # Deliberately tiny synthetic session; both completed minute bars carry
+        # $50m, enough to isolate capitalization from liquidity uncertainty.
+        cal = {'market_data': 1, 'operation': 'sessions', 'provider': 'alpaca', 'resource': 'calendar',
+               'complete': True, 'query': {'start': '2025-04-01', 'end': '2025-04-02'},
+               'source': {}, 'data': {'sessions': [{'date': '2025-04-01', 'open_at': utc(opened),
+                                                   'close_at': utc(closed)}]}}
+        bars = [{'t': utc(start), 'interval_start': utc(start), 'interval_end': utc(start + timedelta(minutes=1)),
+                 'new_york_date': '2025-04-01', 'o': 100, 'h': 100, 'l': 100, 'c': 100, 'vw': 100, 'v': 500000}
+                for start in (opened, opened + timedelta(minutes=1))]
+        prices = {'market_data': 1, 'operation': 'prices', 'provider': 'alpaca', 'resource': 'bars',
+                  'complete': True, 'query': {'symbols': 'ABC', 'start': utc(opened),
+                      'end': utc(closed - timedelta(microseconds=1)), 'requested_end': utc(closed),
+                      'asof': '2025-04-02', 'feed': 'sip', 'timeframe': '1Min', 'adjustment': 'split', 'currency': 'USD'},
+                  'source': {'feed': 'sip'}, 'data': {'requested_symbols': ['ABC'], 'bars': {'ABC': bars}}}
+        return market_universe.liquidity([prices], cal, self.cutoff, ['ABC'], session_count=1,
+                                         market_caps=[cap])['candidates'][0]
+
+    def test_two_classes_noncommutative_events_and_precision_have_hand_calculated_value(self):
+        plan = self.plan()
+        plan['classes'][0].update(shares=30000000, uncertainty_shares=100000,
+                                  precision_basis='Thirty million shares rounded within one hundred thousand.')
+        plan['classes'][0]['conversion']['basis'] = 'Price is for one class A share.'
+        other = copy.deepcopy(plan['classes'][0])
+        other.update(class_id='B', shares=10000000, uncertainty_shares=0,
+                     precision_basis='Exact disclosed class B count.')
+        other['conversion'].update(kind='equivalent_common', shares_per_price_unit=0.5,
+                                   basis='Each B share has the common economic participation of two class A shares.')
+        plan['classes'].append(other)
+        # Input order is intentionally reversed: issuance then split gives 80m
+        # class A shares, not 70m. B contributes 20m priced units: 100m * $30.
+        plan['changes'] = [
+            {'class_id': 'A', 'kind': 'split', 'value': 2, 'effective_at': '2025-03-20T13:30:00Z',
+             'available_at': '2025-03-19T14:00:00Z', 'source_url': 'https://example.invalid/two-for-one-split'},
+            {'class_id': 'A', 'kind': 'share_delta', 'value': 10000000, 'effective_at': '2025-03-10T13:30:00Z',
+             'available_at': '2025-03-10T18:00:00Z', 'source_url': 'https://example.invalid/completed-issuance'}]
+        original = copy.deepcopy(plan)
+        cap = self.calculate(plan)
+        self.assertEqual(plan, original)
+        self.assertEqual(cap['market_cap_usd'], 3000000000)
+        self.assertEqual(cap['estimate_range_usd'], {'low': 2994000000, 'high': 3006000000})
+        self.assertEqual(market_capitalization.validate_proxy_row(cap, self.cutoff), cap)
+        self.assertTrue(self.liquidity(cap)['eligibility_verified'])
+
+    def test_rounding_range_controls_threshold_including_exact_equality(self):
+        cases = [(100005000, 10000, None),  # Central estimate $2.0001bn; range crosses $2bn.
+                 (100005000, 5000, True),  # Declared lower precision edge equals threshold.
+                 (99995000, 4999, False),  # Upper precision edge is $20 below threshold.
+                 (99995000, 5000, None)]  # Upper edge equals threshold, so cannot exclude.
+        for shares, uncertainty, expected in cases:
+            with self.subTest(shares=shares, uncertainty=uncertainty):
+                plan = self.plan()
+                plan['classes'][0].update(shares=shares, uncertainty_shares=uncertainty,
+                                          precision_basis='Synthetic declared count-rounding uncertainty.')
+                plan['price']['usd'] = 20
+                cap = self.calculate(plan)
+                self.assertEqual(cap['estimate_range_usd'],
+                                 {'low': (shares - uncertainty) * 20, 'high': (shares + uncertainty) * 20})
+                candidate = self.liquidity(cap)
+                self.assertIs(candidate['market_cap_eligible'], expected)
+                self.assertIs(candidate['eligibility_verified'], expected is True)
+                self.assertTrue(cap['estimate'])
+
+    def test_common_quote_requires_its_own_class_and_ads_cannot_be_counted_twice(self):
+        plans = []
+        missing = self.plan()
+        missing['classes'][0]['class_id'] = 'B'
+        missing['classes'][0]['conversion'].update(kind='equivalent_common',
+                                                  basis='B is economically equivalent to the omitted priced A class.')
+        plans.append(missing)
+        doubled = self.plan()
+        doubled['price']['class_id'] = 'ADS'
+        doubled['classes'][0]['conversion'].update(kind='adr', shares_per_price_unit=2,
+                                                  basis='One ADS represents two underlying class A ordinary shares.')
+        ads = copy.deepcopy(doubled['classes'][0])
+        ads.update(class_id='ADS', shares=50000000)
+        ads['conversion'].update(kind='same_common', shares_per_price_unit=1,
+                                 basis='These depositary receipts represent the same underlying A shares.')
+        doubled['classes'].append(ads)
+        plans.append(doubled)
+        for plan in plans:
+            with self.subTest(classes=[item['class_id'] for item in plan['classes']]):
+                result = market_capitalization.calculate([plan], self.cutoff)
+                self.assertFalse(result['complete'])
+                self.assertEqual(result['market_caps'], [])
+
+    def test_retroactive_disclosure_and_changes_after_price_cannot_rewrite_cutoff(self):
+        for kind in ('late_disclosure', 'post_price_change', 'same_day_change', 'unquantified_changes'):
+            with self.subTest(kind=kind):
+                plan = self.plan()
+                if kind == 'late_disclosure':
+                    plan['classes'][0]['available_at'] = '2025-04-02T14:00:00.001Z'
+                elif kind == 'unquantified_changes':
+                    plan['review'][kind] = True
+                else:
+                    effective = '2025-04-01T20:00:00.001Z' if kind == 'post_price_change' else '2025-03-01T23:59:00Z'
+                    plan['changes'] = [{'class_id': 'A', 'kind': 'share_delta', 'value': 10000000,
+                                        'effective_at': effective, 'available_at': '2025-04-01T19:00:00Z',
+                                        'source_url': 'https://example.invalid/completed-share-change'}]
+                result = market_capitalization.calculate([plan], self.cutoff)
+                self.assertEqual(result['market_caps'], [])
+                self.assertFalse(result['complete'])
+
+    def test_freshness_uses_observation_date_and_consumer_requires_recent_price(self):
+        plan = self.plan()
+        plan['classes'][0].update(observed_on='2024-12-02', available_at='2025-03-31T18:00:00Z')
+        self.assertEqual(self.calculate(plan)['calculation']['classes'][0]['share_age_days'], 120)
+        plan['classes'][0]['observed_on'] = '2024-12-01'
+        self.assertEqual(market_capitalization.calculate([plan], self.cutoff)['market_caps'], [])
+        plan = self.plan()
+        plan['price'].update(as_of='2025-03-31T20:00:00Z', available_at='2025-03-31T20:15:00Z')
+        plan['review'].update(through='2025-03-31T20:00:00Z', available_at='2025-03-31T19:00:00Z')
+        with self.assertRaises(acquire.DataError):
+            self.liquidity(self.calculate(plan))
+
+    def test_consumer_recomputes_class_basis_digest_and_rounding_range(self):
+        original = self.calculate(self.plan())
+        for field in ('range', 'retained_class', 'digest', 'estimate_without_plan', 'unknown_method'):
+            with self.subTest(field=field):
+                cap = copy.deepcopy(original)
+                if field == 'range':
+                    cap['estimate_range_usd']['low'] += 1
+                elif field == 'retained_class':
+                    cap['calculation']['plan']['classes'][0]['shares'] += 1
+                elif field == 'digest':
+                    cap['calculation']['input_sha256'] = '0' * 64
+                else:
+                    cap.pop('calculation')
+                    cap.pop('estimate_range_usd')
+                    if field == 'estimate_without_plan':
+                        cap.pop('method')
+                    else:
+                        cap.pop('estimate')
+                        cap['method'] = 'approximate_shares_times_price'
+                with self.assertRaises(acquire.DataError):
+                    self.liquidity(cap)
 
 
 if __name__ == '__main__':

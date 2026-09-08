@@ -104,6 +104,7 @@ skipped in Screening and sources. A successful setup probe is not today's resear
 | Candidate announcements | `news --provider alpaca --symbol '<symbol>'` for a bounded candidate-specific news window when configured; use `news --provider alpha_vantage` selectively for additional coverage within its account quota. Use `earnings` for upcoming scheduled risks, then verify timing and results on issuer pages. Neither news feed must duplicate the other on every run. |
 | Candidate price history | `prices` for the nominated stocks, prior active theses and benchmarks over matching completed sessions, then the offline [screener](screening.md). Preserve its defined filters, coverage and exclusions. Its daily notional proxy is preliminary; verify regular-session liquidity separately for the shortlist. |
 | Intraday assessment | On open-market runs, use `prices --timeframe 1Min` or a timestamped host quote for the shortlist's morning reaction. Respect feed delay and the cutoff; keep snapshots separate from completed-session signals, and compare partial volume only with matching historical session/time windows. |
+| Company size | Use an already dated sourced cap, or the [capitalization workflow](capitalization.md) to acquire outstanding-share evidence, review subsequent changes and run the offline disclosed-share calculator. Preserve its estimate label and precision range. |
 | Shortlist and readiness | `sec-company` for relevant filings, then `sec-facts` for comparable reported fundamentals and optional `sec-filing` for the exact filing's narrative/tables. For expectations that matter, retrieve `estimates` and use the dated-snapshot workflow below. When insider activity changes the case, inspect an exact accession with `sec-ownership`. Open material cited sections and issuer releases; a parser is not a factual verifier. Check `halts` and current issuer/exchange notices before first readiness or when a trading-status concern arises; a current empty feed does not reconstruct an earlier cutoff or clear an older unresolved halt. |
 | Corporate actions | `actions` when validating adjustments, unexplained price discontinuities, instrument changes or outcome inputs. Its process-date records need issuer corroboration; choose the relevant history and keep original raw observations. |
 | Macro context | `fred-releases` for relevant upcoming releases and `fred-series` for a small dated set of rates, credit, employment or inflation observations when they affect a thesis. Verify fresh announcements with the releasing agency. |
@@ -244,6 +245,14 @@ runs. Its conservative retry delay is **not** a verified provider reset time or
 an account-wide usage meter. Other clients may consume the same account quota.
 Existing eligible snapshots remain usable during cooldown. No subscription, key,
 login or scheduled task is changed; failed access stays a bounded coverage gap.
+For a frozen-cutoff retry, a recent late snapshot is reused as
+`reused_future_only`, with `eligible_at_cutoff: false`, instead of spending another
+request for the same observation. Both this status and `captured_future_only`
+remain unusable in that edition. An eligible earlier snapshot takes precedence.
+For `coverage_unavailable`, retain the normalized `coverage` diagnostics in the
+research record: they distinguish absent fiscal periods/horizons, missing current
+values and malformed/incomplete provider records. HTTP success alone is not
+usable estimate coverage; do not repeat the same failed request without new cause.
 
 Alpha Vantage's [EARNINGS_ESTIMATES](https://www.alphavantage.co/documentation/#earnings-estimates)
 supplies quarterly/annual EPS and revenue estimates, analyst counts and reported
@@ -344,9 +353,11 @@ provider spellings, exchange, ETF and test-issue flags and file timestamps. Thes
 are current listings, not a historical or survivorship-free universe. An ETF flag
 of N does not prove common-stock eligibility; inspect security descriptions and
 issuer identity, then verify each provider's symbol spelling. `halts --date`
-selects the halt date, not a resumption date. The default RSS covers the current
-trade-halt day, not every unresolved older halt. Do not poll it more than once a
-minute across runs. Resumption fields are scheduled times, not verified actual
+selects the halt date, not a resumption date. The default RSS is a current snapshot
+that can include older halts; it is not a complete history or guaranteed inventory
+of unresolved halts. The parser accepts the observed `Market` field and the `Mkt`
+alias, retaining original source fields and rejecting conflicting values. Do not
+poll it more than once a minute across runs. Resumption fields are scheduled times, not verified actual
 trades; an empty feed is not clearance to trade. A current feed cannot reconstruct
 the exact halt state known at a past cutoff.
 [Directory definitions](https://www.nasdaqtrader.com/trader.aspx?id=symboldirdefs)

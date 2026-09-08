@@ -38,6 +38,9 @@ DEFAULT_CONCEPTS = ('RevenueFromContractWithCustomerExcludingAssessedTax', 'Reve
 ACC = re.compile(r'\d{10}-\d{2}-\d{6}\Z')
 SYMBOL = re.compile(r'[A-Z0-9][A-Z0-9.\-/$^=+]{0,29}\Z')
 MAX_RECORDS = 100000
+HALT_SOURCE_FIELDS = ('HaltDate', 'HaltTime', 'IssueSymbol', 'IssueName', 'Market', 'Mkt',
+                      'ReasonCode', 'PauseThresholdPrice', 'ResumptionDate',
+                      'ResumptionQuoteTime', 'ResumptionTradeTime')
 
 
 def _ny():
@@ -430,6 +433,70 @@ def _halt_stamp(day, clock):
         _bad('Nasdaq halt timestamp is invalid.')
 
 
+def _rss_item(node, row_number):
+    """Normalize one row without losing source spellings or masking bad aliases."""
+    def invalid(key, problem):
+        # XML names and values are untrusted; diagnostics use only known labels.
+        label = key if key in HALT_SOURCE_FIELDS + ('title', 'pubDate', 'link', 'description') else 'unrecognized field'
+        _bad(f'Nasdaq RSS item {row_number}: {label} {problem}.')
+
+    original = {}
+    for child in node:
+        key = _local_name(child.tag)
+        if key in original:
+            invalid(key, 'is duplicated')
+        # RSS extensions can contain nested elements. Ignore that structure
+        # only for namespaced fields we do not consume; halt fields and ordinary
+        # RSS text fields must still be unambiguous scalar values.
+        if len(child) and (key in HALT_SOURCE_FIELDS + ('title', 'pubDate', 'link', 'description')
+                           or not child.tag.startswith('{')):
+            invalid(key, 'must contain text only')
+        original[key] = child.text or ''
+    fields = {key: value.strip() for key, value in original.items()}
+    for key in ('HaltDate', 'HaltTime', 'IssueSymbol', 'IssueName'):
+        if key not in fields:
+            invalid(key, 'is missing')
+        if not fields[key]:
+            invalid(key, 'is blank')
+    # The live RSS uses Market. Accept the alternate Mkt spelling only after
+    # validating every supplied alias; a blank or conflicting alias is an error.
+    markets = [key for key in ('Market', 'Mkt') if key in fields]
+    if not markets:
+        invalid('Market', 'is missing (alternate Mkt is also absent)')
+    for key in markets:
+        if not fields[key]:
+            invalid(key, 'is blank')
+    if len(markets) == 2 and fields['Market'] != fields['Mkt']:
+        invalid('Market', 'conflicts with Mkt')
+
+    def stamp(day_key, clock_key):
+        day, clock = fields.get(day_key), fields.get(clock_key)
+        if clock and not day:
+            invalid(clock_key, 'requires a nonblank ' + day_key)
+        try:
+            return _halt_stamp(day, clock)
+        except DataError:
+            invalid(clock_key, 'or ' + day_key + ' is invalid or ambiguous in New York time')
+
+    halt_at = stamp('HaltDate', 'HaltTime')
+    quote_at = stamp('ResumptionDate', 'ResumptionQuoteTime')
+    trade_at = stamp('ResumptionDate', 'ResumptionTradeTime')
+    url = fields.get('link') or None
+    if url:
+        try:
+            parts = urlsplit(url)
+        except ValueError:
+            invalid('link', 'is not an ordinary web URL')
+        if parts.scheme not in ('http', 'https') or not parts.netloc or parts.username or parts.password:
+            invalid('link', 'is not an ordinary web URL')
+    return {'symbol': fields['IssueSymbol'], 'security_name': fields['IssueName'],
+            'market_code': fields[markets[0]],
+            'halt_at': halt_at, 'scheduled_quote_resumption_at': quote_at,
+            'scheduled_trade_resumption_at': trade_at,
+            'reason_code': fields.get('ReasonCode') or None, 'source_url': url,
+            'source_fields': {key: original[key] for key in HALT_SOURCE_FIELDS if key in original}}
+
+
 def _rss(text):
     if not isinstance(text, str) or re.search(r'<!\s*(DOCTYPE|ENTITY)\b', text, re.I):
         _bad('Nasdaq RSS contains an unsupported declaration.')
@@ -447,11 +514,15 @@ def _rss(text):
     for node in channel:
         tag = _local_name(node.tag)
         if tag == 'numItems':
+            if declared is not None:
+                _bad('Nasdaq RSS numItems is duplicated.')
             try:
                 declared = int(node.text)
             except (TypeError, ValueError):
                 _bad('Nasdaq RSS item count is invalid.')
-        elif tag == 'pubDate' and node.text:
+        elif tag == 'pubDate':
+            if published is not None:
+                _bad('Nasdaq RSS pubDate is duplicated.')
             try:
                 parsed = parsedate_to_datetime(node.text)
                 if parsed.tzinfo is None:
@@ -460,30 +531,7 @@ def _rss(text):
             except (TypeError, ValueError):
                 _bad('Nasdaq RSS publication time is invalid.')
         elif tag == 'item':
-            fields = {}
-            for child in node:
-                key = _local_name(child.tag)
-                if key in fields:
-                    _bad('Nasdaq RSS item field is duplicated.')
-                fields[key] = (child.text or '').strip()
-            for key in ('HaltDate', 'HaltTime', 'IssueSymbol', 'IssueName', 'Mkt'):
-                _str(fields.get(key))
-            halt_at = _halt_stamp(fields['HaltDate'], fields['HaltTime'])
-            quote_at = _halt_stamp(fields.get('ResumptionDate'), fields.get('ResumptionQuoteTime'))
-            trade_at = _halt_stamp(fields.get('ResumptionDate'), fields.get('ResumptionTradeTime'))
-            if (fields.get('ResumptionQuoteTime') or fields.get('ResumptionTradeTime')) and not fields.get('ResumptionDate'):
-                _bad('Nasdaq resumption clock lacks its date.')
-            url = fields.get('link') or None
-            if url:
-                parts = urlsplit(url)
-                if parts.scheme not in ('http', 'https') or not parts.netloc or parts.username or parts.password:
-                    _bad('Nasdaq RSS item link is not an ordinary web URL.')
-            records.append({'symbol': fields['IssueSymbol'], 'security_name': fields['IssueName'],
-                            'market_code': fields['Mkt'],
-                            'halt_at': halt_at, 'scheduled_quote_resumption_at': quote_at,
-                            'scheduled_trade_resumption_at': trade_at,
-                            'reason_code': fields.get('ReasonCode') or None, 'source_url': url,
-                            'source_fields': {k: fields[k] for k in ('HaltDate', 'HaltTime', 'IssueSymbol', 'IssueName', 'Mkt', 'ReasonCode', 'PauseThresholdPrice', 'ResumptionDate', 'ResumptionQuoteTime', 'ResumptionTradeTime') if k in fields}})
+            records.append(_rss_item(node, len(records) + 1))
             if len(records) > MAX_RECORDS:
                 _bad('Nasdaq RSS exceeds the record bound.')
     if published is None:
@@ -513,8 +561,9 @@ def nasdaq_halts(client, args):
         _bad('Nasdaq returned a halt outside the explicitly requested halt date.')
     selected = [r for r in rows if (not symbols or r['symbol'] in symbols)
                 and (not cutoff or parse_time(r['halt_at']) <= cutoff)]
-    warnings = ['Feed is a current snapshot of the requested halt day, not a historical record of what was known at an earlier cutoff.',
-                'Without date, the feed covers the current trade-halt day; it is not a complete inventory of unresolved older halts.',
+    warnings = ['Feed is a current snapshot, not a historical record of what was known at an earlier cutoff.',
+                'Without date, the current feed may include older halts; absence does not establish historical clearance or a complete inventory of unresolved halts.',
+                'complete describes untruncated rows in the returned snapshot, not complete trading-status history.',
                 'as_of filters halt occurrence only; reason codes and scheduled resumption times may reflect later updates.',
                 'Scheduled resumption times do not prove that trading actually resumed. Do not poll this feed more than once per minute.']
     complete = len(selected) <= limit
@@ -655,37 +704,97 @@ def self_test():
     fails(lambda: _directory(nasdaq.replace('|N|100|N', '|Z|100|N'), 'nasdaqlisted.txt'), 'invalid flag')
     directory_args.limit = 1
     check(not nasdaq_symbols(directory_client, directory_args)['complete'], 'directory bound')
-    rss = '<rss xmlns:n="urn:nasdaq"><channel><pubDate>Fri, 04 Sep 2026 13:00:00 GMT</pubDate><n:numItems>1</n:numItems><item><n:HaltDate>09/04/2026</n:HaltDate><n:HaltTime>08:00:00</n:HaltTime><n:IssueSymbol>FIX</n:IssueSymbol><n:IssueName>Fixture</n:IssueName><n:Mkt>Q</n:Mkt><n:ReasonCode>T1</n:ReasonCode><n:ResumptionDate>09/04/2026</n:ResumptionDate><n:ResumptionTradeTime>09:30:00</n:ResumptionTradeTime></item></channel></rss>'
+    # Synthetic identities with the namespace and Market spelling used by the
+    # official public RSS; do not base this fixture on the HTML table's Mkt label.
+    rss = '<rss version="2.0" xmlns:n="http://www.nasdaqtrader.com/"><channel><pubDate>Fri, 04 Sep 2026 13:00:00 GMT</pubDate><n:numItems>1</n:numItems><item><n:HaltDate>09/04/2026</n:HaltDate><n:HaltTime>08:00:00</n:HaltTime><n:IssueSymbol>FIX</n:IssueSymbol><n:IssueName>Fixture</n:IssueName><n:Market>NASDAQ</n:Market><n:ReasonCode>T1</n:ReasonCode><n:ResumptionDate>09/04/2026</n:ResumptionDate><n:ResumptionTradeTime>09:30:00</n:ResumptionTradeTime></item></channel></rss>'
     halt_args = SimpleNamespace(symbols=None, date='2026-09-04', as_of='2026-09-04T13:00:00Z', limit=20000)
     client = Fake({HALTS: rss})
     result = nasdaq_halts(client, halt_args)
     check(result['data']['halts'][0]['halt_at'] == '2026-09-04T08:00:00-04:00', 'ET halt timestamp')
     check(client.calls[0][1]['haltdate'] == '09042026', 'official historical halt parameter')
     check('scheduled_trade_resumption_at' in result['data']['halts'][0] and not result['query']['point_in_time'], 'scheduled not actual resumption')
-    check(result['data']['halts'][0]['market_code'] == 'Q'
-          and result['data']['halts'][0]['source_fields']['Mkt'] == 'Q', 'actual Nasdaq Mkt field retained')
+    check(result['data']['halts'][0]['market_code'] == 'NASDAQ'
+          and result['data']['halts'][0]['source_fields']['Market'] == 'NASDAQ'
+          and 'Mkt' not in result['data']['halts'][0]['source_fields'], 'actual Nasdaq Market field retained')
+    market_xml = '<n:Market>NASDAQ</n:Market>'
+    legacy = _rss(rss.replace(market_xml, '<n:Mkt>Q</n:Mkt>'))[0][0]
+    check(legacy['market_code'] == 'Q' and legacy['source_fields']['Mkt'] == 'Q'
+          and 'Market' not in legacy['source_fields'], 'alternate Mkt retains its source spelling and value')
+    matching_markets = market_xml + '<n:Mkt> NASDAQ </n:Mkt>'
+    matching = _rss(rss.replace(market_xml, matching_markets))[0][0]
+    check(matching['market_code'] == 'NASDAQ' and matching['source_fields']['Mkt'] == ' NASDAQ ',
+          'matching aliases preserve original text without inventing a market-code mapping')
+
+    def rss_fails(xml, key, problem, row=1):
+        try:
+            _rss(xml)
+        except DataError as exc:
+            check(exc.code == 'schema_error' and f'item {row}:' in str(exc)
+                  and key in str(exc) and problem in str(exc)
+                  and 'secret-provider-payload' not in str(exc), 'actionable safe RSS row and field error')
+            return
+        raise AssertionError('Malformed RSS row was accepted')
+
+    rss_fails(rss.replace(market_xml, ''), 'Market', 'missing')
+    for key, value in (('HaltDate', '09/04/2026'), ('HaltTime', '08:00:00'),
+                       ('IssueSymbol', 'FIX'), ('IssueName', 'Fixture'), ('Market', 'NASDAQ')):
+        field_xml = f'<n:{key}>{value}</n:{key}>'
+        rss_fails(rss.replace(field_xml, ''), key, 'missing')
+        rss_fails(rss.replace(field_xml, f'<n:{key}> \t </n:{key}>'), key, 'blank')
+        rss_fails(rss.replace(field_xml, field_xml * 2), key, 'duplicated')
+    rss_fails(rss.replace(market_xml, '<n:Mkt> </n:Mkt>'), 'Mkt', 'blank')
+    rss_fails(rss.replace(market_xml, '<n:Mkt>Q</n:Mkt>' * 2), 'Mkt', 'duplicated')
+    for aliases, key, problem in (
+            (market_xml + '<n:Mkt>OTHER</n:Mkt>', 'Market', 'conflicts'),
+            (market_xml + '<n:Mkt/>', 'Mkt', 'blank'),
+            ('<n:Market/> <n:Mkt>NASDAQ</n:Mkt>', 'Market', 'blank'),
+            ('<n:Market>NASDAQ<x/></n:Market>', 'Market', 'text only'),
+            (market_xml + '<Market>NASDAQ</Market>', 'Market', 'duplicated')):
+        rss_fails(rss.replace(market_xml, aliases), key, problem)
+    rss_fails(rss.replace('>08:00:00<', '>secret-provider-payload<'), 'HaltTime', 'invalid')
+    rss_fails(rss.replace('>09/04/2026</n:ResumptionDate>', '></n:ResumptionDate>'),
+              'ResumptionTradeTime', 'requires')
+    rss_fails(rss.replace('</item>', '<link>https://[invalid</link></item>'), 'link', 'ordinary web URL')
+    unknown_duplicate = '<secret-provider-payload>hidden</secret-provider-payload>' * 2
+    rss_fails(rss.replace('</item>', unknown_duplicate + '</item>'), 'unrecognized field', 'duplicated')
+    item = rss.split('<item>', 1)[1].split('</item>', 1)[0]
+    second_bad_row = rss.replace('>1</n:numItems>', '>2</n:numItems>').replace(
+        '</channel>', '<item>' + item.replace(market_xml, '') + '</item></channel>')
+    rss_fails(second_bad_row, 'Market', 'missing', row=2)
+    empty_rss = rss.replace('<item>' + item + '</item>', '').replace('>1</n:numItems>', '>0</n:numItems>')
+    check(_rss(empty_rss)[0] == [], 'declared empty feed is distinct from malformed rows')
+    unresolved = rss.replace('09/04/2026</n:ResumptionDate>', '</n:ResumptionDate>').replace(
+        '09:30:00</n:ResumptionTradeTime>', '</n:ResumptionTradeTime>')
+    check(_rss(unresolved)[0][0]['scheduled_trade_resumption_at'] is None,
+          'empty optional resumption fields remain valid without asserting resumption')
     padded_clock = '08:00:00                      .590'
     padded_rss = rss.replace('<n:HaltTime>08:00:00</n:HaltTime>', '<n:HaltTime>' + padded_clock + '</n:HaltTime>')
     padded = nasdaq_halts(Fake({HALTS: padded_rss}), halt_args)['data']['halts'][0]
     check(padded['halt_at'] == '2026-09-04T08:00:00.590000-04:00'
           and padded['source_fields']['HaltTime'] == padded_clock, 'padded fraction parsed without discarding raw clock')
-    fails(lambda: _rss(rss.replace('<n:Mkt>Q</n:Mkt>', '')), 'missing actual market field rejected')
     for bad_clock in ('08: 00:00', '08:00:00 .1234567', '08:00:00 .', '08:00:00 trailing'):
         fails(lambda: _halt_stamp('09/04/2026', bad_clock), 'malformed clock not normalized')
     wrong_day = rss.replace('<n:HaltDate>09/04/2026</n:HaltDate>', '<n:HaltDate>09/03/2026</n:HaltDate>')
     fails(lambda: nasdaq_halts(Fake({HALTS: wrong_day}), halt_args), 'historical halt date mismatch rejected')
     default_halt_args = copy.copy(halt_args)
     default_halt_args.date = None
-    check(nasdaq_halts(Fake({HALTS: wrong_day}), default_halt_args)['complete'],
-          'default current-trade-day feed need not match current calendar day')
+    default_result = nasdaq_halts(Fake({HALTS: wrong_day}), default_halt_args)
+    check(default_result['complete'] and len(default_result['data']['halts']) == 1
+          and any('may include older halts' in warning for warning in default_result['warnings'])
+          and any('not complete trading-status history' in warning for warning in default_result['warnings']),
+          'default current feed retains older halts without claiming historical completeness')
     later_resume = rss.replace('<n:ResumptionDate>09/04/2026</n:ResumptionDate>',
                               '<n:ResumptionDate>09/08/2026</n:ResumptionDate>')
     check(nasdaq_halts(Fake({HALTS: later_resume}), halt_args)['complete'],
           'historical halt date does not restrict a later scheduled resumption')
     fails(lambda: _rss('<!DOCTYPE foo [<!ENTITY a "x">]>' + rss), 'DTD and entity rejected')
     fails(lambda: _rss(rss.replace('>1</n:numItems>', '>2</n:numItems>')), 'RSS count mismatch')
+    fails(lambda: _rss(rss.replace('<n:numItems>1</n:numItems>', '<n:numItems>1</n:numItems>' * 2)), 'RSS duplicate count')
+    fails(lambda: _rss(rss.replace('<pubDate>Fri, 04 Sep 2026 13:00:00 GMT</pubDate>',
+                                  '<pubDate>Fri, 04 Sep 2026 13:00:00 GMT</pubDate>' * 2)), 'RSS duplicate publication time')
     fails(lambda: _rss('<html>blocked</html>'), 'HTML error not empty success')
     fails(lambda: _rss(rss.replace('<pubDate>Fri, 04 Sep 2026 13:00:00 GMT</pubDate>', '')), 'feed timestamp missing')
+    fails(lambda: _rss(rss.replace('<pubDate>Fri, 04 Sep 2026 13:00:00 GMT</pubDate>', '<pubDate/>')), 'feed timestamp blank')
     fails(lambda: _halt_stamp('11/01/2026', '01:30:00'), 'DST fold rejected')
     fails(lambda: _halt_stamp('03/08/2026', '02:30:00'), 'DST gap rejected')
     future_client = Fake({})

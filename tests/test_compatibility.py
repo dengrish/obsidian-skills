@@ -432,7 +432,7 @@ class CompatibilityTests(unittest.TestCase):
                 encoding="utf-8", timeout=30)
             self.assertEqual(screen_help.returncode, 0, screen_help.stderr)
 
-            for helper in ('market_estimates.py', 'market_ownership.py',
+            for helper in ('market_estimates.py', 'market_ownership.py', 'market_capitalization.py',
                            'market_estimate_history.py', 'market_comparison.py'):
                 isolated = subprocess.run(
                     [sys.executable, '-I', '-S', '-B', str(script.parent / helper), '--test'],

@@ -522,15 +522,15 @@ raise SystemExit(main(fixture['args'], client))
 
         # Match the real RSS field names and padded fractional clock, with
         # synthetic values. A JSON-only fixture misses this provider's parser.
-        rss = '''<rss xmlns:ndaq="urn:nasdaq"><channel>
+        rss = '''<rss xmlns:ndaq="http://www.nasdaqtrader.com/"><channel>
 <pubDate>Fri, 05 Sep 2025 13:00:00 GMT</pubDate><ndaq:numItems>1</ndaq:numItems>
 <item><ndaq:HaltDate>09/05/2025</ndaq:HaltDate>
 <ndaq:HaltTime>08:00:00                      .590</ndaq:HaltTime>
 <ndaq:IssueSymbol>FIX</ndaq:IssueSymbol><ndaq:IssueName>Fixture company</ndaq:IssueName>
-<ndaq:Mkt>Q</ndaq:Mkt><ndaq:ReasonCode>T1</ndaq:ReasonCode></item></channel></rss>'''
+<ndaq:Market>NASDAQ</ndaq:Market><ndaq:ReasonCode>T1</ndaq:ReasonCode></item></channel></rss>'''
         halt_args = ['halts', '--date', '2025-09-05', '--as-of', '2025-09-05T09:00:00-04:00']
         halt = run(halt_args, [rss], 0)
-        self.assertEqual(halt['data']['halts'][0]['market_code'], 'Q')
+        self.assertEqual(halt['data']['halts'][0]['market_code'], 'NASDAQ')
         self.assertEqual(halt['data']['halts'][0]['halt_at'], '2025-09-05T08:00:00.590000-04:00')
         self.assertIn('haltdate=09052025', halt['requests'][0]['url'])
         mismatched = run(halt_args, [rss.replace('09/05/2025', '09/04/2025')], 2)

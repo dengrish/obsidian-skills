@@ -131,19 +131,34 @@ python3 '<skill>/scripts/market_universe.py' liquidity \
 Minute evidence must be SIP, USD and split-adjusted, using the same mapping date.
 The calculator filters against actual calendar opening/closing times, including
 early closes, and lists missing expected minutes separately for each session.
-It never imputes zero trading or divides observed days by a shortened lookback.
-Missing minutes may mean no eligible trade or unavailable data: the resulting
-turnover stays unresolved until another explicit regular-session source settles
-it. A provider's `complete` flag alone is not complete interval coverage.
+The minute starting at the close is excluded because it can mix auction and
+extended-hours trades; no auction turnover is added separately. VWAP and volume
+can use different eligible trade sets, so their product estimates trading
+activity rather than measuring exact traded dollars.
+
+The default liquidity filter is a **$25 million** average over **20 completed
+sessions**. With complete source responses and requests covering the entire
+calendar window, observed nonnegative minute notional divided by all 20 sessions
+is a lower bound on this defined proxy. A sufficient bound can verify the filter
+even with missing minutes. The full-window average remains unavailable, and
+`complete` remains false; read `liquidity_threshold_verified` separately.
+An insufficient bound with gaps is unknown, not a failed filter. Missing minutes
+are never treated as zero trading, and the denominator never shrinks. Partial
+responses or shortened requests cannot establish the bound. A source's `complete`
+flag alone does not establish interval coverage.
 
 The optional market-cap file is a JSON list of rows with `symbol`,
 `market_cap_usd`, `currency: "USD"`, timezone-aware `as_of` and `available_at`,
 `source_url` and `basis`. The basis identifies the issuer/share classes and ADR
 ratio where applicable; do not multiply an ambiguous share count by a convenient
 price. Measurement must be at least as recent as the reference session, and
-measurement ≤ availability ≤ cutoff. Without this sourced input, capitalization
-eligibility remains unresolved. Cap and turnover verification still do not
-establish a buying opportunity.
+measurement ≤ availability ≤ cutoff. When a dated cap is unavailable, use the
+[capitalization workflow](capitalization.md) to acquire outstanding shares,
+check subsequent changes and calculate a labeled disclosed-share estimate with
+`market_capitalization.py`. Its share observation date remains distinct from the
+price measurement date. Without adequate sourced evidence, capitalization stays
+unresolved. Preserve the reported/estimated basis; size and liquidity filters do
+not establish a buying opportunity.
 
 Daily OHLC and volume use different eligibility rules; see
 [Alpaca's aggregation documentation](https://docs.alpaca.markets/us/docs/market-data-faq).

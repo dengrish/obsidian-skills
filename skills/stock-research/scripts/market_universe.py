@@ -281,7 +281,7 @@ def prepare(plan, prices, calendar, as_of, benchmark='SPY', rules=None, *, valid
 
 
 def liquidity(prices, calendar, as_of, symbols, session_count=20, minimum=25000000, market_caps=None, min_market_cap=2000000000):
-    """Measure exact regular-minute coverage and retain unresolved cap eligibility."""
+    """Measure regular-minute notional coverage and its observed lower bound."""
     cutoff = parse_time(as_of)
     if type(session_count) is not int or not 1 <= session_count <= 60:
         fail('Liquidity session count must be 1–60.')
@@ -294,7 +294,9 @@ def liquidity(prices, calendar, as_of, symbols, session_count=20, minimum=250000
     sessions, _ = _sessions(calendar, cutoff, session_count)
     expected = {day: {opened + timedelta(minutes=i) for i in range(int((closed-opened).total_seconds()/60))}
                 for day, opened, closed in sessions}
+    expected_starts = set().union(*expected.values())
     observed = {symbol: {} for symbol in symbols}
+    queried = {symbol: set() for symbol in symbols}
     source_complete, sources, warnings = True, [], []
     if not isinstance(prices, list) or len(prices) > 200:
         fail('Provide a list of original minute-price envelopes.')
@@ -313,6 +315,11 @@ def liquidity(prices, calendar, as_of, symbols, session_count=20, minimum=250000
         if (not isinstance(requested, list) or not requested or len(set(requested)) != len(requested)
                 or query.get('symbols') != ','.join(requested) or not isinstance(values, dict) or set(values) - set(requested)):
             fail('Minute query and response identities disagree.')
+        covered = {stamp for stamp in expected_starts if start <= stamp <= end and stamp + timedelta(minutes=1) <= requested_end}
+        for symbol in requested:
+            _symbol(symbol)
+            if symbol in queried:
+                queried[symbol].update(covered)
         for symbol, rows in values.items():
             _symbol(symbol)
             if not isinstance(rows, list):
@@ -341,7 +348,7 @@ def liquidity(prices, calendar, as_of, symbols, session_count=20, minimum=250000
         warnings.extend(envelope.get('warnings', []))
         sources.append({'query': query, 'source': envelope['source'], 'requests': envelope.get('requests', []),
                         'complete': envelope['complete'], 'sha256': _digest(envelope)})
-    caps = {}
+    caps, cap_eligibility = {}, {}
     if market_caps is not None:
         if not isinstance(market_caps, list):
             fail('Market-cap evidence must be dated source rows.')
@@ -358,6 +365,16 @@ def liquidity(prices, calendar, as_of, symbols, session_count=20, minimum=250000
                     or not isinstance(row.get('source_url'), str) or not re.match(r'https://[^/\s]+/', row['source_url'])
                     or not isinstance(row.get('basis'), str) or not row['basis'].strip()):
                 fail('Market cap needs a sourced USD basis, a measurement at least as recent as the reference session, and measurement <= availability <= cutoff.')
+            if 'estimate' in row and type(row['estimate']) is not bool:
+                fail('Market-cap estimate status must be an explicit boolean when supplied.')
+            if (row.get('method') is not None or row.get('estimate') is True
+                    or 'calculation' in row or 'estimate_range_usd' in row):
+                from market_capitalization import validate_proxy_row
+                validate_proxy_row(row, _iso(cutoff))
+                low, high = row['estimate_range_usd']['low'], row['estimate_range_usd']['high']
+            else:
+                low = high = row['market_cap_usd']
+            cap_eligibility[symbol] = True if low >= min_market_cap else (False if high < min_market_cap else None)
             caps[symbol] = row
     candidates = []
     for symbol in symbols:
@@ -371,22 +388,35 @@ def liquidity(prices, calendar, as_of, symbols, session_count=20, minimum=250000
             by_session.append({'date': day.isoformat(), 'expected_minutes': len(expected[day]), 'observed_minutes': len(values),
                                'missing_minutes': [_iso(stamp) for stamp in missing], 'observed_notional_usd': subtotal,
                                'regular_notional_usd': subtotal if not missing else None})
-        full = bool(prices) and source_complete and missing_total == 0
+        evidence_complete = bool(prices) and source_complete and queried[symbol] == expected_starts
+        full = evidence_complete and missing_total == 0
         mean = math.fsum(row['regular_notional_usd'] for row in by_session) / session_count if full else None
+        lower_bound = math.fsum(row['observed_notional_usd'] for row in by_session) / session_count if evidence_complete else None
+        threshold_verified = lower_bound is not None and lower_bound >= minimum
+        eligible = mean >= minimum if mean is not None else (True if threshold_verified else None)
         cap = caps.get(symbol)
-        candidates.append({'symbol': symbol, 'regular_liquidity_complete': full, 'average_regular_notional_usd': mean,
-                           'liquidity_eligible': mean >= minimum if mean is not None else None,
-                           'market_cap_evidence': cap, 'market_cap_eligible': cap['market_cap_usd'] >= min_market_cap if cap else None,
-                           'eligibility_verified': bool(full and mean >= minimum and cap and cap['market_cap_usd'] >= min_market_cap),
+        candidates.append({'symbol': symbol, 'liquidity_source_complete': evidence_complete,
+                           'regular_liquidity_complete': full, 'average_regular_notional_usd': mean,
+                           'average_regular_notional_lower_bound_usd': lower_bound,
+                           'liquidity_threshold_verified': threshold_verified, 'liquidity_eligible': eligible,
+                           'market_cap_evidence': cap, 'market_cap_eligible': cap_eligibility.get(symbol),
+                           'market_cap_is_estimate': cap.get('estimate') if cap else None,
+                           'eligibility_verified': bool(threshold_verified and cap_eligibility.get(symbol) is True),
                            'sessions': by_session})
     return {'market_universe': 1, 'operation': 'liquidity', 'as_of': _iso(cutoff),
-            'complete': all(row['regular_liquidity_complete'] and row['market_cap_evidence'] is not None for row in candidates),
+            'complete': all(row['regular_liquidity_complete'] and row['market_cap_eligible'] is not None for row in candidates),
             'reference_session': sessions[-1][0].isoformat(), 'candidates': candidates,
             'definition': {'session_count': session_count, 'minimum_average_regular_notional_usd': minimum,
-                           'minimum_market_cap_usd': min_market_cap, 'missing_intervals': 'unresolved; never zero-filled'},
+                           'minimum_market_cap_usd': min_market_cap,
+                           'missing_intervals': 'exact average unresolved; observed nonnegative notional divided by all selected sessions is a lower bound, never zero-filled',
+                           'minute_window': 'calendar open inclusive, close exclusive; the minute starting at the close is excluded',
+                           'notional_measure': 'sum of reported minute VWAP times reported volume; an approximation to traded dollars because their eligible trade sets can differ'},
             'sources': {'prices': sources, 'sessions': calendar},
             'warnings': list(dict.fromkeys(warnings + ['Missing minute bars can represent no eligible trades or absent data; absence never proves zero turnover.',
+                'The observed lower bound applies to the defined minute-bar notional measure; it is not an exact traded-dollar lower bound.',
+                'The minute starting at the calendar close can mix closing-auction and extended-hours activity; it is excluded without adding auction turnover separately.',
                 'Source completeness and regular-session coverage are separate checks; market cap and liquidity do not establish a buying opportunity.',
+                'Disclosed-share capitalization proxies remain estimates; a declared precision range crossing the size threshold leaves eligibility unresolved.',
                 'Market-cap dates and share-class/ADR basis require verification; the calculator does not derive capitalization from guessed shares.']))}
 
 
@@ -514,6 +544,16 @@ def run_self_test():
         return [{'symbol': 'AAA', 'market_cap_usd': 3000000000, 'currency': 'USD',
                  'as_of': '2025-03-31T20:00:00Z', 'available_at': '2025-03-31T20:01:00Z',
                  'source_url': 'https://example.invalid/issuer', 'basis': 'Synthetic complete common equity capitalization'}]
+
+    def fixture_liquidity(notional_per_minute=12500000):
+        prices, calendar = fixture_evidence(True)
+        prices['data']['requested_symbols'] = ['AAA']
+        prices['query']['symbols'] = 'AAA'
+        prices['data']['bars'] = {'AAA': prices['data']['bars']['AAA'][-40:]}
+        for row in prices['data']['bars']['AAA']:
+            row.update({key: 100 for key in ('o', 'h', 'l', 'c', 'vw')})
+            row['v'] = notional_per_minute / 100
+        return prices, calendar
 
     class Cases(unittest.TestCase):
         def setUp(self):
@@ -697,11 +737,165 @@ def run_self_test():
             self.assertFalse(row['regular_liquidity_complete'])
             self.assertIsNone(row['average_regular_notional_usd'])
             self.assertEqual(len(row['sessions'][-1]['missing_minutes']), 1)
+            self.assertTrue(row['liquidity_threshold_verified'])
+            self.assertTrue(row['eligibility_verified'])
+
+        def test_complete_minute_threshold_boundary(self):
+            for notional, eligible in ((12499999, False), (12500000, True)):
+                with self.subTest(notional=notional):
+                    prices, calendar = fixture_liquidity(notional)
+                    out = liquidity([prices], calendar, cutoff, ['AAA'], market_caps=cap())
+                    row = out['candidates'][0]
+                    self.assertTrue(out['complete'])
+                    self.assertEqual(out['definition']['session_count'], 20)
+                    self.assertEqual(out['definition']['minimum_average_regular_notional_usd'], 25000000)
+                    self.assertEqual(row['average_regular_notional_usd'], notional * 2)
+                    self.assertEqual(row['average_regular_notional_lower_bound_usd'], notional * 2)
+                    self.assertEqual(row['liquidity_eligible'], eligible)
+                    self.assertEqual(row['liquidity_threshold_verified'], eligible)
+                    self.assertEqual(row['eligibility_verified'], eligible)
+
+        def test_missing_minute_below_threshold_is_unknown(self):
+            prices, calendar = fixture_liquidity()
+            prices['data']['bars']['AAA'].pop()
+            row = liquidity([prices], calendar, cutoff, ['AAA'], market_caps=cap())['candidates'][0]
+            self.assertTrue(row['liquidity_source_complete'])
+            self.assertIsNone(row['average_regular_notional_usd'])
+            self.assertEqual(row['average_regular_notional_lower_bound_usd'], 24375000)
+            self.assertIsNone(row['liquidity_eligible'])
+            self.assertFalse(row['liquidity_threshold_verified'])
+            self.assertFalse(row['eligibility_verified'])
+
+        def test_one_observed_day_keeps_twenty_session_denominator(self):
+            for observed_total, eligible in ((499999999, None), (500000000, True)):
+                with self.subTest(observed_total=observed_total):
+                    prices, calendar = fixture_liquidity(observed_total)
+                    prices['data']['bars']['AAA'] = prices['data']['bars']['AAA'][-1:]
+                    out = liquidity([prices], calendar, cutoff, ['AAA'], market_caps=cap())
+                    row = out['candidates'][0]
+                    self.assertFalse(out['complete'])
+                    self.assertEqual(len(row['sessions']), 20)
+                    self.assertEqual(sum(session['observed_minutes'] for session in row['sessions']), 1)
+                    self.assertEqual(row['average_regular_notional_lower_bound_usd'], observed_total / 20)
+                    self.assertIsNone(row['average_regular_notional_usd'])
+                    self.assertEqual(row['liquidity_eligible'], eligible)
+                    self.assertEqual(row['liquidity_threshold_verified'], eligible is True)
+                    self.assertEqual(row['eligibility_verified'], eligible is True)
+
+        def test_identical_overlapping_minute_responses_not_double_counted(self):
+            prices, calendar = fixture_liquidity()
+            prices['data']['bars']['AAA'].pop()
+            row = liquidity([prices, copy.deepcopy(prices)], calendar, cutoff, ['AAA'])['candidates'][0]
+            self.assertEqual(row['average_regular_notional_lower_bound_usd'], 24375000)
+            self.assertIsNone(row['liquidity_eligible'])
+
+        def test_unqueried_minutes_remain_unresolved(self):
+            prices, calendar = fixture_liquidity(500000000)
+            prices['data']['bars']['AAA'] = prices['data']['bars']['AAA'][-1:]
+            prices['query']['start'] = prices['data']['bars']['AAA'][0]['t']
+            row = liquidity([prices], calendar, cutoff, ['AAA'])['candidates'][0]
+            self.assertFalse(row['liquidity_source_complete'])
+            self.assertIsNone(row['average_regular_notional_lower_bound_usd'])
+            self.assertIsNone(row['liquidity_eligible'])
+            self.assertFalse(row['liquidity_threshold_verified'])
+
+        def test_missing_price_evidence_remains_unresolved(self):
+            _, calendar = fixture_liquidity()
+            row = liquidity([], calendar, cutoff, ['AAA'])['candidates'][0]
+            self.assertFalse(row['liquidity_source_complete'])
+            self.assertIsNone(row['average_regular_notional_lower_bound_usd'])
+            self.assertIsNone(row['average_regular_notional_usd'])
+            self.assertIsNone(row['liquidity_eligible'])
+
+        def test_missing_all_returned_minutes_is_unknown_not_zero(self):
+            prices, calendar = fixture_liquidity()
+            prices['data']['bars']['AAA'] = []
+            row = liquidity([prices], calendar, cutoff, ['AAA'])['candidates'][0]
+            self.assertTrue(row['liquidity_source_complete'])
+            self.assertEqual(row['average_regular_notional_lower_bound_usd'], 0)
+            self.assertIsNone(row['average_regular_notional_usd'])
+            self.assertIsNone(row['liquidity_eligible'])
+
+        def test_calendar_lookback_cannot_be_shortened(self):
+            prices, calendar = fixture_liquidity()
+            calendar['data']['sessions'] = calendar['data']['sessions'][-19:]
+            with self.assertRaises(DataError):
+                liquidity([prices], calendar, cutoff, ['AAA'])
+            prices, calendar = fixture_liquidity()
+            calendar['complete'] = False
+            with self.assertRaises(DataError):
+                liquidity([prices], calendar, cutoff, ['AAA'])
+
+        def test_regular_and_early_close_minutes_are_excluded(self):
+            for closing_time, expected_minutes in ((time(16), 390), (time(13), 210)):
+                with self.subTest(closing_time=closing_time):
+                    prices, calendar = fixture_liquidity()
+                    session = calendar['data']['sessions'][-1]
+                    day = parse_date(session['date'])
+                    closed = datetime.combine(day, closing_time, ny())
+                    session['close_at'] = _iso(closed)
+                    sample = copy.deepcopy(prices['data']['bars']['AAA'][-1])
+                    prices['data']['bars']['AAA'] = []
+                    # The last pre-close minute counts; the close-starting minute
+                    # cannot be added wholesale as if it were auction-only data.
+                    for left, volume in ((closed - timedelta(minutes=1), 4999999), (closed, 1000000000)):
+                        row = dict(sample, t=_iso(left), interval_start=_iso(left),
+                                   interval_end=_iso(left + timedelta(minutes=1)), v=volume)
+                        prices['data']['bars']['AAA'].append(row)
+                    result = liquidity([prices], calendar, cutoff, ['AAA'])['candidates'][0]
+                    self.assertEqual(result['sessions'][-1]['expected_minutes'], expected_minutes)
+                    self.assertEqual(result['sessions'][-1]['observed_minutes'], 1)
+                    self.assertEqual(result['average_regular_notional_lower_bound_usd'], 24999995)
+                    self.assertIsNone(result['liquidity_eligible'])
+
+        def test_current_partial_session_does_not_enter_liquidity(self):
+            prices, calendar = fixture_liquidity()
+            prices['data']['bars']['AAA'].pop()
+            left = datetime(2025, 4, 1, 9, 30, tzinfo=ny())
+            calendar['data']['sessions'].append({'date': '2025-04-01', 'open_at': _iso(left),
+                                                'close_at': _iso(left.replace(hour=16, minute=0))})
+            row = dict(prices['data']['bars']['AAA'][-1], t=_iso(left), interval_start=_iso(left),
+                       interval_end=_iso(left + timedelta(minutes=1)), new_york_date='2025-04-01', v=1000000000)
+            prices['data']['bars']['AAA'].append(row)
+            prices['query']['requested_end'] = cutoff
+            prices['query']['end'] = _iso(parse_time(cutoff) - timedelta(seconds=1))
+            out = liquidity([prices], calendar, cutoff, ['AAA'])
+            self.assertEqual(out['reference_session'], '2025-03-31')
+            self.assertEqual(out['candidates'][0]['average_regular_notional_lower_bound_usd'], 24375000)
+            self.assertIsNone(out['candidates'][0]['liquidity_eligible'])
 
         def test_minute_partial_envelope_not_complete(self):
             prices, calendar = fixture_evidence(True)
             prices['complete'] = False
-            self.assertFalse(liquidity([prices], calendar, cutoff, ['AAA'], market_caps=cap())['complete'])
+            out = liquidity([prices], calendar, cutoff, ['AAA'], market_caps=cap())
+            self.assertFalse(out['complete'])
+            row = out['candidates'][0]
+            self.assertFalse(row['liquidity_source_complete'])
+            self.assertIsNone(row['average_regular_notional_lower_bound_usd'])
+            self.assertIsNone(row['liquidity_eligible'])
+            self.assertFalse(row['liquidity_threshold_verified'])
+            self.assertFalse(row['eligibility_verified'])
+
+        def test_minute_evidence_validation_cannot_be_bypassed_by_large_total(self):
+            for corruption in ('feed', 'source_feed', 'currency', 'adjustment', 'timeframe',
+                               'mapping', 'query_cutoff', 'bar_cutoff', 'negative_volume'):
+                with self.subTest(corruption=corruption):
+                    prices, calendar = fixture_liquidity(500000000)
+                    if corruption == 'source_feed':
+                        prices['source']['feed'] = 'iex'
+                    elif corruption == 'query_cutoff':
+                        prices['query']['requested_end'] = '2025-04-02T00:00:00Z'
+                    elif corruption == 'bar_cutoff':
+                        prices['data']['bars']['AAA'][-1]['interval_end'] = '2025-04-02T00:00:00Z'
+                    elif corruption == 'negative_volume':
+                        prices['data']['bars']['AAA'][-1]['v'] = -1
+                    else:
+                        key, value = {'feed': ('feed', 'iex'), 'currency': ('currency', 'EUR'),
+                                      'adjustment': ('adjustment', 'raw'), 'timeframe': ('timeframe', '1Day'),
+                                      'mapping': ('asof', '2025-04-02')}[corruption]
+                        prices['query'][key] = value
+                    with self.assertRaises(DataError):
+                        liquidity([prices], calendar, cutoff, ['AAA'])
 
         def test_no_cap_does_not_invent_cap_eligibility(self):
             prices, calendar = fixture_evidence(True)

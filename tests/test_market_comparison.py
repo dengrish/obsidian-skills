@@ -551,6 +551,26 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(path.read_bytes(), raw)
         self.assertEqual(list(self.vault.glob('.comparison-*')), [])
 
+    def test_unavailable_attachment_description_matches_absent_measurements(self):
+        card = comparison.unavailable('2024-05-01T11:30:00-04:00', 'No independent universe was available.')
+        rendered = comparison.formation_markdown(card, '2024-05-01-stock-research', self.vault)
+        self.assertIn('No instrument rows, source queries or history calendar were available', rendered['detail_markdown'])
+        self.assertNotIn('full declared roster', rendered['detail_markdown'])
+        self.assertNotIn('It also preserves', rendered['detail_markdown'])
+        restored = comparison.read_card(rendered['detail_markdown'], comparison.heading_for(card['metadata']['Cohort']),
+                                        vault=self.vault, note_key='2024-05-01-stock-research')
+        self.assertEqual(restored, card)
+
+    def test_incomplete_attachment_describes_the_evidence_it_actually_retains(self):
+        bundle = copy.deepcopy(self.bundle)
+        bundle['prices'][0]['data']['bars']['AAA'].pop()
+        card = comparison.form(bundle)
+        self.assertEqual(card['metadata']['State'], 'unavailable')
+        rendered = comparison.formation_markdown(card, '2024-05-01-stock-research', self.vault)
+        self.assertIn('4 declared instrument rows', rendered['detail_markdown'])
+        self.assertIn('source queries, history calendar boundaries', rendered['detail_markdown'])
+        self.assertNotIn('No instrument rows', rendered['detail_markdown'])
+
     def test_partial_upstream_discovery_cannot_form_a_smaller_successful_cohort(self):
         incomplete = copy.deepcopy(self.bundle)
         incomplete['universe'].update(discovery_complete=False,
