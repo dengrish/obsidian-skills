@@ -37,7 +37,7 @@ provenance = load("note_provenance", SHARED / "note_provenance.py")
 wiki = load("provenance_wiki_lint", ROOT / "skills/wiki-build/scripts/lint_entry.py")
 scanner = load("provenance_vault_scan", ROOT / "skills/wiki-lint/scripts/scan_vault.py")
 summary = load("provenance_summary_lint", ROOT / "skills/paper-summarize/scripts/note_lint.py")
-market = load("provenance_market_notes", ROOT / "skills/market-research/scripts/market_notes.py")
+market = load("provenance_market_notes", ROOT / "skills/stock-research/scripts/market_notes.py")
 
 
 def record(skill="knowledge:wiki-build", version="1.0.2"):
@@ -159,11 +159,11 @@ class NoteFormatTests(unittest.TestCase):
     def test_malformed_market_provenance_is_reported_without_aborting_history(self):
         folder = self.vault / "Investments"
         folder.mkdir()
-        path = folder / "2026-09-05-market-research.md"
+        path = folder / "2026-09-05-stock-research.md"
         depth = sys.getrecursionlimit() + 100
         payloads = [
             (json.dumps({"schema": 1, "generated_by": dict(
-                record("investments:market-research"), source_status=status)}), "source status")
+                record("investments:stock-research"), source_status=status)}), "source status")
             for status in ([], {})
         ] + [
             ('{"schema":1,"generated_by":' + '[' * depth + '0' + ']' * depth + '}',

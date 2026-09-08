@@ -49,7 +49,7 @@ remaining checks and packaging.
 Knowledge and investment workflows may share one vault. Resolve `<vault>` using
 [the runtime guide](RUNTIME.md): use the user-selected or unambiguous workspace
 vault, never a hard-coded home-directory path. Per-run folder overrides apply
-where the selected workflow supports them; market-research uses the fixed
+where the selected workflow supports them; stock-research uses the fixed
 `Investments/` folder under the selected vault. Workflow scratch uses one hidden
 `.obsidian-skills-tmp-<unique-id>` directory outside the vault, as defined in
 [RUNTIME.md](RUNTIME.md#one-owned-scratch-directory-per-run). It is not a vault
@@ -65,7 +65,7 @@ publication stages follow [SAFE_WRITES.md](SAFE_WRITES.md) separately.
 | `Sources/PDFs/<Work>/` | book-chapter PDFs, e.g. `Sources/PDFs/Prince_UDL_2026/`. The folder is what pdf-organize creates when it splits a book. paper-summarize's batch **scans** it — a book is only recognisable as one when a chapter turns up beside it — and then **skips** every chapter it finds, so a sweep never becomes a book's worth of summaries | pdf-organize, the user | figure-extract, paper-summarize (scans, skips), wiki-build, wiki-add |
 | `Sources/Images/` | **flat**; every figure and downloaded image, all extensions, whatever it came from | figure-extract, clipping-clean, wiki-add (new research images only), feed-collect (original photo attachments); **pdf-organize** renames in place only within an approved source rename (§1a) | wiki-build, wiki-add, paper-summarize, clipping-clean (its `rename` path re-reads the folder — §8a), wiki-lint (with `--images`, validates embeds and reports nested/staging residue without opening or deleting files); feed-collect within its own scope |
 | `Wiki/` | wiki entries, one `.md` per entity (walked **recursively**) | wiki-build, wiki-add (missing requested entries only), wiki-lint | wiki-build, wiki-add, wiki-lint |
-| `Investments/` | dated market analyses at the top level, plus research evidence and source collections in dedicated subfolders; each investments skill governs its own format | market-research (immutable dated records and evidence snapshots), feed-collect (maintained source collections); the user maintains `x-accounts.md` | the investments skills within their own scope |
+| `Investments/` | dated stock analyses at the top level, plus maintained stock notes, research evidence and source collections in dedicated subfolders; each investments skill governs its own format | stock-research (immutable dated records/evidence and maintained Stocks/ notes), feed-collect (maintained source collections); the user maintains `x-accounts.md` | the investments skills within their own scope |
 | `add-to-wiki.md` at the *vault root* | requested-topic queue | the user; wiki-add checks off successful or already-existing items only | wiki-add |
 | `MOCs/` | **flat**; fully generated `<discipline>.md` nested outlines plus `misc.md` for Wiki entries tagged `#misc`; no `-moc` suffix, marker comments, H1, or frontmatter | wiki-lint | wiki-lint (navigation/hierarchy diagnostics only; reads each before an in-place update) |
 | `Reviews/` | `<current-skill>-suggestions.md` for installed skills, plus `Reviews/wiki-notes-suggestions.md` for Wiki note-content improvements; open issues only | skills under the attribution and setup rules in [SUGGESTIONS.md](SUGGESTIONS.md) | skills consuming the relevant outputs or verifying a fix |
@@ -106,25 +106,31 @@ items are checked off; unresolved items remain unchecked. This queue-first
 route does not change wiki-build's ordinary source-first extraction or
 wiki-lint's maintenance scope.
 
-**Market research route.** market-research combines current financial evidence
-with earlier daily analyses for liquid U.S.-listed stocks over a 3–12 month
-momentum horizon. It focuses on buying opportunities, leaving current-holdings
+**Stock research route.** stock-research takes new ideas from feed-collect’s
+published account notes and combines targeted financial verification with earlier
+analyses for liquid U.S.-listed stocks over a 3–12 month momentum horizon. It focuses on buying opportunities, leaving current-holdings
 reviews and sell recommendations to separate workflows. Dated notes in
-`Investments/` contain a short decision brief and a detailed research record. The independent `investments:market-research` skill governs evidence, uncertainty, and longitudinal review. These are research
+`Investments/` contain a short decision brief and a detailed research record. The independent `investments:stock-research` skill governs evidence, uncertainty, and longitudinal review. These are research
 records, not Wiki entries, source notes about one document, or generated MOCs.
 They do not enter automatic wiki-build intake, and no source-processing or Wiki
 maintenance run may rewrite them. Inventory their resolving links during
 rename and refactor planning: if an operation requires changing an investment
 record, report the dependency and retain its existing target. General
 authorization to repair dependencies does not waive this history rule.
-market-research never places trades.
+stock-research never places trades. Each substantively analyzed stock also has a
+maintained `Investments/Stocks/<TICKER>.md` note, with its latest assessment and
+links to dated reports. These stock notes are updated only by stock-research;
+the dated reports remain the authoritative historical record. The old
+market-research filenames and schema stay readable without rewriting history.
+Stock-note publication receipts under `Investments/.stock-research/dossiers/`
+are durable workflow data and must not be removed as scratch.
 
 **Feed collection route.** `investments:feed-collect` reads
 `Investments/x-accounts.md` and maintains one source-only X account note under
 `Investments/Sources/X/`. Its resumable collection state in
 `Investments/Sources/.feed-collect/` is durable workflow data, not scratch.
 These account notes may be updated for new posts and source compliance; the
-immutability rule above applies to dated market-research records, not the
+immutability rule above applies to dated stock-research records, not the
 source collection. They remain outside knowledge intake and maintenance.
 
 The collector also owns downloaded photo attachments in flat `Sources/Images/`
@@ -412,7 +418,7 @@ before retrying.
 
 **Depended on by:** workflows that write to the vault in either plugin.
 pdf-organize, figure-extract,
-clipping-clean, and market-research implement the same guarantees in their
+clipping-clean, and stock-research implement the same guarantees in their
 shipped helpers;
 paper-summarize, wiki-build, wiki-add and wiki-lint apply them when
 publishing notes, entries, queue checkoffs, logs, parents, and MOCs.
@@ -424,7 +430,7 @@ publishing notes, entries, queue checkoffs, logs, parents, and MOCs.
 This section defines the shared frontmatter schemas for Wiki entries and
 source notes. A skill writing either kind follows its schema exactly, including
 field order. Daily market research has a separate purpose and follows its own
-`investments:market-research` note format; these schemas,
+`investments:stock-research` note format; these schemas,
 Wiki discipline tags, and Wiki review-checkbox rules do not apply to it.
 
 ### 2a. Wiki entry — `Wiki/*.md`

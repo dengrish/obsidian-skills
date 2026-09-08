@@ -183,7 +183,7 @@ class HttpClient:
         if not query_credentials.issubset(allowed_credentials.get(host, set())):
             raise DataError('unsafe_credentials', 'Query credentials are not approved for this provider resource.')
         target = url + ('?' + urllib.parse.urlencode(params, doseq=True) if params else '')
-        request_headers = {'User-Agent': 'obsidian-market-research/1.0', 'Accept': 'application/json,text/plain',
+        request_headers = {'User-Agent': 'obsidian-stock-research/1.0', 'Accept': 'application/json,text/plain',
                            'Accept-Encoding': 'identity', **headers}
         # Space requests within a command; daily Alpha Vantage quotas remain server/account limits.
         interval = (0.2 if host.endswith('sec.gov') else 0.35 if 'alpaca.markets' in host

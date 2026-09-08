@@ -135,7 +135,7 @@ def _package_inventory(root, snapshots=None):
                 owner = skill_owners.setdefault(skill, plugin)
                 if owner != plugin:
                     raise ValueError("skill %s appears in both plugins" % skill)
-    investment_skills = {"market-research", "feed-collect"}
+    investment_skills = {"stock-research", "feed-collect"}
     for skill in investment_skills:
         if skill_owners.get(skill) != "investments":
             raise ValueError("%s must belong to investments" % skill)

@@ -29,7 +29,7 @@ PLUGIN_SKILLS = {
         "clipping-clean", "paper-summarize", "figure-extract", "pdf-organize",
         "wiki-add", "wiki-build", "wiki-lint",
     },
-    "investments": {"market-research", "feed-collect"},
+    "investments": {"stock-research", "feed-collect"},
 }
 
 
@@ -394,7 +394,7 @@ class CompatibilityTests(unittest.TestCase):
             config.write_text(json.dumps(fixtures), encoding="utf-8")
             config.chmod(0o600)
             before = config.read_bytes()
-            script = install / "skills/market-research/scripts/market_data.py"
+            script = install / "skills/stock-research/scripts/market_data.py"
             env = {key: value for key, value in os.environ.items() if key not in fixtures}
             env.pop('OBSIDIAN_VAULT_SHARED', None)
 
@@ -425,7 +425,7 @@ class CompatibilityTests(unittest.TestCase):
             self.assertEqual(unavailable["requests"], [])
             self.assertIn("parser", unavailable["error"]["message"].lower())
 
-            screen = install / "skills/market-research/scripts/market_screen.py"
+            screen = install / "skills/stock-research/scripts/market_screen.py"
             screen_help = subprocess.run(
                 [sys.executable, "-I", "-S", "-B", str(screen), "--help"],
                 cwd=root, env=env, capture_output=True, text=True,
@@ -553,7 +553,7 @@ class CompatibilityTests(unittest.TestCase):
             self.assertNotEqual(first, generated)
             self.assertEqual({name: metadata(name) for name in PLUGIN_SKILLS}, initial)
 
-            investment_skill = root / "skills/market-research/SKILL.md"
+            investment_skill = root / "skills/stock-research/SKILL.md"
             original_investment = investment_skill.read_bytes()
             investment_skill.write_bytes(original_investment + b"\nInvestment change.\n")
             investment_commit = commit("Investment source update")

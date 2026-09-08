@@ -13,19 +13,24 @@ source metadata, collection status and skill provenance stay in private state.
 Reposts keep their own timestamps and original-source links; returned snippets
 may be truncated, and referenced originals are not fetched separately.
 
-[investments:market-research](skills/market-research/SKILL.md) finds buying
-opportunities in liquid U.S.-listed stocks for a 3–12 month momentum horizon.
-It records concise decision briefs, detailed research, and later evaluations
+[investments:stock-research](skills/stock-research/SKILL.md) finds buying
+opportunities in liquid U.S.-listed stocks for a 3–12 month momentum horizon,
+starting from feed-collect’s published account notes. Run feed-collect first,
+then stock-research; the research skill does not collect posts or replace missing
+feeds with an independent discovery scan. It maintains a note for every
+substantively analyzed stock, including rejected and watch ideas, under
+`Investments/Stocks/`. These contain the latest assessment and dated history links.
+It records concise daily decision briefs, detailed research, and later evaluations
 of earlier recommendations in an Obsidian vault. Holdings reviews, sell
 recommendations and trade execution are outside this skill's scope.
 
 ## Setup
 
 Read [runtime setup](shared/RUNTIME.md) and the skill's
-[data-access guide](skills/market-research/references/data-access.md).
+[data-access guide](skills/stock-research/references/data-access.md).
 Both skills' core helpers use Python 3.10+ and the standard library, including system timezone
-data. A bounded directory-derived acquisition workflow feeds the offline screener
-with consistent momentum, relative strength, trend and liquidity-proxy inputs.
+data. Targeted financial retrieval feeds the offline screener with momentum,
+relative strength, trend and liquidity-proxy inputs for feed-nominated stocks.
 Shortlist helpers separately verify regular-session coverage and sourced
 market-cap eligibility; passing a screen is not a buying recommendation. Optional
 SEC filing/section extraction uses pinned EdgarTools; its setup is in the
@@ -47,17 +52,10 @@ retrying. Collection state in `Investments/Sources/.feed-collect/` is durable,
 not temporary scratch. Source edits and removals use a separate reconciliation
 procedure; account notes are maintained records, not immutable research
 editions. Blogs and newsletters are not yet supported. Collection does not
-interpret content or automatically replace market-research's discovery inputs.
-
-For a smaller starting universe, configure a covered-creator roster in the vault's
-`market-research-sources.json` under the
-[ShadowAlpha guide](skills/market-research/references/shadowalpha.md).
-The host's authenticated read-only MCP supplies posts and extracted predictions;
-the bundled offline helper validates and deduplicates them. Curated mode checks
-nominated companies in depth without running the broad directory acquisition.
-It retains independent news leads and prior theses, and applies the same buying
-criteria. Each host needs its own working connector; no subscription, portfolio
-or trading automation is created by this plugin.
+interpret content. Published account notes and the collector’s read-only coverage
+receipts are the input to stock-research. Uncollected, stale, incomplete or
+unpublished account data remain explicit limitations; a feed mention is not a
+buy recommendation.
 
 Credentials remain outside the repository, plugin and vault. An explicitly
 selected private JSON credentials file can be passed to the bundled data
@@ -67,9 +65,11 @@ FRED, subject to account access and coverage limits. Credentials are never
 included in plugin installation or publication.
 
 Use the same selected Obsidian vault as `knowledge` if desired. Published
-dated market-research records remain immutable. Scheduled research runs create one daily edition;
+dated stock-research records remain immutable; earlier market-research editions
+remain readable under their original names. Maintained stock notes do not replace
+this evidence history. Scheduled research runs create one daily edition;
 user-requested fresh reviews create timestamped manual editions under the
-[note format](skills/market-research/references/note-format.md#editions-and-retries).
+[note format](skills/stock-research/references/note-format.md#editions-and-retries).
 Both share the same thesis and outcome history. Private run receipts allow a
 started review to finish across midnight within eight hours; completed declared
 checks bind to the exact final draft without requiring human review.
@@ -86,8 +86,10 @@ credentials or parser dependencies; no buying score is inferred from a filing.
 Each skill uses `Reviews/<skill>-suggestions.md` under the
 [shared protocol](shared/SUGGESTIONS.md).
 
-Scheduling is separate from installation. When requested, invoke
-`investments:market-research` daily at 08:30 `America/Los_Angeles` (11:30
+Scheduling is separate from installation. The intended sequence is feed-collect
+then stock-research; each invocation remains separate unless the user explicitly
+schedules both. When requested, invoke
+`investments:stock-research` daily at 08:30 `America/Los_Angeles` (11:30
 `America/New_York`), following daylight saving time. Preserve the selected
 vault and credentials configuration in the host's task; installing this plugin
 does not create or change a schedule.

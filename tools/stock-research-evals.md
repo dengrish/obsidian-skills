@@ -1,4 +1,4 @@
-# Offline market-research evidence evaluation
+# Offline stock-research evidence evaluation
 
 This developer tool checks whether a research method handles specific financial
 evidence correctly. It does not fetch prices, call a model, place trades, modify
@@ -30,7 +30,7 @@ constructed responses. They are not a substitute for running an independent agen
 From the repository, using the isolated development interpreter:
 
 ```sh
-.venv/py310/bin/python tools/evaluate_market_research.py export > /private/tmp/market-research-eval-input-only.json
+.venv/py310/bin/python tools/evaluate_market_research.py export > /private/tmp/stock-research-eval-input-only.json
 ```
 
 `export` reads only `tests/fixtures/market_research/inputs.json`. It never reads

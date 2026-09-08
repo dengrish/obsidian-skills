@@ -3,7 +3,7 @@
 
 The export command reads inputs only. grade/compare also read the separately
 held answer key. No network, model, vault, runtime plugin or external dependency
-is used. See market-research-evals.md for independent behavioral runs.
+is used. See stock-research-evals.md for independent behavioral runs.
 """
 
 import argparse

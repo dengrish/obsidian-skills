@@ -14,7 +14,7 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'skills/market-research/scripts'))
+sys.path.insert(0, str(ROOT / 'skills/stock-research/scripts'))
 import market_comparison as comparison
 import market_notes
 
@@ -87,7 +87,7 @@ def note(day, content='', as_of=None):
     cutoff = as_of or day + 'T11:30:00-04:00'
     generated = comparison.parse_time(cutoff) + timedelta(minutes=1)
     return f'''---
-market_research: 1
+stock_research: 1
 date: {day}
 as_of: "{cutoff}"
 generated_at: "{generated.isoformat()}"
@@ -95,7 +95,7 @@ session: unknown
 coverage: limited
 ---
 
-# Market research — {day}
+# Stock research — {day}
 
 ## Decision brief
 
@@ -141,13 +141,13 @@ class ComparisonTests(unittest.TestCase):
 
     def save_formation(self, card=None):
         card = card or self.card
-        snippets = comparison.formation_markdown(card, '2024-05-01-market-research')
-        path = self.folder / '2024-05-01-market-research.md'
+        snippets = comparison.formation_markdown(card, '2024-05-01-stock-research')
+        path = self.folder / '2024-05-01-stock-research.md'
         path.write_text(note('2024-05-01', snippets['journal_markdown'] + '\n' + snippets['detail_markdown']), encoding='utf-8')
         return path
 
     def draft_observation(self, observation, replaces='-'):
-        snippets = comparison.observation_markdown(observation, '2024-08-03-market-research', replaces)
+        snippets = comparison.observation_markdown(observation, '2024-08-03-stock-research', replaces)
         draft = self.vault / 'draft.md'
         draft.write_text(note('2024-08-03', snippets['journal_markdown'] + '\n' + snippets['detail_markdown']), encoding='utf-8')
         return draft
@@ -199,7 +199,7 @@ class ComparisonTests(unittest.TestCase):
     def test_visible_markdown_round_trip_preserves_frozen_selection(self):
         self.bundle['universe']['name'] = 'Synthetic A&B | cohort'
         self.card = comparison.form(self.bundle)
-        rendered = comparison.formation_markdown(self.card, '2024-05-01-market-research')
+        rendered = comparison.formation_markdown(self.card, '2024-05-01-stock-research')
         parsed = comparison.read_card(rendered['detail_markdown'], comparison.heading_for(self.card['metadata']['Cohort']))
         self.assertEqual(parsed, self.card)
         path = self.save_formation()
@@ -276,16 +276,16 @@ class ComparisonTests(unittest.TestCase):
         sources[-1]['query']['end'] = '2024-05-02'
         sources[0]['query']['end'] = sources[0]['query']['requested_end'] = '2024-05-02T03:59:59Z'
         mutated['metadata']['Sources'] = json.dumps(sources)
-        rendered = comparison.formation_markdown(mutated, '2024-05-02-market-research')
+        rendered = comparison.formation_markdown(mutated, '2024-05-02-stock-research')
         late.write_text(note('2024-05-02', rendered['journal_markdown'] + '\n' + rendered['detail_markdown']), encoding='utf-8')
         result = market_notes.outcomes(self.vault, late, comparison.parse_time('2024-05-02T11:32:00-04:00'))
         self.assertFalse(result['complete'])
         self.assertTrue(any('formation is frozen' in row['error'] for row in result['findings']))
-        (self.folder / '2024-06-01-market-research.md').write_text(note('2024-06-01'), encoding='utf-8')
+        (self.folder / '2024-06-01-stock-research.md').write_text(note('2024-06-01'), encoding='utf-8')
         result = market_notes.outcomes(self.vault, now=comparison.parse_time('2024-06-02T11:32:00-04:00'))
         self.assertTrue(result['comparison_formation_must_be_unavailable'])
         unavailable = comparison.unavailable('2024-06-02T11:30:00-04:00', 'First monthly formation was missed.')
-        rendered = comparison.formation_markdown(unavailable, '2024-06-02-market-research')
+        rendered = comparison.formation_markdown(unavailable, '2024-06-02-stock-research')
         late.write_text(note('2024-06-02', rendered['journal_markdown'] + '\n' + rendered['detail_markdown']), encoding='utf-8')
         self.assertTrue(market_notes.outcomes(self.vault, late,
                         comparison.parse_time('2024-06-02T11:32:00-04:00'))['complete'])
@@ -359,10 +359,10 @@ class ComparisonTests(unittest.TestCase):
         self.save_formation()
         first = comparison.evaluate(self.card, '2024-05-01T11:31:00-04:00', observation_fixture(), '3m')
         draft = self.draft_observation(first)
-        original = self.folder / '2024-08-03-market-research.md'
+        original = self.folder / '2024-08-03-stock-research.md'
         original.write_bytes(draft.read_bytes())
         saved = original.read_bytes()
-        prior = comparison.record_link('2024-08-03-market-research', comparison.heading_for('simple-momentum-v1@2024-05', '3m'))
+        prior = comparison.record_link('2024-08-03-stock-research', comparison.heading_for('simple-momentum-v1@2024-05', '3m'))
         bundle = observation_fixture()
         bundle['as_of'] = '2024-08-03T15:00:00-04:00'
         bundle['prices'][0]['data']['bars']['AAA'][-1]['o'] = 140
@@ -370,7 +370,7 @@ class ComparisonTests(unittest.TestCase):
         bundle['prices'][0]['data']['bars']['AAA'][-1]['h'] = 140
         changed = comparison.evaluate(self.card, '2024-05-01T11:31:00-04:00', bundle, '3m')
         for replaces, complete in (('-', False), (prior, True)):
-            snippets = comparison.observation_markdown(changed, '2024-08-03-150000-market-research', replaces)
+            snippets = comparison.observation_markdown(changed, '2024-08-03-150000-stock-research', replaces)
             draft.write_text(note('2024-08-03', snippets['journal_markdown'] + '\n' + snippets['detail_markdown'],
                                   as_of=bundle['as_of']), encoding='utf-8')
             result = market_notes.outcomes(self.vault, draft, comparison.parse_time('2024-08-03T15:02:00-04:00'),
@@ -384,12 +384,12 @@ class ComparisonTests(unittest.TestCase):
         del incomplete['corporate_actions']['CCC']
         observation = comparison.evaluate(self.card, '2024-05-01T11:31:00-04:00', incomplete, '3m')
         draft = self.draft_observation(observation)
-        original = self.folder / '2024-08-03-market-research.md'
+        original = self.folder / '2024-08-03-stock-research.md'
         original.write_bytes(draft.read_bytes())
         bundle = observation_fixture()
         bundle['as_of'] = '2024-08-03T15:00:00-04:00'
         result = comparison.evaluate(self.card, '2024-05-01T11:31:00-04:00', bundle, '3m')
-        snippets = comparison.observation_markdown(result, '2024-08-03-150000-market-research')
+        snippets = comparison.observation_markdown(result, '2024-08-03-150000-stock-research')
         draft.write_text(note('2024-08-03', snippets['journal_markdown'] + '\n' + snippets['detail_markdown'],
                               as_of=bundle['as_of']), encoding='utf-8')
         indexed = market_notes.outcomes(self.vault, draft, comparison.parse_time('2024-08-03T15:02:00-04:00'),
@@ -409,14 +409,14 @@ class ComparisonTests(unittest.TestCase):
             comparison.load_json(linked)
 
     def test_card_bounds_and_malformed_cli_fail_without_traceback(self):
-        rendered = comparison.formation_markdown(self.card, '2024-05-01-market-research')
+        rendered = comparison.formation_markdown(self.card, '2024-05-01-stock-research')
         with self.assertRaisesRegex(ValueError, 'budget'):
             comparison.read_card(rendered['detail_markdown'] + 'x' * comparison.MAX_CARD_BYTES,
                                  comparison.heading_for(self.card['metadata']['Cohort']))
         path = self.vault / 'nested.json'
         path.write_text('[' * 2000 + '0' + ']' * 2000, encoding='utf-8')
-        result = subprocess.run([sys.executable, '-B', str(ROOT / 'skills/market-research/scripts/market_comparison.py'),
-                                 'form', '--input', str(path), '--note-key', '2024-05-01-market-research'],
+        result = subprocess.run([sys.executable, '-B', str(ROOT / 'skills/stock-research/scripts/market_comparison.py'),
+                                 'form', '--input', str(path), '--note-key', '2024-05-01-stock-research'],
                                 capture_output=True, text=True, encoding='utf-8')
         self.assertEqual(result.returncode, 2)
         self.assertNotIn('Traceback', result.stderr)
@@ -462,7 +462,7 @@ class ComparisonTests(unittest.TestCase):
         self.save_formation()
         changed = comparison.evaluate(self.card, '2024-05-01T11:31:00-04:00', observation_fixture(), '3m')
         changed['metadata']['As of'] = '2024-08-02T16:30:00-04:00'
-        snippets = comparison.observation_markdown(changed, '2024-08-02-163000-market-research')
+        snippets = comparison.observation_markdown(changed, '2024-08-02-163000-stock-research')
         draft = self.vault / 'draft.md'
         draft.write_text(note('2024-08-02', snippets['journal_markdown'] + '\n' + snippets['detail_markdown'],
                               as_of=changed['metadata']['As of']), encoding='utf-8')
@@ -482,7 +482,7 @@ class ComparisonTests(unittest.TestCase):
         with patch.object(comparison, 'ZoneInfo', side_effect=comparison.ZoneInfoNotFoundError('missing')):
             with contextlib.redirect_stdout(output):
                 code = comparison.main(['unavailable', '--as-of', '2024-05-01T11:30:00-04:00',
-                                        '--reason', 'Synthetic missing calendar', '--note-key', '2024-05-01-market-research'])
+                                        '--reason', 'Synthetic missing calendar', '--note-key', '2024-05-01-stock-research'])
         self.assertEqual(code, 2)
         self.assertIn('timezone', json.loads(output.getvalue())['error'])
 
@@ -520,8 +520,8 @@ class ComparisonTests(unittest.TestCase):
     def test_cli_generates_snippets_without_writing_vault(self):
         saved = self.vault / 'input.json'
         saved.write_text(json.dumps(self.bundle), encoding='utf-8')
-        result = subprocess.run([sys.executable, '-B', str(ROOT / 'skills/market-research/scripts/market_comparison.py'),
-                                 'form', '--input', str(saved), '--note-key', '2024-05-01-market-research'],
+        result = subprocess.run([sys.executable, '-B', str(ROOT / 'skills/stock-research/scripts/market_comparison.py'),
+                                 'form', '--input', str(saved), '--note-key', '2024-05-01-stock-research'],
                                 capture_output=True, text=True, encoding='utf-8')
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         output = json.loads(result.stdout)
@@ -530,7 +530,7 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(list(self.folder.iterdir()), [])
 
     def test_linked_formation_keeps_full_evidence_outside_the_readable_note(self):
-        rendered = comparison.formation_markdown(self.card, '2024-05-01-market-research', self.vault)
+        rendered = comparison.formation_markdown(self.card, '2024-05-01-stock-research', self.vault)
         attachment = rendered['evidence_attachment']
         path = Path(attachment['path'])
         self.assertEqual(path.parent, self.folder / 'Snapshots' / 'Comparisons')
@@ -543,9 +543,9 @@ class ComparisonTests(unittest.TestCase):
         self.assertLess(len(rendered['detail_markdown']), 5000)
         self.assertGreater(len(raw), len(rendered['detail_markdown']) * 3)
         parsed = comparison.read_card(rendered['detail_markdown'], comparison.heading_for(self.card['metadata']['Cohort']),
-                                      vault=self.vault, note_key='2024-05-01-market-research')
+                                      vault=self.vault, note_key='2024-05-01-stock-research')
         self.assertEqual(parsed, self.card)
-        retried = comparison.formation_markdown(self.card, '2024-05-01-market-research', self.vault)
+        retried = comparison.formation_markdown(self.card, '2024-05-01-stock-research', self.vault)
         self.assertEqual(retried['evidence_attachment']['status'], 'unchanged')
         self.assertEqual(path.stat().st_mtime_ns, before)
         self.assertEqual(path.read_bytes(), raw)
@@ -562,9 +562,9 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(formed['members'], [])
         self.assertTrue(all(row[-1] == 'unavailable' for row in formed['rows']))
         self.assertNotEqual(formed['metadata']['Screen input SHA-256'], self.card['metadata']['Screen input SHA-256'])
-        rendered = comparison.formation_markdown(formed, '2024-05-01-market-research', self.vault)
+        rendered = comparison.formation_markdown(formed, '2024-05-01-stock-research', self.vault)
         restored = comparison.read_card(rendered['detail_markdown'], comparison.heading_for(formed['metadata']['Cohort']),
-                                       vault=self.vault, note_key='2024-05-01-market-research')
+                                       vault=self.vault, note_key='2024-05-01-stock-research')
         self.assertEqual(restored['metadata']['State'], 'unavailable')
         self.assertEqual(restored['members'], [])
 
@@ -583,11 +583,11 @@ class ComparisonTests(unittest.TestCase):
                 comparison.form(complete)
 
     def test_linked_records_are_verified_by_the_ordinary_outcomes_index(self):
-        rendered = comparison.formation_markdown(self.card, '2024-05-01-market-research', self.vault)
-        path = self.folder / '2024-05-01-market-research.md'
+        rendered = comparison.formation_markdown(self.card, '2024-05-01-stock-research', self.vault)
+        path = self.folder / '2024-05-01-stock-research.md'
         path.write_text(note('2024-05-01', rendered['journal_markdown'] + '\n' + rendered['detail_markdown']), encoding='utf-8')
         observed = comparison.evaluate(self.card, '2024-05-01T11:31:00-04:00', observation_fixture(), '3m')
-        compact = comparison.observation_markdown(observed, '2024-08-03-market-research', vault=self.vault)
+        compact = comparison.observation_markdown(observed, '2024-08-03-stock-research', vault=self.vault)
         draft = self.vault / 'draft.md'
         draft.write_text(note('2024-08-03', compact['journal_markdown'] + '\n' + compact['detail_markdown']), encoding='utf-8')
         result = market_notes.outcomes(self.vault, draft, comparison.parse_time('2024-08-03T11:32:00-04:00'))
@@ -600,13 +600,13 @@ class ComparisonTests(unittest.TestCase):
         self.assertTrue(any('evidence' in row['error'] for row in result['findings']))
 
     def test_attached_formation_publishes_from_scratch_before_its_note_exists(self):
-        rendered = comparison.formation_markdown(self.card, '2024-05-01-market-research', self.vault)
+        rendered = comparison.formation_markdown(self.card, '2024-05-01-stock-research', self.vault)
         attachment = Path(rendered['evidence_attachment']['path'])
         original, original_time = attachment.read_bytes(), attachment.stat().st_mtime_ns
         draft = self.vault / 'not-the-daily-filename.md'
         draft.write_text(note('2024-05-01', rendered['journal_markdown'] + '\n' + rendered['detail_markdown']),
                          encoding='utf-8')
-        target = self.folder / '2024-05-01-market-research.md'
+        target = self.folder / '2024-05-01-stock-research.md'
         self.assertFalse(target.exists())
         with patch.object(market_notes, 'require_publication_provenance'):
             result = market_notes.publish(draft, self.vault, comparison.parse_time('2024-05-01T11:32:00-04:00'))
@@ -618,7 +618,7 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(attachment.stat().st_mtime_ns, original_time)
 
     def test_attachment_changed_after_initial_validation_cannot_publish(self):
-        rendered = comparison.formation_markdown(self.card, '2024-05-01-market-research', self.vault)
+        rendered = comparison.formation_markdown(self.card, '2024-05-01-stock-research', self.vault)
         attachment = Path(rendered['evidence_attachment']['path'])
         draft = self.vault / 'draft.md'
         draft.write_text(note('2024-05-01', rendered['journal_markdown'] + '\n' + rendered['detail_markdown']),
@@ -628,14 +628,14 @@ class ComparisonTests(unittest.TestCase):
         with patch.object(market_notes, 'require_publication_provenance', side_effect=changed_after_initial_checks):
             with self.assertRaisesRegex(RuntimeError, 'outcome evidence changed before publication'):
                 market_notes.publish(draft, self.vault, comparison.parse_time('2024-05-01T11:32:00-04:00'))
-        self.assertFalse((self.folder / '2024-05-01-market-research.md').exists())
-        self.assertEqual(len(list(self.vault.glob('.market-research-stage-*'))), 1)
+        self.assertFalse((self.folder / '2024-05-01-stock-research.md').exists())
+        self.assertEqual(len(list(self.vault.glob('.stock-research-stage-*'))), 1)
 
     def test_linked_evidence_rejects_owner_digest_summary_and_traversal_tampering(self):
-        rendered = comparison.formation_markdown(self.card, '2024-05-01-market-research', self.vault)
+        rendered = comparison.formation_markdown(self.card, '2024-05-01-stock-research', self.vault)
         attachment = rendered['evidence_attachment']
         heading = comparison.heading_for(self.card['metadata']['Cohort'])
-        def read(text=None, owner='2024-05-01-market-research', vault=None):
+        def read(text=None, owner='2024-05-01-stock-research', vault=None):
             return comparison.read_card(text or rendered['detail_markdown'], heading,
                                         vault=vault or self.vault, note_key=owner)
         for text in (
@@ -646,40 +646,40 @@ class ComparisonTests(unittest.TestCase):
             with self.subTest(text=text[:80]), self.assertRaises(ValueError):
                 read(text)
         with self.assertRaisesRegex(ValueError, 'owner'):
-            read(owner='2024-05-01-120000-market-research')
+            read(owner='2024-05-01-120000-stock-research')
         with self.assertRaisesRegex(ValueError, 'selected vault'):
-            comparison.read_card(rendered['detail_markdown'], heading, note_key='2024-05-01-market-research')
+            comparison.read_card(rendered['detail_markdown'], heading, note_key='2024-05-01-stock-research')
         path = Path(attachment['path'])
         original = path.read_bytes()
         path.write_bytes(original.replace(b'"AAA"', b'"ZZZ"', 1))
         with self.assertRaisesRegex(ValueError, 'SHA-256'):
             read()
         with self.assertRaisesRegex(ValueError, 'occupied by different bytes'):
-            comparison.save_evidence(self.card, self.vault, '2024-05-01-market-research')
+            comparison.save_evidence(self.card, self.vault, '2024-05-01-stock-research')
         self.assertNotEqual(path.read_bytes(), original)  # A failed retry never overwrites the occupant.
 
     def test_compact_metadata_round_trip_preserves_unescaped_evidence_values(self):
         self.bundle['universe']['name'] = 'Synthetic A&B | declared universe'
         self.bundle['universe']['source'] = 'Synthetic source with A&B | classification notes'
         card = comparison.form(self.bundle)
-        rendered = comparison.formation_markdown(card, '2024-05-01-market-research', self.vault)
+        rendered = comparison.formation_markdown(card, '2024-05-01-stock-research', self.vault)
         parsed = comparison.read_card(rendered['detail_markdown'], comparison.heading_for(card['metadata']['Cohort']),
-                                      vault=self.vault, note_key='2024-05-01-market-research')
+                                      vault=self.vault, note_key='2024-05-01-stock-research')
         self.assertEqual(parsed, card)
 
     def test_evidence_attachment_has_an_independent_bounded_size(self):
         with patch.object(comparison, 'MAX_EVIDENCE_BYTES', 128):
             with self.assertRaisesRegex(ValueError, 'attachment byte budget'):
-                comparison.save_evidence(self.card, self.vault, '2024-05-01-market-research')
+                comparison.save_evidence(self.card, self.vault, '2024-05-01-stock-research')
         self.assertEqual(list(self.folder.iterdir()), [])
-        rendered = comparison.formation_markdown(self.card, '2024-05-01-market-research', self.vault)
+        rendered = comparison.formation_markdown(self.card, '2024-05-01-stock-research', self.vault)
         evidence = rendered['evidence_attachment']
         with patch.object(comparison, 'MAX_EVIDENCE_BYTES', 128):
             with self.assertRaisesRegex(ValueError, 'bounded regular'):
-                comparison.load_evidence(self.vault, evidence['link'], evidence['sha256'], '2024-05-01-market-research')
+                comparison.load_evidence(self.vault, evidence['link'], evidence['sha256'], '2024-05-01-stock-research')
 
     def test_attached_calendar_and_source_validation_is_not_replaced_by_a_digest(self):
-        rendered = comparison.formation_markdown(self.card, '2024-05-01-market-research', self.vault)
+        rendered = comparison.formation_markdown(self.card, '2024-05-01-stock-research', self.vault)
         original = rendered['evidence_attachment']
         value = json.loads(Path(original['path']).read_bytes())
         value['metadata']['History calendar'] = '[]'
@@ -690,34 +690,34 @@ class ComparisonTests(unittest.TestCase):
         text = rendered['detail_markdown'].replace(original['sha256'], sha256)
         with self.assertRaises((ValueError, comparison.DataError)):
             comparison.read_card(text, comparison.heading_for(self.card['metadata']['Cohort']),
-                                 vault=self.vault, note_key='2024-05-01-market-research')
+                                 vault=self.vault, note_key='2024-05-01-stock-research')
 
     def test_linked_evidence_refuses_symlink_folders_files_and_portable_collisions(self):
-        rendered = comparison.formation_markdown(self.card, '2024-05-01-market-research', self.vault)
+        rendered = comparison.formation_markdown(self.card, '2024-05-01-stock-research', self.vault)
         attachment = rendered['evidence_attachment']
         path, outside = Path(attachment['path']), self.vault / 'outside.json'
         original = path.read_bytes()
         outside.write_bytes(original)
         path.unlink(); path.symlink_to(outside)
         with self.assertRaisesRegex(ValueError, 'non-symlink'):
-            comparison.load_evidence(self.vault, attachment['link'], attachment['sha256'], '2024-05-01-market-research')
+            comparison.load_evidence(self.vault, attachment['link'], attachment['sha256'], '2024-05-01-stock-research')
         with self.assertRaisesRegex(ValueError, 'non-symlink'):
-            comparison.save_evidence(self.card, self.vault, '2024-05-01-market-research')
+            comparison.save_evidence(self.card, self.vault, '2024-05-01-stock-research')
         path.unlink(); path.write_bytes(original)
         folder, moved = path.parent, self.vault / 'moved'
         folder.rename(moved); folder.symlink_to(moved, target_is_directory=True)
         with self.assertRaisesRegex(ValueError, 'never symlinks'):
-            comparison.load_evidence(self.vault, attachment['link'], attachment['sha256'], '2024-05-01-market-research')
+            comparison.load_evidence(self.vault, attachment['link'], attachment['sha256'], '2024-05-01-stock-research')
         folder.unlink(); moved.rename(folder)
         collision = folder.parent / 'comparisons'
         if not collision.exists():  # Also exercise portable aliases on case-sensitive hosts.
             collision.mkdir()
             with self.assertRaisesRegex(ValueError, 'portable-equivalent'):
-                comparison.load_evidence(self.vault, attachment['link'], attachment['sha256'], '2024-05-01-market-research')
+                comparison.load_evidence(self.vault, attachment['link'], attachment['sha256'], '2024-05-01-stock-research')
         self.assertEqual(outside.read_bytes(), original)
 
     def test_evidence_directory_swap_during_read_is_detected(self):
-        rendered = comparison.formation_markdown(self.card, '2024-05-01-market-research', self.vault)
+        rendered = comparison.formation_markdown(self.card, '2024-05-01-stock-research', self.vault)
         attachment = rendered['evidence_attachment']
         folder = Path(attachment['path']).parent
         actual_reader = comparison._read_evidence_bytes
@@ -728,7 +728,7 @@ class ComparisonTests(unittest.TestCase):
             return data
         with patch.object(comparison, '_read_evidence_bytes', side_effect=swapped):
             with self.assertRaisesRegex(ValueError, 'directory changed'):
-                comparison.load_evidence(self.vault, attachment['link'], attachment['sha256'], '2024-05-01-market-research')
+                comparison.load_evidence(self.vault, attachment['link'], attachment['sha256'], '2024-05-01-stock-research')
 
     def test_large_frozen_roster_uses_attachment_budget_without_trimming(self):
         # Copy the already verified evidence schema; every new identity has an
@@ -740,11 +740,11 @@ class ComparisonTests(unittest.TestCase):
             large['metadata']['Universe'], large['metadata']['Membership date'], large['metadata']['Universe source'],
             [dict(exchange=row[0], symbol=row[1], security_type=row[2], currency=row[3]) for row in large['rows']]))
         with self.assertRaisesRegex(ValueError, 'note budget'):
-            comparison.formation_markdown(large, '2024-05-01-market-research')
-        rendered = comparison.formation_markdown(large, '2024-05-01-market-research', self.vault)
+            comparison.formation_markdown(large, '2024-05-01-stock-research')
+        rendered = comparison.formation_markdown(large, '2024-05-01-stock-research', self.vault)
         self.assertLess(len(rendered['detail_markdown']), 5000)
         parsed = comparison.read_card(rendered['detail_markdown'], comparison.heading_for(large['metadata']['Cohort']),
-                                      vault=self.vault, note_key='2024-05-01-market-research')
+                                      vault=self.vault, note_key='2024-05-01-stock-research')
         self.assertEqual(len(parsed['rows']), 2004)
         self.assertEqual(parsed['members'], self.card['members'])
 
@@ -757,21 +757,21 @@ class ComparisonTests(unittest.TestCase):
             shutil.copyfile(ROOT / source, target)
         source = self.vault / 'fixture.json'
         source.write_text(json.dumps(self.bundle), encoding='utf-8')
-        script = install / 'skills/market-research/scripts/market_comparison.py'
+        script = install / 'skills/stock-research/scripts/market_comparison.py'
         env = {key: value for key, value in os.environ.items() if key not in ('OBSIDIAN_VAULT_SHARED', 'PYTHONPATH')}
         result = subprocess.run([sys.executable, '-I', '-S', '-B', str(script), 'form', '--input', str(source),
-                                 '--vault', str(self.vault), '--note-key', '2024-05-01-market-research'],
+                                 '--vault', str(self.vault), '--note-key', '2024-05-01-stock-research'],
                                 cwd=self.vault, env=env, capture_output=True, text=True, encoding='utf-8', timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         output = json.loads(result.stdout)
         self.assertEqual(output['members'], self.card['members'])
         self.assertTrue(Path(output['evidence_attachment']['path']).is_file())
-        first = self.folder / '2024-05-01-market-research.md'
+        first = self.folder / '2024-05-01-stock-research.md'
         first.write_text(note('2024-05-01', output['journal_markdown'] + '\n' + output['detail_markdown']), encoding='utf-8')
         source.write_text(json.dumps(observation_fixture()), encoding='utf-8')
         result = subprocess.run([sys.executable, '-I', '-S', '-B', str(script), 'evaluate', '--input', str(source),
                                  '--vault', str(self.vault), '--cohort-note', str(first), '--cohort', 'simple-momentum-v1@2024-05',
-                                 '--horizon', '3m', '--note-key', '2024-08-03-market-research'],
+                                 '--horizon', '3m', '--note-key', '2024-08-03-stock-research'],
                                 cwd=self.vault, env=env, capture_output=True, text=True, encoding='utf-8', timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         output = json.loads(result.stdout)

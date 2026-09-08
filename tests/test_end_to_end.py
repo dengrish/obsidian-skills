@@ -10,6 +10,7 @@ from datetime import datetime, time, timedelta
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -146,7 +147,9 @@ class WorkflowTests(unittest.TestCase):
 
     def run_script(self, relative, *args, expected=0):
         env = self.env
-        if relative == "skills/market-research/scripts/market_notes.py":
+        if relative in {"skills/stock-research/scripts/market_notes.py",
+                        "skills/stock-research/scripts/stock_dossiers.py",
+                        "skills/stock-research/scripts/stock_feed.py"}:
             # Publication verifies the complete generated bundle. Exercising the
             # source checkout here would bypass the installed-runtime contract.
             relative = "plugins/investments/" + relative
@@ -162,11 +165,83 @@ class WorkflowTests(unittest.TestCase):
     def stamp_market_draft(self, path):
         plugin = ROOT / "plugins/investments"
         script = "plugins/investments/shared/scripts/note_provenance.py"
-        args = ("--plugin", plugin, "--skill", "market-research")
+        args = ("--plugin", plugin, "--skill", "stock-research")
         record = json.loads(self.run_script(script, "inspect", *args).stdout)
         stamped = path.with_name(path.stem + "-stamped" + path.suffix)
         self.run_script(script, "stamp", *args, "--draft", path, "--output", stamped)
         return record, stamped
+
+    def test_collected_feed_to_daily_and_all_stock_notes(self):
+        """Exercise the installed-tree CLIs without real collection or market calls."""
+        self.vault = self.vault.resolve()
+        from test_stock_feed import account, post, feed
+        daily_helper = "skills/stock-research/scripts/market_notes.py"
+        dossier_helper = "skills/stock-research/scripts/stock_dossiers.py"
+        prepared = json.loads(self.run_script(daily_helper, "prepare", "--vault", self.vault,
+                                             "--mode", "manual", "--work-dir", self.scratch.name).stdout)
+        cutoff = datetime.fromisoformat(prepared["as_of"])
+        observed = (cutoff - timedelta(minutes=5)).isoformat()
+        since = (cutoff - timedelta(days=3)).isoformat()
+        item = account(1, "Example", post(101, text="Synthetic ideas: $EXAMPLE and $OTHER.",
+                       created_at=(cutoff - timedelta(hours=1)).isoformat(),
+                       first_retrieved_at=observed, last_checked_at=observed))
+        item.update(completed_at=observed, requested_since=since,
+                    requested_through=observed, history_before=since)
+        folder = self.vault / "Investments"
+        (folder / "Sources/X").mkdir(parents=True)
+        (folder / "Sources/.feed-collect").mkdir()
+        (folder / "x-accounts.md").write_text("- [x] @Example\n", encoding="utf-8")
+        source = folder / "Sources/X/example.md"
+        source.write_text(feed.render(item, {}), encoding="utf-8")
+        item["published_sha256"] = digest(source)
+        state = folder / "Sources/.feed-collect/state.json"
+        state.write_bytes(feed.encoded({"schema": 1, "accounts": {"example": item},
+                         "requests": [], "pending": None, "round_robin": 0, "assets": {}}))
+        before = {path: path.read_bytes() for path in (source, state, folder / "x-accounts.md")}
+        intake = json.loads(self.run_script("skills/stock-research/scripts/stock_feed.py", "context",
+                            "--vault", self.vault, "--cutoff", prepared["as_of"]).stdout)
+        self.assertEqual(intake["status"], "ready")
+        self.assertEqual([row["post_id"] for row in intake["posts"]], ["101"])
+        draft = Path(prepared["draft"])
+        body = re.sub(r"DRAFT —[^\n]*", "Synthetic fixture; no verified financial conclusion.",
+                      draft.read_text(encoding="utf-8"))
+        assessments = "\n\n".join(
+            f"#### NASDAQ:{ticker} — {company}\n\nStatus: {status}\n\n"
+            f"[[Investments/Stocks/{ticker}]]\n\n"
+            "Feed nomination: [Post 101](https://x.com/i/web/status/101). "
+            "This is a synthetic test. Evidence is insufficient for a buying recommendation."
+            for ticker, company, status in (("EXAMPLE", "Example Inc.", "watch"),
+                                             ("OTHER", "Other Inc.", "rejected")))
+        body = re.sub(r"(?<=### Candidate assessments\n)\n.*?(?=\n### Thesis updates)",
+                      "\n" + assessments + "\n", body, flags=re.S)
+        body = body.replace("No active theses.", "| Thesis | State | Update / next check |\n"
+                            "| --- | --- | --- |\n"
+                            f"| NASDAQ:EXAMPLE@{prepared['date']} | watch | Verify synthetic evidence. |")
+        draft.write_text(body, encoding="utf-8")
+        producer, stamped = self.stamp_market_draft(draft)
+        self.run_script(daily_helper, "review-complete", "--vault", self.vault,
+                        "--run-receipt", prepared["run_receipt"], "--draft", stamped, "--check", "final-review")
+        publication = json.loads(self.run_script(daily_helper, "publish", stamped,
+                                 "--vault", self.vault, "--run-receipt", prepared["run_receipt"]).stdout)
+        daily = Path(publication["path"])
+        daily_bytes = daily.read_bytes()
+        arguments = ("sync", "--vault", self.vault, "--daily-note", daily, "--work-dir", self.scratch.name)
+        synced = json.loads(self.run_script(dossier_helper, *arguments).stdout)
+        self.assertTrue(synced["complete"], synced)
+        self.assertEqual(synced["analyzed"], 2)
+        notes = [folder / "Stocks" / (ticker + ".md") for ticker in ("EXAMPLE", "OTHER")]
+        saved = {path: path.read_bytes() for path in notes}
+        for path in notes:
+            content = path.read_text(encoding="utf-8")
+            self.assertIn("[[Investments/" + daily.stem + "#NASDAQ:", content)
+            self.assertIn(producer["runtime_sha256"], content)
+        self.assertIn('status: "rejected"', notes[1].read_text(encoding="utf-8"))
+        retry = json.loads(self.run_script(dossier_helper, *arguments).stdout)
+        self.assertTrue(retry["complete"], retry)
+        self.assertTrue(all(row["status"] == "unchanged" for row in retry["results"]))
+        self.assertEqual(daily.read_bytes(), daily_bytes)
+        self.assertEqual({path: path.read_bytes() for path in notes}, saved)
+        self.assertEqual({path: path.read_bytes() for path in before}, before)
 
     def make_pdf(self, path):
         with pymupdf.open() as doc:
@@ -186,7 +261,7 @@ class WorkflowTests(unittest.TestCase):
         for key in ('SEC_USER_AGENT', 'ALPACA_API_KEY', 'ALPACA_SECRET_KEY', 'ALPHA_VANTAGE_API_KEY', 'FRED_API_KEY'):
             self.env.pop(key, None)
         before = sorted(str(path.relative_to(self.vault)) for path in self.vault.rglob('*'))
-        result = json.loads(self.run_script('skills/market-research/scripts/market_data.py',
+        result = json.loads(self.run_script('skills/stock-research/scripts/market_data.py',
                                             'check', expected=2).stdout)
         self.assertEqual(result['requests'], [])
         self.assertFalse(result['complete'])
@@ -222,7 +297,7 @@ raise SystemExit(main(fixture['args'], client))
             'ALPHA_VANTAGE_API_KEY': key, 'ALPACA_API_KEY': key, 'ALPACA_SECRET_KEY': key,
             'FRED_API_KEY': key, 'SEC_USER_AGENT': 'Fixture Research fixture@example.invalid'}}
         response = subprocess.run(
-            [sys.executable, str(driver), str(ROOT / 'skills/market-research/scripts')],
+            [sys.executable, str(driver), str(ROOT / 'skills/stock-research/scripts')],
             input=json.dumps(fixture), cwd=self.vault, env=self.env,
             capture_output=True, text=True, encoding='utf-8', timeout=30)
         self.assertEqual(response.returncode, expected, response.stdout + response.stderr)
@@ -241,7 +316,7 @@ raise SystemExit(main(fixture['args'], client))
         self.assertFalse(result['within_cutoff'])
         capture = Path(self.scratch.name) / 'estimate response.json'
         capture.write_text(json.dumps(result), encoding='utf-8')
-        helper = 'skills/market-research/scripts/market_estimate_history.py'
+        helper = 'skills/stock-research/scripts/market_estimate_history.py'
         saved = json.loads(self.run_script(helper, 'save', '--input', capture, '--vault', self.vault,
                                            '--period', '2027-03-31', '--horizon', 'fiscal quarter').stdout)
         path = Path(saved['path'])
@@ -259,7 +334,7 @@ raise SystemExit(main(fixture['args'], client))
         available = json.loads(self.run_script(helper, 'history', '--vault', self.vault,
                                               '--symbol', 'IBM', '--as-of', datetime.now().astimezone().isoformat()).stdout)
         self.assertEqual(len(available['snapshots']), 1)
-        context = json.loads(self.run_script('skills/market-research/scripts/market_notes.py',
+        context = json.loads(self.run_script('skills/stock-research/scripts/market_notes.py',
                                              'context', '--vault', self.vault).stdout)
         self.assertTrue(context['complete'])
         self.assertEqual(context['other_notes'], [])
@@ -326,7 +401,7 @@ raise SystemExit(main(fixture['args'], client))
         }
         path = Path(self.scratch.name) / 'screen input.json'
         path.write_text(json.dumps(bundle), encoding='utf-8')
-        result = json.loads(self.run_script('skills/market-research/scripts/market_screen.py',
+        result = json.loads(self.run_script('skills/stock-research/scripts/market_screen.py',
                                              '--input', path).stdout)
         self.assertTrue(result['complete'])
         self.assertEqual([row['symbol'] for row in result['candidates']], ['STRONG'])
@@ -340,12 +415,12 @@ raise SystemExit(main(fixture['args'], client))
         june_price = 100 + dates.index(datetime(2025, 6, 5).date())
         self.assertAlmostEqual(metrics['return_3m'], last_price / june_price - 1)
         self.assertAlmostEqual(metrics['relative_return_3m'], metrics['return_3m'])
-        repeated = json.loads(self.run_script('skills/market-research/scripts/market_screen.py',
+        repeated = json.loads(self.run_script('skills/stock-research/scripts/market_screen.py',
                                                '--input', path).stdout)
         self.assertEqual(result, repeated)
         prices['complete'] = False
         path.write_text(json.dumps(bundle), encoding='utf-8')
-        partial = json.loads(self.run_script('skills/market-research/scripts/market_screen.py',
+        partial = json.loads(self.run_script('skills/stock-research/scripts/market_screen.py',
                                               '--input', path, expected=2).stdout)
         self.assertFalse(partial['complete'])
         self.assertEqual(partial['candidates'], result['candidates'])
@@ -494,17 +569,17 @@ raise SystemExit(main(fixture['args'], client))
         self.assertFalse(releases['point_in_time_verified'])
 
     def test_market_documented_template_is_accepted_by_publisher_linter(self):
-        guide = (ROOT / "skills/market-research/references/note-format.md").read_text(encoding="utf-8")
+        guide = (ROOT / "skills/stock-research/references/note-format.md").read_text(encoding="utf-8")
         template = guide.split("```markdown\n", 1)[1].split("\n```", 1)[0]
         draft = Path(self.scratch.name) / "documented market template.md"
         draft.write_text(template + "\n", encoding="utf-8")
         result = json.loads(self.run_script(
-            "skills/market-research/scripts/market_notes.py", "lint", draft).stdout)
+            "skills/stock-research/scripts/market_notes.py", "lint", draft).stdout)
         self.assertEqual(result["theses"], [])
         self.assertFalse((self.vault / "Investments").exists())
 
     def test_market_checkpoint_catchup_and_lessons_survive_invalidation(self):
-        script = "skills/market-research/scripts/market_notes.py"
+        script = "skills/stock-research/scripts/market_notes.py"
         clock = json.loads(self.run_script(script, "context", "--vault", self.vault).stdout)
         today = datetime.fromisoformat(clock["now"]).date()
         first_day = today - timedelta(days=2000)
@@ -519,7 +594,7 @@ raise SystemExit(main(fixture['args'], client))
             return datetime.combine(day, time(hour, minute), zone).isoformat()
 
         def link(day, heading):
-            return f"[[Investments/{day}-market-research#{heading}]]"
+            return f"[[Investments/{day}-stock-research#{heading}]]"
 
         def daily(day, state, review):
             as_of = clock["as_of"] if day == today else stamp(day, 9)
@@ -527,9 +602,9 @@ raise SystemExit(main(fixture['args'], client))
             ledger = ("| Thesis | State | Update / next check |\n|---|---|---|\n"
                       f"| {thesis} | {state} | Synthetic historical state only. |"
                       if state else "No active theses.")
-            return (f'---\nmarket_research: 1\ndate: {day}\nas_of: "{as_of}"\n'
+            return (f'---\nstock_research: 1\ndate: {day}\nas_of: "{as_of}"\n'
                     f'generated_at: "{generated}"\nsession: unknown\ncoverage: limited\n---\n'
-                    f'# Market research — {day}\n\n## Decision brief\n\nSynthetic fixture only.\n\n'
+                    f'# Stock research — {day}\n\n## Decision brief\n\nSynthetic fixture only.\n\n'
                     '### Buying opportunities\n\nNo real investment recommendation.\n\n'
                     '### Next checks\n\nCheck due synthetic observations.\n\n'
                     '## Research record\n\n### Screening and sources\n\nSynthetic calendar and values.\n\n'
@@ -539,14 +614,14 @@ raise SystemExit(main(fixture['args'], client))
         recommendation_header = ("#### Recommendation records\n\n"
             "| Recommendation | First ready | Baseline at | Record | Replaces |\n"
             "|---|---|---|---|---|\n")
-        first = folder / f"{first_day}-market-research.md"
+        first = folder / f"{first_day}-stock-research.md"
         first.write_text(daily(first_day, "ready", recommendation_header
             + f"| {thesis} | {first_day} | pending | {link(first_day, 'Original recommendation')} | - |\n\n"
             + "#### Original recommendation\n\nSynthetic reference quote120; prospective baseline pending."),
             encoding="utf-8")
         initial = json.loads(self.run_script(script, "outcomes", "--vault", self.vault).stdout)
         self.assertEqual([item["id"] for item in initial["due_baselines"]], [thesis])
-        update = folder / f"{update_day}-market-research.md"
+        update = folder / f"{update_day}-stock-research.md"
         update.write_text(daily(update_day, "invalidated", recommendation_header
             + f"| {thesis} | {first_day} | {stamp(baseline_day, 9, 30)} | {link(update_day, 'Baseline evidence')} | - |\n\n"
             + "#### Baseline evidence\n\nSynthetic opening100; original quote120 is not an execution. "
@@ -562,7 +637,7 @@ raise SystemExit(main(fixture['args'], client))
         one_month = next(item for item in planned["checkpoints"] if item["horizon"] == "1m")
         month_target_day = datetime.fromisoformat(one_month["target_date"]).date()
         month_note_day = month_target_day + timedelta(days=1)
-        previous_month = folder / f"{month_note_day}-market-research.md"
+        previous_month = folder / f"{month_note_day}-stock-research.md"
         previous_month.write_text(daily(month_note_day, None,
             "#### Checkpoint records\n\n"
             "| Recommendation | Months | State | Observed at | Record | Replaces |\n"
@@ -596,11 +671,11 @@ raise SystemExit(main(fixture['args'], client))
                          encoding="utf-8")
         self.run_script(script, "outcomes", "--vault", self.vault, "--draft", draft, expected=2)
         self.run_script(script, "publish", draft, "--vault", self.vault, expected=2)
-        self.assertFalse((folder / f"{today}-market-research.md").exists())
+        self.assertFalse((folder / f"{today}-stock-research.md").exists())
         # A timestamp correction needs a newly written evidence card; neither an
         # alias nor a different older card can document the current correction.
         old_record = link(update_day, 'Baseline evidence')
-        alias_record = old_record.replace('-market-research#', '-market-research.md#')
+        alias_record = old_record.replace('-stock-research#', '-stock-research.md#')
         for stale_card in (alias_record, link(month_note_day, 'Historical monthly result')):
             ambiguous_correction = (recommendation_header
                 + f"| {thesis} | {first_day} | {stamp(baseline_day, 9, 31)} | "
@@ -609,14 +684,14 @@ raise SystemExit(main(fixture['args'], client))
             rejected = self.run_script(script, "outcomes", "--vault", self.vault, "--draft", draft, expected=2)
             self.assertIn("new detail card in the current draft", rejected.stdout)
             self.run_script(script, "publish", draft, "--vault", self.vault, expected=2)
-            self.assertFalse((folder / f"{today}-market-research.md").exists())
+            self.assertFalse((folder / f"{today}-stock-research.md").exists())
         # A real section link is insufficient when that immutable evidence card
         # predates the observation it is supposed to support.
         stale_evidence = review.replace(link(today, 'Observed result'), old_record)
         draft.write_text(daily(today, None, stale_evidence), encoding="utf-8")
         self.run_script(script, "outcomes", "--vault", self.vault, "--draft", draft, expected=2)
         self.run_script(script, "publish", draft, "--vault", self.vault, expected=2)
-        self.assertFalse((folder / f"{today}-market-research.md").exists())
+        self.assertFalse((folder / f"{today}-stock-research.md").exists())
         draft.write_text(daily(today, None, review), encoding="utf-8")
         checked = json.loads(self.run_script(script, "outcomes", "--vault", self.vault, "--draft", draft).stdout)
         self.assertEqual(checked["active_lessons"][0]["id"], lesson)
@@ -633,10 +708,10 @@ raise SystemExit(main(fixture['args'], client))
         self.assertTrue(Path(rebuilt["active_lessons"][0]["record_note"]).is_file())
         for path, original in originals.items():
             self.assertEqual(path.read_bytes(), original)
-        self.assertEqual(list(self.vault.glob(".market-research-stage-*")), [])
+        self.assertEqual(list(self.vault.glob(".stock-research-stage-*")), [])
 
     def test_market_daily_history_publication_and_retry(self):
-        script = "skills/market-research/scripts/market_notes.py"
+        script = "skills/stock-research/scripts/market_notes.py"
         initial = json.loads(self.run_script(script, "context", "--vault", self.vault).stdout)
         folder = self.vault / "Investments"
         self.assertTrue(initial["complete"])
@@ -658,26 +733,26 @@ raise SystemExit(main(fixture['args'], client))
                       if carry else "No active theses.")
             buying = (f'{thesis}: watch only; no confirmed buying opportunity.'
                       if carry else 'No confirmed buying opportunity.')
-            return (f'---\nmarket_research: 1\ndate: {day}\nas_of: "{as_of}"\n'
+            return (f'---\nstock_research: 1\ndate: {day}\nas_of: "{as_of}"\n'
                     f'generated_at: "{generated_at}"\nsession: unknown\ncoverage: unavailable\n---\n\n'
-                    f'# Market research — {day}\n\n## Decision brief\n\nNo verified market data.\n\n'
+                    f'# Stock research — {day}\n\n## Decision brief\n\nNo verified market data.\n\n'
                     f'### Buying opportunities\n\n{buying}\n\n'
                     '### Next checks\n\nVerify data before assessing the fixture.\n\n'
                     '## Research record\n\n### Screening and sources\n\nSynthetic test only.\n\n'
-                    f'### Candidate assessments\n\n#### {thesis}\n\n{record}\n\n'
+                    f'### Candidate assessments\n\n#### NASDAQ:EXAMPLE — Example Inc.\n\nStatus: watch\n\n[[Investments/Stocks/EXAMPLE]]\n\n{record}\n\n'
                     f'### Thesis updates\n\n{ledger}\n\n'
                     '### Outcome review\n\nNo confirmed ideas are due for measurement.\n')
 
         folder.mkdir()
         prior_time = datetime.combine(yesterday, time(9), ZoneInfo("America/New_York")).isoformat()
-        prior = folder / f"{yesterday}-market-research.md"
+        prior = folder / f"{yesterday}-stock-research.md"
         prior.write_text(daily(yesterday, prior_time, prior_time, True), encoding="utf-8")
         original_prior = prior.read_bytes()
         user_note = folder / "My own research.md"
         user_note.write_text("Personal notes must remain unchanged.\n", encoding="utf-8")
         original_user = user_note.read_bytes()
         draft = Path(self.scratch.name) / "market draft.md"
-        target = folder / f"{today}-market-research.md"
+        target = folder / f"{today}-stock-research.md"
 
         draft.write_text(daily(today, initial["as_of"], initial["now"], False), encoding="utf-8")
         refused = self.run_script(script, "publish", draft, "--vault", self.vault, expected=2)
@@ -689,7 +764,7 @@ raise SystemExit(main(fixture['args'], client))
         current = current.replace('\n\n### Outcome review',
                                   f'\n| {new_thesis} | watch | Newly recorded synthetic idea. |\n\n### Outcome review')
         current += ('\n#### Lesson records\n\n| Lesson | Status | Record |\n|---|---|---|\n'
-                    f'| {new_lesson} | provisional | [[Investments/{today}-market-research#Initial lesson]] |\n\n'
+                    f'| {new_lesson} | provisional | [[Investments/{today}-stock-research#Initial lesson]] |\n\n'
                     '#### Initial lesson\n\nSynthetic provisional question; no investment claim.\n')
         for identifier in (new_thesis, new_lesson):
             backdated = identifier.replace(today.isoformat(), yesterday.isoformat())
@@ -710,7 +785,7 @@ raise SystemExit(main(fixture['args'], client))
         generator, draft = self.stamp_market_draft(draft)
         stamped = json.loads(self.run_script(script, "lint", draft).stdout)
         self.assertEqual(stamped["provenance"], {"schema": 1, "generated_by": generator})
-        self.assertEqual(generator["skill"], "investments:market-research")
+        self.assertEqual(generator["skill"], "investments:stock-research")
         self.assertEqual(len(generator["runtime_sha256"]), 64)
         created = json.loads(self.run_script(script, "publish", draft, "--vault", self.vault).stdout)
         self.assertEqual(created, {"status": "created", "path": str(target.resolve())})
@@ -736,7 +811,7 @@ raise SystemExit(main(fixture['args'], client))
         self.assertEqual(current["active_theses"][0]["id"], thesis)
         historical_record = Path(current["active_theses"][0]["note"]).read_text(encoding="utf-8")
         self.assertIn(evidence, historical_record, "ledger retrieval must reach the complete earlier record")
-        self.assertEqual(list(self.vault.glob(".market-research-stage-*")), [])
+        self.assertEqual(list(self.vault.glob(".stock-research-stage-*")), [])
 
     def test_paper_note_lint_applies_the_selected_nonempirical_mode(self):
         note = self.notes / "Doe_Correction_2025.md"
@@ -792,7 +867,7 @@ raise SystemExit(main(fixture['args'], client))
 
         # Sharing a vault must not let a knowledge rename alter immutable
         # investment history or partly move its otherwise writable family.
-        history = self.vault / "Investments/2025-09-05-market-research.md"
+        history = self.vault / "Investments/2025-09-05-stock-research.md"
         history.parent.mkdir(exist_ok=True)
         history.write_text("Original evidence: [[Doe_Study_2025.pdf#page=1]].\n",
                            encoding="utf-8")

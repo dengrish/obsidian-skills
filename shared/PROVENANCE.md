@@ -18,7 +18,7 @@ in the private collection state alongside the note's publication digest. These
 notes contain properties and posts, with no provenance footer or metadata
 section. The collector preserves a known creator when migrating its existing
 footer to state and records the current updater on substantive changes. This
-exception does not apply to market-research reports or suggestion logs.
+exception does not apply to stock-research reports or suggestion logs.
 
 ## Stamp the reviewed draft
 

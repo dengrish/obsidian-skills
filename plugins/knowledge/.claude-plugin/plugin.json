@@ -1,6 +1,6 @@
 {
   "name": "knowledge",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Build and maintain an Obsidian knowledge base: organize PDFs, extract figures, create reading notes, clean web clippings, research queued topics, and maintain interlinked wiki entries and maps of content.",
   "repository": "https://github.com/dengrish/obsidian-skills",
   "author": {

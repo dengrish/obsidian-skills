@@ -28,7 +28,7 @@ Choose by the requested result, not just the input's file type.
 | Research and add missing requested topics | [knowledge:wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md` → durable sources and new requested entries only |
 | Audit, correct or explicitly refactor existing wiki entries | [knowledge:wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources or an exact producer mapping → scoped repairs, links, parents and MOCs |
 | Record posts from selected X accounts without interpretation | [investments:feed-collect](skills/feed-collect/SKILL.md) | `Investments/x-accounts.md` → one maintained account note in `Investments/Sources/X/` |
-| Research market catalysts and developing momentum | [investments:market-research](skills/market-research/SKILL.md) | current market evidence and earlier analyses → brief daily note in `Investments/` |
+| Analyze stock ideas from collected feeds | [investments:stock-research](skills/stock-research/SKILL.md) | saved posts + verified financial evidence → daily report and maintained stock notes |
 
 A PDF attached without a stated goal has no default workflow; ask what result
 the user wants. An inbox-wide request splits captured `.md` files and `.pdf`
@@ -54,7 +54,8 @@ Existing Wiki/ → wiki-lint → entry repairs, links, parents, MOCs and proposa
 
 Investments/x-accounts.md → feed-collect → account notes containing posts, quote posts and reposts
 
-Market evidence + prior Investments/ notes → market-research → daily research note
+Selected X accounts → feed-collect → account notes → stock-research
+  + targeted financial verification + prior research → daily report + Stocks/ notes
 ```
 
 Figure extraction supplies images to paper-summarize and wiki-build.
@@ -89,32 +90,31 @@ adds an unrequested entity to satisfy a builder audit. It checks off only
 successfully published or already-existing queue items; uncertain or blocked
 items remain unchecked. Existing-entry enrichment remains wiki-build's job.
 
-market-research finds long-only buying opportunities in liquid U.S.-listed
-stocks over a 3–12 month momentum horizon. It combines repeatable announcement
-and price screens with verified business evidence and bounded social research.
+stock-research analyzes ideas in feed-collect’s saved account notes for long-only
+buying opportunities in liquid U.S.-listed stocks over a 3–12 month momentum
+horizon. Run feed-collect first, then stock-research. Posts nominate ideas; targeted
+price, filing and business checks establish whether the buying case holds.
+It does not collect posts itself or silently substitute a broad market scan.
+Every substantively analyzed stock, including watch and rejected ideas, gets a
+maintained note in `Investments/Stocks/`, with its latest assessment and links
+to the immutable daily reports that record earlier conclusions.
 Each note has a short decision brief and a detailed research record for future
 runs, including thesis changes, daily checks of two-week and 1/3/6/12/24/60-month
 outcomes and monthly summaries of evidence-backed lessons. Quoted recommendation prices stay
 separate from the fixed hypothetical entry convention. No qualifying
 buying opportunity is a valid result. Scheduled and user-requested manual editions
-use the skill's [note format](skills/market-research/references/note-format.md) in
+use the skill's [note format](skills/stock-research/references/note-format.md) in
 `Investments/`, sharing one thesis and outcome history; they are not
 Wiki entries or source notes for automatic wiki-build intake. It researches
 opportunities without reviewing current holdings, recommending sales, placing
 trades, or rewriting earlier records.
-Its optional [data retrieval helpers](skills/market-research/references/data-access.md)
+Its optional [data retrieval helpers](skills/stock-research/references/data-access.md)
 cover SEC filings/facts, Nasdaq directories/halts, Alpaca prices/actions/sessions/news,
 Alpha Vantage news/earnings calendars and estimates, and FRED macro series/release dates. Setup
 can be checked offline; keyed sources use local environment variables or an
 explicit private JSON file passed to the bundled script with `--credentials-file`.
 Credentials remain outside the plugin, repository and vault; no separate local
 credential launcher is required. Retrieval retains explicit feed and coverage limits.
-
-An optional [ShadowAlpha roster](skills/market-research/references/shadowalpha.md)
-supports a smaller curated discovery universe via the host's read-only MCP.
-Personal source configuration stays in the vault; bundled normalization preserves
-attribution, cutoffs and sample limitations without turning extracted calls into
-buy recommendations. This mode retains independent news and earlier theses.
 
 [feed-collect](skills/feed-collect/SKILL.md) independently records timestamped
 original posts, quote posts and reposts from public X accounts selected in
@@ -134,15 +134,15 @@ Routine updates avoid replaying saved pages and reuse saved responses when
 publication needs retrying. Ambiguous paid requests stop for
 resolution instead of silently retrying. Source edits and removals have a
 separate reconciliation procedure. The collector does not summarize posts,
-select stocks or change the market-research schedule. Blogs and newsletters
+select stocks or change the stock-research schedule. Blogs and newsletters
 are future work, not supported inputs. Read its
 [X API guide](skills/feed-collect/references/x-api.md) for credentials, bounded
 backfills, coverage limitations and compliance maintenance.
 
-The [offline screener](skills/market-research/references/screening.md) calculates
+The [offline screener](skills/stock-research/references/screening.md) calculates
 calendar-month momentum, benchmark-relative returns, moving averages and a
 clearly labeled daily liquidity proxy from saved Alpaca/calendar responses.
-The research method adds bounded thematic discovery and checks decision-critical
+The research method verifies feed-nominated candidates and checks decision-critical
 claims and earnings comparisons before publication. Optional exact-accession SEC
 filing extraction uses pinned EdgarTools as a local parser, without delegating
 network requests or installing another framework. Core retrieval, screening and
@@ -178,7 +178,7 @@ claude plugin install investments@obsidian-skills
 
 Invoke skills as `knowledge:wiki-build`, `knowledge:wiki-add`,
 `knowledge:wiki-lint`, `investments:feed-collect`, or
-`investments:market-research`. Start a fresh
+`investments:stock-research`. Start a fresh
 session/task after installation or updates to refresh the host's catalog.
 Each plugin uses its own packaged `skills/` and `shared/` resources; copying
 one SKILL.md or relying on a sibling installation is unsupported.
@@ -206,8 +206,9 @@ both new plugins before removing the former `obsidian@obsidian-skills`
 installation; do not keep duplicate skill catalogs enabled after migration.
 Do not manually edit caches or replace the GitHub marketplace with a local one.
 
-Update scheduled skill references from `obsidian:market-research` to
-`investments:market-research` only after the new installed plugin is available.
+Update scheduled skill references to `investments:stock-research` only after the new installed plugin is available.
+Earlier `*-market-research.md` daily reports and their outcome links remain
+readable without renaming or rewriting historical files.
 Keep the selected vault, credentials file, interpreter and schedule unchanged;
 shared-helper overrides must point to the selected investments installation.
 The default daily edition remains 08:30 `America/Los_Angeles` / 11:30
@@ -344,6 +345,8 @@ python3 -m venv .venv
 .venv/bin/python tests/test_market_research_eval.py
 .venv/bin/python tests/test_market_comparison.py
 .venv/bin/python tests/test_market_acquire.py
+.venv/bin/python tests/test_stock_feed.py
+.venv/bin/python tests/test_stock_dossiers.py
 .venv/bin/python tests/test_feed_collect.py
 .venv/bin/python tests/test_feed_recent.py
 .venv/bin/python tests/test_feed_media.py
@@ -367,7 +370,7 @@ execution from another working directory and platform-sensitive paths and
 interpreter handling. These tests do not establish prose quality, correct
 source interpretation or visually accurate crops; review those separately.
 
-The [research evaluation workflow](tools/market-research-evals.md) exports frozen
+The [research evaluation workflow](tools/stock-research-evals.md) exports frozen
 financial evidence cases without answer keys, grades structured responses and
 compares runs under matching conditions. Its document suite compares raw financial
 tables with curated evidence, separately checking source selection, extraction

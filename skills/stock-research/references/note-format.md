@@ -1,8 +1,15 @@
-# Daily market note format
+# Daily stock-research note format
 
-Keep market notes in `<vault>/Investments/`, with the review's
+Keep daily stock-research notes in `<vault>/Investments/`, with the review's
 **America/New_York** date. Keep published notes unchanged; place corrections and
 changed assessments in a later edition with a link to the affected record.
+
+Maintained per-stock notes live separately in `Investments/Stocks/`; see
+[stock note maintenance](stock-notes.md). They are current views, while these
+immutable daily editions preserve the evidence and judgments at each cutoff.
+Historical `*-market-research.md` notes with `market_research: 1` and a `Market
+research` H1 remain valid read-only history. Do not rename them, relabel their
+provenance or rewrite their links merely because the skill has been renamed.
 
 Each note has two parts: a short **Decision brief** for the user and a detailed
 **Research record** for future research. Both are visible Markdown in the same
@@ -14,12 +21,12 @@ safety limit is not a writing target.
 
 ## Editions and retries
 
-- **Scheduled:** `YYYY-MM-DD-market-research.md`, one edition per calendar day.
+- **Scheduled:** `YYYY-MM-DD-stock-research.md`, one edition per calendar day.
   Helpers default to `--mode scheduled`; the daily schedule keeps its established
   cutoff, and successful retries reuse the existing edition. A new scheduled
   draft cannot use evidence after 11:30 New York time; use a manual edition for
   a later cutoff. Earlier published cutoffs remain unchanged on retries.
-- **Manual:** `YYYY-MM-DD-HHMMSS-market-research.md`, using the New York date and
+- **Manual:** `YYYY-MM-DD-HHMMSS-stock-research.md`, using the New York date and
   whole-second time in `as_of`. A user-requested fresh review may create another
   edition on the same day without replacing an earlier note or changing the schedule.
 
@@ -74,7 +81,7 @@ bytes can be retried; a different edition needs a new current cutoff.
 
 ## Metadata and outline
 
-Use these six frontmatter keys, in this order. `market_research` is the integer
+Use these six frontmatter keys, in this order. `stock_research` is the integer
 schema version `1`; `date` is an ISO date. Quote `as_of` and `generated_at` as ISO
 datetimes with explicit UTC offsets, using New York's offset for each timestamp.
 `as_of` is the latest permitted evidence timestamp, not the retrieval time of a
@@ -84,8 +91,8 @@ bounded live run that crosses midnight can have a later generation date.
 
 `session` is `premarket`, `closed`, `intraday`, `after-hours`, or `unknown`, based
 on the verified exchange session at the cutoff. `coverage` is `normal`, `limited`,
-or `unavailable`; normal means the declared screen was checked adequately, not
-that every listed stock was assessed. Explain material missing data in the brief.
+or `unavailable`; normal means the declared feed window and relevant checks were adequate, not
+that every listed stock or all of X was assessed. Explain material missing data in the brief.
 No Wiki/source-note frontmatter, flashcards, or review checkboxes are needed.
 
 Keep exactly the two H2 headings and six H3 subsections below, in order. Opening
@@ -103,14 +110,14 @@ The following is a layout template; replace all illustrative values and prose:
 
 ```markdown
 ---
-market_research: 1
+stock_research: 1
 date: 2026-09-08
 as_of: "2026-09-08T11:30:00-04:00"
 generated_at: "2026-09-08T11:46:00-04:00"
 session: intraday
 coverage: limited
 ---
-# Market research — 2026-09-08
+# Stock research — 2026-09-08
 
 ## Decision brief
 
@@ -130,13 +137,15 @@ State the next dated catalyst or observable condition that could qualify an idea
 
 ### Screening and sources
 
-Record the checked universe, both discovery passes, dates, filters, sources,
-coverage gaps, and relevant social-source findings or access limitations.
+Record the feed window and account coverage, post nominations and dispositions,
+the checked stock set, dates, filters, primary sources and material data gaps.
 
 ### Candidate assessments
 
 Preserve the evidence, observations and concise rationale for shortlisted names,
-including rejected candidates and what would justify revisiting them.
+including rejected candidates and what would justify revisiting them. Each
+substantively analyzed stock uses the exact H4/Status structure below and links
+its maintained stock note.
 
 ### Thesis updates
 
@@ -168,8 +177,9 @@ or reason not to buy yet. Briefly mention a material deterioration in a previous
 featured buying thesis; never turn it into an instruction to sell an assumed
 holding. Finish with the next concrete checks.
 
-Use an H4 heading for a candidate if useful, for example
-`#### NASDAQ:EXAMPLE — Company name · watch`. Link its detailed assessment or
+Use an H4 heading for a brief candidate if useful, for example
+`#### NASDAQ:EXAMPLE — Company name · watch`. The structured assessment belongs
+under Candidate assessments, where the heading has no appended state. Link its detailed assessment or
 original thesis and retain primary citations beside material claims. Important
 limitations must appear in the brief even when explained fully in the record.
 Do not move the full ledger, screening tables, or outcome calculations here.
@@ -187,34 +197,36 @@ Current-holdings review, sell timing and rebalancing are outside this skill's sc
 Record enough information to resume and audit the work without reconstructing
 it from the short brief. Organize each day's relevant material as follows:
 
-- **Screening and sources:** persist the universe definition, source/provider,
-  price-history period, liquidity/filter/ranking rules, coverage, candidate counts
-  when known, and the announcement and price-screen results. Explain changes to
-  the prior screen. For a thematic expansion, retain the theme, actual checked
-  names, coverage and decisive exclusions. Preserve direct evidence URLs,
-  publisher/author, publication and observation timestamps, and the facts
-  supported. For social findings,
-  identify the original claim, source/platform, deduplication and verification
-  result; distinguish sampled conversations from representative measurements.
-  For curated discovery, preserve the roster/configuration and nomination
-  dispositions required by the [ShadowAlpha guide](shadowalpha.md), including
-  provider classifications versus your verified interpretation. Do not repeat
-  source endorsements in the brief or treat extracted calls as recommendations.
-- **Candidate assessments:** group details under H4 exchange:ticker/thesis IDs.
-  Retain the setup type, expected vs reported facts when verified, quarter-to-quarter
-  changes, trend/benchmark observations, pricing assumptions, risks, confirmation,
-  invalidation, milestone and review-by date. Record the leading rejected or
-  deferred candidates with their decisive reason and reconsideration condition;
-  do not preserve every irrelevant search hit. Separate verified observations,
-  management claims, estimates, investment hypotheses and unresolved questions.
-  Where relevant, retain the theme-to-company benefit and compact earnings
-  comparisons from the [research method](research-method.md), including a linked
-  prospective expectations snapshot for a material upcoming event. Later results
-  refer back to the preserved pre-event snapshot; unchanged previews need no copy.
-  Rejected names need not become tracked theses merely to appear in this record.
-  Link immutable estimate snapshots used in the assessment; their observation and
-  first-save times must both precede the edition's cutoff. Later captures belong
-  only to later assessments, not a backdated consensus comparison.
+- **Screening and sources:** retain the feed window, checked account roster,
+  eligible post counts and per-account collection limitations. Record substantive
+  nominations with original post IDs/links, identity, source claim and disposition
+  (analyzed, deferred, already covered or excluded). Distinguish posts, originating
+  claims and distinct stocks; preserve quote/repost attribution and duplicate
+  evidence groups. State targeted price/news coverage, eligibility/filter/ranking
+  rules and observed counts. Keep actual publication/observation times, decisive
+  evidence URLs and material gaps; no full-feed dump or claim of a complete market
+  scan. Continuing theses and user-named overrides have separate origins.
+- **Candidate assessments:** use one H4 per substantively analyzed stock in the
+  exact form `#### NASDAQ:AAPL — Apple Inc.` (verified exchange/ticker/company).
+  Include exactly one `Status: watch` line, substituting `ready`, `rejected`,
+  `invalidated` or `expired` when supported, and a link such as
+  `[[Investments/Stocks/AAPL]]`. Under that heading, retain the source idea and
+  verification, setup, decisive business and trend observations, what price may
+  already assume, strongest counterargument, confirmation/invalidation conditions,
+  milestone and reconsideration check. Use H5 or deeper headings if needed; all
+  detail before the next H4 belongs to that assessment. This exact section becomes
+  the maintained stock note's latest assessment after publication, avoiding a
+  second inconsistent rewrite. A single stock may have several thesis IDs; explain
+  them within this section and keep their distinct states in the thesis ledger.
+  Rejected or deferred ideas that received substantive evaluation get stock notes
+  even when absent from the short brief; a nomination deferred before evaluation
+  needs only its Screening and sources disposition. Passing mentions do not create
+  dossiers. Rejected assessments need not become tracked theses.
+  Separate verified observations, management claims, estimates and inference.
+  Preserve material quarter-to-quarter comparisons, a linked pre-event expectations
+  snapshot where needed, and immutable estimate snapshots whose observation and
+  first-save times precede the cutoff. Later captures are for later assessments.
+  Link unchanged earlier evidence; do not duplicate an entire stock's history.
 - **Thesis updates:** keep the canonical complete ledger below. Put fuller
   supporting changes under Candidate assessments, linked from the update cell.
 - **Outcome review:** check daily for newly due and previously missing observations
@@ -319,7 +331,7 @@ justify a new thesis ID or restart its recommendation clock.
 Invalidation/expiry qualifies future purchases, not sales of the user's holdings.
 
 Link the first and most recent material analysis with qualified wikilinks such
-as `[[Investments/2026-09-08-market-research#Candidate assessments]]`. Within table
+as `[[Investments/2026-09-08-stock-research#Candidate assessments]]`. Within table
 cells use unpiped wikilinks and avoid literal `|` characters. The subsection
 contains only its table or exact `No active theses.` sentence, with table rows
 starting at column zero. Keep explanatory prose in Candidate assessments.

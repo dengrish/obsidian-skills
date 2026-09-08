@@ -13,7 +13,7 @@
     {
       "name": "investments",
       "source": "./plugins/investments",
-      "description": "Collect posts from selected X accounts without interpretation, research buying opportunities in liquid U.S.-listed stocks, and track investment theses and recommendation outcomes in an Obsidian vault."
+      "description": "Collect selected X accounts into source notes, research feed-sourced stock buying ideas, and maintain daily reports, stock dossiers and recommendation outcomes in an Obsidian vault."
     }
   ]
 }

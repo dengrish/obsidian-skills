@@ -18,7 +18,7 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'skills/market-research/scripts'))
+sys.path.insert(0, str(ROOT / 'skills/stock-research/scripts'))
 import market_acquire as acquire
 import market_public
 
