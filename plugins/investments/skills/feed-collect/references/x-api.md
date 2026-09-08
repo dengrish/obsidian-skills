@@ -40,18 +40,54 @@ documents `GET /2/users/{id}/tweets`, incremental IDs and pagination. Every time
 request uses `exclude=retweets,replies`, including resumed pages, to avoid retrieving
 those posts. This also excludes self-replies and thread continuations; quote posts
 remain unless they are also replies. The documented timeline ceiling with replies
-excluded is **800 recent posts**, not a complete historical archive. The helper
-starts with only seven days rather than automatically purchasing all accessible
-history. A long offline interval or provider visibility limits can leave gaps
-even when pagination ends.
+excluded is **800 recent posts**, not a complete historical archive. A normal
+first run starts with seven days. The explicit `--latest N` sample can reach
+older posts within the provider's available timeline, subject to its separate
+paid-read budget. A long offline interval or provider visibility limits can
+leave gaps even when pagination ends.
+
+## Initial samples and incremental updates
+
+`--latest N` establishes an initial sample target for each account, not a limit
+on the lifetime size of its note. Future runs continue forward from the saved
+boundary. Once established, that target is fixed: repeat the same `--latest N`
+or omit it for ordinary forward updates. A different N is rejected; it does not
+reset the sample or silently resume intentionally omitted older history.
+Stop when the target is reached, the provider is exhausted or a budget
+is reached; report those outcomes separately. Replies, reposts and duplicates
+consume a returned-row budget even when they do not count toward the target.
+The API's minimum page size is five. When fewer originals remain to reach the
+target, the final page can contain up to four extra originals; retain purchased
+posts and report the actual count rather than discard them or claim exactly N.
+Initial-sample status and forward completion are reported separately. When a
+saved older window finishes, continue toward the current requested cutoff while
+budgets permit. A budget stop reports the completed and requested cutoffs and
+its deferral reason; reaching the initial target alone does not establish that
+the newest requested interval has been checked.
+
+Preserve incomplete pages already collected by an older version. Do not reset
+an account or restart a page to switch to sampling. A completed older window
+may lack its original lower bound; `--history-before` supplies that verified
+UTC boundary when older history is explicitly needed. Use retained request
+evidence to establish it, never guess it from the newest saved post or today's
+date. Once recorded, the boundary can be resumed without reentering it. An
+unknown boundary limits older-history extension; it does not authorize repeat
+paid reads. Completing a sample leaves older-history omission explicit.
+
+Saved pagination tokens can expire. A rejected or expired token remains an
+explicit recovery/gap condition; never restart from the newest page automatically
+or describe the interrupted interval as complete. [X pagination notes](https://docs.x.com/x-api/fundamentals/pagination#notes)
 
 ## Paid-read discipline
 
 The helper's request and post limits are hard bounds for each invocation, not a
 promise of a dollar charge. Check [current X pricing](https://docs.x.com/x-api/getting-started/pricing)
 and set a spending limit in the developer console. User lookup and other resource
-types may be billable too. Avoid extra profile/metric refreshes and source-post
-expansions; repeated manual runs must use the same saved state.
+types may be billable too. Avoid extra profile/metric refreshes and referenced-post
+expansions; repeated manual runs must use the same saved state. New timeline
+windows request only primary-post attachment metadata in the same response;
+see [attachments](attachments.md). Do not change a saved page's query schema
+mid-pagination to add media fields.
 
 Defaults are 25 requests and 1,000 returned posts per invocation, shared across
 the roster. `--max-requests` and `--max-posts` can set a smaller explicit budget.
@@ -62,7 +98,10 @@ budget. Deferred or unfinished accounts remain visible in the result.
 - Resolve a handle once, then collect by its stable user ID.
 - Retain successful pages before generating notes. Publication is offline.
 - Resume the saved window and next page after a budget stop or interruption.
-  Advance the completed boundary only after exhausting that window. Preserve
+  For ordinary collection, advance the completed boundary after exhausting that
+  window. An initial sample may instead stop at its target and advance to its
+  sample cutoff while preserving the unconsumed older cursor as intentionally
+  omitted history. Preserve
   its exclusion filter; an incompatible saved filter blocks further requests
   instead of silently restarting or reusing a cursor with a different query.
 - Deduplicate post IDs locally, including repeated rows returned by X. This
@@ -70,6 +109,10 @@ budget. Deferred or unfinished accounts remain visible in the result.
   that the provider itself returned. Unexpected reply/repost rows are not added
   to the account record, but still count toward the returned-post budget and
   cursor advancement so they do not cause repeated requests.
+- Keep the request's safe filtering/paging parameters and its non-overlapping
+  row-accounting totals after processing. Source text and credentials do not
+  belong in these operational receipts. Old request records without this
+  breakdown remain unknown; do not invent historical exclusion counts.
 - Do not automatically retry a network timeout or an interrupted in-flight
   request. The server may already have returned billable data.
 
@@ -78,11 +121,19 @@ is displayed literally so embedded HTML, wikilinks or instruction-like content
 cannot become commands or change the note's generated structure. Record both
 source creation time and first retrieval time in UTC. Prefer returned complete
 long-post text to a short preview, without reconstructing missing text. Preserve
-reference IDs and available attachment metadata. The collector does not fetch
-quoted posts separately, download media, transcribe videos or open linked pages.
-Readable post text uses an escaped HTML preformatted block; source metadata is
-collapsed below it. Exact source text and the original timestamp spelling remain
-in state. A new edited version records its own retrieval time rather than
+reference IDs and available attachment metadata. The collector downloads its own
+photo attachments and directly linked PDFs under [the attachment rules](attachments.md).
+It does not fetch quoted posts separately, transcribe videos or crawl linked pages.
+Readable post text uses ordinary Markdown paragraphs with source markup escaped
+and original line breaks preserved; source metadata is collapsed below it.
+Render HTTP(S) URLs as explicit clickable links without changing their original
+destinations or relying on automatic URL detection. Preserve query strings and
+fragments; use matching API URL entities to distinguish URL punctuation from
+surrounding prose when available. No link expansion or network request is
+needed for formatting, and source link syntax cannot activate a remote embed.
+The heading records publication time. First retrieval and last check times,
+exact source text and the original timestamp spelling remain in state, without
+repeated retrieval/check labels in the note. A new edited version records its own retrieval time rather than
 claiming its changed wording was available when an older version was captured.
 
 Current X documentation uses inconsistent `tweet`/`post` field names across
@@ -99,6 +150,16 @@ identities and publication receipts. It is durable, private collection state.
 Back it up together with the notes; do not copy it to plugin caches or put it in
 an owned scratch directory. The account notes are readable projections of this
 state. Deleting a note does not require downloading its sources again.
+
+The state file has a 64 MiB capacity. Before a paid request, the helper reserves
+headroom for its 8 MiB raw-response limit; this is conservative rather than a
+guarantee because JSON serialization can expand received data. A capacity
+preflight failure makes no API request. If received data nevertheless exceeds
+the state limit, the helper preserves the full attempted state in the private
+`preserved_recovery` directory it reports, leaving the prior state file intact.
+Preserve that directory and resolve capacity/recovery before continuing. Do not
+delete the state, repeat the request or use `resolve-pending --outcome retry`
+to replace data already captured in that recovery file.
 
 `status` and `plan` are offline. `publish` retries note generation from stored
 data without network access. If publication finds a conflicting note or newer

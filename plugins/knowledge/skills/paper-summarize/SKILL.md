@@ -33,6 +33,11 @@ Organization precedes summaries:
 notes, source links and figures all depend on the
 [PDF's canonical, vault-unique stem](../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first).
 
+Exclude feed-owned `x-<post-id>-<asset-hash>.pdf` attachments from ordinary
+folder sweeps. For an explicitly named attachment, preserve its collector-owned
+path and report the deliberate `--allow-unorganized` exception at scan and final
+note lint; do not rename it or change feed receipts to obtain a canonical stem.
+
 Before scanning a fresh vault, confirm that the resolved vault anchor, the
 configured `Sources/PDFs/` inventory root and the selected PDF(s) already exist.
 For content output, create only this skill's canonical folders, `Articles/` and

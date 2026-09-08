@@ -30,6 +30,11 @@ routing clarification, not an automatic chain of all these skills.
   select notes in `Wiki/`, `Articles/`, or the vault root, or figures in
   `Sources/Images/`, as independent rename targets. Derived files may follow
   their source through the guarded rename below.
+- Leave feed-owned `x-<post-id>-<asset-hash>.pdf` attachments out of routine
+  sweeps, even under `Sources/PDFs/`. Their paths belong to the collector's
+  durable receipts; the [feed route](../../shared/CONVENTIONS.md#1-vault-folder-layout)
+  is not an unorganized Inbox backlog. A named attachment does not waive
+  investment-record dependency or ownership checks.
 - A PDF in `Inbox/` or another explicitly selected source location **inside**
   the vault is filed in `Sources/PDFs/`. A PDF already under `Sources/PDFs/`
   is renamed where it stands. This layout follows
