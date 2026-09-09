@@ -16,6 +16,15 @@ new posts, query social APIs, discover companies or acquire the whole market.
 New nominees first discovered after preparation cannot gain pre-cutoff local
 availability by fetching their older bars; archive them for a later edition.
 
+The coordinator already performs the raw-price capture described below. Reuse
+its saved observations and receipts; do not run a second capture just because
+the size review begins. Continue with **Acquire the inputs** and the offline
+selection command when those prices are adequate. Only a specific unresolved
+price need justifies the standalone route below, within the run's remaining
+authorized request budget.
+
+### Standalone price capture or archive selection
+
 Keep an ordered JSON plan in owned scratch. Every object has exactly `symbol`,
 `class_id`, `identity_source_url`, `identity_available_at` and `reason`.
 Use a canonical uppercase provider symbol and the exact quoted common class or
@@ -23,7 +32,10 @@ ADS identifier used in the share-count review. The public HTTPS identity source
 and timezone-aware availability must support that mapping before capture;
 the helper never infers an entire issuer or a share class from a ticker alone.
 `reason` briefly names the saved nomination or tracked thesis. No URLs are
-fetched from this plan. The plan permits at most 30 unique symbols.
+fetched from this plan. This standalone plan permits at most 30 unique symbols;
+the coordinator's larger plan and extra fields are not accepted here. For offline
+selection after coordinated capture, project only these five fields for the
+needed symbols and retain their verified identity declarations unchanged.
 
 ```bash
 python3 '<skill>/scripts/market_price_capture.py' capture --vault '<vault>' --plan '<scratch>/price-plan.json' --max-symbols 10 --credentials-file '<credentials-file>'

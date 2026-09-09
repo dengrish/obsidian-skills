@@ -155,6 +155,8 @@ def source_signature(item):
     """Compare supplied source material independently of a renderer upgrade."""
     result = {key: item.get(key) for key in ('canonical_url', 'title', 'authors', 'published_at',
               'updated_at', 'content', 'content_type', 'content_scope')}
+    if item.get('content_type') in {'html', 'xhtml'}:
+        result['content'] = rss_source.stable_embed_content(result['content'])
     result['attachments'] = sorted({(row['kind'], row['url']) for row in item['attachments']})
     result['linked_media'] = item.get('linked_media', [])
     return common.digest(common.encoded(result))
@@ -166,6 +168,33 @@ def same_source(first, second):
     return (source_signature(first) == source_signature(second)
             and (not first.get('render_base') or not second.get('render_base')
                  or first['render_base'] == second['render_base']))
+
+
+def observed_content(version, observation, spans=None):
+    """Reconstruct an exact display-only observation from its immutable base."""
+    content = version['content']
+    patch = observation.get('display_content')
+    if patch is None:
+        return content
+    spans = rss_source.embedded_age_spans(content) if spans is None else spans
+    if (not isinstance(patch, dict) or set(patch) != {'sha256', 'age_labels'}
+            or not isinstance(patch['sha256'], str) or not HASH.fullmatch(patch['sha256'])
+            or not isinstance(patch['age_labels'], list) or len(patch['age_labels']) != len(spans)
+            or not spans or any(not isinstance(label, str) or not re.fullmatch(rss_source.EMBEDDED_AGE, label)
+                                for label in patch['age_labels'])):
+        raise RSSError('invalid_rss_display_observation')
+    for (start, end), label in reversed(list(zip(spans, patch['age_labels']))):
+        content = content[:start] + label + content[end:]
+    if common.digest(content.encode('utf-8')) != patch['sha256']:
+        raise RSSError('rss_display_observation_digest_mismatch')
+    return content
+
+
+def current_display_version(entry, version):
+    """Only the maintained view uses later display labels; evidence stays fixed."""
+    observation = next((row for row in reversed(entry.get('observations', []))
+                        if row['revision_sha256'] == version['revision_sha256']), {})
+    return dict(version, content=observed_content(version, observation))
 
 
 def semantic_hash(item):
@@ -271,6 +300,18 @@ def validate(data):
             for key in ('published_at', 'updated_at', 'archive_published_at'):
                 if version.get(key) is not None:
                     common.timestamp(version[key])
+        by_revision = {version['revision_sha256']: version for version in entry['versions']}
+        span_cache = {}
+        for observation in entry.get('observations', []):
+            common.timestamp(observation.get('observed_at'))
+            version = by_revision.get(observation.get('revision_sha256'))
+            if version is None or common.instant(observation['observed_at']) < common.instant(version['observed_at']):
+                raise RSSError('invalid_rss_article_observation')
+            if 'display_content' in observation:
+                signature = version['revision_sha256']
+                if signature not in span_cache:
+                    span_cache[signature] = rss_source.embedded_age_spans(version['content'])
+                observed_content(version, observation, span_cache[signature])
     for identity, asset in data['assets'].items():
         if (not HASH.fullmatch(identity) or not isinstance(asset, dict) or asset.get('kind') not in {'image', 'pdf'}
                 or asset.get('status') not in {'pending', 'prepared', 'downloaded', 'failed', 'deferred'}):
@@ -470,7 +511,7 @@ def apply_pending(store):
         # Known bases distinguish competing representations in this response;
         # cross-version comparison separately accommodates legacy absent bases.
         representations.setdefault(article_id(item['canonical_url']), set()).add(
-            (source_signature(item), item.get('render_base')))
+            (source_signature(item), item.get('render_base'), common.digest(item['content'].encode('utf-8'))))
     ambiguous = {identity for identity, variants in representations.items() if len(variants) > 1}
     for item in parsed['items']:
         identity = article_id(item['canonical_url'])
@@ -525,7 +566,19 @@ def apply_pending(store):
             entry['versions'].append(version)
             result['new_revisions'] += 1
         signature = entry['versions'][-1]['revision_sha256']
-        entry.setdefault('observations', []).append({'observed_at': observed, 'revision_sha256': signature})
+        observation = {'observed_at': observed, 'revision_sha256': signature}
+        version = entry['versions'][-1]
+        if item['content'] != version['content']:
+            # The comparison accepted only recognized generated age labels.
+            # Save exact observation bytes as small, verified replacements;
+            # never rewrite the original revision or duplicate its media set.
+            observation['display_content'] = {
+                'sha256': common.digest(item['content'].encode('utf-8')),
+                'age_labels': [item['content'][start:end]
+                               for start, end in rss_source.embedded_age_spans(item['content'])]}
+            if observed_content(version, observation) != item['content']:
+                raise RSSError('rss_display_observation_not_reconstructible')
+        entry.setdefault('observations', []).append(observation)
     previous = feed.get('current_article_ids', [])
     overlap = bool(set(previous) & seen) if previous and seen else None
     feed.update(title=parsed.get('title') or feed['title'], authors=parsed.get('authors', []),
@@ -747,7 +800,7 @@ def publish(store, vault, feed_ids):
             if not version.get('archive_published_at'):
                 version['archive_published_at'] = now()
                 store.save()
-        version = latest_version(entry)
+        version = current_display_version(entry, latest_version(entry))
         rendering = rss_source.render_current(version)
         if 'legacy_render_base_unavailable' in rendering['diagnostics']:
             # A legacy record may have resolved relative URLs using xml:base
@@ -893,7 +946,7 @@ def collect_attachments(vault, *, asset_fetch=None, max_downloads=None, max_byte
                 'rendering_limitations': limitations, 'pending_feed_response_unchanged': pending,
                 'uncollected_feeds': uncollected}
 
-def _context(vault, cutoff, since=None, retained_ids=None):
+def _context(vault, cutoff, since=None, retained_ids=None, *, compact=False):
     cutoff = common.timestamp(cutoff)
     if since is not None:
         since = common.timestamp(since)
@@ -908,7 +961,7 @@ def _context(vault, cutoff, since=None, retained_ids=None):
         if urls or retained:
             result['status'] = 'incomplete'
             result['diagnostics'].append({'reason': 'rss_sources_not_collected'})
-        return result
+        return operational_summary(result, None) if compact else result
 
     if data['pending']:
         result['diagnostics'].append({'reason': 'rss_pending_response_requires_offline_publication'})
@@ -1004,15 +1057,45 @@ def _context(vault, cutoff, since=None, retained_ids=None):
         result['status'] = 'incomplete'
     if read_state(vault) != data:
         raise RSSError('rss_state_changed_during_context_read')
-    return result
+    return operational_summary(result, data) if compact else result
 
 
-def context(vault, cutoff, since=None, retained_ids=None):
+def context(vault, cutoff, since=None, retained_ids=None, *, compact=False):
     """Read verified archived source versions without changing collection state."""
     try:
-        return _context(vault, cutoff, since, retained_ids)
+        return _context(vault, cutoff, since, retained_ids, compact=compact)
     except (common.FeedError, rss_source.RSSSourceError, OSError, KeyError, TypeError) as exc:
         raise RSSError(str(exc) if not isinstance(exc, (KeyError, TypeError)) else 'invalid_rss_state') from None
+
+
+def operational_summary(captured, data):
+    """Compact CLI preflight; full verified evidence remains in context()."""
+    articles = data['articles'].values() if data else []
+    attachment_totals = {}
+    for receipt in data['assets'].values() if data else []:
+        status = 'failed' if receipt.get('error') else receipt['status']
+        attachment_totals[status] = attachment_totals.get(status, 0) + 1
+    scopes, limitations = {}, []
+    for item in captured['items']:
+        scope = item['content_scope']
+        scopes[scope] = scopes.get(scope, 0) + 1
+        reasons = set(item['diagnostics'])
+        if scope == 'summary_only':
+            reasons.add('summary_only')
+        if item.get('current_note_rendering_limitation'):
+            reasons.add(item['current_note_rendering_limitation'])
+        if reasons:
+            limitations.append({'evidence_id': item['evidence_id'], 'note_relative': item['note_relative'],
+                                'reasons': sorted(reasons)})
+    return {'status': captured['status'], 'configured_feeds': captured['configured_feeds'],
+            'pending': captured['pending'], 'requests': 0,
+            'current_articles': len(captured['items']), 'retained_articles': len(articles),
+            'retained_revisions': sum(len(entry['versions']) for entry in articles),
+            'attachments': attachment_totals, 'content_scopes': scopes, 'article_limitations': limitations,
+            'feeds': [{key: feed.get(key) for key in ('feed_id', 'feed_url', 'publication',
+                      'last_checked_at', 'last_error', 'history_limit', 'diagnostics')}
+                      for feed in captured['feeds']],
+            'diagnostics': captured['diagnostics']}
 
 
 def parser():
@@ -1024,13 +1107,17 @@ def parser():
     result.add_argument('--max-attachment-bytes', type=int, default=None,
                         help='Optional aggregate byte limit; per-file safety limits always apply.')
     result.add_argument('--retry-attachments', action='store_true')
+    result.add_argument('--details', action='store_true',
+                        help='Plan/status only: output complete verified research context, including source bodies.')
     result.add_argument('--test', action='store_true')
     return result
 
 
 def execute(args):
     if args.command in {'plan', 'status'}:
-        return {**context(args.vault, now()), 'requests': 0}
+        return {**context(args.vault, now(), compact=not args.details), 'requests': 0}
+    if args.details:
+        raise RSSError('details_requires_plan_or_status')
     if args.command == 'collect':
         return collect(args.vault, max_downloads=args.max_downloads, max_bytes=args.max_attachment_bytes,
                        retry_attachments=args.retry_attachments)

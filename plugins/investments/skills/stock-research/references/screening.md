@@ -223,7 +223,9 @@ the record of subsequent recommendation performance.
 
 Follow the [comparison guide](comparison-strategy.md) for existing cohort outcomes
 and due monthly records. The feed-nominated subset is discretionary and cannot
-replace a previously independent comparison universe. If matching predeclared
-inputs are not already available, record a due formation as unavailable with the
-scope mismatch. Do not fetch a broad universe for this diagnostic or tune a new
-comparison after seeing today's candidates. Earlier cohorts remain unchanged.
+replace a previously independent comparison universe. For an explicitly requested
+new independent formation, missing predeclared inputs leave that formation
+unavailable with the scope mismatch. Ordinary runs create no new independent
+cohorts or unavailable monthly rows. Do not fetch a broad universe for this
+diagnostic or tune a new comparison after seeing today's candidates. Earlier
+cohorts remain unchanged.

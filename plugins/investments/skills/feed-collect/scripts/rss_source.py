@@ -346,6 +346,83 @@ def _HTMLTree():
     return Parser()
 
 
+EMBEDDED_AGE = r'[0-9]+ (?:second|minute|hour|day|week|month|year)s? ago'
+
+
+def embedded_age_spans(content):
+    """Locate only Substack's generated embed age text, never authored prose.
+
+    Offsets address the exact saved HTML. Require both the component marker and
+    post-card ancestry, a plain metadata leaf, and its known display grammar.
+    Unknown markup remains substantive rather than broadening the exception.
+    """
+    if 'EmbeddedPostToDOM' not in content or 'embedded-post-meta' not in content:
+        return []
+    class Parser(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=False)
+            self.stack, self.spans = [], []
+            self.lines = [0] + [match.end() for match in re.finditer('\n', content)]
+
+        def absolute_position(self):
+            line, column = self.getpos()
+            return self.lines[line - 1] + column
+
+        def handle_starttag(self, tag, attributes):
+            attrs = dict(attributes)
+            classes = (attrs.get('class') or '').split()
+            if self.stack:
+                self.stack[-1]['leaf'] = False
+            is_meta = (tag == 'div' and 'embedded-post-meta' in classes
+                       and any(row['component'] for row in self.stack)
+                       and any(row['card'] for row in self.stack))
+            if tag not in {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'}:
+                self.stack.append({'tag': tag, 'leaf': True, 'meta': is_meta, 'closed': False,
+                    'start': self.absolute_position() + len(self.get_starttag_text()),
+                    'component': attrs.get('data-component-name') == 'EmbeddedPostToDOM',
+                    'card': tag == 'a' and 'embedded-post' in classes})
+            if len(self.stack) > DEPTH_LIMIT:
+                raise RSSSourceError('feed_html_structure_limit')
+
+        def handle_startendtag(self, tag, attributes):
+            self.handle_starttag(tag, attributes)
+            self.handle_endtag(tag)
+
+        def handle_comment(self, data):
+            if self.stack:
+                self.stack[-1]['leaf'] = False
+
+        def handle_endtag(self, tag):
+            if tag in {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'}:
+                return
+            if not self.stack or self.stack[-1]['tag'] != tag:
+                # Malformed ancestry cannot establish generated metadata.
+                self.stack.clear()
+                return
+            row = self.stack.pop()
+            row['closed'] = True
+            if not row['meta'] or not row['leaf']:
+                return
+            raw = content[row['start']:self.absolute_position()]
+            match = re.fullmatch(r'\s*(' + EMBEDDED_AGE + r')(?:(?:\s|&#183;|&middot;|·)+'
+                                 r'[0-9,]+ (?:likes?|comments?))*\s*', raw)
+            if match:
+                self.spans.append((row['start'] + match.start(1), row['start'] + match.end(1),
+                                   tuple(parent for parent in self.stack if parent['component'] or parent['card'])))
+
+    parser = Parser()
+    parser.feed(content)
+    parser.close()
+    return [(start, end) for start, end, ancestors in parser.spans
+            if all(parent['closed'] for parent in ancestors)]
+
+
+def stable_embed_content(content):
+    for start, end in reversed(embedded_age_spans(content)):
+        content = content[:start] + '0 seconds ago' + content[end:]
+    return content
+
+
 def _render_html(content, base, found, diagnostics, occurrences=None):
     parser = _HTMLTree()
     # NUL-delimited markers are private renderer output, never source text.
@@ -707,7 +784,7 @@ def _fragment(node, bases=None):
         return ('<' + tag + attrs + '>' + html.escape(element.text or '')
                 + ''.join(serialize(child) + html.escape(child.tail or '') for child in element)
                 + '</' + tag + '>')
-    return (node.text or '') + ''.join(serialize(child) + html.escape(child.tail or '') for child in node)
+    return html.escape(node.text or '') + ''.join(serialize(child) + html.escape(child.tail or '') for child in node)
 
 
 def parse_feed(raw, feed_url):
