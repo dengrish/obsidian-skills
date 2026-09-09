@@ -19,8 +19,8 @@ operating observation, catalyst or price setup can justify investigation; a pass
 mention, unrelated discussion, retrospective victory claim, pure promotion or
 unexplained ticker list need not. Bearish material can challenge an existing idea
 without becoming a new long thesis. Resolve ambiguous tickers, ADRs and share
-classes against issuer/exchange evidence. Unresolved identity stays an exclusion,
-not an assumed match.
+classes against issuer/exchange evidence. Unresolved identity is a blocked check,
+not an assumed match or a verified reason for exclusion.
 
 For quote posts and reposts, preserve both the collecting account and original
 author. Separate added commentary from the referenced claim. If the original
@@ -30,12 +30,15 @@ accounts repeating a claim do not provide independent confirmation. Author
 reputation, self-reported returns and attention counts do not establish reliability.
 A post is a lead; verify its material facts independently before using them.
 
-Retain a compact nomination/disposition record with post links, identity, claimed
-setup, new versus previously assessed status, and reason to assess, defer or skip.
-Preserve material exclusions and their reconsideration condition without copying
-entire feeds. If more substantive ideas exist than can be researched carefully,
-prioritize fresh decision-changing evidence and unresolved earlier checks, record
-the deferred candidates and return to them. Do not imply every mention was analyzed.
+Use the [coverage guide](coverage.md) to account for every substantive idea and
+carry unfinished work across runs. It owns the queue, ordering, retry conditions
+and reconciliation format. Every eligible new idea gets a standard initial
+assessment; apparent popularity or a brief's display limit cannot discard it.
+Preserve material screening reasons and their reconsideration conditions without
+copying entire feeds. An assessment can address several arguments for the same
+stock, but cannot count an unexamined argument as covered. An unchanged argument
+reuses verified earlier work; a new material argument requires a focused
+reassessment of the affected premises and conclusion.
 
 Apply two complementary checks to the nominated names and earlier open theses:
 
@@ -54,12 +57,42 @@ no substantive idea in usable posts from missing collection, stale or incomplete
 feeds, unverified identity, unavailable prices and unperformed research.
 
 An additional same-day edition uses its own cutoff and resumes the last available
-research record. Reuse source dispositions, dated checks and unresolved questions;
-unchanged posts do not restart research, watch dates or recommendation clocks.
-Carry earlier unreviewed windows while relevant, using the intake helper's
-`--since` when saved older posts are needed. Record what was recovered, remains
-unavailable or is closed as no longer relevant. Do not claim later discovery was
-known in an earlier report or treat a new collection as filling an older gap.
+coverage record. Reuse verified source dispositions and still-valid dated checks;
+new information, a crossed condition or a due event can warrant another check.
+Unchanged posts do not restart research, watch dates or recommendation clocks.
+Use the intake helper's `--since` when retained older posts are needed for earlier
+unfinished work. Record what was recovered or remains unavailable; missing saved
+posts do not erase a documented backlog. Do not claim later discovery was known
+in an earlier report or treat a new collection as filling an older gap.
+
+## Standard initial assessment and readiness
+
+A standard initial assessment establishes:
+
+- The security's verified identity, investment scope and eligibility evidence or
+  exact unresolved check.
+- The attributed buying argument, what the business does, and independent
+  verification of the argument's central facts.
+- Relevant price behavior and valuation in relation to the claimed improvement,
+  with dated inputs and any material limitations.
+- The strongest counterargument and a conditional conclusion, including what
+  would strengthen or invalidate it and the next check.
+
+Keep depth proportional to the argument, but do not substitute a ticker screen,
+copied social claim or missing-data label for these elements. Assess every eligible
+new idea to this standard before claiming complete initial coverage. When a
+required element cannot be established, preserve the exact gap as blocked work;
+do not turn missing evidence into rejection or claim the assessment complete.
+An adequately supported adverse conclusion can end the assessment without
+performing readiness-only checks. Preserve useful partial findings without
+pretending they resolved the unfinished question.
+
+Use deeper work for candidates approaching `ready`: settle the few facts that
+could change the buying decision, verify final eligibility, current confirmation
+and adverse-event risk, and stress-test relevant valuation assumptions. This
+completion pass complements initial coverage; it cannot become a quota that
+leaves the other eligible ideas permanently unexamined. Research completion and
+purchase readiness are separate: a completed assessment can remain `watch`.
 
 **Thematic evidence.** For a nominated stock's theme, trace the claimed demand,
 spending or regulatory change into its actual segments, customers or contracts.
@@ -134,7 +167,7 @@ report series or full earnings model is required.
 
 ## Four distinct setup tests
 
-For each shortlisted business, use its latest relevant release or transcript to
+For each business under assessment, use its latest relevant release or transcript to
 compare the few metrics driving the thesis: revenue, earnings, margins, cash
 generation or operating indicators. For earnings-based ideas, separate these
 comparisons rather than calling every improvement a beat:
@@ -199,15 +232,12 @@ distinguish continuation from a failed rebound. Check adverse news and upcoming
 earnings. Say no material new catalyst was found in the checked sources, not
 that none exists.
 
-After initial ranking, use a bounded completion pass for the most promising
-candidates. Identify the few unresolved facts that could actually change the
-buying conclusion, prioritize their retrieval, and distinguish an adverse finding
-from an unperformed check. Complete instrument/market-cap and regular-session
-liquidity eligibility, current price/session and relevant adverse-event checks
-before first readiness. Do not spend the entire run expanding leads while leaving
-these basic checks unfinished. Keep genuine missing evidence as watch/unavailable;
-do not relax the bar or force a recommendation to produce an actionable-looking
-brief. Carry the precise next check into the ledger so repeated runs advance it.
+Before first readiness, complete instrument/market-cap and regular-session
+liquidity eligibility, current price/session and relevant adverse-event checks.
+Keep genuine missing evidence as watch/unavailable; do not relax the bar or force
+a recommendation to produce an actionable-looking brief. Carry each precise
+unfinished check into the coverage record with its retry condition so repeated
+runs advance it instead of repeating unsuccessful requests blindly.
 
 For every leading idea, explain **why a purchase could still be attractive after
 the observed price reaction**. Compare the proposed improvement with what is
@@ -266,7 +296,7 @@ comparing periods or instruments; reconcile unlike feeds before combining them.
 Useful evidence includes 3/6/12-month returns, a price range or higher-low pattern,
 50/200-session moving-average direction, and strength versus a broad market and
 sector benchmark. Use stable assessment filters but discuss only the measurements
-that explain each shortlisted setup. Relative return means stock return minus
+that explain each assessed setup. Relative return means stock return minus
 the named benchmark's return over matching dates and adjustment conventions;
 state another definition if used. Calculate from inspectable data or a provider's
 explicitly defined metric. Do not invent observations or report a 200-session
@@ -276,7 +306,7 @@ The offline `market_screen.py` helper in the [data-access guide](data-access.md)
 makes the calendar-month returns, 50/200-session averages and relative returns
 repeatable from retained inputs. Its 20-session daily VWAP × volume proxy includes
 extended-hours activity: use it for preliminary filtering, then verify regular-session
-liquidity for shortlisted names. It does not establish purchase confirmation or
+liquidity before first readiness. It does not establish purchase confirmation or
 an investment edge. Retain an alternative recovery/consolidation route; requiring
 every candidate to be above its 200-session average would exclude some improving
 setups before they can be assessed.
@@ -298,15 +328,35 @@ it neither asserts a purchase occurred nor instructs action on current holdings.
 
 ## Thesis continuity and aging
 
-Compare today's evidence with the original rationale and last material update.
+Monitor every active `watch` or `ready` thesis each trading day for relevant news,
+upcoming events and its recorded price/confirmation/invalidation conditions.
+Verify the monitoring window and sources rather than assuming silence in social
+posts means no change. Follow prior active theses even when their originating
+account leaves the roster. A stock note's existence alone does not require another
+full assessment, and no fixed count limits the active set.
+
+Reuse verified checks on an additional same-day run unless new information, a
+crossed condition or a due event warrants refreshing them. On closed-market days,
+check relevant news/events and carry completed-session price evidence with its
+date; do not invent a new trading session or refetch unchanged history merely
+because the calendar day changed. Missing or incomplete feeds do not suspend
+existing monitoring, due reviews or unfinished research.
+
+Do a substantive reassessment when material evidence or a condition changes, an
+event occurs, or the recorded review date arrives. Check older catalysts and
+thesis relevance in the first completed review each week; incomplete weekly work
+remains due. Rejected, invalidated or expired ideas return to buying research only
+on new substantive evidence or their recorded reconsideration condition. Their
+separate outcome checkpoints still apply.
+
+Compare changed evidence with the original rationale and last material update.
 State strengthened, unchanged, weakened, invalidated or expired in ordinary
 prose while using the note format's four machine-readable states. Explain changes
 to confirmation/invalidation conditions; never move them silently to keep a
 thesis alive. Preserve the original prediction, including failures and misses.
 
-On the first review each week, check whether old catalysts occurred, expected
-improvements appeared, and the thesis remains relevant. Preserve the original
-watch dates and catalyst deadlines; before first readiness, apply the
+Preserve the original watch dates and catalyst deadlines; before first readiness,
+apply the
 [note format's prospective buying-window check](note-format.md#thesis-continuity).
 Expire passed thesis windows explicitly; a materially renewed thesis needs a new
 linked ID. Invalidation can occur earlier and means the buying thesis no longer

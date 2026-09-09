@@ -28,8 +28,25 @@ backfill snapshots, change its original hash or upgrade its evidence contract.
 Create or update a stock note for every substantively evaluated stock, including
 watch, ready, rejected, invalidated and expired assessments. A passing mention or
 nomination deferred before evaluation needs only a disposition in the daily
-record. Existing active theses continue to be followed even if their originating
+record. A partial assessment must identify its missing evidence and remain
+unfinished in the [coverage record](coverage.md); a dossier does not establish
+that research is complete. The coverage record governs new ideas, reuse, due
+monitoring, outstanding assessments and retries independently of the dossier's
+buying status.
+
+Do not reassess every stock merely because it has a note. Active theses receive
+the [research method's monitoring and due reviews](research-method.md#thesis-continuity-and-aging);
+closed ideas return on new substantive evidence or a recorded reconsideration
+condition. Existing active theses continue to be followed even if their originating
 account leaves the roster; that does not restore the account as a new idea source.
+Routine unchanged monitoring belongs in the daily coverage record, with a link to
+the valid assessment, and does not rewrite the stock note. New material findings
+or a substantive due reassessment update it from the newly published daily record.
+
+When earlier notes predate structured coverage, explicitly review the available
+prior daily dispositions, active theses and deferred work using the coverage
+guide's migration procedure. Do not infer an empty queue from missing structured
+records, treat every old note as active, or restart all historical research.
 
 Each daily Candidate assessments section uses a verified identity heading such as
 `#### NASDAQ:AAPL — Apple Inc.`, exactly one standalone `Status: watch` line
