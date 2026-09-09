@@ -59,7 +59,8 @@ TABLES = {
     'Research queue': ('Security', 'First seen', 'State', 'Priority', 'Due', 'Sources', 'Assessment', 'Reason'),
 }
 SECURITY = re.compile(r'[A-Z][A-Z0-9]{1,15}:[A-Z][A-Z0-9.-]{0,14}\Z')
-POST = re.compile(r'https://x\.com/i/web/status/([1-9][0-9]{0,24})\Z')
+POST = re.compile(r'(?:https://x\.com/i/web/status/([1-9][0-9]{0,24})|(rss:[a-f0-9]{64}@[a-f0-9]{64}))\Z')
+SOURCE_ID = re.compile(r'(?:[1-9][0-9]{0,24}|rss:[a-f0-9]{64}@[a-f0-9]{64})\Z')
 HASH = re.compile(r'[a-f0-9]{64}\Z')
 REPORT = re.compile(r'\[\[(Investments/\d{4}-\d{2}-\d{2}(?:-\d{6})?-(?:stock|market)-research)(?:\.md)?\]\]\Z')
 ASSESSMENT = re.compile(r'\[\[(Investments/(?:\d{4}-\d{2}-\d{2}(?:-\d{6})?-(?:stock|market)-research|'
@@ -87,6 +88,14 @@ def _list(value):
     if any(not item for item in items) or len(set(items)) != len(items):
         raise ValueError('coverage list has empty or duplicate entries')
     return items
+
+
+def source_identity(value):
+    """The Post cell is an X source URL or an exact published RSS revision ID."""
+    match = POST.fullmatch(value)
+    if match is None:
+        raise ValueError('feed source requires a canonical X URL or exact RSS revision ID')
+    return match[1] or match[2]
 
 
 def parse(data):
@@ -138,10 +147,11 @@ def parse(data):
     seen = set()
     for row in found['Feed dispositions']:
         match = POST.fullmatch(row['Post'])
-        if (not match or match[1] in seen or not HASH.fullmatch(row['Fingerprint'])
+        identity = source_identity(row['Post']) if match else None
+        if (not match or identity in seen or not HASH.fullmatch(row['Fingerprint'])
                 or row['Disposition'] not in POST_STATES or _time(row['Published']) > cutoff):
             raise ValueError('invalid or duplicate feed disposition')
-        seen.add(match[1])
+        seen.add(identity)
         names = _list(row['Securities'])
         if any(not SECURITY.fullmatch(name) for name in names):
             raise ValueError('feed securities need verified EXCHANGE:TICKER identities')
@@ -165,10 +175,10 @@ def parse(data):
         elif row['State'] in UNFINISHED or row['State'] == 'monitored':
             raise ValueError('unfinished/monitored work requires a next-review timestamp')
         origins = _list(row['Sources'])
-        if not origins or any(not (re.fullmatch(r'[1-9][0-9]{0,24}', origin) or origin == 'user'
+        if not origins or any(not (SOURCE_ID.fullmatch(origin) or origin == 'user'
                 or re.fullmatch(r'legacy:\d{4}-\d{2}-\d{2}(?:-\d{6})?-(?:stock|market)-research\.md', origin))
                 for origin in origins):
-            raise ValueError('queue sources must name post IDs, user, or an explicit legacy report')
+            raise ValueError('queue sources must name X post IDs, exact RSS revision IDs, user, or an explicit legacy report')
         if row['Assessment'] != '-' and not ASSESSMENT.fullmatch(row['Assessment']):
             raise ValueError('assessment must link an exact dated Candidate assessments H4')
         if row['State'] in {'assessed', 'reused', 'monitored'} and row['Assessment'] == '-':
@@ -226,7 +236,7 @@ def _history(vault, cutoff):
                 raise ValueError('coverage history anchor is missing, changed or out of order: ' + report['relative'])
             _continuity(posts, jobs, journals, cutoff=_time(meta['as_of']))
             for row in journals['Feed dispositions']:
-                posts[POST.fullmatch(row['Post'])[1]] = dict(row, report=report['relative'])
+                posts[source_identity(row['Post'])] = dict(row, report=report['relative'])
             new_arguments = {security for post in journals['Feed dispositions']
                              if post['Disposition'] == 'nominated' for security in _list(post['Securities'])}
             for row in journals['Research queue']:
@@ -245,7 +255,7 @@ def _history(vault, cutoff):
 
 
 def _continuity(posts, jobs, journals, *, cutoff):
-    current_posts = {POST.fullmatch(row['Post'])[1]: row for row in journals['Feed dispositions']}
+    current_posts = {source_identity(row['Post']): row for row in journals['Feed dispositions']}
     current_jobs = {row['Security']: row for row in journals['Research queue']}
     for identity, previous in posts.items():
         if previous['Disposition'] in UNRESOLVED and identity not in current_posts:
@@ -301,16 +311,19 @@ def _state(vault, as_of, since=None, feed_snapshot=None):
     retained = set()
     for identity, row in posts.items():
         if row['Disposition'] in UNRESOLVED:
-            floor = min(floor, _time(row['Published']))
+            if not identity.startswith('rss:'):
+                floor = min(floor, _time(row['Published']))
             retained.add(identity)
     for job in jobs.values():
         if (job['State'] in UNFINISHED or job.get('requires_assessment')
                 or job['Due'] != '-' and _time(job['Due']) <= cutoff):
             for origin in _list(job['Sources']):
                 if origin in posts:
-                    floor = min(floor, _time(posts[origin]['Published']))
+                    if not origin.startswith('rss:'):
+                        floor = min(floor, _time(posts[origin]['Published']))
                     retained.add(origin)
-    snapshot = _snapshot(vault, cutoff, floor, feed_snapshot, sorted(retained, key=int))
+    import stock_feed
+    snapshot = _snapshot(vault, cutoff, floor, feed_snapshot, sorted(retained, key=stock_feed.source_sort_key))
     eligible = {post['post_id']: post for post in snapshot['posts']}
     active = {row['id'].split('@', 1)[0] for row in inventory['active_theses']}
     return cutoff, reports, posts, jobs, snapshot, eligible, active
@@ -319,7 +332,10 @@ def _state(vault, as_of, since=None, feed_snapshot=None):
 def _summary(state):
     cutoff, reports, posts, jobs, snapshot, eligible, active = state
     unseen = [{'post_id': identity, 'source_url': post['source_url'], 'published': post['created_at'],
-               'fingerprint': fingerprint(post)} for identity, post in eligible.items()
+               'fingerprint': fingerprint(post), **({'journal_source': post['journal_source'],
+                   'source_id': post['source_id'], 'source_kind': 'rss',
+                   'observed_at': post['version_observed_at'], 'published_basis': post['created_at_basis']}
+                   if post.get('source_kind') == 'rss' else {})} for identity, post in eligible.items()
               if identity not in posts or posts[identity]['Fingerprint'] != fingerprint(post)]
     pending = [dict(row, post_id=identity, source_available=identity in eligible)
                for identity, row in posts.items() if row['Disposition'] in UNRESOLVED]
@@ -343,7 +359,7 @@ def _summary(state):
     work.sort(key=lambda row: (PRIORITIES.index(row['priority']),
                               _time(row['first_seen']) if row['first_seen'] else cutoff - timedelta(days=100000),
                               row['security']))
-    return {'schema': 1, 'as_of': cutoff.isoformat(), 'since': snapshot['since'],
+    result = {'schema': 1, 'as_of': cutoff.isoformat(), 'since': snapshot['since'],
             'complete': True, 'feed_status': snapshot['status'], 'snapshot_sha256': snapshot['snapshot_sha256'],
             'intake_error': snapshot.get('intake_error'),
             'retained_sources': snapshot.get('retained_sources', []),
@@ -357,6 +373,10 @@ def _summary(state):
                        'unresolved_posts': len(pending), 'required_securities': len(work)},
             'limitations': ['Coverage journals verify accounting, not nomination completeness or financial judgments.',
                            'Bootstrap hashes attest review of actual legacy bytes; they never repair conflicted dossier evidence.']}
+    if 'rss_feeds' in snapshot:
+        result['rss_feeds'] = snapshot['rss_feeds']
+        result['source_diagnostics'] = snapshot.get('source_diagnostics', [])
+    return result
 
 
 def context(vault, as_of, *, since=None, feed_snapshot=None):
@@ -414,7 +434,7 @@ def check(vault, draft, as_of, *, since=None, feed_snapshot=None, edition=None, 
     if journals['Coverage history'] != _anchors(reports):
         raise ValueError('coverage history must match required prior report hashes exactly')
     _continuity(posts, jobs, journals, cutoff=cutoff)
-    current_posts = {POST.fullmatch(row['Post'])[1]: row for row in journals['Feed dispositions']}
+    current_posts = {source_identity(row['Post']): row for row in journals['Feed dispositions']}
     current_jobs = {row['Security']: row for row in journals['Research queue']}
     _assessment_continuity(jobs, current_jobs)
     changes = {identity for identity, post in eligible.items()
@@ -521,6 +541,8 @@ def check(vault, draft, as_of, *, since=None, feed_snapshot=None, edition=None, 
     return {'complete': True, 'research_complete': research_complete,
             'feed_status': snapshot['status'], 'snapshot_sha256': snapshot['snapshot_sha256'],
             'intake_error': snapshot.get('intake_error'),
+            **({'rss_feeds': snapshot['rss_feeds'], 'source_diagnostics': snapshot.get('source_diagnostics', [])}
+               if 'rss_feeds' in snapshot else {}),
             'retained_sources': snapshot.get('retained_sources', []),
             'bootstrap_reviewed': _bootstrap_required(reports),
             'counts': {'eligible_posts': len(eligible), 'new_or_changed_posts': len(changes),
@@ -568,6 +590,18 @@ def run_self_test():
         def test_assessed_with_no_due_is_not_automatic_work(self):
             _continuity({}, {'NASDAQ:A': {'State': 'assessed', 'Due': '-'}},
                         {'Feed dispositions': [], 'Research queue': []}, cutoff=_time('2026-09-08T12:00:00Z'))
+
+        def test_rss_revision_and_historical_x_identity_are_unambiguous(self):
+            revision = 'rss:' + 'a' * 64 + '@' + 'b' * 64
+            self.assertEqual(source_identity(revision), revision)
+            self.assertEqual(source_identity('https://x.com/i/web/status/10'), '10')
+            with self.assertRaises(ValueError):
+                source_identity('rss:' + 'a' * 64)
+
+        def test_rss_new_revision_cannot_share_an_old_fingerprint(self):
+            source = {'post_id': 'rss:' + 'a' * 64 + '@' + 'b' * 64, 'excerpt_sha256': 'c' * 64}
+            changed = dict(source, post_id='rss:' + 'a' * 64 + '@' + 'd' * 64)
+            self.assertNotEqual(fingerprint(source), fingerprint(changed))
 
     result = unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromTestCase(Tests))
     print('%d/%d self-test cases pass' % (result.testsRun - len(result.errors) - len(result.failures), result.testsRun))

@@ -1,6 +1,6 @@
 ---
 name: feed-collect
-description: Collect all available posts, quote posts and reposts from the past three days for selected public X accounts into one Obsidian note per account, including local photo embeds and linked PDFs. Uses the official API and saved progress to avoid repeat reads. Excludes replies; an explicitly requested latest-post sample can reach older history. Use for source collection without interpretation or investment recommendations.
+description: Collect selected public X accounts and RSS/Atom publications into Obsidian source notes, preserving source text, dates, local images and linked PDFs. X includes original posts, quotes, reposts and self-replies from the past three days; RSS saves unseen articles and revisions from the available feed. Uses saved progress and conditional retrieval. Use for source collection without interpretation or investment recommendations.
 ---
 
 # Feed collection
@@ -14,6 +14,18 @@ install the complete investments plugin, not this folder alone.
 
 ## Scope and inputs
 
+An ordinary run processes the enabled sources in both `Investments/x-accounts.md`
+and `Investments/rss-feeds.md`. An explicit adapter selection narrows that run.
+The RSS helper processes all enabled feeds and has no per-feed selection flag;
+do not silently widen a request for only one publication to other enabled feeds.
+A missing roster means that adapter is unconfigured; no enabled entries
+means it is paused. Do not create a roster, enable sources or substitute a source
+during routine collection. Run the applicable helpers below independently: an X
+access failure must not prevent authorized public RSS collection, or vice versa.
+Report each configured adapter's outcome and any limits separately.
+
+## X account notes
+
 Read `Investments/x-accounts.md` in the selected vault, or the explicitly selected
 accounts note within that vault. Checked `- [x] @handle` lines enable collection;
 unchecked lines disable it. Do not add, rank, substitute or remove accounts during
@@ -23,14 +35,19 @@ syntax and API setup in [the X reference](references/x-api.md).
 
 Write **one account note**, `Investments/Sources/X/<initial-handle-lower>.md`,
 and update that same note on subsequent runs. Do not split it into daily or
-monthly notes. Collect original posts, quote posts and reposts; exclude replies,
-including self-replies and thread continuations. Preserve source timestamps and
+monthly notes. Collect original posts, quote posts, reposts and self-replies that
+continue the author's own posts. Exclude replies to other accounts and replies
+whose target author cannot be verified from API metadata. Keep each continuation
+as a timestamped post with links to its parent and available conversation root.
+Threads can be incomplete: do not fetch missing parents or older roots, merge
+text, or claim the whole thread was captured. Preserve source timestamps and
 text, and record retrieval times and links. A repost keeps its own ID and time,
 is labeled `Reposted by @handle`, and links to the original post. Its returned
 text may be a truncated preview. Preserve that limitation; do not fetch or expand
 referenced originals, their authors or their media. Do not interpret source
 relationships. Follow [the X reference](references/x-api.md) when resuming an
-older window whose saved filter excludes reposts.
+older window whose saved filter excludes replies or reposts. Do not reread old
+intervals to fill previously excluded material.
 Use `sources: [X]` and an `authors` list linking to the X account in properties.
 Use `created` and `updated` dates for the note itself, not the account or posts.
 Keep `created` stable; change `updated` only when visible note content changes.
@@ -61,13 +78,12 @@ link to them. Use the bundled [attachment workflow](references/attachments.md)
 for source matching, download limits, deduplication and guarded publication.
 Do not substitute webpage previews or referenced originals' images for attachments.
 
-The supported adapter is X only. Other links to blogs, newsletters, X Articles
-or paywalled pages remain source links; do not crawl them or invent their text.
-Future adapters can share the source-note/state pattern but require their own
-supported acquisition and permissions. This skill neither invokes stock-research
-nor changes its configured discovery sources or schedule.
+Links in X posts remain links. Blog/newsletter bodies are acquired only through
+the separately enabled RSS/Atom feeds below, not by crawling a post's links.
+X Articles and paywalled pages have no fallback scraper. This skill neither
+invokes stock-research nor changes discovery sources or schedules.
 
-## Collect the past three days
+## Collect X posts from the past three days
 
 Before a first run or an access/budget change, read
 [API access and recovery](references/x-api.md). Keep credentials outside the
@@ -106,6 +122,9 @@ There is no default request or returned-post cap. An explicit `--max-requests` o
 unfinished. Honor those bounds and report partial coverage. Provider access,
 timeline limits and errors can still prevent a complete collection. Attachment
 downloads retain their separate limits and may need a later retry from saved URLs.
+X cannot exclude only other people's replies from the account timeline: new
+requests include replies, then the helper filters them locally. Excluded rows
+still count toward paid reads and any returned-post budget.
 
 Only for an explicitly requested initial sample, use `--latest N`. This is a
 separate historical mode that can reach beyond three days; the target applies
@@ -147,10 +166,53 @@ editor changes. Do not manually splice source text into an account note. The hel
 verified plugin provenance in private state for changed output and leaves
 unchanged notes alone.
 
+## Collect RSS/Atom publications
+
+Read [RSS/Atom collection](references/rss-atom.md) for the roster, article notes,
+content limits, revisions and recovery. These public feeds need no X credentials.
+Use the installed helper's offline plan before collection:
+
+```bash
+python3 '<skill>/scripts/rss_collect.py' plan --vault '<vault>'
+python3 '<skill>/scripts/rss_collect.py' collect --vault '<vault>'
+```
+
+Keep one publication index and one maintained note per article under
+`Investments/Sources/RSS/`. Preserve the body supplied by the feed without
+summaries or investment interpretation. Keep source dates, authors, functional
+links, tables and images; mark summaries and unsupported content honestly.
+Images go to `Sources/Images/`, direct PDFs to `Sources/PDFs/`. Do not crawl the
+article page, bypass a paywall, use browser cookies or collect a subscriber feed
+token in the public roster. A feed body is not proof of a complete article.
+
+The first run saves the entries currently offered by each feed. Later runs save
+unseen articles and changed revisions, using conditional requests where supported.
+There is no three-day acquisition cutoff for RSS. Preserve old saved articles when
+they disappear from the finite feed; do not claim a complete publication archive
+or infer deletion. Keep article identity separate from revision identity, including
+when a publisher republishes an old article. Report possible missed intervals.
+
+Durable state in `Investments/Sources/.rss-collect/` preserves article identities,
+observed revisions, validators, attachment receipts and publication provenance.
+Back it up with the notes. Never reset it to repair an output conflict or mark a
+new response checked before its articles are saved. Retry publication from saved
+records without reacquiring article bodies:
+
+```bash
+python3 '<skill>/scripts/rss_collect.py' publish --vault '<vault>'
+```
+
 ## Closeout
+
+For RSS, check newly saved articles, revisions, unchanged feeds, summary-only
+content, missing dates, attachment failures, publication conflicts and history
+limits. A failed feed is not an empty feed, and a successful conditional check
+does not establish that every older article was captured.
 
 Check returned rows separately from saved posts, including excluded replies,
 reposts excluded by an older saved filter, duplicate rows and merged versions.
+Distinguish ordinary replies from unavailable or ambiguous reply-target metadata;
+the latter can conceal a continuation and must be reported as a limitation.
 Also check account coverage, attachment results, resumed pages, unchanged outputs,
 deferred accounts and unresolved requests. API window completion is not a claim
 to have captured an account's entire lifetime or content deleted before retrieval.

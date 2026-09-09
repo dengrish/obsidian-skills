@@ -51,7 +51,7 @@ readiness-only checks can remain attached to a completed `watch` assessment;
 
 The offline helper replays visible coverage tables in earlier daily reports,
 verifies their history links and fingerprints, and compares them with saved feed
-post versions. There is no independently edited queue note or mutable research
+post and article revisions. There is no independently edited queue note or mutable research
 cursor. The daily reports are the persistent record; do not edit them to clear
 work. No provider calls or feed writes occur here.
 
@@ -68,13 +68,19 @@ the budget through smaller invocations. An already frozen cutoff stays fixed;
 only eligible earlier archives can fill its evidence needs.
 
 Read the pending source work, older unfinished queue, active securities and new
-post fingerprints. Unresolved older posts extend the intake window to their
+post fingerprints. Unresolved older X posts extend the intake window to their
 recorded publication time; an explicit `--since` can recover an additional known
 gap. If the collector no longer retains a source, preserve the pending item and
 report that limitation. It does not become processed merely by falling outside
 the normal 72-hour window or because its author left the roster. An old source
 can complete its already-recorded work without reactivating that account for new
 ideas. Prior active theses likewise survive removal of their originating account.
+
+RSS revisions enter new intake by first observation, even when their article was
+published earlier. Unfinished work retains the exact revision ID instead of
+expanding X's lookback to that article's publication date. A later article revision
+does not silently replace the evidence underlying an unfinished or completed
+assessment; compare the changed premise and keep the earlier source traceable.
 
 The helper cannot decide whether an argument is substantive, verify a financial
 claim or recognize every important event. Read each unprocessed source, make those
@@ -111,8 +117,12 @@ the recovery work rather than claiming a clean history.
 
 **Feed dispositions** has columns
 `Post | Fingerprint | Published | Disposition | Securities | Due | Reason`.
-Use the exact source permalink, coverage fingerprint and publication timestamp
-supplied by the planner. The fingerprint includes the excerpt and relevant
+Use the planner's exact `journal_source` in `Post`: an X permalink or an RSS
+revision token `rss:<URL hash>@<revision hash>`. Use its separate canonical article
+link in explanatory prose. Copy the supplied coverage fingerprint and `Published`
+timestamp. For an undated RSS item, the planner explicitly labels a first-observed
+fallback; preserve that limitation, never call it a known publisher date.
+The fingerprint includes the excerpt and relevant
 attachment evidence, so newly available attachments prompt reconsideration too.
 Record new or changed post versions, plus unresolved earlier rows until
 resolved. `nominated` lists the verified `EXCHANGE:TICKER` identities with new or
@@ -133,7 +143,7 @@ security, repeated argument's security, and stock substantively assessed this ru
 One row per verified security
 can cover several sources or thesis IDs; preserve the separate thesis ledger.
 Retain original first-seen time when continuing work. Sources are the originating
-post IDs, `user` for an explicit user request, or
+X post IDs or exact RSS revision tokens, `user` for an explicit user request, or
 `legacy:<canonical-daily-filename>.md` for work recovered from a legacy report.
 Carry every source from an unfinished prior job into its resolution; explain any
 obsolete argument in the assessment instead of silently dropping its source.

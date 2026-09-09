@@ -27,7 +27,7 @@ Choose by the requested result, not just the input's file type.
 | Build or enrich wiki entries from new evidence | [knowledge:wiki-build](skills/wiki-build/SKILL.md) | PDF or URL-origin source note → entries in `Wiki/` |
 | Research and add missing requested topics | [knowledge:wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md` → durable sources and new requested entries only |
 | Audit, correct or explicitly refactor existing wiki entries | [knowledge:wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources or an exact producer mapping → scoped repairs, links, parents and MOCs |
-| Record posts from selected X accounts without interpretation | [investments:feed-collect](skills/feed-collect/SKILL.md) | `Investments/x-accounts.md` → one maintained account note in `Investments/Sources/X/` |
+| Record selected X posts and RSS/Atom articles without interpretation | [investments:feed-collect](skills/feed-collect/SKILL.md) | `Investments/x-accounts.md` and `rss-feeds.md` → maintained X notes and RSS article notes in `Investments/Sources/` |
 | Analyze stock ideas from collected feeds | [investments:stock-research](skills/stock-research/SKILL.md) | saved posts + verified financial evidence → daily report and maintained stock notes |
 
 A PDF attached without a stated goal has no default workflow; ask what result
@@ -52,9 +52,8 @@ add-to-wiki.md → wiki-add → durable sources → missing requested entries in
 
 Existing Wiki/ → wiki-lint → entry repairs, links, parents, MOCs and proposals
 
-Investments/x-accounts.md → feed-collect → account notes containing posts, quote posts and reposts
-
-Selected X accounts → feed-collect → account notes → stock-research
+Investments/x-accounts.md + rss-feeds.md → feed-collect → X notes + RSS articles
+  → stock-research
   + targeted financial verification + prior research → daily report + Stocks/ notes
 ```
 
@@ -90,7 +89,7 @@ adds an unrequested entity to satisfy a builder audit. It checks off only
 successfully published or already-existing queue items; uncertain or blocked
 items remain unchecked. Existing-entry enrichment remains wiki-build's job.
 
-stock-research analyzes ideas in feed-collect’s saved account notes for long-only
+stock-research analyzes ideas in feed-collect’s saved X notes and RSS articles for long-only
 buying opportunities in liquid U.S.-listed stocks over a 3–12 month momentum
 horizon. Run feed-collect first, then stock-research. Posts nominate ideas; targeted
 price, filing and business checks establish whether the buying case holds.
@@ -118,7 +117,8 @@ credential launcher is required. Retrieval retains explicit feed and coverage li
 
 [feed-collect](skills/feed-collect/SKILL.md) independently records timestamped
 original posts, quote posts and reposts from public X accounts selected in
-`Investments/x-accounts.md`, using the official API and excluding replies.
+`Investments/x-accounts.md`, using the official API. It includes self-replies and
+thread continuations while excluding replies to other accounts.
 It maintains one account note under `Investments/Sources/X/`,
 with durable cursors and recovery state under `Investments/Sources/.feed-collect/`.
 Ordinary runs collect all available eligible posts from the past three days,
@@ -134,10 +134,20 @@ Routine updates avoid replaying saved pages and reuse saved responses when
 publication needs retrying. Ambiguous paid requests stop for
 resolution instead of silently retrying. Source edits and removals have a
 separate reconciliation procedure. The collector does not summarize posts,
-select stocks or change the stock-research schedule. Blogs and newsletters
-are future work, not supported inputs. Read its
+select stocks or change the stock-research schedule. Read its
 [X API guide](skills/feed-collect/references/x-api.md) for credentials, bounded
 backfills, coverage limitations and compliance maintenance.
+
+For public blogs/newsletters, enable RSS 2.0 or Atom feeds in
+`Investments/rss-feeds.md`. The [RSS/Atom adapter](skills/feed-collect/references/rss-atom.md)
+saves one note per article and a publication index under `Investments/Sources/RSS/`,
+with durable state in `Investments/Sources/.rss-collect/`. It saves the current feed
+on first collection and unseen articles/revisions on later runs, without X's
+three-day cutoff. Conditional requests avoid unchanged transfers where supported;
+revision identities prevent both duplicate research and reuse of outdated text.
+Feed-provided summaries remain labeled as such. It does not crawl article pages,
+collect subscriber credentials or bypass paywalls. Both adapters retain images
+and direct PDFs locally, with bounded downloads and publication guards.
 
 The [offline screener](skills/stock-research/references/screening.md) calculates
 calendar-month momentum, benchmark-relative returns, moving averages and a
@@ -243,9 +253,12 @@ it and any per-run path overrides through [RUNTIME.md](shared/RUNTIME.md).
 ├── Wiki/                     entity notes, scanned recursively
 ├── Investments/              dated market research, separate from the Wiki
 │   ├── x-accounts.md         user-maintained X account roster
+│   ├── rss-feeds.md          user-maintained public RSS/Atom roster
 │   ├── Sources/
 │   │   ├── X/                one maintained note per collected account
-│   │   └── .feed-collect/    durable collection cursors and recovery state
+│   │   ├── RSS/              publication indexes and article notes
+│   │   ├── .feed-collect/    durable X cursors and recovery state
+│   │   └── .rss-collect/     durable RSS identities, revisions and receipts
 │   └── Snapshots/            research evidence
 ├── MOCs/                     generated navigation outlines
 │   ├── <discipline>.md       e.g. machine-learning.md (no -moc suffix)
@@ -360,6 +373,8 @@ python3 -m venv .venv
 .venv/bin/python tests/test_stock_cohorts.py
 .venv/bin/python tests/test_feed_collect.py
 .venv/bin/python tests/test_feed_recent.py
+.venv/bin/python tests/test_rss_source.py
+.venv/bin/python tests/test_rss_collect.py
 .venv/bin/python tests/test_feed_media.py
 .venv/bin/python tests/test_feed_attachments.py
 .venv/bin/python tests/test_compatibility.py
@@ -443,5 +458,5 @@ Generated Markdown notes record the producing skill, plugin version, source
 commit link and verified runtime fingerprint under the shared
 [provenance contract](shared/PROVENANCE.md). Existing notes are not backfilled
 with a guessed creator, and unchanged notes stay unchanged.
-Feed account notes keep this provenance in private collection state instead of
+Feed source notes keep this provenance in private collection state instead of
 a note footer; their visible content is properties and timestamped posts.

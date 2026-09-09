@@ -1,8 +1,10 @@
 # Investments
 
 [investments:feed-collect](skills/feed-collect/SKILL.md) records timestamped
-original posts, quote posts and reposts from selected public X accounts, excluding
-replies, with one maintained account note in `Investments/Sources/X/`.
+original posts, quote posts, reposts and self-replies from selected public X
+accounts, excluding replies to others, with one maintained account note in
+`Investments/Sources/X/`. Thread continuations retain parent/conversation links;
+missing or older roots are not fetched automatically.
 It preserves source content without summaries,
 sentiment labels or buying recommendations. Attached photos are saved in
 `Sources/Images/` and embedded locally; direct PDFs are saved in `Sources/PDFs/`
@@ -13,9 +15,16 @@ source metadata, collection status and skill provenance stay in private state.
 Reposts keep their own timestamps and original-source links; returned snippets
 may be truncated, and referenced originals are not fetched separately.
 
+Public RSS/Atom feeds enabled in `Investments/rss-feeds.md` produce one note per
+article and a publication index in `Investments/Sources/RSS/`. The collector keeps
+the supplied text, tables, links and local images without summarizing it. It
+tracks unseen articles and revisions separately from X's three-day policy;
+conditional requests avoid unchanged transfers where the publisher supports them.
+Summary-only feeds and incomplete archive coverage remain explicit limitations.
+
 [investments:stock-research](skills/stock-research/SKILL.md) finds buying
 opportunities in liquid U.S.-listed stocks for a 3–12 month momentum horizon,
-starting from feed-collect’s published account notes. Run feed-collect first,
+starting from feed-collect’s published X notes and RSS articles. Run feed-collect first,
 then stock-research; the research skill does not collect posts or replace missing
 feeds with an independent discovery scan. It maintains a note for every
 substantively analyzed stock, including rejected and watch ideas, under
@@ -66,10 +75,13 @@ An ambiguous paid request is recorded and stops instead of silently
 retrying. Collection state in `Investments/Sources/.feed-collect/` is durable,
 not temporary scratch. Source edits and removals use a separate reconciliation
 procedure; account notes are maintained records, not immutable research
-editions. Blogs and newsletters are not yet supported. Collection does not
-interpret content. Published account notes and the collector’s read-only coverage
+editions. For blogs/newsletters, configure the separate
+[RSS/Atom adapter](skills/feed-collect/references/rss-atom.md). It needs no X API
+key; public feed bodies are supported, subscriber credentials and article-page
+crawling are not. Preserve its `.rss-collect/` state alongside the article notes.
+Collection does not interpret content. Published source notes and the collector’s read-only coverage
 receipts are the input to stock-research. Uncollected, stale, incomplete or
-unpublished account data remain explicit limitations; a feed mention is not a
+unpublished source data remain explicit limitations; a feed mention is not a
 buy recommendation.
 
 Credentials remain outside the repository, plugin and vault. An explicitly

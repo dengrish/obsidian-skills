@@ -463,20 +463,21 @@ class CompatibilityTests(unittest.TestCase):
             install = root / "installed plugin"
             with zipfile.ZipFile(ROOT / "investments.plugin") as archive:
                 archive.extractall(install)
-            script = install / "skills/feed-collect/scripts/feed_collect.py"
             env = {key: value for key, value in os.environ.items()
                    if key not in {"OBSIDIAN_VAULT_SHARED", "X_BEARER_TOKEN"}}
-            for option in ("--help", "--test"):
-                with self.subTest(option=option):
-                    result = subprocess.run(
-                        [sys.executable, "-I", "-S", "-B", str(script), option],
-                        cwd=root, env=env, capture_output=True, text=True,
-                        encoding="utf-8", timeout=60)
-                    self.assertEqual(result.returncode, 0,
-                                     result.stdout + result.stderr)
-                    if option == "--help":
-                        self.assertIn("collect", result.stdout)
-                        self.assertIn("reconcile", result.stdout)
+            for name in ("feed_collect.py", "rss_collect.py", "rss_source.py"):
+                script = install / "skills/feed-collect/scripts" / name
+                for option in ("--help", "--test"):
+                    with self.subTest(script=name, option=option):
+                        result = subprocess.run(
+                            [sys.executable, "-I", "-S", "-B", str(script), option],
+                            cwd=root, env=env, capture_output=True, text=True,
+                            encoding="utf-8", timeout=60)
+                        self.assertEqual(result.returncode, 0,
+                                         result.stdout + result.stderr)
+                        if option == "--help" and name == "feed_collect.py":
+                            self.assertIn("collect", result.stdout)
+                            self.assertIn("reconcile", result.stdout)
 
     def test_packaging_derives_the_loose_and_archived_codex_manifest_once(self):
         build = load("build_plugin_single_manifest", ROOT / "tools/build_plugin.py")

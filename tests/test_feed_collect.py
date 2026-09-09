@@ -25,6 +25,11 @@ def post(identity, created='2026-09-07T11:00:00Z', text='Literal source post.'):
     return {'id': str(identity), 'author_id': '12', 'created_at': created, 'text': text}
 
 
+def self_reply(identity, parent='81', conversation='80', **kwargs):
+    return {**post(identity, **kwargs), 'in_reply_to_user_id': '12', 'conversation_id': conversation,
+            'referenced_tweets': [{'id': parent, 'type': 'replied_to'}]}
+
+
 def page(rows, next_token=None):
     meta = {'result_count': len(rows)}
     if next_token:
@@ -91,14 +96,14 @@ class FeedCollectionTests(unittest.TestCase):
     def test_resume_then_incremental_run_does_not_purchase_known_pages(self):
         provider = Provider(page([post(105), post(104)], 'page-two'))
         first = self.collect(provider, max_requests=2)
-        self.assertEqual(provider.calls[1][1]['exclude'], 'replies')
+        self.assertNotIn('exclude', provider.calls[1][1])
         self.assertEqual(first['partial_accounts'], 1)
         self.assertIsNone(self.state()['accounts']['actual']['since_id'])
         resume = Provider(page([post(103)]))
         self.collect(resume, max_requests=1)
         self.assertEqual(len(resume.calls), 1)
         self.assertEqual(resume.calls[0][1]['pagination_token'], 'page-two')
-        self.assertEqual(resume.calls[0][1]['exclude'], 'replies')
+        self.assertNotIn('exclude', resume.calls[0][1])
         self.assertEqual(self.state()['accounts']['actual']['since_id'], '105')
         original_note = self.note.read_bytes()
         none = Provider()
@@ -109,13 +114,13 @@ class FeedCollectionTests(unittest.TestCase):
         self.collect(fresh, until=LATER)
         self.assertEqual(fresh.calls[0][1]['start_time'], FIRST)
         self.assertNotIn('since_id', fresh.calls[0][1])
-        self.assertEqual(fresh.calls[0][1]['exclude'], 'replies')
+        self.assertNotIn('exclude', fresh.calls[0][1])
         self.assertNotIn('pagination_token', fresh.calls[0][1])
         self.assertEqual(set(self.state()['accounts']['actual']['posts']), {'103', '104', '105', '106'})
         self.assertEqual(self.roster.read_bytes(), self.roster_bytes)
         self.assertEqual([p.name for p in self.note.parent.glob('*.md')], ['actual.md'])
 
-    def test_original_quote_and_repost_rows_are_recorded_but_any_reply_is_excluded(self):
+    def test_original_quote_and_repost_rows_are_recorded_but_unverified_reply_is_excluded(self):
         quote = post(106, text='Original quote commentary')
         quote['referenced_posts'] = [{'id': '80', 'type': 'quoted'}]
         reply = post(107, text='Excluded reply body')
@@ -144,6 +149,151 @@ class FeedCollectionTests(unittest.TestCase):
         self.collect(fresh, until=LATER)
         self.assertEqual(fresh.calls[0][1]['start_time'], FIRST)
         self.assertNotIn('since_id', fresh.calls[0][1])
+
+    def test_self_replies_and_quote_continuations_preserve_identity_and_context(self):
+        continuation = self_reply(106, text='Second part of the original thesis.')
+        quote = self_reply(107, parent='106', text='Third part quotes another source.')
+        quote['referenced_tweets'].append({'id': '72', 'type': 'quoted'})
+        provider = Provider(page([continuation, quote, deepcopy(quote)]))
+        result = self.collect(provider)
+        self.assertEqual(len(provider.calls), 2)  # Never look up missing roots or parents.
+        self.assertNotIn('exclude', provider.calls[1][1])
+        self.assertIn('in_reply_to_user_id', provider.calls[1][1]['tweet.fields'].split(','))
+        self.assertEqual(result['returned_posts'], 3)
+        self.assertEqual(result['row_counts']['newly_stored_posts'], 2)
+        self.assertEqual(result['row_counts']['duplicate_rows'], 1)
+        saved = self.state()['accounts']['actual']['posts']
+        self.assertEqual(set(saved), {'106', '107'})
+        self.assertTrue(all(feed.is_self_reply(value, '12') for value in saved.values()))
+        self.assertEqual(saved['107']['references'], quote['referenced_tweets'])
+        note = self.note.read_text(encoding='utf-8')
+        self.assertEqual(note.count('[Self-reply]'), 2)
+        self.assertIn('[Parent post](https://x.com/i/web/status/81)', note)
+        self.assertIn('[Parent post](https://x.com/i/web/status/106)', note)
+        self.assertEqual(note.count('[Conversation](https://x.com/i/web/status/80)'), 2)
+        self.assertIn('Thread context may be incomplete', note)
+        none = Provider()
+        self.collect(none)
+        self.assertEqual(none.calls, [])
+
+    def test_other_user_and_ambiguous_replies_are_excluded_with_exact_diagnostics(self):
+        other = self_reply(101, text='@actual is mentioned, but this replies to somebody else.')
+        other['in_reply_to_user_id'] = '13'
+        absent = self_reply(102)
+        absent.pop('in_reply_to_user_id')
+        malformed = self_reply(103)
+        malformed['in_reply_to_user_id'] = 12
+        no_parent = self_reply(104)
+        no_parent['referenced_tweets'] = []
+        two_parents = self_reply(105)
+        two_parents['referenced_tweets'].append({'id': '79', 'type': 'replied_to'})
+        invalid_conversation = self_reply(106, conversation='80)unsafe')
+        repost_reply = self_reply(107)
+        repost_reply['referenced_tweets'].append({'id': '79', 'type': 'retweeted'})
+        result = self.collect(Provider(page([other, absent, malformed, no_parent, two_parents,
+                                            invalid_conversation, repost_reply])))
+        self.assertEqual(result['returned_posts'], 7)
+        self.assertEqual(result['row_counts']['excluded_replies'], 7)
+        self.assertEqual(result['reply_exclusions'], {'other_account': 1, 'target_unavailable': 2,
+                                                     'ambiguous_metadata': 4, 'legacy_filter': 0})
+        self.assertEqual(result['unexpected_filter_rows'], 0)
+        self.assertEqual(self.state()['accounts']['actual']['posts'], {})
+        self.assertEqual(self.state()['accounts']['actual']['since_id'], '107')
+        self.assertNotIn(other['text'], self.state_path.read_text(encoding='utf-8'))
+
+    def test_self_reply_without_conversation_retains_parent_without_inventing_root(self):
+        continuation = self_reply(106)
+        continuation.pop('conversation_id')
+        self.collect(Provider(page([continuation])))
+        self.assertIn('[Parent post]', self.note.read_text(encoding='utf-8'))
+        self.assertNotIn('[Conversation]', self.note.read_text(encoding='utf-8'))
+
+    def test_self_reply_keeps_only_its_own_expanded_photo_attachments(self):
+        continuation = self_reply(106)
+        continuation['attachments'] = {'media_keys': ['3_own']}
+        response = page([continuation])
+        response['includes'] = {'media': [
+            {'media_key': '3_own', 'type': 'photo', 'url': 'https://pbs.twimg.com/media/own.jpg'},
+            {'media_key': '3_parent', 'type': 'photo', 'url': 'https://pbs.twimg.com/media/parent.jpg'}]}
+        provider = Provider(response)
+        self.collect(provider)
+        saved = self.state()['accounts']['actual']['posts']['106']
+        self.assertEqual(saved['media'], [response['includes']['media'][0]])
+        self.assertEqual(saved['attachments'], continuation['attachments'])
+        self.assertEqual(len(provider.calls), 2)
+
+    def test_legacy_reply_filter_preserves_fields_and_skips_self_replies_without_backfill(self):
+        self.collect(Provider(page([post(109)], 'legacy-next')), max_requests=2)
+        state = self.state()
+        window = state['accounts']['actual']['window']
+        window['exclude'] = 'replies'
+        window['fields']['tweet.fields'] = feed.LEGACY_FIELDS
+        self.state_path.write_text(json.dumps(state), encoding='utf-8')
+        resumed = Provider(page([self_reply(108)]))
+        result = self.collect(resumed, max_requests=1)
+        query = resumed.calls[0][1]
+        self.assertEqual(query['exclude'], 'replies')
+        self.assertEqual(query['tweet.fields'], feed.LEGACY_FIELDS)
+        self.assertEqual(query['pagination_token'], 'legacy-next')
+        self.assertEqual(result['reply_exclusions']['legacy_filter'], 1)
+        self.assertEqual(result['unexpected_filter_rows'], 1)
+        self.assertNotIn('108', self.state()['accounts']['actual']['posts'])
+        fresh = Provider(page([self_reply(110, created='2026-09-07T13:00:00Z')]))
+        result = self.collect(fresh, until=LATER)
+        self.assertEqual(fresh.calls[0][1]['start_time'], FIRST)
+        self.assertNotIn('exclude', fresh.calls[0][1])
+        self.assertEqual(fresh.calls[0][1]['tweet.fields'], feed.FIELDS)
+        self.assertTrue(result['accounts'][0]['reply_collection']['prior_filtered_history_not_backfilled'])
+        self.assertEqual(set(self.state()['accounts']['actual']['posts']), {'109', '110'})
+
+    def test_pending_field_selection_cannot_be_changed_to_enable_historical_reply_reads(self):
+        with self.assertRaises(feed.FeedError):
+            self.collect(Provider(TimeoutError()))
+        state = self.state()
+        state['accounts']['actual']['window']['exclude'] = 'replies'
+        state['pending']['query']['exclude'] = 'replies'
+        state['accounts']['actual']['window']['fields']['tweet.fields'] = feed.LEGACY_FIELDS
+        self.state_path.write_text(json.dumps(state), encoding='utf-8')
+        before = self.state_path.read_bytes()
+        provider = Provider()
+        with self.assertRaisesRegex(feed.FeedError, 'incompatible_saved_timeline_fields'):
+            self.collect(provider)
+        self.assertEqual(provider.calls, [])
+        self.assertEqual(self.state_path.read_bytes(), before)
+
+    def test_saved_unfiltered_response_with_self_reply_is_consumed_offline(self):
+        real_apply = feed.apply_response
+
+        def interrupted(store):
+            if store.data['pending']['kind'] == 'timeline':
+                raise RuntimeError('saved unfiltered response')
+            return real_apply(store)
+
+        with patch.object(feed, 'apply_response', side_effect=interrupted), self.assertRaises(RuntimeError):
+            self.collect(Provider(page([self_reply(106)])))
+        query = deepcopy(self.state()['pending']['query'])
+        with patch.object(feed, 'request_json', side_effect=AssertionError('Paid replay')):
+            feed.execute(self.args(command='publish'))
+        self.assertEqual(self.state()['requests'][-1]['query'], query)
+        self.assertIn('[Self-reply]', self.note.read_text(encoding='utf-8'))
+
+    def test_api_url_omits_exclude_instead_of_serializing_empty_or_none(self):
+        class Response:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def read(self, limit):
+                return b'{"data": [], "meta": {"result_count": 0}}'
+
+        with patch.object(feed.urllib.request, 'build_opener') as opener:
+            opener.return_value.open.return_value = Response()
+            provider = Provider(page([]))
+            self.collect(provider)
+            feed.request_json(provider.calls[1][0], provider.calls[1][1], 'offline-token')
+            url = opener.return_value.open.call_args.args[0].full_url
+        self.assertNotIn('exclude', feed.urllib.parse.parse_qs(feed.urllib.parse.urlsplit(url).query,
+                                                          keep_blank_values=True))
 
     def test_repost_wrappers_keep_distinct_identity_and_time_without_fetching_originals(self):
         first = post(108, '2026-09-07T10:00:00Z', text='RT @source: Preserved API excerpt…')
@@ -223,7 +373,7 @@ class FeedCollectionTests(unittest.TestCase):
         fresh = Provider(page([repost]))
         self.collect(fresh, until=LATER)
         self.assertEqual(len(fresh.calls), 1)
-        self.assertEqual(fresh.calls[0][1]['exclude'], 'replies')
+        self.assertNotIn('exclude', fresh.calls[0][1])
         self.assertEqual(fresh.calls[0][1]['start_time'], FIRST)
         self.assertNotIn('since_id', fresh.calls[0][1])
         self.assertNotIn('pagination_token', fresh.calls[0][1])
@@ -242,7 +392,7 @@ class FeedCollectionTests(unittest.TestCase):
     def test_incompatible_saved_filter_blocks_without_repeating_paid_pages(self):
         self.collect(Provider(page([post(105)], 'page-two')), max_requests=2)
         original = self.state()
-        for incompatible in (None, '', 'retweets', 'replies,retweets'):
+        for incompatible in ('', 'retweets', 'replies,retweets'):
             with self.subTest(exclude=incompatible):
                 state = deepcopy(original)
                 state['accounts']['actual']['window']['exclude'] = incompatible
@@ -258,7 +408,7 @@ class FeedCollectionTests(unittest.TestCase):
         with self.assertRaises(feed.FeedError):
             self.collect(Provider(TimeoutError()))
         state = self.state()
-        state['pending']['query'].pop('exclude')
+        state['pending']['query']['exclude'] = None
         self.state_path.write_text(json.dumps(state), encoding='utf-8')
         before = self.state_path.read_bytes()
         provider = Provider()
@@ -972,7 +1122,7 @@ class FeedCollectionTests(unittest.TestCase):
         self.assertEqual(resumed.calls[0][1]['exclude'], 'retweets,replies')
         self.assertNotIn('expansions', resumed.calls[0][1])
         self.assertEqual(resumed.calls[1][1]['end_time'], original_start)
-        self.assertEqual(resumed.calls[1][1]['exclude'], 'replies')
+        self.assertNotIn('exclude', resumed.calls[1][1])
         self.assertNotIn('start_time', resumed.calls[1][1])
         self.assertNotIn('since_id', resumed.calls[1][1])
         self.assertEqual(resumed.calls[1][1]['expansions'], 'attachments.media_keys')
@@ -1081,6 +1231,7 @@ class FeedCollectionTests(unittest.TestCase):
         state = self.state()
         for request in state['requests']:
             request.pop('row_counts', None)
+            request.pop('reply_exclusions', None)
             request.pop('query', None)
         self.state_path.write_text(json.dumps(state), encoding='utf-8')
         before = self.state_path.read_bytes()
@@ -1106,10 +1257,10 @@ class FeedCollectionTests(unittest.TestCase):
                     'merged_versions': 1, 'newly_stored_posts': 2, 'updated_existing_posts': 0}
         self.assertEqual(result['row_counts'], expected)
         self.assertEqual(sum(expected.values()), result['returned_posts'])
-        self.assertEqual(result['unexpected_filter_rows'], 2)
+        self.assertEqual(result['unexpected_filter_rows'], 0)
         request = self.state()['requests'][-1]
         self.assertEqual(request['row_counts'], expected)
-        self.assertEqual(request['query']['exclude'], 'replies')
+        self.assertNotIn('exclude', request['query'])
         self.assertEqual(request['query']['pagination_token'], 'two')
         self.assertNotIn(initial['text'], json.dumps(request))
         self.assertNotIn(edited['text'], json.dumps(request))
@@ -1121,6 +1272,7 @@ class FeedCollectionTests(unittest.TestCase):
         state = self.state()
         request = state['requests'][-1]
         request['query']['exclude'] = 'retweets,replies'
+        request.pop('reply_exclusions', None)
         request['row_counts']['excluded_replies'] = 0
         request['row_counts']['excluded_reposts'] = 1
         self.state_path.write_text(json.dumps(state), encoding='utf-8')

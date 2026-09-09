@@ -40,7 +40,7 @@ class RecentFeedTests(unittest.TestCase):
         self.assertEqual(query['start_time'], FLOOR)
         self.assertEqual(query['end_time'], FIRST)
         self.assertNotIn('since_id', query)
-        self.assertEqual(query['exclude'], 'replies')
+        self.assertNotIn('exclude', query)
         self.assertEqual(set(self.state()['accounts']['actual']['posts']), {'101', '105'})
         self.assertEqual(result['deferred_accounts'], [])
         none = Provider()
@@ -235,6 +235,38 @@ class RecentFeedTests(unittest.TestCase):
         self.assertTrue(account['retired_windows'])
         self.assertEqual(set(account['posts']), {'105', '110'})
         self.assertEqual(result['deferred_accounts'], [])
+
+    def test_rebased_legacy_window_without_saved_fields_keeps_original_default(self):
+        self.collect(Provider(page([post(200), post(180, '2026-09-06T17:00:00Z')], 'legacy-cursor')),
+                     max_requests=2)
+        state = self.state()
+        window = state['accounts']['actual']['window']
+        window['exclude'] = 'replies'
+        window.pop('fields')
+        self.save(state)
+        provider = Provider(page([post(179, '2026-09-06T16:00:00Z')]), page([]))
+        self.collect(provider, until='2026-09-09T12:00:00Z')
+        tail, forward = [call[1] for call in provider.calls]
+        self.assertEqual(tail['exclude'], 'replies')
+        self.assertEqual(tail['tweet.fields'], feed.LEGACY_FIELDS)
+        self.assertNotIn('expansions', tail)
+        self.assertNotIn('media.fields', tail)
+        self.assertEqual(tail['until_id'], '180')
+        self.assertNotIn('pagination_token', tail)
+        self.assertEqual(forward['tweet.fields'], feed.FIELDS)
+        self.assertNotIn('exclude', forward)
+        self.assertEqual(forward['start_time'], FIRST)
+
+    def test_recent_self_reply_can_reference_older_root_without_fetching_or_inventing_it(self):
+        continuation = fixtures.self_reply(200, parent='81', conversation='80')
+        provider = Provider(page([continuation]))
+        self.collect(provider)
+        self.assertEqual(len(provider.calls), 2)
+        self.assertEqual(provider.calls[1][1]['start_time'], FLOOR)
+        self.assertEqual(set(self.state()['accounts']['actual']['posts']), {'200'})
+        text = self.note.read_text(encoding='utf-8')
+        self.assertIn('[Parent post](https://x.com/i/web/status/81)', text)
+        self.assertIn('Thread context may be incomplete', text)
 
     def test_unread_tail_below_floor_is_retired_even_while_window_end_is_recent(self):
         self.collect(Provider(page([post(105), post(101, '2026-09-04T13:00:00Z')], 'expired-tail')),

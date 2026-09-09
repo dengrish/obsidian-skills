@@ -192,8 +192,17 @@ def _target(url):
     return host, path, addresses
 
 
-def _request(host, path, addresses, deadline):
+def _request(host, path, addresses, deadline, *, extra_headers=None):
     """Resolve once, connect to one vetted address, retain hostname TLS checks."""
+    headers = {'Host': '[' + host + ']' if ':' in host else host,
+               'User-Agent': 'obsidian-investments-feed-collect/1.0',
+               'Accept-Encoding': 'identity', 'Connection': 'close'}
+    for name, value in (extra_headers or {}).items():
+        if (name not in {'If-None-Match', 'If-Modified-Since', 'Accept'}
+                or not isinstance(value, str) or len(value) > 2048
+                or any(ord(character) < 32 or ord(character) == 127 for character in value)):
+            raise MediaError('invalid_public_request_header')
+        headers[name] = value
     wire = None
     for family, socktype, protocol, _, endpoint in addresses:
         if time.monotonic() >= deadline:
@@ -213,10 +222,7 @@ def _request(host, path, addresses, deadline):
         wire = ssl.create_default_context().wrap_socket(wire, server_hostname=host)
         connection = http.client.HTTPConnection(host, 443)
         connection.sock = _deadline_socket(wire, deadline)
-        connection.request('GET', path, headers={
-            'Host': '[' + host + ']' if ':' in host else host,
-            'User-Agent': 'obsidian-investments-feed-collect/1.0',
-            'Accept-Encoding': 'identity', 'Connection': 'close'})
+        connection.request('GET', path, headers=headers)
         return connection, connection.getresponse(), wire
     except Exception:
         if connection is not None:

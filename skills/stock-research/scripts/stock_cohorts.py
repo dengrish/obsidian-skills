@@ -263,7 +263,7 @@ def _derive(report, enrolled, excluded, latest):
             continue
         for security in coverage._list(post['Securities']):
             job = jobs.get(security)
-            post_id = coverage.POST.fullmatch(post['Post'])[1]
+            post_id = coverage.source_identity(post['Post'])
             if (job is None or job['State'] not in {'assessed', 'queued', 'blocked'}
                     or post_id not in coverage._list(job['Sources'])):
                 raise ValueError('every substantive nomination needs its matching research disposition')

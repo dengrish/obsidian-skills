@@ -7,10 +7,11 @@ purchase; it is not an instruction to sell an existing holding.
 
 ## Feed nominations and targeted evidence
 
-Use the [feed intake guide](screening.md) to read the active account collections
-at the frozen cutoff. The source set is the checked `Investments/x-accounts.md`
-roster, not every account remaining in collection state. New autonomous candidates
-must trace to an eligible collected post. Separately identify continuing theses
+Use the [feed intake guide](screening.md) to read active X collections and RSS/Atom
+article revisions at the frozen cutoff. The source set is the checked entries in
+`Investments/x-accounts.md` and `Investments/rss-feeds.md`, not every source remaining
+in collection state. New autonomous candidates must trace to eligible collected
+evidence. Separately identify continuing theses
 and explicit user-named overrides. Do not silently substitute news search,
 ShadowAlpha, a broad directory scan or a list of familiar names when feeds fail.
 
