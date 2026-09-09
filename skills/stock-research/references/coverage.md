@@ -139,6 +139,10 @@ When only part of a post is blocked, retain the known securities and their
 separate queue entries while explaining the unresolved remainder. Link each
 resolved security back to that source; its assessment and nominee enrollment
 need not wait for an unrelated symbol or attachment to be resolved.
+When a new or changed partial source creates unfinished security work, that
+assessment must address the new argument; reuse or monitoring of an older
+assessment cannot clear it. Once the security's work is assessed, carrying
+the unchanged source's unrelated blocker does not reopen that completed work.
 
 **Research queue** has columns
 `Security | First seen | State | Priority | Due | Sources | Assessment | Reason`.

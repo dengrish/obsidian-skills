@@ -46,6 +46,13 @@ unchanged response avoids downloading its body; publishers without validators
 may return the entire feed again. Local article and revision IDs prevent duplicate
 notes and work even when transfer avoidance is unavailable.
 
+`plan` and `status` return compact operational summaries: feed checks, retained
+article/revision counts, attachment totals, pending work and diagnostics. They do
+not print source bodies. Only when complete verified evidence is explicitly
+needed, use `plan --details` or `status --details` and direct the potentially large
+output to the run's owned scratch. Programmatic research consumers retain their
+full verified context; a compact summary is not a substitute for reading evidence.
+
 On first collection, save the entries currently offered by the feed. Later runs
 save unseen entries and changed revisions regardless of their age. Do not apply
 X's three-day acquisition cutoff here: a weekly newsletter or newly discovered
@@ -137,6 +144,8 @@ old bytes; earlier evidence keeps its earlier assets. Missing or rejected downlo
 their source links and limitations rather than producing broken local embeds.
 Preserve unknown or edited files; generated notes and assets require positive
 ownership and guarded publication, just as X output does.
+Changes limited to recognized publisher-generated embed age labels reuse the
+same evidence revision and media receipts, as described below.
 
 ## Identities, revisions and research
 
@@ -157,6 +166,17 @@ Offline publication can improve the current note's formatting from saved source
 without fetching the feed or creating an article revision. Earlier evidence
 archives, revision identities and observation times remain unchanged; presentation
 repairs are not new investment evidence.
+
+There is one narrow source-display exception: relative-age text inside a verified
+Substack `EmbeddedPostToDOM` post card's plain `embedded-post-meta` leaf does not
+create new investment evidence. Preserve each exact raw observation as verified
+age-label replacements against its immutable revision; the maintained note may
+show the latest observed label. Earlier revision bodies, timestamps, archives and
+research fingerprints stay unchanged. Do not remove relative dates from authored
+prose, guess at unfamiliar markup, or ignore changed titles, arguments, source
+dates, engagement counts or attachment descriptors. Any substantive change still
+creates a revision and rechecks its media, including images at the same URL.
+Do not merge or rewrite earlier revisions that were already captured.
 
 The same canonical article discovered through another enabled feed shares its
 article record. Conflicting secondary versions stay explicit while the original

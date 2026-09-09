@@ -207,6 +207,33 @@ def _bootstrap_required(reports):
     return bool(reports and reports[-1]['journals'] is None)
 
 
+def _new_arguments(posts, jobs, journals):
+    """Retain per-security work even when the containing source remains partial."""
+    current_jobs = {row['Security']: row for row in journals['Research queue']}
+    result = set()
+    for post in journals['Feed dispositions']:
+        securities = _list(post['Securities'])
+        if post['Disposition'] == 'nominated':
+            result.update(securities)
+            continue
+        if post['Disposition'] not in UNRESOLVED:
+            continue
+        identity = source_identity(post['Post'])
+        previous = posts.get(identity)
+        for security in securities:
+            job, prior_job = current_jobs.get(security), jobs.get(security)
+            # The same bidirectional mapping used by nominee enrollment proves
+            # actual security work, rather than a possible name in a paused source.
+            if (job is None or job['State'] not in {'assessed', 'queued', 'blocked'}
+                    or identity not in _list(job['Sources'])):
+                continue
+            if (previous is None or previous['Fingerprint'] != post['Fingerprint']
+                    or security not in _list(previous['Securities']) or prior_job is None
+                    or identity not in _list(prior_job['Sources'])):
+                result.add(security)
+    return result
+
+
 def _history(vault, cutoff):
     import market_notes
     import stock_dossiers
@@ -235,10 +262,9 @@ def _history(vault, cutoff):
             if journals['Coverage history'] != _anchors(reports):
                 raise ValueError('coverage history anchor is missing, changed or out of order: ' + report['relative'])
             _continuity(posts, jobs, journals, cutoff=_time(meta['as_of']))
+            new_arguments = _new_arguments(posts, jobs, journals)
             for row in journals['Feed dispositions']:
                 posts[source_identity(row['Post'])] = dict(row, report=report['relative'])
-            new_arguments = {security for post in journals['Feed dispositions']
-                             if post['Disposition'] == 'nominated' for security in _list(post['Securities'])}
             for row in journals['Research queue']:
                 old = jobs.get(row['Security'], {})
                 checked_at = meta['as_of'] if row['State'] in {'assessed', 'monitored'} else old.get('checked_at')

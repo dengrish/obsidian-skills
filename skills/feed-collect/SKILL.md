@@ -198,6 +198,9 @@ remain labeled as such; do not infer that every iframe is a video.
 
 The first run saves the entries currently offered by each feed. Later runs save
 unseen articles and changed revisions, using conditional requests where supported.
+Recognized generated embed age-label updates retain exact source observations
+without creating new research evidence or repeating unchanged attachment downloads;
+the RSS reference defines this narrow exception.
 There is no three-day acquisition cutoff for RSS. Preserve old saved articles when
 they disappear from the finite feed; do not claim a complete publication archive
 or infer deletion. Keep article identity separate from revision identity, including

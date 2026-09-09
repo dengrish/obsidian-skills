@@ -44,6 +44,36 @@ class Response:
 
 
 class SourceTests(unittest.TestCase):
+    def test_fragment_prefix_keeps_encoded_tags_literal(self):
+        raw = b'''<feed xmlns="http://www.w3.org/2005/Atom"><entry>
+        <link href="https://example.com/post"/><content type="xhtml">&lt;img src="https://example.com/not-an-asset.png"&gt;
+        <div xmlns="http://www.w3.org/1999/xhtml"><p>Actual body.</p></div></content></entry></feed>'''
+        value = rss.parse_feed(raw, URL)['items'][0]
+        self.assertIn('&lt;img src="https://example.com/not', value['markdown'])
+        self.assertIn('Actual body.', value['markdown'])
+        self.assertEqual(value['attachments'], [])
+
+    def test_generated_embed_age_exception_requires_structure_and_preserves_exact_spans(self):
+        card = ('<div data-component-name="EmbeddedPostToDOM"><a class="embedded-post" href="https://example.com/p">'
+                '<img src="/logo.png"><div class="embedded-post-title">The thesis</div>'
+                '<div class="embedded-post-meta">7 days ago &#183; 9 likes &#183; 1 comment</div></a></div>')
+        text = '<p>We invested 7 days ago.</p>\n' + card
+        spans = rss.embedded_age_spans(text)
+        self.assertEqual([text[start:end] for start, end in spans], ['7 days ago'])
+        stable = rss.stable_embed_content(text)
+        self.assertIn('<p>We invested 7 days ago.</p>', stable)
+        self.assertIn('0 seconds ago &#183; 9 likes', stable)
+        for unrecognized in (card.replace('EmbeddedPostToDOM', 'AuthoredComponent'),
+                             card.replace('class="embedded-post"', 'class="authored-post"'),
+                             card.replace('7 days ago', '<b>7 days ago</b>'),
+                             card.replace('7 days ago', 'We invested 7 days ago'),
+                             card.replace('</a></div>', '</div>'), card[:-6]):
+            with self.subTest(source=unrecognized):
+                self.assertEqual(rss.stable_embed_content(unrecognized), unrecognized)
+        for boolean_class in ('<div class>Text</div>', '<a class>Text</a>',
+                              card.replace('class="embedded-post-meta"', 'class')):
+            self.assertEqual(rss.stable_embed_content(boolean_class), boolean_class)
+
     def render(self, source, extra=''):
         value = rss.parse_feed(rss_feed(item('<content:encoded><![CDATA[' + source
                                             + ']]></content:encoded>' + extra)), URL)['items'][0]

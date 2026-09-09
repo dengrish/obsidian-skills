@@ -75,6 +75,86 @@ class RSSCollectionTests(unittest.TestCase):
     def entry(self):
         return next(iter(self.state()['articles'].values()))
 
+    def test_generated_embed_age_updates_view_and_exact_observation_without_new_evidence_or_downloads(self):
+        source = ('<p>Actual thesis.</p><div data-component-name="EmbeddedPostToDOM">'
+                  '<a class="embedded-post" href="https://example.com/linked">'
+                  '<img src="https://example.com/chart.png"><div class="embedded-post-meta">'
+                  '7 days ago &#183; 9 likes &#183; 1 comment</div></a></div>')
+        changed = source.replace('7 days ago', '8 days ago')
+        fetch = Fetch(body(item(text=source)), body(item(text=changed)), body(item(text=changed)))
+        self.collect(fetch)
+        version = deepcopy(self.entry()['versions'][0])
+        archive = (self.vault / version['archive_relative']).read_bytes()
+        receipts = deepcopy(self.state()['assets'])
+        self.clock.return_value = LATER
+        result = self.collect(fetch)
+        self.assertEqual(result['new_revisions'], 0)
+        self.assertEqual(result['assets']['requests'], 0)
+        self.assertEqual(len(self.asset_fetch.calls), 1)
+        entry = self.entry()
+        self.assertEqual(entry['versions'], [version])
+        self.assertEqual(self.state()['assets'], receipts)
+        self.assertEqual(rss.observed_content(version, entry['observations'][-1]), changed)
+        self.assertLess(len(json.dumps(entry['observations'][-1]['display_content'])), 180)
+        self.assertEqual((self.vault / version['archive_relative']).read_bytes(), archive)
+        self.assertIn('8 days ago', (self.vault / entry['note_relative']).read_text(encoding='utf-8'))
+        self.assertEqual(rss.context(self.vault, LATER, since=LATER)['items'], [])
+        self.assertIn('7 days ago', rss.context(self.vault, LATER)['items'][0]['raw_content'])
+        self.assertEqual(self.collect(fetch)['published_notes'], 0)
+        tampered = self.state()
+        next(iter(tampered['articles'].values()))['observations'][-1]['display_content']['age_labels'] = ['9 days ago']
+        with self.assertRaisesRegex(rss.RSSError, 'display_observation_digest'):
+            rss.validate(tampered)
+
+    def test_real_prose_or_chart_changes_still_create_revision_and_refresh_same_url(self):
+        source = ('<p>We invested 7 days ago.</p><img src="https://example.com/chart.png" alt="Revenue 10">'
+                  '<div data-component-name="EmbeddedPostToDOM"><a class="embedded-post">'
+                  '<div class="embedded-post-meta">7 days ago &#183; 9 likes</div></a></div>')
+        self.collect(Fetch(body(item(text=source))))
+        for changed in (source.replace('We invested 7 days ago', 'We invested 8 days ago'),
+                        source.replace('Revenue 10', 'Revenue 11'),
+                        source.replace('9 likes', '10 likes')):
+            self.clock.return_value = LATER
+            result = self.collect(Fetch(body(item(text=changed))))
+            self.assertEqual(result['new_revisions'], 1)
+            self.assertEqual(result['assets']['requests'], 1)
+        self.assertEqual(len(self.entry()['versions']), 4)
+        self.assertEqual(len(self.asset_fetch.calls), 4)
+
+    def test_plan_and_status_are_compact_but_details_keep_complete_verified_context(self):
+        source = '<p>' + 'Long retained research. ' * 5000 + '</p>'
+        self.collect(Fetch(body(item(text=source))))
+        before = self.state()
+        with patch.object(rss.rss_source, 'fetch_feed', side_effect=AssertionError('offline')):
+            for command in ('plan', 'status'):
+                args = rss.parser().parse_args([command, '--vault', str(self.vault)])
+                summary = rss.execute(args)
+                self.assertLess(len(json.dumps(summary)), 4000)
+                self.assertNotIn('Long retained research', json.dumps(summary))
+                self.assertEqual(summary['current_articles'], 1)
+                self.assertEqual(summary['retained_articles'], 1)
+                self.assertEqual(summary['retained_revisions'], 1)
+                self.assertEqual(summary['requests'], 0)
+                args.details = True
+                detailed = rss.execute(args)
+                self.assertEqual(detailed['items'][0]['raw_content'], source)
+                self.assertTrue(detailed['items'][0]['note_available'])
+        self.assertEqual(self.state(), before)
+
+    def test_compact_summary_preserves_item_scope_and_rendering_limitations(self):
+        raw = body(item(text='<p>Teaser.</p><script>not source prose</script>')).replace(
+            b'content:encoded', b'description')
+        self.collect(Fetch(raw))
+        summary = rss.execute(rss.parser().parse_args(['status', '--vault', str(self.vault)]))
+        self.assertEqual(summary['content_scopes'], {'summary_only': 1})
+        row = summary['article_limitations'][0]
+        self.assertEqual(row['note_relative'], self.entry()['note_relative'])
+        self.assertEqual(row['reasons'], ['active_or_unsupported_html_omitted', 'summary_only'])
+        captured = rss.context(self.vault, FIRST)
+        captured['items'][0]['current_note_rendering_limitation'] = 'legacy_render_base_unavailable'
+        summary = rss.operational_summary(captured, self.state())
+        self.assertIn('legacy_render_base_unavailable', summary['article_limitations'][0]['reasons'])
+
     def capture_legacy(self, raw, markdown, *, max_downloads=0):
         """Frozen v1 evidence contract, independent of the active renderer."""
         parsed = rss.rss_source.parse_feed(raw, URL)

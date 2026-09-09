@@ -24,11 +24,12 @@ additional market-wide daily fetch is required.
 
 The feed-nominated universe is a discretionary shortlist,
 not an independent universe for this fixed comparison. Do not form
-`simple-momentum-v1` from it. If due, record unavailable with the scope mismatch
-unless the previously declared independent input is already available at this
-cutoff. Do not acquire a broad universe solely for this diagnostic. Continue due
-observations for earlier cohorts unchanged. A future comparison of the feed
-pipeline would require a separately supported prospective definition.
+`simple-momentum-v1` from it. For an explicitly requested new independent
+formation, record unavailable with the scope mismatch unless the previously
+declared independent input is already available at this cutoff. Do not acquire
+a broad universe solely for this diagnostic. Continue due observations for
+earlier cohorts unchanged. The [feed nominee comparison](nominee-comparison.md)
+provides the separate prospective definition for the current pipeline.
 
 Eligible instruments are USD common stocks/ADRs on the screener's supported U.S.
 exchanges, priced at least $10, above their 200-session moving average, with a
@@ -42,7 +43,10 @@ weighted across the **actual selected count**. One name means weight one, not
 one-third plus invented cash. Do not add qualitative overrides, tune thresholds
 from results, or replace an unavailable member with a later winner.
 
-The first review using this feature activates it prospectively. Thereafter form
+The following formation rules apply only when a new independent comparison is
+explicitly requested; ordinary runs follow existing cohorts without restarting
+monthly formation. The first review using this feature activates it
+prospectively. Thereafter form
 once in the first published research edition of each New York calendar month,
 including a manual or non-trading-day edition. Before assembling a new note,
 inspect `comparison_formation_due` and

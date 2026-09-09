@@ -538,6 +538,51 @@ class CoverageTests(unittest.TestCase):
             history=self.anchors(later), ledger=ledger), later)
         self.assertEqual(result['counts']['monitored'], 1)
 
+    def test_partial_source_material_work_cannot_be_cleared_by_old_assessment(self):
+        link = '[[Investments/2026-09-08-113000-stock-research#NASDAQ:ABC — Example Inc.]]'
+        self.archive(posts=[self.post()], jobs=[self.job('assessed', assessment=link)], candidates=True)
+        partial = self.post('blocked', due='2026-09-09T12:00:00-04:00')
+        self.account['posts']['10']['text'] = '$ABC has a new argument; another company remains unidentified.'
+        self.account['posts']['10']['last_checked_at'] = '2026-09-08T15:40:00Z'
+        self.publish_feed()
+        source = stock_feed.context(self.vault, LATER)['posts'][0]
+        partial['Fingerprint'] = coverage.fingerprint(source)
+        self.archive(as_of=LATER, posts=[partial], jobs=[self.job('blocked')], history=self.anchors())
+        later = '2026-09-08T13:00:00-04:00'
+        current = coverage.context(self.vault, later)
+        self.assertTrue(current['work'][0]['requires_assessment'])
+        for state in ('reused', 'monitored'):
+            with self.subTest(state=state), self.assertRaisesRegex(ValueError, 'unfinished substantive research'):
+                coverage.check(self.vault, self.note(as_of=later, posts=[partial],
+                    jobs=[self.job(state, assessment=link)], history=self.anchors(later)), later)
+        fresh = '[[Investments/2026-09-08-130000-stock-research#NASDAQ:ABC — Example Inc.]]'
+        result = coverage.check(self.vault, self.note(as_of=later, posts=[partial], candidates=True,
+            jobs=[self.job('assessed', assessment=fresh)], history=self.anchors(later)), later)
+        self.assertEqual(result['counts']['completed_assessments'], 1)
+        self.assertFalse(result['research_complete'])
+
+    def test_unchanged_partial_source_does_not_reopen_completed_security_research(self):
+        link = '[[Investments/2026-09-08-113000-stock-research#NASDAQ:ABC — Example Inc.]]'
+        partial = self.post('blocked', due='2026-09-09T12:00:00-04:00')
+        self.archive(posts=[partial], jobs=[self.job('assessed', assessment=link)], candidates=True)
+        self.archive(as_of=LATER, posts=[partial], jobs=[self.job('blocked')], history=self.anchors())
+        later = '2026-09-08T13:00:00-04:00'
+        self.assertFalse(coverage.context(self.vault, later)['work'][0]['requires_assessment'])
+        result = coverage.check(self.vault, self.note(as_of=later, posts=[partial],
+            jobs=[self.job('monitored', assessment=link)], history=self.anchors(later)), later)
+        self.assertEqual(result['counts']['monitored'], 1)
+        self.assertFalse(result['research_complete'])
+
+    def test_paused_partial_source_establishes_material_work_when_job_is_added(self):
+        partial = self.post('pending', due='2026-09-09T12:00:00-04:00')
+        self.archive(posts=[partial])
+        self.assertFalse(coverage.context(self.vault, LATER)['work'])
+        self.archive(as_of=LATER, posts=[partial], jobs=[self.job('blocked')], history=self.anchors())
+        later = '2026-09-08T13:00:00-04:00'
+        current = coverage.context(self.vault, later)
+        self.assertTrue(current['work'][0]['requires_assessment'])
+        self.assertEqual(current['work'][0]['security'], 'NASDAQ:ABC')
+
     def test_old_runtime_reuse_mistake_remains_readable_and_recovers_material_work(self):
         link = '[[Investments/2026-09-08-113000-stock-research#NASDAQ:ABC — Example Inc.]]'
         self.archive(posts=[self.post()], jobs=[self.job('blocked', assessment=link)], candidates=True)
