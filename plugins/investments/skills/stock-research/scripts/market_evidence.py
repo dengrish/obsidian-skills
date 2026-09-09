@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pinned, content-addressed JSON evidence for the investments plugin.
 
-Only Comparisons, ProviderStatus, Prices and EstimateReceipts snapshot folders are supported. Files are
+Only Comparisons, ProviderStatus, Prices, EstimateReceipts and Nominees snapshot folders are supported. Files are
 create-only; exact retries verify existing bytes. This writer briefly pins the
 working directory: invoke it from a single-threaded CLI, never parallel threads.
 """
@@ -60,7 +60,8 @@ from portable_names import portable_identity
 
 MAX_BYTES = 32 * 1024 * 1024
 FOLDERS = {('Investments', 'Snapshots', 'Comparisons'), ('Investments', 'Snapshots', 'ProviderStatus'),
-           ('Investments', 'Snapshots', 'Prices'), ('Investments', 'Snapshots', 'EstimateReceipts')}
+           ('Investments', 'Snapshots', 'Prices'), ('Investments', 'Snapshots', 'EstimateReceipts'),
+           ('Investments', 'Snapshots', 'Nominees')}
 
 
 class PublicationError(RuntimeError):
@@ -84,12 +85,12 @@ def directory_owner(descriptor, name):
     return bool(owners)
 
 
-def pinned_directory(vault, folder, create=False):
+def pinned_directory(vault, folder, create=False, *, _lock_descriptor=None):
     """Create the directory context only when evidence is accessed."""
-    return contextmanager(_pinned_directory)(vault, folder, create)
+    return contextmanager(_pinned_directory)(vault, folder, create, _lock_descriptor=_lock_descriptor)
 
 
-def _pinned_directory(vault, folder, create=False):
+def _pinned_directory(vault, folder, create=False, *, _lock_descriptor=None):
     """Pin every vault-relative directory; a symlink or replacement never redirects I/O."""
     if tuple(folder) not in FOLDERS:
         fail('unsupported immutable evidence folder')
@@ -103,13 +104,17 @@ def _pinned_directory(vault, folder, create=False):
     descriptors, chain = [], []
     try:
         descriptors.append(os.open(root, flags))
-        if create:
+        root_stat = os.fstat(descriptors[0])
+        if _lock_descriptor is not None:
+            inherited = os.fstat(_lock_descriptor)
+            if (inherited.st_dev, inherited.st_ino) != (root_stat.st_dev, root_stat.st_ino):
+                fail('inherited immutable-evidence lock belongs to a different vault')
+        elif create:
             import fcntl
             try:
                 fcntl.flock(descriptors[0], fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 fail('another market publication is in progress; retry after it finishes')
-        root_stat = os.fstat(descriptors[0])
         for name in folder:
             parent = descriptors[-1]
             present = directory_owner(parent, name)
@@ -167,14 +172,14 @@ def read_bytes(descriptor, name, max_bytes=MAX_BYTES):
     return raw
 
 
-def write(value, vault, folder, max_bytes=MAX_BYTES):
+def write(value, vault, folder, max_bytes=MAX_BYTES, *, _lock_descriptor=None):
     """Publish canonical bytes exclusively; callers validate their own record schema."""
     raw = canonical(value)
     if len(raw) > max_bytes:
         fail('immutable evidence exceeds its attachment byte budget')
     sha256 = hashlib.sha256(raw).hexdigest()
     name = sha256 + '.json'
-    with pinned_directory(vault, folder, create=True) as (root, descriptor, check):
+    with pinned_directory(vault, folder, create=True, _lock_descriptor=_lock_descriptor) as (root, descriptor, check):
         path = root.joinpath(*folder, name)
         if directory_owner(descriptor, name):
             if read_bytes(descriptor, name, max_bytes) != raw:
@@ -242,6 +247,21 @@ def run_self_test():
         def test_no_stage_remains_after_success(self):
             write({'fixture': 1}, self.vault, self.folder)
             self.assertEqual(list(self.vault.glob('.market-evidence-*')), [])
+
+        def test_inherited_vault_lock_supports_atomic_multi_event_writers(self):
+            import fcntl
+            descriptor = os.open(self.vault, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with self.assertRaisesRegex(ValueError, 'publication is in progress'):
+                    write({'fixture': 1}, self.vault, self.folder)
+                result = write({'fixture': 1}, self.vault, self.folder, _lock_descriptor=descriptor)
+                self.assertTrue(Path(result['path']).is_file())
+                other = self.vault / 'other'; other.mkdir()
+                with self.assertRaisesRegex(ValueError, 'different vault'):
+                    write({'fixture': 1}, other, self.folder, _lock_descriptor=descriptor)
+            finally:
+                os.close(descriptor)
 
     result = unittest.TextTestRunner(verbosity=1).run(unittest.defaultTestLoader.loadTestsFromTestCase(EvidenceTests))
     print('%d/%d self-tests passed' % (result.testsRun - len(result.failures) - len(result.errors), result.testsRun))

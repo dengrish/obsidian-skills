@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capture bounded raw prices before a fresh manual research cutoff; replay offline.
+"""Capture bounded raw prices before a fresh research cutoff; replay offline.
 
 Explicit known nominees only. No discovery, social calls, orders or scheduling.
 Uses the existing redacting transport and pinned create-only evidence writer.

@@ -7,7 +7,8 @@ requests merely to populate a size field.
 
 ## Capture before freezing the cutoff
 
-On a **fresh manual** run, capture a bounded set of raw prices before
+On a **fresh scheduled or manual** run, use the
+[targeted coordinator](targeted-acquisition.md) to capture needed raw prices before
 `market_notes.py prepare` freezes the edition. Use previously collected feed
 nominees, earlier deferred lists and tracked stocks, including a first-run or
 catch-up shortlist drawn from the saved feed. This preflight does not collect
@@ -45,17 +46,16 @@ The receipt is timestamped only **after** the observation's exclusive publicatio
 and verified readback. The archive retains the actual provider-request times,
 raw interval and price, reviewed class identity and session evidence. Failed
 receipt publication leaves an unreceipted observation ineligible; later retries
-do not manufacture an earlier save time. The manual helper waits through the
+do not manufacture an earlier save time. In fresh mode the helper waits through the
 actual next whole second after successful publication, including partial
 success, and also when reusing a receipt saved in the current fractional second,
-so the immediately following manual preparation can admit those saves.
+so the immediately following preparation can admit those saves.
 It never selects or advances the research edition itself.
 
 For an **already frozen manual or scheduled cutoff**, pass `--as-of '<cutoff>'`.
-The scheduled 11:30 New York cutoff stays fixed. A capture first saved after it
+The edition's actual preparation cutoff stays fixed. A capture first saved after it
 is `future_only`, with `price: null` for that edition, even if the bar describes
-an earlier interval. This preflight does not make a late scheduled capture
-eligible. Reuse an eligible earlier archive or report the price-availability gap;
+an earlier interval. Reuse an eligible earlier archive or report the price-availability gap;
 do not re-prepare the edition, backdate the receipt or infer publication time
 from the bar label or the provider's delay policy.
 
