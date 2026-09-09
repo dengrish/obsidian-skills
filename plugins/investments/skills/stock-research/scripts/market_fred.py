@@ -131,6 +131,7 @@ def _pages(client, url, params, field, max_pages, limit, decode, identity, order
     """Validate each page before retaining it; changed offsets/counts never complete."""
     rows, warnings, seen = [], [], set()
     total, pages, complete = None, 0, False
+    failure = None
     for _ in range(max_pages):
         offset, page_limit = len(rows), min(PAGE_SIZE, limit - len(rows))
         try:
@@ -157,6 +158,7 @@ def _pages(client, url, params, field, max_pages, limit, decode, identity, order
                 raise
             warnings.append('A later FRED page failed retrieval or validation; validated earlier pages '
                             f'are retained ({error.code}).')
+            failure = {'code': error.code, 'message': str(error)}
             break
         rows.extend(parsed)
         seen.update(keys)
@@ -169,8 +171,10 @@ def _pages(client, url, params, field, max_pages, limit, decode, identity, order
             break
     else:
         warnings.append('Page budget reached with more FRED records available.')
-    return rows, complete, warnings, {'pages': pages, 'returned': len(rows), 'provider_count': total,
-                                     'exhausted': complete}
+    pagination = {'pages': pages, 'returned': len(rows), 'provider_count': total, 'exhausted': complete}
+    if failure is not None:
+        pagination['error'] = failure
+    return rows, complete, warnings, pagination
 
 
 def fred_series(client, args):
@@ -436,6 +440,8 @@ def run_self_test():
                         self.assertFalse(result['complete'])
                         self.assertFalse(result['pagination']['exhausted'])
                         self.assertEqual(len(result['data']['observations']), 1)
+                        if isinstance(failure, DataError):
+                            self.assertEqual(result['pagination']['error']['code'], failure.code)
             for rows in ([observation(), observation()], [observation('2026-02-01'), observation()]):
                 with self.assertRaises(DataError):
                     fred_series(Client(meta(), observations(rows)), args())
@@ -495,6 +501,8 @@ def run_self_test():
                     result = fred_releases(Client(first, later), args())
                     self.assertFalse(result['complete'])
                     self.assertEqual(len(result['data']['release_dates']), 1)
+                    self.assertEqual(result['pagination']['error']['code'],
+                                     'rate_limited' if isinstance(later, DataError) else 'changed_response')
                 other = dict(raw, release_id=9)
                 second = releases([other], count=2, offset=1, limit=1)
                 self.assertTrue(fred_releases(Client(first, second), args())['complete'])

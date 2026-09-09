@@ -211,12 +211,14 @@ def _history(vault, cutoff):
         data, token = market_notes.read_stable(Path(name))
         if baseline[2].get(name) != token:
             raise ValueError('daily history changed during coverage replay')
-        meta = market_notes.lint_bytes(data)['metadata']
+        linted = market_notes.lint_bytes(data)
+        meta = linted['metadata']
         if _time(meta['as_of']) >= cutoff or _time(meta['generated_at']) > cutoff:
             continue
         journals = parse(data)
         report = {'relative': 'Investments/' + Path(name).name, 'sha256': _hash(data),
                   'as_of': meta['as_of'], 'generated_at': meta['generated_at'], 'journals': journals,
+                  'theses': linted['theses'],
                   'candidates': stock_dossiers.candidates(data), 'token': token,
                   'legacy_text': data.decode('utf-8') if journals is None else None}
         if journals is not None:
@@ -225,10 +227,16 @@ def _history(vault, cutoff):
             _continuity(posts, jobs, journals, cutoff=_time(meta['as_of']))
             for row in journals['Feed dispositions']:
                 posts[POST.fullmatch(row['Post'])[1]] = dict(row, report=report['relative'])
+            new_arguments = {security for post in journals['Feed dispositions']
+                             if post['Disposition'] == 'nominated' for security in _list(post['Securities'])}
             for row in journals['Research queue']:
                 old = jobs.get(row['Security'], {})
                 checked_at = meta['as_of'] if row['State'] in {'assessed', 'monitored'} else old.get('checked_at')
-                jobs[row['Security']] = dict(row, report=report['relative'], checked_at=checked_at)
+                requires_assessment = (row['State'] not in {'assessed', 'closed'} and
+                                       (row['State'] == 'queued' or row['Security'] in new_arguments
+                                        or old.get('requires_assessment', False)))
+                jobs[row['Security']] = dict(row, report=report['relative'], checked_at=checked_at,
+                                             requires_assessment=requires_assessment)
         reports.append(report)
     for report in reports:
         if market_notes.read_stable(Path(vault) / report['relative'])[1] != report['token']:
@@ -250,6 +258,22 @@ def _continuity(posts, jobs, journals, *, cutoff):
             raise ValueError('preserve first-seen time across research updates: ' + security)
         if (previous['State'] in UNFINISHED and security in current_jobs
                 and not set(_list(previous['Sources'])).issubset(_list(current_jobs[security]['Sources']))):
+            raise ValueError('preserve every source association of unfinished research: ' + security)
+
+
+def _assessment_continuity(jobs, current_jobs):
+    # Older runtimes could accidentally clear material work through reuse.
+    # Keep those immutable editions readable and recover their still-unfinished
+    # obligation; only a new publication must satisfy this stricter check.
+    for security, previous in jobs.items():
+        if not previous.get('requires_assessment'):
+            continue
+        current = current_jobs.get(security)
+        if current is None:
+            raise ValueError('carry or explicitly resolve unfinished substantive research: ' + security)
+        if current['State'] in {'reused', 'monitored'}:
+            raise ValueError('unfinished substantive research cannot be completed by reuse or monitoring: ' + security)
+        if not set(_list(previous['Sources'])).issubset(_list(current['Sources'])):
             raise ValueError('preserve every source association of unfinished research: ' + security)
 
 
@@ -280,7 +304,8 @@ def _state(vault, as_of, since=None, feed_snapshot=None):
             floor = min(floor, _time(row['Published']))
             retained.add(identity)
     for job in jobs.values():
-        if job['State'] in UNFINISHED or job['Due'] != '-' and _time(job['Due']) <= cutoff:
+        if (job['State'] in UNFINISHED or job.get('requires_assessment')
+                or job['Due'] != '-' and _time(job['Due']) <= cutoff):
             for origin in _list(job['Sources']):
                 if origin in posts:
                     floor = min(floor, _time(posts[origin]['Published']))
@@ -302,14 +327,18 @@ def _summary(state):
     for security in sorted(set(jobs) | active):
         row = jobs.get(security)
         due = row is not None and row['Due'] != '-' and _time(row['Due']) <= cutoff
-        if security not in active and (row is None or row['State'] not in UNFINISHED and not due):
+        if security not in active and (row is None or row['State'] not in UNFINISHED
+                                       and not row.get('requires_assessment') and not due):
             continue
-        priority = ('active' if security in active and (row is None or due) else
-                    'capacity' if row and row['State'] == 'queued' else 'due' if due else 'active')
+        priority = ('active' if security in active else
+                    'capacity' if row and (row['State'] == 'queued' or
+                        row.get('requires_assessment') and row['State'] not in UNFINISHED)
+                    else 'due')
         work.append({'security': security, 'priority': priority, 'due': row['Due'] if row else None,
                      'first_seen': row['First seen'] if row else None,
                      'age_days': max(0, (cutoff - _time(row['First seen'])).days) if row else None,
                      'previous_state': row['State'] if row else None,
+                     'requires_assessment': row.get('requires_assessment', False) if row else False,
                      'reason': row['Reason'] if row else 'Existing active thesis requires monitoring.'})
     work.sort(key=lambda row: (PRIORITIES.index(row['priority']),
                               _time(row['first_seen']) if row['first_seen'] else cutoff - timedelta(days=100000),
@@ -334,14 +363,15 @@ def context(vault, as_of, *, since=None, feed_snapshot=None):
     return _summary(_state(vault, as_of, since, feed_snapshot))
 
 
-def _verified_assessment(vault, link, security, reports, cutoff):
+def _verified_assessment(vault, link, security, reports, cutoff, *, _lock_descriptor=None):
     import stock_dossiers
     import stock_feed
     match = ASSESSMENT.fullmatch(link)
     if match is None:
         raise ValueError('missing exact assessment link: ' + security)
     relative, heading = match[1] + '.md', match[2]
-    audit = stock_dossiers.context(vault, security.split(':', 1)[1], cutoff.isoformat())
+    audit = stock_dossiers.context(vault, security.split(':', 1)[1], cutoff.isoformat(),
+                                   _lock_descriptor=_lock_descriptor)
     if relative.startswith('Investments/.stock-research/dossiers/evidence/'):
         verified = next((row for row in audit['history'] if row['evidence_note'] == relative
                          and row['daily_sha256'] == Path(relative).stem), None)
@@ -367,7 +397,7 @@ def _verified_assessment(vault, link, security, reports, cutoff):
         raise ValueError('reuse link does not identify that security\'s actual assessment')
 
 
-def check(vault, draft, as_of, *, since=None, feed_snapshot=None, edition=None):
+def check(vault, draft, as_of, *, since=None, feed_snapshot=None, edition=None, _lock_descriptor=None):
     """Validate accounting before publication; legitimate blocked work can publish."""
     import market_notes
     import stock_dossiers
@@ -386,6 +416,7 @@ def check(vault, draft, as_of, *, since=None, feed_snapshot=None, edition=None):
     _continuity(posts, jobs, journals, cutoff=cutoff)
     current_posts = {POST.fullmatch(row['Post'])[1]: row for row in journals['Feed dispositions']}
     current_jobs = {row['Security']: row for row in journals['Research queue']}
+    _assessment_continuity(jobs, current_jobs)
     changes = {identity for identity, post in eligible.items()
                if identity not in posts or posts[identity]['Fingerprint'] != fingerprint(post)}
     if changes - set(current_posts):
@@ -412,6 +443,8 @@ def check(vault, draft, as_of, *, since=None, feed_snapshot=None, edition=None):
     candidates = {row['exchange'] + ':' + row['ticker']: row for row in stock_dossiers.candidates(data)}
     if set(candidates) - set(current_jobs):
         raise ValueError('every actual stock assessment needs a research queue disposition')
+    if candidates:
+        stock_dossiers.validate_identities(vault, candidates.values(), _lock_descriptor=_lock_descriptor)
     source_rows = {**posts, **current_posts}
     report_names = {Path(row['relative']).name: row for row in reports}
     current_name = edition or market_notes.run_identity(vault, market_notes.ny_now(cutoff), 'manual', as_of)[1]
@@ -422,6 +455,11 @@ def check(vault, draft, as_of, *, since=None, feed_snapshot=None, edition=None):
     current_active = {row['id'].split('@', 1)[0] for row in linted['theses'] if row['state'] in market_notes.ACTIVE}
     required_active = active | current_active
     current_ready = {row['id'].split('@', 1)[0] for row in linted['theses'] if row['state'] == 'ready'}
+    for security, candidate in candidates.items():
+        if (candidate['status'] == 'ready') != (security in current_ready):
+            raise ValueError('candidate readiness must agree with its current thesis ledger: ' + security)
+        if candidate['status'] in {'rejected', 'invalidated', 'expired'} and security in current_active:
+            raise ValueError('terminal/rejected candidate cannot retain an active thesis: ' + security)
     for security, row in current_jobs.items():
         old = jobs.get(security)
         for origin in _list(row['Sources']):
@@ -448,7 +486,8 @@ def check(vault, draft, as_of, *, since=None, feed_snapshot=None, edition=None):
                     or link[1] + '.md' != 'Investments/' + current_name or link[2] != candidate['heading']):
                 raise ValueError('assessed requires this edition\'s exact substantive Candidate assessment')
         elif row['State'] in {'reused', 'monitored'}:
-            _verified_assessment(vault, row['Assessment'], security, reports, cutoff)
+            _verified_assessment(vault, row['Assessment'], security, reports, cutoff,
+                                 _lock_descriptor=_lock_descriptor)
             stale = old is not None and old['Due'] != '-' and _time(old['Due']) <= cutoff
             # A new post may repeat an unchanged argument. Its semantic relevance is
             # the author's documented judgment, not something a fingerprint proves.
@@ -466,6 +505,12 @@ def check(vault, draft, as_of, *, since=None, feed_snapshot=None, edition=None):
             raise ValueError('blocked or unfinished current confirmation cannot retain ready status')
     if required_active - set(current_jobs):
         raise ValueError('every active security needs a monitoring/research disposition')
+    prior_theses = {row['id']: row['state'] for report in reports for row in report['theses']}
+    changed_theses = {row['id'].split('@', 1)[0] for row in linted['theses']
+                      if prior_theses.get(row['id']) != row['state']}
+    if changed_theses - set(candidates):
+        raise ValueError('new or state-changing theses need a current substantive Candidate assessment: '
+                         + ', '.join(sorted(changed_theses - set(candidates))))
     unfinished_posts = sum(row['Disposition'] in UNRESOLVED for row in current_posts.values())
     unfinished_jobs = sum(row['State'] in UNFINISHED for row in current_jobs.values())
     research_complete = snapshot['status'] == 'ready' and not unfinished_posts and not unfinished_jobs

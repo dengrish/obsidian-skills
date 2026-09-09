@@ -64,6 +64,7 @@ if _here != _shared:
 from market_estimates import ESTIMATE_FIELDS, HORIZONS, SOURCE, has_current_estimate, validate_estimate_row
 from market_http import parse_date, parse_time
 from market_notes import MAX_BYTES, atomic_move, output_folder, portable_identity, publish_pinned, read_stable
+import market_evidence as receipt_store
 
 SYMBOL = re.compile(r'[A-Z][A-Z0-9.-]{0,14}\Z', re.ASCII)
 DIGEST = re.compile(r'[0-9a-f]{64}\Z', re.ASCII)
@@ -71,8 +72,12 @@ NAME = re.compile(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}\.[0-9]{6}Z-([A-Z][A-Z0-9
 MAX_FILES = 100000
 EVIDENCE_KEYS = {'source', 'symbol', 'observed_at', 'provider_as_of', 'record', 'request'}
 SNAPSHOT_KEYS = EVIDENCE_KEYS | {'estimate_snapshot', 'saved_at', 'available_at', 'observation_sha256', 'snapshot_sha256'}
+SNAPSHOT_KEYS_V2 = SNAPSHOT_KEYS - {'saved_at', 'available_at'}
+RECEIPT_FOLDER = ('Investments', 'Snapshots', 'EstimateReceipts')
+RECEIPT_BYTES = 4096
 WARNINGS = [
-    'Availability begins at the later of actual observation and first local save; no earlier provider publication time or historical vintage is inferred.',
+    'Verified availability comes from a receipt timestamped after immutable snapshot publication and readback, not the observation or a legacy pre-publication save timestamp.',
+    'Unreceipted snapshots retain their original bytes but have unverified local availability and cannot support a historical cutoff; an explicit save retry can receipt them only at the current time.',
     'Provider trailing-window estimates and revision counts are current reported aggregates, not independently archived earlier observations.',
     'Numeric changes alone do not verify economic comparability; check instrument, period, units, accounting basis and provider coverage.',
     'This provider does not supply an EPS accounting basis; an absent currency also remains unknown, not an assumed U.S. dollar denomination.',
@@ -210,27 +215,78 @@ def _filename(evidence):
 
 
 def _validate_snapshot(value, name=None):
-    if (set(value) != SNAPSHOT_KEYS or type(value.get('estimate_snapshot')) is not int
-            or value['estimate_snapshot'] != 1 or value.get('source') != SOURCE
+    if (type(value.get('estimate_snapshot')) is not int or value['estimate_snapshot'] not in (1, 2)
+            or set(value) != (SNAPSHOT_KEYS if value['estimate_snapshot'] == 1 else SNAPSHOT_KEYS_V2)
+            or value.get('source') != SOURCE
             or value.get('provider_as_of') is not None):
         raise ValueError('unsupported or nonminimal estimate snapshot schema')
     symbol = _symbol(value['symbol'])
-    observed, saved, available = (_time(value[key]) for key in ('observed_at', 'saved_at', 'available_at'))
-    if saved < observed or available != max(observed, saved):
-        raise ValueError('snapshot availability must follow both observation and first save')
+    observed = _time(value['observed_at'])
+    if value['estimate_snapshot'] == 1:
+        saved, available = (_time(value[key]) for key in ('saved_at', 'available_at'))
+        if (saved < observed or available != max(observed, saved)
+                or value['saved_at'] != _iso(saved) or value['available_at'] != _iso(available)):
+            raise ValueError('legacy snapshot timestamps are inconsistent')
     evidence = {'source': dict(SOURCE), 'symbol': symbol, 'observed_at': _iso(observed), 'provider_as_of': None,
                 'record': validate_estimate_row(value['record']), 'request': _request(value['request'], observed)}
     if not has_current_estimate(evidence['record']):
         raise ValueError('an estimate snapshot must contain current estimates')
     if (set(value['request']) != {'retrieved_at', 'status', 'bytes', 'sha256'}
             or any(value[key] != evidence[key] for key in EVIDENCE_KEYS)
-            or value['saved_at'] != _iso(saved) or value['available_at'] != _iso(available)
             or value['observation_sha256'] != hashlib.sha256(_canonical(evidence)).hexdigest()
             or value['snapshot_sha256'] != hashlib.sha256(_canonical({key: item for key, item in value.items()
                                                                        if key != 'snapshot_sha256'})).hexdigest()
             or (name is not None and name != _filename(evidence))):
         raise ValueError('estimate snapshot identity, canonical representation or content hash does not match')
     return value
+
+
+def _receipts(vault, current):
+    """Validate immutable receipts; retain the earliest proven persistence time."""
+    result, opened = {}, False
+    try:
+        with receipt_store.pinned_directory(vault, RECEIPT_FOLDER) as (root, descriptor, check):
+            opened = True
+            names = sorted(os.listdir(descriptor))
+            if len(names) > MAX_FILES:
+                raise ValueError('estimate receipt inventory exceeds its bounded file count')
+            for name in names:
+                if not re.fullmatch(r'[0-9a-f]{64}\.json', name):
+                    raise ValueError('unexpected estimate receipt occupant; preserve it for inspection')
+                raw = receipt_store.read_bytes(descriptor, name, RECEIPT_BYTES)
+                value = json.loads(raw, object_pairs_hook=_unique)
+                if (not isinstance(value, dict) or set(value) != {'estimate_receipt', 'snapshot_sha256', 'available_at'}
+                        or type(value['estimate_receipt']) is not int or value['estimate_receipt'] != 1
+                        or not isinstance(value['snapshot_sha256'], str) or not DIGEST.fullmatch(value['snapshot_sha256'])
+                        or raw != receipt_store.canonical(value) or hashlib.sha256(raw).hexdigest() + '.json' != name):
+                    raise ValueError('estimate receipt schema, hash or canonical bytes disagree')
+                available = _time(value['available_at'])
+                if available > current or value['available_at'] != _iso(available):
+                    raise ValueError('estimate receipt availability is invalid or in the future')
+                key = value['snapshot_sha256']
+                if key not in result or available < _time(result[key]['available_at']):
+                    result[key] = {'available_at': value['available_at'],
+                                   'receipt': str(root.joinpath(*RECEIPT_FOLDER, name))}
+            if sorted(os.listdir(descriptor)) != names:
+                raise ValueError('estimate receipts changed during inventory; retry')
+            check()
+    except FileNotFoundError:
+        if opened:
+            raise ValueError('estimate receipt disappeared during inventory; retry') from None
+    return result
+
+
+def _verified_availability(value, receipts):
+    receipt = receipts.get(value['snapshot_sha256'])
+    if receipt is not None and _time(receipt['available_at']) < _time(value['observed_at']):
+        raise ValueError('estimate receipt precedes the actual observation')
+    return receipt
+
+
+def _snapshot_current(value, current):
+    if (_time(value['observed_at']) > current
+            or value['estimate_snapshot'] == 1 and _time(value['saved_at']) > current):
+        raise ValueError('a stored snapshot claims a future observation or legacy save time')
 
 
 def _subfolder(parent, name, parent_identity, create):
@@ -302,8 +358,8 @@ def _locked_vault(vault):
         os.close(descriptor)
 
 
-def save_snapshot(input_path, vault, period, horizon, now=None):
-    """Archive one explicit period; exact same observation retries keep first save."""
+def _save_observation(input_path, vault, period, horizon, now=None):
+    """Persist the observation before any receipt may establish availability."""
     current = _now(now)
     input_path = Path(input_path).expanduser().absolute()
     payload, input_token = _load(input_path)
@@ -316,8 +372,7 @@ def save_snapshot(input_path, vault, period, horizon, now=None):
         if target in paths:
             existing, target_token = _load(target)
             _validate_snapshot(existing, name)
-            if _time(existing['saved_at']) > current:
-                raise ValueError('the existing snapshot claims a future first save time')
+            _snapshot_current(existing, current)
             if {key: existing[key] for key in EVIDENCE_KEYS} != evidence:
                 raise ValueError('snapshot filename is occupied by different evidence; preserve the existing file')
             if (_folders(root)[2] != chain or _listing(folder) != paths
@@ -325,9 +380,7 @@ def save_snapshot(input_path, vault, period, horizon, now=None):
                     or atomic_move.regular_file_snapshot(target) != target_token):
                 raise ValueError('snapshot input or directories changed during retry validation')
             return {'status': 'unchanged', 'path': str(target), 'snapshot': existing, 'warnings': list(WARNINGS)}
-        saved = _now(now)
-        value = dict(evidence, estimate_snapshot=1, saved_at=_iso(saved),
-                     available_at=_iso(max(saved, _time(evidence['observed_at']))),
+        value = dict(evidence, estimate_snapshot=2,
                      observation_sha256=hashlib.sha256(_canonical(evidence)).hexdigest())
         value['snapshot_sha256'] = hashlib.sha256(_canonical(value)).hexdigest()
         data = _canonical(value)
@@ -353,6 +406,28 @@ def save_snapshot(input_path, vault, period, horizon, now=None):
         return {'status': 'created', 'path': str(target), 'snapshot': value, 'warnings': list(WARNINGS)}
 
 
+def save_snapshot(input_path, vault, period, horizon, now=None, *, clock=None):
+    """Receipt only after publication/readback; exact retries keep verified time."""
+    clock = clock or (lambda: _now(now))
+    result = _save_observation(input_path, vault, period, horizon, now=clock())
+    # Verify the final immutable bytes, then sample actual time. A failed receipt
+    # leaves an unreceipted observation, which history never treats as eligible.
+    value, token = _load(Path(result['path']))
+    if value != result['snapshot']:
+        raise ValueError('published estimate readback changed; preserve the unreceipted observation')
+    completed = _now(clock())
+    _snapshot_current(value, completed)
+    receipts = _receipts(vault, completed)
+    receipt = _verified_availability(value, receipts)
+    if receipt is None:
+        saved = receipt_store.write({'estimate_receipt': 1, 'snapshot_sha256': value['snapshot_sha256'],
+            'available_at': _iso(completed)}, vault, RECEIPT_FOLDER, RECEIPT_BYTES)
+        receipt = {'available_at': _iso(completed), 'receipt': saved['path']}
+    if atomic_move.regular_file_snapshot(result['path']) != token:
+        raise ValueError('estimate observation changed during receipt publication; preserve both files')
+    return dict(result, **receipt, availability_basis='post_publication_receipt')
+
+
 def estimate_history(vault, as_of, symbol, now=None):
     symbol, cutoff, current = _symbol(symbol), _time(as_of), _now(now)
     if cutoff > current:
@@ -361,30 +436,37 @@ def estimate_history(vault, as_of, symbol, now=None):
     if chain[-1] is None:
         if _folders(root)[2] != chain:
             raise ValueError('snapshot history directories changed during inventory; retry')
-        return {'complete': True, 'symbol': symbol, 'as_of': _iso(cutoff), 'snapshots': [], 'warnings': list(WARNINGS)}
-    paths, records, tokens = _listing(folder), [], {}
+        return {'complete': True, 'symbol': symbol, 'as_of': _iso(cutoff), 'snapshots': [],
+                'unverified_snapshots': [], 'warnings': list(WARNINGS)}
+    receipts = _receipts(root, current)
+    paths, records, unverified, tokens = _listing(folder), [], [], {}
     for path in paths:
         if NAME.fullmatch(path.name)[1] != symbol:
             continue
         value, token = _load(path)
         _validate_snapshot(value, path.name)
-        if _time(value['saved_at']) > current:
-            raise ValueError('a stored snapshot claims a future save time')
+        _snapshot_current(value, current)
         tokens[path] = token
-        if _time(value['available_at']) <= cutoff:
-            records.append({'path': str(path), 'snapshot': value})
+        receipt = _verified_availability(value, receipts)
+        if receipt is None:
+            unverified.append({'path': str(path), 'observed_at': value['observed_at'],
+                               'reason': 'missing_post_publication_receipt'})
+        elif _time(receipt['available_at']) <= cutoff:
+            records.append({'path': str(path), 'snapshot': value, **receipt,
+                            'availability_basis': 'post_publication_receipt'})
     if (_folders(root)[2] != chain or _listing(folder) != paths
             or any(atomic_move.regular_file_snapshot(path) != token for path, token in tokens.items())):
         raise ValueError('snapshot history changed during inventory; retry')
-    records.sort(key=lambda row: (_time(row['snapshot']['available_at']),
+    records.sort(key=lambda row: (_time(row['available_at']),
                                  _time(row['snapshot']['observed_at']), row['path']))
-    return {'complete': True, 'symbol': symbol, 'as_of': _iso(cutoff), 'snapshots': records, 'warnings': list(WARNINGS)}
+    return {'complete': not unverified, 'symbol': symbol, 'as_of': _iso(cutoff), 'snapshots': records,
+            'unverified_snapshots': unverified, 'warnings': list(WARNINGS)}
 
 
 def compare_snapshots(older_path, newer_path, now=None):
     paths = [Path(path).expanduser().absolute() for path in (older_path, newer_path)]
     current = _now(now)
-    values, tokens = [], []
+    values, tokens, availability = [], [], []
     for path in paths:
         value, token = _load(path)
         values.append(_validate_snapshot(value, path.name))
@@ -392,8 +474,13 @@ def compare_snapshots(older_path, newer_path, now=None):
                   if portable_identity(entry.name) == portable_identity(path.name)]
         if owners != [path.name]:
             raise ValueError('portable-equivalent snapshot owner collision')
-        if _time(value['saved_at']) > current:
-            raise ValueError('a compared snapshot claims a future first save time')
+        _snapshot_current(value, current)
+        if tuple(path.parts[-4:-1]) != ('Investments', 'Snapshots', 'Estimates'):
+            raise ValueError('comparison requires canonical archived paths with their local persistence receipts')
+        receipt = _verified_availability(value, _receipts(path.parents[3], current))
+        if receipt is None:
+            raise ValueError('snapshot local availability is unverified without a post-publication receipt')
+        availability.append(receipt)
         tokens.append(token)
     older, newer = values
     if (older['source'] != newer['source'] or older['symbol'] != newer['symbol']
@@ -401,7 +488,7 @@ def compare_snapshots(older_path, newer_path, now=None):
                    for key in ('fiscal_period_end', 'horizon', 'currency', 'accounting_basis'))):
         raise ValueError('comparison requires the exact same provider, symbol, fiscal period, horizon, currency and accounting basis')
     if (_time(older['observed_at']) >= _time(newer['observed_at'])
-            or _time(older['available_at']) > _time(newer['available_at'])):
+            or _time(availability[0]['available_at']) > _time(availability[1]['available_at'])):
         raise ValueError('older and newer observations and their availability must be chronological')
     changes = {}
     for field in ESTIMATE_FIELDS:
@@ -426,7 +513,8 @@ def compare_snapshots(older_path, newer_path, now=None):
             'source': dict(SOURCE), 'older_observed_at': older['observed_at'], 'newer_observed_at': newer['observed_at'],
             'fiscal_period_end': older['record']['fiscal_period_end'], 'horizon': older['record']['horizon'],
             'currency': older['record']['currency'], 'accounting_basis': older['record']['accounting_basis'],
-            'available_at': newer['available_at'], 'percent_significant_digits': 28,
+            'available_at': availability[1]['available_at'], 'availability_basis': 'post_publication_receipt',
+            'receipts': [row['receipt'] for row in availability], 'percent_significant_digits': 28,
             'changes': changes, 'warnings': warnings}
 
 
@@ -502,8 +590,11 @@ def run_self_test():
             self.assertNotIn('9.9', text)
             self.assertNotIn('apikey', text)
             self.assertEqual(result['snapshot']['record'], self.row)
-            self.assertEqual(result['snapshot']['saved_at'], _iso(self.now))
-            self.assertEqual(result['snapshot']['available_at'], _iso(self.now))
+            self.assertEqual(result['snapshot']['estimate_snapshot'], 2)
+            self.assertNotIn('saved_at', result['snapshot'])
+            self.assertNotIn('available_at', result['snapshot'])
+            self.assertEqual(result['available_at'], _iso(self.now))
+            self.assertTrue(Path(result['receipt']).is_file())
             self.assertEqual(set(result['snapshot']['request']), {'status', 'retrieved_at', 'bytes', 'sha256'})
             self.assertFalse(list(self.vault.glob('.estimate-snapshot-stage-*')))
 
@@ -514,6 +605,8 @@ def run_self_test():
             retry = self.save(now=self.now + timedelta(days=3))
             self.assertEqual(retry['status'], 'unchanged')
             self.assertEqual(retry['snapshot'], first['snapshot'])
+            self.assertEqual(retry['available_at'], first['available_at'])
+            self.assertEqual(retry['receipt'], first['receipt'])
             self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), before)
             self.assertEqual(len(list(path.parent.iterdir())), 1)
 
@@ -538,7 +631,7 @@ def run_self_test():
             self.now += timedelta(days=30)
             result = self.save()
             self.assertEqual(self.history(self.observed + timedelta(days=1))['snapshots'], [])
-            self.assertEqual(result['snapshot']['available_at'], _iso(self.now))
+            self.assertEqual(result['available_at'], _iso(self.now))
 
         def test_partial_schema_failure_or_other_incompleteness_never_saves(self):
             for updates in ({'coverage_complete': False}, {'complete': False}, {'complete': 1},
@@ -602,7 +695,7 @@ def run_self_test():
             self.assertEqual(change['absolute_change'], '0.5000')
             self.assertEqual(Decimal(change['percent_change']), Decimal(20))
             self.assertTrue(any('unknown' in warning and 'economically' in warning for warning in result['warnings']))
-            self.assertEqual(result['available_at'], new['snapshot']['available_at'])
+            self.assertEqual(result['available_at'], new['available_at'])
 
         def test_missing_values_never_become_zero_changes(self):
             old = self.save()
@@ -679,7 +772,7 @@ def run_self_test():
 
         def test_history_reads_only_requested_ticker_and_known_availability(self):
             old, new = self.pair()
-            result = self.history(_time(old['snapshot']['available_at']))
+            result = self.history(_time(old['available_at']))
             self.assertEqual([item['path'] for item in result['snapshots']], [old['path']])
             empty = estimate_history(self.vault, _iso(self.now), 'AAPL', now=self.now)
             self.assertEqual(empty['snapshots'], [])
@@ -728,8 +821,76 @@ def run_self_test():
             with self.assertRaises(ValueError):
                 _validate_snapshot(value, path.name.replace('IBM', 'AAPL'))
             value['saved_at'] = value['available_at'] = _iso(self.now + timedelta(days=1))
+            value['estimate_snapshot'] = 1
             value['snapshot_sha256'] = hashlib.sha256(_canonical({key: item for key, item in value.items() if key != 'snapshot_sha256'})).hexdigest()
             path.write_bytes(_canonical(value))
+            with self.assertRaises(ValueError):
+                self.history()
+
+        def test_receipt_waits_until_observation_publication_and_readback_finish(self):
+            self.capture()
+            started, original = self.now, publish_pinned
+            def delayed(*args):
+                result = original(*args)
+                self.now += timedelta(seconds=3)
+                return result
+            with patch(__name__ + '.publish_pinned', side_effect=delayed):
+                saved = save_snapshot(self.input, self.vault, self.period, self.horizon, clock=lambda: self.now)
+            self.assertEqual(saved['available_at'], _iso(started + timedelta(seconds=3)))
+            self.assertEqual(self.history(started + timedelta(seconds=2))['snapshots'], [])
+            self.assertEqual(self.history()['snapshots'][0]['path'], saved['path'])
+
+        def test_failed_receipt_leaves_unavailable_observation_and_retry_never_backdates(self):
+            self.capture()
+            with patch.object(receipt_store, 'write', side_effect=receipt_store.PublicationError('fixture receipt failure')):
+                with self.assertRaises(RuntimeError):
+                    self.save()
+            path = next((self.vault / 'Investments/Snapshots/Estimates').iterdir())
+            original = path.read_bytes()
+            result = self.history()
+            self.assertFalse(result['complete'])
+            self.assertEqual(result['snapshots'], [])
+            self.assertEqual(result['unverified_snapshots'][0]['path'], str(path))
+            before_retry = self.now
+            self.now += timedelta(hours=1)
+            retry = self.save()
+            self.assertEqual(retry['status'], 'unchanged')
+            self.assertEqual(path.read_bytes(), original)
+            self.assertEqual(retry['available_at'], _iso(self.now))
+            self.assertEqual(self.history(before_retry)['snapshots'], [])
+
+        def test_legacy_bytes_remain_readable_but_need_new_verified_receipt(self):
+            self.capture()
+            saved = _save_observation(self.input, self.vault, self.period, self.horizon, now=self.now)
+            path = Path(saved['path'])
+            value = dict(saved['snapshot'], estimate_snapshot=1, saved_at=_iso(self.now), available_at=_iso(self.now))
+            value['snapshot_sha256'] = hashlib.sha256(_canonical({key: item for key, item in value.items()
+                if key != 'snapshot_sha256'})).hexdigest()
+            original = _canonical(value)
+            path.write_bytes(original)
+            self.assertEqual(_validate_snapshot(value, path.name), value)
+            self.assertEqual(self.history()['snapshots'], [])
+            with self.assertRaisesRegex(ValueError, 'unverified'):
+                compare_snapshots(path, path, now=self.now)
+            original_cutoff = self.now
+            self.now += timedelta(hours=2)
+            retry = self.save()
+            self.assertEqual(path.read_bytes(), original)
+            self.assertEqual(retry['available_at'], _iso(self.now))
+            self.assertEqual(self.history(original_cutoff)['snapshots'], [])
+            self.assertEqual(self.history()['snapshots'][0]['snapshot'], value)
+
+        def test_receipt_tampering_or_missing_receipt_never_grants_availability(self):
+            saved = self.save()
+            path = Path(saved['receipt'])
+            raw = path.read_bytes()
+            path.write_bytes(raw + b' ')
+            with self.assertRaises(ValueError):
+                self.history()
+            path.unlink()
+            self.assertFalse(self.history()['complete'])
+            self.assertEqual(self.history()['snapshots'], [])
+            path.symlink_to(self.input)
             with self.assertRaises(ValueError):
                 self.history()
 

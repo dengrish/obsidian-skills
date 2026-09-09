@@ -30,6 +30,23 @@ accounts repeating a claim do not provide independent confirmation. Author
 reputation, self-reported returns and attention counts do not establish reliability.
 A post is a lead; verify its material facts independently before using them.
 
+**Missing context and horizon.** Check saved attachments and the meaning of a
+material linked source before deciding that a short post has no substantive
+argument. A relevant public article or PDF directly linked by the eligible post
+may supply its argument; opening it is source follow-up, not permission to crawl
+an author's archive, collect another social feed or add unrelated names. Preserve
+the post as the discovery origin and the document's author, date and availability
+separately. A later or undated version cannot fill an earlier evidence cutoff.
+Unavailable, truncated or paywalled material remains a specific source blocker;
+do not infer the missing argument or bypass access restrictions.
+
+Translate a trading post into a testable 3–12 month buying case before adopting
+its horizon. A same-day target, chart breakout or author's long holding period
+does not establish that fit. State the mechanism that could persist or become
+visible within the research window, including the relevant business or durable
+price evidence. A developed recovery setup need not have new company news.
+Distinguish evidence against horizon fit from insufficient context to judge it.
+
 Use the [coverage guide](coverage.md) to account for every substantive idea and
 carry unfinished work across runs. It owns the queue, ordering, retry conditions
 and reconciliation format. Every eligible new idea gets a standard initial
@@ -249,6 +266,27 @@ decisive operating or multiple assumptions; missing inputs stay missing rather
 than receiving default values. An attractive company or
 rising price alone does not establish an attractive entry. Do not invent target
 prices, expected-return probabilities or precision unsupported by the evidence.
+
+## Compare the buying cases
+
+Assess research completeness, thesis merit and entry readiness separately. A
+missing routine data check can block an otherwise promising case; a fully
+documented weak case can be rejected. Do not rank stocks by how easily their data
+were retrieved, or let a more verbose dossier imply stronger evidence.
+
+After initial coverage, compare the strongest candidates on the change not
+obviously reflected in price, its plausible timing, supporting evidence,
+downside/invalidation and current entry conditions. Explain the few reasons for
+the leading choices relative to the other assessed ideas. There is no forced
+minimum, numerical confidence score or rule that the biggest past winner must
+lead. Distinguish the most promising unfinished research from a verified buying
+opportunity; preserve required monitoring and queue order under the coverage guide.
+
+Check shared business drivers across the leading ideas. Several issuers can
+depend on the same customer budget, commodity cycle, financing condition or
+underlying announcement. Name a material common risk rather than presenting
+them as independent confirmation or diversification. This compares opportunities,
+not the user's holdings, position sizes or portfolio allocation.
 
 Method references: the compact earnings comparisons draw on
 [Anthropic's earnings workflow](https://github.com/anthropics/financial-services/blob/69cbc81467a5dced793eee03dec4658aa24ef856/plugins/vertical-plugins/equity-research/skills/earnings-analysis/references/workflow.md).

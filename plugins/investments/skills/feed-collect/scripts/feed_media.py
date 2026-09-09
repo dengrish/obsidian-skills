@@ -777,15 +777,26 @@ def collect_assets(vault, posts, receipts, save, *, max_downloads=40, max_bytes=
     budget = {'maximum': max_downloads, 'requests': 0, 'bytes': 0, 'max_bytes': max_bytes}
     summary = {'downloaded': 0, 'reused': 0, 'failed': 0, 'deferred': 0,
                'metadata_unavailable': 0, 'unsupported': 0}
+    post_descriptors = [(post, discover_assets(post)) for post in posts]
+    preferred = {}
+    for _, descriptors in post_descriptors:
+        for item in descriptors:
+            previous = preferred.get(item['key'])
+            # Media keys identify one shared attachment. An older saved row
+            # may lack its expansion while another already-purchased row has
+            # it; choose that evidence before deduplicating work for the run.
+            if previous is None or (not previous.get('url') and not previous.get('unsupported')
+                                    and (item.get('url') or item.get('unsupported'))):
+                preferred[item['key']] = item
     handled = set()
-    for post in posts:
-        descriptors = discover_assets(post)
+    for post, descriptors in post_descriptors:
         post['assets'] = [item['key'] for item in descriptors]
         for item in descriptors:
             identity = item['key']
             if identity in handled:
                 continue
             handled.add(identity)
+            item = preferred[identity]
             receipt = receipts.get(identity)
             if receipt is not None and not isinstance(receipt, dict):
                 raise MediaError('invalid_asset_receipt')

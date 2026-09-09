@@ -242,11 +242,13 @@ def capture(vault, plan_path, work_dir, *, max_calls=3, reuse_hours=24, as_of=No
         row = dict(item, status='pending', snapshot=None, available_at=None, eligible_at_cutoff=None)
         if matching:
             eligible = [record for record in matching
-                        if cutoff is None or parse_time(record['snapshot']['available_at']) <= cutoff]
-            selected = (eligible or matching)[-1]
+                        if cutoff is None or parse_time(record['available_at']) <= cutoff]
+            selected = max(eligible or matching, key=lambda record: (
+                parse_time(record['snapshot']['observed_at']),
+                parse_time(record['available_at'])))
             within_cutoff = bool(eligible) if cutoff is not None else None
             row.update(status='reused' if within_cutoff is not False else 'reused_future_only',
-                       snapshot=selected['path'], available_at=selected['snapshot']['available_at'],
+                       snapshot=selected['path'], available_at=selected['available_at'],
                        eligible_at_cutoff=within_cutoff)
         else:
             missing.setdefault(symbol, []).append(len(result))
@@ -292,8 +294,8 @@ def capture(vault, plan_path, work_dir, *, max_calls=3, reuse_hours=24, as_of=No
                            for item in payload['data']):
                     row.update(status='coverage_unavailable', coverage=_coverage_diagnostic(payload, row))
                     continue
-                saved = history.save_snapshot(saved_payload, vault, row['period'], row['horizon'], now=clock())
-                available = saved['snapshot']['available_at']
+                saved = history.save_snapshot(saved_payload, vault, row['period'], row['horizon'], clock=clock)
+                available = saved['available_at']
                 eligible = parse_time(available) <= cutoff if cutoff is not None else None
                 row.update(status='captured' if eligible is not False else 'captured_future_only',
                            snapshot=saved['path'], available_at=available, eligible_at_cutoff=eligible)
@@ -313,9 +315,14 @@ def capture(vault, plan_path, work_dir, *, max_calls=3, reuse_hours=24, as_of=No
         raise DataError('changed_plan', 'Capture plan changed during execution; retain saved observations and rerun planning.')
     # Manual preparation freezes whole seconds. Cross only the remaining
     # fractional second after the last actual save, never invent a future cutoff.
-    if cutoff is None and any(row['status'] == 'captured' for row in result):
-        boundary = max(parse_time(row['available_at']) for row in result if row['available_at']).replace(microsecond=0) + timedelta(seconds=1)
-        remaining = (boundary - clock()).total_seconds()
+    finished = clock()
+    reused_after_floor = any(row['status'] == 'reused' and row['available_at']
+        and parse_time(row['available_at']) > finished.replace(microsecond=0) for row in result)
+    if cutoff is None and (any(row['status'] == 'captured' for row in result) or reused_after_floor):
+        # Receipt publication can itself span a second. Freeze manual research
+        # only after actual completion, never from the earlier receipt time.
+        boundary = finished.replace(microsecond=0) + timedelta(seconds=1)
+        remaining = (boundary - finished).total_seconds()
         if 0 < remaining <= 1:
             sleep(remaining)
         if clock() < boundary:
@@ -451,7 +458,10 @@ def run_self_test():
             self.assertGreater(parse_time(result['finished_at']), parse_time(result['items'][0]['available_at']))
             value = json.loads(Path(result['items'][0]['snapshot']).read_bytes())
             self.assertIsNone(value['provider_as_of'])
-            self.assertEqual(value['available_at'], value['saved_at'])
+            self.assertNotIn('available_at', value)
+            self.assertNotIn('saved_at', value)
+            archived = history.estimate_history(self.vault, _iso(self.instant), 'AAA', now=self.instant)['snapshots'][0]
+            self.assertEqual(result['items'][0]['available_at'], archived['available_at'])
 
         def test_reuse_is_fresh_matching_period_and_does_not_spend_calls(self):
             first = self.run_capture()
@@ -461,6 +471,25 @@ def run_self_test():
             self.assertEqual([row['status'] for row in result['items']], ['reused', 'captured', 'budget_deferred'])
             self.assertEqual(self.calls, ['AAA', 'BBB'])
             self.assertEqual(path.read_bytes(), before)
+
+        def test_manual_capture_waits_after_delayed_receipt_publication(self):
+            original = history.receipt_store.write
+            def delayed(*args, **kwargs):
+                result = original(*args, **kwargs)
+                self.instant += timedelta(seconds=3)
+                return result
+            with patch.object(history.receipt_store, 'write', side_effect=delayed):
+                result = self.run_capture()
+            self.assertEqual(parse_time(result['finished_at']).microsecond, 0)
+            self.assertEqual(self.sleeps, [0.75])
+
+        def test_manual_reuse_in_current_fractional_second_waits_before_prepare(self):
+            frozen = _iso(self.instant)
+            self.run_capture(as_of=frozen)
+            self.assertEqual(self.sleeps, [])
+            result = self.run_capture(max_calls=0)
+            self.assertEqual(result['items'][0]['status'], 'reused')
+            self.assertEqual(self.sleeps, [0.75])
 
         def test_ordered_priority_and_multiple_periods_share_one_symbol_request(self):
             result = self.run_capture([self.item('BBB'), self.item('AAA'),
@@ -548,6 +577,26 @@ def run_self_test():
             self.assertEqual(result['items'][0]['status'], 'reused')
             self.assertTrue(result['items'][0]['eligible_at_cutoff'])
             self.assertEqual(self.calls, ['AAA', 'AAA'])
+
+        def test_late_save_of_older_observation_does_not_displace_newer_estimates(self):
+            payload = market_estimates.alpha_estimates(self.client,
+                SimpleNamespace(symbol='AAA', period=['2026-11-30'], as_of=None))
+            payload.update(market_data=1, operation='estimates', requests=list(self.client.requests))
+            old_input = self.work / 'older-observation.json'
+            old_input.write_text(json.dumps(payload), encoding='utf-8')
+            self.instant += timedelta(hours=1)
+            latest_item = self.run_capture()['items'][0]
+            latest = latest_item['snapshot']
+            self.instant += timedelta(hours=1)
+            older = history.save_snapshot(old_input, self.vault, '2026-11-30', 'fiscal quarter', now=self.instant)
+            self.assertGreater(older['available_at'], latest_item['available_at'])
+            for cutoff in (None, _iso(self.instant)):
+                with self.subTest(cutoff=cutoff):
+                    result = self.run_capture(max_calls=0, as_of=cutoff)
+                    self.assertEqual(result['items'][0]['snapshot'], latest)
+                    self.assertEqual(result['items'][0]['status'], 'reused')
+                    self.assertEqual(result['unique_symbol_calls'], 0)
+            self.assertTrue(Path(older['path']).is_file())
 
         def test_unknown_matching_horizon_stays_unavailable(self):
             result = self.run_capture([self.item('AAA', horizon='fiscal year')])

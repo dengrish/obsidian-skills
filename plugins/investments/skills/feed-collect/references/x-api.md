@@ -92,6 +92,9 @@ time bounds for the invocation; the upper cutoff leaves a 30-second API indexing
 buffer, so the newest few seconds are picked up on a later run. An explicit
 `--until` instead sets a reproducible historical cutoff with a three-day lookback.
 There is no normal bootstrap or older-history catch-up period.
+A cutoff earlier than an account's saved completion is reported as deferred:
+that completion alone cannot prove coverage of the earlier three-day lookback.
+The helper preserves progress without replaying overlapping paid intervals.
 
 Saved completion boundaries and pagination prevent overlapping paid requests.
 The collector does not request the entire three-day window again each time.

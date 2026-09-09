@@ -70,6 +70,7 @@ def _pages(client, url, params, headers, budget, decode):
     token = None
     complete = False
     count = 0
+    failure = None
     for _ in range(budget):
         query = dict(params)
         if token is not None:
@@ -90,6 +91,7 @@ def _pages(client, url, params, headers, budget, decode):
                 raise
             warnings.append("A later page failed validation or retrieval; earlier pages are retained "
                             f"({error.code}).")
+            failure = {"code": error.code, "message": str(error)}
             break
         count += 1
         results.append(parsed)
@@ -103,7 +105,10 @@ def _pages(client, url, params, headers, budget, decode):
         seen_tokens.add(token)
     else:
         warnings.append("Page budget reached with more provider results available.")
-    return results, complete, warnings, {"pages": count, "exhausted": complete}
+    pagination = {"pages": count, "exhausted": complete}
+    if failure is not None:
+        pagination["error"] = failure
+    return results, complete, warnings, pagination
 
 
 def _finite(value, *, positive=False, integer=False):
@@ -490,9 +495,19 @@ def run_self_test():
 
         def test_later_network_failure_preserves_first_page(self):
             result = alpaca_bars(FakeClient([page({"AAPL": [bar()]}, "x"),
-                                           DataError("rate_limit", "fixture failure")]), args())
+                                           DataError("rate_limited", "fixture failure")]), args())
             self.assertFalse(result["complete"])
             self.assertEqual(len(result["data"]["bars"]["AAPL"]), 1)
+            self.assertEqual(result["pagination"]["error"],
+                             {"code": "rate_limited", "message": "fixture failure"})
+
+        def test_action_later_page_failure_keeps_typed_stop_diagnostic(self):
+            result = alpaca_actions(FakeClient([action_page([action()], "next"),
+                                               DataError("access_denied", "fixture denial")]),
+                                    args(start="2026-09-01", end="2026-09-05"))
+            self.assertFalse(result["complete"])
+            self.assertEqual(len(result["data"]["actions"]), 1)
+            self.assertEqual(result["pagination"]["error"]["code"], "access_denied")
 
         def test_later_invalid_page_preserves_first_page(self):
             result = alpaca_bars(FakeClient([page({"AAPL": [bar()]}, "x"), page({"ALIEN": [bar()]})]), args())

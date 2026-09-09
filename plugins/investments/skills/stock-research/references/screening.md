@@ -38,6 +38,9 @@ Read the actual post Markdown and distinguish original text, added quote comment
 and referenced/reposted content. Origin groups help avoid double counting; they
 do not establish the truth or independence of a claim. Preserve original post IDs,
 permalinks, collecting/original authors and timestamps beside material findings.
+Use the research method's bounded linked-source follow-up for a post whose
+argument is in a public article or saved attachment. A teaser is not proof of a
+buying case, but inaccessible material is not evidence that no argument exists.
 A recent repost of an old claim is a newly collected reference, not a fresh
 company catalyst; retain both times and treat the original as dated background.
 Use source links rather than temporary snapshot paths in published notes. Retain

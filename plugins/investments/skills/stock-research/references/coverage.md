@@ -138,6 +138,10 @@ Carry every source from an unfinished prior job into its resolution; explain any
 obsolete argument in the assessment instead of silently dropping its source.
 New nominations require `assessed`, `queued` or `blocked`; routine monitoring or
 reuse alone cannot account for a declared new argument.
+Unfinished substantive work retains that requirement across runs: an older
+assessment cannot clear a later material argument or capacity deferral. The helper
+also restores such work if an older report mistakenly marked it reused or monitored,
+without rewriting that historical report.
 
 - `queued`: capacity prevented completion; keep priority `capacity` on the next
   run and a due timestamp no later than the next review.

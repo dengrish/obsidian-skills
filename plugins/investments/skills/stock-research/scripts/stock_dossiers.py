@@ -203,7 +203,7 @@ def _directory(parent, name, create=False, private=False):
 
 
 class Store:
-    def __init__(self, vault, create=False):
+    def __init__(self, vault, create=False, *, _lock_descriptor=None):
         import fcntl
         self.vault = Path(vault).expanduser().resolve(strict=True)
         self.fds = []
@@ -211,10 +211,17 @@ class Store:
         try:
             self.root = os.open(self.vault, flags)
             self.fds.append(self.root)
-            try:
-                fcntl.flock(self.root, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError as exc:
-                raise ValueError('another research publication is in progress; retry afterwards') from exc
+            if _lock_descriptor is not None:
+                # The daily publisher already owns this exact directory lock.
+                # Reopening/flocking it would conflict with our own publication.
+                # Only read-only nested context accepts its live descriptor.
+                if create or _identity(_lock_descriptor) != _identity(self.root):
+                    raise ValueError('inherited research lock does not match this read-only vault')
+            else:
+                try:
+                    fcntl.flock(self.root, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError as exc:
+                    raise ValueError('another research publication is in progress; retry afterwards') from exc
             self.investments = self._child(self.root, 'Investments', create)
             self.stocks = self._child(self.investments, 'Stocks', create)
             self.private = self._child(self.investments, '.stock-research', create, True)
@@ -475,6 +482,23 @@ def _same_company(prior, item):
         raise ValueError('company name changed without a matching stable ID; verify identity before migration')
 
 
+def validate_identities(vault, entries, *, _lock_descriptor=None):
+    """Check prospective daily assessments against owned dossiers before publication.
+
+    Reuse the exact synchronization identity rules without creating folders,
+    adopting unmanaged notes, or advancing a pending publication.
+    """
+    with Store(vault, _lock_descriptor=_lock_descriptor) as store:
+        for item in entries:
+            receipt, _, _ = store.load(item['ticker'])
+            if receipt['pending']:
+                raise ValueError('stock publication is incomplete; recover the pending daily update first: '
+                                 + item['ticker'])
+            if receipt['committed']:
+                _same_company(receipt['committed'], item)
+        store.stable()
+
+
 def _daily_relative(vault, daily_note):
     path = Path(daily_note).expanduser()
     if not path.is_absolute():
@@ -645,11 +669,11 @@ def publish(vault, draft, provenance=None):
                 **_history_audit(store, record)}
 
 
-def context(vault, ticker, as_of):
+def context(vault, ticker, as_of, *, _lock_descriptor=None):
     if not SYMBOL.fullmatch(ticker):
         raise ValueError('invalid ticker')
     cutoff = market_notes.iso_time(as_of)
-    with Store(vault) as store:
+    with Store(vault, _lock_descriptor=_lock_descriptor) as store:
         receipt, _, _ = store.load(ticker)
         if receipt['pending']:
             raise ValueError('stock publication is incomplete; recover the pending daily update first')
