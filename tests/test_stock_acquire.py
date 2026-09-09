@@ -84,7 +84,10 @@ class AcquisitionTests(unittest.TestCase):
                 day += timedelta(days=1)
         elif endpoint == market_prices.BARS_URL:
             end = acquire.parse_time(params['end'])
-            bar = {'t': acquire.history._iso(end - timedelta(minutes=1)), 'o': 30, 'h': 31,
+            interval = (end.astimezone(market_prices.ZoneInfo('America/New_York')).replace(
+                hour=0, minute=0, second=0, microsecond=0)
+                if params['timeframe'] == '1Day' else end - timedelta(minutes=1))
+            bar = {'t': acquire.history._iso(interval), 'o': 30, 'h': 31,
                    'l': 29, 'c': 30, 'v': 1000, 'n': 100, 'vw': 30}
             payload = {'bars': {symbol: [deepcopy(bar)] for symbol in params['symbols'].split(',')},
                        'next_page_token': None}
@@ -120,6 +123,100 @@ class AcquisitionTests(unittest.TestCase):
                 with patch('sys.stdout', output):
                     self.assertEqual(acquire.main(['--vault', str(self.vault), '--plan', str(self.path),
                                                   '--work-dir', str(self.work)]), 0)
+
+    def history_request(self, timeframe='1Min'):
+        return {'timeframe': timeframe, 'start': '2024-04-01T04:00:00Z',
+                'end': '2024-05-01T04:00:00Z', 'adjustment': 'raw',
+                'asof': '2024-05-01', 'reason': 'Regular-session turnover or dated trend evidence',
+                'max_pages': 5}
+
+    def test_history_finishes_before_quotes_estimates_and_frozen_cutoff(self):
+        items = [dict(self.item(symbol, estimates=True),
+                      history=[self.history_request(), self.history_request('1Day')])
+                 for symbol in ('AAA', 'BBB')]
+        offline = self.run_acquire(items)
+        self.assertEqual(offline['planned']['history_requests_missing'], 4)
+        self.assertEqual(self.seen, [])
+        self.assertEqual(list(self.vault.iterdir()), [])
+        result = self.run_acquire(execute=True)
+        self.assertTrue(result['complete'])
+        self.assertEqual(len(result['history']), 4)
+        ready = acquire.parse_time(result['ready_to_freeze_after']).replace(microsecond=0)
+        self.assertTrue(all(acquire.parse_time(row['available_at']) <= ready for row in result['history']))
+        bars = [query for endpoint, query in self.seen if endpoint == market_prices.BARS_URL]
+        self.assertEqual([row['timeframe'] for row in bars], ['1Min', '1Day', '1Min'])
+        self.assertEqual([row['start'] for row in bars[:2]], [items[0]['history'][0]['start']] * 2)
+        self.assertEqual(len(self.seen), result['budget']['http_attempts'])
+        for row in result['history']:
+            self.assertTrue(Path(row['snapshot']).is_file())
+            self.assertTrue(Path(row['receipt']).is_file())
+        previous = len(self.seen)
+        repeated = self.run_acquire(execute=True)
+        self.assertTrue(repeated['complete'])
+        self.assertEqual(len(self.seen), previous)
+        self.assertTrue(all(row['status'] == 'reused' for row in repeated['history']))
+
+    def test_history_pages_and_other_phases_share_one_budget(self):
+        item = dict(self.item('AAA', estimates=True), history=[self.history_request()])
+        result = self.run_acquire([item], execute=True, max_requests=2)
+        self.assertFalse(result['complete'])
+        self.assertEqual(len(self.seen), 2)
+        self.assertEqual(result['budget']['http_attempts'], 2)
+        self.assertEqual(result['history'][0]['status'], 'captured')
+        self.assertEqual(result['prices'][0]['capture_error'], 'request_budget')
+        self.assertEqual(result['estimates'][0]['error_code'], 'request_budget')
+        self.assertEqual(result['continuation'][0]['history'], [])
+        self.assertIsNotNone(result['ready_to_freeze_after'])
+
+    def test_unresolved_offset_history_survives_continuation_with_cached_quote(self):
+        seeded = self.run_acquire([self.item('AAA')], execute=True)
+        self.assertTrue(seeded['complete'])
+        before = len(self.seen)
+        request = dict(self.history_request(), start='2024-04-01T00:00:00-04:00',
+                       end='2024-05-01T00:00:00-04:00')
+        result = self.run_acquire([dict(self.item('AAA'), history=[request])],
+                                  execute=True, max_requests=0)
+        self.assertEqual(len(self.seen), before)
+        self.assertFalse(result['complete'])
+        self.assertEqual(result['prices'][0]['status'], 'selected')
+        self.assertEqual(result['history'][0]['error_code'], 'request_budget')
+        self.assertEqual(len(result['continuation']), 1)
+        pending = result['continuation'][0]['history']
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]['start'], '2024-04-01T04:00:00.000000Z')
+        self.assertEqual(pending[0]['end'], '2024-05-01T04:00:00.000000Z')
+        self.assertEqual(acquire.parse_time(pending[0]['start']), acquire.parse_time(request['start']))
+        saved = json.loads(Path(result['continuation_plan']).read_text(encoding='utf-8'))
+        self.assertEqual(saved, result['continuation'])
+        resumed = self.run_acquire(saved, execute=True, max_requests=2)
+        self.assertTrue(resumed['complete'])
+        self.assertEqual(resumed['history'][0]['status'], 'captured')
+        self.assertEqual(resumed['continuation'], [])
+        self.assertEqual(len(self.seen) - before, 2)
+        new_bars = [query for endpoint, query in self.seen[before:] if endpoint == market_prices.BARS_URL]
+        self.assertEqual(len(new_bars), 1)
+        self.assertEqual(acquire.parse_time(new_bars[0]['start']), acquire.parse_time(request['start']))
+
+    def test_late_history_cannot_repair_fixed_edition_or_spend_again(self):
+        cutoff = acquire.history._iso(self.now - timedelta(seconds=1))
+        item = dict(self.item('AAA'), history=[self.history_request()])
+        result = self.run_acquire([item], execute=True, as_of=cutoff)
+        self.assertFalse(result['complete'])
+        self.assertIsNone(result['ready_to_freeze_after'])
+        self.assertEqual(result['history'][0]['status'], 'captured_future_only')
+        self.assertEqual(result['continuation'], [])
+        previous = len(self.seen)
+        repeated = self.run_acquire(execute=True, as_of=cutoff)
+        self.assertEqual(len(self.seen), previous)
+        self.assertEqual(repeated['history'][0]['status'], 'reused_future_only')
+
+    def test_history_outside_fixed_cutoff_is_rejected_before_access(self):
+        item = dict(self.item('AAA'), history=[self.history_request()])
+        item['history'][0]['end'] = '2024-05-01T15:00:00Z'
+        with self.assertRaises(acquire.DataError):
+            self.run_acquire([item], execute=True, as_of='2024-05-01T14:00:00Z')
+        self.assertEqual(self.seen, [])
+        self.assertEqual(list(self.vault.iterdir()), [])
 
     def test_all_65_explicit_nominees_share_calendar_and_one_attempt_ledger(self):
         result = self.run_acquire([self.item('S%02d' % n) for n in range(65)], execute=True)

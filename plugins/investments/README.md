@@ -121,8 +121,12 @@ Selected estimate observations persist as immutable source JSON under
 under `Investments/Snapshots/EstimateReceipts/`. Legacy observations stay intact;
 an embedded save timestamp alone does not prove availability at an earlier cutoff.
 A targeted acquisition coordinator batches the explicitly justified nominees
-through price and estimate capture, shares a request budget, reuses archives
-and respects provider cooldowns. Both scheduled and manual reviews freeze their
+through daily/minute history with exchange calendars, current prices and estimate
+capture, shares a request budget, reuses archives and respects provider cooldowns.
+History and its availability receipts persist under `Investments/Snapshots/PriceHistory/`;
+acquisition alone does not prove regular-session liquidity or a price trigger.
+Each new thesis defines its price test's measurement, session, duration and any
+later-hold condition; historical ambiguity remains explicit. Both scheduled and manual reviews freeze their
 cutoff only after preparation completes. The daily start remains 08:30 Pacific;
 late captures cannot change an already frozen edition. Stock notes
 keep usable current assessments separate from conflicts in older report links,

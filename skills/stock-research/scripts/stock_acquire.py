@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Plan, then explicitly acquire bounded evidence for already verified stock nominees.
 
-Coordinates the existing price/estimate archival helpers with one transport and
+Coordinates history, current-price and estimate archival helpers with one transport and
 one fixed HTTP-attempt budget. Never discovers securities or collects feeds.
 """
 from __future__ import annotations
@@ -59,6 +59,7 @@ import market_capture as estimates
 import market_price_capture as prices
 import market_estimate_history as history
 import market_estimates
+import stock_history
 from market_acquire import Scratch
 from market_credentials import credential_environment, load_credentials
 from market_http import CREDENTIAL_NAMES, DataError, HttpClient, parse_date, parse_time, redact, utc_now
@@ -92,13 +93,17 @@ def read_plan(path, current, cutoff=None):
         _fail('Use one to 100 explicit nominees per plan; carry further justified nominees in a separate continuation plan.')
     seen = set()
     for row in plan:
-        if (not isinstance(row, dict) or set(row) - (prices.PLAN_KEYS | {'origins', 'estimates'})
+        if (not isinstance(row, dict) or set(row) - (prices.PLAN_KEYS | {'origins', 'estimates', 'history'})
                 or not (prices.PLAN_KEYS | {'origins'}) <= set(row)):
-            _fail('Each nominee needs the price-plan identity/reason fields, origins and optional estimates.')
+            _fail('Each nominee needs the price-plan identity/reason fields, origins and optional estimates/history.')
         prices._item({key: row[key] for key in prices.PLAN_KEYS}, current)
         if row['symbol'] in seen:
             _fail('Each symbol must appear once with one explicitly verified quoted class.')
         seen.add(row['symbol'])
+        if 'history' in row:
+            row['history'] = stock_history.validate_requests(row['history'], current)
+        if cutoff and any(parse_time(item['end']) > cutoff for item in row.get('history', [])):
+            _fail('History intervals must end by the fixed cutoff; later captures still cannot backfill it.')
         if cutoff and parse_time(row['identity_available_at']) > cutoff:
             _fail('Quoted-class identity evidence must be available by the fixed cutoff.')
         if not isinstance(row['origins'], list) or not 1 <= len(row['origins']) <= 8:
@@ -300,6 +305,7 @@ def acquire(vault, plan_path, work_dir, *, execute=False, as_of=None, max_reques
     work = estimates._work_folder(work_dir, vault)
     price_initial = prices.select(vault, _price_plan(plan), history._iso(cutoff or current), current=current)
     estimate_initial = _estimate_cache(vault, plan, current, cutoff, reuse_hours)
+    history_initial = stock_history.inspect(vault, plan, current, cutoff, reuse_hours)
     cooldown = estimates.provider_status(vault, current)
     price_missing = sum(row['status'] not in {'selected', 'future_only'} for row in price_initial['items'])
     estimate_missing = list(dict.fromkeys(row['symbol'] for row in estimate_initial if row['status'] == 'planned'))
@@ -310,8 +316,10 @@ def acquire(vault, plan_path, work_dir, *, execute=False, as_of=None, max_reques
                    'max_seconds': max_seconds, 'reuse_hours': reuse_hours,
                    'http_attempts': 0, 'estimate_symbol_calls': 0, 'memoized_requests': 0},
         'planned': {'price_symbols_missing': price_missing,
+                    'history_requests_missing': sum(row['status'] == 'planned' for row in history_initial),
                     'estimate_symbols_missing': estimate_missing, 'cooldown': cooldown},
         'prices': price_initial['items'], 'estimates': estimate_initial,
+        'history': history_initial,
         'requests': [], 'ready_to_freeze_after': None, 'scratch': None,
         'warnings': ['Source origins and quoted class are explicit reviewed declarations, not inferred ticker identities.',
                      'Raw price acquisition does not establish shares outstanding, entire-issuer capitalization or research readiness.',
@@ -326,6 +334,10 @@ def acquire(vault, plan_path, work_dir, *, execute=False, as_of=None, max_reques
     scratch.save('plan.json', plan)
     scratch.save('budget.json', dict(result['budget'], plan_sha256=digest, as_of=result['as_of']))
     run = RunClient(client, max_requests, scratch)
+    # History can be substantially larger than a quote. Finish it first so the
+    # current-price archive is still fresh when the same edition is prepared.
+    history_rows = stock_history.capture(vault, plan, run, clock, cutoff=cutoff, reuse_hours=reuse_hours)
+    scratch.save('history-result.json', history_rows)
     captures = {}
     for index, selected in enumerate(_price_batches(plan)):
         path = scratch.save('prices-%03d-plan.json' % index, _price_plan(selected))
@@ -355,6 +367,7 @@ def acquire(vault, plan_path, work_dir, *, execute=False, as_of=None, max_reques
     if cutoff is None:
         available = [parse_time(row['available_at']) for row in estimate_rows if row.get('available_at')]
         available += [parse_time(row['price']['available_at']) for row in captures.values() if row.get('price')]
+        available += [parse_time(row['available_at']) for row in history_rows if row.get('available_at')]
         if available and max(available) > finished.replace(microsecond=0):
             boundary = finished.replace(microsecond=0) + timedelta(seconds=1)
             sleep((boundary - finished).total_seconds())
@@ -363,10 +376,11 @@ def acquire(vault, plan_path, work_dir, *, execute=False, as_of=None, max_reques
                 raise DataError('clock_boundary', 'Wait for actual publication completion before preparing research.')
     final_prices = prices.select(vault, _price_plan(plan), history._iso(cutoff or finished), current=finished)
     _recheck_estimates(vault, estimate_rows, finished, cutoff, reuse_hours)
+    stock_history.recheck(vault, history_rows, finished, cutoff, reuse_hours)
     for row in final_prices['items']:
         prior = captures[row['symbol']]
         row.update({key: prior[key] for key in ('capture_status', 'capture_error') if key in prior})
-    result.update(prices=final_prices['items'], estimates=estimate_rows, cooldown=cooldown,
+    result.update(prices=final_prices['items'], estimates=estimate_rows, history=history_rows, cooldown=cooldown,
                   finished_at=history._iso(finished), requests=run.actual,
                   ready_to_freeze_after=history._iso(finished) if cutoff is None else None)
     result['budget'].update(http_attempts=len(run.actual), estimate_symbol_calls=calls, memoized_requests=run.reuses,
@@ -381,9 +395,13 @@ def _finish(result, plan):
     estimates_by_symbol = {}
     for row in result['estimates']:
         estimates_by_symbol.setdefault(row['symbol'], []).append(row)
+    history_by_symbol = {}
+    for row in result['history']:
+        history_by_symbol.setdefault(row['symbol'], []).append(row)
     targets, continuation = [], []
     for nominee, price in zip(plan, result['prices']):
         fiscal = estimates_by_symbol.get(nominee['symbol'], [])
+        history_rows = history_by_symbol.get(nominee['symbol'], [])
         limitations = []
         if price['status'] != 'selected':
             limitations.append({'resource': 'raw_price', 'status': price['status'],
@@ -393,12 +411,25 @@ def _finish(result, plan):
                 limitations.append({'resource': 'estimate', 'period': row['period'], 'horizon': row['horizon'],
                                     'status': row['status'], 'error_code': row.get('error_code'),
                                     'coverage': row.get('coverage')})
+        for row in history_rows:
+            if row['status'] not in {'reused', 'captured'}:
+                limitations.append({'resource': 'price_history', 'timeframe': row['timeframe'],
+                                    'start': row['start'], 'end': row['end'],
+                                    'status': row['status'], 'error_code': row.get('error_code'),
+                                    'coverage': row.get('coverage')})
         targets.append({'symbol': nominee['symbol'], 'class_id': nominee['class_id'], 'limitations': limitations})
         retry_estimates = [item for item in nominee.get('estimates', [])
             if any(row['period'] == item['period'] and row['horizon'] == item['horizon']
                    and row['status'] not in {'reused', 'captured', 'reused_future_only', 'captured_future_only'} for row in fiscal)]
-        if price['status'] not in {'selected', 'future_only'} or retry_estimates:
-            continuation.append(dict(nominee, estimates=retry_estimates))
+        retry_history = [item for item in nominee.get('history', [])
+            if any(all(row[key] == value for key, value in item.items())
+                   and row['status'] not in {'reused', 'captured'}
+                   and not row['status'].endswith('_future_only') for row in history_rows)]
+        if price['status'] not in {'selected', 'future_only'} or retry_estimates or retry_history:
+            continued = dict(nominee, estimates=retry_estimates)
+            if 'history' in nominee:
+                continued['history'] = retry_history
+            continuation.append(continued)
     result.update(targets=targets, complete=all(not row['limitations'] for row in targets), continuation=continuation)
     return result
 

@@ -162,7 +162,10 @@ network requests or installing another framework. Core retrieval, screening and
 note handling remain standard-library-only. Exact Form 4/4-A XML supplies selective
 insider context. Immutable selected estimate snapshots preserve what was observed
 and saved before each cutoff. A targeted acquisition coordinator batches needed
-prices and estimates for the explicit nominees under one bounded request budget.
+current prices, justified daily/minute history with exchange calendars, and
+estimates for the explicit nominees under one bounded request budget before
+freezing the report cutoff. Price conditions specify their measurement, session,
+duration and any later-hold test when the thesis opens.
 Prospective comparisons freeze those nominees and their initial research states,
 including unfinished work, to evaluate future outcomes without selecting only
 eventual recommendations. Earlier independent momentum cohorts retain their
@@ -373,6 +376,7 @@ python3 -m venv .venv
 .venv/bin/python tests/test_stock_coverage.py
 .venv/bin/python tests/test_stock_dossiers.py
 .venv/bin/python tests/test_stock_acquire.py
+.venv/bin/python tests/test_stock_history.py
 .venv/bin/python tests/test_stock_cohorts.py
 .venv/bin/python tests/test_feed_collect.py
 .venv/bin/python tests/test_feed_recent.py

@@ -5992,6 +5992,7 @@ SELFTEST_MIN_CASES = {
     "skills/feed-collect/scripts/rss_collect.py": 5,
     "skills/stock-research/scripts/market_notes.py": 113,
     "skills/stock-research/scripts/stock_acquire.py": 2,
+    "skills/stock-research/scripts/stock_history.py": 1,
     "skills/stock-research/scripts/stock_cohorts.py": 6,
     "skills/stock-research/scripts/stock_feed.py": 6,
     "skills/stock-research/scripts/stock_coverage.py": 8,

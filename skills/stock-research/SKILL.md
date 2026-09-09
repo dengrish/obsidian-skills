@@ -49,8 +49,11 @@ under the rules below. For a **fresh scheduled or manual** run, first identify
 the candidates justified by prior watch/deferred notes, the user's request or
 already-collected feed posts. Resolve quoted securities and use the
 [targeted acquisition coordinator](references/targeted-acquisition.md) for needed
-raw prices and justified estimate periods. It batches this explicit plan, reuses
-archives, and shares a bounded request budget. Other thesis-specific checks use
+daily/minute price history and session calendars needed for trend, trigger or
+regular-session liquidity checks, current raw prices, and justified estimate
+periods. Include needed history in the plan before execution; use an eligible
+archive or explain any intentional omission. It batches this explicit plan,
+reuses archives, and shares a bounded request budget. Other thesis-specific checks use
 the data-access guide; the coordinator does not research the stocks for you.
 This planning pass does not collect feeds, discover unrelated stocks or establish
 the final nomination set. Recheck the inputs at the frozen cutoff. Acquisition
@@ -77,7 +80,7 @@ finish against the final draft before publication. Details and retries are in
 [edition naming and run receipts](references/note-format.md#editions-and-retries).
 
 Never move an already frozen cutoff to admit a late capture. New candidates
-discovered later may contribute late price or estimate snapshots only to future
+discovered later may contribute late price, history or estimate snapshots only to future
 editions. A capture made after preparation cannot supply earlier evidence, even
 if its bar describes an earlier trading interval. Use an eligible archive or
 retain the limitation. Existing run receipts and published editions keep the
@@ -268,7 +271,9 @@ For each selected idea, provide:
 - Verified completed-session trend evidence and a separate timestamped intraday
   or premarket snapshot; distinguish facts from the overreaction/reversal hypothesis.
 - An observable confirmation condition, invalidation condition, next milestone,
-  and prospective 3–12 month buying window when first marked ready. Follow the
+  and prospective 3–12 month buying window when first marked ready. Define price
+  tests when opening a thesis under the
+  [price-trigger rules](references/research-method.md#price-trigger-definitions). Follow the
   research method's aging rules, preserving original watch dates and deadlines.
 
 A premarket or intraday move cannot establish a confirmed closing breakout or
