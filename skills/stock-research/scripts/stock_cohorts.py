@@ -74,12 +74,19 @@ STRATEGY = {
 }
 HASH = re.compile(r'[a-f0-9]{64}\Z')
 MAX_EVENTS = 20000
+REPORT_FIELDS = {'source_report', 'source_sha256', 'source_as_of', 'published_at', 'formation_delay_seconds',
+                 'cohort', 'members', 'observations', 'excluded_prior_securities', 'coverage'}
 EVENT_FIELDS = {
     'launch': {'excluded_reports', 'excluded_securities'},
-    'report': {'source_report', 'source_sha256', 'source_as_of', 'published_at', 'formation_delay_seconds',
-               'cohort', 'members', 'observations', 'excluded_prior_securities', 'coverage'},
+    'report': REPORT_FIELDS,
+    'report-v2': REPORT_FIELDS,
+    'recovery-v2': REPORT_FIELDS | {'recovered_from'},
     'checkpoint': {'cohort', 'formation_sha256', 'horizon', 'replaces', 'input', 'result'},
 }
+# Event kinds version enrollment derivation without changing the fixed strategy
+# or silently replaying historical reports with a corrected implementation.
+REPORT_KINDS = {'report', 'report-v2'}
+FORMATION_KINDS = REPORT_KINDS | {'recovery-v2'}
 
 
 def _now(value=None):
@@ -126,7 +133,7 @@ def _events(vault):
                 value = comparison.parse_json(raw)
                 if (not isinstance(value, dict) or type(value.get('stock_nominees')) is not int or value.get('stock_nominees') != 1
                         or value.get('strategy') != STRATEGY
-                        or value.get('kind') not in {'launch', 'report', 'checkpoint'}
+                        or value.get('kind') not in EVENT_FIELDS
                         or evidence.canonical(value) != raw):
                     raise ValueError('invalid nominee event or changed strategy')
                 if set(value) != {'stock_nominees', 'strategy', 'kind', 'recorded_at', 'previous'} | EVENT_FIELDS[value['kind']]:
@@ -249,7 +256,8 @@ def _disposition(report, job):
             'decision_as_of': report['as_of'], 'published_at': report['generated_at']}
 
 
-def _derive(report, enrolled, excluded, latest):
+def _derive(report, enrolled, excluded, latest, *, include_partial=False):
+    """Keep default derivation frozen for old ``report`` event replay."""
     journals = report['journals']
     if not report['schema2'] or journals is None:
         return {'members': [], 'observations': [], 'excluded_prior_securities': [],
@@ -257,15 +265,21 @@ def _derive(report, enrolled, excluded, latest):
                              'queued': None, 'blocked': None,
                              'gap': 'Published legacy schema has no eligible schema-2 nominee journal; history retained without prospective enrollment.'}}
     jobs = {row['Security']: row for row in journals['Research queue']}
-    origins = {}
+    origins, partial_posts = {}, set()
     for post in journals['Feed dispositions']:
-        if post['Disposition'] != 'nominated':
+        partial = include_partial and post['Disposition'] in coverage.UNRESOLVED
+        if post['Disposition'] != 'nominated' and not partial:
             continue
         for security in coverage._list(post['Securities']):
             job = jobs.get(security)
             post_id = coverage.source_identity(post['Post'])
             if (job is None or job['State'] not in {'assessed', 'queued', 'blocked'}
                     or post_id not in coverage._list(job['Sources'])):
+                # A paused source journal may name a possible security before
+                # per-security work is recorded. Only a bidirectional mapping
+                # to an eligible job proves a substantive nomination.
+                if partial:
+                    continue
                 raise ValueError('every substantive nomination needs its matching research disposition')
             if job['State'] == 'assessed':
                 candidate = next((row for row in report['candidates'] if row['exchange'] + ':' + row['ticker'] == security), None)
@@ -278,6 +292,8 @@ def _derive(report, enrolled, excluded, latest):
             origins.setdefault(security, []).append({
                 'post': post['Post'], 'post_id': post_id, 'fingerprint': post['Fingerprint'],
                 'published_at': post['Published'], 'reason': post['Reason']})
+            if partial:
+                partial_posts.add(post_id)
     members, observations = [], []
     for security in sorted(set(origins) | (set(jobs) & set(enrolled))):
         decision = _disposition(report, jobs[security])
@@ -292,7 +308,35 @@ def _derive(report, enrolled, excluded, latest):
                 'nominated_posts': sum(row['Disposition'] == 'nominated' for row in journals['Feed dispositions']),
                 'unresolved_posts': sum(row['Disposition'] in coverage.UNRESOLVED for row in journals['Feed dispositions']),
                 'queued': sum(row['State'] == 'queued' for row in jobs.values()),
-                'blocked': sum(row['State'] == 'blocked' for row in jobs.values())}}
+                'blocked': sum(row['State'] == 'blocked' for row in jobs.values()),
+                **({'partial_nomination_posts': len(partial_posts)} if include_partial else {})}}
+
+
+def _next_recovery(events, reports, enrolled, latest):
+    """Find the earliest old omission, never re-enroll or relabel an existing member."""
+    by_report = {row['relative']: row for row in reports}
+    excluded = events[0][1]['excluded_securities']
+    for digest, old in events:
+        if old['kind'] != 'report':
+            continue
+        report = by_report[old['source_report']]
+        payload = _derive(report, enrolled, excluded, latest, include_partial=True)
+        if payload['members']:
+            # Old observations must not rewind the latest decisions of members
+            # whose initial enrollment and subsequent history already exist.
+            payload['observations'] = []
+            return report, digest, payload
+    return None
+
+
+def _pending_recoveries(events, reports, enrolled, latest):
+    pending, simulated = [], dict(enrolled)
+    while next_item := _next_recovery(events, reports, simulated, latest):
+        report, digest, payload = next_item
+        pending.append({'source_report': report['relative'], 'recovered_from': digest,
+                        'securities': [row['security'] for row in payload['members']]})
+        simulated.update((row['security'], 'pending-recovery') for row in payload['members'])
+    return pending
 
 
 def _replay(vault, events, reports):
@@ -319,30 +363,41 @@ def _replay(vault, events, reports):
         raise ValueError('activation exclusion roster no longer matches its sources')
     enrolled, latest, cohorts, checkpoints = {}, {}, {}, {}
     processed = {row['report'] for row in launch['excluded_reports']}
-    for digest, event in events[1:]:
-        if event['kind'] == 'report':
+    for event_index, (digest, event) in enumerate(events[1:], 1):
+        if event['kind'] in FORMATION_KINDS:
             report = by_report.get(event['source_report'])
             if report is None or report['sha256'] != event['source_sha256']:
                 raise ValueError('frozen nominee source report is missing or changed')
-            if event['source_report'] in processed:
-                raise ValueError('nominee report was enrolled twice')
-            next_report = next((row for row in reports if row['relative'] not in processed), None)
-            if next_report is None or next_report['relative'] != event['source_report']:
-                raise ValueError('nominee enrollment omitted or reordered a published report')
+            recovery = event['kind'] == 'recovery-v2'
+            if recovery:
+                pending = _next_recovery(events[:event_index], reports, enrolled, latest)
+                if (pending is None or pending[0]['relative'] != event['source_report']
+                        or pending[1] != event['recovered_from']):
+                    raise ValueError('nominee recovery must preserve the earliest remaining historical omission')
+                derived = pending[2]
+            else:
+                if event['source_report'] in processed:
+                    raise ValueError('nominee report was enrolled twice')
+                next_report = next((row for row in reports if row['relative'] not in processed), None)
+                if next_report is None or next_report['relative'] != event['source_report']:
+                    raise ValueError('nominee enrollment omitted or reordered a published report')
+                if event['kind'] == 'report-v2' and _next_recovery(events[:event_index], reports, enrolled, latest):
+                    raise ValueError('recover historical nominee omissions before forming new reports')
+                derived = _derive(report, enrolled, excluded, latest, include_partial=event['kind'] == 'report-v2')
             if (market_notes.iso_time(report['generated_at']) < market_notes.iso_time(launch['recorded_at'])
                     or market_notes.iso_time(report['generated_at']) > market_notes.iso_time(event['recorded_at'])):
                 raise ValueError('nominee enrollment predates activation or publication')
-            derived = _derive(report, enrolled, excluded, latest)
             if any(event.get(key) != value for key, value in derived.items()):
                 raise ValueError('frozen nominee pool or initial decisions do not match the actual source report')
             expected_delay = (market_notes.iso_time(event['recorded_at']) - market_notes.iso_time(report['generated_at'])).total_seconds()
             if (event['source_as_of'] != report['as_of'] or event['published_at'] != report['generated_at']
                     or event['formation_delay_seconds'] != expected_delay):
                 raise ValueError('nominee formation changed its source timing or observed delay')
-            expected_id = STRATEGY['id'] + '@' + report['sha256'][:24]
+            expected_id = STRATEGY['id'] + '@' + report['sha256'][:24] + (':recovery-v2' if recovery else '')
             if event['cohort'] != expected_id:
                 raise ValueError('nominee cohort identity differs from its original report')
-            processed.add(event['source_report'])
+            if not recovery:
+                processed.add(event['source_report'])
             if event['members']:
                 cohorts[event['cohort']] = dict(event, sha256=digest, evidence_link=_link(digest))
             for row in event['members']:
@@ -381,36 +436,52 @@ def _form(vault, now=None, *, _lock_descriptor=None):
     enrolled, latest, _, _ = _replay(vault, events, reports)
     launch = events[0][1]
     processed = {row['report'] for row in launch['excluded_reports']}
-    processed.update(value['source_report'] for _, value in events if value['kind'] == 'report')
+    processed.update(value['source_report'] for _, value in events if value['kind'] in REPORT_KINDS)
     result = {'status': 'unchanged', 'launch_at': launch['recorded_at'], 'processed_reports': [],
+              'recovered_reports': [], 'recovered_members': 0,
               'new_cohorts': 0, 'new_members': 0, 'observations': 0, 'evidence_attachments': []}
-    for report in reports:
-        if report['relative'] in processed:
-            continue
-        if market_notes.iso_time(report['generated_at']) < market_notes.iso_time(launch['recorded_at']):
-            raise ValueError('unregistered preactivation report appeared; do not backfill historical recommendations')
-        payload = _derive(report, enrolled, launch['excluded_securities'], latest)
+
+    def record(report, payload, kind, recovered_from=None):
         observed = _now(now)
-        value = _new('report', observed, events, source_report=report['relative'], source_sha256=report['sha256'],
+        recovery = kind == 'recovery-v2'
+        value = _new(kind, observed, events, source_report=report['relative'], source_sha256=report['sha256'],
                      source_as_of=report['as_of'], published_at=report['generated_at'],
                      formation_delay_seconds=(observed - market_notes.iso_time(report['generated_at'])).total_seconds(),
-                     cohort=STRATEGY['id'] + '@' + report['sha256'][:24], **payload)
+                     cohort=STRATEGY['id'] + '@' + report['sha256'][:24] + (':recovery-v2' if recovery else ''),
+                     **({'recovered_from': recovered_from} if recovery else {}), **payload)
         saved = _append(vault, value, events, _lock_descriptor)
         events.append((saved['sha256'], value))
         for row in value['members']:
             enrolled[row['security']] = value['cohort']
         for row in value['members'] + value['observations']:
             latest[row['security']] = row['disposition']
-        result['processed_reports'].append(report['relative'])
+        result['recovered_reports' if recovery else 'processed_reports'].append(report['relative'])
+        if recovery:
+            result['recovered_members'] += len(value['members'])
         result['new_cohorts'] += bool(value['members'])
         result['new_members'] += len(value['members'])
         result['observations'] += len(value['observations'])
         result['evidence_attachments'].append(saved)
-    if result['processed_reports']:
+
+    # Recover before considering newer reports, so a later decision cannot
+    # replace an omitted member's original disposition. Actual recovery time,
+    # never the old formation clock, starts its separate measurement cohort.
+    while pending := _next_recovery(events, reports, enrolled, latest):
+        report, original, payload = pending
+        record(report, payload, 'recovery-v2', original)
+    for report in reports:
+        if report['relative'] in processed:
+            continue
+        if market_notes.iso_time(report['generated_at']) < market_notes.iso_time(launch['recorded_at']):
+            raise ValueError('unregistered preactivation report appeared; do not backfill historical recommendations')
+        payload = _derive(report, enrolled, launch['excluded_securities'], latest, include_partial=True)
+        record(report, payload, 'report-v2')
+    if result['evidence_attachments']:
         result['status'] = 'created'
     result['summary_markdown'] = ('Nominee evaluation froze %s new securities in %s publication cohorts; '
-        '%s later decision/source observations. Baselines follow actual formation, including any delay.' %
-        (result['new_members'], result['new_cohorts'], result['observations']))
+        '%s later decision/source observations. This includes %s recovered omissions, whose separate baselines '
+        'follow actual recovery. All baselines retain formation delay.' %
+        (result['new_members'], result['new_cohorts'], result['observations'], result['recovered_members']))
     return result
 
 
@@ -541,23 +612,27 @@ def context(vault, as_of):
     result = {'schema': 1, 'strategy_id': STRATEGY['id'], 'as_of': as_of,
               'launch_at': all_events[0][1]['recorded_at'] if all_events else None,
               'launch_due': not bool(all_events), 'cohorts': [], 'checkpoints': [], 'due_checkpoints': [],
-              'formation_due': False, 'unformed_reports': [],
+              'formation_due': False, 'unformed_reports': [], 'recovery_due': False, 'pending_recoveries': [],
               'counts': {'cohorts': 0, 'enrolled': 0, 'observations': 0, 'unresolved_posts': 0},
               'evidence_links': [_link(key) for key, _ in events]}
     if not events:
         result['summary_markdown'] = 'Prospective nominee evaluation has not yet formed an observable cohort.'
         return result
     reports = _reports(vault, cutoff)
-    enrolled, _, cohorts, checkpoints = _replay(vault, events, reports)
+    enrolled, latest, cohorts, checkpoints = _replay(vault, events, reports)
     processed = {row['report'] for row in events[0][1]['excluded_reports']}
-    processed.update(row['source_report'] for _, row in events if row['kind'] == 'report')
+    processed.update(row['source_report'] for _, row in events if row['kind'] in REPORT_KINDS)
     result['unformed_reports'] = [row['relative'] for row in reports if row['relative'] not in processed]
-    result['formation_due'] = bool(result['unformed_reports'])
+    result['pending_recoveries'] = _pending_recoveries(events, reports, enrolled, latest)
+    result['recovery_due'] = bool(result['pending_recoveries'])
+    result['formation_due'] = bool(result['unformed_reports'] or result['recovery_due'])
     for key, value in cohorts.items():
         count = {group: sum(row['disposition']['group'] == group for row in value['members']) for group in STRATEGY['groups']}
         result['cohorts'].append({name: value[name] for name in (
             'cohort', 'recorded_at', 'source_report', 'source_sha256', 'source_as_of', 'published_at',
-            'formation_delay_seconds', 'members', 'coverage', 'sha256', 'evidence_link')} | {'initial_counts': count})
+            'formation_delay_seconds', 'members', 'coverage', 'sha256', 'evidence_link')} |
+            {'initial_counts': count, 'enrollment_kind': value['kind'],
+             'recovered_from': value.get('recovered_from')})
         for horizon in STRATEGY['horizons']:
             old = checkpoints.get((key, horizon))
             earliest = market_notes.horizon_target(
@@ -567,13 +642,16 @@ def context(vault, as_of):
                     'target_not_before': earliest.isoformat(), 'state': old['result']['state'] if old else 'pending',
                     'reason': 'Verify the fixed baseline and first eligible session; this lower bound is not a trading calendar.'})
     result['checkpoints'] = [dict(row['result'], evidence_link=row['evidence_link'], sha256=row['sha256']) for row in checkpoints.values()]
-    report_events = [row for _, row in events if row['kind'] == 'report']
+    report_events = [row for _, row in events if row['kind'] in REPORT_KINDS]
+    recovery_events = [row for _, row in events if row['kind'] == 'recovery-v2']
     result['counts'].update(cohorts=len(cohorts), enrolled=len(enrolled),
         observations=sum(len(row['observations']) for row in report_events),
         unresolved_posts=report_events[-1]['coverage']['unresolved_posts'] if report_events else 0,
         checkpoints_observed=sum(row['result']['state'] == 'observed' for row in checkpoints.values()),
         checkpoints_unavailable=sum(row['result']['state'] == 'unavailable' for row in checkpoints.values()),
-        checkpoints_pending=len(cohorts) * len(STRATEGY['horizons']) - len(checkpoints))
+        checkpoints_pending=len(cohorts) * len(STRATEGY['horizons']) - len(checkpoints),
+        recovered_members=sum(len(row['members']) for row in recovery_events),
+        pending_recovery_members=sum(len(row['securities']) for row in result['pending_recoveries']))
     result['counts']['legacy_report_gaps'] = sum(bool(row['coverage'].get('gap')) for row in report_events)
     result['summary_markdown'] = ('Prospective nominee pool: %s unique securities across %s cohorts; '
         '%s observed, %s unavailable and %s pending cohort windows. Latest source journal has %s unresolved posts. '
@@ -581,6 +659,9 @@ def context(vault, as_of):
         'Returns begin after actual formation, including any delay; selection differences are descriptive.' %
         tuple(result['counts'][name] for name in ('enrolled', 'cohorts', 'checkpoints_observed',
                                                 'checkpoints_unavailable', 'checkpoints_pending', 'unresolved_posts')))
+    if result['recovery_due']:
+        result['summary_markdown'] += (' %s verified securities omitted by the old source-row rule await '
+            'append-only recovery with form; they are not yet enrolled.' % result['counts']['pending_recovery_members'])
     return result
 
 
@@ -668,6 +749,27 @@ def run_self_test():
             groups, _ = _groups([], None)
             self.assertEqual(groups['all']['enrolled'], 0)
             self.assertIsNone(groups['all']['return_value'])
+
+        def test_partial_source_mapping_preserves_old_derivation_and_unresolved_coverage(self):
+            report = {'schema2': True, 'as_of': '2026-09-08T15:00:00Z',
+                'generated_at': '2026-09-08T15:05:00Z', 'candidates': [], 'theses': [],
+                'journals': {'Feed dispositions': [{'Disposition': 'blocked',
+                    'Securities': 'NASDAQ:ABC, NASDAQ:DEF', 'Post': 'https://x.com/i/web/status/10',
+                    'Fingerprint': 'a' * 64, 'Published': '2026-09-08T14:00:00Z',
+                    'Reason': 'Known ABC needs research; remaining identity is unresolved.'}],
+                    'Research queue': [{'Security': 'NASDAQ:ABC', 'State': 'queued',
+                        'Sources': '10', 'Assessment': '-', 'First seen': '2026-09-08T15:00:00Z',
+                        'Due': '2026-09-09T15:00:00Z', 'Reason': 'Verify primary evidence.'}]}}
+            old = _derive(report, {}, [], {})
+            self.assertEqual(old['members'], [])
+            self.assertEqual(old['coverage'], {'posts': 1, 'nominated_posts': 0,
+                'unresolved_posts': 1, 'queued': 1, 'blocked': 0})
+            corrected = _derive(report, {}, [], {}, include_partial=True)
+            self.assertEqual([row['security'] for row in corrected['members']], ['NASDAQ:ABC'])
+            self.assertEqual(corrected['coverage']['unresolved_posts'], 1)
+            self.assertEqual(corrected['coverage']['partial_nomination_posts'], 1)
+            report['journals']['Research queue'][0]['Sources'] = 'user'
+            self.assertEqual(_derive(report, {}, [], {}, include_partial=True)['members'], [])
 
     result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(NomineeTests))
     print('%d/%d self-test cases pass' % (result.testsRun - len(result.failures) - len(result.errors), result.testsRun))

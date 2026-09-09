@@ -47,12 +47,15 @@ create or change that schedule only when the user requests scheduling.
 For a scheduled retry, inspect `context` first and reuse a valid existing edition
 under the rules below. For a **fresh scheduled or manual** run, first identify
 the candidates justified by prior watch/deferred notes, the user's request or
-already-collected feed posts. Resolve quoted securities and use the
+already-collected feed posts. Read the prior queue's due blockers and their
+linked assessments before choosing data windows; a ticker list alone loses the
+historical questions. Resolve quoted securities and use the
 [targeted acquisition coordinator](references/targeted-acquisition.md) for needed
 daily/minute price history and session calendars needed for trend, trigger or
 regular-session liquidity checks, current raw prices, and justified estimate
-periods. Include needed history in the plan before execution; use an eligible
-archive or explain any intentional omission. It batches this explicit plan,
+periods. Reconcile each due evidence question with an eligible archive, an exact
+planned request or an explicit unresolved limitation, as described in the
+acquisition guide. It batches this explicit plan,
 reuses archives, and shares a bounded request budget. Other thesis-specific checks use
 the data-access guide; the coordinator does not research the stocks for you.
 This planning pass does not collect feeds, discover unrelated stocks or establish
@@ -60,7 +63,10 @@ the final nomination set. Recheck the inputs at the frozen cutoff. Acquisition
 bounds are not research quotas: retain every uncompleted item and its limitation
 under the coverage rules, without silently raising the request budget.
 
-Then use `prepare` to create the canonical draft and a private run receipt in
+After acquisition, check its results against those questions, not just its
+`complete` flag. Missing windows remain explicit blockers; resolve them within
+the authorized budget before freezing when feasible. Then use `prepare` to
+create the canonical draft and a private run receipt in
 owned scratch:
 
 ```bash

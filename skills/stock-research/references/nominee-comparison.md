@@ -35,6 +35,12 @@ Formation replays every unaccounted published report. It derives all nominations
 from validated schema-2 `Feed dispositions` and `Research queue` journals.
 Assessed nominations must link that report's actual assessment and agree with
 its readiness ledger. `queued` and `blocked` nominations enroll immediately.
+An unresolved source can still contain verified nominations: a `pending` or
+`blocked` post enrolls each named security whose assessed/queued/blocked job
+retains that post ID. A missing job, unlinked source, unresolved name or only
+user-supplied job does not establish a feed nomination. This per-security
+enrollment never clears the source's unresolved status. Coverage counts keep
+explicitly nominated posts separate from partial nomination posts.
 Reports with no new members still retain coverage and later observations;
 postactivation legacy reports remain explicit coverage gaps without enrollment.
 
@@ -54,6 +60,36 @@ Keep unresolved identities/posts and source gaps visible; zero members do not
 prove complete source coverage or no useful ideas. User-only ideas and repeated
 claims without a substantive nomination do not expand this feed population.
 
+### Repairing the earlier partial-source omission
+
+Investments **1.15.2 or later** writes versioned `report-v2` enrollment events.
+Earlier `report` events retain their original derivation, bytes, initial groups
+and checkpoints. Do not edit or regenerate them to include securities omitted
+because their source also contained an unresolved idea.
+
+After the updated plugin is installed, the ordinary `form` command first
+recovers still-unenrolled verified securities from those earlier reports. It
+appends separate cohorts with event kind `recovery-v2`, taking each security's
+earliest eligible old assessment and retaining the original source hash and
+formation-event hash.
+Already enrolled securities and the activation exclusion roster remain
+unchanged. Recovery is automatic, exhaustive and idempotent; no member-selection
+or historical-clock override is available. Later unformed reports become
+observations without changing those recovered initial groups.
+
+The recovery's actual timestamp determines its own baseline and visible delay;
+never use the old cohort's earlier opening or blend its results with that
+cohort's differently dated returns. Context exposes `recovery_due` and
+`pending_recoveries`, and `formation_due` includes this unfinished closeout.
+The form result counts recovered members within `new_members`/`new_cohorts` and
+also names them separately under `recovered_members`/`recovered_reports`.
+Recovery does not resolve old source gaps or count old reports as newly processed.
+
+Install the update in every runtime sharing this history before running form:
+older releases cannot interpret the new event kinds. Do not run a development
+copy against the live history while scheduled/manual runs still use the older
+installed plugin. Validate repairs in temporary vaults until rollout is ready.
+
 ## Read the daily and monthly view
 
 ```bash
@@ -64,8 +100,9 @@ python3 '<skill>/scripts/stock_cohorts.py' context \
 The ordinary outcomes helper also returns this read-only view under
 `nominee_comparison`. It includes activation, frozen cohorts and initial counts,
 checkpoint results, due windows, unresolved coverage, evidence links, and a
-compact `summary_markdown`. `formation_due` and `unformed_reports` identify
-published work still needing the idempotent formation command. Do not declare a
+compact `summary_markdown`. `formation_due`, `unformed_reports` and
+`pending_recoveries` identify published work still needing the idempotent
+formation command. Do not declare a
 daily run complete while its postpublication formation is still outstanding.
 
 Use the compact summary and relevant evidence links in the existing daily
@@ -75,8 +112,9 @@ no separate dated report series and never rewrites a published daily note.
 
 Create-only JSON under `Investments/Snapshots/Nominees/` preserves activation,
 formations, transitions and checkpoints in an immutable predecessor chain.
-Replay rechecks source hashes, derives membership/decisions again and recomputes
-results. These are durable records, not scratch. Changed sources, missing links
+Replay rechecks source hashes, derives membership/decisions using each event's
+recorded derivation version and recomputes results. These are durable records,
+not scratch. Changed sources, missing links
 or competing events fail visibly; writers share the vault publication lock.
 
 ## Observe the fixed return windows

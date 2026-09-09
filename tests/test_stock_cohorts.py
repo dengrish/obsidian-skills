@@ -43,7 +43,8 @@ class CohortTests(unittest.TestCase):
         day = market_notes.ny_now(stamp(as_of)).strftime('%Y-%m-%d')
         current = market_notes.ny_now(stamp(as_of)).strftime('%Y-%m-%d-%H%M%S-stock-research')
         security = 'NASDAQ:' + ticker
-        post = self.fixture.post(disposition=disposition, securities=security)
+        post = self.fixture.post(disposition=disposition, securities=security,
+            due=(stamp(as_of) + timedelta(days=1)).isoformat() if disposition in cohorts.coverage.UNRESOLVED else '-')
         post['Fingerprint'] = fingerprint or post['Fingerprint']
         post['Post'] = 'https://x.com/i/web/status/' + sources.split(',')[0].strip()
         if history is None:
@@ -83,6 +84,190 @@ class CohortTests(unittest.TestCase):
     def frozen(self, **kwargs):
         _, _, card = self.form_one(**kwargs)
         return cohorts._replay(self.vault, cohorts._events(self.vault), cohorts._reports(self.vault, self.formed))[2][card['cohort']]
+
+    def partial_pair(self):
+        """Two verified assessments plus an unmapped residual in one blocked source."""
+        path = self.publish(group='watch', disposition='blocked')
+        text = path.read_text(encoding='utf-8')
+        text = text.replace('| blocked | NASDAQ:ABC |', '| blocked | NASDAQ:ABC, NASDAQ:DEF |')
+        text = text.replace('Verified lead.', 'ABC and DEF verified; $UNKNOWN remains unidentified.')
+        job = next(line for line in text.splitlines() if line.startswith('| NASDAQ:ABC |'))
+        text = text.replace(job, job + '\n' + job.replace('NASDAQ:ABC', 'NASDAQ:DEF'))
+        detail = ('#### NASDAQ:DEF — Example Inc.\n\nStatus: rejected\n\n[[Investments/Stocks/DEF]]\n\n'
+                  'The initial valuation leaves no supported buying case.\n\n')
+        text = text.replace('### Thesis updates', detail + '### Thesis updates')
+        path.write_text(text, encoding='utf-8')
+        return path
+
+    def legacy_partial_formation(self, path):
+        """Fixed v1 output for the partial-pair fixture, not the current derivation."""
+        report = next(row for row in cohorts._reports(self.vault, self.formed) if row['relative'].endswith(path.name))
+        events = cohorts._events(self.vault)
+        value = cohorts._new('report', self.formed, events,
+            source_report=report['relative'], source_sha256=report['sha256'],
+            source_as_of=report['as_of'], published_at=report['generated_at'], formation_delay_seconds=300.0,
+            cohort='feed-nominees-v1@' + report['sha256'][:24], members=[], observations=[],
+            excluded_prior_securities=[], coverage={'posts': 1, 'nominated_posts': 0,
+                'unresolved_posts': 1, 'queued': 0, 'blocked': 0})
+        return cohorts.evidence.write(value, self.vault, cohorts.FOLDER)
+
+    def test_partial_source_enrolls_every_verified_security_without_hiding_residual(self):
+        self.activate(); self.partial_pair()
+        result = cohorts.form(self.vault, self.formed)
+        current = cohorts.context(self.vault, self.formed.isoformat())
+        self.assertEqual(result['new_members'], 2)
+        self.assertEqual(result['recovered_members'], 0)
+        self.assertEqual(current['counts']['unresolved_posts'], 1)
+        card = current['cohorts'][0]
+        self.assertEqual(card['enrollment_kind'], 'report-v2')
+        self.assertEqual(card['coverage']['partial_nomination_posts'], 1)
+        self.assertEqual(card['coverage']['nominated_posts'], 0)
+        self.assertEqual([(row['security'], row['disposition']['group']) for row in card['members']],
+                         [('NASDAQ:ABC', 'watch'), ('NASDAQ:DEF', 'rejected')])
+        self.assertTrue(all(row['origins'][0]['post_id'] == '10' for row in card['members']))
+        self.assertEqual(cohorts.form(self.vault, self.formed + timedelta(minutes=1))['status'], 'unchanged')
+
+    def test_pending_partial_source_can_enroll_an_explicit_unfinished_job(self):
+        self.activate(); self.publish(disposition='pending', state='blocked')
+        self.assertEqual(cohorts.form(self.vault, self.formed)['new_members'], 1)
+        current = cohorts.context(self.vault, self.formed.isoformat())
+        member = current['cohorts'][0]['members'][0]
+        self.assertEqual(member['disposition']['group'], 'unfinished')
+        self.assertEqual(member['disposition']['work_state'], 'blocked')
+        self.assertEqual(current['counts']['unresolved_posts'], 1)
+
+    def test_paused_partial_journal_needs_matching_job_and_source_before_enrollment(self):
+        self.activate()
+        path = self.fixture.note(name='2026-09-08-113000-stock-research.md',
+            posts=[self.fixture.post('pending', 'NASDAQ:ABC, NASDAQ:DEF', due='2026-09-09T12:00:00-04:00')],
+            jobs=[self.fixture.job(source='user')])
+        result = cohorts.form(self.vault, self.formed)
+        current = cohorts.context(self.vault, self.formed.isoformat())
+        self.assertEqual(result['new_members'], 0)
+        self.assertEqual(current['counts']['unresolved_posts'], 1)
+        self.assertEqual(current['counts']['enrolled'], 0)
+        self.assertFalse(current['formation_due'])
+        self.assertTrue(path.is_file())
+
+    def test_legacy_omissions_recover_once_without_rewriting_history_or_backdating(self):
+        self.activate(); path = self.partial_pair()
+        old = self.legacy_partial_formation(path)
+        original_events = cohorts._events(self.vault)
+        source = path.read_bytes()
+        old_context = cohorts.context(self.vault, self.formed.isoformat())
+        self.assertEqual(old_context['counts']['enrolled'], 0)
+        self.assertEqual(old_context['counts']['pending_recovery_members'], 2)
+        self.assertTrue(old_context['formation_due'])
+        self.assertEqual(old_context['unformed_reports'], [])
+        recovered_at = stamp('2026-09-10T11:40:00-04:00')
+        result = cohorts.form(self.vault, recovered_at)
+        self.assertEqual((result['new_members'], result['recovered_members'], result['new_cohorts']), (2, 2, 1))
+        self.assertEqual(result['processed_reports'], [])
+        self.assertEqual(result['recovered_reports'], ['Investments/' + path.name])
+        self.assertEqual(cohorts._events(self.vault)[:2], original_events)
+        self.assertEqual(path.read_bytes(), source)
+        current = cohorts.context(self.vault, recovered_at.isoformat())
+        card = current['cohorts'][0]
+        self.assertEqual(card['enrollment_kind'], 'recovery-v2')
+        self.assertEqual(card['recovered_from'], old['sha256'])
+        self.assertEqual(card['recorded_at'], recovered_at.isoformat())
+        self.assertEqual(card['source_as_of'], CUTOFF)
+        self.assertEqual(card['formation_delay_seconds'], 173100)
+        self.assertEqual(current['counts']['enrolled'], 2)
+        self.assertEqual(current['counts']['unresolved_posts'], 1)
+        self.assertEqual(current['counts']['observations'], 0)
+        self.assertEqual(current['counts']['checkpoints_pending'], 5)
+        self.assertFalse(current['recovery_due'])
+        self.assertFalse(current['formation_due'])
+        self.assertEqual(cohorts.form(self.vault, recovered_at + timedelta(minutes=1))['status'], 'unchanged')
+        # Later recovery is invisible before its actual time; no frozen initial
+        # or baseline is silently inserted into the old historical context.
+        self.assertEqual(cohorts.context(self.vault, self.formed.isoformat()), old_context)
+        bundle = self.bundle(symbols=('ABC', 'DEF', 'SPY'), baseline='2026-09-11', endpoint='2026-09-25',
+                             cutoff='2026-09-26T11:30:00-04:00')
+        bundle['sessions'] = calendar_fixture('2026-09-10', '2026-09-26')
+        bundle['prices'][0]['query']['asof'] = '2026-09-10'
+        result = cohorts.calculate(card, bundle, '2w')
+        self.assertEqual(result['baseline_at'], '2026-09-11T13:30:00+00:00')
+        self.assertEqual(result['target_date'], '2026-09-25')
+
+    def test_recovery_keeps_original_assessment_before_later_decision(self):
+        self.activate(); path = self.partial_pair(); self.legacy_partial_formation(path)
+        newer = self.publish(group='rejected', as_of='2026-09-09T11:30:00-04:00')
+        later = stamp('2026-09-10T11:40:00-04:00')
+        result = cohorts.form(self.vault, later)
+        current = cohorts.context(self.vault, later.isoformat())
+        self.assertEqual(result['new_members'], 2)
+        self.assertEqual(result['observations'], 1)
+        self.assertEqual(result['processed_reports'], ['Investments/' + newer.name])
+        initial = current['cohorts'][0]['members'][0]
+        self.assertEqual(initial['disposition']['group'], 'watch')
+        replay = cohorts._replay(self.vault, cohorts._events(self.vault), cohorts._reports(self.vault, later))
+        self.assertEqual(replay[1]['NASDAQ:ABC']['group'], 'rejected')
+
+    def test_later_v1_enrollment_is_preserved_and_only_remaining_omission_recovers(self):
+        self.activate(); self.legacy_partial_formation(self.partial_pair())
+        newer = self.publish(group='rejected', as_of='2026-09-09T11:30:00-04:00')
+        later_v1_time = stamp('2026-09-09T11:40:00-04:00')
+        reports = cohorts._reports(self.vault, later_v1_time)
+        events = cohorts._events(self.vault)
+        enrolled, latest, _, _ = cohorts._replay(self.vault, events, reports)
+        report = next(row for row in reports if row['relative'].endswith(newer.name))
+        legacy = cohorts._new('report', later_v1_time, events,
+            source_report=report['relative'], source_sha256=report['sha256'],
+            source_as_of=report['as_of'], published_at=report['generated_at'], formation_delay_seconds=300.0,
+            cohort='feed-nominees-v1@' + report['sha256'][:24],
+            **cohorts._derive(report, enrolled, events[0][1]['excluded_securities'], latest))
+        cohorts.evidence.write(legacy, self.vault, cohorts.FOLDER)
+        before = cohorts._events(self.vault)
+        original = cohorts.context(self.vault, later_v1_time.isoformat())['cohorts'][0]
+        later = stamp('2026-09-10T11:40:00-04:00')
+        result = cohorts.form(self.vault, later)
+        self.assertEqual((result['new_members'], result['recovered_members'], result['observations']), (1, 1, 0))
+        current = cohorts.context(self.vault, later.isoformat())
+        self.assertEqual(current['cohorts'][0], original)
+        self.assertEqual(cohorts._events(self.vault)[:len(before)], before)
+        self.assertEqual(current['cohorts'][1]['members'][0]['security'], 'NASDAQ:DEF')
+        self.assertEqual(current['counts']['enrolled'], 2)
+        # Recovery reads the older blocked report but cannot rewind the newer
+        # source coverage census or an existing member's initial/latest group.
+        self.assertEqual(current['counts']['unresolved_posts'], 0)
+        latest = cohorts._replay(self.vault, cohorts._events(self.vault), cohorts._reports(self.vault, later))[1]
+        self.assertEqual(latest['NASDAQ:ABC']['group'], 'rejected')
+
+    def test_paused_partial_mapping_enrolls_only_after_its_job_is_published(self):
+        self.activate()
+        self.fixture.note(name='2026-09-08-113000-stock-research.md',
+            posts=[self.fixture.post('pending', 'NASDAQ:ABC', due='2026-09-09T12:00:00-04:00')])
+        self.assertEqual(cohorts.form(self.vault, self.formed)['new_members'], 0)
+        self.publish(group='watch', disposition='blocked', as_of='2026-09-09T11:30:00-04:00')
+        later = stamp('2026-09-09T11:40:00-04:00')
+        self.assertEqual(cohorts.form(self.vault, later)['new_members'], 1)
+        current = cohorts.context(self.vault, later.isoformat())
+        self.assertEqual(current['cohorts'][0]['source_as_of'], '2026-09-09T11:30:00-04:00')
+        self.assertEqual(current['cohorts'][0]['members'][0]['disposition']['group'], 'watch')
+        self.assertEqual(current['counts']['unresolved_posts'], 1)
+
+    def test_partial_nomination_never_reenrolls_activation_exclusions(self):
+        path = self.partial_pair()
+        cohorts.start(self.vault, self.formed)
+        original = path.read_bytes()
+        self.publish(group='watch', disposition='blocked', as_of='2026-09-09T11:30:00-04:00')
+        later = stamp('2026-09-09T11:40:00-04:00')
+        self.assertEqual(cohorts.form(self.vault, later)['new_members'], 0)
+        self.assertEqual(cohorts.context(self.vault, later.isoformat())['counts']['enrolled'], 0)
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_recovery_tampering_cannot_change_original_members_or_source(self):
+        self.activate(); self.legacy_partial_formation(self.partial_pair())
+        later = stamp('2026-09-10T11:40:00-04:00')
+        cohorts.form(self.vault, later)
+        digest, value = cohorts._events(self.vault)[-1]
+        self.vault.joinpath(*cohorts.FOLDER, digest + '.json').unlink()
+        value['members'] = value['members'][:1]
+        cohorts.evidence.write(value, self.vault, cohorts.FOLDER)
+        with self.assertRaisesRegex(ValueError, 'pool or initial decisions'):
+            cohorts.context(self.vault, later.isoformat())
 
     def test_context_is_readonly_and_start_is_idempotent(self):
         before = {p.relative_to(self.vault): p.read_bytes() for p in self.vault.rglob('*') if p.is_file()}

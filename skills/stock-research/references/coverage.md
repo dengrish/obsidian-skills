@@ -135,6 +135,10 @@ has not been evaluated; `blocked` names an unavailable premise, attachment or
 unresolved identity. Use `-` for no known security, never invent one. Pending and
 blocked sources retain a dated next check; completed source dispositions use `-`.
 A post containing several new substantive stock ideas lists all their identities.
+When only part of a post is blocked, retain the known securities and their
+separate queue entries while explaining the unresolved remainder. Link each
+resolved security back to that source; its assessment and nominee enrollment
+need not wait for an unrelated symbol or attachment to be resolved.
 
 **Research queue** has columns
 `Security | First seen | State | Priority | Due | Sources | Assessment | Reason`.
