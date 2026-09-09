@@ -9,6 +9,12 @@ The optional `sec-filing` command uses pinned EdgarTools for local HTML parsing.
 Use the [offline screening guide](screening.md) for repeatable calculations on
 saved price/calendar responses.
 
+For a new edition, put needed daily/minute windows in the
+[targeted acquisition plan](targeted-acquisition.md#price-history-needed-for-this-edition)
+alongside current prices and estimates. It shares their request budget and saves
+history before preparation freezes the cutoff. Use direct commands below for
+other justified checks; they do not bypass an existing edition's cutoff.
+
 ## Setup and access checks
 
 | Source | Credential names | Commands and purpose |

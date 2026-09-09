@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pinned, content-addressed JSON evidence for the investments plugin.
 
-Only Comparisons, ProviderStatus, Prices, EstimateReceipts and Nominees snapshot folders are supported. Files are
+Only Comparisons, ProviderStatus, Prices, PriceHistory, EstimateReceipts and Nominees snapshot folders are supported. Files are
 create-only; exact retries verify existing bytes. This writer briefly pins the
 working directory: invoke it from a single-threaded CLI, never parallel threads.
 """
@@ -61,6 +61,7 @@ from portable_names import portable_identity
 MAX_BYTES = 32 * 1024 * 1024
 FOLDERS = {('Investments', 'Snapshots', 'Comparisons'), ('Investments', 'Snapshots', 'ProviderStatus'),
            ('Investments', 'Snapshots', 'Prices'), ('Investments', 'Snapshots', 'EstimateReceipts'),
+           ('Investments', 'Snapshots', 'PriceHistory'),
            ('Investments', 'Snapshots', 'Nominees')}
 
 

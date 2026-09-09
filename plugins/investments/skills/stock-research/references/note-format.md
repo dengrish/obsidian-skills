@@ -378,8 +378,11 @@ There is no numerical research or active-thesis quota. Admit a watch only when i
 buying hypothesis merits monitoring, not merely because the stock was assessed;
 never omit an existing thesis to meet a count target. Each new thesis records its expected opportunity,
 next milestone, review-by date and any catalyst/thesis expiry in its initial
-assessment. A watch's monitoring dates are distinct from its prospective buying
-horizon.
+assessment. Include its original confirmation and invalidation conditions; define
+price tests using the [measurement, session, duration and subsequent-hold rules](research-method.md#price-trigger-definitions).
+Later assessments link that definition and state the matching observations or
+specific unresolved check, rather than shortening it into an ambiguous new rule.
+A watch's monitoring dates are distinct from its prospective buying horizon.
 
 At first readiness, state and justify a 3–12 month buying horizon and end date
 from that readiness date using current evidence. Preserve the first-seen date,

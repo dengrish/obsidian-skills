@@ -365,6 +365,40 @@ condition, not a guaranteed executable price. `ready` requires satisfied purchas
 confirmation with no known invalidation or unresolved material contrary evidence;
 it neither asserts a purchase occurred nor instructs action on current holdings.
 
+### Price trigger definitions
+
+When opening a thesis, define each price-based confirmation or invalidation in its
+initial assessment so later runs can apply the same test:
+
+- **Measurement:** the price or derived metric, comparison and sourced level;
+  distinguish an official closing price, a provider's daily aggregate and a
+  timestamped intraday trade. Name the feed and adjustment basis where they affect
+  comparability.
+- **Session:** regular, extended or all-session coverage, with the exchange's
+  session dates and time zone. A daily bar labelled with a trading date does not
+  by itself establish regular-session coverage.
+- **Duration:** the observation or interval required, such as one completed close,
+  two consecutive session closes or a defined intraday window. Specify whether
+  equality satisfies the threshold; avoid undefined "sustained" or "holds."
+- **Subsequent hold:** whether confirmation alone suffices or which later
+  observations must also pass, and through when. Define the breach test separately;
+  a close-based confirmation need not imply a close-based invalidation.
+
+For example, a sourced $100 breakout level could require two consecutive official
+regular closes strictly above $100, then no later official regular close below
+$100 through the assessment cutoff. Intraday lows would not decide that rule.
+This illustrates a complete definition, not a default strategy or threshold.
+
+Match later evidence to the recorded test. Sparse snapshots cannot prove an
+uninterrupted intraday hold; an interval low cannot locate a breach within that
+interval or prove it occurred after thesis opening. Missing matching evidence
+leaves the condition unverified rather than passed or disproved. Preserve an
+ambiguous historical rule verbatim and identify which interpretation cannot be
+resolved. Do not silently make it close-only after an intraday breach, assert an
+exact breach time, or revive a terminal thesis to repair its original wording.
+With unresolved validity, keep or return an active thesis to `watch`; any
+invalidation on other evidence needs its own stated basis.
+
 ## Thesis continuity and aging
 
 Monitor every active `watch` or `ready` thesis each trading day for relevant news,
@@ -391,8 +425,9 @@ separate outcome checkpoints still apply.
 Compare changed evidence with the original rationale and last material update.
 State strengthened, unchanged, weakened, invalidated or expired in ordinary
 prose while using the note format's four machine-readable states. Explain changes
-to confirmation/invalidation conditions; never move them silently to keep a
-thesis alive. Preserve the original prediction, including failures and misses.
+to confirmation/invalidation conditions as dated prospective amendments, retaining
+the original test for earlier observations. Never change a breached rule to keep
+a thesis alive. Preserve the original prediction, including failures and misses.
 
 Preserve the original watch dates and catalyst deadlines; before first readiness,
 apply the
