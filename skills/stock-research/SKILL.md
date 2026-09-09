@@ -255,6 +255,8 @@ Apply the relevant setup-specific evidence tests in the research method. Prefer
 **zero to three leading buying ideas**, ranked by the quality of the catalyst, price
 confirmation, downside/invalidation evidence, and fit to the 3–12 month horizon.
 Treat these as judgments, not fabricated probabilities or a guaranteed edge.
+Explain why the leading choices merit attention relative to the other assessed
+ideas, including shared risks; use the research method's comparison criteria.
 For each selected idea, provide:
 
 - What changed: for news-driven setups, the actual announcement date/time and
@@ -318,8 +320,9 @@ Preserve decision-relevant detail without padding, copying full articles, dumpin
 entire feeds, or duplicating unchanged history. Link specific earlier records and
 state today's changes. Charts belong where they clarify verified evidence, usually
 in the record. Keep conclusions, citations and journal cards visible in ordinary
-Markdown. Link preserved estimate snapshots from the record and summarize the
-relevant values; those source observations remain immutable JSON files.
+Markdown. Link preserved estimate snapshots and their availability receipts from
+the record and summarize the relevant values; those source observations remain
+immutable JSON files. Use the helper's verified availability when applying a cutoff.
 
 Finish the draft in owned scratch, with the actual completion time, then stamp
 its verified installed-plugin identity under [note provenance](../../shared/PROVENANCE.md).

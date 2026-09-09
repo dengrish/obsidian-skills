@@ -588,8 +588,8 @@ def finish_request(store, pending, count=0, row_counts=None):
     store.save()
 
 
-def binding(store, item):
-    accounts = store.data['accounts']
+def stored_binding(accounts, item):
+    """Resolve a verified identity without changing state during offline plans."""
     current = accounts.get(item['handle'])
     if current:
         if item['id'] and item['id'] != current['id']:
@@ -598,10 +598,15 @@ def binding(store, item):
     if item['id']:
         found = [(name, account) for name, account in accounts.items() if account['id'] == item['id']]
         if found:
-            name, account = found[0]
-            account['handle'] = item['handle']
-            return name, account
+            return found[0]
     return item['handle'], None
+
+
+def binding(store, item):
+    name, account = stored_binding(store.data['accounts'], item)
+    if account and name != item['handle']:
+        account['handle'] = item['handle']
+    return name, account
 
 
 def validate_bindings(store, items):
@@ -911,7 +916,7 @@ def account_status(account):
         reasons.append('known_collection_gaps')
     if sample_status == 'in_progress':
         status = 'initial_sample_in_progress'
-    elif account['window'] or forward_pending or account['gaps']:
+    elif account['window'] or forward_pending or account['gaps'] or account.get('recent_deferred_reason'):
         status = 'partial'
     elif sample and not account.get('requested_since'):
         status = 'initial_sample_' + sample_status
@@ -1176,6 +1181,12 @@ def prepare_recent(account, floor, cutoff):
     sample = account.get('sample')
     if sample and sample['status'] == 'in_progress':
         sample['status'] = 'superseded_by_recent_window'
+    if account['completed_at'] and instant(cutoff) < instant(account['completed_at']):
+        # A later completion does not prove the earlier lookback was acquired.
+        # Reopening it could overlap paid history, while silently skipping it
+        # would falsely claim coverage. Preserve progress and report the limit.
+        account['recent_deferred_reason'] = 'requested_cutoff_precedes_saved_completion'
+        return
     if (sample and sample['status'] == 'target_reached' and account['window'] is None
             and sample.get('deferred_window')):
         # A finished sample may have omitted more recent posts than its target.
@@ -1457,9 +1468,11 @@ def execute(args):
                 data = validate_state(decode(raw)) if raw is not None else None
             finally:
                 os.close(fd)
+        bound_accounts = {item['handle']: stored_binding(data['accounts'], item)[1] if data else None
+                          for item in items}
         return {'active_accounts': items, 'requests': 0,
                 'missing_descriptions': [item['handle'] for item in items
-                                         if not data or not data['accounts'].get(item['handle'], {}).get('profile')],
+                                         if not (bound_accounts[item['handle']] or {}).get('profile')],
                 'collection_mode': 'recent_72_hours' if args.latest is None else 'initial_sample',
                 'max_requests': args.max_requests, 'max_posts': args.max_posts,
                 'credential_available': bool(token(args)) if args.credentials_file else bool(os.environ.get('X_BEARER_TOKEN')),

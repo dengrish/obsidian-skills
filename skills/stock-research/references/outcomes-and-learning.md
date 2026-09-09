@@ -57,6 +57,15 @@ unknown group; do not backfill them from a newer note. Compare like horizons,
 setups, benchmarks and market conditions and report sample sizes and overlap.
 A release difference in small or differently exposed cohorts does not establish
 that a skill change caused better returns. No new journal columns are needed.
+Also assess the discovery-to-decision process using the available coverage
+records: distinct verified leads versus repeated claims, source/context gaps,
+unresolved-work age, reasons promising ideas remain unready, and concentration
+in common business drivers. Keep measured post/security counts separate from
+manually reviewed arguments; missing history is not a zero. Attribute useful
+source contributions without counting reposts as independent calls or calling
+these process measures a verified author return record. Low readiness alone does
+not establish poor source quality. Record evidenced roster or workflow suggestions
+for consideration, without changing accounts or collecting extra sources.
 If the review cannot be completed, leave it due and record the limitation rather
 than registering a completed summary. The ordinary daily run retries it.
 

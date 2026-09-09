@@ -474,6 +474,18 @@ class FeedCollectionTests(unittest.TestCase):
                 feed.execute(self.args(command='describe', account='actual', description='Background.', description_source=sources))
             self.assertEqual((self.state_path.read_bytes(), self.note.read_bytes()), before)
 
+    def test_plan_reuses_verified_renamed_account_description_without_writing(self):
+        self.collect(Provider(page([post(105)])))
+        feed.execute(self.args(command='describe', account='actual', description='Public research author.',
+                               description_source=['https://example.org/author']))
+        self.roster.write_text('- [x] @NewHandle <!-- x-user-id: 12 -->\n', encoding='utf-8')
+        before = self.state_path.read_bytes(), self.note.read_bytes()
+        for command in ('plan', 'status'):
+            result = feed.execute(self.args(command=command))
+            self.assertEqual(result['missing_descriptions'], [])
+            self.assertEqual(result['requests'], 0)
+        self.assertEqual((self.state_path.read_bytes(), self.note.read_bytes()), before)
+
     def test_note_dates_and_provenance_change_only_with_visible_content(self):
         with patch.object(feed, 'now', return_value=FIRST):
             self.collect(Provider(page([post(105)])))

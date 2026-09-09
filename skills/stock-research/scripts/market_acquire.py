@@ -33,7 +33,12 @@ class ArtifactTooLarge(ValueError):
 
 def _error(result):
     pagination = result.get('pagination')
-    error = result.get('error') or (pagination.get('error') if isinstance(pagination, dict) else None)
+    errors = [error for error in (result.get('error'),
+              pagination.get('error') if isinstance(pagination, dict) else None) if isinstance(error, dict)]
+    # A quarantined symbol may also set an invalid-response diagnostic. A later
+    # quota or access failure still governs whether another batch may run.
+    error = next((error for error in errors if error.get('code') in STOP_CODES),
+                 errors[0] if errors else None)
     return ({key: error[key] for key in ('code', 'message') if isinstance(error.get(key), str)}
             if isinstance(error, dict) else None)
 

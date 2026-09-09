@@ -280,6 +280,30 @@ def prepare(plan, prices, calendar, as_of, benchmark='SPY', rules=None, *, valid
     return bundle
 
 
+def _complete_price_symbols(envelope, requested):
+    """Narrow only a proven per-symbol failure, never incomplete pagination."""
+    if envelope['complete']:
+        return set(requested)
+    pagination, data = envelope.get('pagination', {}), envelope['data']
+    if (not isinstance(pagination, dict) or pagination.get('exhausted') is not True
+            or type(pagination.get('pages')) is not int or pagination['pages'] < 1
+            or pagination.get('error')):
+        return set()
+    missing, duplicates, rejected = (data.get(key) for key in
+        ('missing_symbols', 'duplicate_symbols', 'rejected_symbols'))
+    if (not isinstance(missing, list) or not isinstance(duplicates, list) or not isinstance(rejected, list)
+            or any(not isinstance(row, dict) or not isinstance(row.get('symbol'), str) for row in rejected)):
+        return set()
+    bad = missing + duplicates + [row['symbol'] for row in rejected]
+    if not bad or any(not isinstance(symbol, str) or symbol not in requested for symbol in bad):
+        return set()
+    error = envelope.get('error')
+    if error is not None and (not isinstance(error, dict)
+            or error.get('code') != 'invalid_response' or not rejected):
+        return set()
+    return set(requested) - set(bad)
+
+
 def liquidity(prices, calendar, as_of, symbols, session_count=20, minimum=25000000, market_caps=None, min_market_cap=2000000000):
     """Measure regular-minute notional coverage and its observed lower bound."""
     cutoff = parse_time(as_of)
@@ -297,7 +321,7 @@ def liquidity(prices, calendar, as_of, symbols, session_count=20, minimum=250000
     expected_starts = set().union(*expected.values())
     observed = {symbol: {} for symbol in symbols}
     queried = {symbol: set() for symbol in symbols}
-    source_complete, sources, warnings = True, [], []
+    source_complete, sources, warnings = dict.fromkeys(symbols, True), [], []
     if not isinstance(prices, list) or len(prices) > 200:
         fail('Provide a list of original minute-price envelopes.')
     for envelope in prices:
@@ -316,10 +340,12 @@ def liquidity(prices, calendar, as_of, symbols, session_count=20, minimum=250000
                 or query.get('symbols') != ','.join(requested) or not isinstance(values, dict) or set(values) - set(requested)):
             fail('Minute query and response identities disagree.')
         covered = {stamp for stamp in expected_starts if start <= stamp <= end and stamp + timedelta(minutes=1) <= requested_end}
+        complete_symbols = _complete_price_symbols(envelope, requested)
         for symbol in requested:
             _symbol(symbol)
             if symbol in queried:
                 queried[symbol].update(covered)
+                source_complete[symbol] = source_complete[symbol] and symbol in complete_symbols
         for symbol, rows in values.items():
             _symbol(symbol)
             if not isinstance(rows, list):
@@ -344,7 +370,6 @@ def liquidity(prices, calendar, as_of, symbols, session_count=20, minimum=250000
                 if prior is not None and prior != normalized:
                     fail('Conflicting duplicate minute bars.')
                 observed[symbol][left] = normalized
-        source_complete = source_complete and envelope['complete']
         warnings.extend(envelope.get('warnings', []))
         sources.append({'query': query, 'source': envelope['source'], 'requests': envelope.get('requests', []),
                         'complete': envelope['complete'], 'sha256': _digest(envelope)})
@@ -388,7 +413,7 @@ def liquidity(prices, calendar, as_of, symbols, session_count=20, minimum=250000
             by_session.append({'date': day.isoformat(), 'expected_minutes': len(expected[day]), 'observed_minutes': len(values),
                                'missing_minutes': [_iso(stamp) for stamp in missing], 'observed_notional_usd': subtotal,
                                'regular_notional_usd': subtotal if not missing else None})
-        evidence_complete = bool(prices) and source_complete and queried[symbol] == expected_starts
+        evidence_complete = bool(prices) and source_complete[symbol] and queried[symbol] == expected_starts
         full = evidence_complete and missing_total == 0
         mean = math.fsum(row['regular_notional_usd'] for row in by_session) / session_count if full else None
         lower_bound = math.fsum(row['observed_notional_usd'] for row in by_session) / session_count if evidence_complete else None
@@ -416,6 +441,7 @@ def liquidity(prices, calendar, as_of, symbols, session_count=20, minimum=250000
                 'The observed lower bound applies to the defined minute-bar notional measure; it is not an exact traded-dollar lower bound.',
                 'The minute starting at the calendar close can mix closing-auction and extended-hours activity; it is excluded without adding auction turnover separately.',
                 'Source completeness and regular-session coverage are separate checks; market cap and liquidity do not establish a buying opportunity.',
+                'An exhausted batch with typed per-symbol failures can preserve unrelated verified targets; quota, transport and pagination failures remain unavailable for their requested symbols.',
                 'Disclosed-share capitalization proxies remain estimates; a declared precision range crossing the size threshold leaves eligibility unresolved.',
                 'Market-cap dates and share-class/ADR basis require verification; the calculator does not derive capitalization from guessed shares.']))}
 
@@ -806,6 +832,38 @@ def run_self_test():
             self.assertIsNone(row['average_regular_notional_lower_bound_usd'])
             self.assertIsNone(row['average_regular_notional_usd'])
             self.assertIsNone(row['liquidity_eligible'])
+
+        def test_mixed_symbol_failure_preserves_verified_shortlist_liquidity(self):
+            prices, calendar = fixture_liquidity()
+            prices['complete'] = False
+            prices['query']['symbols'] = 'AAA,BBB'
+            prices['data'].update(requested_symbols=['AAA', 'BBB'], missing_symbols=['BBB'],
+                                  duplicate_symbols=[], rejected_symbols=[{'symbol': 'BBB',
+                                      'error': {'code': 'invalid_response', 'message': 'Synthetic rejected bar.'}}])
+            prices['data']['bars']['BBB'] = []
+            prices['pagination'] = {'pages': 2, 'exhausted': True}
+            prices['error'] = {'code': 'invalid_response', 'message': 'Synthetic rejected symbol.'}
+            result = liquidity([prices], calendar, cutoff, ['AAA', 'BBB'], market_caps=cap())
+            self.assertFalse(result['complete'])
+            valid, missing = result['candidates']
+            self.assertTrue(valid['liquidity_source_complete'])
+            self.assertTrue(valid['eligibility_verified'])
+            self.assertFalse(missing['liquidity_source_complete'])
+            self.assertIsNone(missing['average_regular_notional_lower_bound_usd'])
+            for mutation in ('page_not_exhausted', 'quota', 'transport', 'missing_diagnostics'):
+                partial = copy.deepcopy(prices)
+                if mutation == 'page_not_exhausted':
+                    partial['pagination']['exhausted'] = False
+                elif mutation == 'quota':
+                    partial['pagination']['error'] = {'code': 'rate_limited', 'message': 'Synthetic quota.'}
+                elif mutation == 'transport':
+                    partial['error'] = {'code': 'network_error', 'message': 'Synthetic network failure.'}
+                else:
+                    partial['data'].pop('rejected_symbols')
+                with self.subTest(mutation=mutation):
+                    row = liquidity([partial], calendar, cutoff, ['AAA'], market_caps=cap())['candidates'][0]
+                    self.assertFalse(row['liquidity_source_complete'])
+                    self.assertFalse(row['eligibility_verified'])
 
         def test_missing_all_returned_minutes_is_unknown_not_zero(self):
             prices, calendar = fixture_liquidity()

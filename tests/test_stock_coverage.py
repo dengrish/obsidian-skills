@@ -95,6 +95,16 @@ class CoverageTests(unittest.TestCase):
     def anchors(self, cutoff=LATER):
         return coverage.context(self.vault, cutoff)['required_history']
 
+    def sync_archive(self, daily):
+        import stock_dossiers
+        producer = {'skill': 'investments:stock-research', 'plugin_version': '1.0.0',
+                    'source_commit': None, 'source_url': None, 'source_status': 'unavailable',
+                    'runtime_sha256': 'a' * 64}
+        daily.write_text(stock_dossiers.note_provenance.stamp_text(
+            daily.read_text(encoding='utf-8'), producer), encoding='utf-8')
+        result = stock_dossiers.sync(self.vault, daily, self.root, producer)
+        self.assertTrue(result['complete'], result)
+
     def test_new_posts_need_disposition(self):
         with self.assertRaisesRegex(ValueError, 'every new or changed'):
             coverage.check(self.vault, self.note(), CUTOFF)
@@ -346,6 +356,24 @@ class CoverageTests(unittest.TestCase):
         self.assertEqual(result['counts']['substantive_assessments'], 1)
         self.assertEqual(result['counts']['completed_assessments'], 0)
 
+    def test_thesis_state_change_cannot_leave_an_obsolete_stock_assessment(self):
+        old_ledger = '| Thesis | State | Update / next check |\n|---|---|---|\n| NASDAQ:ABC@2026-09-08 | ready | Verified original conditions. |'
+        self.archive(schema=1, candidates=True, ledger=old_ledger)
+        ledger = old_ledger.replace('| ready |', '| watch |')
+        note = self.note(as_of=LATER, posts=[self.post()], jobs=[self.job('blocked')],
+                         ledger=ledger, history=self.anchors())
+        with self.assertRaisesRegex(ValueError, 'state-changing theses need'):
+            coverage.check(self.vault, note, LATER)
+
+    def test_monitoring_cannot_promote_watch_to_ready_without_current_assessment(self):
+        ledger = '| Thesis | State | Update / next check |\n|---|---|---|\n| NASDAQ:ABC@2026-09-08 | watch | Awaiting verification. |'
+        link = '[[Investments/2026-09-08-113000-stock-research#NASDAQ:ABC — Example Inc.]]'
+        self.archive(posts=[self.post()], jobs=[self.job('assessed', assessment=link)], candidates=True, ledger=ledger)
+        note = self.note(as_of=LATER, jobs=[self.job('monitored', assessment=link)],
+                         ledger=ledger.replace('| watch |', '| ready |'), history=self.anchors())
+        with self.assertRaisesRegex(ValueError, 'state-changing theses need'):
+            coverage.check(self.vault, note, LATER)
+
     def test_next_day_active_reuse_cannot_skip_daily_monitoring(self):
         ledger = '| Thesis | State | Update / next check |\n|---|---|---|\n| NASDAQ:ABC@2026-09-08 | watch | Verify next event. |'
         link = '[[Investments/2026-09-08-113000-stock-research#NASDAQ:ABC — Example Inc.]]'
@@ -479,6 +507,154 @@ class CoverageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'declared new/material'):
             coverage.check(self.vault, self.note(as_of=LATER, posts=[self.post()],
                 jobs=[self.job('monitored', assessment=link)], history=self.anchors()), LATER)
+
+    def test_deferred_material_argument_cannot_disappear_into_earlier_research(self):
+        link = '[[Investments/2026-09-08-113000-stock-research#NASDAQ:ABC — Example Inc.]]'
+        self.archive(posts=[self.post()], jobs=[self.job('assessed', assessment=link)], candidates=True)
+        nomination = self.post()
+        self.account['posts']['10']['text'] = '$ABC has a new material argument requiring investigation.'
+        self.account['posts']['10']['last_checked_at'] = '2026-09-08T15:40:00Z'
+        self.publish_feed()
+        source = stock_feed.context(self.vault, LATER)['posts'][0]
+        nomination['Fingerprint'] = coverage.fingerprint(source)
+        self.archive(as_of=LATER, posts=[nomination], jobs=[self.job('blocked')], history=self.anchors())
+        later = '2026-09-08T13:00:00-04:00'
+        for state in ('reused', 'monitored'):
+            with self.subTest(state=state), self.assertRaisesRegex(ValueError, 'unfinished substantive research'):
+                coverage.check(self.vault, self.note(as_of=later, jobs=[self.job(state, assessment=link)],
+                    history=self.anchors(later)), later)
+        new_link = '[[Investments/2026-09-08-130000-stock-research#NASDAQ:ABC — Example Inc.]]'
+        result = coverage.check(self.vault, self.note(as_of=later, jobs=[self.job('assessed', assessment=new_link)],
+            candidates=True, history=self.anchors(later)), later)
+        self.assertEqual(result['counts']['completed_assessments'], 1)
+
+    def test_blocked_monitoring_can_resume_without_new_material_assessment(self):
+        link = '[[Investments/2026-09-08-113000-stock-research#NASDAQ:ABC — Example Inc.]]'
+        ledger = '| Thesis | State | Update / next check |\n|---|---|---|\n| NASDAQ:ABC@2026-09-08 | watch | Verify next event. |'
+        self.archive(posts=[self.post()], jobs=[self.job('assessed', assessment=link)], candidates=True, ledger=ledger)
+        self.archive(as_of=LATER, jobs=[self.job('blocked')], history=self.anchors(), ledger=ledger)
+        later = '2026-09-08T13:00:00-04:00'
+        result = coverage.check(self.vault, self.note(as_of=later, jobs=[self.job('monitored', assessment=link)],
+            history=self.anchors(later), ledger=ledger), later)
+        self.assertEqual(result['counts']['monitored'], 1)
+
+    def test_old_runtime_reuse_mistake_remains_readable_and_recovers_material_work(self):
+        link = '[[Investments/2026-09-08-113000-stock-research#NASDAQ:ABC — Example Inc.]]'
+        self.archive(posts=[self.post()], jobs=[self.job('blocked', assessment=link)], candidates=True)
+        # Version 1.12.0 accepted this mistaken resolution while Due was future.
+        self.archive(as_of=LATER, jobs=[self.job('reused', '-', link)], history=self.anchors())
+        later = '2026-09-08T13:00:00-04:00'
+        context = coverage.context(self.vault, later)
+        self.assertEqual(context['work'][0]['security'], 'NASDAQ:ABC')
+        self.assertTrue(context['work'][0]['requires_assessment'])
+        self.assertEqual(context['work'][0]['first_seen'], CUTOFF)
+        self.assertEqual(context['work'][0]['priority'], 'capacity')
+        with self.assertRaisesRegex(ValueError, 'unfinished substantive research'):
+            coverage.check(self.vault, self.note(as_of=later, history=context['required_history']), later)
+        new_link = '[[Investments/2026-09-08-130000-stock-research#NASDAQ:ABC — Example Inc.]]'
+        result = coverage.check(self.vault, self.note(as_of=later, candidates=True,
+            jobs=[self.job('assessed', '-', new_link)], history=context['required_history']), later)
+        self.assertTrue(result['research_complete'])
+
+    def test_ready_candidate_cannot_bypass_ledger_or_blocked_work(self):
+        link = '[[Investments/2026-09-08-113000-stock-research#NASDAQ:ABC — Example Inc.]]'
+        for state in ('assessed', 'blocked'):
+            with self.subTest(state=state):
+                note = self.note(posts=[self.post()], jobs=[self.job(state, assessment=link)], candidates=True)
+                note.write_text(note.read_text(encoding='utf-8').replace('Status: watch', 'Status: ready'), encoding='utf-8')
+                with self.assertRaisesRegex(ValueError, 'readiness must agree'):
+                    coverage.check(self.vault, note, CUTOFF)
+
+    def test_watch_candidate_cannot_leave_ready_thesis(self):
+        ledger = '| Thesis | State | Update / next check |\n|---|---|---|\n| NASDAQ:ABC@2026-09-08 | ready | Reconfirmed. |'
+        link = '[[Investments/2026-09-08-113000-stock-research#NASDAQ:ABC — Example Inc.]]'
+        with self.assertRaisesRegex(ValueError, 'readiness must agree'):
+            coverage.check(self.vault, self.note(posts=[self.post()], jobs=[self.job('assessed', assessment=link)],
+                candidates=True, ledger=ledger), CUTOFF)
+
+    def test_multiple_watch_and_ready_theses_have_ready_aggregate_assessment(self):
+        ledger = ('| Thesis | State | Update / next check |\n|---|---|---|\n'
+                  '| NASDAQ:ABC@2026-09-07 | watch | Earlier separate hypothesis awaits confirmation. |\n'
+                  '| NASDAQ:ABC@2026-09-08 | ready | Distinct current catalyst is confirmed. |')
+        link = '[[Investments/2026-09-08-113000-stock-research#NASDAQ:ABC — Example Inc.]]'
+        note = self.note(posts=[self.post()], jobs=[self.job('assessed', assessment=link)], candidates=True, ledger=ledger)
+        note.write_text(note.read_text(encoding='utf-8').replace('Status: watch', 'Status: ready'), encoding='utf-8')
+        self.assertTrue(coverage.check(self.vault, note, CUTOFF)['complete'])
+
+    def test_rejected_candidate_cannot_leave_active_thesis(self):
+        ledger = '| Thesis | State | Update / next check |\n|---|---|---|\n| NASDAQ:ABC@2026-09-08 | watch | Verify next event. |'
+        link = '[[Investments/2026-09-08-113000-stock-research#NASDAQ:ABC — Example Inc.]]'
+        note = self.note(posts=[self.post()], jobs=[self.job('assessed', assessment=link)], candidates=True, ledger=ledger)
+        note.write_text(note.read_text(encoding='utf-8').replace('Status: watch', 'Status: rejected'), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'cannot retain an active thesis'):
+            coverage.check(self.vault, note, CUTOFF)
+
+    def test_real_publication_can_verify_reuse_under_its_existing_vault_lock(self):
+        link = '[[Investments/2026-09-08-113000-stock-research#NASDAQ:ABC — Example Inc.]]'
+        daily = self.archive(posts=[self.post()], jobs=[self.job('assessed', assessment=link)], candidates=True)
+        self.sync_archive(daily)
+        note = self.note(as_of=LATER, jobs=[self.job('reused', assessment=link)], history=self.anchors())
+        # Only runtime identity is a fixture: coverage, dossier reading, locking,
+        # outcome planning and actual immutable publication all run normally.
+        with patch.object(market_notes, 'require_publication_provenance'):
+            result = market_notes.publish(note, self.vault, coverage._time('2026-09-08T12:06:00-04:00'),
+                                          mode='manual', as_of=LATER)
+        self.assertEqual(result['status'], 'created')
+        self.assertEqual(Path(result['path']).read_bytes(), note.read_bytes())
+
+    def test_changed_issuer_is_refused_before_immutable_daily_publication(self):
+        daily = self.archive(schema=1, candidates=True)
+        daily.write_text(daily.read_text(encoding='utf-8').replace('Status: watch',
+            'Status: watch\nCompany ID: SEC:0000000001'), encoding='utf-8')
+        self.sync_archive(daily)
+        before = (self.vault / 'Investments/Stocks/ABC.md').read_bytes()
+        link = '[[Investments/2026-09-08-120000-stock-research#NASDAQ:ABC — Example Inc.]]'
+        note = self.note(as_of=LATER, posts=[self.post()], jobs=[self.job('assessed', assessment=link)],
+                         candidates=True, history=self.anchors())
+        note.write_text(note.read_text(encoding='utf-8').replace('Status: watch',
+            'Status: watch\nCompany ID: SEC:0000000002'), encoding='utf-8')
+        with patch.object(market_notes, 'require_publication_provenance'):
+            with self.assertRaisesRegex(ValueError, 'ticker company ID changed'):
+                market_notes.publish(note, self.vault, coverage._time('2026-09-08T12:06:00-04:00'),
+                                     mode='manual', as_of=LATER)
+        self.assertFalse((self.vault / 'Investments/2026-09-08-120000-stock-research.md').exists())
+        self.assertEqual((self.vault / 'Investments/Stocks/ABC.md').read_bytes(), before)
+
+    def test_matching_issuer_id_allows_renamed_company_before_publication(self):
+        daily = self.archive(schema=1, candidates=True)
+        daily.write_text(daily.read_text(encoding='utf-8').replace('Status: watch',
+            'Status: watch\nCompany ID: SEC:0000000001'), encoding='utf-8')
+        self.sync_archive(daily)
+        link = '[[Investments/2026-09-08-120000-stock-research#NASDAQ:ABC — Renamed Inc.]]'
+        note = self.note(as_of=LATER, posts=[self.post()], jobs=[self.job('assessed', assessment=link)],
+                         candidates=True, history=self.anchors())
+        text = note.read_text(encoding='utf-8').replace('Status: watch', 'Status: watch\nCompany ID: SEC:0000000001')
+        note.write_text(text.replace('Example Inc.', 'Renamed Inc.'), encoding='utf-8')
+        with patch.object(market_notes, 'require_publication_provenance'):
+            result = market_notes.publish(note, self.vault, coverage._time('2026-09-08T12:06:00-04:00'),
+                                          mode='manual', as_of=LATER)
+        self.assertEqual(result['status'], 'created')
+
+    def test_feed_change_after_initial_publication_check_is_rejected(self):
+        note = self.note(posts=[self.post('no-idea', '-')])
+        original = market_notes.outcomes
+        calls = 0
+        def change_during_final_outcome_check(*args, **kwargs):
+            nonlocal calls
+            result = original(*args, **kwargs)
+            calls += 1
+            if calls == 2:
+                # Even a harmless collection update changes the verified snapshot
+                # and must be reconciled before publishing the inspected report.
+                self.account['completed_at'] = '2026-09-08T15:10:00Z'
+                self.publish_feed()
+            return result
+        with patch.object(market_notes, 'require_publication_provenance'), \
+                patch.object(market_notes, 'outcomes', side_effect=change_during_final_outcome_check):
+            with self.assertRaisesRegex(RuntimeError, 'coverage changed after planning'):
+                market_notes.publish(note, self.vault, coverage._time('2026-09-08T11:36:00-04:00'),
+                                     mode='manual', as_of=CUTOFF)
+        self.assertFalse((self.vault / 'Investments/2026-09-08-113000-stock-research.md').exists())
 
     def test_unfinished_source_associations_cannot_be_dropped_at_completion(self):
         self.account['posts']['11'] = dict(self.account['posts']['10'], id='11', text='$ABC has another argument.')

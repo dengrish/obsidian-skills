@@ -72,8 +72,10 @@ every saved post or promise that an API provider's billing deduplication is free
   state. Repeated runs use those receipts. Preserve the state with the account
   notes and downloaded files; losing it does not authorize adopting an occupied
   filename or downloading paid posts again.
-- Reuse a photo by its X media key. Capture PDFs separately for each post, even
-  when another post links the same URL: the document at that URL may have changed.
+- Reuse a photo by its X media key. When an older record lacks the photo expansion
+  and another saved post supplies it, resolve that metadata before deduplicating
+  downloads. Capture PDFs separately for each post, even when another post links
+  the same URL: the document at that URL may have changed.
   Private collector state records each file's capture time, source URL, local
   path, digest and status; account notes show no source-metadata blocks.
 - Downloads use public HTTPS with no X Authorization header, ambient cookies or

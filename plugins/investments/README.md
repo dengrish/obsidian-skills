@@ -32,6 +32,13 @@ report preserve processed posts, unfinished work and retry dates. They distingui
 complete research from queued or blocked checks and buying readiness. Earlier
 reports remain unchanged; their prose backlog requires an explicit initial review.
 
+Research distinguishes an interesting business, a completed assessment and a
+verified entry opportunity. It follows material public documents linked by saved
+posts without crawling new feeds, tests whether short-term claims fit the 3–12
+month horizon, and explains both the leading choices and their shared business
+risks. Monthly learning also reviews discovery gaps and research bottlenecks;
+source popularity and repeated claims are not independent confirmation.
+
 ## Setup
 
 Read [runtime setup](shared/RUNTIME.md) and the skill's
@@ -85,7 +92,9 @@ A fixed monthly momentum comparison is recorded separately within those notes,
 with bulky evidence in verified immutable `Investments/Snapshots/Comparisons/` attachments.
 Existing inline comparison records remain readable.
 Selected estimate observations persist as immutable source JSON under
-`Investments/Snapshots/Estimates/`, with availability times for future comparisons.
+`Investments/Snapshots/Estimates/`, with separate verified availability receipts
+under `Investments/Snapshots/EstimateReceipts/`. Legacy observations stay intact;
+an embedded save timestamp alone does not prove availability at an earlier cutoff.
 A small ordered estimate preflight reuses recent observations and records a
 conservative provider cooldown after quota failure; it never invents historical
 consensus or changes an established cutoff.

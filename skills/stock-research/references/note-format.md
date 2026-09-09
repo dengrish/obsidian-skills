@@ -207,6 +207,8 @@ assessment or a future research check.
 
 The brief and record must agree on candidate identity, status, conditions,
 observed values and risks. A `watch` is not presented as a confirmed purchase.
+Explain the main reasons for the leading choices and material shared business
+risks; three names do not necessarily represent three independent opportunities.
 A `ready` means the research conditions for considering a new long position are
 met; it does not imply portfolio suitability, a purchase, or guaranteed returns.
 Current-holdings review, sell timing and rebalancing are outside this skill's scope.
@@ -243,14 +245,23 @@ it from the short brief. Organize each day's relevant material as follows:
   the maintained stock note's latest assessment after publication, avoiding a
   second inconsistent rewrite. A single stock may have several thesis IDs; explain
   them within this section and keep their distinct states in the thesis ledger.
+  The stock's aggregate status is `ready` when any current thesis for that security
+  is ready, even if another thesis remains watch. A terminal/rejected stock status
+  cannot coexist with an active thesis; explain the individual thesis outcomes.
+  Introducing a thesis or changing its state requires a substantive current
+  assessment, including a readiness downgrade caused by missing confirmation.
+  This ensures the maintained stock note changes with the daily ledger. Unchanged
+  monitoring and reuse do not require rewriting its dossier.
   Rejected or deferred ideas that received substantive evaluation get stock notes
   even when absent from the short brief; a nomination deferred before evaluation
   needs only its Screening and sources disposition. Passing mentions do not create
   dossiers. Rejected assessments need not become tracked theses.
   Separate verified observations, management claims, estimates and inference.
   Preserve material quarter-to-quarter comparisons, a linked pre-event expectations
-  snapshot where needed, and immutable estimate snapshots whose observation and
-  first-save times precede the cutoff. Later captures are for later assessments.
+  snapshot where needed, and immutable estimate snapshots with linked availability
+  receipts. Their observation and helper-verified availability must precede the
+  cutoff; a legacy embedded save timestamp is insufficient. Later captures are for
+  later assessments.
   Link unchanged earlier evidence; do not duplicate an entire stock's history.
 - **Thesis updates:** keep the canonical complete ledger below. Put fuller
   supporting changes under Candidate assessments, linked from the update cell.

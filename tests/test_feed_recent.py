@@ -102,6 +102,20 @@ class RecentFeedTests(unittest.TestCase):
         self.assertEqual(set(self.state()['accounts']['actual']['posts']), {'105', '110'})
         self.assertIn('2026-09-07 11:00:00 UTC', self.note.read_text(encoding='utf-8'))
 
+    def test_backwards_cutoff_reports_uncovered_history_without_paid_overlap(self):
+        self.collect(Provider(page([post(105)])))
+        before = self.note.read_bytes()
+        provider = Provider()
+        result = self.collect(provider, until='2026-09-06T12:00:00Z')
+        self.assertEqual(provider.calls, [])
+        self.assertEqual(self.note.read_bytes(), before)
+        self.assertEqual(result['accounts'][0]['status'], 'partial')
+        self.assertIn('requested_cutoff_precedes_saved_completion',
+                      result['accounts'][0]['deferred_reasons'])
+        self.assertEqual(self.state()['accounts']['actual']['completed_at'], FIRST)
+        resumed = self.collect(Provider())
+        self.assertEqual(resumed['deferred_accounts'], [])
+
     def test_edited_sample_frontier_does_not_make_unread_recent_posts_look_expired(self):
         edited = post(110, '2026-08-01T11:00:00Z')
         edited['edit_history_post_ids'] = ['90', '110']

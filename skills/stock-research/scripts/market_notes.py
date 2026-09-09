@@ -358,13 +358,14 @@ def require_publication_provenance(metadata):
                          'stock-research bundle as its creator, without an update record')
 
 
-def require_publication_coverage(vault, draft, note, cutoff, edition):
+def require_publication_coverage(vault, draft, note, cutoff, edition, *, _lock_descriptor=None):
     """New editions account for source intake and unfinished work before writing."""
     if note['metadata'].get('stock_research') != '2':
         raise ValueError('new editions require stock_research: 2 and its coverage journals; '
                          'preserve schema-1 history and identical retries')
     from stock_coverage import check
-    checked = check(vault, draft, cutoff.isoformat(), edition=edition)
+    checked = check(vault, draft, cutoff.isoformat(), edition=edition,
+                    _lock_descriptor=_lock_descriptor)
     if not checked.get('complete', False):
         raise ValueError('coverage accounting is invalid: ' + json.dumps(checked.get('findings', [])))
     return checked
@@ -1192,12 +1193,12 @@ def publish(draft, vault, now=None, mode=None, as_of=None, run_receipt=None):
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise ValueError('another market-note publication is in progress; rerun context after it finishes') from exc
-        return _publish(draft, root, now, mode, as_of, run_receipt)
+        return _publish(draft, root, now, mode, as_of, run_receipt, _lock_descriptor=descriptor)
     finally:
         os.close(descriptor)
 
 
-def _publish(draft, vault, now=None, mode=None, as_of=None, run_receipt=None):
+def _publish(draft, vault, now=None, mode=None, as_of=None, run_receipt=None, *, _lock_descriptor=None):
     data, expected = read_stable(draft)
     note = lint_bytes(data)
     current = ny_now(now)
@@ -1241,7 +1242,8 @@ def _publish(draft, vault, now=None, mode=None, as_of=None, run_receipt=None):
     if 'stock_research' not in note['metadata']:
         raise ValueError('new editions must use stock_research; historical market_research records are read-only')
     require_publication_provenance(note['provenance'])
-    require_publication_coverage(vault, draft, note, cutoff, edition)
+    coverage = require_publication_coverage(vault, draft, note, cutoff, edition,
+                                            _lock_descriptor=_lock_descriptor)
     if run_receipt is not None:
         require_run_checks(run_receipt, vault, data, current)
     vault, folder, folder_identity = output_folder(vault, create=True)
@@ -1268,6 +1270,10 @@ def _publish(draft, vault, now=None, mode=None, as_of=None, run_receipt=None):
         _, checked = inventory(vault, day, edition, cutoff, continuation=run_receipt is not None)
         if checked != baseline or output_folder(vault)[2] != folder_identity:
             raise ValueError('daily-note history changed after planning; rerun context')
+        checked_coverage = require_publication_coverage(vault, draft, note, cutoff, edition,
+                                                        _lock_descriptor=_lock_descriptor)
+        if checked_coverage != coverage:
+            raise ValueError('feed or research coverage changed after planning; reconcile the draft')
         if run_receipt is not None:
             require_run_checks(run_receipt, vault, data, current)
         actual = publish_pinned(staged, target, vault, folder_identity)

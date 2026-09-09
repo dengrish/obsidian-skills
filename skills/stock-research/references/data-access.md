@@ -249,6 +249,8 @@ For a frozen-cutoff retry, a recent late snapshot is reused as
 `reused_future_only`, with `eligible_at_cutoff: false`, instead of spending another
 request for the same observation. Both this status and `captured_future_only`
 remain unusable in that edition. An eligible earlier snapshot takes precedence.
+Among eligible matching snapshots, reuse the newest provider observation, even
+when an older observation was archived later.
 For `coverage_unavailable`, retain the normalized `coverage` diagnostics in the
 research record: they distinguish absent fiscal periods/horizons, missing current
 values and malformed/incomplete provider records. HTTP success alone is not
@@ -270,11 +272,19 @@ python3 '<skill>/scripts/market_estimate_history.py' compare --older '<older-sna
 Replace the example period with the actual thesis period and add the selected
 `--credentials-file` to retrieval. Saving is separate from the read-only data
 helper: it preserves one selected period/horizon in an immutable JSON file under
-`Investments/Snapshots/Estimates/`, with observation/save times and source digest.
+`Investments/Snapshots/Estimates/`, with its observation time and source digest.
+Version 2 snapshots do not embed a purported first-save time. After publishing
+and rereading the snapshot, the helper writes a separate immutable receipt under
+`Investments/Snapshots/EstimateReceipts/`. The `save` result and each returned
+`history.snapshots[]` record expose verified `available_at`, `receipt`, and
+`availability_basis: post_publication_receipt` beside the unchanged `snapshot`.
 It excludes arbitrary provider text, request credentials and the rest of the feed.
-Exact retries reuse the original snapshot; collisions never overwrite evidence.
+Exact retries reuse the original snapshot and its earliest verified receipt;
+collisions never overwrite evidence. A failed receipt leaves the observation
+unavailable until a successful retry is receipted at its actual current time.
 These are source records, not daily analyses or a mutable database. Link the
-specific snapshot and summarize only decision-relevant values in the daily note.
+specific snapshot and receipt, and summarize only decision-relevant values in
+the daily note.
 
 The provider gives no historical vintage or publication time. A fiscal period end
 is not an availability date, and its trailing-window revision figures are current
@@ -282,8 +292,14 @@ provider claims, not independently preserved past observations. `--as-of` theref
 marks a later retrieval incomplete for that cutoff. When `coverage_complete` is
 true, the snapshot helper can still preserve it for a **later** review; do not use
 it in the earlier edition or shift that edition's cutoff. History exposes only
-records whose observation and first-save times are available by the requested
-cutoff. Do not replace a missing historical snapshot with current estimates.
+records whose verified receipt availability is no later than the requested
+cutoff. Old version 1 snapshot bytes remain readable and unchanged, but their
+embedded `saved_at`/`available_at` were sampled before publication and do not
+prove completed persistence. Unreceipted old or interrupted new snapshots appear
+in `unverified_snapshots`, not eligible history. A deliberate exact `save` retry
+can add a receipt now; it cannot repair an earlier cutoff. Do not replace a
+missing historical snapshot with current estimates. Comparison requires the
+original canonical archive paths and each snapshot's local receipt.
 
 Compare the same instrument, fiscal period, horizon and definitions. The helper
 reports changes in preserved provider values, with percentages only from a

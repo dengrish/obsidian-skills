@@ -197,6 +197,37 @@ class AcquisitionTests(unittest.TestCase):
                                                  'message': 'Synthetic news endpoint failure.'})
         self.assertEqual(self.read(result, 'manifest'), result)
 
+    def test_later_price_page_quota_stops_next_batch_and_preserves_prior_evidence(self):
+        import market_prices
+        for rejected_symbol in (False, True):
+            with self.subTest(rejected_symbol=rejected_symbol):
+                calls = []
+                valid = {'t': '2024-04-30T04:00:00Z', 'o': 100, 'h': 101, 'l': 99,
+                         'c': 100, 'vw': 100, 'v': 1000000, 'n': 120}
+                rows = {'AAA': [valid]}
+                if rejected_symbol:
+                    rows['BBB'] = [dict(valid, vw=0)]
+                def get_json(url, **kwargs):
+                    calls.append(url)
+                    if len(calls) == 1:
+                        return {'bars': rows, 'next_page_token': 'next'}
+                    raise acquire.DataError('rate_limited', 'Synthetic quota reached.')
+                client = SimpleNamespace(env={'ALPACA_API_KEY': 'fixture-key',
+                                              'ALPACA_SECRET_KEY': 'fixture-secret'},
+                                         requests=[], get_json=get_json)
+                run = acquire.Acquisition(client)
+                argv = ['prices', '--symbols', 'AAA,BBB', '--start', '2024-04-30T04:00:00Z',
+                        '--end', '2024-05-01T04:00:00Z']
+                with patch.object(market_prices, 'utc_now', return_value=NOW):
+                    result = run.fetch(argv)
+                    blocked = run.fetch(argv)
+                self.assertEqual(result['data']['bars']['AAA'][0]['c'], 100)
+                self.assertFalse(result['complete'])
+                self.assertEqual(result['pagination']['error']['code'], 'rate_limited')
+                self.assertEqual(run.stopped, {'alpaca': 'rate_limited'})
+                self.assertEqual(blocked['error']['code'], 'rate_limited')
+                self.assertEqual(len(calls), 2)
+
     def test_invalid_symbol_bars_do_not_discard_unrelated_discovery_candidates(self):
         import market_prices
 

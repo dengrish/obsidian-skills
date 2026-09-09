@@ -116,6 +116,20 @@ class AssetTests(unittest.TestCase):
         self.assertEqual(self.posts[0]['assets'], self.posts[1]['assets'])
         self.assertEqual(len(self.fetch.calls), 1)
 
+    def test_later_post_metadata_repairs_shared_photo_without_rereading_old_post(self):
+        self.posts[0].pop('media')
+        self.assertEqual(self.collect()['metadata_unavailable'], 1)
+        self.posts.append(post(identity='124'))
+        result = self.collect()
+        self.assertEqual(result['downloaded'], 1)
+        self.assertEqual(result['metadata_unavailable'], 0)
+        self.assertEqual(self.fetch.calls, ['https://pbs.twimg.com/media/a.png'])
+        self.assertEqual(self.posts[0]['assets'], self.posts[1]['assets'])
+        for source in self.posts:
+            self.assertIn('![[Sources/Images/', '\n'.join(media.render_assets(source, self.receipts)))
+        self.assertEqual(self.collect()['reused'], 1)
+        self.assertEqual(len(self.fetch.calls), 1)
+
     def test_pdf_url_captured_per_post_and_deduplicated_within_post(self):
         url = {'expanded_url': 'https://example.com/current-report.pdf'}
         self.posts = [{'id': '123', 'entities': {'urls': [url]}, 'long_post_entities': {'urls': [url]}},

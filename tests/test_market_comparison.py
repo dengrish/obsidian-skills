@@ -266,6 +266,16 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(result['state'], 'pending')  # August 3 is not a synthetic session.
         self.assertEqual(comparison.month_target(comparison.parse_date('2024-01-31'), 1).isoformat(), '2024-02-29')
 
+    def test_closed_session_waits_for_full_daily_interval_before_observation(self):
+        bundle = observation_fixture()
+        bundle['as_of'] = '2024-08-02T16:30:00-04:00'
+        result = comparison.evaluate(self.card, '2024-05-01T11:31:00-04:00', bundle, '3m')
+        self.assertEqual(result['state'], 'pending')
+        self.assertIn('daily price interval', result['reason'])
+        self.assertIsNone(comparison.observation_markdown(result, '2024-08-02-stock-research')['detail_markdown'])
+        bundle['as_of'] = '2024-08-03T00:00:00-04:00'
+        self.assertEqual(comparison.evaluate(self.card, '2024-05-01T11:31:00-04:00', bundle, '3m')['state'], 'observed')
+
     def test_frozen_month_cannot_be_replaced_and_missed_month_cannot_pick_late_winners(self):
         self.save_formation()
         late = self.vault / 'draft.md'

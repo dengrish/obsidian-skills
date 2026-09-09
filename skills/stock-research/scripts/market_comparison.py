@@ -598,6 +598,9 @@ def evaluate(card, published_at, bundle, horizon):
         return {'state': 'pending', 'reason': 'The first target-date regular close has not completed.',
                 'target_date': target.isoformat()}
     endpoint = endpoints[0]
+    if not full_daily_bar_available(endpoint[0], cutoff):
+        return {'state': 'pending', 'reason': 'The endpoint daily price interval has not fully elapsed.',
+                'target_date': target.isoformat()}
     bars, requested, complete, warnings, sources, ignored, mapping = market_screen._prices(bundle['prices'], cutoff, dates)
     if mapping.isoformat() != card['metadata']['Symbol mapping date']:
         fail('comparison prices must preserve the formation symbol-mapping date')
