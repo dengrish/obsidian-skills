@@ -14,18 +14,33 @@ python3 '<skill>/scripts/stock_feed.py' context --vault '<vault>' --cutoff '<cut
 
 The JSON snapshot identifies the checked roster, per-account publication and
 coverage status, eligible posts and originating-post groups. It reads the saved
-collection state and verifies the corresponding published account notes. Only
-checked accounts in `Investments/x-accounts.md` supply new ideas; old untracked
-accounts may remain in collection state without authorizing their use. Feed notes,
+collection state and verifies the corresponding published source notes. Only
+checked accounts in `Investments/x-accounts.md` and feeds in
+`Investments/rss-feeds.md` supply new ideas; old untracked sources may remain in
+collection state without authorizing their use. Either roster can be used alone. Feed notes,
 state, attachments and the roster remain unchanged. Missing state, divergent note
 bytes or malformed records are reported, never repaired by this consumer.
 
-Default intake covers the preceding 72 hours. Pass `--since '<earlier timestamp>'`
+Default X intake covers the preceding 72 hours by post date. RSS intake uses
+the observation time of each saved article revision, so a newly collected older
+article or revision is not silently skipped. Preserve its separate publication
+date; first observation does not make an old catalyst current.
+Pass `--since '<earlier timestamp>'`
 when previous research records identify a still-relevant unreviewed saved window.
 It can recover only material that feed-collect retained; this does not request
 more X history. Publication time, observation availability and the cutoff constrain
 which post text is usable. Current note metadata or a pre-cutoff post date alone
 cannot prove that later text was known at an earlier cutoff.
+
+RSS articles have a stable `rss:<URL hash>` identity and a separate
+`rss:<URL hash>@<revision hash>` evidence ID. Use the exact evidence ID in coverage
+journals and retained-source requests. Unchanged polling does not create new work;
+a new revision requires checking what changed, with unchanged arguments linked to
+their earlier assessment. Do not substitute the current article for an earlier
+revision at a historical cutoff. A summary-only feed or missing image may leave
+the thesis unavailable. Preserve that limit rather than supplying imagined text.
+An X post linking to an RSS article and the article itself may be the same argument,
+not independent confirmation; retain both source identities when reconciling them.
 
 Inspect each account's missing, stale, partial and attachment diagnostics. A
 newly followed account without a note was not checked successfully; an account
@@ -38,6 +53,13 @@ Read the actual post Markdown and distinguish original text, added quote comment
 and referenced/reposted content. Origin groups help avoid double counting; they
 do not establish the truth or independence of a claim. Preserve original post IDs,
 permalinks, collecting/original authors and timestamps beside material findings.
+Read retained self-replies in publication order with their parent/conversation
+links, within the same author's evidence. A shared conversation ID does not prove
+common authorship or a complete thread. The intake snapshot marks missing parent
+or root context; do not invent it or count continuations as independent endorsers.
+Keep every post's coverage disposition, while one assessment can address the
+linked argument across several posts. Earlier filtered intervals remain a source
+gap, not proof that an author posted no supporting reasoning.
 Use the research method's bounded linked-source follow-up for a post whose
 argument is in a public article or saved attachment. A teaser is not proof of a
 buying case, but inaccessible material is not evidence that no argument exists.

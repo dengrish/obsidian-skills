@@ -37,18 +37,35 @@ API credentials, stored post bodies and collector state do not belong in Git.
 
 The [official timeline guide](https://docs.x.com/x-api/posts/timelines/integrate)
 documents `GET /2/users/{id}/tweets`, incremental IDs and pagination. New timeline
-windows use `exclude=replies`: original posts, quote posts and reposts are eligible,
-but replies, self-replies and thread continuations are not. The documented timeline
-ceiling with replies excluded is **800 recent posts**, not a complete historical
-archive. This can limit coverage even within a three-day window for a prolific
-account. Provider visibility limits or deleted posts can also leave gaps even
-when pagination ends.
+windows omit `exclude` and request `in_reply_to_user_id` alongside author,
+reference and conversation metadata. Original posts, quote posts, reposts and
+self-replies are eligible. A self-reply must have one `replied_to` parent and
+`in_reply_to_user_id` equal to the account's verified numeric ID. Do not infer this
+from text, mentions, handles or `conversation_id`; a conversation can contain
+many authors. Replies to other users are filtered locally. Unknown targets or
+ambiguous reply metadata are excluded with a diagnostic, not guessed.
+See the [field definitions](https://docs.x.com/x-api/fundamentals/data-dictionary).
 
-An unfinished window created with `exclude=retweets,replies` retains that exact
-filter when resumed. Only newly opened windows switch to including reposts.
-Do not reset cursors, change a query mid-pagination or reread completed intervals
-to recover previously excluded reposts. Historical repost coverage remains
-limited by the filter used at the time of collection.
+X has no timeline filter for only other people's replies. All returned rows,
+including locally excluded replies, can incur charges and consume a returned-post
+budget. The documented unfiltered ceiling is **3,200 recent posts**, versus
+**800** with `exclude=replies`; neither proves complete historical coverage.
+This can limit even a three-day window for a prolific account. Visibility limits
+or deleted posts can leave gaps when pagination ends.
+
+An unfinished window created with `exclude=replies` or `exclude=retweets,replies`
+retains its exact filter and requested fields when resumed, including a saved
+paid-response recovery. Only newly opened windows use the new policy. Do not
+reset cursors, change a query mid-pagination or reread completed intervals to
+recover previously excluded replies or reposts. Preserve that historical coverage
+limitation rather than treating an old completion as proof of full thread capture.
+
+Each self-reply keeps its own timestamp, body and attachments, with a `Self-reply`
+permalink, `Parent post` link and a `Conversation` link when available. Notes remain
+in chronological order; follow retained parent links to trace a thread. These links
+are context, not requests: no extra parent/root lookups or conversation searches
+are performed. The root may be older than 72 hours, missing, deleted or another
+author's post. Do not reconstruct missing text or label a thread complete.
 
 ## Account descriptions
 
@@ -190,7 +207,7 @@ divided into equal per-account allocations.
   cursor with a different query.
 - Deduplicate post IDs locally, including repeated rows returned by X. This
   prevents duplicate records; it cannot undo a provider's charge for duplicates
-  that the provider itself returned. Replies, and reposts excluded by an older
+  that the provider itself returned. Ineligible replies, and reposts excluded by an older
   window's filter, are not added to the account record, but still count toward
   the returned-post budget and cursor advancement so they do not cause repeated
   requests. Keep each repost's own ID rather than deduplicating it against the
@@ -199,6 +216,10 @@ divided into equal per-account allocations.
   row-accounting totals after processing. Source text and credentials do not
   belong in these operational receipts. Old request records without this
   breakdown remain unknown; do not invent historical exclusion counts.
+  New receipts separate replies to other accounts, unavailable targets, ambiguous
+  metadata and exclusions required by an older saved filter. Ordinary local
+  filtering is expected, not an unexpected server-filter failure. Report unknown
+  or ambiguous targets and earlier filtered history without inventing completeness.
 - Do not automatically retry a network timeout or an interrupted in-flight
   request. The server may already have returned billable data.
 
@@ -305,7 +326,6 @@ automatically. The same explicit maintenance command can retrieve a latest ID
 already established by the stored edit history. An arbitrary unknown ID remains
 outside this command's scope. Old versions never replace a newer recorded one.
 
-Blogs, newsletters and Substack are future adapters, not fallbacks. Implement
-their own stable item IDs, conditional retrieval, source timestamps, licensing
-and paid-access boundaries before collecting their bodies. Other skills may
-later consume these source notes for interpretation; this adapter does not.
+Blogs and newsletters use the separate [RSS/Atom adapter](rss-atom.md) when their
+feed is enabled. It is not an X access fallback and does not follow links from
+these posts automatically. Collection remains separate from interpretation.

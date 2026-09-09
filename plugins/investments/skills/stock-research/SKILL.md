@@ -14,8 +14,9 @@ is a useful result. A thesis becoming invalid is a change to its buying rational
 not a recommendation to sell an assumed holding. Do not review the user's current
 portfolio, recommend sales or rebalancing, or place trades; those are separate tasks.
 
-The user runs `feed-collect`, then this skill. Read its saved account notes and
-collection receipts; do not invoke collection, call X or ShadowAlpha, or broaden
+The user runs `feed-collect`, then this skill. Read its saved X account notes,
+RSS/Atom articles and collection receipts; do not invoke collection, poll feeds,
+call X or ShadowAlpha, or broaden
 the idea source independently. Continue earlier theses even when their accounts
 are no longer followed. An explicitly user-named stock is a labeled override,
 not permission to add other stocks.

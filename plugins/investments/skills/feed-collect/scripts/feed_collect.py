@@ -77,17 +77,18 @@ HANDLE = re.compile(r'[A-Za-z0-9_]{1,15}\Z')
 ID = re.compile(r'[0-9]{1,25}\Z')
 LIMIT = 64 * 1024 * 1024
 API_RESPONSE_LIMIT = 8 * 1024 * 1024
-EXCLUDE = 'replies'
-# Finish already-purchased pagination with its original filter. New windows
-# include reposts without refetching earlier filtered history.
-TIMELINE_FILTERS = (EXCLUDE, 'retweets,replies')
+EXCLUDE = None  # No transport parameter: filter replies to other users locally.
+# Finish already-purchased pagination with its original filter and fields.
+TIMELINE_FILTERS = (EXCLUDE, 'replies', 'retweets,replies')
+REPLY_EXCLUSIONS = ('other_account', 'target_unavailable', 'ambiguous_metadata', 'legacy_filter')
 # Keep historical excluded-repost counts readable after enabling reposts.
 ROW_CATEGORIES = ('excluded_replies', 'excluded_reposts', 'duplicate_rows',
                   'merged_versions', 'updated_existing_posts', 'newly_stored_posts')
 SAFE_QUERY_KEYS = {'max_results', 'tweet.fields', 'post.fields', 'media.fields', 'expansions',
                    'start_time', 'end_time', 'since_id', 'until_id', 'exclude', 'pagination_token', 'ids'}
-FIELDS = ('id,text,author_id,created_at,note_tweet,attachments,entities,media_metadata,'
-          'referenced_tweets,conversation_id,edit_history_tweet_ids,withheld')
+LEGACY_FIELDS = ('id,text,author_id,created_at,note_tweet,attachments,entities,media_metadata,'
+                 'referenced_tweets,conversation_id,edit_history_tweet_ids,withheld')
+FIELDS = LEGACY_FIELDS + ',in_reply_to_user_id'
 MEDIA_FIELDS = 'media_key,type,url,alt_text,width,height'
 
 
@@ -256,6 +257,21 @@ def validated_references(value):
     return value
 
 
+def is_self_reply(post, account_id):
+    """Recognize only reply metadata bound to this verified account identity."""
+    if not isinstance(post, dict) or post.get('in_reply_to_user_id') != account_id:
+        return False
+    references = post.get('references', [])
+    if not isinstance(references, list) or any(not isinstance(ref, dict) for ref in references):
+        return False
+    parents = [ref for ref in references if ref.get('type') == 'replied_to']
+    conversation = post.get('conversation_id')
+    return (isinstance(account_id, str) and bool(ID.fullmatch(account_id)) and len(parents) == 1
+            and isinstance(parents[0].get('id'), str) and bool(ID.fullmatch(parents[0]['id']))
+            and not any(ref.get('type') == 'retweeted' for ref in references)
+            and (conversation is None or isinstance(conversation, str) and bool(ID.fullmatch(conversation))))
+
+
 def validate_profile(profile):
     if (not isinstance(profile, dict) or not isinstance(profile.get('description'), str)
             or not profile['description'].strip() or len(profile['description']) > 2000
@@ -334,7 +350,7 @@ def validate_state(data):
         if window is not None:
             if not isinstance(window, dict) or not {'start', 'end', 'next_token', 'seen_tokens', 'max_id'} <= window.keys():
                 raise FeedError('invalid_saved_window')
-            if window.get('exclude') not in TIMELINE_FILTERS:
+            if 'exclude' not in window or window['exclude'] not in TIMELINE_FILTERS:
                 raise FeedError('incompatible_saved_timeline_filter')
             if ((window['start'] is not None and instant(window['start']) >= instant(window['end']))
                     or not isinstance(window['seen_tokens'], list)):
@@ -351,9 +367,12 @@ def validate_state(data):
                 raise FeedError('invalid_saved_window_boundary')
             if window.get('completed_through') is not None:
                 timestamp(window['completed_through'])
-            if 'fields' in window and window['fields'] not in (
-                    {'tweet.fields': FIELDS}, {'tweet.fields': FIELDS,
-                     'expansions': 'attachments.media_keys', 'media.fields': MEDIA_FIELDS}):
+            allowed_fields = (FIELDS,) if window['exclude'] is None else (LEGACY_FIELDS, FIELDS)
+            if ((window['exclude'] is None and 'fields' not in window)
+                    or 'fields' in window and window['fields'] not in tuple(
+                        selection for fields in allowed_fields for selection in (
+                            {'tweet.fields': fields}, {'tweet.fields': fields,
+                             'expansions': 'attachments.media_keys', 'media.fields': MEDIA_FIELDS}))):
                 raise FeedError('invalid_saved_field_selection')
             if window['next_token'] is not None and not re.fullmatch(r'[A-Za-z0-9_-]{1,2048}', str(window['next_token'])):
                 raise FeedError('invalid_saved_pagination')
@@ -378,6 +397,8 @@ def validate_state(data):
             if post['status'] == 'available' and not isinstance(post.get('text'), str):
                 raise FeedError('invalid_stored_post_text')
             validated_references(post.get('references', []))
+            if 'in_reply_to_user_id' in post and not is_self_reply(post, account['id']):
+                raise FeedError('invalid_stored_self_reply')
     for request in data['requests']:
         if not isinstance(request, dict):
             raise FeedError('invalid_request_history')
@@ -389,6 +410,12 @@ def validate_state(data):
                     or any(type(value) is not int or value < 0 for value in counts.values())
                     or sum(counts.values()) != request.get('returned_posts')):
                 raise FeedError('invalid_request_row_accounting')
+        if 'reply_exclusions' in request:
+            reasons = request['reply_exclusions']
+            if (not isinstance(reasons, dict) or set(reasons) != set(REPLY_EXCLUSIONS)
+                    or any(type(value) is not int or value < 0 for value in reasons.values())
+                    or sum(reasons.values()) != request.get('row_counts', {}).get('excluded_replies')):
+                raise FeedError('invalid_reply_exclusion_accounting')
     pending = data['pending']
     if pending is not None:
         if (not isinstance(pending, dict) or not {'kind', 'handle', 'path', 'query', 'started_at', 'request_id'} <= pending.keys()
@@ -399,9 +426,12 @@ def validate_state(data):
             raise FeedError('pending_identity_missing')
         if pending['kind'] == 'timeline':
             window = data['accounts'][pending['handle']]['window']
-            if (pending['query'].get('exclude') not in TIMELINE_FILTERS or window is None
-                    or pending['query']['exclude'] != window['exclude']):
+            if (window is None or (window['exclude'] is None and 'exclude' in pending['query'])
+                    or (window['exclude'] is not None and pending['query'].get('exclude') != window['exclude'])):
                 raise FeedError('incompatible_saved_timeline_filter')
+            if 'fields' in window and {key: pending['query'][key] for key in
+                    ('tweet.fields', 'post.fields', 'expansions', 'media.fields') if key in pending['query']} != window['fields']:
+                raise FeedError('incompatible_saved_timeline_fields')
     return data
 
 
@@ -574,7 +604,7 @@ def paid_request(store, kind, handle, path, query, bearer, fetch):
     return pending
 
 
-def finish_request(store, pending, count=0, row_counts=None):
+def finish_request(store, pending, count=0, row_counts=None, reply_exclusions=None):
     store.data['requests'].append({key: pending[key] for key in
                                   ('kind', 'handle', 'started_at', 'request_id', 'received_at') if key in pending})
     store.data['requests'][-1]['returned_posts'] = count
@@ -584,6 +614,8 @@ def finish_request(store, pending, count=0, row_counts=None):
         if sum(row_counts.values()) != count:
             raise FeedError('row_accounting_mismatch')
         store.data['requests'][-1]['row_counts'] = row_counts
+    if reply_exclusions is not None:
+        store.data['requests'][-1]['reply_exclusions'] = reply_exclusions
     store.data['pending'] = None
     store.save()
 
@@ -620,7 +652,7 @@ def validate_bindings(store, items):
             seen.add(account['id'])
 
 
-def normalize_post(post, expected_id, retrieved, media=None, *, exclude_reposts=False):
+def normalize_post(post, expected_id, retrieved, media=None, *, exclude_reposts=False, exclude_replies=False):
     if not isinstance(post, dict) or not isinstance(post.get('id'), str) or not ID.fullmatch(post['id']):
         raise FeedError('invalid_post_id')
     if post.get('author_id') != expected_id:
@@ -637,18 +669,35 @@ def normalize_post(post, expected_id, retrieved, media=None, *, exclude_reposts=
     if not isinstance(post.get('attachments', {}), dict) or not isinstance(post.get('entities', {}), dict):
         raise FeedError('invalid_post_metadata')
     created = timestamp(post.get('created_at'))
-    reply = any(reference['type'] == 'replied_to' for reference in references)
-    if reply or exclude_reposts and any(reference['type'] == 'retweeted' for reference in references):
+    parents = [reference for reference in references if reference['type'] == 'replied_to']
+    target = post.get('in_reply_to_user_id')
+    reply = bool(parents) or target is not None
+    reply_reason = None
+    if reply:
+        if exclude_replies:
+            reply_reason = 'legacy_filter'
+        elif len(parents) != 1 or any(ref['type'] == 'retweeted' for ref in references):
+            reply_reason = 'ambiguous_metadata'
+        elif not isinstance(target, str) or not ID.fullmatch(target):
+            reply_reason = 'target_unavailable'
+        elif target != expected_id:
+            reply_reason = 'other_account'
+        elif post.get('conversation_id') is not None and (
+                not isinstance(post['conversation_id'], str) or not ID.fullmatch(post['conversation_id'])):
+            reply_reason = 'ambiguous_metadata'
+    if reply_reason or exclude_reposts and any(reference['type'] == 'retweeted' for reference in references):
         # Keep the saved window's filter if a provider still returns an excluded row;
         # retain only enough metadata to advance the cursor, never its body.
         return {'id': post['id'], 'created_at': created, 'source_created_at': post['created_at'],
                 'first_retrieved_at': retrieved, 'last_checked_at': retrieved,
                 'status': 'excluded', 'edit_history_ids': edits,
-                'excluded_reason': 'reply' if reply else 'repost'}
+                'excluded_reason': 'reply' if reply_reason else 'repost',
+                **({'reply_exclusion': reply_reason} if reply_reason else {})}
+    reply_metadata = {'in_reply_to_user_id': target, 'conversation_id': post.get('conversation_id')} if reply else {}
     if post.get('withheld'):
         return {'id': post['id'], 'created_at': created, 'source_created_at': post['created_at'], 'first_retrieved_at': retrieved,
                 'last_checked_at': retrieved, 'status': 'withheld', 'withheld': post['withheld'],
-                'edit_history_ids': edits, 'references': references}
+                'edit_history_ids': edits, 'references': references, **reply_metadata}
     text = post.get('text')
     long = post.get('note_tweet', post.get('note_post'))
     if isinstance(long, dict) and isinstance(long.get('text'), str):
@@ -666,6 +715,7 @@ def normalize_post(post, expected_id, retrieved, media=None, *, exclude_reposts=
             'media_metadata': post.get('media_metadata', {}),
             'edit_history_ids': edits,
             'conversation_id': post.get('conversation_id'), 'withheld': post.get('withheld')}
+    result.update(reply_metadata)
     if media is not None:
         keys = post.get('attachments', {}).get('media_keys', [])
         if not isinstance(keys, list) or any(not isinstance(key, str) for key in keys):
@@ -723,16 +773,20 @@ def apply_response(store):
     if not isinstance(rows, list):
         raise FeedError('invalid_posts_response')
     media = response_media(response)
-    exclude_reposts = pending['kind'] == 'timeline' and pending['query']['exclude'] == 'retweets,replies'
+    saved_filter = pending['query'].get('exclude') if pending['kind'] == 'timeline' else None
+    exclude_reposts = saved_filter == 'retweets,replies'
     normalized = [normalize_post(post, account['id'], pending['received_at'], media,
-                                 exclude_reposts=exclude_reposts) for post in rows]
+                                 exclude_reposts=exclude_reposts, exclude_replies=saved_filter is not None) for post in rows]
     unique = {}
     row_counts = dict.fromkeys(ROW_CATEGORIES, 0)
+    reply_exclusions = dict.fromkeys(REPLY_EXCLUSIONS, 0)
     for post in normalized:
         if post['id'] in unique and unique[post['id']] != post:
             raise FeedError('conflicting_duplicate_post_rows')
         if post['status'] == 'excluded':
             row_counts['excluded_replies' if post['excluded_reason'] == 'reply' else 'excluded_reposts'] += 1
+            if post['excluded_reason'] == 'reply':
+                reply_exclusions[post['reply_exclusion']] += 1
         elif post['id'] in unique:
             row_counts['duplicate_rows'] += 1
         unique[post['id']] = post
@@ -882,7 +936,7 @@ def apply_response(store):
                 account['posts'][identity].update(status='unavailable', last_checked_at=pending['received_at'])
     else:
         raise FeedError('unknown_saved_request_kind')
-    finish_request(store, pending, len(rows), row_counts)
+    finish_request(store, pending, len(rows), row_counts, reply_exclusions)
     return len(rows)
 
 
@@ -995,9 +1049,16 @@ def render(account, assets=None):
              '---', '']
     for post in sorted(account['posts'].values(), key=lambda item: (instant(item['created_at']), int(item['id']))):
         reposts = [reference for reference in post.get('references', []) if reference['type'] == 'retweeted']
-        label = 'Repost' if reposts else 'Original post'
+        parents = [reference for reference in post.get('references', []) if reference['type'] == 'replied_to']
+        self_reply = is_self_reply(post, account['id'])
+        label = 'Self-reply' if self_reply else 'Repost' if reposts else 'Original post'
         lines.extend(['## ' + timestamp(post['created_at']).replace('T', ' ').replace('Z', ' UTC'), '',
                       '[' + label + '](https://x.com/i/web/status/' + post['id'] + ')', ''])
+        if self_reply:
+            links = '[Parent post](https://x.com/i/web/status/' + parents[0]['id'] + ')'
+            if post.get('conversation_id'):
+                links += ' · [Conversation](https://x.com/i/web/status/' + post['conversation_id'] + ')'
+            lines.extend([links, '', 'Thread context may be incomplete; parent and earlier posts are not fetched separately.', ''])
         if reposts:
             lines.extend('Reposted by @' + account['handle'] + ': [Source post](https://x.com/i/web/status/'
                          + reference['id'] + ').' for reference in reposts)
@@ -1221,6 +1282,8 @@ def prepare_recent(account, floor, cutoff):
     for key in ('exclude', 'fields', 'max_id', 'oldest_id', 'oldest_at', 'oldest_is_edit', 'until_id', 'completed_through'):
         if key in window:
             replacement[key] = window[key]
+    if 'fields' not in window:
+        replacement.pop('fields')  # Preserve the legacy default selection, too.
     if window.get('oldest_id'):
         replacement['until_id'] = window['oldest_id']
     # until_id is exclusive and replaces the old end_time. It resumes below
@@ -1285,16 +1348,37 @@ def advance_sample(account):
 
 def request_accounting(requests):
     totals = dict.fromkeys(ROW_CATEGORIES, 0)
+    reply_exclusions = dict.fromkeys(REPLY_EXCLUSIONS, 0)
     legacy = 0
+    unexpected = 0
+    legacy_filters, self_reply_queries, unknown_filters = [], [], []
     for request in requests:
         if 'row_counts' in request:
             for key in ROW_CATEGORIES:
                 totals[key] += request['row_counts'].get(key, 0)
         else:
             legacy += request.get('returned_posts', 0)
+        for key in REPLY_EXCLUSIONS:
+            reply_exclusions[key] += request.get('reply_exclusions', {}).get(key, 0)
+        if request.get('query', {}).get('exclude') is not None:
+            unexpected += sum(request.get('row_counts', {}).get(key, 0) for key in ('excluded_replies', 'excluded_reposts'))
+        if request.get('kind') == 'timeline':
+            query = request.get('query', {})
+            if query.get('exclude') in ('replies', 'retweets,replies'):
+                legacy_filters.append(query)
+            elif 'exclude' not in query and 'in_reply_to_user_id' in query.get('tweet.fields', '').split(','):
+                self_reply_queries.append(query)
+            else:
+                unknown_filters.append(query)
     return {'row_counts': totals, 'legacy_unclassified_rows': legacy,
+            'reply_exclusions': reply_exclusions,
+            'reply_collection': {'legacy_filtered_requests': len(legacy_filters),
+                                 'self_reply_enabled_requests': len(self_reply_queries),
+                                 'unknown_filter_requests': len(unknown_filters),
+                                 'first_self_reply_window_start': self_reply_queries[0].get('start_time') if self_reply_queries else None,
+                                 'prior_filtered_history_not_backfilled': bool(legacy_filters)},
             'accounted_returned_rows': sum(totals.values()) + legacy,
-            'unexpected_filter_rows': totals['excluded_replies'] + totals['excluded_reposts']}
+            'unexpected_filter_rows': unexpected}
 
 
 def process_attachments(store, items, args, *, download):
@@ -1391,8 +1475,10 @@ def collect(args, fetch=request_json, record=None):
             sample = account.get('sample')
             if sample and sample['status'] == 'in_progress' and not sample.get('pending_forward_window'):
                 page_size = min(page_size, max(5, sample['target'] - available_count(account)))
-            query = {'max_results': page_size, **window.get('fields', {'tweet.fields': FIELDS}),
-                     'end_time': window['end'], 'exclude': window['exclude']}
+            query = {'max_results': page_size, **window.get('fields', {'tweet.fields': LEGACY_FIELDS}),
+                     'end_time': window['end']}
+            if window['exclude'] is not None:
+                query['exclude'] = window['exclude']
             boundary_id = window.get('since_id', account['since_id'])
             if boundary_id:
                 query['since_id'] = boundary_id
@@ -1618,6 +1704,16 @@ def run_self_test():
             self.assertGreater(instant(post['created_at']), instant('2026-09-07T08:00:00Z'))
             with self.assertRaises(FeedError):
                 timestamp('2026-09-07')
+        def test_self_reply_requires_verified_target_and_keeps_parent(self):
+            source = {'id': '123', 'author_id': '12', 'created_at': '2026-09-07T01:00:00Z', 'text': 'continuation',
+                      'in_reply_to_user_id': '12', 'referenced_tweets': [{'id': '122', 'type': 'replied_to'}]}
+            post = normalize_post(source, '12', '2026-09-07T10:00:00Z')
+            self.assertTrue(is_self_reply(post, '12'))
+            self.assertEqual(post['references'][0]['id'], '122')
+            source['in_reply_to_user_id'] = '13'
+            self.assertEqual(normalize_post(source, '12', '2026-09-07T10:00:00Z')['reply_exclusion'], 'other_account')
+            source.pop('in_reply_to_user_id')
+            self.assertEqual(normalize_post(source, '12', '2026-09-07T10:00:00Z')['reply_exclusion'], 'target_unavailable')
         def test_roster_ignores_examples(self):
             with tempfile.TemporaryDirectory() as folder:
                 path = Path(folder).resolve() / 'accounts.md'
@@ -1693,13 +1789,12 @@ def run_self_test():
                                  lambda *args: {'data': {'id': '12', 'username': 'actual'}})
                     apply_response(store)
                     account = store.data['accounts']['actual']
-                    account['window'] = {'start': '2026-09-01T00:00:00Z', 'end': '2026-09-07T00:00:00Z',
-                                         'max_id': None, 'next_token': None, 'seen_tokens': [], 'exclude': EXCLUDE}
+                    account['window'] = new_window('2026-09-01T00:00:00Z', '2026-09-07T00:00:00Z')
                     row = {'id': '123', 'author_id': '12', 'created_at': '2026-09-06T00:00:00Z',
                            'text': 'preview', 'note_post': {'text': 'complete source'}}
                     response = {'data': [row, row], 'meta': {'result_count': 2}}
                     paid_request(store, 'timeline', 'actual', '/2/users/12/tweets',
-                                 {'max_results': 5, 'exclude': EXCLUDE}, 'secret', lambda *args: response)
+                                 {'max_results': 5, **account['window']['fields']}, 'secret', lambda *args: response)
                 with Store(Path(folder).resolve()) as store:
                     self.assertEqual(apply_response(store), 2)
                     account = store.data['accounts']['actual']
