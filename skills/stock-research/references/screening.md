@@ -43,20 +43,30 @@ company catalyst; retain both times and treat the original as dated background.
 Use source links rather than temporary snapshot paths in published notes. Retain
 only the decisive attributed claim and verification; do not republish full feeds.
 
-Compare the eligible posts with prior daily nomination dispositions and stock
-notes. Reuse an unchanged assessment by link; revisit changed evidence or a due
-check. Every substantive new nomination gets a disposition: analyzed, deferred,
-already covered or excluded, with a concise reason. A mere ticker mention is not
-a completed analysis and does not require a stock note. Retain processed post IDs
-and their dispositions in the daily record; compare overlapping windows without
-adding a mutable collection cursor. Keep exact account/post
-counts distinct from idea, stock and fully analyzed counts.
+Reconcile eligible posts with the durable [coverage record](coverage.md) and
+verified earlier assessments. Every eligible new substantive stock idea receives
+a standard initial assessment; there is no top-three or top-ten research quota.
+Several new arguments about the same security can share one assessment, provided
+each argument is addressed and its source relationship retained. An unchanged
+argument reuses its earlier assessment by link. A new material argument about an
+already covered stock requires evaluating the change, not restarting all research.
+
+Screen out passing mentions, duplicates and positively ineligible securities with
+the applicable evidence or earlier-assessment link. Missing identity, price or
+financial data is an unresolved check, not proof of ineligibility. Do not count a
+ticker mention, a screen result or a capacity deferral as a completed assessment.
+The coverage guide governs unresolved work, original queue age, retry conditions
+and same-day reuse. Preserve processed post IDs and dispositions in the daily
+record; keep account/post, distinct idea, security and completed-assessment counts
+separate. Overlapping windows do not require a mutable collection cursor.
 
 ## Prepare targeted price evidence
 
-Freeze the nominated identities and reasons before price ranking. Add prior open
-theses and explicitly requested companies as labeled origins, never unmentioned
-stocks found during primary-source verification. Resolve exchange, issuer, share
+Freeze the nominated identities and reasons before price ranking. Include earlier
+unfinished work, prior active theses due for checks and explicitly requested
+companies as labeled origins, never unmentioned stocks found during primary-source
+verification. Reuse adequate cutoff-eligible measurements instead of reacquiring
+every existing stock note. Resolve exchange, issuer, share
 class and currency using issuer/exchange evidence; `market_data.py symbols` may
 help resolve identity, but downloading a directory does not expand the candidate
 set. Retain unresolved identities and unmeasured names as gaps.
@@ -119,12 +129,13 @@ provider responses cannot be repaired with zeroes or shortened lookbacks.
 
 The 20-session average of daily VWAP × volume is a **daily notional proxy**.
 Alpaca's daily volume includes eligible extended-hours activity; it does not
-verify regular-session turnover. For the shortlist, use the bundled calculator:
+verify regular-session turnover. For candidates whose eligibility needs
+verification, use the bundled calculator:
 
 ```bash
 python3 '<skill>/scripts/market_universe.py' liquidity \
-  --prices '<scratch>/shortlist-minute.json' --sessions '<scratch>/sessions.json' \
-  --as-of '<cutoff>' --symbols '<shortlist-symbols>' \
+  --prices '<scratch>/eligibility-minute.json' --sessions '<scratch>/sessions.json' \
+  --as-of '<cutoff>' --symbols '<candidate-symbols>' \
   --market-caps '<scratch>/market-caps.json' > '<scratch>/eligibility.json'
 ```
 
@@ -172,7 +183,8 @@ passing candidates with a failed or incomplete screen.
 
 In the daily Research record retain the universe definition, exact rules, input,
 rule and calculator digests, cutoff/reference session, coverage counts, and the
-measurements and source observations needed to reproduce shortlisted or decisive exclusions.
+measurements and source observations needed to reproduce assessed candidates or
+decisive exclusions.
 A digest identifies input; it does not preserve that input. Keep relevant dated
 values in the note or an already authorized durable source, with source URLs and
 adjustment definitions. Do not cite temporary JSON paths after scratch cleanup

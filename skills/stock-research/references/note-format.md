@@ -10,6 +10,9 @@ immutable daily editions preserve the evidence and judgments at each cutoff.
 Historical `*-market-research.md` notes with `market_research: 1` and a `Market
 research` H1 remain valid read-only history. Do not rename them, relabel their
 provenance or rewrite their links merely because the skill has been renamed.
+Earlier `stock_research: 1` editions also remain readable and can be retried
+unchanged. New editions use `stock_research: 2`, adding the visible
+[coverage journals](coverage.md) without changing the two-part outline.
 
 Each note has two parts: a short **Decision brief** for the user and a detailed
 **Research record** for future research. Both are visible Markdown in the same
@@ -34,7 +37,7 @@ Start a run with the installed `market_notes.py prepare --vault '<vault>'
 --work-dir '<scratch>' --mode manual --check evidence-audit` (use `scheduled` for
 scheduled work). It freezes the live cutoff and creates a canonical, unfinished
 `draft.md` plus a private `run.json` receipt in an exclusive subdirectory of the
-owned external scratch folder. Complete any permitted estimate preflight before
+owned external scratch folder. Complete any permitted price/estimate preflight before
 this step; a scheduled evidence cutoff never moves to admit late captures.
 The receipt includes `final-review` automatically. Declare `--check
 independent-review` too when delegating that check; register any additional checker
@@ -69,8 +72,8 @@ them in owned scratch and clean them with the run, never in the vault or report.
 The earlier no-receipt interface remains available for compatible reads and
 retries: `context --mode manual` freezes a nonfuture, whole-second cutoff on the
 current New York date; reuse it with `--mode manual --as-of '<cutoff>'`. Without a
-live receipt, publication still refuses historical backfill. Neither the schema
-nor the two-part layout changes. Identify the edition's cutoff clearly in the brief.
+live receipt, publication still refuses historical backfill. Identify the edition's
+cutoff clearly in the brief; new publications still require the current coverage schema.
 
 History and journals include earlier available editions from the same day,
 ordered chronologically; later cutoffs and notes generated after the selected
@@ -82,7 +85,7 @@ bytes can be retried; a different edition needs a new current cutoff.
 ## Metadata and outline
 
 Use these six frontmatter keys, in this order. `stock_research` is the integer
-schema version `1`; `date` is an ISO date. Quote `as_of` and `generated_at` as ISO
+schema version `2`; `date` is an ISO date. Quote `as_of` and `generated_at` as ISO
 datetimes with explicit UTC offsets, using New York's offset for each timestamp.
 `as_of` is the latest permitted evidence timestamp, not the retrieval time of a
 page. It must not follow `generated_at` and must belong to the note's New York date.
@@ -91,8 +94,9 @@ bounded live run that crosses midnight can have a later generation date.
 
 `session` is `premarket`, `closed`, `intraday`, `after-hours`, or `unknown`, based
 on the verified exchange session at the cutoff. `coverage` is `normal`, `limited`,
-or `unavailable`; normal means the declared feed window and relevant checks were adequate, not
-that every listed stock or all of X was assessed. Explain material missing data in the brief.
+or `unavailable`. Normal requires adequate feed coverage and completion of all
+eligible new assessments and required continuing work. It does not imply that
+every passing ticker mention or all of X was researched. Explain material gaps in the brief.
 No Wiki/source-note frontmatter, flashcards, or review checkboxes are needed.
 
 Keep exactly the two H2 headings and six H3 subsections below, in order. Opening
@@ -110,7 +114,7 @@ The following is a layout template; replace all illustrative values and prose:
 
 ```markdown
 ---
-stock_research: 1
+stock_research: 2
 date: 2026-09-08
 as_of: "2026-09-08T11:30:00-04:00"
 generated_at: "2026-09-08T11:46:00-04:00"
@@ -140,9 +144,24 @@ State the next dated catalyst or observable condition that could qualify an idea
 Record the feed window and account coverage, post nominations and dispositions,
 the checked stock set, dates, filters, primary sources and material data gaps.
 
+#### Coverage history
+
+| Report | SHA256 |
+| --- | --- |
+
+#### Feed dispositions
+
+| Post | Fingerprint | Published | Disposition | Securities | Due | Reason |
+| --- | --- | --- | --- | --- | --- | --- |
+
+#### Research queue
+
+| Security | First seen | State | Priority | Due | Sources | Assessment | Reason |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+
 ### Candidate assessments
 
-Preserve the evidence, observations and concise rationale for shortlisted names,
+Preserve the evidence, observations and concise rationale for assessed names,
 including rejected candidates and what would justify revisiting them. Each
 substantively analyzed stock uses the exact H4/Status structure below and links
 its maintained stock note.
@@ -206,6 +225,12 @@ it from the short brief. Organize each day's relevant material as follows:
   rules and observed counts. Keep actual publication/observation times, decisive
   evidence URLs and material gaps; no full-feed dump or claim of a complete market
   scan. Continuing theses and user-named overrides have separate origins.
+  Use the [coverage journals](coverage.md) for persistent processed-post and work
+  state; reconcile the helper's counts in concise prose. Queued work, blocked
+  checks and partial source intake require `coverage: limited` or `unavailable`,
+  with the specific remaining work named in the brief. A finished initial
+  assessment may conclude `watch`; lack of buying confirmation alone does not
+  mean the assessment is unfinished.
 - **Candidate assessments:** use one H4 per substantively analyzed stock in the
   exact form `#### NASDAQ:AAPL — Apple Inc.` (verified exchange/ticker/company).
   Include exactly one `Status: watch` line, substituting `ready`, `rejected`,
@@ -336,8 +361,9 @@ cells use unpiped wikilinks and avoid literal `|` characters. The subsection
 contains only its table or exact `No active theses.` sentence, with table rows
 starting at column zero. Keep explanatory prose in Candidate assessments.
 
-Keep the active list selective (about ten by default), but never omit an existing
-thesis to meet a count target. Each new thesis records its expected opportunity,
+There is no numerical research or active-thesis quota. Admit a watch only when its
+buying hypothesis merits monitoring, not merely because the stock was assessed;
+never omit an existing thesis to meet a count target. Each new thesis records its expected opportunity,
 next milestone, review-by date and any catalyst/thesis expiry in its initial
 assessment. A watch's monitoring dates are distinct from its prospective buying
 horizon.
@@ -349,7 +375,9 @@ prospective after time on watch. Routine confirmation may qualify the same ID;
 it does not automatically extend catalyst or thesis expiry. If a fixed deadline
 leaves no credible 3–12 month opportunity, keep the idea unready or expire it as
 appropriate. A materially renewed rationale needs a new linked ID. Expire passed
-thesis windows explicitly; revisit aging and invalidated ideas each week.
+thesis windows explicitly. Review active thesis health at least weekly; reconsider
+closed ideas only on material new evidence or their recorded condition/date under
+the coverage guide. Outcome checkpoints continue independently after closure.
 
 The day the last active idea closes must include its terminal row; the next day
 may use `No active theses.`. Preserve prior terminal records for later outcome

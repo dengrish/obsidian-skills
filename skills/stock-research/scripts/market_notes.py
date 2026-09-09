@@ -282,7 +282,7 @@ def lint_bytes(data, expected_date=None):
         raise ValueError('frontmatter must use these exact ordered fields: ' + ', '.join(FIELDS))
     meta = dict(pairs)
     schema = 'stock_research' if 'stock_research' in meta else 'market_research'
-    if meta[schema] != '1':
+    if meta[schema] not in ({'1', '2'} if schema == 'stock_research' else {'1'}):
         raise ValueError('unsupported stock_research schema version')
     day = iso_date(meta['date'])
     if expected_date is not None and day.isoformat() != expected_date:
@@ -312,6 +312,10 @@ def lint_bytes(data, expected_date=None):
         # Historical notes keep their original, pre-dossier layout.
         from stock_dossiers import candidates
         candidates(data)
+        from stock_coverage import parse
+        coverage = parse(data)
+        if meta[schema] == '2' and coverage is None:
+            raise ValueError('stock_research: 2 requires the visible coverage journals')
     ledger = sections['Thesis updates']
     rows = []
     if ledger != 'No active theses.':
@@ -352,6 +356,18 @@ def require_publication_provenance(metadata):
     if metadata.get('generated_by') != active_provenance() or 'updated_by' in metadata:
         raise ValueError('new market-note provenance must identify the executing installed '
                          'stock-research bundle as its creator, without an update record')
+
+
+def require_publication_coverage(vault, draft, note, cutoff, edition):
+    """New editions account for source intake and unfinished work before writing."""
+    if note['metadata'].get('stock_research') != '2':
+        raise ValueError('new editions require stock_research: 2 and its coverage journals; '
+                         'preserve schema-1 history and identical retries')
+    from stock_coverage import check
+    checked = check(vault, draft, cutoff.isoformat(), edition=edition)
+    if not checked.get('complete', False):
+        raise ValueError('coverage accounting is invalid: ' + json.dumps(checked.get('findings', [])))
+    return checked
 
 
 def output_folder(vault, create=False):
@@ -534,7 +550,7 @@ def prepare(vault, work_dir, now=None, mode='scheduled', checks=()):
                    'checks': names}
         _run_write(descriptor, 'key', key)
         _run_write(descriptor, 'run.json', _run_seal(payload, key))
-        draft = ('---\nstock_research: 1\ndate: {date}\nas_of: "{as_of}"\n'
+        draft = ('---\nstock_research: 2\ndate: {date}\nas_of: "{as_of}"\n'
                  'generated_at: "{generated}"\nsession: unknown\ncoverage: unavailable\n---\n'
                  '# Stock research — {date}\n\n## Decision brief\n\n'
                  'DRAFT — research and verification are incomplete.\n\n'
@@ -542,6 +558,13 @@ def prepare(vault, work_dir, now=None, mode='scheduled', checks=()):
                  '### Next checks\n\nDRAFT — verify the next session and dated events.\n\n'
                  '## Research record\n\n### Screening and sources\n\n'
                  'DRAFT — retain checked universe, evidence and coverage.\n\n'
+                 '#### Coverage history\n\n| Report | SHA256 |\n| --- | --- |\n\n'
+                 '#### Feed dispositions\n\n'
+                 '| Post | Fingerprint | Published | Disposition | Securities | Due | Reason |\n'
+                 '| --- | --- | --- | --- | --- | --- | --- |\n\n'
+                 '#### Research queue\n\n'
+                 '| Security | First seen | State | Priority | Due | Sources | Assessment | Reason |\n'
+                 '| --- | --- | --- | --- | --- | --- | --- | --- |\n\n'
                  '### Candidate assessments\n\nDRAFT — assess evidence, confirmation and risks.\n\n'
                  '### Thesis updates\n\nNo active theses.\n\n'
                  '### Outcome review\n\nDRAFT — review continuity, due outcomes and comparisons.\n').format(
@@ -1218,6 +1241,7 @@ def _publish(draft, vault, now=None, mode=None, as_of=None, run_receipt=None):
     if 'stock_research' not in note['metadata']:
         raise ValueError('new editions must use stock_research; historical market_research records are read-only')
     require_publication_provenance(note['provenance'])
+    require_publication_coverage(vault, draft, note, cutoff, edition)
     if run_receipt is not None:
         require_run_checks(run_receipt, vault, data, current)
     vault, folder, folder_identity = output_folder(vault, create=True)
@@ -1277,6 +1301,12 @@ def run_self_test():
             self.provenance_gate = patch(__name__ + '.require_publication_provenance')
             self.provenance_gate.start()
             self.addCleanup(self.provenance_gate.stop)
+            # These schema-1 history fixtures isolate edition/outcome behavior.
+            # Real coverage enforcement is exercised by stock_coverage tests
+            # and the installed-package end-to-end publication scenarios.
+            self.coverage_gate = patch(__name__ + '.require_publication_coverage')
+            self.coverage_gate.start()
+            self.addCleanup(self.coverage_gate.stop)
             self.generator = {'skill': 'investments:stock-research', 'plugin_version': '1.2.0',
                               'source_commit': None, 'source_url': None,
                               'source_status': 'unavailable', 'runtime_sha256': 'f' * 64}

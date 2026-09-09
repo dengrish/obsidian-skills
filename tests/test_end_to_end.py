@@ -30,6 +30,21 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def coverage_journals(reports=(), queue_rows=()):
+    """Visible version-2 journals; historical fixture reports remain unchanged."""
+    anchors = ''.join(f'| [[Investments/{path.stem}]] | {digest(path)} |\n'
+                      for path in reports)
+    rows = ''.join('| ' + ' | '.join(row) + ' |\n' for row in queue_rows)
+    return ('#### Coverage history\n\n| Report | SHA256 |\n| --- | --- |\n'
+            + anchors + '\n#### Feed dispositions\n\n'
+            '| Post | Fingerprint | Published | Disposition | Securities | Due | Reason |\n'
+            '| --- | --- | --- | --- | --- | --- | --- |\n\n'
+            '#### Research queue\n\n'
+            '| Security | First seen | State | Priority | Due | Sources | Assessment | Reason |\n'
+            '| --- | --- | --- | --- | --- | --- | --- | --- |\n'
+            + rows + '\n')
+
+
 def summary_note(stem):
     return f'''---
 title: A synthetic study of one rectangle
@@ -149,6 +164,7 @@ class WorkflowTests(unittest.TestCase):
         env = self.env
         if relative in {"skills/stock-research/scripts/market_notes.py",
                         "skills/stock-research/scripts/stock_dossiers.py",
+                        "skills/stock-research/scripts/stock_coverage.py",
                         "skills/stock-research/scripts/stock_feed.py"}:
             # Publication verifies the complete generated bundle. Exercising the
             # source checkout here would bypass the installed-runtime contract.
@@ -217,6 +233,29 @@ class WorkflowTests(unittest.TestCase):
         body = body.replace("No active theses.", "| Thesis | State | Update / next check |\n"
                             "| --- | --- | --- |\n"
                             f"| NASDAQ:EXAMPLE@{prepared['date']} | watch | Verify synthetic evidence. |")
+        # The real publication path refuses a superficially complete report
+        # that silently omits a collected source and its two stock ideas.
+        draft.write_text(body, encoding="utf-8")
+        _, incomplete = self.stamp_market_draft(draft)
+        refused = self.run_script(daily_helper, "publish", incomplete, "--vault", self.vault,
+                                 "--run-receipt", prepared["run_receipt"], expected=2)
+        self.assertIn('needs a disposition: 101', refused.stdout)
+        incomplete.unlink()  # This refused, temporary stamp is never a published record.
+        planner = json.loads(self.run_script("skills/stock-research/scripts/stock_coverage.py",
+                            "context", "--vault", self.vault, "--as-of", prepared['as_of']).stdout)
+        nomination = planner['new_or_changed_posts'][0]
+        body = body.replace('| --- | --- | --- | --- | --- | --- | --- |\n',
+            '| --- | --- | --- | --- | --- | --- | --- |\n'
+            f"| {nomination['source_url']} | {nomination['fingerprint']} | {nomination['published']} | "
+            'nominated | NASDAQ:EXAMPLE, NASDAQ:OTHER | - | Two synthetic user-visible arguments. |\n', 1)
+        due = (cutoff + timedelta(days=1)).isoformat()
+        edition = prepared['date'] + '-' + cutoff.strftime('%H%M%S') + '-stock-research'
+        queue = ''.join(
+            f'| NASDAQ:{ticker} | {prepared["as_of"]} | assessed | new | {due if ticker == "EXAMPLE" else "-"} | '
+            f'101 | [[Investments/{edition}#NASDAQ:{ticker} — {company}]] | Synthetic assessment completed. |\n'
+            for ticker, company in (("EXAMPLE", "Example Inc."), ("OTHER", "Other Inc.")))
+        body = body.replace('| --- | --- | --- | --- | --- | --- | --- | --- |\n',
+                            '| --- | --- | --- | --- | --- | --- | --- | --- |\n' + queue, 1)
         draft.write_text(body, encoding="utf-8")
         producer, stamped = self.stamp_market_draft(draft)
         self.run_script(daily_helper, "review-complete", "--vault", self.vault,
@@ -700,6 +739,11 @@ raise SystemExit(main(fixture['args'], client))
                          {"3m", "6m", "12m", "24m", "60m"})
         self.assertEqual({item["horizon"] for item in checked["checkpoints"]
                           if item["state"] == "observed"}, {"2w", "1m"})
+        draft.write_text(draft.read_text(encoding="utf-8")
+                         .replace('stock_research: 1', 'stock_research: 2')
+                         .replace('### Candidate assessments',
+                                  coverage_journals((first, update, previous_month))
+                                  + '### Candidate assessments'), encoding="utf-8")
         _, draft = self.stamp_market_draft(draft)
         self.run_script(script, "publish", draft, "--vault", self.vault)
         rebuilt = json.loads(self.run_script(script, "outcomes", "--vault", self.vault).stdout)
@@ -763,6 +807,10 @@ raise SystemExit(main(fixture['args'], client))
         new_lesson = "lesson-" + today.isoformat() + "-01"
         current = current.replace('\n\n### Outcome review',
                                   f'\n| {new_thesis} | watch | Newly recorded synthetic idea. |\n\n### Outcome review')
+        current = current.replace('### Thesis updates',
+            '#### NASDAQ:NEW — New Inc.\n\nStatus: watch\n\n'
+            '[[Investments/Stocks/NEW]]\n\nSynthetic assessment of an explicit user-requested '
+            'idea; no real investment recommendation.\n\n### Thesis updates')
         current += ('\n#### Lesson records\n\n| Lesson | Status | Record |\n|---|---|---|\n'
                     f'| {new_lesson} | provisional | [[Investments/{today}-stock-research#Initial lesson]] |\n\n'
                     '#### Initial lesson\n\nSynthetic provisional question; no investment claim.\n')
@@ -782,6 +830,19 @@ raise SystemExit(main(fixture['args'], client))
         missing = self.run_script(script, "publish", draft, "--vault", self.vault, expected=2)
         self.assertIn("skill-provenance footer", missing.stdout)
         self.assertFalse(target.exists())
+        due = (datetime.fromisoformat(initial['as_of']) + timedelta(days=1)).isoformat()
+        rows = (
+            ('NASDAQ:EXAMPLE', prior_time, 'assessed', 'active', due,
+             f'legacy:{prior.name}',
+             f'[[Investments/{target.stem}#NASDAQ:EXAMPLE — Example Inc.]]',
+             'Synthetic continued assessment; relevant facts checked at the cutoff.'),
+            ('NASDAQ:NEW', initial['as_of'], 'assessed', 'new', due, 'user',
+             f'[[Investments/{target.stem}#NASDAQ:NEW — New Inc.]]',
+             'Synthetic initial assessment of a user-requested idea.'))
+        draft.write_text(current.replace('stock_research: 1', 'stock_research: 2')
+                         .replace('### Candidate assessments',
+                                  coverage_journals((prior,), rows)
+                                  + '### Candidate assessments'), encoding="utf-8")
         generator, draft = self.stamp_market_draft(draft)
         stamped = json.loads(self.run_script(script, "lint", draft).stdout)
         self.assertEqual(stamped["provenance"], {"schema": 1, "generated_by": generator})

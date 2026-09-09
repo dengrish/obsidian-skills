@@ -5988,6 +5988,7 @@ SELFTEST_MIN_CASES = {
     "skills/clipping-clean/scripts/slug.py": 133,  # device-name guards removed
     "skills/stock-research/scripts/market_notes.py": 111,
     "skills/stock-research/scripts/stock_feed.py": 4,
+    "skills/stock-research/scripts/stock_coverage.py": 6,
     "skills/stock-research/scripts/stock_dossiers.py": 3,
     "skills/stock-research/scripts/market_acquire.py": 4,
     "skills/stock-research/scripts/market_capture.py": 19,

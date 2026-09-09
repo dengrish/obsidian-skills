@@ -111,6 +111,7 @@
     "skills/stock-research/SKILL.md": "skills/stock-research/SKILL.md",
     "skills/stock-research/references/comparison-strategy.md": "skills/stock-research/references/comparison-strategy.md",
     "skills/stock-research/references/capitalization.md": "skills/stock-research/references/capitalization.md",
+    "skills/stock-research/references/coverage.md": "skills/stock-research/references/coverage.md",
     "skills/stock-research/references/data-access.md": "skills/stock-research/references/data-access.md",
     "skills/stock-research/references/note-format.md": "skills/stock-research/references/note-format.md",
     "skills/stock-research/references/outcomes-and-learning.md": "skills/stock-research/references/outcomes-and-learning.md",
@@ -138,6 +139,7 @@
     "skills/stock-research/scripts/market_universe.py": "skills/stock-research/scripts/market_universe.py",
     "skills/stock-research/scripts/requirements-filings.txt": "skills/stock-research/scripts/requirements-filings.txt",
     "skills/stock-research/scripts/stock_feed.py": "skills/stock-research/scripts/stock_feed.py",
+    "skills/stock-research/scripts/stock_coverage.py": "skills/stock-research/scripts/stock_coverage.py",
     "skills/stock-research/scripts/stock_dossiers.py": "skills/stock-research/scripts/stock_dossiers.py",
     "skills/stock-research/references/stock-notes.md": "skills/stock-research/references/stock-notes.md"
   }

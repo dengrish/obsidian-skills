@@ -27,6 +27,9 @@ Resolve the selected vault and this skill's actual directory. Follow the
 [note format](references/note-format.md) when reading or writing daily records.
 Use [stock note maintenance](references/stock-notes.md) for the continuously
 updated notes in `Investments/Stocks/`. Use
+[coverage and work scheduling](references/coverage.md) on every run: assess every
+eligible new substantive idea, account for every active thesis, and carry unfinished
+work without confusing research status with investment conclusions. Use
 [outcomes and learning](references/outcomes-and-learning.md) for the daily checkpoint inventory, recommendation records and evidence-based lesson updates.
 Investment notes have their own schema; do not apply Wiki/source-note fields,
 flashcards, MOCs, or automatic source-document extraction to them.
@@ -51,6 +54,10 @@ may also be captured now. This planning pass does not collect feeds, discover
 unrelated stocks or establish the final nomination set; recheck the inputs at
 the frozen cutoff. The capture helpers return after their saves are eligible
 at a real whole-second cutoff.
+Per-request price limits are acquisition safeguards, not research quotas: split
+larger justified sets into bounded plans and complete all manual preflight batches
+before preparation. If an actual resource limit prevents completion, retain the
+affected work and limitation under the coverage rules.
 
 Then use `prepare` to create the canonical draft and a private run receipt in
 owned scratch:
@@ -123,6 +130,14 @@ history reconciliation. The daily history and outcome journals remain authoritat
 Inspect relevant existing user market notes listed outside the recognized
 naming pattern as read-only background and identify gaps in their history.
 
+Recover the [structured coverage history](references/coverage.md) as well as the
+thesis ledger. A stock note's existence does not schedule daily full research.
+Active ideas receive dated monitoring; material changes and due reviews trigger
+substantive reassessment. Closed ideas return only on new substantive evidence or
+their recorded reconsideration condition. Never infer an empty backlog from older
+reports that lack structured coverage; inspect and explicitly account for that
+legacy research before establishing the new journal.
+
 The helper reports malformed or unreadable recognized history explicitly. Do not
 treat incomplete history as an empty watchlist. Preserve files, report the exact
 blocker, and retain a completed draft if publication cannot safely proceed.
@@ -159,6 +174,18 @@ collect missing posts, or alter the account roster or collection state. Read its
 coverage diagnostics before interpreting the posts. Missing, stale, partial,
 changed or unpublished account output is a limitation, not a clean empty result.
 
+Run the offline coverage planner at the same cutoff:
+
+```bash
+python3 '<skill>/scripts/stock_coverage.py' context --vault '<vault>' --as-of '<cutoff>' --mode '<mode>' > '<scratch>/coverage-context.json'
+```
+
+Use its pending sources, prior queue, due work and processed fingerprints to avoid
+restarting unchanged work. Preserve an older intake window when it identifies
+unreviewed saved posts. Read the source text before classifying it; the planner
+does not decide which posts contain investment arguments. Use this edition's
+actual `manual` or `scheduled` mode in coverage commands.
+
 Triage substantive stock ideas from the eligible posts, preserving source links,
 authors, timestamps and disposition. Verify company/share-class identity rather
 than treating every cashtag as a valid nomination. Distinguish the collector
@@ -167,6 +194,12 @@ one originating piece of evidence. Carry prior open theses separately. Reuse
 previously assessed posts by link; a new run need not re-research unchanged claims.
 
 Use this nominated set for targeted announcement, business, price and risk checks.
+Give every eligible new stock a [standard initial assessment](references/research-method.md#standard-initial-assessment-and-readiness).
+Prioritize urgent active checks and older unfinished work, but do not arbitrarily
+select a few new names and describe the remainder as covered. Repeated arguments
+reuse earlier work; new material arguments prompt focused reassessment. Capacity
+deferrals remain queued for the next run, while evidence blockers name the missing
+fact and a dated retry or reconsideration condition.
 Default to liquid U.S.-listed common stocks and ADRs, identifying exchange,
 company, share class and currency. Exclude OTC/penny stocks, leveraged products,
 options and short-sale strategies unless the user changes the scope. This is a
@@ -325,6 +358,18 @@ review is required to publish the research note. Follow [safe writes](../../shar
 preserve reported recovery stages on failure, and read back the published note.
 Ensure its citations and retained evidence remain usable after owned scratch is
 cleaned; no published reference should point to a run's temporary files.
+
+Complete the visible [coverage journals](references/coverage.md) in the Research
+record and check them against the saved feeds and prior editions:
+
+```bash
+python3 '<skill>/scripts/stock_coverage.py' check --vault '<vault>' --as-of '<cutoff>' --mode '<mode>' --draft '<run>/daily-stamped.md'
+```
+
+Distinguish valid accounting from completed research. A report may truthfully
+publish queued or blocked work, but must identify that limitation and its next
+steps; it cannot label unperformed research complete. The publisher repeats this
+check and refuses lost backlog, missing dispositions and invalid reuse links.
 
 Only after the checks above have finished and any findings are resolved, record
 their completion for the **exact stamped draft**, then publish it. For example,

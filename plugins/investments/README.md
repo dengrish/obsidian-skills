@@ -24,6 +24,14 @@ It records concise daily decision briefs, detailed research, and later evaluatio
 of earlier recommendations in an Obsidian vault. Holdings reviews, sell
 recommendations and trade execution are outside this skill's scope.
 
+Every eligible new substantive idea receives a standard initial assessment.
+Active theses receive dated monitoring, while deeper reassessment follows changed
+evidence or a due review. The daily brief still highlights at most three ideas;
+that is not a research quota. Visible, validated coverage tables in each new daily
+report preserve processed posts, unfinished work and retry dates. They distinguish
+complete research from queued or blocked checks and buying readiness. Earlier
+reports remain unchanged; their prose backlog requires an explicit initial review.
+
 ## Setup
 
 Read [runtime setup](shared/RUNTIME.md) and the skill's

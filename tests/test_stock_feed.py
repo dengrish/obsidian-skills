@@ -57,7 +57,8 @@ class FeedIntakeTests(unittest.TestCase):
         self.save()
 
     def run_intake(self, **kwargs):
-        return intake.context(self.vault, kwargs.get('cutoff', CUTOFF), kwargs.get('since'))
+        return intake.context(self.vault, kwargs.get('cutoff', CUTOFF), kwargs.get('since'),
+                              kwargs.get('retained_post_ids'))
 
     def test_reads_only_active_sources_and_changes_no_files_or_calls_provider(self):
         self.state['accounts']['paused'] = account(2, 'Paused', post(12))
@@ -82,6 +83,180 @@ class FeedIntakeTests(unittest.TestCase):
         self.assertEqual(result['status'], 'incomplete')
         self.assertEqual(result['accounts'][1]['gaps'], ['account_not_collected'])
         self.assertEqual(len(result['posts']), 1)
+
+    def test_exact_retained_source_survives_unchecking_without_other_posts_or_writes(self):
+        self.state['accounts']['paused'] = account(2, 'Paused',
+            post(12, created_at='2026-08-01T12:00:00Z'), post(13))
+        self.publish()
+        before = {p.relative_to(self.vault): p.read_bytes() for p in self.vault.rglob('*') if p.is_file()}
+        with patch.object(feed, 'collect', side_effect=AssertionError('must not collect')), \
+                patch.object(feed, 'Store', side_effect=AssertionError('must not mutate state')):
+            result = self.run_intake(retained_post_ids=['12'])
+        after = {p.relative_to(self.vault): p.read_bytes() for p in self.vault.rglob('*') if p.is_file()}
+        self.assertEqual(before, after)
+        self.assertEqual([row['handle'] for row in result['accounts']], ['alpha'])
+        self.assertEqual([row['post_id'] for row in result['posts']], ['10', '12'])
+        self.assertEqual(result['posts'][1]['intake_origin'], 'retained_prior_source')
+        self.assertTrue(result['retained_sources_complete'])
+        self.assertEqual(result['retained_sources'][0], {
+            'post_id': '12', 'status': 'available', 'origin': 'retained_prior_source',
+            'active_roster': False, 'reasons': [], 'handle': 'paused', 'account_id': '2',
+            'note': 'Investments/Sources/X/paused.md'})
+
+    def test_retention_does_not_change_default_intake(self):
+        self.state['accounts']['paused'] = account(2, 'Paused', post(12))
+        self.publish()
+        normal = self.run_intake()
+        self.assertEqual(normal, self.run_intake(retained_post_ids=[]))
+        self.assertNotIn('retained_sources', normal)
+        self.assertEqual([row['post_id'] for row in normal['posts']], ['10'])
+
+    def test_requested_active_sources_older_than_window_are_retained_once(self):
+        self.state['accounts']['alpha']['posts']['11'] = post(11, created_at='2026-08-01T12:00:00Z')
+        self.publish()
+        result = self.run_intake(retained_post_ids=['11', '10'])
+        self.assertEqual([row['post_id'] for row in result['posts']], ['11', '10'])
+        diagnostics = {row['post_id']: row for row in result['retained_sources']}
+        self.assertEqual(diagnostics['10']['origin'], 'active_roster')
+        self.assertEqual(diagnostics['11']['origin'], 'retained_prior_source')
+        self.assertTrue(diagnostics['11']['active_roster'])
+        self.assertTrue(result['retained_sources_complete'])
+
+    def test_all_accounts_unchecked_still_allow_exact_retained_sources(self):
+        self.roster.write_text('- [ ] @Alpha\n', encoding='utf-8')
+        result = self.run_intake(retained_post_ids=['10'])
+        self.assertEqual(result['accounts'], [])
+        self.assertEqual([row['post_id'] for row in result['posts']], ['10'])
+        self.assertEqual(result['posts'][0]['intake_origin'], 'retained_prior_source')
+        self.assertTrue(result['retained_sources_complete'])
+        with self.assertRaisesRegex(feed.FeedError, 'no_active_accounts'):
+            self.run_intake()
+
+    def test_retained_ids_require_bounded_unique_canonical_strings(self):
+        for values in ('10', {'10'}, [10], ['0'], ['010'], ['10', '10'], ['../10'],
+                       ['1' * 26], [str(i) for i in range(1, intake.MAX_RETAINED_POST_IDS + 2)]):
+            with self.subTest(values=values), self.assertRaisesRegex(intake.IntakeError, 'canonical_ids'):
+                self.run_intake(retained_post_ids=values)
+
+    def test_more_than_1000_retained_ids_remain_processable_without_new_discovery(self):
+        self.state['accounts']['paused'] = account(2, 'Paused', post(12), post(13))
+        self.publish()
+        requested = ['12', *[str(i) for i in range(1000, 2100)]]
+        before = {p.relative_to(self.vault): p.read_bytes() for p in self.vault.rglob('*') if p.is_file()}
+        with patch.object(feed, 'collect', side_effect=AssertionError('must not collect')), \
+                patch.object(feed, 'Store', side_effect=AssertionError('must not mutate state')):
+            result = self.run_intake(retained_post_ids=requested)
+        self.assertEqual([row['post_id'] for row in result['posts']], ['10', '12'])
+        self.assertEqual([row['handle'] for row in result['accounts']], ['alpha'])
+        self.assertEqual(len(result['retained_sources']), len(requested))
+        self.assertEqual({row['post_id'] for row in result['retained_sources']}, set(requested))
+        self.assertEqual(result['retained_sources'][0]['status'], 'available')
+        self.assertTrue(all(row['reasons'] == ['source_not_saved'] for row in result['retained_sources'][1:]))
+        self.assertEqual(before, {p.relative_to(self.vault): p.read_bytes()
+                                 for p in self.vault.rglob('*') if p.is_file()})
+
+    def test_absent_retained_source_is_an_explicit_limitation(self):
+        result = self.run_intake(retained_post_ids=['999'])
+        self.assertEqual(result['status'], 'incomplete')
+        self.assertFalse(result['retained_sources_complete'])
+        self.assertEqual(result['retained_sources'][0]['reasons'], ['source_not_saved'])
+        self.state_path.unlink()
+        result = self.run_intake(retained_post_ids=['10'])
+        self.assertEqual(result['retained_sources'][0]['reasons'], ['collection_state_missing'])
+        self.assertFalse(self.state_path.exists())
+
+    def test_unavailable_retained_post_is_not_recovered_from_old_note(self):
+        self.state['accounts']['paused'] = account(2, 'Paused', post(12))
+        self.publish()
+        value = self.state['accounts']['paused']['posts']['12']
+        value.pop('text')
+        value['status'] = 'unavailable'
+        self.save()
+        result = self.run_intake(retained_post_ids=['12'])
+        self.assertEqual([row['post_id'] for row in result['posts']], ['10'])
+        self.assertEqual(result['retained_sources'][0]['reasons'], ['source_unavailable'])
+        self.assertEqual(result['status'], 'incomplete')
+
+    def test_retained_source_after_cutoff_stays_unavailable(self):
+        self.state['accounts']['paused'] = account(2, 'Paused', post(12,
+            created_at='2026-08-01T12:00:00Z', text='Later revised source text',
+            last_checked_at='2026-09-09T15:00:00Z'))
+        self.publish()
+        result = self.run_intake(retained_post_ids=['12'])
+        self.assertNotIn('Later revised source text', json.dumps(result))
+        self.assertEqual(result['retained_sources'][0]['reasons'], ['current_version_observed_after_cutoff'])
+        self.assertEqual(result['retained_sources'][0]['status'], 'unavailable')
+
+    def test_removed_account_conflicting_missing_or_unsafe_note_is_a_limitation(self):
+        self.state['accounts']['paused'] = account(2, 'Paused', post(12))
+        self.publish()
+        path = self.vault / intake.NOTE_FOLDER / 'paused.md'
+        path.write_bytes(path.read_bytes() + b'User annotation\n')
+        before = path.read_bytes()
+        result = self.run_intake(retained_post_ids=['12'])
+        self.assertEqual(result['retained_sources'][0]['reasons'], ['published_note_digest_mismatch'])
+        self.assertEqual(path.read_bytes(), before)
+        path.unlink()
+        result = self.run_intake(retained_post_ids=['12'])
+        self.assertEqual(result['retained_sources'][0]['reasons'], ['published_note_missing'])
+        external = self.vault / 'outside.md'
+        external.write_text('Private unrelated evidence', encoding='utf-8')
+        path.symlink_to(external)
+        result = self.run_intake(retained_post_ids=['12'])
+        self.assertEqual(result['retained_sources'][0]['reasons'], ['retained_source_unsafe_or_invalid'])
+        self.assertNotIn('Private unrelated evidence', json.dumps(result))
+
+    def test_unrelated_inactive_notes_and_post_attachments_are_not_read(self):
+        self.state['accounts']['paused'] = account(2, 'Paused', post(12), post(13, assets=['a' * 64]))
+        self.state['accounts']['unrelated'] = account(3, 'Unrelated', post(14))
+        self.publish()
+        real_read = intake.read
+        seen = []
+        def bounded_read(vault, relative, optional=False):
+            seen.append(relative)
+            if relative == intake.NOTE_FOLDER + 'unrelated.md' or relative.startswith('Sources/'):
+                raise AssertionError('unrelated source was read')
+            return real_read(vault, relative, optional)
+        with patch.object(intake, 'read', side_effect=bounded_read):
+            result = self.run_intake(retained_post_ids=['12'])
+        self.assertEqual([row['post_id'] for row in result['posts']], ['10', '12'])
+        self.assertNotIn(intake.NOTE_FOLDER + 'unrelated.md', seen)
+
+    def test_retained_source_attachments_keep_cutoff_validation(self):
+        self.add_asset(retrieved='2026-09-09T01:00:00Z')
+        self.roster.write_text('- [ ] @Alpha\n', encoding='utf-8')
+        result = self.run_intake(retained_post_ids=['10'])
+        self.assertEqual(result['posts'][0]['attachments'][0]['status'], 'attachment_observed_after_cutoff')
+        self.assertEqual(result['retained_sources'][0]['status'], 'available')
+        self.assertEqual(result['retained_sources'][0]['reasons'], ['attachments_unavailable'])
+        self.assertFalse(result['retained_sources_complete'])
+        self.assertNotIn('Sources/Images', result['posts'][0]['published_excerpt'])
+
+    def test_retained_post_with_ambiguous_saved_owner_is_not_selected(self):
+        self.state['accounts']['paused'] = account(2, 'Paused', post(12))
+        self.state['accounts']['other'] = account(3, 'Other', post(12))
+        self.publish()
+        result = self.run_intake(retained_post_ids=['12'])
+        self.assertEqual([row['post_id'] for row in result['posts']], ['10'])
+        self.assertEqual(result['retained_sources'][0]['reasons'], ['ambiguous_saved_post_identity'])
+        self.roster.write_text('- [x] @Alpha\n- [x] @Paused\n', encoding='utf-8')
+        result = self.run_intake(retained_post_ids=['12'])
+        self.assertEqual([row['post_id'] for row in result['posts']], ['10'])
+        self.assertEqual(result['accounts'][1]['eligible_posts'], 0)
+        self.assertIn('ambiguous_saved_post_identity', result['accounts'][1]['gaps'])
+
+    def test_retained_repost_keeps_original_referral_and_does_not_import_related_posts(self):
+        self.state['accounts']['paused'] = account(2, 'Paused',
+            post(12, references=[{'id': '7', 'type': 'retweeted'}]), post(13))
+        self.publish()
+        result = self.run_intake(retained_post_ids=['12'])
+        retained = next(row for row in result['posts'] if row['post_id'] == '12')
+        self.assertEqual(retained['kind'], 'repost')
+        self.assertEqual(retained['references'], [{'id': '7', 'type': 'retweeted'}])
+        origin = next(row for row in result['origin_groups'] if row['origin_post_id'] == '7')
+        self.assertEqual(origin['referrals'], [{'handle': 'paused', 'account_id': '2',
+                                               'post_id': '12', 'kind': 'repost'}])
+        self.assertNotIn('13', {row['post_id'] for row in result['posts']})
 
     def test_published_note_missing_is_a_gap(self):
         (self.vault / 'Investments/Sources/X/alpha.md').unlink()

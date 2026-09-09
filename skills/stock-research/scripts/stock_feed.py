@@ -65,6 +65,9 @@ STATE = 'Investments/Sources/.feed-collect/state.json'
 NOTE_FOLDER = 'Investments/Sources/X/'
 HEADINGS = re.compile(r'^## \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{1,6})? UTC$', re.MULTILINE)
 POST_LINK = re.compile(r'\[(?:Original post|Repost)\]\(https://x\.com/i/web/status/([0-9]{1,25})\)')
+# Safety bound for local source identities, not a research/queue quota. The
+# collector's bounded state reader separately limits the saved evidence bytes.
+MAX_RETAINED_POST_IDS = 100000
 
 
 class IntakeError(Exception):
@@ -163,113 +166,202 @@ def origins(posts):
     return [result[key] for key in sorted(result, key=int)]
 
 
-def context(vault, cutoff, since=None):
+def _retained_ids(values):
+    if values is None:
+        return ()
+    if (not isinstance(values, (list, tuple)) or len(values) > MAX_RETAINED_POST_IDS
+            or any(not isinstance(value, str) or not re.fullmatch(r'[1-9][0-9]{0,24}', value)
+                   for value in values) or len(set(values)) != len(values)):
+        raise IntakeError('retained_post_ids_require_at_most_100000_unique_canonical_ids')
+    return tuple(sorted(values, key=int))
+
+
+def _account_context(vault, cutoff, since, state, item, account, snapshots,
+                     retained=frozenset(), retained_only=False):
+    """One publication/cutoff reader for active intake and exact retained sources."""
+    posts, retained_status = [], {}
+    row = {'handle': item['handle'], 'account_id': account['id'] if account else item['id'],
+           'gaps': [], 'eligible_posts': 0, 'omitted_posts': {}, 'collection': feed.account_status(account)}
+    if account is None:
+        row['gaps'].append('account_not_collected' if state else 'collection_state_missing')
+        return row, posts, retained_status
+
+    row['gaps'].extend(row['collection']['deferred_reasons'])
+    completed = account['completed_at']
+    if not completed or cutoff - feed.instant(completed) > timedelta(hours=26):
+        row['gaps'].append('stale_collection')
+    row['coverage_lag_seconds'] = max(0, int((cutoff - feed.instant(completed)).total_seconds())) if completed else None
+    if completed and feed.instant(completed) > cutoff:
+        row['gaps'].append('collection_boundary_after_cutoff')
+    # history_before records an older collection boundary, not continuous
+    # coverage up to the latest window. Daily collection can skip downtime
+    # older than its three-day lookback; do not bridge that gap implicitly.
+    floor = account.get('requested_since') or account.get('history_before')
+    if not floor or feed.instant(floor) > since:
+        row['gaps'].append('lookback_coverage_unproven')
+    requests = [request for request in state['requests'] if request.get('handle') == account['filename'][:-3]]
+    if any(request.get('received_at') and feed.instant(request['received_at']) > cutoff for request in requests):
+        row['gaps'].append('historical_collection_coverage_unproven')
+    if state.get('pending') and state['pending']['handle'] == account['filename'][:-3]:
+        row['gaps'].append('unresolved_collection_request')
+    relative = NOTE_FOLDER + account['filename']
+    snapshots[relative] = read(vault, relative, optional=True)
+    raw = snapshots[relative]
+    if raw is None:
+        row['gaps'].append('published_note_missing')
+        for identity in retained.intersection(account['posts']):
+            retained_status[identity] = ['published_note_missing']
+        return row, posts, retained_status
+    digest = feed.digest(raw)
+    if digest != account.get('published_sha256'):
+        # Even a prepared digest is not a completed publication receipt.
+        raise IntakeError('published_note_digest_mismatch:' + relative)
+    row.update(note=relative, note_sha256=digest)
+    published = blocks(raw.decode('utf-8'))
+    if set(published) - set(account['posts']):
+        row['gaps'].append('publication_contains_unreconciled_posts')
+    def omitted(reason):
+        row['omitted_posts'][reason] = row['omitted_posts'].get(reason, 0) + 1
+        if post['id'] in retained:
+            retained_status[post['id']] = [reason]
+    selected = (post for post in account['posts'].values() if not retained_only or post['id'] in retained)
+    for post in sorted(selected, key=lambda value: (feed.instant(value['created_at']), int(value['id']))):
+        edits = post.get('edit_history_ids', [])
+        if (not isinstance(edits, list) or any(not isinstance(value, str) or not feed.ID.fullmatch(value) for value in edits)
+                or edits and post['id'] not in edits):
+            raise IntakeError('invalid_saved_edit_history')
+        if post['status'] not in {'available', 'unavailable', 'withheld', 'excluded', 'superseded'}:
+            raise IntakeError('invalid_saved_post_status')
+        created = feed.instant(post['created_at'])
+        retained_origin = retained_only or created < since
+        if created > cutoff or created < since and post['id'] not in retained:
+            omitted('outside_time_window')
+            continue
+        if post['status'] != 'available':
+            omitted('source_' + post['status'])
+            continue
+        if any(ref['type'] == 'replied_to' for ref in post.get('references', [])):
+            omitted('reply')
+            continue
+        observed = post.get('last_checked_at') or post['first_retrieved_at']
+        if feed.instant(post['first_retrieved_at']) > cutoff or feed.instant(observed) > cutoff:
+            omitted('current_version_observed_after_cutoff')
+            continue
+        if post['id'] not in published:
+            omitted('post_not_published')
+            continue
+        if published[post['id']].rstrip() != post_block(account, post, state.get('assets', {})).rstrip():
+            omitted('published_post_version_mismatch')
+            continue
+        references = post.get('references', [])
+        kind = ('repost' if any(ref['type'] == 'retweeted' for ref in references) else
+                'quote' if any(ref['type'] == 'quoted' for ref in references) else 'original')
+        # The prefix is exact published evidence. Attachment links are
+        # supplied separately only after cutoff and file-integrity checks.
+        excerpt = post_block(account, dict(post, assets=[]), {}).rstrip()
+        attachment = attachment_rows(vault, post, state.get('assets', {}), cutoff, snapshots)
+        if any(not asset['eligible'] for asset in attachment):
+            row['gaps'].append('attachments_unavailable')
+        posts.append({'handle': item['handle'], 'published_handle': account['handle'], 'account_id': account['id'],
+                      'post_id': post['id'], 'created_at': post['created_at'],
+                      'first_retrieved_at': post['first_retrieved_at'], 'version_observed_at': observed,
+                      'source_url': 'https://x.com/i/web/status/' + post['id'],
+                      'note': relative, 'note_sha256': digest,
+                      'kind': kind, 'references': references, 'edit_history_ids': post.get('edit_history_ids', []),
+                      'text': post['text'], 'published_excerpt': excerpt,
+                      'excerpt_sha256': feed.digest(excerpt.encode('utf-8')), 'attachments': attachment,
+                      'repost_text_may_be_truncated': kind == 'repost'})
+        if retained_origin:
+            posts[-1]['intake_origin'] = 'retained_prior_source'
+        if post['id'] in retained:
+            retained_status[post['id']] = (['attachments_unavailable']
+                                           if any(not asset['eligible'] for asset in attachment) else [])
+        row['eligible_posts'] += 1
+    for reason in ('post_not_published', 'published_post_version_mismatch', 'current_version_observed_after_cutoff'):
+        if row['omitted_posts'].get(reason):
+            row['gaps'].append(reason)
+    row['gaps'] = sorted(set(row['gaps']))
+    return row, posts, retained_status
+
+
+def context(vault, cutoff, since=None, retained_post_ids=None):
+    """Read active feeds; exact journal IDs may recover saved, older/inactive sources."""
+    requested = _retained_ids(retained_post_ids)
     cutoff = feed.instant(cutoff)
     since = feed.instant(since) if since else cutoff - timedelta(days=3)
     if since >= cutoff:
         raise IntakeError('since_must_precede_cutoff')
     vault = Path(os.path.abspath(os.fspath(vault)))
     snapshots = {ROSTER: read(vault, ROSTER)}
-    items = feed.roster(vault / ROSTER)
+    try:
+        items = feed.roster(vault / ROSTER)
+    except feed.FeedError as exc:
+        if not requested or str(exc) != 'no_active_accounts':
+            raise
+        items = []
     snapshots[STATE] = read(vault, STATE, optional=True)
     state = feed.validate_state(feed.decode(snapshots[STATE])) if snapshots[STATE] is not None else None
-    accounts, posts, seen_accounts = [], [], set()
+    owners = {identity: [] for identity in requested}
+    for name, account in (state['accounts'].items() if state else []):
+        for identity in owners.keys() & account['posts'].keys():
+            owners[identity].append((name, account))
+    retained = frozenset(identity for identity, matches in owners.items() if len(matches) == 1)
+    ambiguous = frozenset(identity for identity, matches in owners.items() if len(matches) > 1)
+    accounts, posts, seen_accounts, retained_status, active_handles = [], [], set(), {}, {}
     for item in items:
         account = state['accounts'].get(item['handle']) if state else None
         if account is None and state and item['id']:
             account = next((value for value in state['accounts'].values() if value['id'] == item['id']), None)
         if account and (item['id'] and item['id'] != account['id'] or account['id'] in seen_accounts):
             raise IntakeError('roster_account_identity_conflict')
-        row = {'handle': item['handle'], 'account_id': account['id'] if account else item['id'],
-               'gaps': [], 'eligible_posts': 0, 'omitted_posts': {}, 'collection': feed.account_status(account)}
+        if account:
+            seen_accounts.add(account['id'])
+            active_handles[account['id']] = item['handle']
+        row, selected, status = _account_context(vault, cutoff, since, state, item, account, snapshots, retained)
+        if ambiguous.intersection(post['post_id'] for post in selected):
+            selected = [post for post in selected if post['post_id'] not in ambiguous]
+            row['eligible_posts'] = len(selected)
+            row['gaps'] = sorted(set(row['gaps']) | {'ambiguous_saved_post_identity'})
         accounts.append(row)
-        if account is None:
-            row['gaps'].append('account_not_collected' if state else 'collection_state_missing')
+        posts.extend(selected)
+        retained_status.update(status)
+    for name, account in (state['accounts'].items() if state else []):
+        chosen = retained.intersection(account['posts'])
+        if account['id'] in seen_accounts or not chosen:
             continue
-        seen_accounts.add(account['id'])
-        row['gaps'].extend(row['collection']['deferred_reasons'])
-        completed = account['completed_at']
-        if not completed or cutoff - feed.instant(completed) > timedelta(hours=26):
-            row['gaps'].append('stale_collection')
-        row['coverage_lag_seconds'] = max(0, int((cutoff - feed.instant(completed)).total_seconds())) if completed else None
-        if completed and feed.instant(completed) > cutoff:
-            row['gaps'].append('collection_boundary_after_cutoff')
-        # history_before records an older collection boundary, not continuous
-        # coverage up to the latest window. Daily collection can skip downtime
-        # older than its three-day lookback; do not bridge that gap implicitly.
-        floor = account.get('requested_since') or account.get('history_before')
-        if not floor or feed.instant(floor) > since:
-            row['gaps'].append('lookback_coverage_unproven')
-        requests = [request for request in state['requests'] if request.get('handle') == account['filename'][:-3]]
-        if any(request.get('received_at') and feed.instant(request['received_at']) > cutoff for request in requests):
-            row['gaps'].append('historical_collection_coverage_unproven')
-        if state.get('pending') and state['pending']['handle'] == account['filename'][:-3]:
-            row['gaps'].append('unresolved_collection_request')
-        relative = NOTE_FOLDER + account['filename']
-        snapshots[relative] = read(vault, relative, optional=True)
-        raw = snapshots[relative]
-        if raw is None:
-            row['gaps'].append('published_note_missing')
-            continue
-        digest = feed.digest(raw)
-        if digest != account.get('published_sha256'):
-            # Even a prepared digest is not a completed publication receipt.
-            raise IntakeError('published_note_digest_mismatch:' + relative)
-        row.update(note=relative, note_sha256=digest)
-        published = blocks(raw.decode('utf-8'))
-        if set(published) - set(account['posts']):
-            row['gaps'].append('publication_contains_unreconciled_posts')
-        def omitted(reason):
-            row['omitted_posts'][reason] = row['omitted_posts'].get(reason, 0) + 1
-        for post in sorted(account['posts'].values(), key=lambda value: (feed.instant(value['created_at']), int(value['id']))):
-            edits = post.get('edit_history_ids', [])
-            if (not isinstance(edits, list) or any(not isinstance(value, str) or not feed.ID.fullmatch(value) for value in edits)
-                    or edits and post['id'] not in edits):
-                raise IntakeError('invalid_saved_edit_history')
-            if post['status'] not in {'available', 'unavailable', 'withheld', 'excluded', 'superseded'}:
-                raise IntakeError('invalid_saved_post_status')
-            if not since <= feed.instant(post['created_at']) <= cutoff:
-                omitted('outside_time_window')
-                continue
-            if post['status'] != 'available':
-                omitted('source_' + post['status'])
-                continue
-            if any(ref['type'] == 'replied_to' for ref in post.get('references', [])):
-                omitted('reply')
-                continue
-            observed = post.get('last_checked_at') or post['first_retrieved_at']
-            if feed.instant(post['first_retrieved_at']) > cutoff or feed.instant(observed) > cutoff:
-                omitted('current_version_observed_after_cutoff')
-                continue
-            if post['id'] not in published:
-                omitted('post_not_published')
-                continue
-            if published[post['id']].rstrip() != post_block(account, post, state.get('assets', {})).rstrip():
-                omitted('published_post_version_mismatch')
-                continue
-            references = post.get('references', [])
-            kind = ('repost' if any(ref['type'] == 'retweeted' for ref in references) else
-                    'quote' if any(ref['type'] == 'quoted' for ref in references) else 'original')
-            # The prefix is exact published evidence. Attachment links are
-            # supplied separately only after cutoff and file-integrity checks.
-            excerpt = post_block(account, dict(post, assets=[]), {}).rstrip()
-            attachment = attachment_rows(vault, post, state.get('assets', {}), cutoff, snapshots)
-            if any(not asset['eligible'] for asset in attachment):
-                row['gaps'].append('attachments_unavailable')
-            posts.append({'handle': item['handle'], 'published_handle': account['handle'], 'account_id': account['id'],
-                          'post_id': post['id'], 'created_at': post['created_at'],
-                          'first_retrieved_at': post['first_retrieved_at'], 'version_observed_at': observed,
-                          'source_url': 'https://x.com/i/web/status/' + post['id'],
-                          'note': relative, 'note_sha256': digest,
-                          'kind': kind, 'references': references, 'edit_history_ids': post.get('edit_history_ids', []),
-                          'text': post['text'], 'published_excerpt': excerpt,
-                          'excerpt_sha256': feed.digest(excerpt.encode('utf-8')), 'attachments': attachment,
-                          'repost_text_may_be_truncated': kind == 'repost'})
-            row['eligible_posts'] += 1
-        for reason in ('post_not_published', 'published_post_version_mismatch', 'current_version_observed_after_cutoff'):
-            if row['omitted_posts'].get(reason):
-                row['gaps'].append(reason)
-        row['gaps'] = sorted(set(row['gaps']))
+        try:
+            _, selected, status = _account_context(vault, cutoff, since, state,
+                {'handle': name, 'id': account['id']}, account, snapshots, chosen, retained_only=True)
+        except (IntakeError, feed.FeedError, feed.feed_media.MediaError, OSError, UnicodeError, ValueError) as exc:
+            # A quarantined inactive account is a source limitation, never a
+            # reason to activate it or recover its text from an unverified note.
+            reason = (str(exc).split(':', 1)[0] if isinstance(exc, IntakeError)
+                      else 'retained_source_unsafe_or_invalid')
+            selected, status = [], {identity: [reason] for identity in chosen}
+        posts.extend(selected)
+        retained_status.update(status)
+    diagnostics = []
+    for identity in requested:
+        matches = owners[identity]
+        diagnostic = {'post_id': identity, 'status': 'unavailable', 'origin': 'unknown',
+                      'active_roster': None, 'reasons': []}
+        if len(matches) != 1:
+            diagnostic['reasons'] = ['ambiguous_saved_post_identity' if matches else
+                                     'source_not_saved' if state else 'collection_state_missing']
+        else:
+            name, account = matches[0]
+            active = account['id'] in seen_accounts
+            included = next((post for post in posts if post['post_id'] == identity
+                             and post['account_id'] == account['id']), None)
+            diagnostic.update(handle=active_handles.get(account['id'], name), account_id=account['id'],
+                              note=NOTE_FOLDER + account['filename'], active_roster=active,
+                              origin=('active_roster' if active and included
+                                      and included.get('intake_origin') != 'retained_prior_source'
+                                      else 'retained_prior_source'),
+                              reasons=retained_status.get(identity, ['source_not_eligible']))
+            if included:
+                diagnostic['status'] = 'available'
+        diagnostics.append(diagnostic)
     # An uncoordinated collector/editor may run alongside this reader. Do not
     # return a snapshot assembled from different state/note versions.
     for relative, expected in snapshots.items():
@@ -285,6 +377,12 @@ def context(vault, cutoff, since=None):
                            'Mentions, quotes and reposts are not automatically buying recommendations.',
                            'A current feed snapshot cannot reconstruct removed or later-edited historical text.',
                            'Collection completion is a provider-window claim, not proof that every public post was returned.']}
+    if requested:
+        result['retained_sources'] = diagnostics
+        result['retained_sources_complete'] = all(row['status'] == 'available' and not row['reasons']
+                                                  for row in diagnostics)
+        if not result['retained_sources_complete']:
+            result['status'] = 'incomplete'
     result['snapshot_sha256'] = feed.digest(feed.encoded(result))
     return result
 
@@ -315,12 +413,14 @@ def main():
     command.add_argument('--vault', required=True)
     command.add_argument('--cutoff', required=True)
     command.add_argument('--since')
+    command.add_argument('--retained-post-id', action='append', dest='retained_post_ids',
+                         help='Exact unresolved prior source ID; local safety limit 100000, never truncated.')
     args = parser.parse_args()
     try:
         if args.test:
             return run_self_test()
         elif args.command == 'context':
-            result = context(args.vault, args.cutoff, args.since)
+            result = context(args.vault, args.cutoff, args.since, args.retained_post_ids)
         else:
             parser.error('choose context or --self-test')
         print(json.dumps(result, ensure_ascii=False, indent=2))

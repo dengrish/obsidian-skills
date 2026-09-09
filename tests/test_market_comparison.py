@@ -510,7 +510,10 @@ class ComparisonTests(unittest.TestCase):
         observation = comparison.evaluate(self.card, '2024-05-01T11:31:00-04:00', observation_fixture(), '3m')
         draft = self.draft_observation(observation)
         before = first.read_bytes()
-        with patch.object(market_notes, 'require_publication_provenance'):
+        # These legacy fixtures isolate immutable comparison evidence; the real
+        # coverage publication gate is exercised by test_end_to_end.py.
+        with (patch.object(market_notes, 'require_publication_provenance'),
+              patch.object(market_notes, 'require_publication_coverage')):
             result = market_notes.publish(draft, self.vault, comparison.parse_time('2024-08-03T11:32:00-04:00'))
             self.assertEqual(result['status'], 'created')
             self.assertEqual(market_notes.publish(draft, self.vault,
@@ -628,7 +631,8 @@ class ComparisonTests(unittest.TestCase):
                          encoding='utf-8')
         target = self.folder / '2024-05-01-stock-research.md'
         self.assertFalse(target.exists())
-        with patch.object(market_notes, 'require_publication_provenance'):
+        with (patch.object(market_notes, 'require_publication_provenance'),
+              patch.object(market_notes, 'require_publication_coverage')):
             result = market_notes.publish(draft, self.vault, comparison.parse_time('2024-05-01T11:32:00-04:00'))
             self.assertEqual(result['status'], 'created')
             self.assertEqual(market_notes.publish(draft, self.vault,
@@ -645,7 +649,8 @@ class ComparisonTests(unittest.TestCase):
                          encoding='utf-8')
         def changed_after_initial_checks(_):
             attachment.write_bytes(attachment.read_bytes() + b' ')
-        with patch.object(market_notes, 'require_publication_provenance', side_effect=changed_after_initial_checks):
+        with (patch.object(market_notes, 'require_publication_provenance', side_effect=changed_after_initial_checks),
+              patch.object(market_notes, 'require_publication_coverage')):
             with self.assertRaisesRegex(RuntimeError, 'outcome evidence changed before publication'):
                 market_notes.publish(draft, self.vault, comparison.parse_time('2024-05-01T11:32:00-04:00'))
         self.assertFalse((self.folder / '2024-05-01-stock-research.md').exists())

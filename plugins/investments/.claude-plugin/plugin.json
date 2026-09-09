@@ -1,6 +1,6 @@
 {
   "name": "investments",
-  "version": "1.11.2",
+  "version": "1.12.0",
   "description": "Collect selected X accounts into source notes, research feed-sourced stock buying ideas, and maintain daily reports, stock dossiers and recommendation outcomes in an Obsidian vault.",
   "repository": "https://github.com/dengrish/obsidian-skills",
   "author": {
