@@ -5986,9 +5986,10 @@ SELFTEST_MIN_CASES = {
     "skills/clipping-clean/scripts/dedup_index.py": 168,
     "skills/clipping-clean/scripts/fetch_images.py": 539,
     "skills/clipping-clean/scripts/slug.py": 133,  # device-name guards removed
-    "skills/feed-collect/scripts/feed_collect.py": 12,
+    "skills/feed-collect/scripts/feed_collect.py": 13,
+    "skills/feed-collect/scripts/feed_media.py": 4,
     "skills/feed-collect/scripts/rss_source.py": 4,
-    "skills/feed-collect/scripts/rss_collect.py": 3,
+    "skills/feed-collect/scripts/rss_collect.py": 5,
     "skills/stock-research/scripts/market_notes.py": 113,
     "skills/stock-research/scripts/stock_acquire.py": 2,
     "skills/stock-research/scripts/stock_cohorts.py": 6,

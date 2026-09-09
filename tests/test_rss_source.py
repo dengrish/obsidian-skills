@@ -44,6 +44,188 @@ class Response:
 
 
 class SourceTests(unittest.TestCase):
+    def render(self, source, extra=''):
+        value = rss.parse_feed(rss_feed(item('<content:encoded><![CDATA[' + source
+                                            + ']]></content:encoded>' + extra)), URL)['items'][0]
+        result = rss.render_current(value)
+        self.assertEqual(value['markdown'], result['markdown'])
+        self.assertEqual(result['markdown_sha256'], hashlib.sha256(result['markdown'].encode()).hexdigest())
+        for occurrence in result['occurrences']:
+            self.assertEqual(result['markdown'][occurrence['start']:occurrence['end']], occurrence['markdown'])
+        return value, result
+
+    def test_nested_picture_image_and_caption_have_independent_structure(self):
+        source = '<p>Before.</p><figure><a href="https://example.com/full.png">'
+        source += '<div><picture><source srcset="/not-selected.webp"><img src="/small.png" alt="A chart">'
+        source += '</picture></div></a><figcaption>The figure caption.</figcaption></figure><p>After.</p>'
+        value, result = self.render(source)
+        self.assertIn('[Image: A chart](https://example.com/small.png)\n\n'
+                      '[Image source](https://example.com/full.png)\n\nThe figure caption.', value['markdown'])
+        self.assertNotIn('[[Image:', value['markdown'])
+        self.assertEqual([asset['url'] for asset in value['attachments']], ['https://example.com/small.png'])
+        self.assertEqual(len(result['occurrences']), 1)
+        occurrence = result['occurrences'][0]
+        localized = (result['markdown'][:occurrence['start']] + '![[Sources/Images/small.png]]'
+                     + result['markdown'][occurrence['end']:])
+        self.assertIn('![[Sources/Images/small.png]]\n\n[Image source]', localized)
+        self.assertNotIn('[![[', localized)
+
+    def test_same_image_outer_link_is_not_repeated_and_http_still_cannot_nest(self):
+        source = '<a href="/a.png"><div><picture><img src="/a.png"></picture></div></a>'
+        source += '<a href="https://example.com/source"><div><img src="http://example.com/old.png"></div></a>'
+        value, result = self.render(source)
+        self.assertEqual(value['markdown'].count('https://example.com/a.png'), 1)
+        self.assertIn('[Image: source image](http://example.com/old.png)\n\n'
+                      '[Image source](https://example.com/source)', value['markdown'])
+        self.assertEqual(len(result['occurrences']), 1)
+
+    def test_pdf_links_keep_each_arbitrary_label_and_position_with_one_asset(self):
+        source = '<p>Before <a href="/a.pdf">Download <strong>slides</strong></a> after.</p>'
+        source += '<p>Again <a href="/a.pdf">Appendix [A]</a>.</p>'
+        value, result = self.render(source, '<enclosure url="/a.pdf" type="application/pdf"/>')
+        self.assertEqual(len(value['attachments']), 1)
+        self.assertEqual(len(result['occurrences']), 2)
+        self.assertEqual([entry['label'] for entry in result['occurrences']],
+                         ['Download **slides**', 'Appendix \\[A\\]'])
+        self.assertIn('Before [Download **slides**](https://example.com/a.pdf) after.', value['markdown'])
+        self.assertNotIn('[PDF]', value['markdown'])
+        localized = result['markdown']
+        for entry in reversed(result['occurrences']):
+            token = '[' + entry['label'] + '](../../../Sources/PDFs/a.pdf)'
+            localized = localized[:entry['start']] + token + localized[entry['end']:]
+        self.assertIn('Before [Download **slides**](../../../Sources/PDFs/a.pdf) after.', localized)
+        self.assertIn('Again [Appendix \\[A\\]](../../../Sources/PDFs/a.pdf).', localized)
+
+    def test_image_linked_to_pdf_preserves_both_assets_and_enclosure_fallback_is_labeled(self):
+        value, result = self.render('<figure><a href="/slides.pdf"><div><img src="/cover.png"></div></a>'
+                                   '<figcaption>Cover.</figcaption></figure>',
+                                   '<enclosure url="/extra.pdf" type="application/pdf"/>')
+        self.assertEqual([entry['kind'] for entry in result['occurrences']], ['image', 'pdf', 'pdf'])
+        self.assertIn('[Linked PDF](https://example.com/slides.pdf)\n\nCover.', value['markdown'])
+        self.assertTrue(value['markdown'].endswith('[PDF](https://example.com/extra.pdf)'))
+
+    def test_occurrences_survive_nested_layout_and_cannot_be_forged_by_source(self):
+        source = '<p>Literal [PDF](https://example.com/a.pdf) and &#0;rss-asset-0&#0;.</p>'
+        source += '<pre>&#0;rss-asset-0&#0;</pre><blockquote><ul><li><a href="/a.pdf">File</a></li></ul></blockquote>'
+        source += '<table><tr><td><img src="/a.png" alt="bad ](label)"></td></tr></table>'
+        _value, result = self.render(source)
+        self.assertEqual(len(result['occurrences']), 2)
+        self.assertNotIn('\x00', result['markdown'])
+        self.assertEqual(result['occurrences'][1]['label'], r'Image: bad \](label)')
+        self.assertIn(r'\[PDF\](https://example.com/a.pdf)', result['markdown'])
+        self.assertIn('> - [File](https://example.com/a.pdf)', result['markdown'])
+        direct = rss.render_current({'content': '<pre>\x00rss-asset-0\x00</pre><img src="/a.png">',
+                                     'content_type': 'html', 'render_base': URL})
+        self.assertEqual(len(direct['occurrences']), 1)
+        self.assertNotIn('\x00', direct['markdown'])
+
+    def test_video_sources_and_known_iframes_are_links_without_media_download_candidates(self):
+        source = '<video src="https://example.com/clip.mp4" poster="/not-a-figure.png" title="Demo">'
+        source += '<source src="https://example.com/clip.webm" type="video/webm">Video fallback.</video>'
+        source += '<iframe src="https://www.youtube-nocookie.com/embed/abc?rel=0&amp;autoplay=0" title="Talk"></iframe>'
+        source += '<iframe src="https://player.vimeo.com/video/123"></iframe>'
+        with patch.object(rss, 'fetch_feed', side_effect=AssertionError('no media/network reads')):
+            value, result = self.render(source)
+        self.assertIn('[Video: Demo](https://example.com/clip.mp4)', value['markdown'])
+        self.assertIn('[Video: Demo](https://example.com/clip.webm)', value['markdown'])
+        self.assertIn('[Video: Talk](https://www.youtube-nocookie.com/embed/abc?rel=0&autoplay=0)', value['markdown'])
+        self.assertIn('[Video](https://player.vimeo.com/video/123)', value['markdown'])
+        self.assertIn('Video fallback.', value['markdown'])
+        self.assertEqual(result['attachments'], [])
+        self.assertEqual(result['occurrences'], [])
+        self.assertIn('video_link_only', result['diagnostics'])
+        self.assertNotIn('<video', value['markdown'])
+        self.assertNotIn('<iframe', value['markdown'])
+
+    def test_generic_frames_are_not_called_video_and_unsafe_dynamic_sources_stay_explicit(self):
+        source = '<iframe src="https://charts.example.com/widget#series" title="Market chart"></iframe>'
+        source += '<iframe src="https://www.youtube-nocookie.com.evil.example/embed/abc"></iframe>'
+        source += '<iframe src="javascript:alert(1)"><img src="/hidden.png"></iframe>'
+        source += '<iframe srcdoc="&lt;p&gt;Hidden&lt;/p&gt;"></iframe><video><source src="blob:123"></video>'
+        source += '<iframe src=" "></iframe><video><source src=""></video>'
+        value, result = self.render(source)
+        self.assertIn('[Embedded content: Market chart](https://charts.example.com/widget#series)', value['markdown'])
+        self.assertNotIn('[Video', value['markdown'])
+        self.assertNotIn('javascript:', value['markdown'])
+        self.assertNotIn('Hidden', value['markdown'])
+        self.assertNotIn('blob:', value['markdown'])
+        self.assertNotIn('(https://example.com/feed)', value['markdown'])
+        self.assertEqual(result['attachments'], [])
+        self.assertTrue({'active_or_unsupported_html_omitted', 'embedded_content_link_only',
+                         'video_source_url_unavailable'} <= set(result['diagnostics']))
+
+    def test_rss_video_enclosures_and_media_urls_are_links_and_never_attachment_candidates(self):
+        extra = '<enclosure url="/watch?id=3" type="video/mp4"/><enclosure url="/movie.webm" type="application/octet-stream"/>'
+        extra += '<media:content url="http://example.com/old.mp4" type="video/mp4"/>'
+        extra += '<media:content url="/opaque-video" medium="video"/>'
+        extra += '<enclosure url="/audio.mp3" type="audio/mpeg"/>'
+        value, result = self.render('<p>Introduction.</p>', extra)
+        self.assertEqual(value['linked_media'], [
+            {'url': 'https://example.com/watch?id=3', 'media_type': 'video', 'mime_type': 'video/mp4'},
+            {'url': 'https://example.com/movie.webm', 'media_type': 'video', 'mime_type': 'application/octet-stream'},
+            {'url': 'http://example.com/old.mp4', 'media_type': 'video', 'mime_type': 'video/mp4'},
+            {'url': 'https://example.com/opaque-video', 'media_type': 'video', 'mime_type': ''}])
+        self.assertIn('[Video enclosure](https://example.com/watch?id=3)', value['markdown'])
+        self.assertIn('[Video enclosure](http://example.com/old.mp4)', value['markdown'])
+        self.assertNotIn('audio.mp3', value['markdown'])
+        self.assertEqual(value['attachments'], [])
+        self.assertEqual(result['occurrences'], [])
+
+    def test_atom_video_enclosure_retains_resolved_original_url_and_mime(self):
+        raw = b'''<feed xmlns="http://www.w3.org/2005/Atom" xml:base="https://example.com/blog/">
+        <entry><link href="article"/><content>Text.</content>
+        <link rel="enclosure" href="../video?id=1" type="video/quicktime"/></entry></feed>'''
+        value = rss.parse_feed(raw, URL)['items'][0]
+        self.assertEqual(value['linked_media'], [{'url': 'https://example.com/video?id=1',
+                         'media_type': 'video', 'mime_type': 'video/quicktime'}])
+        self.assertEqual(value['markdown'], rss.render_current(value)['markdown'])
+        self.assertEqual(value['attachments'], [])
+
+    def test_legacy_absolute_source_upgrades_without_mutation_and_relative_base_is_not_guessed(self):
+        value, result = self.render('<figure><img src="https://example.com/a.png"><figcaption>Caption.</figcaption></figure>')
+        del value['render_base']
+        del value['rendering_version']
+        value['markdown'] = 'legacy-rendering'
+        before = deepcopy(value)
+        self.assertIn('\n\nCaption.', rss.render_current(value)['markdown'])
+        self.assertEqual(value, before)
+        value['content'] = '<img src="../a.png">'
+        value['source_feed_url'] = 'https://example.com/feed'
+        fallback = rss.render_current(value)
+        self.assertEqual(fallback['markdown'], 'legacy-rendering')
+        self.assertEqual(fallback['occurrences'], [])
+        self.assertEqual(fallback['rendering_version'], 1)
+        self.assertIn('legacy_render_base_unavailable', fallback['diagnostics'])
+
+    def test_legacy_omitted_ui_and_responsive_sources_do_not_need_an_unknown_base(self):
+        source = '<img src="/img/missing-image.png"><script src="/ui.js"></script>'
+        source += '<img src="/tracking.gif" width="1" height="1">'
+        source += '<picture><source src="/unused.webp"><img src="https://example.com/a.png"></picture>'
+        value = {'content': source, 'content_type': 'html', 'canonical_url': 'https://example.com/article',
+                 'markdown': 'old body', 'attachments': []}
+        result = rss.render_current(value)
+        self.assertEqual(result['rendering_version'], 2)
+        self.assertEqual(len(result['occurrences']), 1)
+        self.assertIn('Source image unavailable.', result['markdown'])
+
+    def test_legacy_malformed_absolute_url_is_omitted_without_crashing_upgrade(self):
+        value = {'content': '<iframe src="https://["></iframe><p>Remaining text.</p>',
+                 'content_type': 'html', 'canonical_url': 'https://example.com/article',
+                 'markdown': 'old body', 'attachments': []}
+        result = rss.render_current(value)
+        self.assertEqual(result['markdown'], 'Remaining text.')
+        self.assertIn('unsupported_or_unsafe_url_omitted', result['diagnostics'])
+
+    def test_atom_explicit_content_base_is_saved_for_identical_current_rendering(self):
+        raw = b'''<feed xmlns="http://www.w3.org/2005/Atom" xml:base="https://example.com/blog/">
+        <entry><link href="entry"/><content type="html" xml:base="../assets/">&lt;a href="slides.pdf"&gt;Slides&lt;/a&gt;</content>
+        </entry></feed>'''
+        value = rss.parse_feed(raw, URL)['items'][0]
+        self.assertEqual(value['render_base'], 'https://example.com/assets/')
+        self.assertEqual(value['rendering_version'], 2)
+        self.assertEqual(value['markdown'], rss.render_current(value)['markdown'])
+        self.assertEqual(rss.render_current(value)['occurrences'][0]['url'], 'https://example.com/assets/slides.pdf')
+
     def test_rss_full_content_wins_over_summary_preserving_literal_source(self):
         content = '<p>First <strong>important</strong> paragraph.</p><p>Second &amp; third.</p>'
         raw = rss_feed(item('<guid isPermaLink="false">source-1</guid><dc:creator>Author</dc:creator>'

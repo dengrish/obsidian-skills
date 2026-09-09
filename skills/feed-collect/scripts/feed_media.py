@@ -72,7 +72,6 @@ from portable_names import portable_identity
 
 PHOTO_LIMIT = 20 * 1024 * 1024
 PDF_LIMIT = 50 * 1024 * 1024
-RUN_LIMIT = 256 * 1024 * 1024
 PNG_RASTER_LIMIT = 256 * 1024 * 1024
 ASSET_PATH = re.compile(r'Sources/(?:Images/x-[0-9]{1,25}-[a-f0-9]{24}\.(?:jpg|png|gif|webp)|PDFs/x-[0-9]{1,25}-[a-f0-9]{24}\.pdf)\Z')
 KEY = re.compile(r'[a-f0-9]{64}\Z')
@@ -85,6 +84,57 @@ class MediaError(Exception):
 
 def _key(value):
     return hashlib.sha256(value.encode('utf-8')).hexdigest()
+
+
+def _public_link(value):
+    """Validate a displayed HTTPS link without DNS or downloading its target."""
+    if (not isinstance(value, str) or not value or len(value) > 8192
+            or any(ord(char) <= 32 or ord(char) == 127 or char in '<>"`\\' for char in value)):
+        return None
+    try:
+        parts = urllib.parse.urlsplit(value)
+        host = (parts.hostname or '').encode('idna').decode('ascii').lower().rstrip('.')
+        if (parts.scheme != 'https' or not host or parts.username is not None or parts.password is not None or parts.port not in (None, 443)
+                or host == 'localhost' or host.endswith(('.localhost', '.local', '.internal'))):
+            return None
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            if ('.' not in host or not re.fullmatch(r'[a-z0-9.-]+', host)
+                    or re.fullmatch(r'[0-9.]+', host) or host.startswith('0x')
+                    or any(not part or part.startswith('-') or part.endswith('-') for part in host.split('.'))):
+                return None
+        else:
+            if not _public_ip(str(address)):
+                return None
+        return value
+    except (ValueError, UnicodeError):
+        return None
+
+
+def _playable_link(row):
+    variants = row.get('variants', [])
+    choices = []
+    for variant in variants if isinstance(variants, list) else []:
+        if not isinstance(variant, dict):
+            continue
+        url = _public_link(variant.get('url'))
+        mime = variant.get('content_type', '').lower() if isinstance(variant.get('content_type'), str) else ''
+        if url and mime in {'video/mp4', 'application/x-mpegurl', 'application/vnd.apple.mpegurl'}:
+            rate = variant.get('bit_rate', variant.get('bitrate', 0))
+            choices.append((mime == 'video/mp4', rate if type(rate) is int and rate >= 0 else 0, url))
+    if choices:
+        return max(choices)[2]
+    url = _public_link(row.get('url'))
+    if url and urllib.parse.unquote(urllib.parse.urlsplit(url).path).lower().endswith(('.mp4', '.m3u8')):
+        return url
+    return None
+
+
+def _post_video_link(post):
+    identity = post.get('id')
+    return ('https://x.com/i/web/status/' + identity
+            if isinstance(identity, str) and re.fullmatch(r'[0-9]{1,25}', identity) else None)
 
 
 def discover_assets(post):
@@ -119,7 +169,13 @@ def discover_assets(post):
         item = {'key': identity, 'kind': kind, 'media_key': key,
                 'url': row.get('url') if kind == 'image' else None}
         if row.get('type') in {'video', 'animated_gif'}:
-            item['unsupported'] = row['type']
+            direct = _playable_link(row)
+            url = direct or _post_video_link(post)
+            if url:
+                item.update(link_only=True, media_type=row['type'], url=url,
+                            url_kind='media' if direct else 'post')
+            else:
+                item['unsupported'] = row['type']
         if isinstance(row.get('alt_text'), str):
             item['alt_text'] = row['alt_text']
         found[identity] = item
@@ -276,12 +332,14 @@ def fetch_asset(url, kind, budget):
     deadline = time.monotonic() + 60
     visited = set()
     for _ in range(5):
+        if budget['maximum'] is not None and budget['requests'] >= budget['maximum']:
+            raise MediaError('asset_request_budget_exhausted')
+        if budget['max_bytes'] is not None and budget['bytes'] >= budget['max_bytes']:
+            raise MediaError('asset_download_byte_limit')
         if url in visited:
             raise MediaError('asset_redirect_loop')
         visited.add(url)
         host, path, addresses = _target(url)
-        if budget['requests'] >= budget['maximum']:
-            raise MediaError('asset_request_budget_exhausted')
         if time.monotonic() >= deadline:
             raise MediaError('asset_download_timeout')
         budget['requests'] += 1
@@ -309,13 +367,15 @@ def fetch_asset(url, kind, budget):
                 # socket) after the previous read completed the body. The
                 # deadline reader bounds actual socket reads; let HTTPResponse
                 # return EOF without touching an already closed descriptor.
-                chunk = response.read1(min(65536, limit + 1 - size,
-                                           budget['max_bytes'] + 1 - budget['bytes']))
+                read_limit = min(65536, limit + 1 - size)
+                if budget['max_bytes'] is not None:
+                    read_limit = min(read_limit, budget['max_bytes'] + 1 - budget['bytes'])
+                chunk = response.read1(read_limit)
                 if not chunk:
                     break
                 size += len(chunk)
                 budget['bytes'] += len(chunk)
-                if size > limit or budget['bytes'] > budget['max_bytes']:
+                if size > limit or budget['max_bytes'] is not None and budget['bytes'] > budget['max_bytes']:
                     raise MediaError('asset_download_byte_limit')
                 chunks.append(chunk)
             if length is not None and size != int(length):
@@ -764,24 +824,25 @@ def _report_recovery_paths(summary, receipts):
         summary['recovery_paths'] = sorted(paths)
 
 
-def collect_assets(vault, posts, receipts, save, *, max_downloads=40, max_bytes=RUN_LIMIT,
+def collect_assets(vault, posts, receipts, save, *, max_downloads=None, max_bytes=None,
                    retry=False, fetch=None):
     """Update durable receipts, then publish validated local assets.
 
     Failed or ambiguous asset downloads are not repeated without retry=True.
     Prepared successful downloads resume offline. X post records are never read
     by this helper, and saved missing metadata does not trigger paid X lookups.
+    None caps complete the finite supplied asset set; per-file bounds still apply.
     """
-    if not isinstance(max_downloads, int) or isinstance(max_downloads, bool) or not 0 <= max_downloads <= 500:
+    if max_downloads is not None and (type(max_downloads) is not int or max_downloads < 0):
         raise MediaError('asset_request_budget_out_of_range')
     if not isinstance(receipts, dict):
         raise MediaError('invalid_asset_receipts')
-    if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or not 0 <= max_bytes <= 1024 * 1024 * 1024:
+    if max_bytes is not None and (type(max_bytes) is not int or max_bytes < 0):
         raise MediaError('asset_byte_budget_out_of_range')
     vault = Path(os.path.abspath(vault))
     fetch = fetch or fetch_asset
     budget = {'maximum': max_downloads, 'requests': 0, 'bytes': 0, 'max_bytes': max_bytes}
-    summary = {'downloaded': 0, 'reused': 0, 'failed': 0, 'deferred': 0,
+    summary = {'downloaded': 0, 'reused': 0, 'failed': 0, 'deferred': 0, 'link_only': 0,
                'metadata_unavailable': 0, 'unsupported': 0}
     post_descriptors = [(post, discover_assets(post)) for post in posts]
     preferred = {}
@@ -792,7 +853,8 @@ def collect_assets(vault, posts, receipts, save, *, max_downloads=40, max_bytes=
             # may lack its expansion while another already-purchased row has
             # it; choose that evidence before deduplicating work for the run.
             if previous is None or (not previous.get('url') and not previous.get('unsupported')
-                                    and (item.get('url') or item.get('unsupported'))):
+                                    and (item.get('url') or item.get('unsupported'))) or (
+                    previous.get('url_kind') == 'post' and item.get('url_kind') == 'media'):
                 preferred[item['key']] = item
     handled = set()
     for post, descriptors in post_descriptors:
@@ -806,6 +868,20 @@ def collect_assets(vault, posts, receipts, save, *, max_downloads=40, max_bytes=
             receipt = receipts.get(identity)
             if receipt is not None and not isinstance(receipt, dict):
                 raise MediaError('invalid_asset_receipt')
+            if item.get('link_only'):
+                if receipt and receipt.get('path'):
+                    # A media key changing from a downloaded photo to video is
+                    # contradictory. Preserve file ownership for safe recovery.
+                    receipt['error'] = 'asset_media_type_conflict'
+                    summary['failed'] += 1
+                    continue
+                # A saved playable URL remains preferable to an older/bare row.
+                if receipt and receipt.get('status') == 'link_only' and receipt.get('url_kind') == 'media' and (
+                        item.get('url_kind') == 'post' and _public_link(receipt.get('url'))):
+                    item = dict(item, url=receipt['url'], url_kind='media')
+                receipts[identity] = dict(item, status='link_only')
+                summary['link_only'] += 1
+                continue  # No download request, cache or binary-file receipt.
             if receipt and receipt.get('status') in {'prepared', 'downloaded'}:
                 missing_cache = False
                 try:
@@ -845,7 +921,8 @@ def collect_assets(vault, posts, receipts, save, *, max_downloads=40, max_bytes=
             if receipt and receipt.get('status') in {'pending', 'failed'} and not retry:
                 summary['failed'] += 1
                 continue
-            if budget['requests'] >= max_downloads or budget['bytes'] >= max_bytes:
+            if ((max_downloads is not None and budget['requests'] >= max_downloads)
+                    or (max_bytes is not None and budget['bytes'] >= max_bytes)):
                 summary['deferred'] += 1
                 receipts.setdefault(identity, dict(item, status='deferred'))
                 continue
@@ -904,6 +981,14 @@ def render_assets(post, receipts):
         if receipt.get('status') == 'downloaded' and not receipt.get('error'):
             path = _path(receipt)
             lines.append(('![[%s]]' if receipt.get('kind') == 'image' else '[[%s]]') % path)
+        elif receipt.get('status') == 'link_only':
+            direct = receipt.get('url_kind') == 'media'
+            url = _public_link(receipt.get('url')) if direct else _post_video_link(post)
+            label = 'Animated GIF' if receipt.get('media_type') == 'animated_gif' else 'Video'
+            if url:
+                lines.append('[' + label + ('' if direct else ' on X') + '](<' + url + '>)')
+            else:
+                lines.append('Video link is unavailable; its media file is not downloaded.')
         elif receipt.get('status') == 'unsupported':
             lines.append('Video attachment is retained in source metadata; its media file is not downloaded.')
         elif receipt.get('status') == 'metadata_unavailable':
@@ -1013,6 +1098,18 @@ def run_self_test():
         def test_refuse_html(self):
             with self.assertRaises(MediaError):
                 extension(b'<html>not a PDF</html>', 'pdf', 'application/pdf')
+
+        def test_video_uses_playable_or_post_link_without_thumbnail(self):
+            post = {'id': '123', 'attachments': {'media_keys': ['7_1']},
+                    'media': [{'media_key': '7_1', 'type': 'video',
+                               'url': 'https://pbs.twimg.com/preview.jpg',
+                               'variants': [{'content_type': 'video/mp4',
+                                             'url': 'https://video.twimg.com/own.mp4'}]}]}
+            asset = discover_assets(post)[0]
+            self.assertTrue(asset['link_only'])
+            self.assertEqual(asset['url'], 'https://video.twimg.com/own.mp4')
+            post['media'][0].pop('variants')
+            self.assertEqual(discover_assets(post)[0]['url'], 'https://x.com/i/web/status/123')
 
         def test_private_endpoint(self):
             self.assertFalse(_public_ip('127.0.0.1'))

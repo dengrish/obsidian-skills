@@ -57,6 +57,9 @@ Investments/x-accounts.md + rss-feeds.md → feed-collect → X notes + RSS arti
   + targeted financial verification + prior research → daily report + Stocks/ notes
 ```
 
+Feed collection saves images and PDFs locally, and retains videos as labeled
+source links without downloading or transcribing them.
+
 Figure extraction supplies images to paper-summarize and wiki-build.
 Both paper-summarize and wiki-build read the **original PDF**; the summary
 is a finished reading note, not a source for wiki-build. A cleaned clipping

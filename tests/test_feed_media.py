@@ -102,8 +102,63 @@ class AssetTests(unittest.TestCase):
 
     def test_video_is_not_downloaded_as_preview_image(self):
         self.posts[0]['media'][0].update(type='video', preview_image_url='https://example.com/preview.png')
-        self.assertEqual(self.collect()['unsupported'], 1)
+        self.assertEqual(self.collect()['link_only'], 1)
         self.assertEqual(self.fetch.calls, [])
+        lines = '\n'.join(media.render_assets(self.posts[0], self.receipts))
+        self.assertIn('[Video on X](<https://x.com/i/web/status/123>)', lines)
+        self.assertNotIn('preview.png', lines)
+        self.assertNotIn('![[', lines)
+
+    def test_video_prefers_playable_mp4_variant_without_downloading(self):
+        self.posts[0]['media'][0].update(type='video', variants=[
+            {'content_type': 'application/x-mpegURL', 'url': 'https://video.twimg.com/stream.m3u8'},
+            {'content_type': 'video/mp4', 'bit_rate': 256000, 'url': 'https://video.twimg.com/low.mp4'},
+            {'content_type': 'video/mp4', 'bit_rate': 832000, 'url': 'https://video.twimg.com/high.mp4?tag=1&other=2'}])
+        result = self.collect()
+        self.assertEqual(result['link_only'], 1)
+        self.assertEqual(result['requests'], 0)
+        self.assertEqual(self.fetch.calls, [])
+        self.assertIn('[Video](<https://video.twimg.com/high.mp4?tag=1&other=2>)',
+                      '\n'.join(media.render_assets(self.posts[0], self.receipts)))
+        self.assertFalse((self.vault / 'Sources').exists())
+
+    def test_animated_gif_link_is_distinct_from_thumbnail_and_unknown_media_stays_unknown(self):
+        self.posts[0]['media'][0].update(type='animated_gif',
+                                       variants=[{'content_type': 'video/mp4', 'url': 'https://video.twimg.com/gif.mp4'}])
+        self.assertEqual(self.collect()['link_only'], 1)
+        self.assertIn('[Animated GIF](<https://video.twimg.com/gif.mp4>)',
+                      '\n'.join(media.render_assets(self.posts[0], self.receipts)))
+        unknown = {'id': '124', 'attachments': {'media_keys': ['unknown']}}
+        self.assertNotIn('link_only', media.discover_assets(unknown)[0])
+        self.assertEqual(self.fetch.calls, [])
+
+    def test_private_or_unsafe_playable_urls_use_post_link_without_any_network(self):
+        urls = ('http://video.twimg.com/clip.mp4', 'https://127.0.0.1/clip.mp4',
+                'https://user:password@example.com/clip.mp4', 'https://example.com/clip.mp4>unsafe',
+                'javascript:alert(1)', 'https://localhost/clip.mp4')
+        for url in urls:
+            with self.subTest(url=url):
+                source = post()
+                source['media'][0].update(type='video', variants=[{'content_type': 'video/mp4', 'url': url}])
+                descriptor = media.discover_assets(source)[0]
+                self.assertEqual(descriptor['url_kind'], 'post')
+                self.assertEqual(descriptor['url'], 'https://x.com/i/web/status/123')
+
+    def test_shared_video_uses_best_saved_metadata_and_post_fallback_is_per_wrapper(self):
+        first, second = post(identity='123'), post(identity='124')
+        first['media'][0].update(type='video')
+        second['media'][0].update(type='video', variants=[{'content_type': 'video/mp4', 'url': 'https://video.twimg.com/clip.mp4'}])
+        self.posts = [first, second]
+        self.assertEqual(self.collect()['link_only'], 1)
+        for source in self.posts:
+            self.assertIn('https://video.twimg.com/clip.mp4', '\n'.join(media.render_assets(source, self.receipts)))
+        self.assertEqual(self.fetch.calls, [])
+        self.receipts = {}
+        second['media'][0].pop('variants')
+        self.collect()
+        for source in self.posts:
+            self.assertIn('https://x.com/i/web/status/' + source['id'],
+                          '\n'.join(media.render_assets(source, self.receipts)))
 
     def test_long_form_pdf_and_opaque_unwound_link(self):
         self.posts[0]['long_post_entities'] = {'urls': [{'unwound_url': 'https://example.com/download?id=1',
@@ -346,6 +401,42 @@ class AssetTests(unittest.TestCase):
         self.assertEqual(self.fetch.calls, [])
         self.assertEqual(self.collect()['downloaded'], 1)
 
+    def test_default_completes_finite_saved_set_past_former_request_cap_without_repeating(self):
+        self.posts = [post(str(100 + index), '3_' + str(index),
+                           'https://pbs.twimg.com/media/' + str(index) + '.png') for index in range(45)]
+        seen_caps = []
+        fetch = self.fetch
+        def observe(url, kind, budget):
+            seen_caps.append((budget['maximum'], budget['max_bytes']))
+            return fetch(url, kind, budget)
+        self.fetch = observe
+        first = self.collect()
+        self.assertEqual(first['downloaded'], 45)
+        self.assertEqual(first['deferred'], 0)
+        self.assertEqual(first['requests'], 45)
+        self.assertEqual(set(seen_caps), {(None, None)})
+        self.assertEqual(self.collect()['reused'], 45)
+        self.assertEqual(len(fetch.calls), 45)
+        self.assertTrue(all('![[Sources/Images/' in '\n'.join(media.render_assets(post, self.receipts))
+                            for post in self.posts))
+
+    def test_explicit_byte_zero_and_request_caps_resume_without_automatic_failed_retry(self):
+        self.posts = [post('123', '3_1'), post('124', '3_2')]
+        self.assertEqual(self.collect(max_bytes=0)['deferred'], 2)
+        self.assertEqual(self.fetch.calls, [])
+        first = self.collect(max_downloads=1)
+        self.assertEqual((first['downloaded'], first['deferred']), (1, 1))
+        second = self.collect()
+        self.assertEqual((second['downloaded'], second['reused']), (1, 1))
+        self.assertEqual(len(self.fetch.calls), 2)
+
+    def test_optional_caps_reject_negative_boolean_and_noninteger_values(self):
+        for field in ('max_downloads', 'max_bytes'):
+            for value in (-1, True, 1.5, '1'):
+                with self.subTest(field=field, value=value), self.assertRaises(media.MediaError):
+                    self.collect(**{field: value})
+        self.assertEqual(self.fetch.calls, [])
+
     def test_failures_require_explicit_retry(self):
         self.fetch = lambda *args: (_ for _ in ()).throw(OSError('https://private-query.example/?secret=not-to-log'))
         self.assertEqual(self.collect()['failed'], 1)
@@ -440,10 +531,47 @@ class AssetTests(unittest.TestCase):
 
 
 class HTTPTransportTests(unittest.TestCase):
+    def test_none_aggregate_caps_keep_per_file_bounds_and_support_existing_run_totals(self):
+        class Response:
+            status = 200
+            def __init__(self, data):
+                self.stream = io.BytesIO(data)
+            def getheader(self, name, default=None):
+                return default
+            def read1(self, maximum):
+                return self.stream.read(maximum)
+            def close(self):
+                pass
+        class Connection:
+            def close(self):
+                pass
+        for body, valid in ((b'12345678', True), (b'123456789', False)):
+            budget = {'maximum': None, 'requests': 501, 'bytes': 256 * 1024 * 1024 + 1, 'max_bytes': None}
+            with self.subTest(valid=valid), patch.object(media, 'PHOTO_LIMIT', 8), \
+                    patch.object(media, '_target', return_value=('example.com', '/image', [])), \
+                    patch.object(media, '_request', return_value=(Connection(), Response(body), None)):
+                if valid:
+                    self.assertEqual(media.fetch_asset('https://example.com/image', 'image', budget)['data'], body)
+                else:
+                    with self.assertRaisesRegex(media.MediaError, 'asset_download_byte_limit'):
+                        media.fetch_asset('https://example.com/image', 'image', budget)
+            self.assertEqual(budget['requests'], 502)
+            self.assertEqual(budget['bytes'], 256 * 1024 * 1024 + 1 + len(body))
+
+    def test_explicit_zero_caps_block_transport_before_dns(self):
+        for maximum, max_bytes in ((0, None), (None, 0)):
+            budget = {'maximum': maximum, 'requests': 0, 'bytes': 0, 'max_bytes': max_bytes}
+            with self.subTest(maximum=maximum, max_bytes=max_bytes), \
+                    patch.object(media, '_target', side_effect=AssertionError('No DNS')), \
+                    patch.object(media, '_request', side_effect=AssertionError('No HTTP')), \
+                    self.assertRaises(media.MediaError):
+                media.fetch_asset('https://example.com/image', 'image', budget)
+            self.assertEqual((budget['requests'], budget['bytes']), (0, 0))
+
     def fetch_response(self, reply, *, kind='pdf', budget=None, after_headers=None):
         """Keep the real response reader and socket makefile lifetime offline."""
         if budget is None:
-            budget = {'maximum': 1, 'requests': 0, 'bytes': 0, 'max_bytes': media.RUN_LIMIT}
+            budget = {'maximum': 1, 'requests': 0, 'bytes': 0, 'max_bytes': 256 * 1024 * 1024}
         wire, peer = socket.socketpair()
         peer.settimeout(2)
         errors, opened = [], []
@@ -667,7 +795,7 @@ class NetworkTests(unittest.TestCase):
         original = media._target
         def target(url):
             return ('example.com', '/file.pdf', []) if 'example.com' in url else original(url)
-        budget = {'maximum': 4, 'requests': 0, 'bytes': 0, 'max_bytes': media.RUN_LIMIT}
+        budget = {'maximum': 4, 'requests': 0, 'bytes': 0, 'max_bytes': 256 * 1024 * 1024}
         with patch.object(media, '_target', side_effect=target), patch.object(media, '_request',
                 return_value=(Connection(), Response(), None)) as request, self.assertRaises(media.MediaError):
             media.fetch_asset('https://example.com/file.pdf', 'pdf', budget)

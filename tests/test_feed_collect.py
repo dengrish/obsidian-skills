@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Independent offline forward tests for paid X collection and vault safety."""
 from copy import deepcopy
+import html
 import json
 import os
 from pathlib import Path
@@ -55,6 +56,17 @@ class Provider:
 
 
 class FeedCollectionTests(unittest.TestCase):
+    def test_cli_optional_attachment_caps_default_to_complete_and_respect_explicit_limits(self):
+        for extra, expected in (([], (None, None)),
+                                (['--max-downloads', '0', '--max-attachment-bytes', '0'], (0, 0)),
+                                (['--max-downloads', '1000', '--max-attachment-bytes', '2147483648'],
+                                 (1000, 2147483648))):
+            with self.subTest(extra=extra), patch.object(feed, 'execute', return_value={'requests': 0}) as execute, \
+                    patch('builtins.print'):
+                self.assertEqual(feed.main(['attachments', '--vault', str(self.vault), *extra]), 0)
+            args = execute.call_args.args[0]
+            self.assertEqual((args.max_downloads, args.max_attachment_bytes), expected)
+
     def test_accounts_override_cannot_walk_outside_vault(self):
         with self.assertRaises(feed.FeedError):
             feed.selected(self.args(accounts_note='Investments/../../outside.md'))
@@ -119,6 +131,117 @@ class FeedCollectionTests(unittest.TestCase):
         self.assertEqual(set(self.state()['accounts']['actual']['posts']), {'103', '104', '105', '106'})
         self.assertEqual(self.roster.read_bytes(), self.roster_bytes)
         self.assertEqual([p.name for p in self.note.parent.glob('*.md')], ['actual.md'])
+
+    def test_x_entities_decode_once_in_note_but_raw_source_and_literal_encoded_intent_survive(self):
+        original = 'S&amp;P; literal &amp;amp;; &lt;script&gt;alert(1)&lt;/script&gt;; &#36;ABC'
+        provider = Provider(page([post(105, text=original)]))
+        self.collect(provider)
+        saved = self.state()['accounts']['actual']['posts']['105']
+        self.assertEqual(saved['text'], original)
+        note = self.note.read_text(encoding='utf-8')
+        self.assertIn('S&amp;P; literal &amp;amp;;', note)
+        self.assertIn('&lt;script&gt;', note)
+        self.assertNotIn('<script>', note)
+        self.assertIn(r'\$ABC', note)
+        self.assertIn('S&P; literal &amp;;', html.unescape(note))
+        # Generic source conversion is also used by RSS and remains literal.
+        self.assertEqual(feed.source_markdown('S&amp;P'), 'S&amp;amp;P')
+
+    def test_x_entity_normalization_preserves_url_metadata_offsets_and_confirmed_destinations(self):
+        raw_url = 'https://example.com/search?a=1&amp;b=2'
+        destination = 'https://example.com/search?a=1&b=2'
+        source = post(105, text='😀 S&amp;P ' + raw_url)
+        offset = len('😀 S&amp;P '.encode('utf-16-le')) // 2
+        source['entities'] = {'urls': [{'url': destination, 'start': offset,
+                                      'end': offset + len(raw_url)}]}
+        entities = deepcopy(source['entities'])
+        self.collect(Provider(page([source])))
+        saved = self.state()['accounts']['actual']['posts']['105']
+        self.assertEqual(saved['text'], source['text'])
+        self.assertEqual(saved['entities'], entities)
+        self.assertIn('<' + destination + '>', self.note.read_text(encoding='utf-8'))
+        self.assertNotIn('<' + raw_url + '>', self.note.read_text(encoding='utf-8'))
+
+    def test_x_bare_url_query_is_not_guessed_and_encoded_placeholder_cannot_inject_link(self):
+        url = 'https://example.com/?literal=&amp;value'
+        text = 'XTEXTURLTOKEN&#48;END &amp; ' + url
+        rendered = feed.x_source_markdown(text)
+        self.assertIn('XTEXTURLTOKEN0END &amp;', rendered)
+        self.assertEqual(rendered.count('<' + url + '>'), 1)
+        self.assertEqual(feed.x_source_markdown('Rock &roll; &copy=1'), 'Rock &amp;roll; &amp;copy=1')
+        self.assertEqual(feed.x_source_markdown('&notarealentity;'), '&amp;notarealentity;')
+
+    def test_new_video_variants_are_saved_without_extra_media_api_calls(self):
+        source = post(105)
+        source['attachments'] = {'media_keys': ['13_1']}
+        response = page([source])
+        response['includes'] = {'media': [{'media_key': '13_1', 'type': 'video',
+            'variants': [{'content_type': 'video/mp4', 'bit_rate': 832000,
+                          'url': 'https://video.twimg.com/own.mp4?tag=12'}],
+            'preview_image_url': 'https://pbs.twimg.com/thumbnail.jpg'}]}
+        provider = Provider(response)
+        result = self.collect(provider)
+        self.assertEqual(len(provider.calls), 2)
+        self.assertIn('variants', provider.calls[1][1]['media.fields'].split(','))
+        self.assertEqual(result['attachments']['requests'], 0)
+        self.assertEqual(result['attachments']['link_only'], 1)
+        self.assertEqual(result['attachments']['unsupported'], 0)
+        saved = self.state()['accounts']['actual']['posts']['105']
+        self.assertEqual(saved['media'][0]['variants'], response['includes']['media'][0]['variants'])
+        self.assertNotIn('preview_image_url', saved['media'][0])
+        note = self.note.read_text(encoding='utf-8')
+        self.assertIn('[Video](<https://video.twimg.com/own.mp4?tag=12>)', note)
+        self.assertNotIn('thumbnail', note)
+
+    def test_legacy_media_fields_resume_unchanged_before_new_windows_request_variants(self):
+        self.collect(Provider(page([post(105)], 'old-page')), max_requests=2)
+        state = self.state()
+        state['accounts']['actual']['window']['fields']['media.fields'] = feed.LEGACY_MEDIA_FIELDS
+        self.state_path.write_text(json.dumps(state), encoding='utf-8')
+        old = Provider(page([post(104)]))
+        self.collect(old)
+        self.assertEqual(old.calls[0][1]['media.fields'], feed.LEGACY_MEDIA_FIELDS)
+        self.assertEqual(old.calls[0][1]['pagination_token'], 'old-page')
+        new = Provider(page([]))
+        self.collect(new, until=LATER)
+        self.assertEqual(new.calls[0][1]['media.fields'], feed.MEDIA_FIELDS)
+
+    def test_legacy_saved_video_becomes_link_only_by_offline_publication(self):
+        source = post(105)
+        source['attachments'] = {'media_keys': ['13_1']}
+        response = page([source])
+        response['includes'] = {'media': [{'media_key': '13_1', 'type': 'video'}]}
+        self.collect(Provider(response))
+        state = self.state()
+        receipt = next(iter(state['assets'].values()))
+        receipt.update(status='unsupported', unsupported='video', url=None)
+        for key in ('link_only', 'media_type', 'url_kind'):
+            receipt.pop(key, None)
+        self.state_path.write_text(json.dumps(state), encoding='utf-8')
+        with patch.object(feed, 'request_json', side_effect=AssertionError('Offline paid request')):
+            result = feed.execute(self.args(command='publish'))
+        self.assertEqual(result['requests'], 0)
+        self.assertEqual(next(iter(self.state()['assets'].values()))['status'], 'link_only')
+        self.assertIn('[Video on X](<https://x.com/i/web/status/105>)', self.note.read_text(encoding='utf-8'))
+
+    def test_legacy_saved_media_response_publishes_offline_with_original_query_receipt(self):
+        real_apply = feed.apply_response
+
+        def interrupted(store):
+            if store.data['pending']['kind'] == 'timeline':
+                raise RuntimeError('saved legacy media response')
+            return real_apply(store)
+
+        with patch.object(feed, 'apply_response', side_effect=interrupted), self.assertRaises(RuntimeError):
+            self.collect(Provider(page([post(105)])))
+        state = self.state()
+        state['accounts']['actual']['window']['fields']['media.fields'] = feed.LEGACY_MEDIA_FIELDS
+        state['pending']['query']['media.fields'] = feed.LEGACY_MEDIA_FIELDS
+        self.state_path.write_text(json.dumps(state), encoding='utf-8')
+        with patch.object(feed, 'request_json', side_effect=AssertionError('Paid replay')):
+            feed.execute(self.args(command='publish'))
+        self.assertIsNone(self.state()['pending'])
+        self.assertEqual(self.state()['requests'][-1]['query']['media.fields'], feed.LEGACY_MEDIA_FIELDS)
 
     def test_original_quote_and_repost_rows_are_recorded_but_unverified_reply_is_excluded(self):
         quote = post(106, text='Original quote commentary')

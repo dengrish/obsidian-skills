@@ -89,7 +89,8 @@ SAFE_QUERY_KEYS = {'max_results', 'tweet.fields', 'post.fields', 'media.fields',
 LEGACY_FIELDS = ('id,text,author_id,created_at,note_tweet,attachments,entities,media_metadata,'
                  'referenced_tweets,conversation_id,edit_history_tweet_ids,withheld')
 FIELDS = LEGACY_FIELDS + ',in_reply_to_user_id'
-MEDIA_FIELDS = 'media_key,type,url,alt_text,width,height'
+LEGACY_MEDIA_FIELDS = 'media_key,type,url,alt_text,width,height'
+MEDIA_FIELDS = LEGACY_MEDIA_FIELDS + ',variants'
 
 
 class FeedError(Exception):
@@ -368,11 +369,11 @@ def validate_state(data):
             if window.get('completed_through') is not None:
                 timestamp(window['completed_through'])
             allowed_fields = (FIELDS,) if window['exclude'] is None else (LEGACY_FIELDS, FIELDS)
+            allowed_selections = [{'tweet.fields': fields} for fields in allowed_fields] + [
+                {'tweet.fields': fields, 'expansions': 'attachments.media_keys', 'media.fields': media_fields}
+                for fields in allowed_fields for media_fields in (LEGACY_MEDIA_FIELDS, MEDIA_FIELDS)]
             if ((window['exclude'] is None and 'fields' not in window)
-                    or 'fields' in window and window['fields'] not in tuple(
-                        selection for fields in allowed_fields for selection in (
-                            {'tweet.fields': fields}, {'tweet.fields': fields,
-                             'expansions': 'attachments.media_keys', 'media.fields': MEDIA_FIELDS}))):
+                    or 'fields' in window and window['fields'] not in allowed_selections):
                 raise FeedError('invalid_saved_field_selection')
             if window['next_token'] is not None and not re.fullmatch(r'[A-Za-z0-9_-]{1,2048}', str(window['next_token'])):
                 raise FeedError('invalid_saved_pagination')
@@ -1039,6 +1040,47 @@ def source_markdown(text, entities=()):
     return result
 
 
+def x_source_markdown(text, entities=()):
+    """Decode one X text-entity layer without changing stored text or URL intent.
+
+    Bare URL query strings stay literal unless supplied URL metadata confirms a
+    decoded destination. The generic renderer also serves already-decoded RSS
+    text and must not perform this provider-specific normalization itself.
+    """
+    known = {row['url'] for container in entities if isinstance(container, dict)
+             for row in (container.get('urls', []) if isinstance(container.get('urls', []), list) else [])
+             if isinstance(row, dict) and isinstance(row.get('url'), str)}
+    prefix = 'XTEXTURLTOKEN'
+    while prefix in text or prefix in html.unescape(text):
+        prefix += 'X'
+    urls = {}
+
+    def protect(match):
+        candidate = match[0]
+        decoded = html.unescape(candidate)
+        matches = [url for url in known if decoded.startswith(url) and (decoded == url
+                   or re.fullmatch(r'[.,!?;:\u2019\u201d\')\]}]+', decoded[len(url):]))]
+        # Only authoritative saved URL metadata can resolve an encoded URL.
+        if candidate not in known and matches:
+            candidate = decoded
+        token = prefix + str(len(urls)) + 'END'
+        urls[token] = candidate
+        return token
+
+    protected = re.sub(r'https?://[^\s<>"`\\]+', protect, text, flags=re.IGNORECASE)
+    def decode(match):
+        entity = match[0]
+        # html.unescape also recognizes legacy name prefixes without a
+        # semicolon; require the entire named entity to avoid changing prose.
+        return (html.unescape(entity) if entity.startswith('&#')
+                else html.entities.html5.get(entity[1:], entity))
+    decoded = re.sub(r'&(?:[A-Za-z][A-Za-z0-9]{1,31}|#[0-9]{1,8}|#[xX][0-9A-Fa-f]{1,8});',
+                     decode, protected)
+    for token, url in urls.items():
+        decoded = decoded.replace(token, url)
+    return source_markdown(decoded, entities)
+
+
 def render(account, assets=None):
     note = account.get('note', {})
     lines = ['---', 'sources:', '  - X', 'authors:',
@@ -1064,7 +1106,7 @@ def render(account, assets=None):
                          + reference['id'] + ').' for reference in reposts)
             lines.extend(['', 'Returned repost text may be truncated; the source post is not fetched separately.', ''])
         if post.get('status', 'available') == 'available':
-            lines.extend([source_markdown(post.get('text', ''),
+            lines.extend([x_source_markdown(post.get('text', ''),
                                           (post.get('entities', {}), post.get('long_post_entities', {}))), ''])
         else:
             lines.extend(['Source content is unavailable, withheld or superseded.', ''])
@@ -1669,8 +1711,8 @@ def parser():
     result.add_argument('--description-source', action='append', help='Supporting public URL; repeat for multiple sources.')
     result.add_argument('--max-requests', type=int, help='Optional total paid API request cap; default completes the requested window.')
     result.add_argument('--max-posts', type=int, help='Optional total returned-post cap; default completes the requested window.')
-    result.add_argument('--max-downloads', type=int, default=40, help='Attachment HTTP request limit, including redirects; zero defers downloads.')
-    result.add_argument('--max-attachment-bytes', type=int, default=feed_media.RUN_LIMIT, help='Total attachment response-byte budget for this run.')
+    result.add_argument('--max-downloads', type=int, help='Optional attachment HTTP request cap, including redirects; default completes saved eligible attachments, zero defers downloads.')
+    result.add_argument('--max-attachment-bytes', type=int, help='Optional total attachment response-byte cap; default has no aggregate cap, zero defers downloads. Per-file limits always apply.')
     result.add_argument('--retry-attachments', action='store_true', help='Retry failed/interrupted file downloads; never rereads X posts.')
     result.add_argument('--latest', type=int, help='Explicit historical sample target per account (1–800); overrides the normal 72-hour scope.')
     result.add_argument('--history-before', help='Known exclusive older-history boundary for legacy completed windows without saved lower bounds.')
@@ -1704,6 +1746,12 @@ def run_self_test():
             self.assertGreater(instant(post['created_at']), instant('2026-09-07T08:00:00Z'))
             with self.assertRaises(FeedError):
                 timestamp('2026-09-07')
+        def test_x_entities_decode_once_without_changing_literal_url_queries(self):
+            text = 'S&amp;P; literal &amp;amp; https://example.com/?literal=&amp;value'
+            result = x_source_markdown(text)
+            self.assertIn('S&amp;P; literal &amp;amp;', result)
+            self.assertIn('<https://example.com/?literal=&amp;value>', result)
+            self.assertEqual(source_markdown('S&amp;P'), 'S&amp;amp;P')
         def test_self_reply_requires_verified_target_and_keeps_parent(self):
             source = {'id': '123', 'author_id': '12', 'created_at': '2026-09-07T01:00:00Z', 'text': 'continuation',
                       'in_reply_to_user_id': '12', 'referenced_tweets': [{'id': '122', 'type': 'replied_to'}]}
@@ -1819,8 +1867,9 @@ def main(argv=None):
         parser().error('optional budgets: requests at least 1, posts at least 5')
     if args.latest is not None and not 1 <= args.latest <= 800:
         parser().error('--latest must be 1–800')
-    if not 0 <= args.max_downloads <= 500 or not 1 <= args.max_attachment_bytes <= 1024 ** 3:
-        parser().error('attachment budgets: requests 0–500, bytes 1–1073741824')
+    if ((args.max_downloads is not None and args.max_downloads < 0)
+            or (args.max_attachment_bytes is not None and args.max_attachment_bytes < 0)):
+        parser().error('optional attachment budgets must be nonnegative integers')
     if args.history_before and args.latest is None:
         parser().error('--history-before requires --latest')
     if args.command == 'resolve-pending' and not args.outcome:

@@ -9,6 +9,8 @@ It preserves source content without summaries,
 sentiment labels or buying recommendations. Attached photos are saved in
 `Sources/Images/` and embedded locally; direct PDFs are saved in `Sources/PDFs/`
 and linked. The collector owns those files through durable receipts.
+Videos and animated media remain labeled links to supplied playable URLs or the
+original posts; their files are not downloaded or transcribed.
 Account notes contain only properties and timestamped posts. Properties include
 stable note creation and update dates and a short sourced owner description;
 source metadata, collection status and skill provenance stay in private state.
@@ -21,6 +23,13 @@ the supplied text, tables, links and local images without summarizing it. It
 tracks unseen articles and revisions separately from X's three-day policy;
 conditional requests avoid unchanged transfers where the publisher supports them.
 Summary-only feeds and incomplete archive coverage remain explicit limitations.
+RSS video and embedded-content URLs remain links too. Current notes can receive
+formatting repairs from saved source without revising earlier evidence archives.
+Image/PDF collection processes all available saved attachments by default,
+subject to per-file safety limits and any explicit run budget. Both adapters
+can finish attachment downloads without rereading posts or feeds. An image shown
+only as a remote link is incomplete; an original-source link can remain beside
+its local embed.
 
 [investments:stock-research](skills/stock-research/SKILL.md) finds buying
 opportunities in liquid U.S.-listed stocks for a 3–12 month momentum horizon,

@@ -57,13 +57,14 @@ not establish deletion or retract the article. Report possible missed intervals,
 missing publication dates, unsupported content and failed sources. Neither an
 exhausted feed nor a 304 response proves that all historical articles were captured.
 
-The helper bounds response bytes, redirects, time and attachment downloads. Feed
-responses are limited to 8 MiB and 1,000 entries; normal attachment collection
-allows 40 download requests and 128 MiB per invocation; `--max-downloads` and
-`--max-attachment-bytes` select different bounds. Honor explicit user budgets. A
-limit leaves a visible gap; do not silently raise it or keep retrying a failing
-publisher. One unavailable source need not prevent the others from being saved.
-Report image/PDF retries still needed separately from successful article capture.
+Feed responses are limited to 8 MiB and 1,000 entries. By default, attachment
+collection processes every eligible saved image/PDF once, reusing verified local
+files. It has no default run request or byte cap; per-file size, time and redirect
+limits still apply. Explicit `--max-downloads` (including redirect requests) and
+`--max-attachment-bytes` bounds limit that invocation. Honor those budgets and
+report the resulting gaps instead of silently raising them. Do not keep retrying
+a failing publisher. Article capture can succeed while its image/PDF collection
+is incomplete; report these outcomes separately.
 
 Saved articles precede updated HTTP validators. If note publication fails after
 the source is retained, fix the specific ownership or filesystem issue and use:
@@ -74,11 +75,18 @@ python3 '<skill>/scripts/rss_collect.py' status --vault '<vault>'
 ```
 
 Publication and status are offline. Intact prepared attachment caches can publish
-offline. Downloads deferred by a budget resume during a later collection; failed
-or ambiguous downloads and missing prepared caches need an explicit retry:
+offline. To complete image/PDF downloads from saved URLs without fetching feeds
+or article bodies again, use:
 
 ```bash
-python3 '<skill>/scripts/rss_collect.py' collect --vault '<vault>' --retry-attachments
+python3 '<skill>/scripts/rss_collect.py' attachments --vault '<vault>'
+```
+
+Downloads deferred by an explicit budget resume here or during later collection.
+Failed or ambiguous downloads and missing prepared caches need an explicit retry:
+
+```bash
+python3 '<skill>/scripts/rss_collect.py' attachments --vault '<vault>' --retry-attachments
 ```
 
 Retries use saved attachment URLs, without scraping the article. Never reset
@@ -103,12 +111,26 @@ in durable source records as well as the safe visible rendering.
 `feed_content` means the feed supplied a content body; it is not a guarantee that
 the article is complete. `summary_only` means only an excerpt/summary was supplied.
 Do not turn a paywall teaser into an inferred full article or omit its limitation.
-Unsupported embedded audio/video, interactive charts and inaccessible attachments
-remain links or explicit limitations, never reconstructed content.
+Video URLs in the article body or explicit RSS/Atom video enclosures become
+labeled links without downloading, embedding, transcribing or checking playback.
+Safe iframe URLs become labeled embedded-content links unless their source
+identifies them more specifically;
+do not guess that a frame is a video. Unsupported audio, interactive charts and
+inaccessible attachments remain links or explicit limitations, never reconstructed
+content. A link is a locator, not reviewed audiovisual evidence.
+Older records that did not retain an enclosure URL cannot supply one offline;
+do not guess it or refetch a feed solely to fill that gap.
 
 Save article images to `Sources/Images/` and embed verified local files in context.
+A remote image link without a local embed is an unresolved-download fallback,
+not a completed image. Finish available image downloads before calling article
+collection complete; supplementary original-source links may remain beside embeds.
 Save direct PDF links/enclosures to `Sources/PDFs/` and link them. Do not download
 logos or webpage previews as substitutes, and do not use remote image embeds.
+Keep images and their captions readable without nested links. Preserve a distinct
+outer destination separately when needed. A downloaded PDF belongs at its original
+link positions with the source's labels; use a labeled fallback only when the
+feed supplies the PDF solely as an enclosure.
 Unchanged revisions reuse their media receipts. New article revisions recheck
 media even when the URL is unchanged, so an updated chart cannot silently reuse
 old bytes; earlier evidence keeps its earlier assets. Missing or rejected downloads retain
@@ -131,6 +153,10 @@ content: a publisher reverting A → B → A creates a new observed revision, wh
 repeated unchanged A → A polling does not. Keep the first observation of each revision so earlier research
 cannot use later edits. The public article note shows the latest saved version;
 durable revision evidence preserves what earlier analysis actually consumed.
+Offline publication can improve the current note's formatting from saved source
+without fetching the feed or creating an article revision. Earlier evidence
+archives, revision identities and observation times remain unchanged; presentation
+repairs are not new investment evidence.
 
 The same canonical article discovered through another enabled feed shares its
 article record. Conflicting secondary versions stay explicit while the original

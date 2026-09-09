@@ -532,6 +532,43 @@ class FeedIntakeTests(unittest.TestCase):
         self.assertNotIn('![[', value['published_excerpt'])
         self.assertEqual(value['attachments'][0]['kind'], 'image')
 
+    def test_link_only_video_is_not_a_download_failure_or_reviewed_visual(self):
+        source = self.state['accounts']['alpha']['posts']['10']
+        source['attachments'] = {'media_keys': ['video-one']}
+        source['media'] = [{'media_key': 'video-one', 'type': 'video', 'variants': [
+            {'content_type': 'video/mp4', 'url': 'https://video.twimg.com/source.mp4', 'bit_rate': 1000}]}]
+        descriptor = feed.feed_media.discover_assets(source)[0]
+        self.state['assets'][descriptor['key']] = dict(descriptor, status='link_only')
+        source['assets'] = [descriptor['key']]
+        self.publish()
+        result = self.run_intake()
+        row = result['posts'][0]['attachments'][0]
+        self.assertEqual(result['status'], 'ready')
+        self.assertTrue(row['link_only'])
+        self.assertFalse(row['eligible'])
+        self.assertFalse(row['content_reviewed'])
+        self.assertEqual(row['url'], 'https://video.twimg.com/source.mp4')
+        self.assertNotIn('path', row)
+        self.assertNotIn('attachments_unavailable', result['accounts'][0]['gaps'])
+        source['media'][0].pop('variants')
+        self.publish()
+        row = self.run_intake()['posts'][0]['attachments'][0]
+        self.assertEqual(row['url'], 'https://x.com/i/web/status/10')
+        self.assertEqual(row['url_kind'], 'post')
+        self.assertFalse(row['eligible'])
+
+    def test_unverified_video_receipt_does_not_hide_missing_attachment(self):
+        identity = '0' * 64
+        self.state['assets'][identity] = {'status': 'link_only', 'url': 'https://example.com/unverified.mp4',
+                                         'url_kind': 'media', 'media_type': 'video'}
+        self.state['accounts']['alpha']['posts']['10']['assets'] = [identity]
+        self.publish()
+        result = self.run_intake()
+        row = result['posts'][0]['attachments'][0]
+        self.assertEqual(row['status'], 'unverified_link_only_media')
+        self.assertNotIn('url', row)
+        self.assertIn('attachments_unavailable', result['accounts'][0]['gaps'])
+
     def test_failed_attachment_is_reported_without_suppressing_available_text(self):
         self.add_asset(status='failed')
         result = self.run_intake()
@@ -654,6 +691,9 @@ class RSSBoundaryTests(unittest.TestCase):
         self.assertEqual(source['source_url'], self.article_url)
         self.assertEqual(source['created_at'], '2026-01-01T12:00:00Z')
         self.assertEqual(source['version_observed_at'], OBSERVED)
+        self.assertEqual(source['content_basis'], 'immutable_revision_archive')
+        self.assertEqual(source['evidence_rendering_version'], 2)
+        self.assertFalse(source['current_note_is_historical_evidence'])
         self.assertIn('/.rss-collect/revisions/', source['note'])
         self.assertTrue((self.vault / source['note']).is_file())
         self.assertIn('Original company evidence.', source['published_excerpt'])

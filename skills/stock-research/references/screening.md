@@ -39,6 +39,9 @@ a new revision requires checking what changed, with unchanged arguments linked t
 their earlier assessment. Do not substitute the current article for an earlier
 revision at a historical cutoff. A summary-only feed or missing image may leave
 the thesis unavailable. Preserve that limit rather than supplying imagined text.
+An offline formatting repair is not a new article revision. A video or embedded
+content link is a source locator, not a transcript or reviewed audiovisual evidence;
+do not infer its claims from a thumbnail, title or the fact that collection linked it.
 An X post linking to an RSS article and the article itself may be the same argument,
 not independent confirmation; retain both source identities when reconciling them.
 

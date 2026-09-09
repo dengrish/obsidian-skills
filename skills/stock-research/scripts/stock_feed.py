@@ -121,6 +121,15 @@ def attachment_rows(vault, post, receipts, cutoff, snapshots):
     for key in keys:
         receipt = receipts.get(key, {})
         row = {'asset_key': key, 'status': receipt.get('status', 'missing_receipt'), 'eligible': False}
+        if row['status'] == 'link_only' and not receipt.get('error'):
+            descriptor = next((item for item in feed.feed_media.discover_assets(post) if item['key'] == key), {})
+            if descriptor.get('link_only'):
+                row.update(link_only=True, content_reviewed=False,
+                    media_type=descriptor['media_type'], url=descriptor['url'], url_kind=descriptor['url_kind'])
+            else:
+                row['status'] = 'unverified_link_only_media'
+            rows.append(row)
+            continue
         if row['status'] != 'downloaded' or receipt.get('error'):
             rows.append(row)
             continue
@@ -291,7 +300,7 @@ def _account_context(vault, cutoff, since, state, item, account, snapshots,
         # supplied separately only after cutoff and file-integrity checks.
         excerpt = post_block(account, dict(post, assets=[]), {}).rstrip()
         attachment = attachment_rows(vault, post, state.get('assets', {}), cutoff, snapshots)
-        if any(not asset['eligible'] for asset in attachment):
+        if any(not asset['eligible'] and not asset.get('link_only') for asset in attachment):
             row['gaps'].append('attachments_unavailable')
         posts.append({'handle': item['handle'], 'published_handle': account['handle'], 'account_id': account['id'],
                       'post_id': post['id'], 'created_at': post['created_at'],
@@ -319,7 +328,8 @@ def _account_context(vault, cutoff, since, state, item, account, snapshots,
             posts[-1]['intake_origin'] = 'retained_prior_source'
         if post['id'] in retained:
             retained_status[post['id']] = (['attachments_unavailable']
-                                           if any(not asset['eligible'] for asset in attachment) else [])
+                                           if any(not asset['eligible'] and not asset.get('link_only')
+                                                  for asset in attachment) else [])
         row['eligible_posts'] += 1
     # Context availability uses only this author's eligible, published evidence;
     # a saved but post-cutoff, excluded or unavailable parent cannot fill a gap.
@@ -507,6 +517,11 @@ def _rss_post(item, cutoff, since, retained):
               'handle': item.get('publication') or item.get('feed_title') or item['feed_id'],
               'account_id': item['feed_id'], 'feed_id': item['feed_id'], 'feed_url': item.get('feed_url'),
               'title': item.get('title'), 'authors': item.get('authors', []), 'content_scope': item.get('content_scope'),
+              'content_basis': 'immutable_revision_archive',
+              'evidence_rendering_version': item.get('evidence_rendering_version', 1),
+              'current_note_is_historical_evidence': False,
+              'linked_media': [dict(row, link_only=True, content_reviewed=False)
+                               for row in item.get('linked_media', [])],
               'note': archived, 'article_note': note, 'version_evidence': archived, 'note_sha256': item['note_sha256'],
               'text': content, 'published_excerpt': content, 'excerpt_sha256': feed.digest(content.encode('utf-8')),
               'references': [], 'attachments': attachments, 'repost_text_may_be_truncated': False}
