@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Public RSS collection with durable revisions and guarded Obsidian publication."""
+"""Public RSS collection; offline publish repairs owned views while preserving archived evidence."""
 from __future__ import annotations
 
 import argparse
@@ -8,12 +8,14 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import posixpath
 import re
 import shutil
 import stat
 import sys
 import tempfile
 import uuid
+from urllib.parse import quote, urlsplit
 
 _OBSIDIAN_SHARED_MODULES = ('atomic_move', 'note_provenance', 'portable_names', 'slugify')
 
@@ -138,8 +140,32 @@ def safe_relative(value, prefix):
 
 
 def semantic(item):
-    return {key: item.get(key) for key in ('canonical_url', 'title', 'authors', 'published_at',
+    result = {key: item.get(key) for key in ('canonical_url', 'title', 'authors', 'published_at',
             'updated_at', 'content', 'content_type', 'content_scope', 'markdown', 'attachments', 'diagnostics')}
+    # The absent discriminator is the original immutable evidence contract.
+    # New rendering metadata is protected by the new revision's own digest.
+    if 'rendering_version' in item:
+        result.update(rendering_version=item['rendering_version'], render_base=item.get('render_base'))
+    if 'linked_media' in item:
+        result['linked_media'] = item['linked_media']
+    return result
+
+
+def source_signature(item):
+    """Compare supplied source material independently of a renderer upgrade."""
+    result = {key: item.get(key) for key in ('canonical_url', 'title', 'authors', 'published_at',
+              'updated_at', 'content', 'content_type', 'content_scope')}
+    result['attachments'] = sorted({(row['kind'], row['url']) for row in item['attachments']})
+    result['linked_media'] = item.get('linked_media', [])
+    return common.digest(common.encoded(result))
+
+
+def same_source(first, second):
+    # Legacy records did not save xml:base. Do not invent a source change merely
+    # because the updated parser now records that rendering context.
+    return (source_signature(first) == source_signature(second)
+            and (not first.get('render_base') or not second.get('render_base')
+                 or first['render_base'] == second['render_base']))
 
 
 def semantic_hash(item):
@@ -207,6 +233,21 @@ def validate(data):
         previous_hash = None
         hashes = set()
         for version in entry['versions']:
+            rendering_version = version.get('rendering_version', 1)
+            if (type(rendering_version) is not int or rendering_version not in {1, 2}
+                    or rendering_version == 2 and (not isinstance(version.get('render_base'), str)
+                        or not version['render_base'] or len(version['render_base']) > 8192
+                        or any(ord(character) < 32 for character in version['render_base']))):
+                raise RSSError('unsupported_rss_evidence_rendering')
+            linked_media = version.get('linked_media', [])
+            if (not isinstance(linked_media, list) or any(not isinstance(row, dict)
+                    or set(row) != {'url', 'media_type', 'mime_type'} or row['media_type'] != 'video'
+                    or not isinstance(row['mime_type'], str) or len(row['mime_type']) > 256
+                    or any(ord(character) < 32 for character in row['mime_type'])
+                    or not isinstance(row['url'], str)
+                    or rss_source._url_or_none(row['url'], entry['canonical_url'], []) != row['url']
+                    for row in linked_media)):
+                raise RSSError('invalid_rss_linked_media')
             if (version.get('revision_sha256') != revision_hash(version)
                     or version.get('semantic_sha256') != semantic_hash(version)
                     or version.get('previous_revision_sha256') != previous_hash
@@ -426,7 +467,10 @@ def apply_pending(store):
     seen = set()
     representations = {}
     for item in parsed['items']:
-        representations.setdefault(article_id(item['canonical_url']), set()).add(semantic_hash(item))
+        # Known bases distinguish competing representations in this response;
+        # cross-version comparison separately accommodates legacy absent bases.
+        representations.setdefault(article_id(item['canonical_url']), set()).add(
+            (source_signature(item), item.get('render_base')))
     ambiguous = {identity for identity, variants in representations.items() if len(variants) > 1}
     for item in parsed['items']:
         identity = article_id(item['canonical_url'])
@@ -456,7 +500,7 @@ def apply_pending(store):
             if entry['feed_id'] not in active and pending['feed_id'] in active:
                 entry['feed_id'] = pending['feed_id']  # Explicitly enabled source; note path stays stable.
             else:
-                if content_signature not in {version['semantic_sha256'] for version in entry['versions']}:
+                if not any(same_source(item, version) for version in entry['versions']):
                     result['issues'].append({'reason': 'secondary_feed_variant_not_applied', 'article_id': identity})
                 continue  # Competing feeds never oscillate the primary source's text.
         if entry is None:
@@ -468,7 +512,7 @@ def apply_pending(store):
             result['new_articles'] += 1
         if guid:
             feed['guids'][guid] = identity
-        if not entry['versions'] or entry['versions'][-1]['semantic_sha256'] != content_signature:
+        if not entry['versions'] or not same_source(entry['versions'][-1], item):
             # Deterministic predecessor identity distinguishes A→B→A from an
             # unchanged poll, without using observation time in evidence IDs.
             version = {**semantic(item), 'observed_at': observed, 'semantic_sha256': content_signature,
@@ -532,11 +576,17 @@ def clean_cache(store, vault, receipt):
     store.save()
 
 
-def assets(store, vault, *, download=False, max_downloads=40, max_bytes=128 * 1024 * 1024,
+def validate_attachment_budgets(max_downloads, max_bytes):
+    if any(value is not None and (type(value) is not int or value < 0) for value in (max_downloads, max_bytes)):
+        raise RSSError('attachment_budgets_must_be_nonnegative_integers_or_none')
+
+
+def assets(store, vault, *, download=False, max_downloads=None, max_bytes=None,
            retry=False, fetch=None, feed_ids=None):
+    validate_attachment_budgets(max_downloads, max_bytes)
     fetch = fetch or feed_media.fetch_asset
     budget = {'maximum': max_downloads if download else 0, 'requests': 0, 'bytes': 0, 'max_bytes': max_bytes}
-    summary = {'downloaded': 0, 'reused': 0, 'unavailable': 0}
+    summary = {'downloaded': 0, 'reused': 0, 'deferred': 0, 'failed': 0, 'pending': 0, 'unavailable': 0}
     feed_ids = set(store.data['feeds']) if feed_ids is None else feed_ids
     descriptors = {asset_key(item, version['revision_sha256']): item for entry in selected_entries(store, feed_ids)
                    for version in entry['versions'] for item in version['attachments']}
@@ -576,9 +626,12 @@ def assets(store, vault, *, download=False, max_downloads=40, max_bytes=128 * 10
                     receipt['status'] = 'failed'
             if receipt['status'] != 'prepared':
                 if receipt['status'] in {'pending', 'failed'} and not retry:
+                    summary[receipt['status']] += 1
                     summary['unavailable'] += 1
                     continue
-                if budget['requests'] >= budget['maximum'] or budget['bytes'] >= max_bytes:
+                if (budget['maximum'] is not None and budget['requests'] >= budget['maximum']
+                        or max_bytes is not None and budget['bytes'] >= max_bytes):
+                    summary[receipt['status'] if receipt['status'] in {'pending', 'failed'} else 'deferred'] += 1
                     summary['unavailable'] += 1
                     continue
                 receipt.update(status='pending')
@@ -613,6 +666,7 @@ def assets(store, vault, *, download=False, max_downloads=40, max_bytes=128 * 10
             if receipt['status'] not in {'prepared', 'downloaded'}:
                 receipt['status'] = 'failed'
             summary['unavailable'] += 1
+            summary['failed'] += 1
             store.save()
     store.save()
     return {**summary, 'requests': budget['requests'], 'bytes': budget['bytes']}
@@ -622,7 +676,47 @@ def yaml_value(value):
     return json.dumps(value, ensure_ascii=False)
 
 
+def current_body(version, receipts, note_relative):
+    """Replace only renderer-owned attachment spans, never matching source text."""
+    rendered = rss_source.render_current(version)
+    body = rendered['markdown']
+    if (not isinstance(body, str) or rendered.get('markdown_sha256') != common.digest(body.encode('utf-8'))
+            or type(rendered.get('rendering_version')) is not int or rendered['rendering_version'] not in {1, 2}):
+        raise RSSError('invalid_rss_current_rendering')
+    previous = 0
+    replacements = []
+    descriptors = {(item['kind'], item['url']) for item in rendered['attachments']}
+    for occurrence in rendered['occurrences']:
+        start, end = occurrence.get('start'), occurrence.get('end')
+        if (type(start) is not int or type(end) is not int or not previous <= start < end <= len(body)
+                or occurrence.get('markdown') != body[start:end]
+                or occurrence.get('kind') not in {'image', 'pdf'}
+                or not isinstance(occurrence.get('label'), str)
+                or (occurrence['kind'], occurrence.get('url')) not in descriptors):
+            raise RSSError('invalid_rss_attachment_occurrence')
+        previous = end
+        receipt = receipts.get(asset_key(occurrence, version['revision_sha256']), {})
+        if receipt.get('status') != 'downloaded' or receipt.get('error'):
+            continue
+        path = receipt['path']
+        safe_relative(path, 'Sources/Images' if occurrence['kind'] == 'image' else 'Sources/PDFs')
+        if occurrence['kind'] == 'image':
+            replacement = '![[%s]]' % path
+        else:
+            # A normal Markdown link preserves arbitrary formatted source labels
+            # without introducing wiki alias delimiters from untrusted text.
+            relative = posixpath.relpath(path, str(Path(note_relative).parent))
+            fragment = urlsplit(occurrence['url']).fragment
+            target = quote(relative, safe='/.-_~') + ('#' + fragment if fragment else '')
+            replacement = rss_source._markdown_link(occurrence['label'], target)
+        replacements.append((start, end, replacement))
+    for start, end, replacement in reversed(replacements):
+        body = body[:start] + replacement + body[end:]
+    return body, rendered
+
+
 def render_article(feed, entry, version, receipts, *, local_assets=True):
+    """Archive format v1 uses saved Markdown forever; current views may improve."""
     metadata = {'sources': [entry['canonical_url']], 'authors': version['authors'],
                 'created': entry['first_retrieved_at'][:10],
                 'updated': entry.get('note_updated', version['observed_at'][:10]) if local_assets else version['observed_at'][:10],
@@ -630,15 +724,9 @@ def render_article(feed, entry, version, receipts, *, local_assets=True):
                 'published': version.get('published_at'), 'content_scope': version['content_scope']}
     body = version['markdown']
     if local_assets:
-        for item in version['attachments']:
-            receipt = receipts.get(asset_key(item, version['revision_sha256']), {})
-            if receipt.get('status') == 'downloaded' and not receipt.get('error'):
-                token = item.get('markdown')
-                link = ('![[%s]]' if item['kind'] == 'image' else '[[%s]]') % receipt['path']
-                if token and token in body:
-                    body = body.replace(token, link)
-                else:
-                    body += '\n\n' + link
+        body, rendered = current_body(version, receipts, entry['note_relative'])
+        if 'legacy_render_base_unavailable' in rendered['diagnostics']:
+            metadata['rendering_limitation'] = 'legacy_render_base_unavailable'
     lines = ['---', *[key + ': ' + yaml_value(value) for key, value in metadata.items()], '---', '', body.rstrip(), '']
     return '\n'.join(lines).encode('utf-8')
 
@@ -660,6 +748,22 @@ def publish(store, vault, feed_ids):
                 version['archive_published_at'] = now()
                 store.save()
         version = latest_version(entry)
+        rendering = rss_source.render_current(version)
+        if 'legacy_render_base_unavailable' in rendering['diagnostics']:
+            # A legacy record may have resolved relative URLs using xml:base
+            # which it did not save. Preserve the last verified public view,
+            # including its local embeds, rather than guessing or degrading it.
+            entry['view_rendering_limitation'] = 'legacy_render_base_unavailable'
+            store.save()
+            existing = read_owned(vault, entry['note_relative'])
+            if existing is not None:
+                if common.digest(existing) != entry.get('published_sha256'):
+                    raise RSSError('rss_ownership_or_edit_conflict')
+                continue
+            if entry.get('published_sha256'):
+                raise RSSError('rss_legacy_current_view_requires_recovery')
+        elif entry.pop('view_rendering_limitation', None) is not None:
+            store.save()
         raw = render_article(feed, entry, version, store.data['assets'])
         if entry.get('published_sha256') != common.digest(raw):
             entry['note_updated'] = now()[:10]
@@ -697,8 +801,14 @@ def preflight(store, vault, feed_ids):
             raise RSSError('rss_ownership_or_edit_conflict')
 
 
-def collect(vault, *, fetch=None, asset_fetch=None, max_downloads=40, max_bytes=128 * 1024 * 1024,
+def rendering_limitations(store, feed_ids):
+    return [{'note': entry['note_relative'], 'reason': entry['view_rendering_limitation']}
+            for entry in selected_entries(store, feed_ids) if entry.get('view_rendering_limitation')]
+
+
+def collect(vault, *, fetch=None, asset_fetch=None, max_downloads=None, max_bytes=None,
             retry_attachments=False):
+    validate_attachment_budgets(max_downloads, max_bytes)
     urls = roster(vault)
     if not urls:
         return {'status': 'not_configured', 'configured_feeds': 0, 'requests': 0, 'published_notes': 0}
@@ -753,10 +863,35 @@ def collect(vault, *, fetch=None, asset_fetch=None, max_downloads=40, max_bytes=
         result['assets'] = assets(store, vault, download=True, max_downloads=max_downloads,
             max_bytes=max_bytes, retry=retry_attachments, fetch=asset_fetch, feed_ids=feed_ids)
         result['published_notes'] = publish(store, vault, feed_ids)
-        result['status'] = 'incomplete' if result['errors'] or result['assets']['unavailable'] else 'ready'
+        result['rendering_limitations'] = rendering_limitations(store, feed_ids)
+        result['status'] = ('incomplete' if result['errors'] or result['assets']['unavailable']
+                            or result['rendering_limitations'] else 'ready')
         result['history_limit'] = 'finite_feed_only; older_or_between_polls_posts_may_be_missing'
     return result
 
+
+def collect_attachments(vault, *, asset_fetch=None, max_downloads=None, max_bytes=None,
+                        retry_attachments=False):
+    """Download finite saved attachments; never fetch/apply a feed response."""
+    validate_attachment_budgets(max_downloads, max_bytes)
+    urls = roster(vault)
+    if not urls:
+        return {'status': 'not_configured', 'feed_requests': 0, 'requests': 0, 'published_notes': 0}
+    if read_state(vault) is None:
+        return {'status': 'not_collected', 'feed_requests': 0, 'requests': 0, 'published_notes': 0}
+    with Store(vault) as store:
+        feed_ids = {feed_identity(url) for url in urls}
+        preflight(store, vault, feed_ids)
+        result = assets(store, vault, download=True, max_downloads=max_downloads, max_bytes=max_bytes,
+                        retry=retry_attachments, fetch=asset_fetch, feed_ids=feed_ids)
+        count = publish(store, vault, feed_ids)
+        limitations = rendering_limitations(store, feed_ids)
+        pending = bool(store.data['pending'] and store.data['pending']['feed_id'] in feed_ids)
+        uncollected = sorted(set(urls) - {feed['url'] for feed in store.data['feeds'].values()})
+        return {'status': 'incomplete' if result['unavailable'] or limitations or pending or uncollected else 'ready',
+                'feed_requests': 0, 'requests': result['requests'], 'published_notes': count, 'assets': result,
+                'rendering_limitations': limitations, 'pending_feed_response_unchanged': pending,
+                'uncollected_feeds': uncollected}
 
 def _context(vault, cutoff, since=None, retained_ids=None):
     cutoff = common.timestamp(cutoff)
@@ -774,6 +909,7 @@ def _context(vault, cutoff, since=None, retained_ids=None):
             result['status'] = 'incomplete'
             result['diagnostics'].append({'reason': 'rss_sources_not_collected'})
         return result
+
     if data['pending']:
         result['diagnostics'].append({'reason': 'rss_pending_response_requires_offline_publication'})
     for url in urls:
@@ -842,6 +978,11 @@ def _context(vault, cutoff, since=None, retained_ids=None):
                 'semantic_sha256': version['semantic_sha256'], 'previous_revision_sha256': version['previous_revision_sha256'],
                 'published_at': version.get('published_at'), 'updated_at': version.get('updated_at'),
                 'content': version['markdown'], 'raw_content': version['content'], 'content_scope': version['content_scope'],
+                'content_basis': 'immutable_revision_archive',
+                'evidence_rendering_version': version.get('rendering_version', 1),
+                'current_note_is_historical_evidence': False,
+                'current_note_rendering_limitation': entry.get('view_rendering_limitation'),
+                'linked_media': version.get('linked_media', []),
                 'assets': asset_rows, 'note_relative': entry['note_relative'], 'evidence_relative': version['archive_relative'],
                 'note_available': available, 'note_sha256': version['archive_receipt'].get('published_sha256'),
                 'feed_id': version['source_feed_id'], 'feed_url': version['source_feed_url'],
@@ -849,6 +990,12 @@ def _context(vault, cutoff, since=None, retained_ids=None):
                 'diagnostics': version.get('diagnostics', [])}
             result['items'].append(item)
             seen.add(evidence_id)
+            missing = [row for row in asset_rows if not row['eligible']]
+            if missing:
+                result['diagnostics'].append({'evidence_id': evidence_id,
+                    'reason': 'rss_attachments_unavailable_at_cutoff', 'unavailable': len(missing),
+                    'images': sum(row['kind'] == 'image' for row in missing),
+                    'pdfs': sum(row['kind'] == 'pdf' for row in missing)})
             if not available:
                 result['diagnostics'].append({'evidence_id': evidence_id, 'reason': error or 'rss_revision_not_published'})
     for missing in sorted(retained - seen):
@@ -870,10 +1017,12 @@ def context(vault, cutoff, since=None, retained_ids=None):
 
 def parser():
     result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument('command', nargs='?', choices=('plan', 'status', 'collect', 'publish'))
+    result.add_argument('command', nargs='?', choices=('plan', 'status', 'collect', 'attachments', 'publish'))
     result.add_argument('--vault')
-    result.add_argument('--max-downloads', type=int, default=40)
-    result.add_argument('--max-attachment-bytes', type=int, default=128 * 1024 * 1024)
+    result.add_argument('--max-downloads', type=int, default=None,
+                        help='Optional media HTTP request limit; default processes the finite saved backlog.')
+    result.add_argument('--max-attachment-bytes', type=int, default=None,
+                        help='Optional aggregate byte limit; per-file safety limits always apply.')
     result.add_argument('--retry-attachments', action='store_true')
     result.add_argument('--test', action='store_true')
     return result
@@ -885,6 +1034,9 @@ def execute(args):
     if args.command == 'collect':
         return collect(args.vault, max_downloads=args.max_downloads, max_bytes=args.max_attachment_bytes,
                        retry_attachments=args.retry_attachments)
+    if args.command == 'attachments':
+        return collect_attachments(args.vault, max_downloads=args.max_downloads,
+                                   max_bytes=args.max_attachment_bytes, retry_attachments=args.retry_attachments)
     if read_state(args.vault) is None:
         return {'requests': 0, 'published_notes': 0, 'status': 'not_collected'}
     with Store(args.vault) as store:
@@ -893,7 +1045,9 @@ def execute(args):
         apply_pending(store)
         preflight(store, args.vault, feed_ids)
         result = assets(store, args.vault, download=False, feed_ids=feed_ids)
-        return {'requests': 0, 'published_notes': publish(store, args.vault, feed_ids), 'assets': result}
+        count = publish(store, args.vault, feed_ids)
+        return {'requests': 0, 'published_notes': count, 'assets': result,
+                'rendering_limitations': rendering_limitations(store, feed_ids)}
 
 
 def run_self_test():
@@ -930,6 +1084,29 @@ def run_self_test():
                 captured = context(vault, now())['items']
                 self.assertEqual(len(captured), 1)
                 self.assertTrue(captured[0]['note_available'])
+                with patch.object(rss_source, 'fetch_feed', side_effect=AssertionError('No feed request')):
+                    attached = collect_attachments(vault)
+                self.assertEqual(attached['feed_requests'], 0)
+                self.assertEqual(attached['requests'], 0)
+        def test_renderer_upgrade_does_not_change_supplied_source_identity(self):
+            old = {'canonical_url': 'https://example.com/post', 'content': '<p>Unchanged source.</p>',
+                   'attachments': [], 'markdown': 'Old display', 'diagnostics': []}
+            new = dict(old, markdown='Improved display', rendering_version=2,
+                       render_base='https://example.com/feed', linked_media=[])
+            self.assertTrue(same_source(old, new))
+            self.assertNotEqual(semantic_hash(old), semantic_hash(new))
+            self.assertFalse(same_source(old, dict(new, content='<p>New source.</p>')))
+        def test_local_pdf_occurrence_does_not_replace_literal_source_code(self):
+            version = {'content': '<p><a href="https://example.com/report.pdf">Read report</a></p>'
+                        '<pre>[PDF](https://example.com/report.pdf)</pre>', 'content_type': 'html',
+                        'render_base': 'https://example.com/feed', 'attachments': [],
+                        'revision_sha256': '0' * 64}
+            item = {'kind': 'pdf', 'url': 'https://example.com/report.pdf'}
+            receipts = {asset_key(item, version['revision_sha256']): {
+                'status': 'downloaded', 'path': 'Sources/PDFs/example.pdf'}}
+            body, _ = current_body(version, receipts, 'Investments/Sources/RSS/example/post.md')
+            self.assertIn('[Read report](../../../../Sources/PDFs/example.pdf)', body)
+            self.assertIn('    [PDF](https://example.com/report.pdf)', body)
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(Tests)
     result = unittest.TextTestRunner().run(suite)
     print(str(result.testsRun - len(result.errors) - len(result.failures)) + '/' + str(result.testsRun) + ' tests passed')
@@ -942,8 +1119,9 @@ def main(argv=None):
         return run_self_test()
     if not args.command or not args.vault:
         parser().error('command and --vault are required')
-    if not 0 <= args.max_downloads <= 500 or not 0 <= args.max_attachment_bytes <= 1024 ** 3:
-        parser().error('attachment budgets are out of range')
+    if ((args.max_downloads is not None and args.max_downloads < 0)
+            or (args.max_attachment_bytes is not None and args.max_attachment_bytes < 0)):
+        parser().error('attachment budgets must be nonnegative')
     try:
         print(json.dumps(execute(args), ensure_ascii=False, indent=2))
         return 0

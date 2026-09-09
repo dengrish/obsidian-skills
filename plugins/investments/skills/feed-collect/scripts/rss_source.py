@@ -246,7 +246,7 @@ def _fetch_feed(url, *, etag, last_modified, max_bytes, timeout, max_requests, a
 
 
 def _safe_text(value):
-    value = html.escape(value, quote=False)
+    value = html.escape(value.replace('\x00', '\ufffd'), quote=False)
     value = re.sub(r'([\\`*_{}\[\]!#|^~+\-])', r'\\\1', value)
     return re.sub(r'(?m)^(\s*\d+)\.', r'\1\\.', value)
 
@@ -291,6 +291,28 @@ def _attachment(found, kind, url, alt=''):
     return found[key]['markdown']
 
 
+def _is_video_enclosure(url, mime):
+    extension = urllib.parse.unquote(urllib.parse.urlsplit(url).path).lower().rsplit('.', 1)[-1]
+    return (mime.lower().split(';', 1)[0].strip().startswith('video/')
+            or extension in {'mp4', 'webm', 'mov', 'm4v', 'ogv', 'avi', 'mkv', 'mpeg', 'mpg'})
+
+
+def _append_linked_media(markdown, linked_media, base, diagnostics):
+    seen = set()
+    for media in linked_media:
+        if media.get('media_type') != 'video':
+            diagnostics.append('unsupported_linked_media_omitted')
+            continue
+        url = _url_or_none(media.get('url'), base, diagnostics)
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        label = 'Video enclosure'
+        markdown += ('\n\n' if markdown else '') + _markdown_link(label, url)
+        diagnostics.append('video_link_only')
+    return markdown
+
+
 def _HTMLTree():
     class Parser(HTMLParser):
         def __init__(self):
@@ -324,13 +346,43 @@ def _HTMLTree():
     return Parser()
 
 
-def _render_html(content, base, found, diagnostics):
+def _render_html(content, base, found, diagnostics, occurrences=None):
     parser = _HTMLTree()
-    parser.feed(content)
+    # NUL-delimited markers are private renderer output, never source text.
+    # Resolving them after block/list layout produces authoritative link spans.
+    parser.feed(content.replace('\x00', '\ufffd'))
     parser.close()
+    tokens = {}
+
+    def asset_link(kind, url, label=None, alt=''):
+        default = _attachment(found, kind, url, alt)
+        markdown = _markdown_link(label, url) if label is not None else default
+        marker = '\x00rss-asset-' + str(len(tokens)) + '\x00'
+        tokens[marker] = {'kind': kind, 'url': url,
+                          'label': label if label is not None else default[1:default.rfind('](')],
+                          'markdown': markdown}
+        return marker
+
+    def video_url(url):
+        parts = urllib.parse.urlsplit(url)
+        host = parts.hostname
+        return ((host in {'youtube.com', 'www.youtube.com', 'youtube-nocookie.com',
+                          'www.youtube-nocookie.com'} and parts.path.startswith('/embed/'))
+                or (host == 'player.vimeo.com' and parts.path.startswith('/video/')))
+
+    def embedded_link(url, label, title=''):
+        if title:
+            label += ': ' + _safe_text(re.sub(r'\s+', ' ', title))
+        diagnostics.append('video_link_only' if label.startswith('Video') else 'embedded_content_link_only')
+        return _markdown_link(label, url)
 
     def literal(node):
         return node if isinstance(node, str) else ''.join(literal(child) for child in node[2])
+
+    def linked_descendant(node):
+        return (isinstance(node, list)
+                and (node[0] in {'img', 'video', 'iframe', 'a'}
+                     or any(linked_descendant(child) for child in node[2])))
 
     def join(parts):
         combined = ''
@@ -345,9 +397,34 @@ def _render_html(content, base, found, diagnostics):
         if isinstance(node, str):
             return _safe_text(re.sub(r'\s+', ' ', node))
         tag, attrs, children = node
-        if tag in {'script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'svg', 'noscript'}:
+        if tag in {'script', 'style', 'object', 'embed', 'form', 'input', 'button', 'svg', 'noscript'}:
             diagnostics.append('active_or_unsupported_html_omitted')
             return ''
+        if tag == 'iframe':
+            source = attrs.get('src')
+            url = _url_or_none(source, base, diagnostics) if source and source.strip() else None
+            if not url:
+                diagnostics.append('active_or_unsupported_html_omitted')
+                return ''
+            return '\n\n' + embedded_link(url, 'Video' if video_url(url) else 'Embedded content',
+                                           attrs.get('title') or '') + '\n\n'
+        if tag == 'video':
+            urls, links = [], []
+            candidates = ([attrs.get('src')] if attrs.get('src') else [])
+            candidates += [child[1].get('src') for child in children
+                           if isinstance(child, list) and child[0] == 'source']
+            for candidate in candidates:
+                if not candidate or not candidate.strip():
+                    continue
+                url = _url_or_none(candidate, base, diagnostics)
+                if url and url not in urls:
+                    urls.append(url)
+                    links.append(embedded_link(url, 'Video', attrs.get('title') or ''))
+            fallback = join(render(child) for child in children
+                            if not isinstance(child, list) or child[0] not in {'source', 'track'}).strip('\n')
+            if not links:
+                diagnostics.append('video_source_url_unavailable')
+            return '\n\n' + '\n\n'.join(links + ([fallback] if fallback else [])) + '\n\n'
         if tag == 'pre':
             # Indented code preserves whitespace and literal Markdown/HTML;
             # source backticks cannot close a generated fence.
@@ -432,15 +509,24 @@ def _render_html(content, base, found, diagnostics):
             if url and not url.startswith('https:'):
                 diagnostics.append('http_image_not_archived')
                 return _markdown_link('Image: ' + _safe_text(attrs.get('alt') or 'source image'), url)
-            return _attachment(found, 'image', url, attrs.get('alt') or '') if url else ''
+            return asset_link('image', url, alt=attrs.get('alt') or '') if url else ''
         if tag == 'a':
             url = _url_or_none(attrs.get('href'), base, diagnostics)
             if not url:
                 return inner
-            if url.startswith('https:') and urllib.parse.unquote(urllib.parse.urlsplit(url).path).lower().endswith('.pdf'):
-                _attachment(found, 'pdf', url)
-            # Image labels already contain a safe link; avoid nesting links.
-            return inner if any(isinstance(child, list) and child[0] == 'img' for child in children) else _markdown_link(inner.strip() or _safe_text(url), url)
+            pdf = (url.startswith('https:')
+                   and urllib.parse.unquote(urllib.parse.urlsplit(url).path).lower().endswith('.pdf'))
+            descendants = [tokens[match[0]] for match in re.finditer('\x00rss-asset-[0-9]+\x00', inner)]
+            # A descendant image may be wrapped in div/picture elements. Its
+            # link/embed must never become another Markdown link's label.
+            if descendants or any(linked_descendant(child) for child in children):
+                if any(value['url'] == url for value in descendants):
+                    return inner
+                label = 'Linked PDF' if pdf else 'Image source'
+                outer = asset_link('pdf', url, label) if pdf else _markdown_link(label, url)
+                return inner.rstrip('\n') + '\n\n' + outer + '\n\n'
+            label = re.sub(r'\s+', ' ', inner).strip() or _safe_text(url)
+            return asset_link('pdf', url, label) if pdf else _markdown_link(label, url)
         if tag in {'strong', 'b'}:
             return '**' + inner + '**' if inner.strip() else inner
         if tag in {'em', 'i'}:
@@ -454,12 +540,84 @@ def _render_html(content, base, found, diagnostics):
             return '\n\n' + '\n'.join('> ' + line if line else '>' for line in quoted.split('\n')) + '\n\n'
         if tag == 'li':
             return '\n' + '  ' * max(0, depth - 1) + '- ' + inner.strip() + '\n'
-        if tag in {'p', 'div', 'section', 'article', 'header', 'footer', 'hr', 'dl', 'dt', 'dd'}:
+        if tag in {'p', 'div', 'section', 'article', 'header', 'footer', 'hr', 'dl', 'dt', 'dd',
+                   'figure', 'figcaption'}:
             return '\n\n' + inner.strip('\n') + '\n\n'
         return inner
 
-    rendered = render(parser.root)
-    return rendered.strip('\n')
+    rendered = render(parser.root).strip('\n')
+    parts, cursor, length = [], 0, 0
+    for match in re.finditer('\x00rss-asset-[0-9]+\x00', rendered):
+        prefix = rendered[cursor:match.start()]
+        value = tokens[match[0]]
+        parts.extend((prefix, value['markdown']))
+        length += len(prefix)
+        if occurrences is not None:
+            occurrences.append(dict(value, start=length, end=length + len(value['markdown'])))
+        length += len(value['markdown'])
+        cursor = match.end()
+    parts.append(rendered[cursor:])
+    return ''.join(parts)
+
+
+def render_current(version):
+    """Render a mutable article view; never modify saved immutable evidence.
+
+    Occurrences address generated asset links in the returned Markdown, with a
+    digest binding offsets to that exact output. Source text cannot forge them.
+    """
+    content, content_type = version.get('content', ''), version.get('content_type', 'text')
+    if not isinstance(content, str):
+        raise RSSSourceError('invalid_saved_content')
+    base, errors, found, occurrences = version.get('render_base'), [], {}, []
+    if base is None and content_type in {'html', 'xhtml'}:
+        parser = _HTMLTree()
+        parser.feed(content)
+        parser.close()
+        def relative_source(node, parent=None):
+            if isinstance(node, str):
+                return False
+            tag, attrs, children = node
+            if tag in {'script', 'style', 'object', 'embed', 'form', 'input', 'button', 'svg', 'noscript'}:
+                return False
+            if tag == 'img' and ((attrs.get('width') in {'0', '1'} and attrs.get('height') in {'0', '1'})
+                                 or re.search(r'(?:^|/)missing-image\.[a-z0-9]+(?:[?#]|$)',
+                                              attrs.get('src') or '', re.IGNORECASE)):
+                return False
+            attribute = ('href' if tag == 'a' else 'src'
+                         if tag in {'img', 'iframe', 'video'} or (tag == 'source' and parent == 'video') else None)
+            value = attrs.get(attribute) if attribute else None
+            try:
+                relative = bool(value and not urllib.parse.urlsplit(value).scheme and not value.startswith('//'))
+            except ValueError:
+                relative = False  # The renderer will omit this malformed URL.
+            return (relative
+                    or (tag != 'iframe' and any(relative_source(child, tag) for child in children)))
+        if relative_source(parser.root):
+            markdown = version.get('markdown', '')
+            return {'markdown': markdown, 'attachments': version.get('attachments', []),
+                    'occurrences': [], 'markdown_sha256': hashlib.sha256(markdown.encode()).hexdigest(),
+                    'rendering_version': 1, 'diagnostics': ['legacy_render_base_unavailable']}
+    base = base or version.get('canonical_url')
+    markdown = (_render_html(content, base, found, errors, occurrences)
+                if content_type in {'html', 'xhtml'} else _safe_text(content))
+    for attachment in version.get('attachments', []):
+        kind, url = attachment.get('kind'), attachment.get('url')
+        if kind not in {'image', 'pdf'}:
+            continue
+        url = _url_or_none(url, base, errors)
+        if not url or not url.startswith('https:'):
+            continue
+        token = _attachment(found, kind, url, attachment.get('alt') or '')
+        if any(value['kind'] == kind and value['url'] == url for value in occurrences):
+            continue
+        markdown += ('\n\n' if markdown else '') + token
+        occurrences.append({'kind': kind, 'url': url, 'label': token[1:token.rfind('](')],
+                            'markdown': token, 'start': len(markdown) - len(token), 'end': len(markdown)})
+    markdown = _append_linked_media(markdown, version.get('linked_media', []), base, errors)
+    return {'markdown': markdown, 'attachments': list(found.values()), 'occurrences': occurrences,
+            'markdown_sha256': hashlib.sha256(markdown.encode()).hexdigest(),
+            'rendering_version': 2, 'diagnostics': sorted(set(errors))}
 
 
 def _date(value, diagnostics, field):
@@ -636,9 +794,9 @@ def parse_feed(raw, feed_url):
             errors.append('xml_content_fragment_serialized')
         else:
             content = content_node.text or ''
-        found = {}
+        found, occurrences, linked_media = {}, [], []
         content_base = bases[content_node] if content_node is not None else bases[entry]
-        markdown = (_render_html(content, content_base, found, errors)
+        markdown = (_render_html(content, content_base, found, errors, occurrences)
                     if content_type in {'html', 'xhtml'} else _safe_text(content))
         for child in entry.iter():
             if child.tag in {'enclosure', '{' + ATOM + '}link'}:
@@ -657,6 +815,12 @@ def parse_feed(raw, feed_url):
             asset_url = _url_or_none(target, bases[child], errors)
             if not asset_url:
                 continue
+            if (_is_video_enclosure(asset_url, mime)
+                    or (child.tag == '{' + MEDIA + '}content' and child.get('medium') == 'video')):
+                media = {'url': asset_url, 'media_type': 'video', 'mime_type': mime}
+                if media not in linked_media:
+                    linked_media.append(media)
+                continue
             if not asset_url.startswith('https:'):
                 errors.append('http_attachment_not_archived')
                 continue
@@ -664,12 +828,16 @@ def parse_feed(raw, feed_url):
                     if mime == 'application/pdf' or urllib.parse.unquote(urllib.parse.urlsplit(asset_url).path).lower().endswith('.pdf') else None)
             if kind:
                 token = _attachment(found, kind, asset_url)
-                if token not in markdown:
+                if not any(value['kind'] == kind and value['url'] == asset_url for value in occurrences):
                     markdown += '\n\n' + token
+                    occurrences.append({'kind': kind, 'url': asset_url})
+        markdown = _append_linked_media(markdown.strip('\n'), linked_media, content_base, errors)
         items.append({'id': hashlib.sha256(url.encode('utf-8')).hexdigest(), 'canonical_url': url,
                       'guid': identity, 'title': title, 'authors': _authors(entry, atom) or authors,
                       'published_at': published, 'updated_at': updated, 'content': content,
                       'content_type': content_type, 'content_scope': scope, 'markdown': markdown.strip('\n'),
+                      'rendering_version': 2, 'render_base': content_base,
+                      'linked_media': linked_media,
                       'attachments': list(found.values()), 'diagnostics': sorted(set(errors))})
     return {'format': 'atom' if atom else 'rss2', 'feed_url': feed_url,
             'title': _text(channel.find(title_tag)), 'site_url': site_url, 'authors': authors,

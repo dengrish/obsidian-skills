@@ -1,4 +1,4 @@
-# Photo and PDF attachments
+# Images, PDFs and video links
 
 Read before downloading attachments or maintaining locally saved source files.
 The collector saves source bytes; it does not interpret figures, summarize PDFs,
@@ -8,12 +8,19 @@ perform OCR or turn linked webpages into new sources.
 
 New timeline windows and explicitly authorized reconciliation requests use
 `expansions=attachments.media_keys` with
-`media.fields=media_key,type,url,alt_text,width,height`. Match `includes.media`
+`media.fields=media_key,type,url,alt_text,width,height,variants`. Match `includes.media`
 only to the returned primary post's own `attachments.media_keys`. Save photos;
 do not download videos, animated-video variants or unrelated expanded media.
 A quote post or repost is eligible only for attachment metadata matched to its
 returned primary row. Do not fetch or expand referenced originals or their media,
 or infer attachments from a reference ID or the text's `RT @handle` prefix.
+
+Videos and animated GIFs are link-only attachments. Use an available public
+playable URL from the primary row's supplied media metadata, or a clearly labeled
+link to that post when older saved metadata lacks one. Never substitute a preview
+image, download the video, fetch it to test playback, or buy another post read to
+find a direct URL. Preserve old windows' exact media fields when resuming them;
+only new requests use the current field list. Links may expire or need login.
 
 Treat missing or conflicting attachment metadata as incomplete. Earlier records
 may contain media keys without URLs. Webpage-card thumbnails in `entities.urls`
@@ -32,15 +39,18 @@ The sibling `scripts/feed_media.py` helper implements attachment discovery,
 bounded HTTPS retrieval, local receipts and guarded publication. Use it through
 `feed_collect.py`; do not rewrite a downloader or copy it into another plugin.
 Collection downloads available attachments before publishing the account note.
-`--max-downloads` and `--max-attachment-bytes` bound that run's attachment work,
-independently of the paid X post/request budgets. Zero downloads leaves files
-deferred. Download limits never authorize increasing the X budget.
+By default, process every eligible attachment in the saved posts once, reusing
+verified local files. Images are complete only when saved locally and embedded;
+a remote source link is a fallback for an unresolved download, not a completed
+image. Explicit `--max-downloads` and `--max-attachment-bytes` bounds limit that
+run's attachment work independently of paid X reads. Zero downloads leaves files
+deferred. Per-file size, time and redirect limits always apply; download work
+never authorizes increasing the X budget.
 
 To process URLs already present in saved posts without calling the X API:
 
 ```bash
-python3 '<skill>/scripts/feed_collect.py' attachments --vault '<vault>' \
-    --max-downloads 40 --max-attachment-bytes 268435456
+python3 '<skill>/scripts/feed_collect.py' attachments --vault '<vault>'
 ```
 
 No X credential is needed for this command. Ready files are reused after
@@ -89,6 +99,7 @@ every saved post or promise that an API provider's billing deduplication is free
 
 Report attachment counts separately from X post rows. Show missing, deferred or
 failed attachments truthfully; do not present a source locator as a saved file.
+Count video links separately from file downloads and unavailable attachments.
 `publish` is offline and does not repair missing files through hidden downloads.
 
 ## Source changes and cleanup

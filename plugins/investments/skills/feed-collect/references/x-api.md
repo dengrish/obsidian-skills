@@ -240,6 +240,8 @@ or reconstruct its text or attachments. The same no-extra-fetch rule applies
 to quoted posts. The collector does not transcribe videos or crawl linked pages.
 Readable post text uses ordinary Markdown paragraphs with source markup escaped
 and original line breaks preserved; detailed source metadata stays in private state.
+Normalize X's encoded text entities once for readable punctuation while retaining
+the raw API text and protecting URL destinations. Decoded markup remains literal.
 Render HTTP(S) URLs as explicit clickable links without changing their original
 destinations or relying on automatic URL detection. Preserve query strings and
 fragments; use matching API URL entities to distinguish URL punctuation from

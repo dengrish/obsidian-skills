@@ -1,6 +1,6 @@
 ---
 name: feed-collect
-description: Collect selected public X accounts and RSS/Atom publications into Obsidian source notes, preserving source text, dates, local images and linked PDFs. X includes original posts, quotes, reposts and self-replies from the past three days; RSS saves unseen articles and revisions from the available feed. Uses saved progress and conditional retrieval. Use for source collection without interpretation or investment recommendations.
+description: Collect selected public X accounts and RSS/Atom publications into Obsidian source notes, preserving source text, dates, local images, linked PDFs and video links. X includes original posts, quotes, reposts and self-replies from the past three days; RSS saves unseen articles and revisions from the available feed. Uses saved progress and conditional retrieval. Use for source collection without interpretation or investment recommendations.
 ---
 
 # Feed collection
@@ -73,10 +73,16 @@ author scores, rewritten prose or reconstructed charts belong in these notes.
 Collect non-investment posts too; filtering source meaning belongs to consumers.
 
 Download the post's own attached photos to `Sources/Images/` and embed the local
-files beneath its text. Download directly linked PDFs to `Sources/PDFs/` and
+files beneath its text. Process all eligible saved attachments by default;
+only an explicit run budget or an actual download limitation leaves them
+unfinished. Remote image links do not satisfy local image collection.
+Download directly linked PDFs to `Sources/PDFs/` and
 link to them. Use the bundled [attachment workflow](references/attachments.md)
 for source matching, download limits, deduplication and guarded publication.
 Do not substitute webpage previews or referenced originals' images for attachments.
+Keep videos and animated media as labeled source links, without downloading,
+embedding or transcribing them. Prefer a supplied playable URL; otherwise link
+to the originating X post and identify that fallback. A thumbnail is not a video.
 
 Links in X posts remain links. Blog/newsletter bodies are acquired only through
 the separately enabled RSS/Atom feeds below, not by crawling a post's links.
@@ -181,9 +187,14 @@ Keep one publication index and one maintained note per article under
 `Investments/Sources/RSS/`. Preserve the body supplied by the feed without
 summaries or investment interpretation. Keep source dates, authors, functional
 links, tables and images; mark summaries and unsupported content honestly.
-Images go to `Sources/Images/`, direct PDFs to `Sources/PDFs/`. Do not crawl the
-article page, bypass a paywall, use browser cookies or collect a subscriber feed
+Download images to `Sources/Images/` and embed them in the article; save direct
+PDFs to `Sources/PDFs/` and link them locally. Remote image links indicate
+incomplete downloads, not an alternative output format. Use the reference's
+attachment-only command to finish saved downloads without fetching feeds again.
+Do not crawl the article page, bypass a paywall, use browser cookies or collect a subscriber feed
 token in the public roster. A feed body is not proof of a complete article.
+Preserve available video URLs as labeled links. Other embedded-content URLs
+remain labeled as such; do not infer that every iframe is a video.
 
 The first run saves the entries currently offered by each feed. Later runs save
 unseen articles and changed revisions, using conditional requests where supported.
@@ -218,6 +229,8 @@ deferred accounts and unresolved requests. API window completion is not a claim
 to have captured an account's entire lifetime or content deleted before retrieval.
 Do not infer silence from a failed or partial request. Embed/link only verified local attachment files;
 report missing metadata or download failures without claiming an image was saved.
+Report video links separately from downloaded assets; a saved URL does not
+establish that playback works or that its content was reviewed.
 
 Follow the [shared suggestion protocol](../../shared/SUGGESTIONS.md), including
 `Reviews/feed-collect-suggestions.md`, without adding speculative issues or
