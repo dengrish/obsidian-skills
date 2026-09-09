@@ -124,12 +124,22 @@ class PriceCaptureTests(unittest.TestCase):
         self.assertEqual(measured['market_caps'][0]['market_cap_usd'], 3000000000)
         self.assertTrue(Path(prepared['run_receipt']).is_file())
 
-    def test_fixed_scheduled_cutoff_remains_1130(self):
-        fixed = market_notes.scheduled_cutoff(self.now.astimezone(capture._ny()))
+    def test_frozen_scheduled_cutoff_never_admits_late_capture(self):
+        prepared = market_notes.prepare(self.vault, self.work, now=self.now, mode='scheduled')
+        fixed = capture.history._time(prepared['as_of'])
         result = self.run_capture(as_of=fixed.isoformat())
         self.assertEqual(capture.history._time(result['as_of']), fixed)
         self.assertEqual(result['items'][0]['status'], 'future_only')
         self.assertIsNone(result['items'][0]['price'])
+
+    def test_fresh_scheduled_preparation_admits_completed_capture(self):
+        result = self.run_capture()
+        prepared = market_notes.prepare(self.vault, self.work, now=self.now, mode='scheduled')
+        selected = capture.select(self.vault, self.items, prepared['as_of'], current=self.now)
+        self.assertTrue(result['complete'])
+        self.assertIsNotNone(selected['items'][0]['price'])
+        self.assertGreater(capture.history._time(prepared['as_of']),
+                           market_notes.scheduled_start(self.now.astimezone(capture._ny())))
 
     def test_manual_reuse_of_same_second_frozen_capture_crosses_boundary(self):
         fixed = capture._iso(self.now - timedelta(minutes=1))

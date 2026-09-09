@@ -44,20 +44,17 @@ must separately invoke it with the selected vault and available research tools;
 create or change that schedule only when the user requests scheduling.
 
 For a scheduled retry, inspect `context` first and reuse a valid existing edition
-under the rules below. Before a **fresh manual** run freezes its cutoff, identify
-the bounded candidates already justified by prior watch/deferred notes, the
-user's request or already-collected feed posts. Resolve their quoted securities
-and [capture any needed raw-price evidence](references/capitalization.md#capture-before-freezing-the-cutoff).
-Reuse eligible archived observations first. A small justified
-[estimate plan](references/data-access.md#dated-estimates-not-reconstructed-expectations)
-may also be captured now. This planning pass does not collect feeds, discover
-unrelated stocks or establish the final nomination set; recheck the inputs at
-the frozen cutoff. The capture helpers return after their saves are eligible
-at a real whole-second cutoff.
-Per-request price limits are acquisition safeguards, not research quotas: split
-larger justified sets into bounded plans and complete all manual preflight batches
-before preparation. If an actual resource limit prevents completion, retain the
-affected work and limitation under the coverage rules.
+under the rules below. For a **fresh scheduled or manual** run, first identify
+the candidates justified by prior watch/deferred notes, the user's request or
+already-collected feed posts. Resolve quoted securities and use the
+[targeted acquisition coordinator](references/targeted-acquisition.md) for needed
+raw prices and justified estimate periods. It batches this explicit plan, reuses
+archives, and shares a bounded request budget. Other thesis-specific checks use
+the data-access guide; the coordinator does not research the stocks for you.
+This planning pass does not collect feeds, discover unrelated stocks or establish
+the final nomination set. Recheck the inputs at the frozen cutoff. Acquisition
+bounds are not research quotas: retain every uncompleted item and its limitation
+under the coverage rules, without silently raising the request budget.
 
 Then use `prepare` to create the canonical draft and a private run receipt in
 owned scratch:
@@ -66,7 +63,9 @@ owned scratch:
 python3 '<skill>/scripts/market_notes.py' prepare --vault '<vault>' --mode manual --work-dir '<scratch>' --check independent-review
 ```
 
-Use `--mode scheduled` for the scheduled task. The independent-review declaration
+Use `--mode scheduled` for the scheduled task. Both modes freeze the actual
+whole-second preparation time after acquisition has returned; 08:30 Pacific is
+the intended start, not a fixed evidence cutoff. The independent-review declaration
 is appropriate when a checker will actually be launched; omit it when delegation
 is unavailable. `final-review` is always declared. Use the returned receipt with
 `context`, `outcomes` and publication via `--run-receipt '<run>/run.json'`; it fixes
@@ -78,26 +77,26 @@ finish against the final draft before publication. Details and retries are in
 
 Never move an already frozen cutoff to admit a late capture. New candidates
 discovered later may contribute late price or estimate snapshots only to future
-editions. Scheduled cutoffs remain at or before 11:30 ET: a capture made after
-that deadline cannot supply earlier evidence, even if its bar describes an
-earlier trading interval. Use an eligible archive or retain the limitation.
+editions. A capture made after preparation cannot supply earlier evidence, even
+if its bar describes an earlier trading interval. Use an eligible archive or
+retain the limitation. Existing run receipts and published editions keep the
+cutoff they originally recorded.
 
-For the scheduled edition, freeze evidence at 11:30 New York time; record the
-actual generation time separately. Read news since the previous completed
+Record the actual preparation cutoff and generation time separately. Read news
+since the previous completed
 review's cutoff, including intervening after-hours releases and still-relevant
 unreviewed windows recorded under the research method's coverage rules. On the
 first run, cover the previous regular-session close through the cutoff, using older
-material only as identified background. Do not use later prices or news in a
-backdated scheduled edition. A late run must recover timestamped pre-cutoff
-evidence or state the data limitation. An explicitly
-requested intraday/manual review may use its actual cutoff and session label.
+material only as identified background. A late scheduled start uses its actual
+preparation time and session label; it does not pretend to be the morning review.
+Do not admit later prices or news into any frozen edition.
 
 Verify the exchange calendar and actual session, including exceptional closures;
 never derive holidays from weekdays alone. Run every calendar day when daily
 execution is requested. On a closed-market day, write a short follow-up with the
 last completed session and next scheduled session; do not present stale prices
 as current trading. A scheduled run before 11:30 New York time uses the helper's
-earlier actual cutoff and is described as an early edition.
+actual preparation cutoff and is described as an early edition.
 
 If the selected edition already exists, read it and run the outcome inventory
 below before reusing it. Context's `thesis_history` and `active_theses` describe
@@ -292,14 +291,17 @@ retraining or permission to edit plugin sources. The two- and five-year observat
 are diagnostics beyond the buying horizon, not extended holding or sell rules.
 Do not create another scheduled job or report series for these reviews.
 
-Also inspect the outcome helper's separate comparison inventory. When a monthly
-formation is due, follow the [fixed comparison strategy](references/comparison-strategy.md).
-The feed-nominated list is not its independent universe: record the scope
-limitation unless matching previously declared inputs are already available.
-Evaluate due 3/6/12-month comparison windows without
-mixing them into ready recommendations. Reuse the declared screen inputs; do not
-change the strategy or its universe after seeing winners. This is a prospective
-diagnostic, not a claim of research outperformance or a portfolio instruction.
+Use the outcome helper's `nominee_comparison` inventory and
+[prospective nominee comparison](references/nominee-comparison.md) to evaluate
+the original idea pool, including watch, rejected and unfinished ideas. Initial
+groups remain frozen; later decisions are separate observations. Review due
+2-week and 1/3/6/12-month windows using matched sessions and benchmarks, retain
+missing members, and include sample sizes and limitations in monthly learning.
+Preparation activates this diagnostic prospectively; it never backfills older
+reports as new experiments. Continue due 3/6/12-month windows for existing
+[independent momentum cohorts](references/comparison-strategy.md), but do not
+form new ones by default or substitute feed nominees for their old universe.
+Neither comparison establishes skill outperformance or recommends a portfolio.
 
 ## Write and publish
 
@@ -407,8 +409,21 @@ The daily report retains the dated evidence and outcome journals; a stock note
 summarizes its latest available assessment and links its history. Preserve earlier
 daily notes and never use a later dossier state to reconstruct an earlier judgment.
 Report incomplete dossier publication separately and resume it without creating
-another daily edition. Do not claim the run complete until these updates succeed
-or their exact remaining blockers are identified.
+another daily edition. After publication, freeze all new nominee and decision
+observations from the published reports:
+
+```bash
+python3 '<skill>/scripts/stock_cohorts.py' form --vault '<vault>'
+```
+
+The helper chooses the complete eligible pool; never pass a handpicked subset.
+Its immutable evidence and timing summary belong in the next report's Outcome
+review, since the just-published report cannot be edited. Include enrollment
+counts or a failure in this run's closeout. On a scheduled retry, recover missing
+enrollment as well as dossier updates before treating the run as unchanged.
+If the strategy has not been activated, start it for future reports only; report
+the missed prospective window without backfilling it. Do not claim the run
+complete until these updates succeed or their exact remaining blockers are identified.
 
 Clean owned scratch that is no longer needed, and return the daily note link,
 created/updated stock notes, the main conclusion and any material limitation.

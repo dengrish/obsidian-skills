@@ -148,8 +148,12 @@ filing extraction uses pinned EdgarTools as a local parser, without delegating
 network requests or installing another framework. Core retrieval, screening and
 note handling remain standard-library-only. Exact Form 4/4-A XML supplies selective
 insider context. Immutable selected estimate snapshots preserve what was observed
-and saved before each cutoff; a fixed monthly momentum comparison stays separate
-from discretionary recommendations in the daily research record.
+and saved before each cutoff. A targeted acquisition coordinator batches needed
+prices and estimates for the explicit nominees under one bounded request budget.
+Prospective comparisons freeze those nominees and their initial research states,
+including unfinished work, to evaluate future outcomes without selecting only
+eventual recommendations. Earlier independent momentum cohorts retain their
+original definitions and checkpoints.
 
 This product uses the FRED® API but is not endorsed or certified by the Federal
 Reserve Bank of St. Louis. Use of its FRED integration is subject to the
@@ -211,8 +215,11 @@ Earlier `*-market-research.md` daily reports and their outcome links remain
 readable without renaming or rewriting historical files.
 Keep the selected vault, credentials file, interpreter and schedule unchanged;
 shared-helper overrides must point to the selected investments installation.
-The default daily edition remains 08:30 `America/Los_Angeles` / 11:30
+The default daily start remains 08:30 `America/Los_Angeles` / 11:30
 `America/New_York`, including closed-market days and daylight-saving changes.
+Fresh scheduled and manual reviews complete bounded targeted acquisition before
+freezing their actual preparation cutoff. Existing reports and run receipts keep
+their original cutoff; late data never changes a frozen edition.
 A source edit alone does not switch an existing automation or install a plugin.
 
 No vault migration is needed. Existing notes, recommendation IDs, review logs,
@@ -349,6 +356,8 @@ python3 -m venv .venv
 .venv/bin/python tests/test_stock_feed.py
 .venv/bin/python tests/test_stock_coverage.py
 .venv/bin/python tests/test_stock_dossiers.py
+.venv/bin/python tests/test_stock_acquire.py
+.venv/bin/python tests/test_stock_cohorts.py
 .venv/bin/python tests/test_feed_collect.py
 .venv/bin/python tests/test_feed_recent.py
 .venv/bin/python tests/test_feed_media.py

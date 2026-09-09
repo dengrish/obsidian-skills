@@ -104,7 +104,7 @@ skipped in Screening and sources. A successful setup probe is not today's resear
 | Candidate announcements | `news --provider alpaca --symbol '<symbol>'` for a bounded candidate-specific news window when configured; use `news --provider alpha_vantage` selectively for additional coverage within its account quota. Use `earnings` for upcoming scheduled risks, then verify timing and results on issuer pages. Neither news feed must duplicate the other on every run. |
 | Candidate price history | `prices` for the nominated stocks, prior active theses and benchmarks over matching completed sessions, then the offline [screener](screening.md). Preserve its defined filters, coverage and exclusions. Its daily notional proxy is preliminary; verify regular-session liquidity separately for the shortlist. |
 | Intraday assessment | On open-market runs, use `prices --timeframe 1Min` or a timestamped host quote for the shortlist's morning reaction. Respect feed delay and the cutoff; keep snapshots separate from completed-session signals, and compare partial volume only with matching historical session/time windows. |
-| Company size | For a fresh manual edition, use the bounded [price-capture preflight](capitalization.md#capture-before-freezing-the-cutoff) for known saved-feed nominees/deferred names and tracked stocks before preparation. It emits reusable raw USD price objects with actual first-save availability. For a frozen cutoff, select only eligible earlier archives; late saves remain future-only. Then use an already dated sourced cap or acquire outstanding-share evidence, review subsequent changes and run the offline disclosed-share calculator. Preserve its estimate label and precision range. |
+| Company size | For a fresh scheduled or manual edition, use the [targeted coordinator](targeted-acquisition.md) and its bounded [price-capture preflight](capitalization.md#capture-before-freezing-the-cutoff) for known saved-feed nominees/deferred names and tracked stocks before preparation. It emits reusable raw USD price objects with actual first-save availability. For a frozen cutoff, select only eligible earlier archives; late saves remain future-only. Then use an already dated sourced cap or acquire outstanding-share evidence, review subsequent changes and run the offline disclosed-share calculator. Preserve its estimate label and precision range. |
 | Shortlist and readiness | `sec-company` for relevant filings, then `sec-facts` for comparable reported fundamentals and optional `sec-filing` for the exact filing's narrative/tables. For expectations that matter, retrieve `estimates` and use the dated-snapshot workflow below. When insider activity changes the case, inspect an exact accession with `sec-ownership`. Open material cited sections and issuer releases; a parser is not a factual verifier. Check `halts` and current issuer/exchange notices before first readiness or when a trading-status concern arises; a current empty feed does not reconstruct an earlier cutoff or clear an older unresolved halt. |
 | Corporate actions | `actions` when validating adjustments, unexplained price discontinuities, instrument changes or outcome inputs. Its process-date records need issuer corroboration; choose the relevant history and keep original raw observations. |
 | Macro context | `fred-releases` for relevant upcoming releases and `fred-series` for a small dated set of rates, credit, employment or inflation observations when they affect a thesis. Verify fresh announcements with the releasing agency. |
@@ -220,8 +220,10 @@ the durable SEC URL and section; do not publish the entire filing or cite scratc
 
 ## Dated estimates, not reconstructed expectations
 
-For a small, already-justified shortlist, prefer the bounded capture helper to
-ad hoc calls. Prepare an ordered JSON list of objects containing exact `symbol`,
+For a justified set of nominees, prefer the
+[targeted coordinator](targeted-acquisition.md), which shares a request budget
+across needed price and estimate capture. For a standalone estimate capture,
+prepare an ordered JSON list of objects containing exact `symbol`,
 `period` (fiscal period-end), `horizon` (`fiscal quarter` or `fiscal year`) and
 `reason`. Order by tracked decision relevance and proximity of the next verified
 event, not by the ease of obtaining a response. Keep the plan in owned scratch.
@@ -230,7 +232,7 @@ event, not by the ease of obtaining a response. Keep the plan in owned scratch.
 python3 '<skill>/scripts/market_capture.py' capture --vault '<vault>' --plan '<scratch>/estimate-plan.json' --work-dir '<scratch>' --max-calls 3 --reuse-hours 24
 ```
 
-Add the selected `--credentials-file`. On a **fresh manual** run this optional
+Add the selected `--credentials-file`. On a **fresh scheduled or manual** run this optional
 preflight occurs before `market_notes.py prepare`; the helper returns only after
 its latest save is available at a real whole-second cutoff. An immediate prepare
 can therefore use the capture without backdating it. Do not reopen an already

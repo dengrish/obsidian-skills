@@ -1,5 +1,10 @@
 # Prospective mechanical momentum comparison
 
+This is the retained definition for existing independent momentum cohorts and
+explicitly requested independent comparisons. Ordinary stock-research runs now
+form the [feed nominee comparison](nominee-comparison.md) instead. Continue this
+strategy's existing checkpoints without creating new monthly unavailable rows.
+
 Use [market_comparison.py](../scripts/market_comparison.py) to form and evaluate
 one fixed monthly **strategy diagnostic** alongside discretionary research. The
 helper is offline: it reads saved evidence, preserves immutable JSON attachments

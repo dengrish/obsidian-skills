@@ -25,10 +25,10 @@ safety limit is not a writing target.
 ## Editions and retries
 
 - **Scheduled:** `YYYY-MM-DD-stock-research.md`, one edition per calendar day.
-  Helpers default to `--mode scheduled`; the daily schedule keeps its established
-  cutoff, and successful retries reuse the existing edition. A new scheduled
-  draft cannot use evidence after 11:30 New York time; use a manual edition for
-  a later cutoff. Earlier published cutoffs remain unchanged on retries.
+  Helpers default to `--mode scheduled`. Begin at the configured time, complete
+  bounded acquisition, then freeze the actual preparation cutoff. Successful
+  retries reuse the existing edition and its original cutoff. A fresh scheduled
+  review does not backdate its evidence to 11:30 New York.
 - **Manual:** `YYYY-MM-DD-HHMMSS-stock-research.md`, using the New York date and
   whole-second time in `as_of`. A user-requested fresh review may create another
   edition on the same day without replacing an earlier note or changing the schedule.
@@ -37,8 +37,8 @@ Start a run with the installed `market_notes.py prepare --vault '<vault>'
 --work-dir '<scratch>' --mode manual --check evidence-audit` (use `scheduled` for
 scheduled work). It freezes the live cutoff and creates a canonical, unfinished
 `draft.md` plus a private `run.json` receipt in an exclusive subdirectory of the
-owned external scratch folder. Complete any permitted price/estimate preflight before
-this step; a scheduled evidence cutoff never moves to admit late captures.
+owned external scratch folder. Complete the targeted acquisition preflight before
+this step for either mode; neither cutoff moves afterward to admit late captures.
 The receipt includes `final-review` automatically. Declare `--check
 independent-review` too when delegating that check; register any additional checker
 with `review-start --vault '<vault>' --run-receipt '<receipt>' --check '<name>'`
@@ -68,6 +68,8 @@ change requires reviewing and recording completion for the changed draft again.
 The private receipt/key detect accidental or untrusted state edits; they are not
 an authorization boundary against another process running as the same user. Keep
 them in owned scratch and clean them with the run, never in the vault or report.
+Older live receipts remain valid under their original timing policy, including
+the former scheduled 11:30 cutoff; upgrading does not extend a started run.
 
 The earlier no-receipt interface remains available for compatible reads and
 retries: `context --mode manual` freezes a nonfuture, whole-second cutoff on the
@@ -77,9 +79,9 @@ cutoff clearly in the brief; new publications still require the current coverage
 
 History and journals include earlier available editions from the same day,
 ordered chronologically; later cutoffs and notes generated after the selected
-cutoff are not evidence for it. If a later manual edition already exists, do not
-insert a missing scheduled edition retrospectively. Run a fresh manual review
-instead. A filename collision never overwrites content: identical published
+cutoff are not evidence for it. A new scheduled edition may follow an earlier
+manual edition at its actual preparation time, but cannot insert itself before
+an already published edition. A filename collision never overwrites content: identical published
 bytes can be retried; a different edition needs a new current cutoff.
 
 ## Metadata and outline

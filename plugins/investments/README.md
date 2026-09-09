@@ -88,19 +88,22 @@ user-requested fresh reviews create timestamped manual editions under the
 Both share the same thesis and outcome history. Private run receipts allow a
 started review to finish across midnight within eight hours; completed declared
 checks bind to the exact final draft without requiring human review.
-A fixed monthly momentum comparison is recorded separately within those notes,
-with bulky evidence in verified immutable `Investments/Snapshots/Comparisons/` attachments.
-Existing inline comparison records remain readable.
+A prospective nominee comparison freezes the actual new idea pool, including
+ready, watch, rejected and unfinished work. Its immutable records live under
+`Investments/Snapshots/Nominees/`; daily and monthly notes summarize fixed future
+windows against matching SPY observations without relabeling initial decisions.
+Existing independent momentum cohorts retain their original evidence under
+`Investments/Snapshots/Comparisons/` and their due checkpoints; automatic new
+formations are retired. Existing inline records remain readable.
 Selected estimate observations persist as immutable source JSON under
 `Investments/Snapshots/Estimates/`, with separate verified availability receipts
 under `Investments/Snapshots/EstimateReceipts/`. Legacy observations stay intact;
 an embedded save timestamp alone does not prove availability at an earlier cutoff.
-A small ordered estimate preflight reuses recent observations and records a
-conservative provider cooldown after quota failure; it never invents historical
-consensus or changes an established cutoff.
-For a fresh manual review, bounded raw-price capture can precede the research
-cutoff too. Verified observations are archived and reused for dated size checks;
-late captures cannot be backdated into a fixed scheduled edition. Stock notes
+A targeted acquisition coordinator batches the explicitly justified nominees
+through price and estimate capture, shares a request budget, reuses archives
+and respects provider cooldowns. Both scheduled and manual reviews freeze their
+cutoff only after preparation completes. The daily start remains 08:30 Pacific;
+late captures cannot change an already frozen edition. Stock notes
 keep usable current assessments separate from conflicts in older report links,
 and new updates preserve the exact original report as evidence.
 Exact SEC Form 4/4-A retrieval adds selective insider context without extra

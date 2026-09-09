@@ -59,12 +59,13 @@ work. No provider calls or feed writes occur here.
 python3 '<skill>/scripts/stock_coverage.py' context --vault '<vault>' --as-of '<cutoff>' --mode '<mode>' > '<scratch>/coverage-context.json'
 ```
 
-Before fresh manual preparation, a planning pass may use the actual current time
-to identify known work for price/estimate preflight. Repeat intake at the final
-frozen cutoff. Split larger price sets into bounded plans and complete all desired
-preflight batches before freezing; do not use the ten-symbol default or thirty-
-symbol plan limit to discard candidates. An already frozen scheduled cutoff stays
-fixed; only eligible earlier archives can fill its evidence needs.
+Before fresh scheduled or manual preparation, use the actual current time to
+identify known work for the [targeted acquisition coordinator](targeted-acquisition.md).
+It batches the justified plan internally under one declared request budget.
+Repeat intake at the final frozen cutoff. Any plan or budget limit leaves visible
+unfinished work; it is not permission to discard candidates or silently reset
+the budget through smaller invocations. An already frozen cutoff stays fixed;
+only eligible earlier archives can fill its evidence needs.
 
 Read the pending source work, older unfinished queue, active securities and new
 post fingerprints. Unresolved older posts extend the intake window to their

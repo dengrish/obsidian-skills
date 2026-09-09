@@ -706,7 +706,9 @@ raise SystemExit(main(fixture['args'], client))
             "#### Learning summary\n\nOne first-ready idea, including its failure; two observed "
             "and five overdue checkpoints; one provisional lesson. Other data remain unavailable.")
         draft = Path(self.scratch.name) / "outcome draft.md"
-        draft.write_text(daily(today, None, review).replace(stamp(target_day, 16), stamp(today, 16)),
+        # A late scheduled run can legitimately follow today's close. Use a
+        # genuinely future observation to exercise the cutoff guard at any hour.
+        draft.write_text(daily(today, None, review).replace(stamp(target_day, 16), stamp(today + timedelta(days=1), 16)),
                          encoding="utf-8")
         self.run_script(script, "outcomes", "--vault", self.vault, "--draft", draft, expected=2)
         self.run_script(script, "publish", draft, "--vault", self.vault, expected=2)

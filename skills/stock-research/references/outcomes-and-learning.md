@@ -76,11 +76,30 @@ changes. Full details remain in their original notes; do not copy the entire
 history into every daily note. Only decision-relevant learning belongs in the
 short Decision brief.
 
-## Separate prospective momentum comparison
+## Prospective comparison within the nominee pool
 
-Use the [fixed comparison strategy](comparison-strategy.md) as a mechanical
-monthly diagnostic alongside recommendation outcomes. The ordinary outcomes
-index also returns `comparison_formation_due`,
+Use [nominee comparison](nominee-comparison.md) to test selection within the
+actual starting ideas. `market_notes.py outcomes` exposes its read-only
+`nominee_comparison` inventory. The first prepared run activates it for future
+reports; closeout enrolls all new verified securities from published nomination
+journals, with their frozen initial decision and work state. Queued and blocked
+work remains visible, and later readiness never replaces an initial group.
+
+Evaluate due fixed windows using the helper and retain its immutable evidence.
+In the daily record, summarize material new observations and link unchanged
+results. Monthly learning compares same-cohort groups and matched SPY windows,
+showing original membership, missing observations and formation delays. An empty
+group has no measured return. Keep this diagnostic separate from each buying
+recommendation's own clock; it measures neither a traded portfolio nor causal
+skill performance. Do not optimize group definitions from later winners.
+
+## Historical independent momentum comparisons
+
+Preserve the [fixed comparison strategy](comparison-strategy.md) and continue
+due observations for its existing cohorts. New automatic formations are retired
+in favor of the feed-nominee diagnostic; do not add a monthly unavailable cohort
+merely to satisfy the former workflow. The ordinary outcomes
+index retains `comparison_formation_due` (false for ordinary runs),
 `comparison_formation_must_be_unavailable`, `comparison_cohorts`,
 `comparison_checkpoints` and `due_comparison_checkpoints`. Its two separate
 journals and visible cards live under Outcome review; they never create a
@@ -155,7 +174,7 @@ on or after that calendar target. Verify the session and its closing boundary,
 including early closes and exceptional closures. The helper's calendar target is
 only a research due date; it cannot establish that a trading session occurred.
 An outcome becomes observable only after that close and by a later review's cutoff.
-At the scheduled 11:30 ET review, today's close is normally still pending.
+At a review prepared during the trading session, today's close is still pending.
 Only a verified earlier session close with data available by the cutoff can
 already support that day's checkpoint; an intraday snapshot cannot replace it.
 

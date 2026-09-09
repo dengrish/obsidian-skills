@@ -141,6 +141,10 @@
     "skills/stock-research/scripts/stock_feed.py": "skills/stock-research/scripts/stock_feed.py",
     "skills/stock-research/scripts/stock_coverage.py": "skills/stock-research/scripts/stock_coverage.py",
     "skills/stock-research/scripts/stock_dossiers.py": "skills/stock-research/scripts/stock_dossiers.py",
-    "skills/stock-research/references/stock-notes.md": "skills/stock-research/references/stock-notes.md"
+    "skills/stock-research/references/stock-notes.md": "skills/stock-research/references/stock-notes.md",
+    "skills/stock-research/references/nominee-comparison.md": "skills/stock-research/references/nominee-comparison.md",
+    "skills/stock-research/references/targeted-acquisition.md": "skills/stock-research/references/targeted-acquisition.md",
+    "skills/stock-research/scripts/stock_acquire.py": "skills/stock-research/scripts/stock_acquire.py",
+    "skills/stock-research/scripts/stock_cohorts.py": "skills/stock-research/scripts/stock_cohorts.py"
   }
 }

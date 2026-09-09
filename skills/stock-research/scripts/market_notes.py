@@ -111,8 +111,8 @@ def ny_now(now=None):
     return current.astimezone(zone)
 
 
-def scheduled_cutoff(current):
-    """The daily 08:30 Pacific run uses an 11:30 New York evidence cutoff."""
+def scheduled_start(current):
+    """08:30 Pacific is the intended start, not a backdated evidence cutoff."""
     return datetime.combine(current.date(), time(11, 30), current.tzinfo)
 
 
@@ -397,7 +397,7 @@ def edition_identity(current, mode='scheduled', as_of=None):
     if mode == 'scheduled':
         if as_of is not None:
             raise ValueError('--as-of is only supported with --mode manual')
-        cutoff = min(current, scheduled_cutoff(current))
+        cutoff = current.replace(microsecond=0)
         return current.date().isoformat() + '-stock-research.md', cutoff
     cutoff = ny_now(iso_time(as_of)) if as_of is not None else current.replace(microsecond=0)
     if (cutoff.date() != current.date() or cutoff.astimezone(timezone.utc) > current.astimezone(timezone.utc)
@@ -484,7 +484,7 @@ def _run_open(receipt, vault, current):
         expected = {'schema', 'id', 'vault', 'vault_identity', 'mode', 'started_at',
                     'expires_at', 'as_of', 'edition', 'checks'}
         root_stat = root.stat()
-        if (set(payload) != expected or payload['schema'] != 1
+        if (set(payload) != expected or type(payload['schema']) is not int or payload['schema'] not in (1, 2)
                 or payload['id'] != path.parent.name.removeprefix('.market-run-')
                 or payload['vault'] != str(root)
                 or payload['vault_identity'] != [root_stat.st_dev, root_stat.st_ino]):
@@ -495,6 +495,9 @@ def _run_open(receipt, vault, current):
             raise ValueError('run receipt is future-dated or expired; start a fresh run without backfilling')
         edition, permitted = edition_identity(ny_now(start), payload['mode'],
                                               payload['as_of'] if payload['mode'] == 'manual' else None)
+        if payload['schema'] == 1 and payload['mode'] == 'scheduled':
+            # Old live receipts keep the policy that actually froze their run.
+            permitted = min(ny_now(start), scheduled_start(ny_now(start)))
         if payload['edition'] != edition or cutoff > permitted or ny_now(cutoff).date() != ny_now(start).date():
             raise ValueError('run receipt has an invalid cutoff or edition')
         if (not isinstance(payload['checks'], list) or not payload['checks']
@@ -535,6 +538,9 @@ def prepare(vault, work_dir, now=None, mode='scheduled', checks=()):
     names = list(dict.fromkeys(('final-review', *checks)))
     if any(not CHECK_NAME.fullmatch(name) for name in names):
         raise ValueError('check names must be lowercase letters/digits/hyphens, starting with a letter')
+    if result['current_note']['state'] == 'missing':
+        import stock_cohorts
+        stock_cohorts.start(vault, now=current)
     identifier = secrets.token_hex(16)
     directory = work / ('.market-run-' + identifier)
     directory.mkdir(mode=0o700)
@@ -543,7 +549,7 @@ def prepare(vault, work_dir, now=None, mode='scheduled', checks=()):
     try:
         key = secrets.token_bytes(32)
         root_stat = root.stat()
-        payload = {'schema': 1, 'id': identifier, 'vault': str(root),
+        payload = {'schema': 2, 'id': identifier, 'vault': str(root),
                    'vault_identity': [root_stat.st_dev, root_stat.st_ino], 'mode': mode,
                    'started_at': current.astimezone(timezone.utc).isoformat(),
                    'expires_at': (current.astimezone(timezone.utc) + timedelta(hours=RUN_HOURS)).isoformat(),
@@ -739,13 +745,13 @@ def context(vault, now=None, mode=None, as_of=None, run_receipt=None):
     current = ny_now(now)
     mode, edition, cutoff = run_identity(vault, current, mode, as_of, run_receipt)
     day = ny_now(cutoff).date().isoformat()
-    scheduled = scheduled_cutoff(ny_now(cutoff))
+    scheduled = scheduled_start(ny_now(cutoff))
     result, _ = inventory(vault, day, edition, cutoff, continuation=run_receipt is not None)
     return dict(result, date=day, now=current.isoformat(), mode=mode,
-                scheduled_cutoff=scheduled.isoformat(),
+                scheduled_start=scheduled.isoformat(),
                 as_of=result['current_note'].get('as_of', cutoff.isoformat()),
                 timing='manual' if mode == 'manual' else
-                       'early/manual' if current < scheduled else 'scheduled-cutoff',
+                       'early-scheduled' if current < scheduled else 'scheduled-live',
                 calendar='unverified; verify the exchange session and holiday calendar')
 
 
@@ -798,11 +804,6 @@ def outcomes(vault, draft=None, now=None, mode=None, as_of=None, run_receipt=Non
             finding(path, 'generated_at is in the future')
         notes[Path(path).stem] = (path, note, data)
     unpublished_draft = draft is not None and edition_key not in notes
-    if (unpublished_draft and mode == 'scheduled'
-            and iso_time(draft_note['metadata']['as_of']) > scheduled_cutoff(ny_now(cutoff))):
-        finding(history['current_note']['path'],
-                'new scheduled notes must not use evidence after 11:30 New York time; '
-                'a later cutoff requires a manual edition')
     if draft is not None:
         if iso_time(draft_note['metadata']['generated_at']) > current:
             raise ValueError('draft generated_at is in the future')
@@ -1024,6 +1025,12 @@ def outcomes(vault, draft=None, now=None, mode=None, as_of=None, run_receipt=Non
                                      ny_now(cutoff), vault)
     findings.extend(comparison.pop('findings'))
     cutoff = notes[edition_key][1]['metadata']['as_of'] if edition_key in notes else cutoff.isoformat()
+    import stock_cohorts
+    try:
+        nominees = stock_cohorts.context(vault, cutoff)
+    except (ValueError, OSError, RuntimeError, KeyError, TypeError) as exc:
+        finding(Path(vault) / 'Investments/Snapshots/Nominees', str(exc))
+        nominees = {'complete': False, 'error': str(exc)}
     return {'complete': not findings, 'findings': findings, 'date': day,
             'as_of': cutoff, 'mode': mode, 'current_note': history['current_note'],
             'calendar': 'unverified; due targets require exchange-calendar and completed-session verification',
@@ -1034,7 +1041,7 @@ def outcomes(vault, draft=None, now=None, mode=None, as_of=None, run_receipt=Non
             'active_lessons': [value for key, value in sorted(lessons.items()) if value['status'] != 'retired'],
             'retired_lessons': [value for key, value in sorted(lessons.items()) if value['status'] == 'retired'],
             'latest_monthly_summary': monthly, 'monthly_review_due': monthly is None or monthly['month'] < day[:7],
-            **comparison}
+            'nominee_comparison': nominees, **comparison}
 
 
 def comparison_outcomes(ordered, notes, edition_key, unpublished_draft, reference, current, vault=None):
@@ -1148,7 +1155,9 @@ def comparison_outcomes(ordered, notes, edition_key, unpublished_draft, referenc
         key != edition_key and value[1]['metadata']['date'][:7] == month
         for key, value in ordered[activation:])
     return {'findings': findings,
-            'comparison_formation_due': current_id not in cohorts,
+            # New feed-based cohorts replace automatic independent-universe
+            # formation. Keep the historical cards, validity rules and due returns.
+            'comparison_formation_due': False,
             'comparison_formation_must_be_unavailable': current_id not in cohorts and missed,
             'comparison_cohorts': [{key: value for key, value in row.items() if not key.startswith('_')}
                                   for _, row in sorted(cohorts.items())],
@@ -1575,10 +1584,12 @@ def run_self_test():
             with self.assertRaisesRegex(ValueError, 'out of order'):
                 publish(self.draft, self.vault, completed, run_receipt=prepared['run_receipt'])
 
-        def test_scheduled_receipt_keeps_fixed_cutoff_and_no_receipt_retains_backfill_guard(self):
+        def test_scheduled_receipt_freezes_after_preparation_and_keeps_backfill_guard(self):
             started = iso_time('2026-09-05T11:45:00-04:00')
             prepared = self.prepared(started, mode='scheduled')
-            self.assertEqual(prepared['as_of'], '2026-09-05T11:30:00-04:00')
+            self.assertEqual(prepared['as_of'], '2026-09-05T11:45:00-04:00')
+            self.assertEqual(context(self.vault, started + timedelta(minutes=5),
+                run_receipt=prepared['run_receipt'])['as_of'], prepared['as_of'])
             completed = started + timedelta(minutes=10)
             self.completed_run_draft(prepared, completed)
             self.assertEqual(publish(self.draft, self.vault, completed,
@@ -1586,6 +1597,27 @@ def run_self_test():
             tomorrow = completed + timedelta(days=1)
             with self.assertRaisesRegex(ValueError, 'no historical backfill'):
                 publish(self.draft, self.vault, tomorrow)
+
+        def test_legacy_scheduled_run_receipt_preserves_its_original_policy(self):
+            started = iso_time('2026-09-05T11:45:00-04:00')
+            prepared = self.prepared(started, mode='scheduled')
+            path = Path(prepared['run_receipt'])
+            key = (path.parent / 'key').read_bytes()
+            payload = _run_unseal(path.read_bytes(), key)
+            payload.update(schema=1, as_of='2026-09-05T11:30:00-04:00')
+            path.write_bytes(_run_seal(payload, key))
+            result = context(self.vault, started, run_receipt=path)
+            self.assertEqual(result['as_of'], payload['as_of'])
+            payload['as_of'] = started.isoformat()
+            path.write_bytes(_run_seal(payload, key))
+            with self.assertRaisesRegex(ValueError, 'invalid cutoff'):
+                context(self.vault, started, run_receipt=path)
+
+        def test_scheduled_preparation_uses_actual_whole_second_cutoff(self):
+            started = iso_time('2026-09-05T11:45:01.750000-04:00')
+            prepared = self.prepared(started, mode='scheduled')
+            self.assertEqual(prepared['as_of'], '2026-09-05T11:45:01-04:00')
+            self.assertLess(iso_time(prepared['as_of']), started)
 
         def test_manual_scheduled_manual_editions_preserve_history_and_first_ready(self):
             identifier = 'NYSE:ABC@2026-09-05'
@@ -1692,7 +1724,9 @@ def run_self_test():
             self.draft.write_bytes(self.note(as_of='2026-09-05T13:00:00-04:00', generated=late.isoformat()))
             published = Path(publish(self.draft, self.vault, late, mode='manual')['path'])
             original = published.read_bytes()
-            self.assertFalse(context(self.vault, late)['complete'])
+            # A fresh scheduled run can now follow this manual edition at its
+            # actual preparation time, but neither mode can backfill before it.
+            self.assertTrue(context(self.vault, late + timedelta(seconds=1))['complete'])
             for mode, cutoff in (('scheduled', '2026-09-05T11:30:00-04:00'),
                                  ('manual', '2026-09-05T12:59:59-04:00')):
                 with self.subTest(mode=mode):
@@ -1803,7 +1837,7 @@ def run_self_test():
                     ('2026-12-01T08:30:00-08:00', '2026-12-01T11:30:00-05:00', '2026-12-01T16:30:00+00:00')):
                 with self.subTest(pacific=pacific):
                     result = context(self.vault, datetime.fromisoformat(pacific))
-                    self.assertEqual(result['scheduled_cutoff'], eastern)
+                    self.assertEqual(result['scheduled_start'], eastern)
                     self.assertEqual(result['now'], eastern)
                     self.assertEqual(result['as_of'], eastern)
                     self.assertEqual(iso_time(result['as_of']).astimezone(timezone.utc).isoformat(), utc)
@@ -1812,9 +1846,9 @@ def run_self_test():
 
         def test_early_exact_and_late_runs_agree_on_unsaved_note_cutoff(self):
             for pacific, eastern_now, cutoff, timing in (
-                    ('2026-09-05T08:29:30-07:00', '11:29:30', '11:29:30', 'early/manual'),
-                    ('2026-09-05T08:30:00-07:00', '11:30:00', '11:30:00', 'scheduled-cutoff'),
-                    ('2026-09-05T10:15:22-07:00', '13:15:22', '11:30:00', 'scheduled-cutoff')):
+                    ('2026-09-05T08:29:30-07:00', '11:29:30', '11:29:30', 'early-scheduled'),
+                    ('2026-09-05T08:30:00-07:00', '11:30:00', '11:30:00', 'scheduled-live'),
+                    ('2026-09-05T10:15:22-07:00', '13:15:22', '13:15:22', 'scheduled-live')):
                 with self.subTest(pacific=pacific):
                     now = datetime.fromisoformat(pacific)
                     result = context(self.vault, now)
@@ -1832,7 +1866,7 @@ def run_self_test():
             result = context(self.vault, now)
             self.assertEqual(result['date'], '2026-09-06')
             self.assertEqual(result['now'], '2026-09-06T02:50:00-04:00')
-            self.assertEqual(result['scheduled_cutoff'], '2026-09-06T11:30:00-04:00')
+            self.assertEqual(result['scheduled_start'], '2026-09-06T11:30:00-04:00')
             self.assertEqual(result['as_of'], result['now'])
             planned = outcomes(self.vault, now=now)
             self.assertEqual(planned['date'], result['date'])
@@ -1852,19 +1886,18 @@ def run_self_test():
             self.assertEqual(path.read_bytes(), original)
             self.assertEqual(lint_bytes(original)['metadata']['generated_at'], '2026-09-05T09:02:00-04:00')
 
-        def test_new_scheduled_edition_cannot_extend_its_evidence_cutoff(self):
+        def test_scheduled_edition_can_use_later_preparation_but_cannot_move_frozen_cutoff(self):
             now = iso_time('2026-09-05T14:02:00-04:00')
-            self.draft.write_bytes(self.note(as_of='2026-09-05T13:00:00-04:00',
-                                            generated=now.isoformat()))
-            planned = outcomes(self.vault, self.draft, now)
-            self.assertFalse(planned['complete'])
-            self.assertTrue(any('after 11:30 New York' in row['error'] for row in planned['findings']))
-            with self.assertRaisesRegex(ValueError, 'after 11:30 New York'):
-                publish(self.draft, self.vault, now)
-            self.assertFalse((self.vault / 'Investments').exists())
-            self.assertTrue(outcomes(self.vault, self.draft, now, mode='manual')['complete'])
-            published = Path(publish(self.draft, self.vault, now, mode='manual')['path'])
-            self.assertEqual(published.name, '2026-09-05-130000-stock-research.md')
+            prepared = self.prepared(now - timedelta(minutes=2), mode='scheduled')
+            self.completed_run_draft(prepared, now)
+            self.assertTrue(outcomes(self.vault, self.draft, now,
+                run_receipt=prepared['run_receipt'])['complete'])
+            self.draft.write_bytes(self.note(as_of='2026-09-05T14:01:00-04:00', generated=now.isoformat()))
+            with self.assertRaisesRegex(ValueError, 'match the run receipt'):
+                publish(self.draft, self.vault, now, run_receipt=prepared['run_receipt'])
+            self.completed_run_draft(prepared, now)
+            published = Path(publish(self.draft, self.vault, now, run_receipt=prepared['run_receipt'])['path'])
+            self.assertEqual(published.name, '2026-09-05-stock-research.md')
 
         def test_early_scheduled_cutoff_and_historical_late_retry_remain_valid(self):
             now = iso_time('2026-09-05T14:02:00-04:00')
