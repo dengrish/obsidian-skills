@@ -83,6 +83,22 @@ unless a still-applicable verified check is already available. A daily-volume
 proxy cannot replace it. Do not fetch minute history automatically for every
 rejected or unchanged stock.
 
+Read the prior queue and each due blocker's linked assessment before choosing
+these windows. In the acquisition plan's existing `origins`, `reason` and
+`history` fields, tie each planned price check to its source question, symbol,
+date range, timeframe and adjustment basis. Keep any question covered by an
+eligible archive, or intentionally unresolved, in the private planning notes
+with its evidence link or missing-data reason; non-price checks may use another
+adapter. This is a requirements check, not another persistent queue.
+
+For example, deciding whether a support breach preceded yesterday's assessment
+requires that day's minute history around the assessment time. Yesterday's
+daily low and today's minutes cannot establish the order. Check that the
+requested range actually covers the relevant sessions and comparison boundary,
+including whether a boundary is inside or outside regular trading hours.
+Do not infer success from a matching symbol, a current-session default or the
+presence of some historical bars.
+
 Each nominee can declare up to four `history` requests with the exact fields
 shown above. `timeframe` is `1Day` or `1Min`; `adjustment` is `raw` or `split`.
 The existing screener and regular-session liquidity helper require `split`;
@@ -185,6 +201,14 @@ normal reuse window; another fetch still could not repair that edition.
 The result retains the complete nomination scope and one limitations list per
 target. `complete` means all requested history/current-price/estimate evidence is eligible; it
 does not mean the investment thesis or issuer-capitalization review is complete.
+Before preparation, reconcile the returned evidence with the due questions from
+planning. An omitted request cannot appear in the helper's limitations or
+continuation plan. Verify archive eligibility and the actual sessions/intervals
+needed for the calculation; retain an exact blocker when data are absent or
+incomplete. If another bounded acquisition is justified before preparation,
+declare it explicitly under the remaining authorized scope; do not silently
+reset an exhausted budget. After preparation, missing captures remain
+future-only under the fixed-cutoff rules below.
 Coverage failures, missing periods, stale prices, provider access failures,
 quota cooldowns and request exhaustion remain visible. Successful evidence
 from another provider is preserved when one source stops.
