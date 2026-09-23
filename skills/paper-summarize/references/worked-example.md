@@ -144,17 +144,19 @@ would require opening the page to distinguish a line break from an accidental
 join. These are illustrative decisions, not invented tool results from an
 included PDF.
 
-Save only the output note fence to a unique scratch `.md`, then run:
+For a real note, save the completed draft to a unique scratch `.md`, then run:
 
 ```bash
 python3 '<skill>/scripts/note_lint.py' '<scratch>/Doe_GutMicrobiome_2025.md' \
-    --mode empirical
+    --mode empirical --images '<vault>/Sources/Images'
 ```
 
-The fixture passes mechanical lint. For a real note with these embeds, also pass
-`--images '<vault>/Sources/Images'` and inspect each actual figure; omitting the
-option here checks the textual example without claiming its fictional images
-exist. Lint cannot verify the fictional science or the page citations.
+The repository's conformance harness checks this fictional fixture's textual
+format through the lint API. The publication CLI also requires the real image
+inventory whenever a note has embeds; omitting `--images` is a violation, not a
+text-only verification mode. Do not create placeholder images to make the
+example pass. Lint cannot verify the fictional science or the page citations,
+and every selected real image still needs visual inspection.
 
 A real run reports source-check counts/corrections and lint separately, then
 publishes only after both gates pass. It does not copy this example's facts or

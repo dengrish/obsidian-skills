@@ -35,6 +35,7 @@ import argparse
 import datetime
 import json
 import os
+import posixpath
 import re
 import stat
 import sys
@@ -1149,7 +1150,7 @@ def _scan_surfaces(text, by_tokens, maxwords):
         yield surface, text[start:end]
 
 
-def build_backfill(entries, surf_map, non_entry_bare_targets=()):
+def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=None):
     """Task 2 worklist: bare-text mentions of another entry's surface forms."""
     by_tokens, maxwords = _index_surfaces(surf_map)
     backfill = []
@@ -1171,6 +1172,11 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=()):
         linked = set()
         for link in WIKILINK.finditer(prose):
             target = link.group(1).split("#", 1)[0].split("^", 1)[0].strip()
+            if resolve_target is not None:
+                owner = resolve_target(target, e)
+                if owner is not None:
+                    linked.add(owner)
+                continue
             path_key = entry_link_path_key(target)
             if (path_key.startswith("mocs/")
                     or ("/" not in path_key and path_key in non_entry_bare_targets)):
@@ -2063,7 +2069,18 @@ def scan(wiki, images=None):
     _legacy_moc_names = {fold_name(os.path.basename(row["path"])[:-3])
                          for row in legacy_moc_states}
 
-    def _resolve_entry_file(raw_target):
+    def _origin_target_key(raw_target, note_path=None):
+        target = entry_link_path_key(raw_target)
+        if target.startswith(("./", "../")):
+            if note_path is None:
+                return None
+            target = fold_name(posixpath.normpath(posixpath.join(
+                posixpath.dirname(note_path), target)))
+            if target == ".." or target.startswith("../"):
+                return None
+        return target
+
+    def _resolve_entry_file(raw_target, note_path=None):
         """Resolve a Wiki file target without discarding path qualification.
 
         Returns ``(record, status, path_key)``. ``record`` is a parsed path
@@ -2074,12 +2091,20 @@ def scan(wiki, images=None):
         use a vault-root prefix (``Wiki/a/foo``) or a unique suffix
         (``a/foo``), and therefore remains resolvable under a basename clash.
         """
-        target_key = entry_link_path_key(raw_target)
+        target_key = _origin_target_key(raw_target, note_path)
+        if target_key is None:
+            return None, "missing", None
+        note_relative = entry_link_path_key(raw_target).startswith(("./", "../"))
         # MOCs/ is a reserved vault-root namespace, never a unique Wiki path
         # suffix. The explicit Wiki/MOCs/foo path still addresses a Wiki entry.
         if target_key.startswith("mocs/"):
             return None, "moc", None
-        basename_key = entry_link_key(raw_target)
+        if note_relative:
+            public_wiki_prefix = fold_name(os.path.relpath(
+                os.path.abspath(wiki), vault_root).replace("\\", "/")) + "/"
+            if not target_key.startswith(public_wiki_prefix):
+                return None, "missing", None
+        basename_key = target_key.rsplit("/", 1)[-1]
         owners = paths_by_basename.get(basename_key, set())
         if "/" not in target_key and basename_key in _moc_basename_owners:
             # A real MOC file outranks any entry alias with its basename. Only
@@ -2105,6 +2130,8 @@ def scan(wiki, images=None):
                 owner = next(iter(exact))
             elif len(exact) > 1:
                 return None, "ambiguous", None
+            elif note_relative:
+                return None, "missing", None
             else:
                 candidates = {
                     candidate for candidate in owners
@@ -2131,9 +2158,11 @@ def scan(wiki, images=None):
             return _entry_vault_target(record)
         return record["slug"]
 
-    def _resolve_parent_target(target):
+    def _resolve_parent_target(target, note_path=None):
         """Resolve paths before basenames; legacy MOCs never supply a new root."""
-        key = entry_link_path_key(target)
+        key = _origin_target_key(target, note_path)
+        if key is None:
+            return None, "missing"
         if key.startswith("mocs/"):
             discipline = key[len("mocs/"):]
             if discipline not in VALID_TAGS:
@@ -2143,7 +2172,7 @@ def scan(wiki, images=None):
             if state.get("state", "missing") in {"missing", "unreadable"}:
                 return None, state.get("state", "missing")
             return "@moc:" + discipline, None
-        record, status, owner_path = _resolve_entry_file(target)
+        record, status, owner_path = _resolve_entry_file(target, note_path)
         if "/" not in key and key in _moc_basename_owners:
             if status not in {"missing", "moc"}:
                 return None, "ambiguous"
@@ -2175,7 +2204,7 @@ def scan(wiki, images=None):
             return owner, None
         return None, "missing"
 
-    def _canonical_qualified_target(raw_target, owner_path):
+    def _canonical_qualified_target(raw_target, owner_path, note_path=None):
         """Exact spelling of the qualified path form that resolved ``owner``.
 
         Resolution deliberately folds case and Unicode so it behaves the same
@@ -2188,6 +2217,16 @@ def scan(wiki, images=None):
         target = target.replace("\\", "/").strip().strip("/")
         if "/" not in target:
             return None
+
+        if target.startswith(("./", "../")):
+            if note_path is None:
+                return None
+            actual = os.path.relpath(os.path.join(wiki, owner_path), vault_root).replace("\\", "/")
+            if not target.lower().endswith(".md"):
+                actual = actual[:-3]
+            relative = posixpath.relpath(actual, posixpath.dirname(note_path))
+            return ("./" + relative if target.startswith("./")
+                    and not relative.startswith(".") else relative)
 
         parts = target.split("/")
         canonical_prefix = []
@@ -2241,7 +2280,7 @@ def scan(wiki, images=None):
                 _work_surfaces.add(_surface.replace("-", " "))
     _work_surfaces = sorted(_work_surfaces, key=lambda value: (-len(value), value))
 
-    def _authors_phrase_names_work(text, match):
+    def _authors_phrase_names_work(text, match, note_path=None):
         """Whether ``the author(s) of ...`` names an existing Work entry."""
         after = text[match.end():]
         of_match = re.match(r"\s+of\s+", after, re.IGNORECASE)
@@ -2251,7 +2290,7 @@ def scan(wiki, images=None):
         linked = WIKILINK.match(remainder)
         if linked is not None and linked.start() == 0:
             target = linked.group(1)
-            record, status, _path = _resolve_entry_file(target)
+            record, status, _path = _resolve_entry_file(target, note_path)
             key = entry_link_key(target)
             if (record is None and status == "missing"
                     and key not in ambiguous_aliases and key in alias_of):
@@ -2437,7 +2476,8 @@ def scan(wiki, images=None):
                 _parent_target = _parent_match.group(1)
                 _parent_key = entry_link_path_key(_parent_target)
                 _parent_canonical = None
-                _parent_owner, _parent_reason = _resolve_parent_target(_parent_target)
+                _parent_owner, _parent_reason = _resolve_parent_target(
+                    _parent_target, _entry_vault_target(e))
                 if _parent_owner is not None:
                     if _parent_owner.startswith("@moc:"):
                         _parent_canonical = "MOCs/" + _parent_owner[len("@moc:"):]
@@ -3406,7 +3446,7 @@ def scan(wiki, images=None):
         if not _meta_found:
             _author_matches = list(re.finditer(r"\bthe authors?\b", _meta_text,
                                                re.IGNORECASE))
-            if any(not _authors_phrase_names_work(_meta_text, match)
+            if any(not _authors_phrase_names_work(_meta_text, match, _entry_vault_target(e))
                    for match in _author_matches):
                 problems.append((
                     sl, "item14",
@@ -3472,9 +3512,9 @@ def scan(wiki, images=None):
             bare = tgt.replace("\\", "/").rsplit("/", 1)[-1]
             lookup = bare[:-3] if bare.lower().endswith(".md") else bare
             lookup_key = entry_link_key(tgt)
-            file_record, file_status, _file_path = _resolve_entry_file(tgt)
+            file_record, file_status, _file_path = _resolve_entry_file(tgt, _entry_vault_target(e))
             if file_status == "moc":
-                _moc_owner, _moc_reason = _resolve_parent_target(tgt)
+                _moc_owner, _moc_reason = _resolve_parent_target(tgt, _entry_vault_target(e))
                 if _moc_reason is not None:
                     problems.append((sl, "item10/moc",
                                      f'MOC navigation target "{tgt}" is {_moc_reason}; '
@@ -3506,7 +3546,7 @@ def scan(wiki, images=None):
                     "link is deliberate navigation, use a local anchor"))
                 continue
             canonical_target = (
-                _canonical_qualified_target(tgt, _file_path)
+                _canonical_qualified_target(tgt, _file_path, _entry_vault_target(e))
                 if file_record is not None and _file_path is not None else None
             )
             normalized_target = tgt.replace("\\", "/").strip().strip("/")
@@ -3589,7 +3629,7 @@ def scan(wiki, images=None):
             key = entry_link_key(raw_target)
             if not key:
                 continue
-            record, status, owner_path = _resolve_entry_file(raw_target)
+            record, status, owner_path = _resolve_entry_file(raw_target, _entry_vault_target(e))
             if (record is not None
                     and record.get("path_key") == e.get("path_key")):
                 continue
@@ -3632,7 +3672,7 @@ def scan(wiki, images=None):
             # before deciding whether item 11 applies; a direct dict lookup on
             # the rendered target let [[Wiki/term#Heading]] escape the rule.
             lookup_key = entry_link_key(tgt)
-            record, status, _owner_path = _resolve_entry_file(tgt)
+            record, status, _owner_path = _resolve_entry_file(tgt, _entry_vault_target(e))
             if status == "ambiguous" or lookup_key in ambiguous_aliases:
                 continue
             if record is None and status == "missing" and lookup_key in alias_of:
@@ -3802,7 +3842,7 @@ def scan(wiki, images=None):
             # Do NOT re-tighten to exact match, and do NOT add a single-token-strict-subset guard (re-flags bare terms).
             # Still flags a label that is neither subset nor superset of any form (a wrong target / invented label).
             target_key = entry_link_key(tgt)
-            target_record, target_status, _target_path = _resolve_entry_file(tgt)
+            target_record, target_status, _target_path = _resolve_entry_file(tgt, _entry_vault_target(e))
             if (target_record is None and target_status == "missing"
                     and target_key not in ambiguous_aliases
                     and target_key in alias_of):
@@ -3986,7 +4026,17 @@ def scan(wiki, images=None):
     # surfaced by COMMON_NOUNS and item 5's bare-slug check.
     bare_noun_alias = {s for s in _alias_surf - _title_surf
                        if re.fullmatch(r"[a-z]+", s)}
-    backfill = (build_backfill(entries, surf_map, _moc_basename_owners)
+    def _backfill_owner(target, entry):
+        record, status, _path = _resolve_entry_file(target, _entry_vault_target(entry))
+        if record is not None and status == "parsed":
+            return record["slug"]
+        key = entry_link_path_key(target)
+        if (status == "missing" and "/" not in key
+                and key not in ambiguous_aliases and key in alias_of):
+            return alias_of[key][0]
+        return None
+
+    backfill = (build_backfill(entries, surf_map, _moc_basename_owners, _backfill_owner)
                 if alias_inventory_complete else [])
 
     # Exact normalized sentence overlap is a cross-entry ownership candidate,
@@ -4065,7 +4115,7 @@ def scan(wiki, images=None):
         # count anything ambiguous or unparsed.
         _inbound_text = strip_code(_e["prose"]) + "\n" + strip_code(_e["rel"] or "")
         for _m in WIKILINK.finditer(_inbound_text):
-            _record, _status, _owner_path = _resolve_entry_file(_m.group(1))
+            _record, _status, _owner_path = _resolve_entry_file(_m.group(1), _entry_vault_target(_e))
             if _status != "parsed" or _record is None or _owner_path is None:
                 continue
             inbound[_owner_path] = inbound.get(_owner_path, 0) + 1
@@ -4118,7 +4168,7 @@ def scan(wiki, images=None):
                 out.append(target)
         return out
     canonical_parents = {
-        sl: [(_target, *_resolve_parent_target(_target))
+        sl: [(_target, *_resolve_parent_target(_target, _entry_vault_target(e)))
              for _target in _parent_targets(e)]
         for sl, e in entries.items()
     }
@@ -4257,7 +4307,8 @@ def scan(wiki, images=None):
                 _raw_target = _link.group(1)
                 _target = _raw_target.strip()
                 _label = _link.group(2)
-                _record, _status, _owner_path = _resolve_entry_file(_target)
+                _record, _status, _owner_path = _resolve_entry_file(
+                    _target, os.path.relpath(_moc_state["path"], vault_root).replace("\\", "/"))
                 _alias_key = entry_link_key(_target)
                 if _status == "missing" and "/" not in entry_link_path_key(_target):
                     if _alias_key in ambiguous_aliases:
@@ -4493,7 +4544,7 @@ def scan(wiki, images=None):
             _target = _target.replace("\\", "/")
             if _target.lower().endswith(".md"):
                 _target = _target[:-3]
-            _owner, _reason = _resolve_parent_target(_target)
+            _owner, _reason = _resolve_parent_target(_target, _entry_vault_target(_e))
             if _reason is None:
                 continue
             unresolved_parents.append({
@@ -7319,7 +7370,8 @@ def run_self_test():
             "indented": "**Indented** documents a listing.\n\n    Recall",
             "sample": "**Sample** displays `[[recall]]` literally.\n\nRecall measures sensitivity.",
             "anchor": "**Anchor** links [[recall#Definition|Recall]]. Recall measures sensitivity.",
-            "qualified": "**Qualified** links [[sub/recall.md|Recall]]. Recall measures sensitivity.",
+            "qualified": "**Qualified** links [[Wiki/recall.md|Recall]]. Recall measures sensitivity.",
+            "misqualified": "**Misqualified** links [[absent/recall.md|Recall]]. Recall measures sensitivity.",
             "case": "**Case** links [[RECALL|Recall]]. Recall measures sensitivity.",
             "alias": "**Alias** links [[true-positive-rate|Sensitivity]]. Recall measures sensitivity.",
             "plain": "**Plain** explains why Recall measures sensitivity.",
@@ -7359,7 +7411,7 @@ def run_self_test():
         res = scan(v)
         check("backfill ignores listings and already-linked destinations, but a shown link cannot hide real prose",
               sorted(b["slug"] for b in res["backfill_candidates"] if b["target"] == "recall"),
-              ["bare-url-then-prose", "plain",
+              ["bare-url-then-prose", "misqualified", "plain",
                "reference-definition-then-prose", "sample",
                "shortcut-reference-then-prose"])
 

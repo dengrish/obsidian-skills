@@ -36,24 +36,34 @@ PY
 ```bash
 IDX=$(mktemp '<scratch>/vault-index.XXXXXX')
 python3 '<skill>/scripts/vault_index.py' '<coverage-tree>' \
-  --source 'Foo.pdf' --source 'Foo.md' -o "$IDX"
+  --vault '<vault>' --source '<vault>/Sources/PDFs/Foo.pdf' \
+  --source '<vault>/Articles/Foo.md' -o "$IDX"
 ```
 
 Use the real Wiki as `<coverage-tree>` before any draft exists. Once an earlier
 source in the same run has produced a draft, use the current unique private
 overlaid resolution tree so that staged coverage participates in later-source
-skip decisions. Substitute the actual on-disk names with their extensions,
-using one `--source` for an unpaired source and both actual names for a resolved
-PDF/note pair; the note need not have the PDF's stem. Read `source_matches` and
-`problems` in `$IDX`. Exit 1 and `ok: false` mean a recursive directory could
-not be inventoried; the helper still writes the useful partial JSON. Exit 0 and
-`ok: true` mean the walk completed, but ordinary entry-level parse/read findings
-can remain in `problems` and still block a source decision. Matching uses only
-decoded frontmatter `sources:`,
-compares literal target basenames after NFC normalization and case folding,
-accepts folder-qualified targets and page anchors, and preserves numeric
-disambiguators. A body example mentioning `[[Foo.pdf]]` does not count as
-having processed Foo. The walk includes subfolders.
+skip decisions; add `--wiki-origin '<vault>/Wiki'` with its actual public
+location, because note-relative links must not resolve from scratch. Supply
+actual absolute or vault-relative source paths with extensions, using one
+`--source` for an unpaired source and both paths for a resolved PDF/note pair;
+the note need not have the PDF's stem.
+
+Read `source_matches`, `source_match_candidates`, `source_problems`,
+`source_inventory_complete`, and ordinary `problems` in `$IDX`. Exit 1 means a
+Wiki or source directory could not be completely inventoried. Exit 0 and
+`ok: true` can still carry parse/read or source-ownership problems that block
+the decision. The helper inventories PDF and Markdown basename owners across
+the vault. A selected source must exist, be readable, and have exactly one
+portable basename owner; a leaf Markdown symlink is not source evidence.
+
+Verified-paths matching uses decoded frontmatter `sources:`, preserves numeric
+disambiguators, and compares each path component with NFC and case folding.
+Bare, vault-relative, note-relative, and shortest-suffix wikilinks can confirm
+the actual file; a wrong folder qualification cannot. Unresolved candidates
+remain visible separately and never establish prior coverage. A legacy query
+without `--vault` returns only `identity_confirmed: false` basename candidates.
+A body example mentioning `[[Foo.pdf]]` does not count as having processed Foo.
 
 If neither a public Wiki nor a staged entry exists, there is no prior coverage
 to inspect: omit this check and use a unique empty private resolution tree for

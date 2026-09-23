@@ -70,6 +70,17 @@ makes the run fail; resolve it before retrying, rather than deleting the
 manifest to make output appear unowned. Completed crops retain their ownership
 records when another PDF fails or an ordinary interruption ends the run.
 
+The manifest verifies crop ownership and current PNG bytes, not the PDF revision
+that produced them. If a PDF was deliberately replaced or revised at the same
+path, an ordinary rerun can still skip its older crops, and review marks protect
+those crops even from batch `--overwrite`. Compare the affected figures with
+the revised source. Use [explicit cropping](#set-and-verify-an-explicit-crop)
+with `--overwrite` for a targeted refresh, then inspect the new PNGs; that
+command deliberately replaces verified crops even when they have review marks.
+For a chosen automatic refresh, first remove only the affected review rows and
+run batch `--overwrite`, then review its outputs again. A verified skip alone
+does not establish that figures reflect a replaced PDF.
+
 For both extraction commands, occupancy is semantic and portable: every inventoried
 `<stem>_fig_<label>.*` spelling shares one slot after case folding and Unicode
 normalization. Thus a clipping-owned `.jpg` or `.webp`, a differently cased
@@ -199,6 +210,12 @@ figure. This workflow creates whole figures only.
    after its repaired crops have been published and verified; preserve the
    organized encrypted original. Arbitrary external output remains a one-off
    and does not imply a vault scan.
+
+   If intake deliberately used `--allow-unorganized`, repeat that flag on
+   this explicit command and the review-mark command below. This includes a
+   named collector-owned PDF attachment whose filename must remain unchanged.
+   The exception changes only the naming gate; duplicate vault basenames and
+   unknown or changed image occupants remain blocked.
 
    `--overwrite` is needed to replace a verified crop; without it that crop
    is skipped. Unknown occupants remain protected. Keep `y1` above the

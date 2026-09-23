@@ -2103,6 +2103,12 @@ def main(argv=None):
         ),
     )
     p.add_argument(
+        "--allow-unorganized", action="store_true",
+        help=("Accept a deliberate source-naming exception when repairing a "
+              "vault crop, matching batch_extract.py. The exact stem, "
+              "whole-vault uniqueness and output ownership checks remain active."),
+    )
+    p.add_argument(
         "--no-caption-check",
         dest="caption_check",
         action="store_false",
@@ -2198,12 +2204,13 @@ def main(argv=None):
     # external output remains an explicit one-off target.
     vault_root = output_vault_root(out_dir)
     if vault_root is not None:
-        if not looks_canonical(pdf_stem, is_stem=True):
+        if not looks_canonical(pdf_stem, is_stem=True) and not args.allow_unorganized:
             sys.exit(
                 "Refusing explicit crops into the vault's canonical "
                 "Sources/Images folder: the selected PDF stem %r has not "
                 "been produced by pdf-organize. Organize it first so a "
-                "later rename does not orphan this crop." % pdf_stem)
+                "later rename does not orphan this crop, or repeat the "
+                "batch's deliberate --allow-unorganized exception." % pdf_stem)
         decision = verify_selected_pdf(vault_root, pdf_path)
         if not decision.unique:
             detail = decision.reason
@@ -2220,6 +2227,10 @@ def main(argv=None):
                 "Sources/Images folder: %s. Give every vault PDF a unique "
                 "basename with pdf-organize, then retry. No sidecar or "
                 "figure was written." % detail)
+
+    if args.allow_unorganized and not looks_canonical(pdf_stem, is_stem=True):
+        print("Source naming exception (--allow-unorganized): crops remain "
+              "keyed to the exact source stem %r." % pdf_stem)
 
     # A one-line message beats a traceback for the two things that land in
     # a Sources/PDFs folder and are not readable PDFs: a truncated or non-PDF

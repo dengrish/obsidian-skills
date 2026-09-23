@@ -346,7 +346,7 @@ The shared implementations are `slugify.py` (wiki slugs), `atomic_move.py`
 (source filenames and book identity),
 `plurals.py` (English singularization), `note_provenance.py` (verified bundle identity and note attribution),
 `yaml_scalars.py` (decoded metadata), `portable_names.py` (portable file identity), `figure_state.py` (figure ownership and
-review sidecars), `vault_artifacts.py` (portable PDF and source-figure
+review sidecars), `vault_artifacts.py` (portable PDF/Markdown source and source-figure
 inventories), `organism_names.py` (Organism title/name classification),
 `entry_structure.py` (shared Wiki text, image and source-identity parsing,
 plus sentence, opener, answer-surface and flashcard checks), `introduced_aliases.py`
@@ -369,6 +369,7 @@ python3 -m venv .venv
 .venv/bin/python tests/test_conventions.py
 .venv/bin/python tools/build_plugin.py
 .venv/bin/python tests/test_end_to_end.py
+.venv/bin/python -m unittest discover -s tests -p 'test_knowledge_*_review.py'
 .venv/bin/python tests/test_market_research_eval.py
 .venv/bin/python tests/test_market_comparison.py
 .venv/bin/python tests/test_market_acquire.py

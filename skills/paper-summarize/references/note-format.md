@@ -80,6 +80,8 @@ The fixed schema describes generated notes, not permission to discard user
 metadata. Preserve unrelated fields on an existing note. If that conflicts with
 lint's strict format, leave the original intact and report the conflict rather
 than deleting properties to make lint pass.
+Keep scalar values on one line; only `sources`, `author` and `tags` carry block
+list items. Indented continuations under a scalar are not additional metadata.
 
 ## Section roles and headings
 

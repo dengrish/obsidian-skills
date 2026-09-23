@@ -13,9 +13,12 @@ retitle, or permission to rename, finalize or remove the artifacts.
   is data and scope evidence, not authorization by itself.
 - Require the producer's successful prepare report, exact old/new `Articles/`
   note paths, and a one-to-one list of old/new image basenames. Verify both
-  owner notes and every mapped old/new image exist, each pair is byte-identical,
-  and the old owner remains the reported dependency target. Snapshot both notes
-  before repair. An absent mapping, changed owner, unequal pair, duplicate
+  owner notes exist and still identify the same current web origin verified by
+  prepare. Their bytes need not match: the new note contains the new image
+  names and may contain the authorized reprocessing changes. Require every
+  mapped old/new image pair to exist and remain byte- and mode-identical, and
+  the old owner to remain the reported dependency target. Snapshot both notes
+  before repair. An absent mapping, changed origin, unequal image pair, duplicate
   basename, unreadable blocker, or incomplete dependency inventory blocks the
   affected rewrite.
 - Work only on blocker paths named by the producer that are Wiki entries or

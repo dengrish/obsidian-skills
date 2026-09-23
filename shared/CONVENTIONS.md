@@ -60,7 +60,7 @@ publication stages follow [SAFE_WRITES.md](SAFE_WRITES.md) separately.
 | Path | Holds | Written by | Read by |
 |---|---|---|---|
 | `Inbox/` | **everything new, unsorted** — Web Clipper `.md` captures and dropped-in documents alike. The **file extension is the dispatch**, and it is the whole of it: `.md` to one skill, `.pdf` to the other, **anything else to neither** | the user, the user's clipper | clipping-clean (`.md` only), pdf-organize (`.pdf` only) |
-| `Articles/` | **flat**; notes *about* a document — cleaned clippings, PDF reading notes and marked research extracts, one schema (§2b), with origin identified by `sources:` item 1 | clipping-clean, paper-summarize, wiki-add (new research extracts only); pdf-organize repairs source references during an authorized PDF rename | wiki-build, wiki-add (source reuse), clipping-clean (dedup index), paper-summarize (dedup and collision check), pdf-organize (authorized rename preflight), wiki-lint (exact producer-mapped dependency repair only) |
+| `Articles/` | **flat**; notes *about* a document — cleaned clippings, PDF reading notes and marked research extracts, one schema (§2b), with origin identified by `sources:` item 1 | clipping-clean, paper-summarize, wiki-add (new research extracts only); wiki-lint only for new evidence extracts needed by Task 3's missing discipline roots; pdf-organize repairs source references during an authorized PDF rename | wiki-build, wiki-add (source reuse), clipping-clean (dedup index), paper-summarize (dedup and collision check), pdf-organize (authorized rename preflight), wiki-lint (root evidence, already-cited correction sources, and exact producer-mapped dependencies) |
 | `Sources/PDFs/` | organized source documents, recursive; feed-owned raw attachments use the separate route below. Knowledge consumers check the canonical stem before deriving files or references (§1a) | pdf-organize (renames an `Inbox/` file **and moves it here**; also organizes wiki-add acquisitions), feed-collect (raw linked PDFs), the user | figure-extract, paper-summarize, wiki-build, wiki-add; feed-collect within its own scope |
 | `Sources/PDFs/<Work>/` | book-chapter PDFs, e.g. `Sources/PDFs/Prince_UDL_2026/`. The folder is what pdf-organize creates when it splits a book. paper-summarize's batch **scans** it — a book is only recognisable as one when a chapter turns up beside it — and then **skips** every chapter it finds, so a sweep never becomes a book's worth of summaries | pdf-organize, the user | figure-extract, paper-summarize (scans, skips), wiki-build, wiki-add |
 | `Sources/Images/` | **flat**; every figure and downloaded image, all extensions, whatever it came from | figure-extract, clipping-clean, wiki-add (new research images only), feed-collect (original photo attachments); **pdf-organize** renames in place only within an approved source rename (§1a) | wiki-build, wiki-add, paper-summarize, clipping-clean (its `rename` path re-reads the folder — §8a), wiki-lint (with `--images`, validates embeds and reports nested/staging residue without opening or deleting files); feed-collect within its own scope |
@@ -213,10 +213,12 @@ plugin; pdf-organize reaches it only on the rename path above, where it is the
 one skill that moves a file another skill wrote.
 `Articles/` is outside wiki-lint's ordinary scan and maintenance scope. Its
 producers enforce their own notes' schema and quality; paper-summarize also
-runs `note_lint.py` before publication. The sole exception is an exact
-producer-mapped dependency repair: wiki-lint may inspect the reported old and
-new clipping-note paths as ownership evidence, but it neither edits nor lints
-those notes.
+runs `note_lint.py` before publication. Source-backed correction may read an
+entry's already-cited source notes. An exact producer-mapped dependency repair
+may inspect the reported old and new clipping notes as ownership evidence,
+without editing or linting them. Task 3's missing-root prerequisite may reuse
+local evidence or create only the new durable research extracts it needs,
+following wiki-add's source rules; it never rewrites existing source notes.
 
 ### 1a. Source-file names, and why pdf-organize runs first
 
@@ -483,8 +485,9 @@ read: false
   to today whenever a wiki-build run changes the entry, including a
   source-no-op merge whose independent QC or metadata work changes the file. A
   byte-unchanged source-no-op keeps the old date. wiki-lint's ordinary lint
-  tasks and producer-mapped dependency repairs preserve both dates; an
-  explicitly requested source-backed correction, split, or merge follows
+  tasks and producer-mapped dependency repairs preserve both dates on existing
+  entries. A missing discipline root created under Task 3 uses today's date
+  for both fields. An explicitly requested source-backed correction, split, or merge follows
   wiki-build's creation and body-change rules for entries it substantively
   rewrites or creates.
 - **`read` is a boolean, written `read: false` on creation.** It is the user's
@@ -519,7 +522,8 @@ still performs the complete semantic coverage review. Section 2c records what
 that enforcement may and may not write.
 
 **Depended on by:** wiki-build (writes it), wiki-lint (validates and fixes
-it; owns `parents:`, writes neither date), wiki-add (creates requested entries
+it; owns `parents:`, preserves existing dates during ordinary maintenance,
+and follows the creation/correction exceptions above), wiki-add (creates requested entries
 with `parents: []` and `read: false` using builder's rules and validators,
 without editing existing entries). The two validator owners bundle scripts
 carrying the field order as a constant — `wiki-build/scripts/vault_index.py` (`SCHEMA_ORDER`)
@@ -528,19 +532,24 @@ and `wiki-lint/scripts/scan_vault.py` (`CANON`) — and both include
 
 ### 2b. Source note — a note *about* a document
 
-One schema, three producers in `Articles/`: `clipping-clean` writes cleaned
+One schema for notes in `Articles/`: `clipping-clean` writes cleaned
 clippings, `paper-summarize` writes PDF reading notes, and `wiki-add` writes
 research extracts. These are notes about a document rather than an entity.
 Their **bodies** follow each producer's workflow — a cleaned article, a
 structured PDF summary, or an agent-written extract of one web page — while
 their frontmatter follows this shared convention. Future source-note producers
-adopt it rather than inventing another schema.
+adopt it rather than inventing another schema. The narrow additional producer
+is wiki-lint's Task 3 missing-root workflow: when it needs new web evidence,
+it follows the same research-extract rules and records `knowledge:wiki-lint`
+as the actual writer. It does not invoke or alter the user's topic queue.
 
-A wiki-add research extract is clearly agent-written and is neither a full-text
+A research extract is clearly agent-written and is neither a full-text
 capture nor a multi-page synthesis. Its body carries the exact marker
 `<!-- obsidian:wiki-add-research-source -->` defined by the
 [research guide](../skills/wiki-add/references/research.md), which owns its
-evidence, attribution and image-provenance procedure. Keep one page per note;
+evidence, attribution and image-provenance procedure. This marker identifies
+the content kind, including Task 3's root evidence; the provenance footer
+identifies the actual producing skill. Keep one page per note;
 reuse suitable existing source notes without rewriting them. `clipping-clean`
 must preserve marked extracts and never process them as full-text captures.
 
@@ -655,14 +664,16 @@ pins it as `checkbox`, so the value is a bare YAML boolean.
 | paper-summarize | `false`, on creation only | a new summary note in `Articles/` |
 | wiki-build | `false`, on creation; `false` again on a **body-content revision** | see the reset rule below |
 | wiki-add | `false`, on creation only | a new requested entry or research extract; existing notes are never edited |
-| wiki-lint | only a meaning-preserving spelling repair | a recognized boolean spelling becomes the bare boolean it already means (`item2/read-type`); never invent, clear or set the user's review state |
+| wiki-lint | meaning-preserving spelling repair during ordinary maintenance; `false` for an authorized new note or substantive source-backed correction | existing entries keep their review state during ordinary Tasks 1–3; Task 3's missing discipline roots and new evidence extracts, plus explicit corrections/refactors, follow the creation/body-change rules below |
 | the user | `true`, whenever they have read it | this is the point of the field |
 
 **The linter preserves the meaning of `read:`.** It may normalize recognizable
 `true`/`false`, `yes`/`no`, or `0`/`1` spellings to a bare YAML boolean, including
 quoted values such as `"false"`. This corrects the checkbox's representation
-without deciding whether the user has read the note. The linter creates no
-entries, so it has no new-entry case.
+without deciding whether the user has read the note. Ordinary QC and link
+hygiene create no entries. A missing discipline root or its new evidence
+extract created under Task 3, or a new entry created by an explicitly requested refactor, starts with
+`read: false` under the ordinary new-entry rule.
 
 These cases are **report-only**, with the note and the value found named under
 *Notes for the user*:
@@ -717,8 +728,9 @@ wiki-add (creates only),
 wiki-lint (ordinary lint validates presence, type and position and only
 re-spells a recognizable wrongly typed value; explicit source-backed
 correction or refactor may reset a substantively rewritten retained entry,
-and refactor may create a split entry, under the builder rule above; neither
-guesses a null or unrecognizable answer).
+and refactor may create a split entry, under the builder rule above;
+Task 3's missing-root creation also follows the new-entry rule. Existing null
+or unrecognizable review values are never guessed).
 
 ---
 
@@ -1112,8 +1124,9 @@ meaning-preserving mathematical-title plain-text conversion),
 `markdown_tables.py` (Markdown-table
 spans and caption checks shared by both Wiki skills), `equation_coverage.py`
 (the conservative missing-display candidate shared by both Wiki skills),
-`figure_state.py` (§8b), `vault_artifacts.py` (portable PDF-basename and flat
-source-figure inventories in §§1a and 8a), and `yaml_scalars.py` (§2).
+`figure_state.py` (§8b), `vault_artifacts.py` (portable PDF/Markdown source
+ownership, qualified local-link matching, and flat source-figure inventories
+in §§1a, 7 and 8a), and `yaml_scalars.py` (§2).
 
 `yaml_scalars.py` decodes the single-line scalar values used in frontmatter:
 YAML double-quote escapes, doubled apostrophes in single quotes, trailing
@@ -1265,19 +1278,29 @@ together; omit the Markdown argument if its origin has not been established:
 
 ```bash
 python3 '<plugin>/skills/wiki-build/scripts/vault_index.py' '<coverage-tree>' \
-  --source '<name>.pdf' --source '<name>.md' -o '<scratch>/wiki-index.json'
+  --vault '<vault>' --source '<vault>/Sources/PDFs/<name>.pdf' \
+  --source '<vault>/Articles/<name>.md' -o '<scratch>/wiki-index.json'
 ```
 
 `<coverage-tree>` is the real Wiki before a run has drafts, the run's private
 overlaid resolution tree afterward, or a unique empty private tree when no
-public Wiki or staged entry exists. Prior-coverage checks never create the
-public folder; authorized final publication owns that step.
+public Wiki or staged entry exists. For a private tree, add
+`--wiki-origin '<vault>/Wiki'` (or the actual public Wiki location) so relative
+citations retain their public meaning. Prior-coverage checks never create the
+public folder; authorized final publication owns that step. Source paths name
+the actual vault files, not decrypted working copies or guessed paired names.
 
-`source_matches` compares literal local basenames with NFC and case folding,
-ignoring folder qualification and anchors. A mention in body
-prose is not evidence that an entry used that source. Inspect index problems
-and ambiguous ownership before deciding to skip; an incomplete index cannot
-establish that a source was fully processed.
+With `--vault`, `source_matches` contains only confirmed source identities:
+the selected source has one usable owner in a complete vault-wide PDF/Markdown
+inventory, and its citation resolves to that path. Case and NFC equivalents,
+page anchors, and valid relative or shortest-suffix wikilinks are supported;
+a wrong folder qualification is never discarded. A mention in body prose is
+not evidence that an entry used that source. Check index `problems`,
+`source_problems`, and unresolved `source_match_candidates` before deciding.
+An automatic skip requires verified-path mode, complete inventories, and
+confirmed identity without relevant unresolved problems. Legacy queries
+without `--vault` return explicitly unconfirmed basename candidates; those
+cannot establish prior coverage or authorize a skip.
 
 Also depended on by
 wiki-add (cites durable local sources using these forms; prior coverage of a
@@ -1622,12 +1645,14 @@ the immutable-record and write-scope blockers in the retitle protocol. A
 producer-mapped external-artifact repair is narrower: it rewrites only exact
 reported Wiki/MOC dependencies, re-runs the producer's probe, and leaves final
 artifact cleanup to that producer.
-Routine lint preserves `created:` and `updated:` and never changes the meaning
+Routine lint preserves existing entries' `created:` and `updated:` and never changes the meaning
 of `read:`. The only permitted review-field edit is §2c's spelling normalization;
 unknown or absent review state is reported, not supplied. The run report is
-the audit trail. Routine lint creates no entries: an unresolved target becomes
+the audit trail. Ordinary QC and link hygiene create no entries: an unresolved target becomes
 plain text and, when it looks like a real gap, a missing-entry candidate for
-a later wiki-build run. Explicit source-backed refactor mode may create a
+a later wiki-build run. Task 3 may create only the missing discipline roots
+needed by its authorized hierarchy closure, following its durable-source
+prerequisite and the new-entry date/review rules above. Explicit source-backed refactor mode may create a
 source-backed split entry only from a subject and durable evidence already in its
 authorized scope.
 

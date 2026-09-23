@@ -1,0 +1,217 @@
+#!/usr/bin/env python3
+"""Verify Wiki source-intake decisions through public CLIs in temporary vaults."""
+
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+INDEX = ROOT / "skills/wiki-build/scripts/vault_index.py"
+BACKLOG = ROOT / "skills/wiki-add/scripts/backlog.py"
+SCAN = ROOT / "skills/wiki-lint/scripts/scan_vault.py"
+
+
+class SourceCoverageTests(unittest.TestCase):
+    def setUp(self):
+        self.scratch = tempfile.TemporaryDirectory(prefix="knowledge-wiki-review-")
+        self.root = Path(self.scratch.name)
+        self.vault = self.root / "Vault with spaces"
+        self.wiki = self.vault / "Wiki"
+        self.wiki.mkdir(parents=True)
+
+    def tearDown(self):
+        self.scratch.cleanup()
+
+    def source(self, relative):
+        path = self.vault / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("Verified source fixture.\n")
+        return path
+
+    def note(self, slug, source, *, tree=None):
+        path = (tree or self.wiki) / (slug + ".md")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        title = path.stem.capitalize()
+        path.write_text("\n".join([
+            "---", "title: " + title, "type: Concept", "sources:",
+            "  - " + json.dumps(source, ensure_ascii=False),
+            "created: 2026-09-23", "updated: 2026-09-23",
+            "description: A fixture verifies source identity.", "tags:",
+            '  - "#engineering"', "parents: []", "read: false", "---",
+            "**" + title + "** verifies a source.", "",
+        ]))
+        return path
+
+    def index(self, *sources, tree=None, origin=None, strict=True, returncode=0):
+        command = [sys.executable, str(INDEX), str(tree or self.wiki)]
+        if strict:
+            command += ["--vault", str(self.vault)]
+        if origin:
+            command += ["--wiki-origin", str(origin)]
+        for source in sources:
+            command += ["--source", str(source)]
+        environment = dict(os.environ, OBSIDIAN_VAULT_SHARED=str(ROOT / "shared/scripts"))
+        result = subprocess.run(command, cwd=self.root, env=environment,
+                                text=True, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, returncode, result.stdout + result.stderr)
+        return json.loads(result.stdout)
+
+    def scan(self):
+        images = self.vault / "Sources/Images"
+        images.mkdir(parents=True, exist_ok=True)
+        result = subprocess.run([sys.executable, str(SCAN), str(self.wiki),
+                                 "--images", str(images)], cwd=self.root,
+                                text=True, capture_output=True, timeout=30,
+                                env=dict(os.environ, OBSIDIAN_VAULT_SHARED=str(ROOT / "shared/scripts")))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return json.loads(result.stdout)
+
+    def test_wrong_qualified_citation_never_proves_prior_pdf_coverage(self):
+        source = self.source("Sources/PDFs/Doe_Example_2025.pdf")
+        self.note("probe", "[[Missing/Doe_Example_2025.pdf#page=2]]")
+        result = self.index(source)
+        self.assertEqual(result["problems"], [])
+        self.assertEqual(result["source_problems"], [])
+        self.assertEqual(result["source_matches"], [])
+        self.assertEqual(result["source_match_candidates"][0]["slug"], "probe")
+        self.assertFalse(result["source_match_candidates"][0]["identity_confirmed"])
+
+    def test_bare_suffix_relative_and_normalized_citations_confirm_one_owner(self):
+        source = self.source("Sources/PDFs/García_Example_2025.pdf")
+        targets = {
+            "bare": "García_Example_2025.pdf",
+            "qualified": "Sources/PDFs/García_Example_2025.pdf",
+            "suffix": "PDFs/García_Example_2025.pdf",
+            "nested/relative": "../../Sources/PDFs/García_Example_2025.pdf",
+            "normalized": "sources/pdfs/GARCI\u0301A_EXAMPLE_2025.PDF",
+        }
+        for slug, target in targets.items():
+            self.note(slug, "[[" + target + "#page=2]]")
+        result = self.index(source.relative_to(self.vault))
+        self.assertEqual(result["source_problems"], [])
+        self.assertEqual({item["relpath"] for item in result["source_matches"]},
+                         {slug + ".md" for slug in targets})
+        self.assertTrue(all(item["identity_confirmed"] for item in result["source_matches"]))
+
+    def test_markdown_qualification_and_duplicate_ownership_are_not_discarded(self):
+        source = self.source("Articles/Explanation.md")
+        self.note("actual", "[[Articles/Explanation.md]]")
+        self.note("wrong", "[[Elsewhere/Explanation.md]]")
+        result = self.index(source)
+        self.assertEqual([item["slug"] for item in result["source_matches"]], ["actual"])
+        self.source("Archive/Explanation.md")
+        ambiguous = self.index(source)
+        self.assertEqual(ambiguous["source_matches"], [])
+        self.assertTrue(ambiguous["source_problems"])
+        self.assertEqual(len(ambiguous["source_problems"][0]["owners"]), 2)
+
+    def test_private_overlay_keeps_original_note_relative_location(self):
+        source = self.source("Articles/Explanation.md")
+        overlay = self.root / "private-overlay"
+        self.note("nested/probe", "[[../../Articles/Explanation.md]]", tree=overlay)
+        unresolved = self.index(source, tree=overlay)
+        self.assertEqual(unresolved["source_matches"], [])
+        self.assertTrue(unresolved["source_problems"])
+        resolved = self.index(source, tree=overlay, origin=self.wiki)
+        self.assertEqual(resolved["source_problems"], [])
+        self.assertEqual([item["slug"] for item in resolved["source_matches"]], ["probe"])
+
+    def test_legacy_basename_queries_are_explicitly_unconfirmed(self):
+        self.note("probe", "[[Missing/Explanation.md]]")
+        result = self.index("Explanation.md", strict=False)
+        self.assertEqual(result["source_match_mode"], "unconfirmed-basename-candidates")
+        self.assertFalse(result["source_matches"][0]["identity_confirmed"])
+
+    def test_incomplete_source_inventory_cannot_confirm_coverage(self):
+        source = self.source("Articles/Explanation.md")
+        self.note("probe", "[[Explanation.md]]")
+        (self.vault / "loop").symlink_to(self.vault, target_is_directory=True)
+        result = self.index(source, returncode=1)
+        self.assertFalse(result["source_inventory_complete"])
+        self.assertEqual(result["source_matches"], [])
+        self.assertTrue(result["source_problems"])
+
+    def test_missing_or_symlink_markdown_source_is_not_coverage_evidence(self):
+        actual = self.source("Articles/Explanation.md")
+        self.note("probe", "[[Explanation.md]]")
+        actual.unlink()
+        missing = self.index(actual)
+        self.assertEqual(missing["source_matches"], [])
+        self.assertTrue(missing["source_problems"])
+        outside = self.root / "outside.md"
+        outside.write_text("Outside content.\n")
+        actual.symlink_to(outside)
+        unsafe = self.index(actual)
+        self.assertEqual(unsafe["source_matches"], [])
+        self.assertTrue(unsafe["source_problems"])
+
+    def test_existing_uppercase_markdown_entry_completes_queue_unchanged(self):
+        note = self.note("topic", "[[Explanation.md]]")
+        upper = note.with_suffix(".MD")
+        note.rename(upper)
+        before = upper.read_bytes()
+        queue = self.vault / "add-to-wiki.md"
+        queue.write_bytes(b"- [ ] Topic\r\n")
+        snapshot = self.root / "queue-snapshot.json"
+        environment = dict(os.environ, OBSIDIAN_VAULT_SHARED=str(ROOT / "shared/scripts"))
+        scan = subprocess.run([sys.executable, str(BACKLOG), "scan", str(queue),
+                               "--out", str(snapshot)], env=environment,
+                              text=True, capture_output=True, timeout=30)
+        self.assertEqual(scan.returncode, 0, scan.stdout + scan.stderr)
+        item = json.loads(snapshot.read_text())["items"][0]["id"]
+        complete = subprocess.run([sys.executable, str(BACKLOG), "complete",
+                                   "--snapshot", str(snapshot), "--item", item,
+                                   "--wiki", str(self.wiki), "--entry", str(upper)],
+                                  env=environment, text=True, capture_output=True, timeout=30)
+        self.assertEqual(complete.returncode, 0, complete.stdout + complete.stderr)
+        self.assertEqual(queue.read_bytes(), b"- [x] Topic\r\n")
+        self.assertEqual(upper.read_bytes(), before)
+
+    def test_note_relative_links_and_parents_resolve_from_each_entry(self):
+        self.note("neighbor", "[[Explanation.md]]")
+        note = self.note("nested/probe", "[[Explanation.md]]")
+        text = note.read_text().replace("parents: []", 'parents:\n  - "[[../neighbor]]"')
+        text += ("\nIts mechanism extends [[../neighbor#Mechanism|Neighbor]].\n"
+                 "Neighbor remains a distinct topic.\n"
+                 "\n**Related:** [[../neighbor|Neighbor]]\n")
+        note.write_text(text)
+        result = self.scan()
+        failures = [item for item in result["problems"] if item["slug"] == "probe"
+                    and item["item"] in {"item10/dangling", "item10/case", "item11"}]
+        self.assertEqual(failures, [])
+        self.assertFalse(any(item["slug"] == "probe"
+                             for item in result["hierarchy_diagnostic"]["unresolved_parents"]))
+        self.assertFalse(any(item["slug"] == "probe" and item["target"] == "neighbor"
+                             for item in result["backfill_candidates"]))
+
+    def test_note_relative_link_never_becomes_an_arbitrary_suffix(self):
+        self.note("deeper/neighbor", "[[Explanation.md]]")
+        self.note("Other/elsewhere", "[[Explanation.md]]")
+        note = self.note("nested/probe", "[[Explanation.md]]")
+        note.write_text(note.read_text() + "\nA link to [[../neighbor|Neighbor]] and "
+                        "[[../../Other/elsewhere|Elsewhere]] is absent.\n")
+        result = self.scan()
+        dangling = [item["message"] for item in result["problems"]
+                    if item["slug"] == "probe" and item["item"] == "item10/dangling"]
+        self.assertTrue(any('"../neighbor"' in item for item in dangling))
+        self.assertTrue(any('"../../Other/elsewhere"' in item for item in dangling))
+
+    def test_relative_moc_link_has_its_own_origin(self):
+        self.note("neighbor", "[[Explanation.md]]")
+        mocs = self.vault / "MOCs"
+        mocs.mkdir()
+        (mocs / "engineering.md").write_text("- [[../Wiki/neighbor|Neighbor]]\n")
+        result = self.scan()
+        findings = result["hierarchy_diagnostic"]["moc_consistency_findings"]
+        self.assertFalse(any(item["kind"] == "unresolved-link" for item in findings))
+        self.assertTrue(any(item["kind"] == "noncanonical-target"
+                            and item["expected_target"] == "Wiki/neighbor" for item in findings))
+
+
+if __name__ == "__main__":
+    unittest.main()

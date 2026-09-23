@@ -70,7 +70,7 @@ import unicodedata
 import sys
 
 _OBSIDIAN_SHARED_MODULES = (
-    'entry_structure', 'markdown_tables', 'plurals', 'slugify', 'yaml_scalars',
+    'entry_structure', 'markdown_tables', 'plurals', 'portable_names', 'slugify', 'vault_artifacts', 'yaml_scalars',
 )
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/RUNTIME.md) ---

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Portable inventories for vault PDFs and source-keyed figures.
+"""Portable inventories for vault sources and source-keyed figures.
 
 Obsidian resolves bare PDF links and image embeds by basename.  A literal
 ``Path.rglob`` or shell glob is not enough for that namespace: it can miss
@@ -45,11 +45,13 @@ __all__ = [
     "ArtifactFinding",
     "PDFEntry",
     "PDFInventory",
+    "SourceInventory",
     "PDFSelection",
     "FigureInventory",
     "portable_identity",
     "local_link_matches",
     "inventory_pdfs",
+    "inventory_sources",
     "verify_selected_pdf",
     "source_stem_groups",
     "output_vault_root",
@@ -74,7 +76,9 @@ def local_link_matches(target, actual, *, note_dir="", allow_suffix=True):
     an Obsidian wikilink behavior.
     """
     def parts(value):
-        return [piece.strip() for piece in value.replace("\\", "/").split("/")]
+        # A folder's whitespace is part of its name. Trimming each component
+        # can turn a wrongly qualified citation into ownership of another file.
+        return value.replace("\\", "/").split("/")
 
     def collapse(pieces):
         result = []
@@ -99,7 +103,12 @@ def local_link_matches(target, actual, *, note_dir="", allow_suffix=True):
     wanted, known = parts(target), collapse(parts(actual))
     if not known or not wanted[-1]:
         return False
-    for candidate in (collapse(wanted), collapse(parts(note_dir) + wanted)):
+    # An explicit ./ or ../ prefix fixes the origin at the containing note.
+    # It cannot also resolve from the vault root after removing the prefix.
+    candidates = [collapse(parts(note_dir) + wanted)]
+    if wanted[0] not in (".", ".."):
+        candidates.append(collapse(wanted))
+    for candidate in candidates:
         if candidate == known:
             return True
     # An explicit relative path cannot also mean an arbitrary suffix.
@@ -190,6 +199,17 @@ class PDFInventory:
         }
 
 
+class SourceInventory(PDFInventory):
+    """PDF and Markdown basename owners, with the PDF inventory interface."""
+    __slots__ = ()
+
+    def to_dict(self):
+        answer = super().to_dict()
+        answer["kind"] = "sources"
+        answer["sources"] = answer.pop("pdfs")
+        return answer
+
+
 class PDFSelection:
     __slots__ = ("inventory", "selected", "portable_basename", "matches",
                  "unique", "reason")
@@ -244,15 +264,32 @@ class FigureInventory:
 
 
 def inventory_pdfs(root, *, include_hidden=False):
-    """Inventory every ``.pdf`` directory entry below *root*.
+    """Inventory every portable PDF basename below *root*, without hiding owners."""
+    return _inventory_sources(root, include_hidden=include_hidden,
+                              extensions={".pdf"}, kind="pdf")
+
+
+def inventory_sources(root, *, include_hidden=False):
+    """Inventory PDF and Markdown owners for source-citation resolution.
+
+    This is a namespace inventory, not permission to read or rewrite each
+    source. Occupied directory/symlink names participate, and an unreadable
+    subtree or cycle makes absence and uniqueness conclusions incomplete.
+    """
+    return _inventory_sources(root, include_hidden=include_hidden,
+                              extensions={".pdf", ".md"}, kind="source")
+
+
+def _inventory_sources(root, *, include_hidden, extensions, kind):
+    """Shared traversal for selected source-file extensions.
 
     Directory symlinks are followed.  Physical identities are tracked per
     ancestor chain, which permits two distinct logical aliases of one subtree
-    to remain visible while stopping a link back to an ancestor. A PDF-named
+    to remain visible while stopping a link back to an ancestor. A source-named
     symlink is an occupant even when dangling. If it targets a directory, the
     occupant is recorded and the directory is still traversed; otherwise a
-    name such as ``archive.pdf`` could hide colliding PDFs below it and make a
-    later uniqueness claim unsound. Other non-regular PDF-named entries are
+    name such as ``archive.pdf`` could hide colliding sources below it and make a
+    later uniqueness claim unsound. Other non-regular source-named entries are
     also retained and reported.
 
     Dot-prefixed entries and subtrees are skipped by default because consumer
@@ -260,6 +297,8 @@ def inventory_pdfs(root, *, include_hidden=False):
     ``include_hidden=True`` is an explicit forensic inventory mode.
     """
     root_path = Path(os.path.abspath(os.path.expanduser(os.fspath(root))))
+    inventory_type = PDFInventory if kind == "pdf" else SourceInventory
+    label = "PDF" if kind == "pdf" else "source"
     entries = []
     findings = []
     complete = True
@@ -277,10 +316,10 @@ def inventory_pdfs(root, *, include_hidden=False):
         finding("unreadable", root_path,
                 "cannot read inventory root: %s: %s" %
                 (type(exc).__name__, exc))
-        return PDFInventory(str(root_path), [], findings, False)
+        return inventory_type(str(root_path), [], findings, False)
     if not stat.S_ISDIR(root_stat.st_mode):
         finding("unreadable", root_path, "inventory root is not a directory")
-        return PDFInventory(str(root_path), [], findings, False)
+        return inventory_type(str(root_path), [], findings, False)
 
     def walk(directory, ancestors):
         try:
@@ -293,8 +332,8 @@ def inventory_pdfs(root, *, include_hidden=False):
         identity = before.st_dev, before.st_ino
         if identity in ancestors:
             finding("directory-cycle", directory,
-                    "directory symlink reaches an ancestor; recursive PDF "
-                    "inventory is incomplete")
+                    "directory symlink reaches an ancestor; recursive %s "
+                    "inventory is incomplete" % label)
             return
         try:
             with os.scandir(directory) as scan:
@@ -318,13 +357,14 @@ def inventory_pdfs(root, *, include_hidden=False):
                         (type(exc).__name__, exc))
                 continue
             is_link = stat.S_ISLNK(child_lstat.st_mode)
-            pdf_named = _is_pdf_name(child.name)
+            source_named = any(portable_identity(child.name).endswith(extension)
+                               for extension in extensions)
 
-            # A PDF-shaped symlink is a namespace occupant in its own right.
+            # A source-shaped symlink is a namespace occupant in its own right.
             # Record it before directory following, but do not let its suffix
-            # hide a directory target: nested PDF basenames still participate
+            # hide a directory target: nested source basenames still participate
             # in the vault-wide namespace.
-            if is_link and pdf_named:
+            if is_link and source_named:
                 entries.append(PDFEntry(str(path), "symlink"))
 
             is_directory = stat.S_ISDIR(child_lstat.st_mode)
@@ -333,38 +373,38 @@ def inventory_pdfs(root, *, include_hidden=False):
                     target = child.stat(follow_symlinks=True)
                     is_directory = stat.S_ISDIR(target.st_mode)
                 except FileNotFoundError:
-                    # A broken non-PDF symlink owns no PDF basename and hides
+                    # A broken non-source symlink owns no source basename and hides
                     # no traversable subtree, so it is harmless to this scope.
                     is_directory = False
                 except OSError as exc:
                     is_directory = False
                     finding("unreadable", path,
                             "cannot inspect symlink target while inventorying "
-                            "possible PDF subtrees: %s: %s" %
-                            (type(exc).__name__, exc))
+                            "possible %s subtrees: %s: %s" %
+                            (label, type(exc).__name__, exc))
             if is_directory:
                 walk(path, lineage)
-                if pdf_named and not is_link:
+                if source_named and not is_link:
                     entries.append(PDFEntry(str(path), "directory"))
-                    finding("pdf-nonregular", path,
-                            "PDF basename is occupied by a directory",
+                    finding(kind + "-nonregular", path,
+                            label + " basename is occupied by a directory",
                             severity="warning")
                 continue
 
-            # The PDF-shaped symlink was already retained above. A regular,
+            # The source-shaped symlink was already retained above. A regular,
             # dangling or non-directory target contributes no subtree and must
             # not be recorded a second time as a generic non-regular entry.
-            if is_link and pdf_named:
+            if is_link and source_named:
                 continue
 
-            if not pdf_named:
+            if not source_named:
                 continue
             if stat.S_ISREG(child_lstat.st_mode):
                 entries.append(PDFEntry(str(path), "regular"))
             else:
                 entries.append(PDFEntry(str(path), "nonregular"))
-                finding("pdf-nonregular", path,
-                        "PDF basename is occupied by a non-regular file",
+                finding(kind + "-nonregular", path,
+                        label + " basename is occupied by a non-regular file",
                         severity="warning")
         try:
             after = os.stat(directory)
@@ -375,12 +415,12 @@ def inventory_pdfs(root, *, include_hidden=False):
         else:
             if _snapshot(before) != _snapshot(after):
                 finding("changed-during-inventory", directory,
-                        "directory contents changed during PDF inventory")
+                        "directory contents changed during %s inventory" % label)
 
     walk(root_path, set())
     entries.sort(key=lambda entry: _sort_key(entry.path))
     findings.sort(key=lambda item: (_sort_key(item.path), item.kind))
-    return PDFInventory(str(root_path), entries, findings, complete)
+    return inventory_type(str(root_path), entries, findings, complete)
 
 
 def _same_logical_or_file(first, second):
@@ -752,6 +792,9 @@ def run_self_test():
             ("Study.pdf", "Sources/PDFs/Study.pdf", "Articles", True),
             ("PDFs/Study.pdf", "Sources/PDFs/Study.pdf", "Articles", True),
             ("../Sources/PDFs/Study.pdf", "Sources/PDFs/Study.pdf", "Articles", True),
+            ("./Sources/PDFs/Study.pdf", "Sources/PDFs/Study.pdf", "Articles", False),
+            ("./Sources/PDFs/Study.pdf", "Sources/PDFs/Study.pdf", "", True),
+            ("./sub/Study.pdf", "Articles/sub/Study.pdf", "Articles", True),
             ("../../Sources/PDFs/Study.pdf", "Sources/PDFs/Study.pdf", "Articles", False),
             ("Missing/Study.pdf", "Sources/PDFs/Study.pdf", "Articles", False),
             ("Other/PDFs/Study.pdf", "Sources/PDFs/Study.pdf", "Articles", False),
@@ -759,6 +802,9 @@ def run_self_test():
             ("/Sources/PDFs/Study.pdf", "Sources/PDFs/Study.pdf", "Articles", False),
             ("https://example.org/Study.pdf", "Sources/PDFs/Study.pdf", "", False),
             ("Sources/PDFs/Other.pdf", "Sources/PDFs/Study.pdf", "", False),
+            ("Sources/ PDFs/Study.pdf", "Sources/PDFs/Study.pdf", "Articles", False),
+            ("Sources/PDFs /Study.pdf", "Sources/PDFs/Study.pdf", "Articles", False),
+            ("Sources/ PDFs/Study.pdf", "Sources/ PDFs/Study.pdf", "Articles", True),
             ("pdfs/Cafe\u0301.pdf", "Sources/PDFs/Caf\u00e9.pdf", "Articles", True),
             ("sub/Study.pdf", "Articles/sub/Study.pdf", "Articles", True)):
         check("qualified local target: " + target,
@@ -788,6 +834,39 @@ def run_self_test():
               [str(selected)])
         decision = verify_selected_pdf(vault, selected, inventory=inv)
         check("one selected vault basename is unique", decision.unique, True)
+
+        articles = vault / "Articles"
+        articles.mkdir()
+        article = articles / "García_Study_2025.md"
+        article.write_text("Clipped source.\n", encoding="utf-8")
+        markdown_collision = nested / "Garci\u0301a_Study_2025.MD"
+        markdown_collision.write_text("Another source.\n", encoding="utf-8")
+        ignored = articles / "unrelated.txt"
+        ignored.write_text("Not a source citation.\n", encoding="utf-8")
+        source_inv = inventory_sources(vault)
+        check("source inventory includes PDFs and portable Markdown owners",
+              set(source_inv.paths), {selected, other, article, markdown_collision})
+        check("source inventory retains ambiguous Markdown basenames",
+              len(source_inv.groups[portable_identity(article.name)]), 2)
+        check("source inventory exposes its own result kind",
+              (source_inv.to_dict()["kind"], len(source_inv.to_dict()["sources"])),
+              ("sources", 4))
+        check("PDF inventory does not acquire Markdown owners",
+              set(inventory_pdfs(vault).paths), {selected, other})
+        scan_sources = os.scandir
+        def unreadable_articles(path):
+            if Path(path) == articles:
+                raise PermissionError("fixture: unreadable Articles")
+            return scan_sources(path)
+        with mock.patch.object(os, "scandir", unreadable_articles):
+            blocked = inventory_sources(vault)
+        check("unreadable Markdown tree blocks complete source ownership",
+              (blocked.complete, any(f.kind == "unreadable" for f in blocked.findings)),
+              (False, True))
+        markdown_collision.unlink()
+        article.unlink()
+        ignored.unlink()
+        articles.rmdir()
 
         hidden = vault / ".trash"
         hidden.mkdir()

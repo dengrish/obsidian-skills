@@ -45,6 +45,12 @@ does not alter the user's topic queue or extract unrelated entities.
 A discipline root is a short explanation of the field, not a duplicate MOC.
 The misc root explains the organizational fallback. Use the ordinary entry
 schema, one matching tag, a primary-definition card, and `parents: []`.
+New roots use today's `created:` and `updated:` dates, `read: false`, and
+verified `wiki-lint` creator provenance; the ordinary maintenance freeze applies
+to existing notes, not this authorized new-entry case. Stamp newly acquired
+source extracts as `wiki-lint` too, retaining the research-source marker and
+visible label defined by wiki-add's reference. Reuse that source format and
+publication procedure without invoking its topic-queue completion workflow.
 Preserve existing roots' substantive content, review state, and card history
 under the normal correction rules. A blocked source or ambiguous root owner
 blocks that group's publication; never fall back to an MOC parent.

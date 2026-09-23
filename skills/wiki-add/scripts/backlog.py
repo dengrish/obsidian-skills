@@ -267,7 +267,7 @@ def complete(snapshot, item_id, wiki, entry):
     if not wiki.is_dir():
         raise ValueError("Wiki must be a directory")
     entry = absolute_leaf(entry)
-    if entry.suffix != ".md" or not entry.is_relative_to(wiki):
+    if entry.suffix.casefold() != ".md" or not entry.is_relative_to(wiki):
         raise ValueError("entry evidence must be a Markdown file inside the selected Wiki")
     entry_bytes, proof = read_stable(entry)
     if not entry_bytes.strip():
