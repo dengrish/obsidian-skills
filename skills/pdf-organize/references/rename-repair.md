@@ -28,6 +28,10 @@ not block a rename.
   foreign, missing, malformed, or unreadable origin does not establish
   ownership. The sole metadata-free legacy exception is a body consisting
   only of an embed of this PDF. Publisher URLs remain external sources.
+  Qualified origins must resolve to the selected PDF's actual location;
+  matching the basename alone never authorizes moving the note or changing
+  its publication date. Vault-relative, note-relative and unique shortest
+  suffix paths receive the same ownership and reference-repair checks.
 - Figure candidates follow the consumer convention
   `[pdf_stem]_fig*`, including older accepted names, but **every image moves only
   when the figure manifest records its exact current digest**. A same-stem

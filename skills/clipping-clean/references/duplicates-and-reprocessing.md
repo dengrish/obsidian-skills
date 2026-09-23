@@ -87,6 +87,13 @@ user's processed version unless they authorize a rewrite. Mobile/AMP variants
 can evade URL matching; the filename check below is a second guard, not license
 to silently merge them.
 
+An earlier raw input is only a pending candidate. A
+`duplicate-of-earlier-input` verdict becomes an ordinary skip only after that
+capture publishes successfully. If it fails or remains deferred, probe the
+later capture again against the current Articles index; it may still be new.
+Two captures matching an already published owner both remain `duplicate`, with
+that actual note as their ownership evidence.
+
 ## Settle a slug before writing images
 
 Check `Articles/<slug>.md` with `dedup_index.py --slug '<slug>'`; check

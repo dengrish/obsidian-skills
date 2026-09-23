@@ -187,6 +187,112 @@ class WorkflowTests(unittest.TestCase):
         self.run_script(script, "stamp", *args, "--draft", path, "--output", stamped)
         return record, stamped
 
+    def test_summary_ownership_honors_the_qualified_pdf_path(self):
+        stem = "Doe_Qualified_2025"
+        pdf = self.pdfs / (stem + ".pdf")
+        doc = pymupdf.open()
+        doc.new_page()
+        doc.save(pdf)
+        doc.close()
+        note = self.notes / (stem + ".md")
+        for origin, expected in (
+                (f"Missing/{stem}.pdf", "collision"),
+                (f"Sources/Other/{stem}.pdf", "collision"),
+                (f"Sources/PDFs/{stem}.pdf", "done"),
+                (f"PDFs/{stem}.pdf", "done"),
+                (f"{stem}.pdf", "done")):
+            with self.subTest(origin=origin):
+                note.write_text(summary_note(stem).replace(
+                    f'"[[{stem}.pdf]]"', f'"[[{origin}]]"'), encoding="utf-8")
+                before = note.read_bytes()
+                result = self.run_script(
+                    "skills/paper-summarize/scripts/paper_scan.py",
+                    "--src", pdf, "--notes", self.notes,
+                    "--images", self.images, "--json")
+                self.assertEqual(json.loads(result.stdout)["pdfs"][0]["status"], expected)
+                self.assertEqual(note.read_bytes(), before)
+
+    def test_backlog_frontmatter_literal_fence_never_becomes_a_request(self):
+        queue = self.vault / "add-to-wiki.md"
+        original = ("---\r\ndescription: |\r\n  ---\r\nlabels:\r\n"
+                    "- Metadata only\r\n---\r\n- [ ] Real topic\r\n").encode()
+        queue.write_bytes(original)
+        snapshot = Path(self.scratch.name) / "queue.json"
+        result = self.run_script("skills/wiki-add/scripts/backlog.py", "scan",
+                                 queue, "--out", snapshot)
+        report = json.loads(result.stdout)
+        self.assertEqual([item["text"] for item in report["items"]], ["Real topic"])
+        entry = self.vault / "Wiki/real-topic.md"
+        entry.write_text("Real topic evidence.\n", encoding="utf-8")
+        self.run_script("skills/wiki-add/scripts/backlog.py", "complete",
+                        "--snapshot", snapshot, "--item", report["items"][0]["id"],
+                        "--wiki", self.vault / "Wiki", "--entry", entry)
+        self.assertEqual(queue.read_bytes(), original.replace(b"[ ]", b"[x]"))
+
+    def test_pdf_rename_does_not_claim_a_wrongly_qualified_article_origin(self):
+        for folder in ("Missing", "Sources/Other"):
+            with self.subTest(folder=folder):
+                stem = "Doe_" + folder.replace("/", "") + "_2025"
+                pdf = self.pdfs / (stem + ".pdf")
+                self.make_pdf(pdf)
+                note = self.notes / (stem + ".md")
+                note.write_text(summary_note(stem).replace(
+                    f'"[[{stem}.pdf]]"', f'"[[{folder}/{stem}.pdf]]"'), encoding="utf-8")
+                new_stem = stem.replace("2025", "2026")
+                self.run_script("skills/pdf-organize/scripts/organize.py", "rename",
+                                pdf, "--vault", self.vault, "--to", new_stem + ".pdf", "--apply")
+                self.assertTrue(note.is_file(), "an unproved owner must retain its pathname")
+                self.assertFalse((self.notes / (new_stem + ".md")).exists())
+                content = note.read_text(encoding="utf-8")
+                self.assertIn(f'"[[{folder}/{stem}.pdf]]"', content)
+                self.assertIn("published: 2025-01-01", content)
+                # The article's ordinary bare citation does resolve to this
+                # PDF, so it receives reference repair without ownership/date repair.
+                self.assertIn(f"[[{new_stem}.pdf#page=1|1]]", content)
+
+    def test_relative_and_shortest_pdf_origins_survive_rename_and_rescan(self):
+        for prefix in ("Sources/PDFs/", "../Sources/PDFs/", "PDFs/"):
+            with self.subTest(prefix=prefix):
+                stem = "Doe_Path" + str(len(list(self.pdfs.iterdir()))) + "_2025"
+                pdf = self.pdfs / (stem + ".pdf")
+                self.make_pdf(pdf)
+                note = self.notes / (stem + ".md")
+                note.write_text(summary_note(stem).replace(
+                    f'"[[{stem}.pdf]]"', f'"[[{prefix}{stem}.pdf]]"')
+                    + f'\n[Other relative path](PDFs/{stem}.pdf)\n', encoding="utf-8")
+                new_stem = stem.replace("2025", "2026")
+                self.run_script("skills/pdf-organize/scripts/organize.py", "rename",
+                                pdf, "--vault", self.vault, "--to", new_stem + ".pdf", "--apply")
+                renamed = self.notes / (new_stem + ".md")
+                self.assertFalse(note.exists())
+                self.assertIn(f'"[[{prefix}{new_stem}.pdf]]"', renamed.read_text(encoding="utf-8"))
+                self.assertIn(f'](PDFs/{stem}.pdf)', renamed.read_text(encoding="utf-8"))
+                result = self.run_script("skills/paper-summarize/scripts/paper_scan.py",
+                                         "--src", self.pdfs / (new_stem + ".pdf"),
+                                         "--notes", self.notes, "--images", self.images, "--json")
+                self.assertEqual(json.loads(result.stdout)["pdfs"][0]["status"], "done")
+
+    def test_clipping_duplicates_keep_published_and_pending_owners_distinct(self):
+        url = "https://example.com/existing"
+        owner = self.notes / "Existing_2025.md"
+        owner.write_text(f'---\nsources:\n  - "{url}"\n---\nCaptured body.\n',
+                         encoding="utf-8")
+        result = self.run_script("skills/clipping-clean/scripts/dedup_index.py",
+                                 self.notes, "--url", url, "--url", url)
+        rows = json.loads(result.stdout)["checked"]
+        self.assertEqual([row["status"] for row in rows], ["duplicate", "duplicate"])
+        self.assertEqual([row["matches"] for row in rows], [[str(owner)], [str(owner)]])
+        pending = "https://example.com/pending"
+        result = self.run_script("skills/clipping-clean/scripts/dedup_index.py",
+                                 self.notes, "--url", pending, "--url", pending)
+        self.assertEqual([row["status"] for row in json.loads(result.stdout)["checked"]],
+                         ["new", "duplicate-of-earlier-input"])
+        # A failed first capture publishes no owner. A fresh probe of the next
+        # capture must therefore leave it eligible for processing.
+        result = self.run_script("skills/clipping-clean/scripts/dedup_index.py",
+                                 self.notes, "--url", pending)
+        self.assertEqual(json.loads(result.stdout)["checked"][0]["status"], "new")
+
     def test_collected_feed_to_daily_and_all_stock_notes(self):
         """Exercise the installed-tree CLIs without real collection or market calls."""
         self.vault = self.vault.resolve()
