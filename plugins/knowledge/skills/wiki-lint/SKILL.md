@@ -87,7 +87,7 @@ Do not reinterpret it as ordinary link hygiene or a text replacement.
 ## Files
 
 - Scan `<vault>/Wiki`, **not the vault root**. Apply user folder overrides for this run without editing installed skills.
-- The scanner derives `<vault>` from the supplied `Sources/Images` path when available, otherwise from the nearest `.obsidian` ancestor of an overridden Wiki folder, falling back to the Wiki folder's parent. It uses that root only for MOC inventory/file diagnostics and resolving qualified MOC parent links. It does not lint suggestion logs or unrelated root notes.
+- Pass the selected `<vault>` with `--vault` for qualified entry links, parent resolution, backfill targets, and MOC inventory/file diagnostics. Without that argument, legacy callers infer the root from a supplied `Sources/Images` path, otherwise the nearest `.obsidian` ancestor, otherwise the Wiki folder's parent. The scanner does not lint suggestion logs or unrelated root notes.
 - Validate embeds against `<vault>/Sources/Images` with `--images` on every apply-capable scan. Follow Step 0 for a genuinely absent default folder; read-only runs may report image checks unavailable. The same inventory reports nested files/directories, recognizable staging residue, unreadable scope, and grouped case/NFC-equivalent basename collisions; these folder findings never authorize moving, renaming, or deleting anything.
 - Task 3 writes `<vault>/MOCs/<discipline-slug>.md`, one per tag with at least one member, including `MOCs/misc.md` for entries tagged only `#misc`, and uses `[[Wiki/<discipline-slug>]]` for discipline root parents. MOCs are navigation only and never parents. Generated tree links use full extensionless vault-relative entry paths such as `[[Wiki/machine-learning|Machine learning]]`. MOCs remain outside `Wiki/` so they are not scanned as entries. Misc uses `[[Wiki/misc]]` with one title-ordered level of members; the root has empty parents.
 - Inventory existing canonical MOCs and recognized old root occupants before creating a file. Preserve and report an unexpected old root note; routine lint does not move it or initialize a competing MOC. Whole-outline regeneration honors its [Task 3 closure](references/hierarchy.md). Recognized discipline and misc MOCs are fully generated notes; unknown files and suggestion logs remain outside that ownership. Reject `MOCs/` folder collisions/symlinks and duplicate MOC owners; preserve the connected closure when blocked.
@@ -118,14 +118,15 @@ replacement. A missing or invalid explicit override is not this default-folder
 case: report it and block checks or writes that depend on it.
 
 A preview/report-only run creates no vault folders. If the default image folder
-is absent, run the read-only scan below **without `--images`**, report image
+is absent, run the read-only scan below **without `--images`**, retaining
+`--vault` so folder overrides still resolve against the selected vault. Report image
 existence and folder checks as unavailable, and perform the other permitted
 checks. This partial coverage is never a clean image audit.
 
 ```bash
 SCAN=$(mktemp '<scratch>/wiki-scan.XXXXXX')
 python3 '<skill>/scripts/scan_vault.py' '<vault>/Wiki' \
-  --images '<vault>/Sources/Images' --out "$SCAN"
+  --vault '<vault>' --images '<vault>/Sources/Images' --out "$SCAN"
 ```
 
 Use the selected paths, keep the output filename unique to this run, and retain it for subsequent slices. A fixed shared temporary filename can supply another vault's results. When supplied, the image directory must exist; an invalid path is a usage error, not evidence that every figure is missing. Treat `hierarchy_diagnostic` as report-only evidence from the previously written hierarchy. Its placement, unresolved-parent, parent-state, MOC-inventory/legacy-path, MOC-file, MOC-consistency, self-parent, and cycle worklists do not authorize a write; a fresh builder note normally has a placement gap until Task 3 runs. An `unreadable` MOC state or unsafe/ambiguous path ownership blocks the connected closure described in [hierarchy](references/hierarchy.md). Non-outline formatting in a generated MOC is a repair finding, not an extra approval gate.

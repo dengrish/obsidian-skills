@@ -20,6 +20,7 @@ scanner deliberately does not check.
 Stdlib only, Python 3.10+ (the plugin runtime floor).
 
     python3 scripts/scan_vault.py /path/to/vault/Wiki \
+        --vault /path/to/vault \
         --images /path/to/vault/Sources/Images \
         --out '/tmp/wiki-scan-<run-id>.json'
 
@@ -1700,8 +1701,12 @@ def duplicate_sentence_surfaces(prose, table_spans=()):
     return out
 
 
-def _vault_root_for(wiki, images=None):
-    """Infer the vault root without assuming Wiki/ is a direct child."""
+def _vault_root_for(wiki, images=None, vault=None):
+    """Use an explicit vault root, otherwise retain legacy path inference."""
+    if vault is not None:
+        if not os.path.isdir(vault):
+            raise ValueError("vault is not a directory: %s" % vault)
+        return os.path.abspath(vault)
     if images:
         image_path = os.path.abspath(images)
         if (fold_name(os.path.basename(image_path)) == "images"
@@ -1743,8 +1748,12 @@ def _entry_physical_key(wiki, path):
     return os.path.relpath(path, wiki).replace("\\", "/")
 
 
-def scan(wiki, images=None):
+def scan(wiki, images=None, vault=None):
     """Parse every entry in the `wiki` folder; return the Step 0 model as a dict.
+
+    `vault` explicitly selects the root used for qualified entry links, parent
+    resolution, backfill targets, and MOC diagnostics. When omitted, infer it
+    from `images`, a .obsidian ancestor, or the Wiki folder's parent.
 
     `images` is the vault's `Sources/Images/` folder, or None. CONVENTIONS §1
     names this skill the validator of the embeds pointing there, and until
@@ -1755,8 +1764,8 @@ def scan(wiki, images=None):
     relies on for `Wiki/` — a source rename renames every figure with it, and
     the embeds left pointing at the old stem are silent otherwise.
     """
+    vault_root = _vault_root_for(wiki, images, vault)
     img_fold, image_folder_findings = image_index(images)
-    vault_root = _vault_root_for(wiki, images)
     entries, problems = {}, _ProblemList()
     # Every slug whose FILE is on disk, whether or not it parsed as an entry.
     # A link to an unparseable file resolves in Obsidian, so it is not dangling
@@ -8697,6 +8706,11 @@ def main(argv=None):
     ap.add_argument("wiki", nargs="?",
                     help="path to the vault's Wiki/ folder (walked recursively; "
                          "entries in subfolders are scanned too)")
+    ap.add_argument("--vault", metavar="DIR",
+                    help="selected vault root for qualified links, parents, "
+                         "backfill targets, and MOC diagnostics; when omitted, "
+                         "infer it from --images, a .obsidian ancestor, or "
+                         "the Wiki folder's parent")
     ap.add_argument("--images", metavar="DIR",
                     help="the vault's flat Sources/Images/ folder; with it, every "
                          "![[…]] image embed is checked to name a file that exists "
@@ -8718,6 +8732,8 @@ def main(argv=None):
         return 2
     if not os.path.isdir(args.wiki):
         ap.error("not a directory: %s" % args.wiki)
+    if args.vault is not None and not os.path.isdir(args.vault):
+        ap.error("--vault is not a directory: %s" % args.vault)
     # A mistyped --images must not read as "the folder is empty": that reports
     # EVERY embed in the vault as naming a missing file, and the executing agent reading
     # that has no way to tell it from a genuinely broken vault. `isdir`, not
@@ -8728,7 +8744,7 @@ def main(argv=None):
         ap.error("--images is not a directory: %s. No embed was checked; this is "
                  "not a vault with no images." % args.images)
     try:
-        report = scan(args.wiki, args.images)
+        report = scan(args.wiki, args.images, vault=args.vault)
     except IncompleteWikiInventoryError as exc:
         print("scan blocked: %s" % exc, file=sys.stderr)
         return 1

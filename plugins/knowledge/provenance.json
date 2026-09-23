@@ -1,15 +1,15 @@
 {
   "schema": 1,
   "plugin": "knowledge",
-  "plugin_version": "1.1.3",
+  "plugin_version": "1.1.4",
   "repository": "https://github.com/dengrish/obsidian-skills",
-  "source_commit": "ca6722f28f19249fe9c66fab3f115c61d4ae42ff",
-  "source_url": "https://github.com/dengrish/obsidian-skills/commit/ca6722f28f19249fe9c66fab3f115c61d4ae42ff",
+  "source_commit": "f53accceb417a4eae0d08fb9b8a397324233a1bb",
+  "source_url": "https://github.com/dengrish/obsidian-skills/commit/f53accceb417a4eae0d08fb9b8a397324233a1bb",
   "source_status": "committed",
-  "runtime_sha256": "767f179a35f6628a9f7bd2fb425387919df3eb4fadc0ccf57b6641b074d1b5f2",
+  "runtime_sha256": "5977ba8f7399cf860fe8b6f73bcde5763b5e9f15a5bc114d69ba16d7584c0d0b",
   "files": {
-    ".claude-plugin/plugin.json": "3b2a3fbf23b82ba64037121e6f84b4f6f26bbdee94844ccb3ca75ab08e4cf9a2",
-    ".codex-plugin/plugin.json": "7bcde12467983ffd171188a4729b88bdc6f1290139020d026bc2d5de65cbe71d",
+    ".claude-plugin/plugin.json": "5350d5a4c24bbdb8ff07691c068b29c4820e89c58f9eaec05988db0eedf41741",
+    ".codex-plugin/plugin.json": "b07ef86e08f17ef265e0b70b84d4ebd064026b023e2369645a8ccc4ed5aeb98b",
     "README.md": "a9110585c14225a2ea93fe6da30f3e7ad20c387add3545597eb71c252a2505a3",
     "requirements.txt": "23acb261416eec241ce2dafb12e486dad9c396cfd0b43fac72c79c5cb1cb1fe7",
     "shared/CONVENTIONS.md": "751e62e363df88c1931b85d0c2514207c6314294ba4ceb85fffe8f927eac9185",
@@ -88,7 +88,7 @@
     "skills/wiki-build/scripts/find_collisions.py": "124c1c6accea13b1411274fedf4812fe4f809f6c5ae09c84fce049b8447770c1",
     "skills/wiki-build/scripts/lint_entry.py": "0c2e2feef017fd0215e2eae06c90ef730852f1cad0a797e03211adfce0db2ce1",
     "skills/wiki-build/scripts/vault_index.py": "96a39375095e33c355f0b29523c0539002d74dfeac76e82ee84aada4544d5210",
-    "skills/wiki-lint/SKILL.md": "9954962d4642281b267ec7e7e1b24cc161fca98e31de9d0be6d58eb9b3084ea0",
+    "skills/wiki-lint/SKILL.md": "6237bded5ec8c08acd7b55d2b10949fe94e774a48a6944a714e10154e8be8d01",
     "skills/wiki-lint/references/backlogs.md": "6c1f3653cc7e8e4032345e6cf67f5662d56adfdca002b38883a5903f7e9f0f68",
     "skills/wiki-lint/references/external-artifact-repair.md": "fe75e0fc64a56eb1ee125635f9fcab60be92309fe27bda3ff9e2c3eec880732f",
     "skills/wiki-lint/references/flashcards.md": "e81e1f9170b89812b7d2e4f2269296dcb09e479bac6fea2085f5e731c6b26a80",
@@ -96,8 +96,8 @@
     "skills/wiki-lint/references/link-hygiene.md": "866c33b629615f99f61286f1decb76a03d02599df6cd7fe9f75a20a8d4cdd571",
     "skills/wiki-lint/references/qc-items.md": "4c4db4adae38c8d3da1a2b5255704a5b7d17c520102db2dbe8b6b79be2cd26c9",
     "skills/wiki-lint/references/refactors.md": "3782c1d4e42f7cc646fefbbfc8149dbd8870b2d57fcd1b71b142026905e1085d",
-    "skills/wiki-lint/references/scanner.md": "e49d341e33e6fdd444a1136a4b8a47eac2defba9f0d0283f0199e634865ab3d4",
+    "skills/wiki-lint/references/scanner.md": "6269a13346b3735e43c806e3c9bfcda7f0df8d61ba9d39fd2a11036ed970aeea",
     "skills/wiki-lint/references/source-backed-corrections.md": "35d74ed4b313e99cbb2c198bf41b48c8f787a41485075d334ba18fceb944002a",
-    "skills/wiki-lint/scripts/scan_vault.py": "4c16cf113154b646c3eedade067e334a5eea8dbc578440f2874134a735cafc7c"
+    "skills/wiki-lint/scripts/scan_vault.py": "b54762b8e78540e0b7cbcb2c445c04540f75ba8b158d9e43efda03b3630cbc48"
   }
 }
