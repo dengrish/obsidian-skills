@@ -173,7 +173,9 @@ _OBSIDIAN_SHARED_MODULES = (
     'note_provenance',
     'organism_names',
     'plurals',
+    'portable_names',
     'slugify',
+    'vault_artifacts',
     'yaml_scalars',
 )
 

@@ -72,17 +72,22 @@ step 3 so prior staged sources participate in this check:
 ```bash
 IDX=$(mktemp '<scratch>/vault-index.XXXXXX')
 python3 '<skill>/scripts/vault_index.py' '<coverage-tree>' \
-  --source 'Foo.pdf' --source 'Foo.md' -o "$IDX"
+  --vault '<vault>' --source '<vault>/Sources/PDFs/Foo.pdf' \
+  --source '<vault>/Articles/Foo.md' -o "$IDX"
 ```
 
 Use the real Wiki as `<coverage-tree>` before any draft exists, otherwise the
-private overlaid tree. Use one actual filename for an unpaired source and both
-actual filenames for a confirmed PDF/note pair; the names need not share a
-stem. Read `$IDX` even when the command exits 1: `ok: false` means the recursive
-inventory is partial, while exit 0 and `ok: true` can still carry entry-level
-parse/read findings in `problems`. Inspect `source_matches` and `problems`; no
-`ok: true` result makes those findings safe to ignore. Body mentions are not prior
-coverage. For uncertain or incomplete results, read [the coverage
+private overlaid tree, adding `--wiki-origin '<vault>/Wiki'` for that mirror
+(use the actual public Wiki location if overridden). Use one actual source
+path for an unpaired source and both paths for a confirmed PDF/note pair; the
+names need not share a stem. Read `$IDX` even when the command exits 1: either
+the Wiki or source inventory may be partial. Inspect `source_matches`,
+`source_match_candidates`, `source_problems`, `source_inventory_complete`, and
+the ordinary index `problems`; exit 0 or `ok: true` does not clear these findings.
+Only a verified-paths match with `identity_confirmed: true`, complete inventories,
+and resolved ownership/metadata problems can establish coverage. A bare
+basename query without `--vault` returns unconfirmed candidates, not skip
+evidence. Body mentions are not prior coverage. For uncertain or incomplete results, read [the coverage
 protocol](references/source-intake.md#check-prior-coverage) and resolve/report
 the uncertainty before deciding. If no public Wiki or staged entry exists,
 omit the check; create the public folder only at authorized publication.
@@ -207,6 +212,14 @@ protected-content rules; word count does not establish quality. Scripts report;
 they do not authorize edits or replace judgment. A prose/script disagreement is
 reported and resolved using the governing rule.
 
+**Review-only candidates do not require edits to silence them.** A supported
+decision to retain prose, such as hard voting without an equation, resolves
+that candidate even if it remains in the lint output and `summary.clean` is
+false. Record the finding and its rule-based disposition, then carry that
+decision into the final check. Do not add notation or rewrite clear prose to
+force a zero-finding report. This does not waive errors, incomplete checks,
+unresolved candidates, or new findings in the published bytes.
+
 **Do not rename or delete a pre-existing entry as a review fix.** Propose it with the reason and intended slug; inbound links, parents, MOCs, and earlier content extend beyond this run's edit scope. A filename correction on an entry created this run must still leave every reference written during the run resolving.
 
 **Do not remove a semantic-invalid alias as a review fix.** Report the alias, the source evidence that shows it names another entity, and the likely canonical owner when known. Alias removal is a separately scoped vault-wide refactor because inbound links may resolve through that alias. Route a request that directly authorizes the refactor to `wiki-lint`'s explicit refactor mode; it follows the complete alias protocol in [shared conventions](../../shared/CONVENTIONS.md#4b-aliases-use-the-same-slug-rule), rewriting resolving entry-link surfaces before deletion without changing sources, embeds, or logs on a text match. It needs no second human review. Ordinary duplicate spellings within one alias list remain format fixes.
@@ -240,8 +253,9 @@ the public name. Record every completed publication. If a later member fails,
 conditionally roll back only unchanged publications and retain/report any
 recovery or mixed state as the multi-file protocol requires. Finally refresh
 the public index and re-lint the published entries and whole Wiki collision
-surface. Claim completion only when this public postcondition is clean and the
-published bytes equal the reviewed bytes.
+surface. Claim completion only when the published bytes equal the reviewed
+bytes and the postcondition has no unresolved in-scope findings; explicitly
+adjudicated review-only candidates follow the rule above.
 
 Report actual creates/regular merges/source-no-op merges, skipped/deferred entities and reasons, review-state decisions, every audit count (including zero), unresolved findings, and unused source figures with the media rule's permitted reasons. Use the complete [report specification](references/review.md#run-report); do not describe proposals as applied. An all-skipped run reports skips without source-entry audits.
 

@@ -469,12 +469,12 @@ def _decoded_markdown_parts(text):
             continue
         start, end = match.start(), match.start(group) + len(path)
         yield text[position:start], text[position:start], None
-        # Complete wikilink boundaries let the existing qualification and
-        # folder-removal checks see decoded spaces without treating them as
-        # Markdown separators. Retain the original Markdown opening outside
-        # this logical representation when encoding a changed path back.
+        # An angle Markdown destination admits decoded spaces/parentheses
+        # without changing the link's resolution rules. A wikilink surrogate
+        # would incorrectly grant Markdown paths shortest-suffix matching.
+        # Retain the original opening when encoding a changed path back.
         prefix = text[start:match.start(group)]
-        yield text[start:end], "[[" + decoded + "]]", ("markdown", prefix)
+        yield text[start:end], "](<" + decoded + ">)", ("markdown", prefix)
         position = end
     yield text[position:], text[position:], None
 
@@ -542,7 +542,7 @@ def _map_source_text(text, transform):
         elif isinstance(style, tuple) and style[0] == "markdown":
             # '%' is deliberately not safe: one URL decode must resolve a
             # literal percent in the filename, rather than decode it twice.
-            out.append(style[1] + quote(changed[2:-2], safe="/:@!$&'*,;=+-._~"))
+            out.append(style[1] + quote(changed[3:-2], safe="/:@!$&'*,;=+-._~"))
         else:
             out.append(changed)
     return "".join(out)
@@ -1074,13 +1074,15 @@ def _stem_match(m):
 #: so it only matches when it abuts the name.  The basename branch of
 #: `_reference_re` has no `open` group -- it matches a full filename anywhere,
 #: including in prose -- so the qualification has to be read off the text.
-_QUAL_BEFORE = re.compile(r"(?:!?\[\[|\]\()(?!\w+:)([^\[\]()\n|#]*/)\Z")
+_QUAL_BEFORE = re.compile(
+    r"(?:!?\[\[|\]\()(?!\w+:)([^\[\]()<>\n|#]*/)\Z"
+    r"|\]\(<(?!\w+:)([^<>\r\n]*/)\Z")
 
 
 def _qualifies_at(body, start, name, dirs, note_dir):
     """Check the qualification and syntax abutting a basename match."""
     m = _QUAL_BEFORE.search(body, max(0, start - 400), start)
-    return _qualifies_qual(m.group(1) if m else None, name, dirs, note_dir,
+    return _qualifies_qual((m.group(1) or m.group(2)) if m else None, name, dirs, note_dir,
                            allow_suffix=bool(m and m.group(0).lstrip("!").startswith("[[")))
 
 
@@ -1218,32 +1220,24 @@ def references(vault, names, dirs=None, directory_names=()):
 #: place.
 def _debase_res(name):
     esc = re.escape(name)
-    # The markdown-link folder class must not swallow a scheme: a bare
-    # `[^()\s]*` matched `https://example.org/papers/` and turned a working
-    # URL into a bare filename.  This one is keyed on the NEW basename, so no
-    # reference check can see it -- the pre-rename probe searches old names and
-    # finds nothing, and the post-rename assert searches old names and passes.
-    # It fires on the "refs empty -> rename immediately" path, silently.
-    #
-    # The wikilink terminator carries `[ \t]*` for the reason `_reference_re`'s
-    # stem branch does: Obsidian resolves `[[ Sources/PDFs/X.pdf ]]` through
-    # the padding, so the rewrite renames inside it and this pattern, without
-    # the padding, then declined to drop the folder the file had just left --
-    # the "matched by the rewrite, missed here" split this comment already
-    # warns about, keyed on the NEW name where no reference check can see it.
-    # The markdown form gets no such tolerance: a space before `)` is part of
-    # the target, not padding a renderer looks past.
+    # Only local destinations may lose their old folder. Include padded
+    # wikilinks and the angle form used for decoded Markdown paths, while
+    # retaining each syntax's own whitespace rules.
     uri_guard = r"(?![A-Za-z][A-Za-z0-9+.-]*:|//)"
     return (re.compile(r"(!?\[\[)(%s[^\[\]\n|#]*/)(%s)(?=[ \t]*[\]\\|#])"
-                       % (uri_guard, esc)),
-            re.compile(r"(\]\()(%s[^()\s\n]*/)(%s)(?=[)#])"
-                       % (uri_guard, esc)))
+                       % (uri_guard, esc), re.I),
+            re.compile(r"(\]\()(%s[^()\s\n]*/)(%s)(?=[)?#])"
+                       % (uri_guard, esc), re.I),
+            re.compile(r"(\]\(<)(%s[^<>\r\n]*/)(%s)(?=[>#])"
+                       % (uri_guard, esc), re.I))
 
 
-def debase_links(text, names):
+def debase_links(text, names, dirs=None, note_dir=""):
     """Drop the folder from every qualified wikilink naming one of `names`.
 
-    Called only when a rename MOVED the file to a different folder.  The
+    Called before rewriting basenames when a rename moves a file to another
+    folder. With `dirs`, only a qualification resolving to that original file
+    may be removed; another folder's same basename remains unchanged. The
     qualification in a note's link is the file's OLD folder, and rewriting the
     name inside it produces a link that resolves to nothing — a working link
     turned dangling, silently, which is the failure `_qualifies` exists to
@@ -1261,7 +1255,13 @@ def debase_links(text, names):
         for name in sorted(names, key=len, reverse=True):
             if name:
                 for rx in _debase_res(name):
-                    part = rx.sub(r"\1\3", part)
+                    def replace(match):
+                        if not _qualifies_qual(
+                                match.group(2), name, dirs, note_dir,
+                                allow_suffix=match.group(1).lstrip("!").startswith("[[")):
+                            return match.group(0)
+                        return match.group(1) + match.group(3)
+                    part = rx.sub(replace, part)
         return part
 
     return _map_source_text(text, debase)
@@ -2047,7 +2047,7 @@ def plan_rename(vault, path, new_basename, dest=None):
     # Empty unless `dest` actually relocates the file: a rename in place keeps
     # every qualification valid, and stripping one there would be a gratuitous
     # rewrite of the user's chosen link style.
-    moved_names = set()
+    moved_source_names = set()
     if dest and os.path.realpath(dest) != os.path.realpath(
             os.path.dirname(path) or "."):
         # The basename ONLY, never its extensionless stem.  A stem carries no
@@ -2058,7 +2058,7 @@ def plan_rename(vault, path, new_basename, dest=None):
         # `_qualifies` exists to prevent, with `_qualifies` bypassed.  An
         # extensionless link to a PDF does not resolve in Obsidian anyway, so
         # there is nothing on that side to fix.
-        moved_names = {ren.get(src_basename, src_basename)}
+        moved_source_names = {src_basename}
 
     def _home(p):
         # The source file is the only one `dest` applies to.
@@ -2187,11 +2187,11 @@ def plan_rename(vault, path, new_basename, dest=None):
                 else:
                     unreadable.append("%s (%s)" % (md, type(exc).__name__))
                 continue
+            note_dir = os.path.relpath(os.path.dirname(md), vault)
+            qualified = (debase_links(body, moved_source_names, dirs, note_dir)
+                         if moved_source_names else body)
             new = rewrite_text(
-                body, reference_ren, stem_ren, dirs,
-                os.path.relpath(os.path.dirname(md), vault), directory_ren)
-            if moved_names:
-                new = debase_links(new, moved_names)
+                qualified, reference_ren, stem_ren, dirs, note_dir, directory_ren)
             if (md in published_year_targets
                     and _is_paper_summary_metadata(new)):
                 try:
@@ -5099,6 +5099,57 @@ def _selftest():
                   _out, "Kuhn_S_2012_01_Intro.pdf")).pages),
                Path(_note).read_text(encoding="utf-8"), os.path.isfile(_book)),
               ([], 1, "existing chapter notes\n", True))
+
+    # Markdown percent-encoding and angle wrappers must not turn a relative
+    # path into an Obsidian shortest-suffix wikilink. Otherwise the same path
+    # gains ownership solely from how its characters were escaped.
+    with _tf.TemporaryDirectory(prefix="org-markdown-resolution-") as _v:
+        _old, _new = "Doe_Example_2025.pdf", "Doe_Example_2026.pdf"
+        _pdf = _put(_v, "Sources/PDFs/" + _old, b"original PDF bytes")
+        _unrelated = ("[plain](PDFs/" + _old + ")\n"
+                      "[encoded](PDFs/Doe%5FExample%5F2025.pdf)\n"
+                      "[angle](<PDFs/" + _old + ">)\n")
+        _record = _put(_v, "Investments/history.md", _unrelated)
+        _code, _, _ = _run_cli(["check", _pdf, "--vault", _v])
+        check("encoded and angle Markdown paths retain relative resolution",
+              _code, 0)
+        _body = (_unrelated + "[valid](../Sources/PDFs/Doe%5FExample%5F2025.pdf)\n"
+                 "[[PDFs/" + _old + "]]\n")
+        _note = _put(_v, "Wiki/topic.md", _body)
+        _code, _, _ = _run_cli(["rename", _pdf, "--vault", _v,
+                                "--to", _new, "--apply"])
+        check("rename repairs only resolving Markdown and wikilink paths",
+              (_code, Path(_note).read_text(encoding="utf-8"),
+               Path(_record).read_text(encoding="utf-8")),
+              (0, _unrelated + "[valid](../Sources/PDFs/" + _new + ")\n"
+               "[[PDFs/" + _new + "]]\n", _unrelated))
+
+    # Filing can keep a canonical basename or change it. In either case,
+    # strip only qualifications that resolved to the selected old source.
+    for _new in ("Doe_Example_2025.pdf", "Doe_Revised_2026.pdf"):
+        with _tf.TemporaryDirectory(prefix="org-qualified-filing-") as _v:
+            _old = "Doe_Example_2025.pdf"
+            _pdf = _put(_v, "Inbox/" + _old, b"original PDF bytes")
+            _unrelated = ("[foreign](Missing/" + _old + ")\n"
+                          "[encoded](Missing/Doe%5FExample%5F2025.pdf)\n"
+                          "[angle](<Missing/" + _old + ">)\n"
+                          "[[Missing/" + _old + "]]\n")
+            if _new != _old:
+                _unrelated += "[[Inbox/" + _new + "]]\n"
+            _record = _put(_v, "Investments/history.md", _unrelated)
+            _body = (_unrelated + "[valid](../Inbox/" + _old + ")\n"
+                     "[query](../Inbox/" + _old + "?download=1#page=2)\n"
+                     "[[INBOX/" + _old.upper() + "]]\n")
+            _note = _put(_v, "Wiki/topic.md", _body)
+            _code, _, _ = _run_cli([
+                "rename", _pdf, "--vault", _v, "--to", _new,
+                "--dest", os.path.join(_v, "Sources/PDFs"), "--apply"])
+            check("filing removes only the selected source's old qualification",
+                  (_code, Path(_note).read_text(encoding="utf-8"),
+                   Path(_record).read_text(encoding="utf-8")),
+                  (0, _unrelated + "[valid](" + _new + ")\n"
+                   "[query](" + _new + "?download=1#page=2)\n"
+                   "[[" + _new + "]]\n", _unrelated))
 
     # Obsidian encodes local Markdown destinations. Repair those alongside
     # wikilinks, but decode only once and leave other documents/URLs alone.

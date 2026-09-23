@@ -145,8 +145,11 @@ never moved, deleted or rewritten, including after a successful reprocess.
    public name; a recheck followed by `os.replace` still has a race. If
    publication fails, no attachment has moved and the unchanged old note still
    resolves.
-5. A same-path rewrite finishes after read-back. For a changed slug, read back
-   the new note and keep both notes in place. Run prepare first with `--dry-run`,
+5. Read back the published note. For a same-path rewrite, place every newly
+   staged remote or recovered image through the guarded
+   [image publication procedure](images.md#download-and-publish), then verify
+   its embeds before finishing. Existing attachments keep their names and bytes.
+   For a changed slug, keep both notes in place. Run prepare first with `--dry-run`,
    review the plan, then run the identical command without `--dry-run`:
 
    ```bash
@@ -169,6 +172,12 @@ never moved, deleted or rewritten, including after a successful reprocess.
    A refusal is not permission to copy by hand; retain the old note and images,
    conditionally withdraw only the exact new note if safe, and report every
    named recovery path.
+   After prepare succeeds, place any additional staged remote or recovered
+   images through that same guarded image procedure, using the new owner note
+   and the new figure numbers. They are separate from the old-image mapping.
+   Resolve a refused placement with the documented placeholder and retain its
+   scratch file. Once any new image has been published, keep its owner note
+   public even if the later dependency handoff remains blocked.
 6. Do not finalize while prepare reports blockers. If every blocker is a Wiki
    entry or recognized MOC (including one in `MOCs/`) and the dependency rewrite is authorized, pass
    the exact prepare report and mapping to `wiki-lint`'s

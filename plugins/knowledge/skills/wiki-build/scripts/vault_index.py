@@ -35,7 +35,8 @@ Module use:
         print(e["slug"], e["title"])
 
 CLI:
-    vault_index.py <wiki-folder> [-o index.json] [--compact] [--source NAME ...]
+    vault_index.py <wiki-folder> [-o index.json] [--compact]
+        [--vault VAULT --source SOURCE_PATH ...] [--wiki-origin PUBLIC_WIKI]
 
 Top-level index shape:
     {ok, wiki_folder, generated, entry_count, entries[],
@@ -46,9 +47,12 @@ parse/read findings remain in ``problems`` without changing it: the report is
 complete even though individual entries need attention. A walk/onerror failure
 sets ``ok`` false while preserving every entry and problem gathered so far.
 
-``--source`` additionally emits ``source_matches[]``, matching only decoded
-frontmatter provenance against literal source basenames. Nonempty problems
-mean lookup data is incomplete or malformed, never an automatic skip decision.
+``--vault`` with ``--source`` verifies decoded provenance against actual source
+paths and a complete vault source inventory. ``source_matches`` contains only
+confirmed identities; unresolved basename candidates and source problems stay
+visible separately. ``--wiki-origin`` preserves note-relative link meaning in
+a private overlay. Without ``--vault``, legacy ``--source`` results are only
+unconfirmed basename candidates, never an automatic skip decision.
 
 Per-entry record:
     slug, path, relpath, title, type, aliases[], sources[], created, updated,
@@ -75,13 +79,14 @@ import argparse
 import datetime as _dt
 import json
 import os
+from pathlib import Path
 import re
 import stat
 import sys
 import unicodedata as _ud
 
 _OBSIDIAN_SHARED_MODULES = (
-    "entry_structure", "markdown_tables", "slugify", "yaml_scalars",
+    "entry_structure", "markdown_tables", "portable_names", "slugify", "vault_artifacts", "yaml_scalars",
 )
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/RUNTIME.md) ---
@@ -125,6 +130,7 @@ from yaml_scalars import (parse_scalar, split_flow as _split_flow,
                           strip_comment)  # noqa: E402
 from entry_structure import mask_body_comments, mask_escaped_wikilinks  # noqa: E402
 from slugify import SlugError, slug_stem  # noqa: E402
+from vault_artifacts import inventory_sources, local_link_matches  # noqa: E402
 
 
 def fold_name(s):
@@ -148,6 +154,7 @@ __all__ = [
     "index_entry",
     "build_index",
     "source_matches",
+    "source_coverage",
     "iter_markdown_files",
     "unquote_scalar",
 ]
@@ -719,15 +726,16 @@ def build_index(root):
     return index
 
 
-def source_matches(index, filenames):
-    """Entries citing the supplied literal PDF/Markdown basenames.
+def source_matches(index, filenames, *, vault_root=None, wiki_origin=None):
+    """Find source provenance, verifying paths when a vault root is supplied.
 
-    Read only decoded frontmatter sources, never example links in body prose.
-    Folder qualifications, anchors, case and Unicode normalization do not
-    change the basename. Disambiguators such as _2 remain part of its name.
-    The caller must inspect ``ok`` and index problems before treating a match
-    as grounds for an automatic already-processed skip.
+    Legacy basename queries retain their candidate shape, but explicitly mark
+    identity as unconfirmed. They cannot establish prior coverage. Strict
+    callers should consume source_coverage's complete diagnostics as well.
     """
+    if vault_root is not None:
+        return source_coverage(index, filenames, vault_root=vault_root,
+                               wiki_origin=wiki_origin)["source_matches"]
     requested = {fold_name(str(name).replace("\\", "/").rsplit("/", 1)[-1])
                  for name in filenames}
     matches = []
@@ -742,8 +750,103 @@ def source_matches(index, filenames):
                 cited.append(source)
         if cited:
             matches.append({"slug": entry["slug"], "path": entry["path"],
-                            "relpath": entry["relpath"], "sources": cited})
+                            "relpath": entry["relpath"], "sources": cited,
+                            "identity_confirmed": False})
     return matches
+
+
+def source_coverage(index, filenames, *, vault_root, wiki_origin=None):
+    """Bind decoded citations to actual, uniquely owned vault sources.
+
+    A private review tree needs its original Wiki location so note-relative
+    links retain their public meaning. Source names are absolute or relative
+    to the selected vault, never relative to the process's working directory.
+    """
+    vault = Path(os.path.abspath(os.path.expanduser(os.fspath(vault_root))))
+    origin = Path(os.path.abspath(os.path.expanduser(os.fspath(
+        wiki_origin if wiki_origin is not None else index["wiki_folder"]))))
+    report = {"source_match_mode": "verified-paths", "source_matches": [],
+              "source_match_candidates": [], "source_problems": [],
+              "source_inventory_complete": False}
+    problems = report["source_problems"]
+    try:
+        origin_relative = origin.relative_to(vault)
+    except ValueError:
+        problems.append("coverage tree is outside the vault; supply --wiki-origin "
+                        "with the public Wiki location")
+        origin_relative = None
+    inventory = inventory_sources(vault)
+    report["source_inventory_complete"] = inventory.complete
+    if not inventory.complete:
+        problems.append("vault source inventory is incomplete")
+        problems.extend(finding.to_dict() for finding in inventory.findings
+                        if finding.severity == "error")
+    groups = inventory.groups
+    kinds = {entry.path: entry.kind for entry in inventory.entries}
+    resolved = {}
+    names = list(filenames)
+    for name in names:
+        supplied = Path(os.path.expanduser(os.fspath(name)))
+        selected = Path(os.path.abspath(supplied if supplied.is_absolute()
+                                      else vault / supplied))
+        key = fold_name(selected.name)
+        try:
+            selected.relative_to(vault)
+        except ValueError:
+            problems.append("selected source is outside the vault: %s" % selected)
+            continue
+        owners = groups.get(key, [])
+        if len(owners) != 1:
+            problems.append({"source": str(selected), "reason":
+                             "selected source needs exactly one portable basename owner",
+                             "owners": owners})
+            continue
+        actual = Path(owners[0])
+        try:
+            same = selected == actual or os.path.samefile(selected, actual)
+        except OSError:
+            same = False
+        if not same:
+            problems.append("selected source is not its inventoried owner: %s" % selected)
+            continue
+        kind = kinds.get(str(actual))
+        if kind != "regular" and not (kind == "symlink" and actual.suffix.lower() == ".pdf"):
+            problems.append("selected source is not a usable regular source: %s" % actual)
+            continue
+        try:
+            flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+            if kind != "symlink":
+                flags |= getattr(os, "O_NOFOLLOW", 0)
+            with os.fdopen(os.open(actual, flags), "rb") as handle:
+                if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                    raise OSError("source is not a regular file")
+                handle.read(1)
+        except OSError as exc:
+            problems.append("selected source is unreadable: %s: %s" % (actual, exc))
+            continue
+        resolved[key] = actual.relative_to(vault).as_posix()
+    entries = {entry["path"]: entry for entry in index["entries"]}
+    for candidate in source_matches(index, names):
+        entry = entries[candidate["path"]]
+        confirmed, uncertain = [], []
+        note_dir = ((origin_relative / Path(entry["relpath"]).parent).as_posix()
+                    if origin_relative is not None else "")
+        for source in candidate["sources"]:
+            target = source[2:-2].split("#", 1)[0].strip()
+            actual = resolved.get(fold_name(target.replace("\\", "/").rsplit("/", 1)[-1]))
+            if (inventory.complete and origin_relative is not None
+                    and not entry["errors"] and actual is not None
+                    and local_link_matches(target, actual, note_dir=note_dir)):
+                confirmed.append(source)
+            else:
+                uncertain.append(source)
+        if confirmed:
+            report["source_matches"].append(dict(candidate, sources=confirmed,
+                                                   identity_confirmed=True))
+        if uncertain:
+            report["source_match_candidates"].append(dict(candidate, sources=uncertain,
+                reason="unresolved ownership, entry metadata, or mismatched qualification"))
+    return report
 
 
 # --------------------------------------------------------------------------
@@ -1279,9 +1382,12 @@ def _build_parser():
                                           "(a one-line status still goes to stdout)")
     p.add_argument("--compact", action="store_true",
                    help="emit compact JSON instead of indented")
-    p.add_argument("--source", action="append", default=[], metavar="FILENAME",
-                   help="also report source_matches for this literal source basename "
-                        "from decoded frontmatter only (repeat for a paired PDF/note)")
+    p.add_argument("--source", action="append", default=[], metavar="SOURCE_PATH",
+                   help="query decoded source provenance (repeat for a paired PDF/note); "
+                        "with --vault use actual absolute or vault-relative paths, "
+                        "otherwise results are unconfirmed basename candidates")
+    p.add_argument("--vault", help="selected vault for verified source-path coverage")
+    p.add_argument("--wiki-origin", help="public Wiki location for a private coverage tree")
     return p
 
 
@@ -1294,6 +1400,9 @@ def main(argv=None):
     args = _build_parser().parse_args(argv)
     if args.test:
         return run_self_test()
+    if args.wiki_origin and not args.vault:
+        print(json.dumps({"ok": False, "error": "--wiki-origin requires --vault"}))
+        return 2
     if not args.wiki_folder:
         print(json.dumps({"ok": False,
                           "error": "missing required argument: wiki_folder "
@@ -1305,11 +1414,16 @@ def main(argv=None):
         print(json.dumps(index, indent=2, ensure_ascii=False))
         return 2
     if args.source:
-        index["source_matches"] = source_matches(index, args.source)
+        if args.vault:
+            index.update(source_coverage(index, args.source, vault_root=args.vault,
+                                         wiki_origin=args.wiki_origin))
+        else:
+            index["source_matches"] = source_matches(index, args.source)
+            index["source_match_mode"] = "unconfirmed-basename-candidates"
 
     dumped = json.dumps(index, ensure_ascii=False,
                         **({} if args.compact else {"indent": 2}))
-    report_complete = index["ok"]
+    report_complete = index["ok"] and index.get("source_inventory_complete", True)
     if args.output:
         try:
             with open(args.output, "w", encoding="utf-8") as fh:
@@ -1325,8 +1439,10 @@ def main(argv=None):
             "entry_count": index["entry_count"],
             "problem_count": len(index["problems"]),
         }
+        if args.source and args.vault:
+            status["source_problem_count"] = len(index["source_problems"])
         if not report_complete:
-            status["error"] = "recursive wiki inventory is incomplete"
+            status["error"] = "recursive wiki or source inventory is incomplete"
             status["problems"] = index["problems"]
         print(json.dumps(status, indent=2, ensure_ascii=False))
     else:

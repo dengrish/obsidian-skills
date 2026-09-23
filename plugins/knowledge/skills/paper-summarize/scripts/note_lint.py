@@ -367,9 +367,10 @@ def _split_front_matter(note):
             kv[cur] = [strip_comment(m.group(2)).strip(), []]
         elif cur is not None:
             kv[cur][1].append(line)
-            if cur not in ("author", "tags", "sources") and not line.startswith(("-", " ", "\t")):
-                note.fail(i + 1, "front-matter line under `%s` is neither a key nor "
-                                 "a list item, so it is silently ignored: %r"
+            if cur not in ("author", "tags", "sources"):
+                note.fail(i + 1, "front-matter line under scalar `%s` would be "
+                                 "silently ignored; keep its value on one line "
+                                 "and other keys at column zero: %r"
                           % (cur, line[:50]))
         else:
             note.fail(i + 1, "front-matter line before any key: %r" % line)

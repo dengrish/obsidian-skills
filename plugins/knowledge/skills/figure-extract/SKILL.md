@@ -89,7 +89,10 @@ directory. For less common options, use the script's `--help`.
 
 Verified existing figures are skipped. `--overwrite` replaces **verified,
 unreviewed output only**; a review-ledger row protects the checked crop from a
-broad automatic overwrite. An unknown or conflicting occupant is protected in
+broad automatic overwrite. If a source PDF was revised at the same path, follow
+the [source-refresh guidance](references/review-and-repair.md#ownership-legacy-adoption-and-review-records):
+a verified skip proves crop ownership, not freshness against that revision.
+An unknown or conflicting occupant is protected in
 both batch and explicit-coordinate extraction. Malformed, protected, or
 symlinked ownership manifests block extraction. Do not delete sidecars or
 occupied images to force a run.
@@ -163,8 +166,10 @@ that option suppresses future warnings and does not itself verify anything.
 The explicit crop helper performs the same complete, portable whole-vault PDF
 basename check before reading an ownership sidecar or writing into canonical
 `Sources/Images`; it cannot bypass the batch namespace gate. An arbitrary
-external output keeps one-off behavior. The reference provides the crop and
-review commands with coordinate units. The page renderer refuses the whole
+external output keeps one-off behavior. If the batch used a deliberate
+`--allow-unorganized` exception, pass it to the explicit repair too; it relaxes
+only canonical naming, never uniqueness or image ownership. The reference
+provides the crop and review commands with coordinate units. The page renderer refuses the whole
 requested set if any preview pathname is occupied; use a unique scratch
 directory. Remove ordinary previews and decrypted scratch copies after the
 verified repair, while preserving every recovery path named by a failed write.
