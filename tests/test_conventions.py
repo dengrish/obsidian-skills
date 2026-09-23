@@ -7028,18 +7028,16 @@ def check_equation_policy(rep, conv):
         (eq_path, eq, r"equation_coverage\.py",
          "equations.md no longer identifies the conservative shared "
          "equation-coverage candidate floor"),
-        (eq_path, eq, r"counts behind averages and empirical ratios must be positive",
-         "equations.md no longer requires positive counts behind averages "
-         "and empirical ratios"),
-        (qc_path, qc, r"positive sample/node/ensemble counts behind averages",
-         "qc-items.md item 12 no longer mirrors the positive-count equation "
-         "condition"),
-        (eq_path, eq, r"exact mathematical definition distinct from a numerical approximation",
+        (eq_path, eq, r"Do not\s+append exhaustive domain checks",
+         "equations.md no longer limits added boundary qualifications to "
+         "source-supported explanatory needs"),
+        (qc_path, qc, r"Do not add exhaustive boundary handling from memory",
+         "qc-items.md no longer prevents speculative boundary-case additions"),
+        (eq_path, eq, r"exact definition distinct from numerical approximations",
          "equations.md no longer separates exact definitions from numerical "
          "tolerance or clipping rules"),
-        (qc_path, qc, r"Exact definitions remain distinct from numerical approximations",
-         "qc-items.md item 12 no longer mirrors the exact-versus-numerical "
-         "equation distinction"),
+        (qc_path, qc, r"\[equation guide\]\(../../wiki-build/references/equations\.md#",
+         "qc-items.md no longer links the canonical equation-assumption rule"),
         (eq_path, eq,
          r"\| \$\\operatorname\{Var\}\(X\)\$ \| variance operator",
          "equations.md no longer distinguishes the variance operator from "

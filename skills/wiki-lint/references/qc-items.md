@@ -325,14 +325,12 @@ after that prose. Never infer a population/sample denominator or any operation
 the note does not supply. Keep restricted-case conditions in prose, and do not
 turn a case-specific formula into the general concept's definition.
 
-Every display preserves its mathematical domain and operational conditions:
-positive sample/node/ensemble counts behind averages, nonzero denominators,
-valid logarithm/root domains, integer and hyperparameter ranges, probability
-normalization and zero-support conventions, training-fitted statistics and
-their reuse, threshold equality, and tie or undefined-boundary handling.
-Exact definitions remain distinct from numerical approximations such as clipping or
-tolerance rules. If the note lacks an operational convention, state the
-mathematical limitation and leave the implementation choice explicit.
+Preserve assumptions that determine the mathematical claim, following the
+[equation guide](../../wiki-build/references/equations.md#1-coverage--a-described-calculation-is-a-provided-equation).
+Do not add exhaustive boundary handling from memory or turn an explanatory
+formula into an implementation specification. Under an explicit simplification
+request, verify and remove unnecessary caveats through source-backed correction;
+ordinary lint does not silently remove substantive conditions.
 
 **Equation form and notation.** Promote a defining inline equation to its own
 display block; keep inline symbol references, bounds, complexity, and worked
