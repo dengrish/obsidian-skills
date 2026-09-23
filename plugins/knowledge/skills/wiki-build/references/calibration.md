@@ -6,17 +6,17 @@
 
 ## The governing test
 
-**Pick the discipline(s) where the entity is canonically defined or primarily classified**, not every discipline that uses it. The test for each: in which discipline would this entity appear in a textbook table of contents as a primary topic (not as an applied example)? **The "uses" trap** is that rule in one word: a discipline that *uses* an entity does not own it.
+**Pick the single discipline where the entity is canonically defined or primarily classified**, not every discipline that uses it. The test for each: in which discipline would this entity appear in a textbook table of contents as a primary topic (not as an applied example)? **The "uses" trap** is that rule in one word: a discipline that *uses* an entity does not own it.
 
 - **Cas9** → `#biology` (a molecular biology system, even though its headline uses are medical).
 - **Thermodynamic entropy** → `#physics` (other fields use the concept; physics is the canonical home).
-- **Herbert Simon** → `#economics`, `#psychology`, `#computer-science` (a polymath — multi-tagged rather than assigned `#misc`).
+- **Herbert Simon** → one home chosen from the entry's main treatment, such as `#economics` for bounded rationality; other fields remain prose relationships.
 
 When no specific discipline owns the entity, use `#misc` alone: `Asilomar Conference on Recombinant DNA` → `#misc`. Never leave Wiki tags blank or combine misc with a specific discipline.
 
 ## Math vs statistics vs ML
 
-Entities a practitioner encounters in ML courses, papers, or textbooks — losses, metrics, information-theoretic quantities, statistical algorithms, named RL formalisms — take `#machine-learning` even when their origins are mathematical or statistical; the origins belong in the body, not in `tags:`. `#mathematics` is reserved for **universal mathematical concepts** taught across many disciplines as primary topics, where ML is one application among many. **`#statistics` is the home for classical inference and methodology** that is not ML-specific. The same test decides all three — where a practitioner meets the entity as a *primary* topic: a `t`-test or ANOVA is a statistics-course topic, Gini impurity an ML-course topic, a measure-theoretic probability axiom a math-course topic.
+Entities a practitioner encounters in ML courses, papers, or textbooks — losses, metrics, information-theoretic quantities, statistical algorithms, named RL formalisms — take `#machine-learning` even when their origins are mathematical or statistical; the origins belong in the body, not in `tags:`. `#mathematics` is reserved for **universal mathematical concepts** taught across many disciplines as primary topics, where ML is one application among many. **`#statistics` is the home for descriptive statistics, sampling, and classical inference. Predictive modeling and model fitting belong to `#machine-learning`, including linear, polynomial, ridge, lasso, elastic-net, logistic, and softmax regression and their model-specific components.** The same test decides all three — where a practitioner meets the entity as a *primary* topic: a `t`-test or ANOVA is a statistics-course topic, Gini impurity an ML-course topic, a measure-theoretic probability axiom a math-course topic.
 
 - **ML:** `Cross-entropy`, `Mean squared error`, `Markov decision process`.
 - **Statistics:** `Hypothesis testing`, `Analysis of variance`, `Pearson correlation coefficient`.
@@ -33,7 +33,7 @@ Names in these lists are in **canonical title form** (`Mathematical vector`, not
 - **Named historical laws, charters, treaties** → `#history`: `Magna Carta`, `Treaty of Westphalia`, `Code of Hammurabi`.
 - **Named historical regimes and institutions** → `#history`: `Holy Roman Empire`, `Soviet Union`, `British East India Company` — institutions whose substance is *what they were* rather than *what they currently are*.
 - **General concepts keep their canonical discipline.** *Separation of powers*, *judicial review*, *rule of law* are `#political-science` or `#law`. A specific historic instance exemplifying the concept (`Marbury v. Madison`) is `#history`; the general concept is not.
-- **Currently-extant historic institutions** (`British monarchy`, `US Senate`, `United Nations`): `#history` if the body emphasizes historical development and influence, `#political-science` (or `#law`) if it emphasizes contemporary structure and function — **both** when the entry genuinely treats both.
+- **Currently-extant historic institutions** (`British monarchy`, `US Senate`, `United Nations`): `#history` if the body emphasizes historical development and influence, `#political-science` (or `#law`) if it emphasizes contemporary structure and function — choose its dominant treatment when both appear.
 
 ## Finance vs economics vs business vs entrepreneurship
 
@@ -43,7 +43,7 @@ Names in these lists are in **canonical title form** (`Mathematical vector`, not
 - **Economics:** `Federal Reserve policy`, `Comparative advantage`, `Inflation targeting` — economy-wide mechanisms, incentives, and policy.
 - **Entrepreneurship:** `Product-market fit`, `Minimum viable product`, `Blitzscaling` — founding and scaling new companies.
 - **Business:** `Porter's five forces`, `Lean manufacturing` — strategy, management and operations of established firms.
-- **Genuinely dual, rarely:** `Efficient-market hypothesis` → `#finance`, `#economics` — a primary topic in both literatures.
+- **Cross-disciplinary topic:** `Efficient-market hypothesis` → `#finance`; discuss its economic relationships without adding a second tag.
 
 ## When in doubt
 

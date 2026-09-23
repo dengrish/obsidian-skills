@@ -1,36 +1,69 @@
 # Equations — coverage, form, notation, normalization
 
-> **When to read this:** the source states **or describes in words** any equation, calculation, or symbolically defined quantity, and this run will write or merge an entry that covers it — **or the run merges into an entry whose body already carries an equation**, which must be preserved, moved, or normalized under §4 whatever the new source brings. Read it before typesetting the first equation of the run. A run whose sources carry no math, merging into no entry that does, never needs this file.
+> **When to read this:** before adding, reviewing, merging, or removing any equation, including a useful standard formula absent from the source and a calculation described in words. Read it before deciding whether notation belongs in the note or its flashcard.
 
 This file owns four rules: **coverage** (when an entry gets an equation), **form** (display vs inline), **notation** (the vault's symbol standard), and **normalization** (rewriting a source's equation into that standard). Prose principle 8 in `references/writing.md` §2 carries the summary; this file is the full rule. Two neighboring rules deliberately stay where they are and are not restated here: the numbers-in-prose rule and literal-`$` escaping live in `writing.md` §2 (under principle 8), and the multi-form `\begin{aligned}` layout lives in [edge cases](edge-cases.md#multi-form-equations).
 
-## 1. Coverage — a described calculation is a provided equation
+## 1. Coverage — explanatory value before notation
 
-**The source need not typeset a calculation for the coverage rule to fire.** When the source defines, characterizes, or quantifies a concept with an equation, the body includes that equation (principle 8). The same holds when the source only *describes* the calculation in prose: "subtract the mean and divide by the standard deviation" states the standardization formula as fully as any typeset line, and the entry must render it as one:
+**Include an equation only when it makes the concept easier to understand.**
+Ask what the reader gains over a short verbal explanation: seeing a quantitative
+relationship, computing a named quantity, or understanding the structure of a
+model or update. A formula is not useful merely because the prose can be
+translated into symbols. Count the cost of introducing indices, indicators,
+operators, and qualifications. If those obscure a simple idea, use prose.
+Hard voting is the concrete counterexample: “choose the class with the most
+votes” explains the rule; an argmax over summed indicator functions adds
+notation without explanatory value. Neither the body nor its flashcard needs
+that equation. This is a semantic judgment, not a ban on formulas for any
+particular topic or a requirement to minimize all mathematics.
+
+**Source typesetting does not decide usefulness or eligibility.** Keep a
+source's equation when it is central to the entry, not every equation from the
+source. A useful calculation described completely in words may be typeset:
+subtracting the mean and dividing by the standard deviation is clearer as the
+standardization formula, with the quantities bound nearby:
 
 $$
 x' = \frac{x - \mu}{\sigma}
 $$
 
-Leaving it as prose ships the observed corpus failure: a `Standardization (machine learning)` entry that walks through the computation in words and shows no equation, sitting beside `RMSE` and `MAE` entries that typeset theirs — the vault's math coverage tracking each source's typesetting habits instead of its content.
-
-The same rule covers a source saying that standard deviation is the square root of variance:
+**A useful standard equation may be added even when the source supplies none.**
+It must express this concept at this entry's scope, materially clarify it, and
+be a verified conventional relationship rather than a formalism invented for
+the note. Check a reliable primary or reference source and retain durable
+support in `sources:` under the normal source workflow when the original
+source does not establish it. Do not infer a population/sample denominator,
+loss function, or other substantive assumption from a vague mention. For
+example, the relationship below is useful when explaining standard deviation,
+but it does not select a sample or population variance formula:
 
 $$
 \sigma = \sqrt{\operatorname{Var}(X)}
 $$
 
-Bind $X$ and $\operatorname{Var}(X)$ in the nearby prose. Do not expand the variance into a denominator the source does not choose: a general statement of this relationship does not by itself say whether the context uses a population or sample variance.
-
-**The bar: the source's words must determine the equation.** Every operand and operation is recoverable from what the source says — the words pin down the math, and the equation states exactly what the words state, in the vault's notation. What the source leaves genuinely underdetermined is not filled in from background knowledge: a source saying only that "a correction factor is applied" or that "the score balances precision against recall" has gestured at math, not stated it, and a gesture gets no equation. (Choosing the standard *symbols* for quantities the source names is notation, not imported content — §3 exists precisely so that choice is not re-made per entry.)
+Bind $X$ and $\operatorname{Var}(X)$ in nearby prose. If the source's words
+already specify every operand and operation, they can supply the support;
+they still do not override the explanatory-value test.
 
 **A special-case equation keeps its conditions attached.** A source may explain a general concept through one loss function, distribution, or other restricted case. State that condition in the sentence introducing the display and keep the description, opener, and flashcard at the concept's actual scope. For example, squared-error gradient boosting fits residuals because those residuals are the negative loss gradient in that case; residual fitting must not become the unqualified definition of gradient boosting. If the source supplies only the special case, present it explicitly as an example or qualified case rather than silently generalizing it.
 
-**A formula keeps the conditions that make it defined.** Bind domains and boundary cases beside the display: counts behind averages and empirical ratios must be positive; other denominators must be nonzero; logarithm arguments and bases must be valid; roots and powers keep their real-domain conditions; integer indices, class counts, and hyperparameters state the ranges the formula assumes; probabilities state normalization and what happens when positive target mass receives zero estimated probability; fitted normalization statistics say which data estimates them and how later data reuse them; threshold and piecewise rules say where equality goes; and an `argmax` or `argmin` that can tie names a deterministic or implementation-defined rule. Keep an exact mathematical definition distinct from a numerical approximation: if software replaces a singular value, zero probability, or other boundary with a tolerance or clipping rule, name that rule as implementation handling rather than silently building it into the definition. If the source does not choose an operational convention for an undefined boundary, state the mathematical limitation and leave the implementation choice explicit rather than inventing one. These qualifications are part of the equation's meaning, not optional commentary.
+**State the assumptions needed for understanding.** Bind the symbols and keep
+conditions that materially determine the claim, such as the loss under which
+an update is valid, the data used to fit normalization, or whether a formula
+describes a population or a sample. Use the source's ordinary case. Do not
+append exhaustive domain checks, positive-count reminders, tie-breaking rules,
+zero-denominator recovery, clipping tolerances, or implementation alternatives
+unless that detail is central to this entry and supported by the source. A
+short qualification such as “for a nonempty cluster” can delimit an average
+without a paragraph on empty-cluster handling. Never invent an operational
+convention to make an illustrative formula specify a complete implementation.
+Keep an exact definition distinct from numerical approximations when the
+source makes that distinction relevant; do not silently add clipping or tolerances.
 
-The post-write linter and the whole-vault scanner share `shared/scripts/equation_coverage.py`, a conservative mechanical candidate floor built from corpus failures. It recognizes affirmative square-root-of-variance definitions; defining equalities or substantive expressions left inline after cues such as “written as,” “similarity is,” or “starts with weight”; and a short list of complete prose calculations such as averaging probabilities, taking a named fraction, normalizing by a row total, or decomposing a quantity into a sum. A prose cue is cleared only by a nearby following display block that contains the covering operation — an unrelated equation does not suppress it — while an inline defining formula is reported for its placement even if the note has other displays. For the square-root cue, variance itself must be the root operand, either as `\operatorname{Var}(X)`, an established squared standard-deviation symbol, or a recognizable average of squared deviations; merely placing unrelated root and variance terms in one display is not coverage. Every result remains an agent-review candidate: the helper never generates LaTeX, decides semantic ownership, or replaces the full semantic coverage pass. In particular, the square-root cue never licenses choosing a population or sample denominator.
+The post-write linter and the whole-vault scanner share `shared/scripts/equation_coverage.py`, a conservative mechanical candidate floor built from corpus failures. It recognizes affirmative square-root-of-variance definitions; defining equalities or substantive expressions left inline after cues such as “written as,” “similarity is,” or “starts with weight”; and a short list of complete prose calculations such as averaging probabilities, taking a named fraction, normalizing by a row total, or decomposing a quantity into a sum. A prose cue is cleared only by a nearby following display block that contains the covering operation — an unrelated equation does not suppress it — while an inline defining formula is reported for its placement even if the note has other displays. For the square-root cue, variance itself must be the root operand, either as `\operatorname{Var}(X)`, an established squared standard-deviation symbol, or a recognizable average of squared deviations; merely placing unrelated root and variance terms in one display is not coverage. Every result remains an agent-review candidate, including the option to retain clear prose without adding math: the helper never generates LaTeX, decides semantic ownership, or replaces the full semantic coverage pass. In particular, the square-root cue never licenses choosing a population or sample denominator.
 
-The rule reaches every formal definition, named quantity, metric, loss function, probability law, rate, or fraction the source states by either route. A concept the source treats purely qualitatively takes no equation — this file adds no math the sources don't carry.
+Apply the usefulness test to every candidate, whether a formal definition, metric, loss, law, rate, or fraction. A qualitative source does not prohibit a verified useful standard equation, and a fully specified verbal calculation does not require an unhelpful one.
 
 ## 2. Form — defining equations are display math
 
@@ -95,6 +128,6 @@ This is the notation the vault's equation-bearing entries already use — Géron
 
 **When the table and a field's own convention collide, the field wins for that discipline's entries** — a statistics source's $n$ for sample size may stay $n$ in a pure-statistics entry where $m$ would read as foreign — but say so in the run report (*Notes for the user*): the call should be visible either way. Within one entry there is no compromise: one symbol per role, bound once.
 
-**On merge, equations behave like images and tables** (`references/merge.md`): existing equations are preserved across body rewrites and move with their motivating prose. Two points are equation-specific. A **nonconforming existing equation is normalized to this file's rules** — a format fix, like re-piping a link: `updated:` bumps, `read:` does not reset. A **new equation added where the body had none is body content** and resets `read: false`, exactly as a new figure does. That reset is wiki-build's, on its own merges. When `wiki-lint` retroactively inserts the same equation under its QC item 12, it writes neither `read:` nor `updated:` — its Dates policy — and instead names the insertion under *Notes for the user*, flagging any entry whose `read: true` now predates content the user has not seen; clearing the checkbox stays the user's call (`CONVENTIONS.md` §2c). Replacing an existing equation happens only when the new source states the *same quantity* more completely (more equivalent forms — fold them into one `aligned` block); different quantities get their own blocks, both kept.
+**On merge, equations normally behave like images and tables** (`references/merge.md`): existing useful equations are preserved across body rewrites and move with their motivating prose. Two points are equation-specific. A **nonconforming existing equation is normalized to this file's rules** — a format fix, like re-piping a link: `updated:` bumps, `read:` does not reset. A **new equation added where the body had none is body content** and resets `read: false`, exactly as a new figure does. That reset is wiki-build's, on its own merges. When `wiki-lint` retroactively inserts the same equation under its QC item 12, it writes neither `read:` nor `updated:` — its Dates policy — and instead names the insertion under *Notes for the user*, flagging any entry whose `read: true` now predates content the user has not seen; clearing the checkbox stays the user's call (`CONVENTIONS.md` §2c). Under an explicit simplification or source-backed correction request, remove an equation that fails the usefulness test, together with notation-only prose and corresponding card math; retain the concept, essential conditions, and all protected card state. Otherwise, replacing an existing equation happens only when the new source states the *same quantity* more completely (more equivalent forms — fold them into one `aligned` block); different quantities get their own blocks, both kept.
 
-**Retroactive reach.** Entries already in the vault that violate these rules — a described calculation never typeset, a defining equation carried inline, off-standard symbols — are `wiki-lint`'s to fix vault-wide (its QC item 12 carries the enforcement bounds); this skill applies the rules to the entries it writes and merges this run, like every other rule it owns.
+**Retroactive reach.** Entries already in the vault that violate these rules — a useful supported calculation missing its equation, a defining equation carried inline, off-standard symbols — are `wiki-lint`'s to fix vault-wide (its QC item 12 carries the enforcement bounds); this skill applies the rules to the entries it writes and merges this run, like every other rule it owns.

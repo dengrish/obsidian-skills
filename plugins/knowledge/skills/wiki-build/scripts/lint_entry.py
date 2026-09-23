@@ -919,6 +919,12 @@ def _check_tags(fm, findings):
             "only when no specific discipline applies",
             {"line": field.line}))
         return
+    if len(values) != 1 or len(field.values) != 1:
+        findings.append(_f(
+            "8-tags", "error",
+            "tags: must contain exactly one discipline home; express cross-field "
+            "relationships in prose and links",
+            {"line": field.line, "values": values}))
     if "#misc" in values and (len(values) != 1 or len(field.values) != 1):
         findings.append(_f(
             "8-tags", "error",
@@ -2951,9 +2957,9 @@ def run_self_test():
                                '  - "#statistics"\n  - "#misc"',
                                '  - "#misc"\n  - "#misc"')],
           [["8-tags"]] * 3)
-    check("multiple specific disciplines remain valid without misc",
+    check("multiple specific disciplines violate the single-home rule",
           items(mutate('  - "#statistics"',
-                       '  - "#statistics"\n  - "#mathematics"')), [])
+                       '  - "#statistics"\n  - "#mathematics"')), ["8-tags"])
     check("missing tags remain a mandatory-field error",
           items(mutate('tags:\n  - "#statistics"\n', "")),
           ["2-field-order"])

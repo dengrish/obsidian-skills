@@ -302,8 +302,8 @@ item numbers used by `lint_entry.py` and `wiki-lint`.
    characters, with the entity in canonical running form as subject and tense
    matching its status. Count before writing and after every later edit. See
    [description](references/writing.md#description).
-8. **Tags** — keep the key; when populated, use one or more quoted,
-   `#`-prefixed discipline-enum values in block form. Use `"#misc"` alone when no specific discipline fits; blank/empty tags and mixed misc/specific tags are invalid. Judge canonical
+8. **Tags** — keep the key; use exactly one quoted,
+   `#`-prefixed discipline-enum value in block form. Use `"#misc"` alone when no specific discipline fits; blank/empty tags and mixed misc/specific tags are invalid. Judge canonical
    ownership rather than source context. See [tags](references/writing.md#tags)
    and [tag calibration](references/calibration.md).
 9. **Body structure, flow, sentence clarity, and atomic scope** — open
@@ -331,8 +331,9 @@ item numbers used by `lint_entry.py` and `wiki-lint`.
     report an inherited excess rather than pruning it. See
     [Related footer](references/writing.md#the-related-footer).
 12. **Equations, images, tables** — keep LaTeX in body prose, ordinary
-    quantities plain, and literal dollars escaped. Render every stated or fully
-    described calculation in conforming LaTeX, display defining equations, bind
+    quantities plain, and literal dollars escaped. Apply the explanatory-value test before including an equation, whether
+    source-supplied or a verified standard addition. Use conforming LaTeX,
+    display warranted defining equations, bind
     symbols, and normalize notation. Inventory source figures, select only
     exhibits that clarify this entry, keep composite/panel identity intact, and
     recreate warranted source tables. See

@@ -51,7 +51,7 @@ ownership.
 | `item10/table` | Replace only the table-cell link markup with its visible plain-text label. |
 | `item10/redundant-pipe` | In Task 1, collapse exact `[[slug|slug]]` body-prose links to `[[slug]]`. Never apply this to the Related footer. |
 | `item12/equation-typography` | In descriptions, replace raw ℓ-norm notation with plain `ell-one`/`ell-two` and retain Unicode `μm`. In prose and card prompts, replace raw ℓ-norm and `μm`/`µm` notation with canonical inline LaTeX. |
-| `item12/equation-coverage-candidate` | Inspect the local prose or inline formula. Insert or promote an equation only when the note completely states the quantity or calculation; otherwise preserve and report the non-defining cue. |
+| `item12/equation-coverage-candidate` | Inspect the local prose or inline formula. Apply the explanatory-value test; add math only when it clarifies the concept and the note supplies the relationship. Clear prose may be the correct outcome. |
 | `item12/equation-format` | Preserve the existing equation and put its opening and closing `$$` delimiters on separate lines. Do not add a duplicate display. |
 | `item12/panel-composite` | Preserve both embeds and report the duplicated exhibit until source-backed review chooses either the default composite or the subject-specific panel. |
 | `item12/remote-image`, `item12/missing-image` | Report and preserve the embed and caption; repair requires work outside this entry. |
@@ -171,15 +171,15 @@ unambiguous format fixes: block-list form, `#`, double quotes, exact enum case,
 safe abbreviation expansion, wikilink-to-tag conversion for a known enum
 member, and duplicate removal after canonicalization.
 
-Semantic disciplinary ownership remains a judgment. Re-home or add a tag only
+Semantic disciplinary ownership remains a judgment. Re-home or reduce multiple tags to one only
 when the entry and vault make the canonical home unambiguous; otherwise report
-the competing candidates. Wiki tags must be a nonempty quoted block list.
+the competing candidates. Wiki tags must be a quoted block list containing exactly one home.
 For a genuinely blank key or empty list, inspect the note and assign its
-supported specific disciplines, or `"#misc"` alone if none fits. Never combine
+best supported specific discipline, or `"#misc"` alone if none fits. Never combine
 misc with specific tags. Missing, malformed, mixed, or uncertain metadata
 requires its own evidence-based resolution, not blind replacement with misc.
 Entries tagged only `#misc` belong to `MOCs/misc.md` and receive
-`[[MOCs/misc]]` during Task 3; preserve prior group evidence across the rescan
+`[[Wiki/misc]]` during Task 3 (the misc root itself keeps `parents: []`); preserve prior group evidence across the rescan
 so retagging closes the old and new hierarchy together.
 
 ### 9. Body structure, coherence, flow, and scope
@@ -206,6 +206,15 @@ their relationships. Report source/tutorial scaffolding and application
 catalogs only when they do not serve the entry, and report duplicated
 explanatory treatments by conceptual owner. Length, a missing transition word,
 list shape, or lexical similarity alone proves nothing.
+
+**Caveat review.** Inspect qualifications and final paragraphs for rare edge
+cases, implementation failure handling, and defensive distinctions that do not
+help explain the ordinary concept. Do not add them from memory. Routine lint
+can remove empty rhetoric but preserves substantive claims; an explicit
+request to simplify such content activates source-backed correction across
+the requested scope, including similar cases beyond named examples. Verify
+the affected passages against each entry's cited sources and retain essential
+conditions. A source-supported detail can still be unnecessary to this entry.
 
 **Local editorial repairs.** Apply these autonomously when the existing entry
 establishes an unambiguous meaning:
@@ -308,22 +317,23 @@ source-backed review decides whether the entry needs the default composite or
 the panel-specific view. Figure selection, source fidelity, table values, and
 retained rows or columns remain source-dependent.
 
-**Equation coverage.** The scanner emits a conservative
-`item12/equation-coverage-candidate`; inspect it autonomously. When the note's
-own prose completely states every operand and operation of a local named
-quantity or calculation, insert the canonical `$$...$$` equation immediately
-after that prose. Never infer a population/sample denominator or any operation
-the note does not supply. Keep restricted-case conditions in prose, and do not
-turn a case-specific formula into the general concept's definition.
+**Equation coverage and usefulness.** The scanner emits a conservative
+`item12/equation-coverage-candidate`; inspect it autonomously rather than treating
+it as a command to add math. Apply the canonical explanatory-value test first.
+A simple verbal rule such as hard voting can remain prose-only even when every
+operation is specified. Do not manufacture an argmax/indicator formalism for
+it. Insert a useful equation in ordinary maintenance only when the note's own
+prose supplies every operand, operation, and essential assumption. A verified
+standard equation absent from that prose may be worthwhile, but acquiring its
+support follows the source-backed or builder workflow authorized for this run.
+Never invent a denominator or silently generalize a restricted case.
 
-Every display preserves its mathematical domain and operational conditions:
-positive sample/node/ensemble counts behind averages, nonzero denominators,
-valid logarithm/root domains, integer and hyperparameter ranges, probability
-normalization and zero-support conventions, training-fitted statistics and
-their reuse, threshold equality, and tie or undefined-boundary handling.
-Exact definitions remain distinct from numerical approximations such as clipping or
-tolerance rules. If the note lacks an operational convention, state the
-mathematical limitation and leave the implementation choice explicit.
+Preserve assumptions that determine the mathematical claim, following the
+[equation guide](../../wiki-build/references/equations.md#1-coverage--explanatory-value-before-notation).
+Do not add exhaustive boundary handling from memory or turn an explanatory
+formula into an implementation specification. Under an explicit simplification
+request, verify and remove unhelpful equations, notation-only prose, corresponding card math, and unnecessary caveats through source-backed correction;
+ordinary lint does not silently remove substantive conditions.
 
 **Equation form and notation.** Promote a defining inline equation to its own
 display block; keep inline symbol references, bounds, complexity, and worked

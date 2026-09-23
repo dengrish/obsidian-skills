@@ -22,6 +22,13 @@ The third failure shape the orphan sweep can't reach: **substantive terms in the
 
 **Source headings get the same ledger.** Every heading that names a durable entity and is followed by substantive treatment receives an explicit existing/accepted/deferred/rejected verdict, even when it names a subtype of the source's main topic. A dedicated `Regression` subsection that explains regression-tree prediction and training cannot disappear inside the broader `Decision tree` candidate merely because the chapter title is broader. Thin organizational headings still fail the ordinary substance bar.
 
+**Contrasted concepts also get separate verdicts.** When a source distinguishes
+two named mechanisms, causes, or alternatives, evaluate each on its own
+substantive treatment. Extracting one does not cover the other: sampling bias
+and sampling noise, for example, explain different reasons a sample can be
+unrepresentative. Recover a supported missing counterpart; do not invent one
+from symmetry or a passing mention.
+
 - **Already processed for this source in this run** (accepted and created or merged, including a source-no-op merge) → noted, move on. A result from a different source in the batch does not satisfy this source's audit.
 - **Already an entry, but not processed for this source** (filename or alias match) → an overlooked merge candidate. Run step 3 and the ordinary merge/no-op gates; existing ownership alone does not prove that this source's contribution was integrated.
 - **Rejected this run with a reason** (2a code-identifier, 2b substance, 2c durability, thin mention) → noted, move on.

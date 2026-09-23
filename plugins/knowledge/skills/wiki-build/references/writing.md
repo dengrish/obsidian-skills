@@ -96,36 +96,34 @@ The new source merely "phrasing it differently" is **not** sufficient grounds fo
 
 ### tags
 
-*(Mandatory; always a nonempty block list. Use `"#misc"` alone when no specific discipline fits.)* **One or more** Obsidian tags classifying the entity by academic discipline: each value is a discipline slug from the fixed enum in [CONVENTIONS §3](../../../shared/CONVENTIONS.md#3-the-discipline-tag-enum), **`#`-prefixed and double-quoted**, in a block-form list. This is the entity's disciplinary classification, and it is **multi-valued**: an entity genuinely foundational to several disciplines carries a tag for each.
+Use exactly one quoted, `#`-prefixed discipline-enum value in a block list,
+under [CONVENTIONS §3](../../../shared/CONVENTIONS.md#3-the-discipline-tag-enum).
+Choose the entry's best disciplinary home; express other relationships through
+prose and links. Use `"#misc"` only when no specific discipline fits.
 
 ```yaml
 tags:
   - "#machine-learning"
 ```
 
-…or, for a genuinely cross-disciplinary entity, more than one:
+The quotes are required because an unquoted `#` begins a YAML comment.
+Tags are not wikilinks. Every active discipline has a corresponding Wiki root
+entry; wiki-lint owns those roots, the MOCs, and parent placement. This skill
+creates entries with `parents: []` and preserves parents on merge.
 
-```yaml
-tags:
-  - "#economics"
-  - "#psychology"
-  - "#computer-science"
-```
+**Choose by the concept's meaning.** Predictive models, regression and
+classification methods, fitting, losses, evaluation, and model components
+belong to `#machine-learning`, including classical statistical models.
+General descriptive statistics and sampling methods belong to `#statistics`;
+universal mathematical structures belong to `#mathematics`. A decision-tree
+leaf belongs with decision trees, while a general data-structure entry may
+belong to computer science. General computing tools such as NumPy and Jupyter
+remain `#computer-science`. Do not add tags for every application or prerequisite.
+Use [calibration](calibration.md) for unresolved boundary cases.
 
-**The quotes are required:** an unquoted `#` begins a YAML comment, so `- #machine-learning` parses as an empty item with the discipline silently lost — always write `- "#machine-learning"`. Tags are **not wikilinks** — they need no target file in `Wiki/`, so adding a discipline tag never requires creating a discipline note.
-
-**How many tags.** Tag **every discipline the entity is genuinely foundational to or canonically classified under — and only those.** Most entities have a single canonical home and take **one** tag; add more only when the entity is genuinely a primary topic in more than one discipline (a polymath whose work spans fields, a method co-owned by two disciplines). Multi-tagging is *not* "tag everything related" — the *uses* trap gates every tag.
-
-**The "uses" trap — don't tag a discipline that merely applies the entity.** For each candidate tag the test is "is this entity foundational *to* this discipline?", not "does this discipline *use* this entity?". An ML algorithm has statistical math underneath, but its home is `#machine-learning`, not `#mathematics`. A biological method may see medical use, but `#medicine` is correct only if the method is canonical to medicine (most aren't). The most common over-tagging mistakes: `#mathematics` on ML methods (the math is upstream, not the home), `#computer-science` on ML methods (the computer is incidental), and `#medicine` on biology entities (medical relevance ≠ medical home). Tag the discipline that *owns* the entity — where it would be a primary topic in a textbook table of contents. A classical descriptive statistic such as **standard deviation** belongs to `#statistics`; the arithmetic used to define it does not move it to `#mathematics`. **The inverse trap — over-tagging general scientific computing tools as ML:** NumPy, Pandas, Jupyter, and Matplotlib are general scientific computing libraries whose home is `#computer-science`, even though most of their use today happens to be in ML workflows.
-
-**Fallback when no specific discipline fits.** Write `"#misc"` as the sole tag; never leave Wiki tags blank or empty, and never combine misc with specific tags. An entity spanning several specific disciplines is multi-tagged: `Herbert Simon` takes `#economics`, `#psychology`, and `#computer-science`. An Event or Place whose disciplinary content is incidental rather than defining may instead take `#misc` (`Asilomar Conference on Recombinant DNA`, `Cold Spring Harbor` as a place). Use the same quoted block-list form:
-
-```yaml
-tags:
-  - "#misc"
-```
-
-On its later maintenance pass, wiki-lint lists these entries in `MOCs/misc.md` and sets their parent to `[[MOCs/misc]]`; this skill still creates entries with `parents: []` and never creates MOCs. On merge, follow the narrow fallback-replacement exception in [merge logic](merge.md#frontmatter-and-related-footer) and preserve parents for the later hierarchy refresh.
+On merge, follow [tag reconciliation](merge.md#frontmatter-and-related-footer):
+retain one supported home, repair clearly incorrect or multiple homes, and
+report the old/new groups for wiki-lint's hierarchy refresh.
 
 ### parents
 
@@ -185,6 +183,16 @@ An entity wikilinked once in body prose can — and often does — also appear i
 ### Prose principles
 
 These are the shared body-writing standards for `wiki-build` and `wiki-lint`. Write new source-derived prose in the model's own words; maintenance improves a concrete defect without rewriting already clear prose. The standards describe the desired result, not permission to alter every part of an existing entry: merges follow `merge.md`, and source-independent repairs follow linter [QC item 9](../../wiki-lint/references/qc-items.md#9-body-structure-coherence-flow-and-scope). Flashcards follow their own principles (§4).
+
+**Explain the concept before cataloging qualifications.** Include a caveat
+only when omitting it would materially mislead the reader about the definition
+or ordinary mechanism. Prefer a short, scoped claim to an absolute claim
+followed by a paragraph of exceptions. Do not add background-knowledge
+clarifications absent from the source, implementation edge cases, defensive
+terminology distinctions, or rare failure modes merely to make an already
+useful explanation more technically exhaustive. Source support is necessary
+but does not by itself make a detail useful. Keep essential assumptions and
+uncertainty; the test is explanatory value, not maximal completeness.
 
 **Operating principle: brief, complete, and atomic.** Give readers fast, accurate orientation to one durable subject. Each sentence should define it, explain how it works, distinguish it, or supply a necessary condition, qualification, or consequence. Keep the shortest wording that preserves understanding; extra words can be necessary to make a relationship or limitation clear. Brevity is not a word-count target or a reason to delete a substantive distinction. A neighboring subject that needs its own explanation belongs in a linked note under the atomicity and refactor rules.
 
@@ -263,7 +271,7 @@ Use a neutral encyclopedic register: direct, precise, and free of conversational
 
   **Recreated tables are outside this principle — they keep their values.** This principle governs a *worked example in prose*: a procedure demonstrated on numbers the source picked to demonstrate it with. It does not reach a table the source itself presents tabularly and the entry recreates in Markdown (*Body Structure → Markdown tables*, and the parenthetical in `references/media.md`). There the values are not a demonstration, they *are* the finding — a benchmark comparison, a parameter table, a small lookup — and stripping them out leaves an empty grid with a caption. A table has its own discipline instead, and it is a selection rule rather than an abstraction rule: recreate, don't transcribe — drop the columns and rows that don't earn their place, rename headers to the entry's terminology, simplify cells. What the carve-out does **not** license is tabulating a worked example's intermediate steps: that is this principle's prose case wearing a grid, and the tables rule already forbids introducing a table for content the source doesn't present tabularly. Checklist item 15 draws the line in the same place.
 
-**8. Include equations, in LaTeX — principally in body prose.** When the source defines, characterizes, or quantifies a concept with an equation — **or describes such a calculation in prose without typesetting it** — the **body includes that equation as LaTeX**: paraphrasing math into words ("precision is the ratio of true positives to all positive predictions") softens load-bearing technical content, and a calculation the source states in words is *provided*, not absent — "subtract the mean and divide by the standard deviation" is the standardization formula, and the entry typesets it as one. This applies to every formal definition, named quantity, metric, loss function, probability law, rate, or fraction the source states by either route. **The defining equation of the entry's subject or of a named quantity goes in a `$$...$$` display block on its own line** — Obsidian renders it centered — while inline `$...$` carries symbol references and short expressions woven into sentences, never the defining equation itself. Symbols, variables, and Greek letters in surrounding **body** prose also use LaTeX (`$\alpha$`, `$x_i$`, `$\Delta\text{NDCG}$`, `$k$-fold`), never plain text. Symbols follow the vault's notation standard, every symbol is bound in nearby prose, and a source equation in off-standard notation is **normalized, never transcribed** — the full rules (the coverage bar, display-vs-inline, the notation table, normalization) are in `references/equations.md`, read before typesetting the first equation of the run. In YAML, only the `title:` field may use narrow inline LaTeX for a load-bearing symbol in the canonical name; descriptions and every other field stay plain. Equations carry meaning prose cannot replicate; including them is non-negotiable when the source provides them — and stating the calculation in words is providing it.
+**8. Mathematics earns its place by explaining the concept.** Include equations that make a quantitative relationship, model, or calculation clearer than prose alone. Do not translate an easily understood verbal rule into complicated notation merely because that is possible: hard voting needs “choose the class with the most votes,” not an argmax over indicators. A useful standard equation may be included even when absent from the source, provided its meaning, assumptions, and conventional status are verified and supported through the normal source workflow. Conversely, a source equation or a fully described calculation is not automatically required. Apply the explanatory-value and evidence tests in `references/equations.md` before adding or retaining math. When warranted, defining equations use `$$...$$` display blocks, symbols use inline LaTeX, notation is consistent, and every symbol is bound nearby. YAML descriptions and other fields remain plain; only `title:` permits narrow inline LaTeX for a load-bearing canonical-name symbol.
 
   **Numbers in body prose: LaTeX for math, plain text for everyday quantities.** Use LaTeX when the number is a math object — class labels in a binary convention (`$\{-1, +1\}$`), indices and subscripted values (`$x_1$`, `$\sigma^2$`), numbers in or referencing an equation, and bounds (`$0 \le p \le 1$`). Use plain text when it's a plain quantity — counts ("5 trials"), dates ("1975"), page numbers, informally reported parameter values ("learning rate of 0.001"), everyday percentages, currency. Named-digit metrics keep the digit plain and spell the name as the field writes it (`F1 score` — the `1` sits directly after the `F` with no hyphen, and is a name fragment rather than a variable, so it is plain text, not `$F_1$`; the subscript form belongs only inside equations, and spellings like `F-measure` go in `aliases:`), while `$k$-fold` keeps the `k` in LaTeX because it is a variable. Test: if you could substitute a variable, it's math; if it's a fixed real-world quantity, it's plain. **Decorative `$...$` wrapping is wrong** — don't wrap plain numbers in math delimiters because nearby numbers happen to be in LaTeX; every `$...$` pair opens a math region and contributes to parser collisions.
 

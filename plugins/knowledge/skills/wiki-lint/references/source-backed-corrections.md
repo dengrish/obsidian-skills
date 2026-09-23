@@ -1,14 +1,15 @@
 # Source-backed corrections to an existing entry
 
-Read this only when the user asks to correct one named existing entry from
-sources that entry already cites. A generic lint request does not
+Read this when the user asks to correct or simplify existing entries from
+their cited sources. A request covering a class of defects or the whole Wiki
+applies to every matching entry in that scope, not just named examples. A generic lint request does not
 activate this mode. A source not already cited by the target is a new
 contribution and belongs to `wiki-build`; a split, merge, retitle, deletion,
 or cross-entry redistribution uses [source-backed refactors](refactors.md).
 
 ## Establish the evidence and scope
 
-1. Run Step 0 and snapshot the named entry. Retain its original lint findings
+1. Run Step 0 and snapshot each affected entry. Retain its original lint findings
    as the baseline, then decode its complete current
    `sources:` list. Resolve every source needed for the requested correction as
    a durable vault file; for a PDF/summary pair, verify against the PDF. A live
@@ -18,14 +19,15 @@ or cross-entry redistribution uses [source-backed refactors](refactors.md).
    physical pages. If the cited files do not settle the correction, preserve
    the note and report what evidence is missing. Do not turn a request to
    “correct this note” into a search for new sources.
-3. Keep the edit within the named entry. If the correction reveals a distinct
+3. Keep each correction within its affected entry. If the correction reveals a distinct
    entity, changes another entry, or requires choosing which entry owns content,
    stop that part and route it to builder or the structural refactor protocol.
 
 ## Correct and publish
 
 Apply the current builder rules for fields, prose, equations, media, links, and
-flashcards. Change the erroneous claim and only the same-entry surfaces needed
+flashcards. Correct the erroneous claim or remove the unnecessary caveat, preserving
+essential assumptions and the ordinary mechanism. Change only the same-entry surfaces needed
 to keep it coherent: for example its description, opener, equation, or primary
 card. Preserve unrelated prose, existing source membership, `created:`,
 `parents:`, user-owned fields, and protected card attachments.
