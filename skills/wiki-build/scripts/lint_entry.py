@@ -1311,9 +1311,10 @@ def _check_equation_coverage_candidates(fm, sections, findings):
         findings.append(_f(
             "12-equation-coverage-candidate", "warning",
             "prose or inline math appears to define a calculation without "
-            "canonical nearby display form; verify the stated operands and "
-            "operations, then typeset only that relationship under the "
-            "equation policy",
+            "a nearby display equation; first decide whether notation adds "
+            "explanatory value under the equation policy. Keep a simple "
+            "verbal rule in prose when a formula would only restate it. "
+            "If useful, verify the relationship and define its symbols",
             {"matches": candidates, "agent_review": True}))
     form_candidates = find_noncanonical_display_equation_candidates(
         masked, table_spans)
