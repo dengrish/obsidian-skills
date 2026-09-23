@@ -98,16 +98,21 @@ class NoteFormatTests(unittest.TestCase):
         self.assertEqual(summary.lint(stamped, mode="empirical"), before)
 
     def test_stamped_moc_retains_complete_entry_placement(self):
-        entry = self.add_entry()
+        entry = self.add_entry().replace("[[MOCs/statistics]]", "[[Wiki/statistics]]")
+        root = scanner._st_entry("Statistics", "**Statistics** is a field.")
+        (self.vault / "Wiki/statistics.md").write_text(
+            provenance.stamp_text(root, record("knowledge:wiki-lint")), encoding="utf-8")
         (self.vault / "Wiki/first.md").write_text(
             provenance.stamp_text(entry, record("knowledge:wiki-add")), encoding="utf-8")
         (self.vault / "MOCs/statistics.md").write_text(
-            provenance.stamp_text("- [[Wiki/first|First]]\n", record("knowledge:wiki-lint")),
+            provenance.stamp_text("- [[Wiki/statistics|Statistics]]\n  - [[Wiki/first|First]]\n",
+                                  record("knowledge:wiki-lint")),
             encoding="utf-8")
         result = self.scan()
         hierarchy = result["hierarchy_diagnostic"]
         self.assertEqual(hierarchy["moc_consistency_findings"], [])
         self.assertEqual(hierarchy["placement_gaps"], [])
+        self.assertEqual(hierarchy["parent_state_findings"], [])
         self.assertEqual(hierarchy["moc_file_states"][0]["state"], "readable")
         self.assertEqual(scanner._st_keys(result, "first"), [])
 
