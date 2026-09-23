@@ -785,7 +785,8 @@ class FeedCollectionTests(unittest.TestCase):
 
     def test_owned_legacy_footer_migrates_to_state_without_losing_creator(self):
         self.collect(Provider(page([post(105)])))
-        legacy = feed.note_provenance.stamp_text('# @actual\n\nOld introduction.\n', RECORD)
+        legacy = '# @actual\n\nOld introduction.\n\n<!-- skill-provenance: ' + json.dumps(
+            {'schema': 1, 'generated_by': RECORD}) + ' -->\n'
         self.note.write_text(legacy, encoding='utf-8')
         with feed.Store(self.vault) as store:
             account = store.data['accounts']['actual']

@@ -42,7 +42,7 @@ class Tests(unittest.TestCase):
                 + '\n\n[[Investments/Stocks/' + ticker + ']]\n\n' + prose
                 + '\n\n### Thesis updates\n\nNo active theses.\n\n### Outcome review\n\nNo observations are due.\n')
         path = self.vault / 'Investments' / (day + suffix + '-stock-research.md')
-        path.write_text(dossiers.note_provenance.stamp_text(body, PROVENANCE), encoding='utf-8')
+        path.write_text(body, encoding='utf-8')
         return path
 
     def plan(self, daily, ticker='ABC'):
@@ -77,7 +77,8 @@ class Tests(unittest.TestCase):
         self.assertIn('created: "2026-09-08T11:35:00-04:00"', text)
         self.assertIn('[[Investments/2026-09-08-stock-research#NASDAQ:ABC — Example Inc.]]', text)
         self.assertEqual(daily.read_bytes(), original)
-        self.assertEqual(dossiers.note_provenance.split_provenance(text)[1]['generated_by'], PROVENANCE)
+        self.assertNotIn('skill-provenance', text)
+        self.assertEqual(json.loads(self.receipt().read_bytes())['committed']['provenance']['generated_by'], PROVENANCE)
         self.assertEqual(self.receipt().stat().st_mode & 0o777, 0o600)
 
     def test_update_preserves_creation_history_and_creator(self):
@@ -90,7 +91,8 @@ class Tests(unittest.TestCase):
         self.assertIn('created: "2026-09-08T11:35:00-04:00"', text)
         self.assertIn('updated: "2026-09-09T11:35:00-04:00"', text)
         self.assertIn('2026-09-08T11:30:00-04:00 — watch', text)
-        provenance = dossiers.note_provenance.split_provenance(text)[1]
+        self.assertNotIn('skill-provenance', text)
+        provenance = json.loads(self.receipt().read_bytes())['committed']['provenance']
         self.assertEqual(provenance['generated_by'], PROVENANCE)
         self.assertEqual(provenance['updated_by'], later)
 
@@ -100,6 +102,20 @@ class Tests(unittest.TestCase):
         before = self.note().read_bytes()
         self.assertEqual(dossiers.publish(self.vault, plan, PROVENANCE)['status'], 'unchanged')
         self.assertEqual(self.note().read_bytes(), before)
+
+    def test_update_legacy_note_keeps_creator_in_receipt_only(self):
+        self.publish(self.daily())
+        receipt = json.loads(self.receipt().read_bytes())
+        legacy = self.note().read_text(encoding='utf-8').rstrip() + '\n\n<!-- skill-provenance: ' + json.dumps(
+            receipt['committed']['provenance']) + ' -->\n'
+        self.note().write_text(legacy, encoding='utf-8')
+        receipt['committed']['published_sha256'] = dossiers._hash(legacy.encode())
+        self.receipt().write_bytes(dossiers._bytes(receipt))
+        self.assertEqual(self.publish(self.daily('2026-09-09'))['status'], 'updated')
+        self.assertNotIn('skill-provenance', self.note().read_text(encoding='utf-8'))
+        current = json.loads(self.receipt().read_bytes())['committed']
+        self.assertEqual(current['provenance']['generated_by'], PROVENANCE)
+        self.assertEqual(len(current['history']), 2)
 
     def test_cutoff_hides_mutable_future_but_keeps_eligible_history(self):
         self.publish(self.daily())

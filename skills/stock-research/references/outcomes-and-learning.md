@@ -48,8 +48,9 @@ that day's Research record and register its link. Include counts of recommendati
 never-ready watches, observed/pending/unavailable/recheck windows, and the relevant
 per-horizon sample sizes. Group comparable setups and distinguish company-specific
 results from broad market/sector moves. A count of zero is a valid first summary.
-Use the helper's `first_ready_producer` to distinguish the releases that originated
-recommendations. Group by its `runtime_sha256`, retaining `plugin_version` and
+When legacy history supplies `first_ready_producer`, use it to distinguish the
+releases that originated those recommendations. New notes carry no producer
+footer. Group known producers by `runtime_sha256`, retaining `plugin_version` and
 the available source-commit link as readable labels; version numbers alone can
 be reused. This is the creator of the earliest actual ready note, not a later
 observer, editor or baseline correction. Keep unknown creators in an explicit

@@ -100,8 +100,6 @@ class CoverageTests(unittest.TestCase):
         producer = {'skill': 'investments:stock-research', 'plugin_version': '1.0.0',
                     'source_commit': None, 'source_url': None, 'source_status': 'unavailable',
                     'runtime_sha256': 'a' * 64}
-        daily.write_text(stock_dossiers.note_provenance.stamp_text(
-            daily.read_text(encoding='utf-8'), producer), encoding='utf-8')
         result = stock_dossiers.sync(self.vault, daily, self.root, producer)
         self.assertTrue(result['complete'], result)
 
@@ -639,11 +637,10 @@ class CoverageTests(unittest.TestCase):
         daily = self.archive(posts=[self.post()], jobs=[self.job('assessed', assessment=link)], candidates=True)
         self.sync_archive(daily)
         note = self.note(as_of=LATER, jobs=[self.job('reused', assessment=link)], history=self.anchors())
-        # Only runtime identity is a fixture: coverage, dossier reading, locking,
-        # outcome planning and actual immutable publication all run normally.
-        with patch.object(market_notes, 'require_publication_provenance'):
-            result = market_notes.publish(note, self.vault, coverage._time('2026-09-08T12:06:00-04:00'),
-                                          mode='manual', as_of=LATER)
+        # Coverage, dossier reading, locking, outcome planning and immutable
+        # publication all run normally without a metadata footer.
+        result = market_notes.publish(note, self.vault, coverage._time('2026-09-08T12:06:00-04:00'),
+                                      mode='manual', as_of=LATER)
         self.assertEqual(result['status'], 'created')
         self.assertEqual(Path(result['path']).read_bytes(), note.read_bytes())
 
@@ -658,10 +655,9 @@ class CoverageTests(unittest.TestCase):
                          candidates=True, history=self.anchors())
         note.write_text(note.read_text(encoding='utf-8').replace('Status: watch',
             'Status: watch\nCompany ID: SEC:0000000002'), encoding='utf-8')
-        with patch.object(market_notes, 'require_publication_provenance'):
-            with self.assertRaisesRegex(ValueError, 'ticker company ID changed'):
-                market_notes.publish(note, self.vault, coverage._time('2026-09-08T12:06:00-04:00'),
-                                     mode='manual', as_of=LATER)
+        with self.assertRaisesRegex(ValueError, 'ticker company ID changed'):
+            market_notes.publish(note, self.vault, coverage._time('2026-09-08T12:06:00-04:00'),
+                                 mode='manual', as_of=LATER)
         self.assertFalse((self.vault / 'Investments/2026-09-08-120000-stock-research.md').exists())
         self.assertEqual((self.vault / 'Investments/Stocks/ABC.md').read_bytes(), before)
 
@@ -675,9 +671,8 @@ class CoverageTests(unittest.TestCase):
                          candidates=True, history=self.anchors())
         text = note.read_text(encoding='utf-8').replace('Status: watch', 'Status: watch\nCompany ID: SEC:0000000001')
         note.write_text(text.replace('Example Inc.', 'Renamed Inc.'), encoding='utf-8')
-        with patch.object(market_notes, 'require_publication_provenance'):
-            result = market_notes.publish(note, self.vault, coverage._time('2026-09-08T12:06:00-04:00'),
-                                          mode='manual', as_of=LATER)
+        result = market_notes.publish(note, self.vault, coverage._time('2026-09-08T12:06:00-04:00'),
+                                      mode='manual', as_of=LATER)
         self.assertEqual(result['status'], 'created')
 
     def test_feed_change_after_initial_publication_check_is_rejected(self):
@@ -694,8 +689,7 @@ class CoverageTests(unittest.TestCase):
                 self.account['completed_at'] = '2026-09-08T15:10:00Z'
                 self.publish_feed()
             return result
-        with patch.object(market_notes, 'require_publication_provenance'), \
-                patch.object(market_notes, 'outcomes', side_effect=change_during_final_outcome_check):
+        with patch.object(market_notes, 'outcomes', side_effect=change_during_final_outcome_check):
             with self.assertRaisesRegex(RuntimeError, 'coverage changed after planning'):
                 market_notes.publish(note, self.vault, coverage._time('2026-09-08T11:36:00-04:00'),
                                      mode='manual', as_of=CUTOFF)

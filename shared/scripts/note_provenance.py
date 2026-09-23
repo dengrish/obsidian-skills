@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Verify a shipped plugin and stamp Markdown drafts with its exact identity.
+"""Verify a shipped plugin and read legacy note attribution.
 
-Stdlib only. No Git, network, host registry, repository fallback, or vault writes.
-The CLI writes only a newly named draft; publish it using the active workflow's
-safe-write protocol. The fingerprint identifies code, not research correctness.
+Stdlib only. No Git, network, host registry, repository fallback, or file writes.
+Markdown footers are no longer produced. Legacy parsing keeps archives readable.
 """
 
 import argparse
@@ -115,7 +114,7 @@ def validate_record(record):
 
 
 def split_provenance(text):
-    """Remove only one valid final footer, rejecting malformed or hidden copies."""
+    """Read a legacy footer without letting malformed or hidden copies pass."""
     if MARKER not in text:
         return text, None
     if text.count(MARKER) != 1:
@@ -239,32 +238,6 @@ def verified_record(plugin_root, skill):
     return record
 
 
-def stamp_text(text, record, previous=None):
-    """Stamp a new draft or retain creator attribution during a substantive edit."""
-    validate_record(record)
-    body, current = split_provenance(text)
-    if previous is not None:
-        old_body, old = split_provenance(previous)
-        if body.rstrip('\r\n') == old_body.rstrip('\r\n'):
-            return previous
-        # Metadata in the source note is authoritative, not a replacement draft.
-        payload = {'schema': 1, 'generated_by': old['generated_by'] if old else None,
-                   'updated_by': record}
-    elif current is not None:
-        # Repeating the stamping step must not turn a new creation into an edit.
-        if current.get('updated_by', current['generated_by']) == record:
-            return text
-        raise ValueError('draft carries another producer; use --previous for an existing-note edit, '
-                         'never copy provenance into a new note')
-    else:
-        payload = {'schema': 1, 'generated_by': record}
-    if not body.strip():
-        # An empty generated misc MOC still needs a separated metadata line.
-        body = ''
-    return (body.rstrip('\r\n') + '\n\n<!-- skill-provenance: '
-            + json.dumps(payload, sort_keys=True, separators=(',', ':')) + ' -->\n')
-
-
 def run_self_test():
     """Portable attribution tests; cross-format/publication tests live in tests/."""
     import unittest
@@ -276,35 +249,34 @@ def run_self_test():
                            'source_url': 'https://github.com/dengrish/obsidian-skills/commit/' + 'a' * 40,
                            'source_status': 'committed', 'runtime_sha256': 'b' * 64}
 
-        def test_create_and_retry(self):
+        def legacy(self, body, **metadata):
+            payload = {'schema': 1, 'generated_by': self.record, **metadata}
+            return body.rstrip('\r\n') + '\n\n<!-- skill-provenance: ' + json.dumps(payload, separators=(',', ':')) + ' -->\n'
+
+        def test_legacy_creator_is_readable(self):
             original = '# A concept\n\nA useful definition.\n'
-            stamped = stamp_text(original, self.record)
-            body, metadata = split_provenance(stamped)
+            body, metadata = split_provenance(self.legacy(original))
             self.assertEqual(body, original)
             self.assertEqual(metadata, {'schema': 1, 'generated_by': self.record})
-            self.assertEqual(stamp_text(stamped, self.record), stamped)
 
-        def test_preserve_known_creator_during_edit(self):
-            previous = stamp_text('Definition.\n', self.record)
+        def test_legacy_update_is_readable(self):
             editor = dict(self.record, skill='knowledge:wiki-lint', runtime_sha256='c' * 64)
-            _, metadata = split_provenance(stamp_text('Improved definition.\n', editor, previous))
+            _, metadata = split_provenance(self.legacy('Definition.\n', updated_by=editor))
             self.assertEqual(metadata['generated_by'], self.record)
             self.assertEqual(metadata['updated_by'], editor)
 
         def test_unknown_historical_creator_remains_unknown(self):
-            _, metadata = split_provenance(stamp_text('New wording.\n', self.record, 'Old wording.\n'))
+            _, metadata = split_provenance(self.legacy('Definition.\n', generated_by=None, updated_by=self.record))
             self.assertIsNone(metadata['generated_by'])
             self.assertEqual(metadata['updated_by'], self.record)
 
-        def test_noop_returns_exact_original_even_without_provenance(self):
-            for previous in ('Old wording.\r\n\r\n', stamp_text('Old wording.\n', self.record)):
-                editor = dict(self.record, plugin_version='2.0.0')
-                self.assertEqual(stamp_text('Old wording.\n', editor, previous), previous)
+        def test_unstamped_text_is_preserved_exactly(self):
+            for original in ('', 'Old wording.\r\n\r\n', 'No trailing newline'):
+                self.assertEqual(split_provenance(original), (original, None))
 
-        def test_another_creator_cannot_be_adopted_without_original(self):
-            copied = stamp_text('A copied template.\n', self.record)
-            with self.assertRaisesRegex(ValueError, 'another producer'):
-                stamp_text(copied, dict(self.record, skill='knowledge:wiki-add'))
+        def test_card_schedule_is_not_provenance(self):
+            original = 'Definition.\n??\nTerm <!--SR:!2026-09-20,30,250--> ^card-id\n'
+            self.assertEqual(split_provenance(self.legacy(original))[0], original)
 
         def test_false_or_abbreviated_commit_is_rejected(self):
             for change in ({'source_commit': 'a' * 7}, {'source_url': 'https://example.org'},
@@ -318,13 +290,13 @@ def run_self_test():
             later = dict(self.record, source_commit='d' * 64,
                          source_url='https://github.com/dengrish/obsidian-skills/commit/' + 'd' * 64,
                          runtime_sha256='e' * 64)
-            first = stamp_text('Definition.\n', self.record)
-            second = stamp_text('Definition.\n', later)
+            first = self.legacy('Definition.\n')
+            second = self.legacy('Definition.\n', generated_by=later)
             self.assertNotEqual(first, second)
             self.assertEqual(split_provenance(second)[1]['generated_by']['plugin_version'], '1.0.2')
 
         def test_malformed_misplaced_duplicate_footer_is_never_silently_removed(self):
-            good = stamp_text('Definition.\n', self.record)
+            good = self.legacy('Definition.\n')
             footer = good[good.index(MARKER):]
             for malformed in (good + 'More prose.\n', good + footer,
                               good.replace('\n\n<!--', '\n<!--'),
@@ -333,11 +305,9 @@ def run_self_test():
                               good.replace('"schema":1', '"schema":1,"hidden_state":true')):
                 with self.subTest(malformed=malformed), self.assertRaises(ValueError):
                     split_provenance(malformed)
-            with self.assertRaises(ValueError):
-                stamp_text('New definition.\n', self.record, good + 'More prose.\n')
 
         def test_empty_outline_has_separate_metadata(self):
-            body, metadata = split_provenance(stamp_text('', self.record))
+            body, metadata = split_provenance(self.legacy(''))
             self.assertFalse(body.strip())
             self.assertEqual(metadata['generated_by'], self.record)
 
@@ -375,41 +345,20 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--test', action='store_true', help='run offline self-tests')
     commands = parser.add_subparsers(dest='command')
-    for command in ('inspect', 'stamp'):
-        sub = commands.add_parser(command)
-        sub.add_argument('--plugin', type=Path, required=True)
-        sub.add_argument('--skill', required=True, help='unqualified skill directory name')
-        if command == 'stamp':
-            sub.add_argument('--draft', type=Path, required=True)
-            sub.add_argument('--previous', type=Path)
-            sub.add_argument('--output', type=Path, required=True, help='new scratch draft only')
+    sub = commands.add_parser('inspect')
+    sub.add_argument('--plugin', type=Path, required=True)
+    sub.add_argument('--skill', required=True, help='unqualified skill directory name')
     args = parser.parse_args(argv)
     if args.test:
         return run_self_test()
     if args.command is None:
-        parser.error('choose inspect or stamp')
+        parser.error('choose inspect')
     try:
         root = args.plugin.resolve()
         if Path(__file__).resolve() != root / 'shared/scripts/note_provenance.py':
             raise ValueError('invoke the selected plugin\'s own provenance helper')
         record = verified_record(args.plugin, args.skill)
-        if args.command == 'inspect':
-            print(json.dumps(record, indent=2, sort_keys=True))
-        else:
-            raw = _read(args.draft)
-            old = _read(args.previous) if args.previous is not None else None
-            content = stamp_text(raw.decode('utf-8'), record,
-                                 old.decode('utf-8') if old is not None else None)
-            if _read(args.draft) != raw or (old is not None and _read(args.previous) != old):
-                raise ValueError('draft or previous note changed during stamping')
-            # This is an intermediate draft writer, never a replacement tool.
-            fd = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(fd, 'wb') as output:
-                output.write(content.encode('utf-8'))
-                output.flush()
-                os.fsync(output.fileno())
-            print(json.dumps({'status': 'created', 'path': str(args.output.absolute()),
-                              'provenance': record}, sort_keys=True))
+        print(json.dumps(record, indent=2, sort_keys=True))
         return 0
     except (OSError, ValueError, TypeError) as exc:
         print('provenance error: ' + str(exc), file=sys.stderr)

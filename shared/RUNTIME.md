@@ -11,10 +11,10 @@ The active skill and its references define workflow-specific procedures and
 scope. For a shared schema, naming, ownership or publication rule, use the
 shared guide the workflow names; a workflow summary is not a competing
 definition. Read [input safety](INPUT_SAFETY.md)
-before handling external values or content. Before publishing a generated or
-changed Markdown note, follow [note provenance](PROVENANCE.md) to record the
-verified installed skill, source commit and runtime fingerprint without
-changing a workflow's content schema or immutable-history rules. At closeout, read
+before handling external values or content. Do not append skill-provenance
+footers to Markdown notes. Build identity stays in the plugin's bundled
+`provenance.json`; helpers may retain it in private operational state.
+At closeout, read
 [SUGGESTIONS.md](SUGGESTIONS.md) for the shared `Reviews/` logs: record only
 evidenced issues in the owning skill or consumed producer's log, remove
 specifically verified resolutions, and make no log writes on a report-only run.

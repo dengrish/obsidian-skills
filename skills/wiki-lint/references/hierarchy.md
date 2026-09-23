@@ -5,9 +5,7 @@ on `hierarchy_diagnostic`. A MOC is a **fully generated navigation note**: disci
 `MOCs/<discipline-slug>.md`, and entries tagged only `#misc` have a root and title-sorted member list in
 `MOCs/misc.md`. Its complete content is a bullet outline derived from the
 current Wiki entries. It contains no ownership
-comments, H1, frontmatter, or separate prose sections, except the final
-[skill-provenance footer](../../../shared/PROVENANCE.md). That metadata is not
-part of the navigation tree. A footer-only misc MOC is an empty outline.
+comments, H1, frontmatter, or separate prose sections.
 
 `parents:` and the MOCs are two renderings of one concept hierarchy.
 Every active discipline has a Wiki root entry at `Wiki/<discipline-slug>.md`.
@@ -29,7 +27,7 @@ publish part of a MOC or leave parents derived from a different plan. Blank,
 malformed, or uncertain tags need QC before placement; they do not imply misc.
 Preserve a specific-discipline MOC that loses its final member and report it
 as inactive. An authorized misc refresh clears an existing zero-member list
-to an empty outline, retaining its provenance footer, and keeps the file.
+to an empty outline and keeps the file.
 
 ## Establish discipline roots
 
@@ -45,11 +43,10 @@ does not alter the user's topic queue or extract unrelated entities.
 A discipline root is a short explanation of the field, not a duplicate MOC.
 The misc root explains the organizational fallback. Use the ordinary entry
 schema, one matching tag, a primary-definition card, and `parents: []`.
-New roots use today's `created:` and `updated:` dates, `read: false`, and
-verified `wiki-lint` creator provenance; the ordinary maintenance freeze applies
-to existing notes, not this authorized new-entry case. Stamp newly acquired
-source extracts as `wiki-lint` too, retaining the research-source marker and
-visible label defined by wiki-add's reference. Reuse that source format and
+New roots use today's `created:` and `updated:` dates and `read: false`;
+the ordinary maintenance freeze applies to existing notes, not this authorized
+new-entry case. Newly acquired source extracts retain the research-source
+marker and visible label defined by wiki-add's reference. Reuse that source format and
 publication procedure without invoking its topic-queue completion workflow.
 Preserve existing roots' substantive content, review state, and card history
 under the normal correction rules. A blocked source or ambiguous root owner
@@ -114,8 +111,7 @@ Existing ambiguous links need evidence, not a global string replacement.
 
 The **whole recognized discipline or misc MOC belongs to Task 3**. Within an authorized
 closure, regenerate its complete content from the derived placement plan and
-publish it through the shared safe-write protocol, preserving/updating the
-provenance footer under its shared rules. Other comments,
+publish it through the shared safe-write protocol. Comments,
 frontmatter, headings, and prose are obsolete generated formatting and are
 removed during regeneration under that whole-file ownership. This does not
 extend to unknown files in `MOCs/`, other vault notes, or suggestion logs.
@@ -132,8 +128,7 @@ A discipline MOC is a nested bullet list, for example:
 
 For discipline trees, use two spaces per level. Each bullet is either a piped entry link with its
 canonical readable title or an unlinked category term. There are no trailing
-descriptions, inline comments, H1, or frontmatter. The provenance footer follows
-the outline after a blank line. Drop a trailing title
+descriptions, inline comments, H1, or frontmatter. Drop a trailing title
 parenthetical that repeats this discipline's name, but retain a finer
 qualifier: `[[Wiki/clustering-machine-learning|Clustering]]` is suitable in the
 machine-learning MOC, while `[[Wiki/pruning-decision-trees|Pruning (decision trees)]]`
@@ -170,7 +165,7 @@ unless cleanup is explicitly requested. These preserved
 findings do not prevent the active hierarchy from completing, but must not be
 described as repaired. **Misc is different:** refresh its entire list from all
 entries tagged only `#misc` in the authorized misc closure. If that list is empty,
-clear an existing misc file to an empty outline and keep its provenance footer.
+clear an existing misc file to an empty outline.
 An explicit request can create empty misc; never apply the inactive-discipline
 preservation rule to retain stale misc members.
 
@@ -202,8 +197,8 @@ preservation rule to retain stale misc members.
 - `moc_consistency_findings` validates the **whole file**: bullet structure,
   canonical targets/labels, entry coverage, duplicate placements,
   wrong-group links, discipline eponymous-root shape, misc member order and single child level, and parent-union
-  consistency. A valid final provenance footer is metadata outside the outline;
-  malformed or misplaced provenance is reported. Other comments, prose, headings,
+  consistency. The scanner tolerates valid legacy provenance footers for
+  compatibility, but regeneration emits only the outline. Other comments, prose, headings,
   fences, and frontmatter are malformed outline lines; none delimit a separately
   owned region.
   Exact union comparison requires every expected group MOC to be readable/empty and
@@ -215,7 +210,7 @@ preservation rule to retain stale misc members.
 After a completed closure, every included entry with valid membership has no placement gap,
 unresolved/invalid parent, self-parent, or cycle. Every active included MOC is
 readable (or empty misc with zero members), contains only the complete generated
-outline plus its valid provenance footer when present, and has no consistency
+outline and has no consistency
 finding. Each included entry's parents exactly
 match its nearest linked Wiki ancestors; discipline roots alone have `parents: []`. Re-scan to verify these conditions. After a
 full-vault pass they hold for all active disciplines, misc, and requested entries;

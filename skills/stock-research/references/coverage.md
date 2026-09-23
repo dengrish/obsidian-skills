@@ -190,7 +190,7 @@ the journals or linked assessment, without reproducing the whole earlier report.
 ## Reconcile and publish
 
 ```bash
-python3 '<skill>/scripts/stock_coverage.py' check --vault '<vault>' --as-of '<cutoff>' --mode '<mode>' --draft '<run>/daily-stamped.md'
+python3 '<skill>/scripts/stock_coverage.py' check --vault '<vault>' --as-of '<cutoff>' --mode '<mode>' --draft '<run>/draft.md'
 ```
 
 The checker requires dispositions for newly available post versions, preserves

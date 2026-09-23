@@ -405,9 +405,6 @@ def _daily(store, name):
 def _daily_content(data, name):
     basename = _daily_name(name)
     linted = market_notes.lint_bytes(data)
-    if (linted['provenance'] is None
-            or linted['provenance']['generated_by']['skill'] != 'investments:stock-research'):
-        raise ValueError('daily report lacks stock-research provenance')
     meta = linted['metadata']
     if not basename.startswith(meta['date']):
         raise ValueError('daily filename and report date disagree')
@@ -573,8 +570,11 @@ def _render(item, meta, daily, daily_digest, prior, previous, provenance):
     body = ('---\n' + front + '\n---\n\n# ' + item['ticker'] + ' — ' + item['company']
             + '\n\n## Latest assessment\n\nSource: [[' + link + ']].\n\n'
             + item['assessment'] + '\n## Research history\n\n' + history + '\n')
-    text = note_provenance.stamp_text(body, provenance, previous.decode() if previous else None)
-    record['provenance'] = note_provenance.split_provenance(text)[1]
+    text = body
+    # Producer identity belongs to the private receipt, never the visible note.
+    record['provenance'] = ({'schema': 1, 'generated_by': prior['provenance']['generated_by'],
+                             'updated_by': provenance} if prior else
+                            {'schema': 1, 'generated_by': provenance})
     record['published_sha256'] = _hash(text.encode())
     return record, text
 

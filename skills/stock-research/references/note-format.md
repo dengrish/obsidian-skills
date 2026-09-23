@@ -55,15 +55,15 @@ vault's real directory identity. It cannot insert an earlier edition after a
 later one has already published. An expired/interrupted run starts a fresh current
 edition; it never extends or rewrites its receipt to backfill an old date.
 
-Before publication, replace all `DRAFT —` placeholders, record the actual completion
-time, and stamp the final draft with installed-plugin provenance. Complete the
-evidence audit and final review of that draft, and wait for every launched
+Before publication, replace all `DRAFT —` placeholders and record the actual
+completion time. Complete the evidence audit and final review of that draft,
+and wait for every launched
 independent checker to return and resolve its findings. Then record each completed
 check with `review-complete --vault '<vault>' --run-receipt '<receipt>' --check
-'<name>' --draft '<final-stamped-draft>'`. This is an agent completion attestation,
+'<name>' --draft '<final-draft>'`. This is an agent completion attestation,
 not a required human review or a certification that claims are true. Do not attest
 completion while a checker is running. Publication requires every declared check
-to match the **exact final draft bytes**; any later wording, timestamp or provenance
+to match the **exact final draft bytes**; any later wording or timestamp
 change requires reviewing and recording completion for the changed draft again.
 The private receipt/key detect accidental or untrusted state edits; they are not
 an authorization boundary against another process running as the same user. Keep
@@ -105,12 +105,7 @@ Keep exactly the two H2 headings and six H3 subsections below, in order. Opening
 conclusion/coverage prose belongs directly under Decision brief. Research record
 starts with its first subsection; use H4 or deeper headings for individual
 candidates or supporting detail within a subsection. Keep the ledger only under
-Thesis updates. Do not conceal content in HTML comments or code fences. The
-final [skill-provenance footer](../../../shared/PROVENANCE.md) is the sole
-metadata exception: it records the verified producer, release, source commit
-and runtime fingerprint, never financial state or supporting evidence. It does
-not add a frontmatter key or change this outline. Historical notes without it
-remain valid and immutable; new publications require it.
+Thesis updates. Do not conceal content in HTML comments or code fences.
 
 The following is a layout template; replace all illustrative values and prose:
 

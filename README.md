@@ -329,7 +329,7 @@ The full path/ownership table is in
 | [shared/RUNTIME.md](shared/RUNTIME.md) | Host-independent paths, Python setup and tool fallbacks |
 | [shared/CONVENTIONS.md](shared/CONVENTIONS.md) | Shared layout, schemas, enums, naming, links and ownership |
 | [shared/SAFE_WRITES.md](shared/SAFE_WRITES.md) | Exclusive creation, conditional replacement, cleanup and rollback safety |
-| [shared/PROVENANCE.md](shared/PROVENANCE.md) | Exact skill identity on generated notes and preservation of creator attribution |
+| [shared/PROVENANCE.md](shared/PROVENANCE.md) | Internal build identity and legacy note compatibility |
 | [shared/SUGGESTIONS.md](shared/SUGGESTIONS.md) | Reviews/ log attribution, open-issue lifecycle, format and publication |
 | `skills/<name>/scripts/` | Executable helpers and their embedded self-tests |
 | `shared/scripts/` | Canonical implementations used by several skills |
@@ -346,7 +346,7 @@ historical explanations are harder to keep aligned.
 The shared implementations are `slugify.py` (wiki slugs), `atomic_move.py`
 (exclusive moves and verified regular-file publication/removal), `naming.py`
 (source filenames and book identity),
-`plurals.py` (English singularization), `note_provenance.py` (verified bundle identity and note attribution),
+`plurals.py` (English singularization), `note_provenance.py` (verified bundle identity and legacy footer parsing),
 `yaml_scalars.py` (decoded metadata), `portable_names.py` (portable file identity), `figure_state.py` (figure ownership and
 review sidecars), `vault_artifacts.py` (portable PDF/Markdown source and source-figure
 inventories), `organism_names.py` (Organism title/name classification),
@@ -465,9 +465,7 @@ versions against the appropriate Git baseline. Pushing does not refresh an
 already-running session; update the installed plugins and start a fresh session
 when delivering a release.
 
-Generated Markdown notes record the producing skill, plugin version, source
-commit link and verified runtime fingerprint under the shared
-[provenance contract](shared/PROVENANCE.md). Existing notes are not backfilled
-with a guessed creator, and unchanged notes stay unchanged.
-Feed source notes keep this provenance in private collection state instead of
-a note footer; their visible content is properties and timestamped posts.
+Markdown notes contain no skill-provenance footer. Build identity remains in
+bundled `provenance.json`, and collection/dossier helpers retain any operational
+producer records in private state. See [build identity](shared/PROVENANCE.md)
+for verification and compatibility with older notes.

@@ -348,14 +348,10 @@ def active_provenance():
     return note_provenance.verified_record(plugin_root, 'stock-research')
 
 
-def require_publication_provenance(metadata):
-    """New immutable editions identify their current, verified creator."""
-    if metadata is None:
-        raise ValueError('new market notes require a skill-provenance footer; stamp the draft with '
-                         'the installed plugin\'s note_provenance helper before publication')
-    if metadata.get('generated_by') != active_provenance() or 'updated_by' in metadata:
-        raise ValueError('new market-note provenance must identify the executing installed '
-                         'stock-research bundle as its creator, without an update record')
+def require_publication_content(note):
+    """Legacy footers are readable, but new editions contain no build metadata."""
+    if note['provenance'] is not None:
+        raise ValueError('new editions must omit the legacy skill-provenance footer')
 
 
 def require_publication_coverage(vault, draft, note, cutoff, edition, *, _lock_descriptor=None):
@@ -581,8 +577,8 @@ def prepare(vault, work_dir, now=None, mode='scheduled', checks=()):
         os.close(descriptor)
     return dict(result, run_receipt=str(directory / 'run.json'), draft=str(directory / 'draft.md'),
                 expires_at=payload['expires_at'], declared_checks=names,
-                instructions='Replace every DRAFT placeholder; update generated_at at completion, stamp '
-                             'provenance, then complete all declared checks against those exact final bytes.')
+                instructions='Replace every DRAFT placeholder; update generated_at at completion, '
+                             'then complete all declared checks against those exact final bytes.')
 
 
 def run_check(receipt, vault, name, draft=None, now=None):
@@ -623,7 +619,7 @@ def run_check(receipt, vault, name, draft=None, now=None):
             raise ValueError('review requires a completed draft matching this run and its actual generation time')
         if 'stock_research' not in note['metadata']:
             raise ValueError('new editions must use stock_research; historical market_research records are read-only')
-        require_publication_provenance(note['provenance'])
+        require_publication_content(note)
         digest = hashlib.sha256(data).hexdigest()
         record = {'run': payload['id'], 'check': name, 'draft_sha256': digest, 'completed_at': current.isoformat()}
         filename = 'done-' + name + '-' + digest + '.json'
@@ -1250,7 +1246,7 @@ def _publish(draft, vault, now=None, mode=None, as_of=None, run_receipt=None, *,
         raise ValueError('outcome journal is incomplete: ' + json.dumps(planned['findings'], ensure_ascii=False))
     if 'stock_research' not in note['metadata']:
         raise ValueError('new editions must use stock_research; historical market_research records are read-only')
-    require_publication_provenance(note['provenance'])
+    require_publication_content(note)
     coverage = require_publication_coverage(vault, draft, note, cutoff, edition,
                                             _lock_descriptor=_lock_descriptor)
     if run_receipt is not None:
@@ -1303,6 +1299,11 @@ def run_self_test():
     import unittest
     from unittest.mock import patch
 
+    def legacy_footer(body, producer):
+        # Historical fixture only; production code never creates note footers.
+        return body.rstrip('\r\n') + '\n\n<!-- skill-provenance: ' + json.dumps(
+            {'schema': 1, 'generated_by': producer}) + ' -->\n'
+
     class Tests(unittest.TestCase):
         def setUp(self):
             self.temp = tempfile.TemporaryDirectory(prefix='.market-notes-test-')
@@ -1310,12 +1311,6 @@ def run_self_test():
             self.vault = Path(self.temp.name).resolve()
             self.now = datetime.fromisoformat('2026-09-05T09:03:00-04:00')
             self.draft = self.vault / 'draft.txt'
-            # Financial-history fixtures predate provenance and intentionally
-            # exercise that logic alone. Dedicated tests below restore the real
-            # publication gate and cover current-bundle and historical behavior.
-            self.provenance_gate = patch(__name__ + '.require_publication_provenance')
-            self.provenance_gate.start()
-            self.addCleanup(self.provenance_gate.stop)
             # These schema-1 history fixtures isolate edition/outcome behavior.
             # Real coverage enforcement is exercised by stock_coverage tests
             # and the installed-package end-to-end publication scenarios.
@@ -1540,15 +1535,15 @@ def run_self_test():
             self.assertEqual(publish(self.draft, self.vault, completed,
                                      run_receipt=prepared['run_receipt'])['status'], 'created')
 
-        def test_review_completion_binds_all_bytes_including_generation_and_provenance(self):
+        def test_review_completion_binds_all_bytes_including_generation(self):
             prepared = self.prepared()
             completed = self.now + timedelta(minutes=5)
             self.completed_run_draft(prepared, completed)
             original = self.draft.read_bytes()
-            stamped = note_provenance.stamp_text(original.decode(), self.generator).encode()
             for changed in (original.replace(b'Wait for confirmation.', b'Changed factual claim.'),
                             original.replace(completed.isoformat().encode(),
-                                             (completed - timedelta(seconds=1)).isoformat().encode()), stamped):
+                                             (completed - timedelta(seconds=1)).isoformat().encode()),
+                            original + b'\n'):
                 with self.subTest(changed=changed[-80:]):
                     self.draft.write_bytes(changed)
                     with self.assertRaisesRegex(ValueError, 'exact final draft'):
@@ -1961,7 +1956,7 @@ def run_self_test():
 
         def test_provenance_footer_is_separate_from_financial_state(self):
             original = self.note()
-            stamped = note_provenance.stamp_text(original.decode('utf-8'), self.generator).encode('utf-8')
+            stamped = legacy_footer(original.decode('utf-8'), self.generator).encode('utf-8')
             old, new = lint_bytes(original), lint_bytes(stamped)
             self.assertIsNone(old.pop('provenance'))
             self.assertEqual(new.pop('provenance'), {'schema': 1, 'generated_by': self.generator})
@@ -1977,33 +1972,18 @@ def run_self_test():
                 with self.subTest(malformed=malformed), self.assertRaises(ValueError):
                     lint_bytes(malformed)
 
-        def test_new_publication_requires_its_verified_creator(self):
-            self.provenance_gate.stop()
+        def test_new_publication_omits_footer(self):
+            self.draft.write_text(legacy_footer(self.note().decode(), self.generator), encoding='utf-8')
+            with self.assertRaisesRegex(ValueError, 'must omit the legacy'):
+                publish(self.draft, self.vault, self.now)
+            self.assertFalse((self.vault / 'Investments').exists())
             self.draft.write_bytes(self.note())
-            with patch(__name__ + '.active_provenance', return_value=self.generator):
-                with self.assertRaisesRegex(ValueError, 'skill-provenance footer'):
-                    publish(self.draft, self.vault, self.now)
-                for change in ({'plugin_version': '0.0.1'}, {'runtime_sha256': 'e' * 64},
-                               {'skill': 'knowledge:wiki-build'}):
-                    with self.subTest(change=change):
-                        self.draft.write_text(note_provenance.stamp_text(
-                            self.note().decode('utf-8'), dict(self.generator, **change)), encoding='utf-8')
-                        with self.assertRaisesRegex(ValueError, 'executing installed'):
-                            publish(self.draft, self.vault, self.now)
-                update = {'schema': 1, 'generated_by': self.generator, 'updated_by': self.generator}
-                self.draft.write_text(self.note().decode('utf-8').rstrip() + '\n\n'
-                                      + '<!-- skill-provenance: ' + json.dumps(update) + ' -->\n', encoding='utf-8')
-                with self.assertRaisesRegex(ValueError, 'without an update record'):
-                    publish(self.draft, self.vault, self.now)
-                self.assertFalse((self.vault / 'Investments').exists())
-                self.draft.write_text(note_provenance.stamp_text(
-                    self.note().decode('utf-8'), self.generator), encoding='utf-8')
-                saved = publish(self.draft, self.vault, self.now)
-                self.assertEqual(saved['status'], 'created')
-                self.assertEqual(Path(saved['path']).read_bytes(), self.draft.read_bytes())
+            saved = publish(self.draft, self.vault, self.now)
+            self.assertEqual(saved['status'], 'created')
+            self.assertEqual(Path(saved['path']).read_bytes(), self.draft.read_bytes())
+            self.assertNotIn(b'skill-provenance', Path(saved['path']).read_bytes())
 
         def test_historical_identical_retry_never_relabels_its_creator(self):
-            self.provenance_gate.stop()
             current = self.prior('2026-09-05', [])
             original = current.read_bytes()
             with patch(__name__ + '.active_provenance', side_effect=AssertionError('must not verify a retry')):
@@ -2021,7 +2001,7 @@ def run_self_test():
                     first = folder / '2024-01-30-stock-research.md'
                     initial = first.read_text(encoding='utf-8')
                     if provenance_state == 'known':
-                        initial = note_provenance.stamp_text(initial, origin)
+                        initial = legacy_footer(initial, origin)
                     elif provenance_state == 'unknown-edited':
                         initial = initial.rstrip() + '\n\n<!-- skill-provenance: ' + json.dumps(
                             {'schema': 1, 'generated_by': None, 'updated_by': newer}) + ' -->\n'
@@ -2029,15 +2009,15 @@ def run_self_test():
                     expected_producer = origin if provenance_state == 'known' else None
                     # A prior watch's author is not the producer of first readiness.
                     watch = folder / '2024-01-30-070000-stock-research.md'
-                    watch.write_text(note_provenance.stamp_text(self.note('2024-01-30',
+                    watch.write_text(legacy_footer(self.note('2024-01-30',
                         [(identifier, 'watch', 'Confirmation still pending')],
                         as_of='2024-01-30T07:00:00-05:00',
                         generated='2024-01-30T07:02:00-05:00').decode('utf-8'), newer), encoding='utf-8')
                     baseline_path = folder / '2024-01-31-stock-research.md'
-                    baseline_path.write_text(note_provenance.stamp_text(
+                    baseline_path.write_text(legacy_footer(
                         baseline_path.read_text(encoding='utf-8'), newer), encoding='utf-8')
                     reminder = self.outcome_note('2024-02-01', [(identifier, 'ready', 'Confirmation rechecked')])
-                    reminder.write_text(note_provenance.stamp_text(
+                    reminder.write_text(legacy_footer(
                         reminder.read_text(encoding='utf-8'), newer), encoding='utf-8')
                     originals = {path: path.read_bytes() for path in folder.iterdir()}
                     result = outcomes(self.vault, now=self.now)
@@ -2049,7 +2029,7 @@ def run_self_test():
                     self.outcome_note('2026-09-05', [(identifier, 'watch', 'Carry the same buying thesis')], [
                         self.journal('Recommendation records', [(identifier, '2024-01-30',
                             '2024-01-31T09:31:00-05:00', self.record_link('2026-09-05'), baseline_link)])], draft=True)
-                    self.draft.write_text(note_provenance.stamp_text(
+                    self.draft.write_text(legacy_footer(
                         self.draft.read_text(encoding='utf-8'), newer), encoding='utf-8')
                     corrected = outcomes(self.vault, self.draft, self.now)
                     self.assertTrue(corrected['complete'], corrected['findings'])
@@ -3270,7 +3250,7 @@ def main(argv=None):
         check_parser.add_argument('--run-receipt', required=True)
         check_parser.add_argument('--check', required=True)
         if command == 'review-complete':
-            check_parser.add_argument('--draft', required=True, help='the exact final stamped draft actually checked')
+            check_parser.add_argument('--draft', required=True, help='the exact final draft actually checked')
     args = parser.parse_args(argv)
     if args.test:
         return 0 if run_self_test() else 1

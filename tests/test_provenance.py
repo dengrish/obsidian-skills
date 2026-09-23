@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check provenance across published note formats and an isolated runtime CLI.
+"""Check legacy note compatibility and the read-only runtime identity CLI.
 
 Fixtures use temporary directories only. No live vault, installed cache, Git,
 network, credentials or model-generated research is required.
@@ -51,6 +51,12 @@ def record(skill="knowledge:wiki-build", version="1.0.2"):
     }
 
 
+def legacy_footer(text, producer, **metadata):
+    """Historical fixture only; shipped helpers cannot write these footers."""
+    return text.rstrip('\r\n') + '\n\n<!-- skill-provenance: ' + json.dumps(
+        {'schema': 1, 'generated_by': producer, **metadata}) + ' -->\n'
+
+
 class NoteFormatTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="obsidian-provenance-test-")
@@ -72,40 +78,36 @@ class NoteFormatTests(unittest.TestCase):
     def test_wiki_footer_is_not_flashcard_content_or_a_source_link(self):
         original = wiki._st_good()
         self.assertEqual(wiki.lint_text(original, "roc-curve.md")["findings"], [])
-        stamped = provenance.stamp_text(original, record())
+        stamped = legacy_footer(original, record())
         self.assertEqual(wiki.lint_text(stamped, "roc-curve.md")["findings"], [])
         body, metadata = provenance.split_provenance(stamped)
         self.assertEqual(body.rstrip(), original.rstrip())
         self.assertEqual(metadata["generated_by"]["skill"], "knowledge:wiki-build")
 
-    def test_wiki_studied_card_attachments_survive_metadata_update(self):
+    def test_legacy_footer_removal_preserves_studied_card_attachments(self):
         original = wiki._st_good().rstrip("\n") + (
             " <!--SR:!2026-09-20,30,250!2026-09-21,31,250--> ^roc-card\n")
-        created = provenance.stamp_text(original, record())
-        updated = provenance.stamp_text(
-            original.replace("updated: 2026-01-02", "updated: 2026-01-03"),
-            record("knowledge:wiki-lint", "1.0.3"), previous=created)
-        self.assertIn("<!--SR:!2026-09-20,30,250!2026-09-21,31,250--> ^roc-card\n", updated)
-        self.assertEqual(wiki.lint_text(updated, "roc-curve.md")["findings"], [])
-        _, metadata = provenance.split_provenance(updated)
+        legacy = legacy_footer(original, record(), updated_by=record("knowledge:wiki-lint", "1.0.3"))
+        cleaned, metadata = provenance.split_provenance(legacy)
+        self.assertEqual(cleaned, original)
+        self.assertEqual(wiki.lint_text(cleaned, "roc-curve.md")["findings"], [])
         self.assertEqual(metadata["generated_by"], record())
-        self.assertEqual(metadata["updated_by"]["skill"], "knowledge:wiki-lint")
 
     def test_summary_footer_does_not_join_final_list_or_consume_prose_budget(self):
         before = summary.lint(summary.GOOD, mode="empirical")
         self.assertEqual(before, [])
-        stamped = provenance.stamp_text(summary.GOOD, record("knowledge:paper-summarize"))
+        stamped = legacy_footer(summary.GOOD, record("knowledge:paper-summarize"))
         self.assertEqual(summary.lint(stamped, mode="empirical"), before)
 
     def test_stamped_moc_retains_complete_entry_placement(self):
         entry = self.add_entry().replace("[[MOCs/statistics]]", "[[Wiki/statistics]]")
         root = scanner._st_entry("Statistics", "**Statistics** is a field.")
         (self.vault / "Wiki/statistics.md").write_text(
-            provenance.stamp_text(root, record("knowledge:wiki-lint")), encoding="utf-8")
+            legacy_footer(root, record("knowledge:wiki-lint")), encoding="utf-8")
         (self.vault / "Wiki/first.md").write_text(
-            provenance.stamp_text(entry, record("knowledge:wiki-add")), encoding="utf-8")
+            legacy_footer(entry, record("knowledge:wiki-add")), encoding="utf-8")
         (self.vault / "MOCs/statistics.md").write_text(
-            provenance.stamp_text("- [[Wiki/statistics|Statistics]]\n  - [[Wiki/first|First]]\n",
+            legacy_footer("- [[Wiki/statistics|Statistics]]\n  - [[Wiki/first|First]]\n",
                                   record("knowledge:wiki-lint")),
             encoding="utf-8")
         result = self.scan()
@@ -118,14 +120,14 @@ class NoteFormatTests(unittest.TestCase):
 
     def test_footer_only_misc_is_an_empty_generated_outline(self):
         (self.vault / "MOCs/misc.md").write_text(
-            provenance.stamp_text("", record("knowledge:wiki-lint")), encoding="utf-8")
+            legacy_footer("", record("knowledge:wiki-lint")), encoding="utf-8")
         hierarchy = self.scan()["hierarchy_diagnostic"]
         self.assertEqual(hierarchy["moc_consistency_findings"], [])
         self.assertEqual([(row["discipline"], row["state"], row["entries"])
                           for row in hierarchy["moc_file_states"]], [("misc", "empty", 0)])
 
     def test_malformed_misplaced_and_duplicate_footers_cannot_hide_in_note_formats(self):
-        good_footer = provenance.stamp_text("", record()).strip()
+        good_footer = legacy_footer("", record()).strip()
         malformed = "<!-- skill-provenance: {invalid JSON} -->"
         tails = {
             "malformed": "\n\n" + malformed + "\n",
@@ -150,16 +152,15 @@ class NoteFormatTests(unittest.TestCase):
                 self.assertIn("invalid-provenance", {finding["kind"] for finding
                               in result["hierarchy_diagnostic"]["moc_consistency_findings"]})
 
-    def test_unknown_historical_summary_attributes_only_its_actual_update(self):
+    def test_legacy_unknown_summary_creator_is_readable(self):
         original = summary.GOOD
-        changed = original.replace("Prose.\n", "Revised prose.\n", 1)
         updater = record("knowledge:paper-summarize")
-        stamped = provenance.stamp_text(changed, updater, previous=original)
-        self.assertEqual(summary.lint(stamped, mode="empirical"), [])
-        _, metadata = provenance.split_provenance(stamped)
+        legacy = legacy_footer(original, None, updated_by=updater)
+        self.assertEqual(summary.lint(legacy, mode="empirical"), [])
+        cleaned, metadata = provenance.split_provenance(legacy)
+        self.assertEqual(cleaned, original)
         self.assertIsNone(metadata["generated_by"])
         self.assertEqual(metadata["updated_by"], updater)
-        self.assertEqual(provenance.stamp_text(original, updater, previous=original), original)
 
     def test_malformed_market_provenance_is_reported_without_aborting_history(self):
         folder = self.vault / "Investments"
@@ -230,7 +231,7 @@ class RuntimeCliTests(unittest.TestCase):
              command, "--plugin", str(self.plugin), "--skill", "wiki-build", *map(str, arguments)],
             capture_output=True, text=True, encoding="utf-8", env=self.environment, cwd=self.directory)
 
-    def test_isolated_runtime_inspection_and_create_only_cli(self):
+    def test_isolated_runtime_inspection_is_read_only(self):
         inspected = self.cli("inspect")
         self.assertEqual(inspected.returncode, 0, inspected.stderr)
         expected = json.loads(inspected.stdout)
@@ -238,17 +239,12 @@ class RuntimeCliTests(unittest.TestCase):
         self.assertEqual(expected["runtime_sha256"], self.manifest["runtime_sha256"])
         draft, output = self.directory / "draft.md", self.directory / "stamped.md"
         draft.write_text(wiki._st_good(), encoding="utf-8")
-        written = self.cli("stamp", "--draft", draft, "--output", output)
-        self.assertEqual(written.returncode, 0, written.stderr)
-        first_bytes = output.read_bytes()
-        _, metadata = provenance.split_provenance(first_bytes.decode())
-        self.assertEqual(metadata["generated_by"], expected)
-        retry = self.cli("stamp", "--draft", draft, "--output", output)
-        self.assertNotEqual(retry.returncode, 0)
-        self.assertEqual(output.read_bytes(), first_bytes)
+        rejected = self.cli("stamp", "--draft", draft, "--output", output)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertFalse(output.exists())
         self.assertEqual(draft.read_text(encoding="utf-8"), wiki._st_good())
 
-    def test_cli_cannot_stamp_using_a_different_helpers_runtime_identity(self):
+    def test_cli_cannot_inspect_using_a_different_helpers_runtime_identity(self):
         inspected = self.cli("inspect", helper=SHARED / "note_provenance.py")
         self.assertNotEqual(inspected.returncode, 0)
         self.assertIn("own provenance helper", inspected.stderr)

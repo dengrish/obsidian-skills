@@ -178,14 +178,12 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
         return result
 
-    def stamp_market_draft(self, path):
+    def inspect_market_runtime(self, path):
         plugin = ROOT / "plugins/investments"
         script = "plugins/investments/shared/scripts/note_provenance.py"
         args = ("--plugin", plugin, "--skill", "stock-research")
         record = json.loads(self.run_script(script, "inspect", *args).stdout)
-        stamped = path.with_name(path.stem + "-stamped" + path.suffix)
-        self.run_script(script, "stamp", *args, "--draft", path, "--output", stamped)
-        return record, stamped
+        return record, path
 
     def test_summary_ownership_honors_the_qualified_pdf_path(self):
         stem = "Doe_Qualified_2025"
@@ -342,11 +340,10 @@ class WorkflowTests(unittest.TestCase):
         # The real publication path refuses a superficially complete report
         # that silently omits a collected source and its two stock ideas.
         draft.write_text(body, encoding="utf-8")
-        _, incomplete = self.stamp_market_draft(draft)
+        _, incomplete = self.inspect_market_runtime(draft)
         refused = self.run_script(daily_helper, "publish", incomplete, "--vault", self.vault,
                                  "--run-receipt", prepared["run_receipt"], expected=2)
         self.assertIn('needs a disposition: 101', refused.stdout)
-        incomplete.unlink()  # This refused, temporary stamp is never a published record.
         planner = json.loads(self.run_script("skills/stock-research/scripts/stock_coverage.py",
                             "context", "--vault", self.vault, "--as-of", prepared['as_of']).stdout)
         nomination = planner['new_or_changed_posts'][0]
@@ -363,10 +360,10 @@ class WorkflowTests(unittest.TestCase):
         body = body.replace('| --- | --- | --- | --- | --- | --- | --- | --- |\n',
                             '| --- | --- | --- | --- | --- | --- | --- | --- |\n' + queue, 1)
         draft.write_text(body, encoding="utf-8")
-        producer, stamped = self.stamp_market_draft(draft)
+        producer, final_draft = self.inspect_market_runtime(draft)
         self.run_script(daily_helper, "review-complete", "--vault", self.vault,
-                        "--run-receipt", prepared["run_receipt"], "--draft", stamped, "--check", "final-review")
-        publication = json.loads(self.run_script(daily_helper, "publish", stamped,
+                        "--run-receipt", prepared["run_receipt"], "--draft", final_draft, "--check", "final-review")
+        publication = json.loads(self.run_script(daily_helper, "publish", final_draft,
                                  "--vault", self.vault, "--run-receipt", prepared["run_receipt"]).stdout)
         daily = Path(publication["path"])
         daily_bytes = daily.read_bytes()
@@ -379,7 +376,9 @@ class WorkflowTests(unittest.TestCase):
         for path in notes:
             content = path.read_text(encoding="utf-8")
             self.assertIn("[[Investments/" + daily.stem + "#NASDAQ:", content)
-            self.assertIn(producer["runtime_sha256"], content)
+            self.assertNotIn("skill-provenance", content)
+            receipt = json.loads((folder / ".stock-research/dossiers" / (path.stem + ".json")).read_bytes())
+            self.assertEqual(receipt["committed"]["provenance"]["generated_by"], producer)
         self.assertIn('status: "rejected"', notes[1].read_text(encoding="utf-8"))
         retry = json.loads(self.run_script(dossier_helper, *arguments).stdout)
         self.assertTrue(retry["complete"], retry)
@@ -852,7 +851,7 @@ raise SystemExit(main(fixture['args'], client))
                          .replace('### Candidate assessments',
                                   coverage_journals((first, update, previous_month))
                                   + '### Candidate assessments'), encoding="utf-8")
-        _, draft = self.stamp_market_draft(draft)
+        _, draft = self.inspect_market_runtime(draft)
         self.run_script(script, "publish", draft, "--vault", self.vault)
         rebuilt = json.loads(self.run_script(script, "outcomes", "--vault", self.vault).stdout)
         self.assertEqual(rebuilt["checkpoints"], checked["checkpoints"])
@@ -936,7 +935,7 @@ raise SystemExit(main(fixture['args'], client))
         self.assertEqual(linted["theses"][0]["id"], thesis)
         self.assertEqual(linted["theses"][0]["state"], "watch")
         missing = self.run_script(script, "publish", draft, "--vault", self.vault, expected=2)
-        self.assertIn("skill-provenance footer", missing.stdout)
+        self.assertIn("stock_research: 2", missing.stdout)
         self.assertFalse(target.exists())
         due = (datetime.fromisoformat(initial['as_of']) + timedelta(days=1)).isoformat()
         rows = (
@@ -951,9 +950,9 @@ raise SystemExit(main(fixture['args'], client))
                          .replace('### Candidate assessments',
                                   coverage_journals((prior,), rows)
                                   + '### Candidate assessments'), encoding="utf-8")
-        generator, draft = self.stamp_market_draft(draft)
-        stamped = json.loads(self.run_script(script, "lint", draft).stdout)
-        self.assertEqual(stamped["provenance"], {"schema": 1, "generated_by": generator})
+        generator, draft = self.inspect_market_runtime(draft)
+        linted = json.loads(self.run_script(script, "lint", draft).stdout)
+        self.assertIsNone(linted["provenance"])
         self.assertEqual(generator["skill"], "investments:stock-research")
         self.assertEqual(len(generator["runtime_sha256"]), 64)
         created = json.loads(self.run_script(script, "publish", draft, "--vault", self.vault).stdout)

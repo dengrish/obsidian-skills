@@ -2,7 +2,7 @@
 
 **This file owns shared vault contracts:** folder ownership, schemas, dates and
 review state, tags, names, source identity, and cross-skill linking boundaries.
-Shared runtime, input safety, safe publication, provenance and suggestion logs
+Shared runtime, input safety, safe publication and suggestion logs
 have their own linked guides. Each skill's entrypoint selects its workflow and
 authorization scope; its linked references own the detailed procedures and
 output-specific writing rules. A consumer links to the rule's owner instead
@@ -498,16 +498,15 @@ structured PDF summary, or an agent-written extract of one web page — while
 their frontmatter follows this shared convention. Future source-note producers
 adopt it rather than inventing another schema. The narrow additional producer
 is wiki-lint's Task 3 missing-root workflow: when it needs new web evidence,
-it follows the same research-extract rules and records `knowledge:wiki-lint`
-as the actual writer. It does not invoke or alter the user's topic queue.
+it follows the same research-extract rules. It does not invoke or alter the
+user's topic queue.
 
 A research extract is clearly agent-written and is neither a full-text
 capture nor a multi-page synthesis. Its body carries the exact marker
 `<!-- obsidian:wiki-add-research-source -->` defined by the
 [research guide](../skills/wiki-add/references/research.md), which owns its
 evidence, attribution and image-provenance procedure. This marker identifies
-the content kind, including Task 3's root evidence; the provenance footer
-identifies the actual producing skill. Keep one page per note;
+the content kind, including Task 3's root evidence. Keep one page per note;
 reuse suitable existing source notes without rewriting them. `clipping-clean`
 must preserve marked extracts and never process them as full-text captures.
 
