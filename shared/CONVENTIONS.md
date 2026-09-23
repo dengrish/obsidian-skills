@@ -511,7 +511,7 @@ When present, keep its value unchanged between `tags:` and `parents:`; it is
 optional and is not a lint finding.
 
 **Body math has a canonical home too.** The vault-wide equation policy —
-coverage from the note's own prose, display form, notation, normalization —
+explanatory value, evidence, display form, notation, normalization —
 lives in `wiki-build/references/equations.md`, and wiki-lint enforces it
 vault-wide under its QC item 12. Both Wiki validators import the conservative
 `shared/scripts/equation_coverage.py` candidate floor; the executing agent

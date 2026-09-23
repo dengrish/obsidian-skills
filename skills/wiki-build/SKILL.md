@@ -331,8 +331,9 @@ item numbers used by `lint_entry.py` and `wiki-lint`.
     report an inherited excess rather than pruning it. See
     [Related footer](references/writing.md#the-related-footer).
 12. **Equations, images, tables** — keep LaTeX in body prose, ordinary
-    quantities plain, and literal dollars escaped. Render every stated or fully
-    described calculation in conforming LaTeX, display defining equations, bind
+    quantities plain, and literal dollars escaped. Apply the explanatory-value test before including an equation, whether
+    source-supplied or a verified standard addition. Use conforming LaTeX,
+    display warranted defining equations, bind
     symbols, and normalize notation. Inventory source figures, select only
     exhibits that clarify this entry, keep composite/panel identity intact, and
     recreate warranted source tables. See

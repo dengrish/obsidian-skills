@@ -7025,6 +7025,12 @@ def check_equation_policy(rep, conv):
          "qc-items.md item 12 no longer states that an insertion into a "
          "`read: true` entry is named under *Notes for the user* -- the "
          "silent-unread-math gap the 2026-08-20 review closed"),
+        (eq_path, eq, r"Include an equation only when it makes the concept easier to understand",
+         "equation policy no longer gates mathematics on explanatory value"),
+        (eq_path, eq, r"A useful standard equation may be added even when the source supplies none",
+         "equation policy incorrectly makes source typesetting a prerequisite"),
+        (qc_path, qc, r"simple verbal rule such as hard voting can remain prose-only",
+         "wiki-lint no longer guards against forcing formalism onto simple concepts"),
         (eq_path, eq, r"equation_coverage\.py",
          "equations.md no longer identifies the conservative shared "
          "equation-coverage candidate floor"),

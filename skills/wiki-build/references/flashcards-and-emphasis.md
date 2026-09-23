@@ -56,10 +56,13 @@ The three content lines run consecutively with **no blank line between any pair 
 
 ### Line-1 equation coverage
 
-**When an equation established in the entry's body expresses the claim a card
-tests, include that equation inline on the same first descriptive line as a
-compact verbal cue.** A mathematically accurate prose-only definition still
-needs the equation. Review every card, including disabled and legacy extra
+**When a useful equation established in the entry's body expresses the quantitative claim a card
+tests, include it inline on the first descriptive line with a compact verbal
+cue.** Apply the body equation guide's explanatory-value test first. A simple
+verbal rule does not become a mathematical learning objective merely because
+an earlier note formalized it; hard voting needs no equation in either place.
+Under an authorized simplification, remove unhelpful card math with its body
+equation while preserving the tested concept and all scheduling state. Review every card, including disabled and legacy extra
 cards, against its own tested claim; a different facet of the entry is not a
 reason to change that claim.
 
