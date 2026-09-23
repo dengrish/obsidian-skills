@@ -4,10 +4,12 @@
 import json
 import os
 from pathlib import Path
+import runpy
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -211,6 +213,116 @@ class SourceCoverageTests(unittest.TestCase):
         self.assertFalse(any(item["kind"] == "unresolved-link" for item in findings))
         self.assertTrue(any(item["kind"] == "noncanonical-target"
                             and item["expected_target"] == "Wiki/neighbor" for item in findings))
+
+
+class VaultRootScanTests(unittest.TestCase):
+    def setUp(self):
+        self.scratch = tempfile.TemporaryDirectory(prefix="knowledge-wiki-root-review-")
+        self.root = Path(self.scratch.name)
+        self.vault = self.root / "Selected vault"
+        self.environment = dict(os.environ, OBSIDIAN_VAULT_SHARED=str(ROOT / "shared/scripts"))
+
+    def tearDown(self):
+        self.scratch.cleanup()
+
+    def fixture(self, wiki_relative="Knowledge/Wiki"):
+        self.wiki = self.vault / wiki_relative
+        self.wiki.mkdir(parents=True)
+        mocs = self.vault / "MOCs"
+        mocs.mkdir()
+        for slug in ("misc", "alpha", "beta"):
+            parents = [] if slug == "misc" else [f"[[{wiki_relative}/misc]]"]
+            body = f"**{slug.title()}** is a fixture entry."
+            if slug == "alpha":
+                body += f" Its mechanism uses [[{wiki_relative}/beta|Beta]]."
+            (self.wiki / (slug + ".md")).write_text("\n".join([
+                "---", "title: " + slug.title(), "type: Concept", "aliases: []",
+                'tags: ["#misc"]', "parents: " + json.dumps(parents),
+                'sources: ["[[Example.md]]"]', "created: 2026-09-23",
+                "updated: 2026-09-23", "read: false",
+                "description: A fixture verifies vault path resolution.",
+                "---", "", body, "",
+            ]), encoding="utf-8")
+        (mocs / "misc.md").write_text(
+            f"- [[{wiki_relative}/misc|Misc]]\n"
+            f"  - [[{wiki_relative}/alpha|Alpha]]\n"
+            f"  - [[{wiki_relative}/beta|Beta]]\n", encoding="utf-8")
+
+    def snapshot(self):
+        return {str(path.relative_to(self.vault)):
+                path.read_bytes() if path.is_file() else None
+                for path in self.vault.rglob("*")}
+
+    def scan_cli(self, *args):
+        return subprocess.run([sys.executable, str(SCAN), str(self.wiki), *map(str, args)],
+                              cwd=self.root, env=self.environment, text=True,
+                              encoding="utf-8", capture_output=True, timeout=30)
+
+    def assert_resolved(self, report):
+        self.assertEqual(report["vault_root"], str(self.vault))
+        self.assertFalse(any(row["item"] == "item10/dangling"
+                             for row in report["problems"]), report["problems"])
+        hierarchy = report["hierarchy_diagnostic"]
+        self.assertEqual(hierarchy["unresolved_parents"], [])
+        self.assertEqual(hierarchy["moc_consistency_findings"], [])
+        self.assertEqual([(row["path"], row["state"])
+                          for row in hierarchy["moc_file_states"]],
+                         [(str(self.vault / "MOCs/misc.md"), "readable")])
+
+    def test_explicit_vault_keeps_no_image_preview_links_and_hierarchy_resolved(self):
+        self.fixture()
+        before = self.snapshot()
+        result = self.scan_cli("--vault", self.vault)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        report = json.loads(result.stdout)
+        self.assert_resolved(report)
+        self.assertEqual(report["image_folder_findings"], [])
+        self.assertEqual(self.snapshot(), before)
+        self.assertFalse((self.vault / ".obsidian").exists())
+        self.assertFalse((self.vault / "Sources").exists())
+
+    def test_invalid_explicit_vault_is_usage_error_without_output_or_setup(self):
+        self.fixture()
+        regular_file = self.root / "not-a-directory"
+        regular_file.write_text("Keep me.\n", encoding="utf-8")
+        output = self.root / "existing-report.json"
+        output.write_text("Original report.\n", encoding="utf-8")
+        before = self.snapshot()
+        for invalid in (self.root / "missing-vault", regular_file):
+            with self.subTest(vault=invalid):
+                result = self.scan_cli("--vault", invalid, "--out", output)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("--vault is not a directory", result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertEqual(output.read_text(encoding="utf-8"), "Original report.\n")
+                self.assertEqual(self.snapshot(), before)
+        self.assertFalse((self.root / "missing-vault").exists())
+
+    def test_omitted_vault_retains_images_marker_and_parent_inference(self):
+        self.fixture()
+        images = self.vault / "Sources/Images"
+        images.mkdir(parents=True)
+        result = self.scan_cli("--images", images)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assert_resolved(json.loads(result.stdout))
+        (self.vault / ".obsidian").mkdir()
+        result = self.scan_cli()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assert_resolved(json.loads(result.stdout))
+        direct_wiki = self.root / "Legacy vault/Wiki"
+        direct_wiki.mkdir(parents=True)
+        self.wiki = direct_wiki
+        result = self.scan_cli()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)["vault_root"], str(direct_wiki.parent))
+
+    def test_python_api_accepts_and_validates_explicit_vault(self):
+        self.fixture()
+        with patch.dict(os.environ, self.environment):
+            scan = runpy.run_path(str(SCAN))["scan"]
+        self.assert_resolved(scan(self.wiki, vault=self.vault))
+        with self.assertRaisesRegex(ValueError, "vault is not a directory"):
+            scan(self.wiki, vault=self.root / "missing-vault")
 
 
 if __name__ == "__main__":
