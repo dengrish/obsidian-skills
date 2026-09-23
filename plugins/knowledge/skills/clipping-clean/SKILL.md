@@ -69,7 +69,7 @@ name immediately before attachment work.
 |---|---|
 | `new` | Continue. |
 | `duplicate` | Ordinary batch: skip and retain the raw. Named file: identify the existing note and obtain overwrite-or-skip authorization before changing it; honor authorization already given. Explicit resume/reprocess intent supplies that decision only for a matching note this skill owns. |
-| `duplicate-of-earlier-input` | Skip the second capture of the same article in this batch. |
+| `duplicate-of-earlier-input` | This is a pending capture, not a published owner. Skip only after the earlier capture publishes successfully. If it fails or is deferred, recheck the later capture against the current Articles index and process it when still new. |
 | `no-source` | Recover a usable HTTP(S) URL from the capture and recheck it with `--url`. Without one, skip/report in batch or ask for it on a named capture. A clearly local note or plugin demo is unsupported input: name it and leave it. Never treat either case as new. |
 
 Report `unindexable` notes and existing URL `collisions`; do not repair, merge

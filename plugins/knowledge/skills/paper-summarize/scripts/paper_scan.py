@@ -106,7 +106,7 @@ import unicodedata
 
 from naming import chapter_book_stem, core_stem, looks_canonical, stem_of
 from vault_artifacts import (inventory_pdfs, inventory_source_figures,
-                             output_vault_root, verify_selected_pdf)
+                             local_link_matches, output_vault_root, verify_selected_pdf)
 from yaml_scalars import parse_source_fields
 
 #: Figure-label namespaces, ranked so a listing reads main → appendix →
@@ -402,12 +402,15 @@ def body_is_embed_only(path):
     return len(kept) == 1 and bool(_EMBED_ONLY_RE.match(kept[0]))
 
 
-def source_names(source, stem):
+def source_names(source, stem, *, pdf_path=None, vault_root=None, note_path=None):
     """True when this `source:` value is a wikilink naming `stem`'s PDF.
 
     A URL is False (it is a clipping note). A wikilink to a *different*
-    document is False. Case-folded so ownership does not change with the host
-    filesystem; the exact stored spelling remains canonical.
+    document is False. A qualified target must also match the selected PDF's
+    actual vault-relative/note-relative path or a component-aligned suffix.
+    Without a vault anchor, only a bare basename can establish ownership.
+    Case-folded so ownership does not change with the host filesystem; the
+    exact stored spelling remains canonical.
     """
     if not source:
         return False
@@ -417,9 +420,22 @@ def source_names(source, stem):
     m = _WIKILINK_RE.match(source)
     if not m:
         return False
-    base = m.group(1).strip().rstrip("/").split("/")[-1]
-    return (base.lower().endswith(".pdf")
-            and _name_key(os.path.splitext(base)[0]) == _name_key(stem))
+    target = m.group(1).strip().replace("\\", "/")
+    parts = target.split("/")
+    base = parts[-1]
+    if not (base.lower().endswith(".pdf")
+            and _name_key(os.path.splitext(base)[0]) == _name_key(stem)):
+        return False
+    if len(parts) == 1:
+        return True
+    if not pdf_path or not vault_root:
+        return False
+    relative = os.path.relpath(os.path.abspath(pdf_path), os.path.abspath(vault_root))
+    if relative == ".." or relative.startswith(".." + os.sep):
+        return False
+    note_dir = (os.path.relpath(os.path.dirname(os.path.abspath(note_path)), vault_root)
+                if note_path else "")
+    return local_link_matches(target, relative, note_dir=note_dir)
 
 
 def find_pdfs(src):
@@ -571,7 +587,8 @@ def scan(src, notes, images, allow_unorganized=False,
             state, existing = "theirs", None
         else:
             existing = note_source(note)
-            if not source_names(existing, stem):
+            if not source_names(existing, stem, pdf_path=path, vault_root=vault_root,
+                                note_path=note):
                 state = "theirs"
             elif body_is_embed_only(note):
                 state = "legacy"
@@ -857,7 +874,7 @@ def run_self_test():
     for src, stem, want in (
             ('"[[Doe_Foo_2025.pdf]]"',                "Doe_Foo_2025",  False),
             ("[[Doe_Foo_2025.pdf]]",                  "Doe_Foo_2025",  True),
-            ("[[Sources/PDFs/Doe_Foo_2025.pdf]]",     "Doe_Foo_2025",  True),
+            ("[[Sources/PDFs/Doe_Foo_2025.pdf]]",     "Doe_Foo_2025",  False),
             ("[[Doe_Foo_2025.pdf|the paper]]",        "Doe_Foo_2025",  True),
             ("[[doe_foo_2025.pdf]]",                  "Doe_Foo_2025",  True),
             ("[[Mu\u0308ller_Foo_2025.pdf]]",          "Müller_Foo_2025", True),

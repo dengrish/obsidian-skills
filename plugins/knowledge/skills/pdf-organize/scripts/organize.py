@@ -138,7 +138,8 @@ from atomic_move import (LinkUnavailable, MoveIncomplete, PublicationConflict,
                          move_noreplace, publish_new,
                          remove_expected, replace_expected,
                          set_private_mode)  # noqa: E402
-from vault_artifacts import inventory_pdfs, inventory_source_figures  # noqa: E402
+from vault_artifacts import (inventory_pdfs, inventory_source_figures,
+                             local_link_matches)  # noqa: E402
 from yaml_scalars import parse_scalar, parse_source_fields, split_flow, strip_comment  # noqa: E402
 from entry_structure import mask_body_comments, mask_escaped_wikilinks  # noqa: E402
 
@@ -351,8 +352,7 @@ NOTE_DIRS = (("Articles",),)
 #: under some other key cannot win over the real one.
 _SOURCES_ITEM = re.compile(r"\A[ \t]*-(?:[ \t]+(.*))?\Z")
 
-#: The document a `source:` wikilink names.  Obsidian resolves by basename, so
-#: only the last path segment matters.
+#: Parse the document target; qualified ownership also checks its actual path.
 _SRC_LINK = re.compile(r"\A!?\[\[([^\]|#\r\n]+)(?:[#|][^\]\r\n]*)?\]\]\Z")
 
 
@@ -565,7 +565,7 @@ def _inside_span(position, spans):
     return any(start <= position < end for start, end in spans)
 
 
-def _note_is_about(path, stem):
+def _note_is_about(path, stem, *, pdf_path=None, vault=None):
     """True when this note is a note ABOUT the document `stem` names.
 
     `Articles/` holds two kinds of note under one filename shape: a summary of
@@ -592,9 +592,11 @@ def _note_is_about(path, stem):
         link = _SRC_LINK.match(val)
         if not link:
             return False
-        base = link.group(1).strip().rstrip("/").split("/")[-1]
-        return (os.path.splitext(base)[1].lower() == ".pdf"
-                and _nfc_low(os.path.splitext(base)[0]) == _nfc_low(stem))
+        target = link.group(1).strip().replace("\\", "/")
+        actual = (os.path.relpath(pdf_path, vault) if pdf_path and vault
+                  else stem + ".pdf")
+        note_dir = os.path.relpath(os.path.dirname(path), vault) if vault else ""
+        return local_link_matches(target, actual, note_dir=note_dir)
 
     def _legacy(body):
         body = body.strip()
@@ -839,7 +841,7 @@ def keyed_files(vault, path, _seen=None):
             if _nfc_low(f) != low + ".md":
                 continue
             note_path = os.path.join(notedir, f)
-            if _note_is_about(note_path, stem):
+            if _note_is_about(note_path, stem, pdf_path=path, vault=vault):
                 out[note_path] = f
             elif _unquoted_source_claim(note_path, stem):
                 raise InventoryFailed(
@@ -1067,32 +1069,6 @@ def _stem_match(m):
     return m.group("stem")
 
 
-def _link_dirs(open_text, note_dir):
-    """Every vault-relative directory a wikilink's `open` group could name.
-
-    `open_text` is the match's `open` group — `[[` or `![[`, optionally
-    followed by a folder qualification.  None when there is no qualification:
-    a bare `[[Stem]]` resolves by basename vault-wide, so it names its file
-    wherever that file lives and there is no path to check.
-
-    TWO candidates, not one, because Obsidian writes two path formats and the
-    link text does not say which: *Absolute path in vault* writes
-    `Articles/Stem`, while *Relative path to file* writes
-    `../Articles/Stem` climbing out of a folder but a bare
-    `Articles/Stem` going into one — the same spelling as the absolute form.
-    Obsidian resolves a qualified link against the vault root AND against the
-    citing note's own folder, so both readings are tried here.  Accepting only
-    the vault-root one would drop a real reference on every vault set to the
-    relative format, which is the exact miss the folder-qualified branch was
-    added to close.
-    """
-    qual = open_text.lstrip("!")[2:].rstrip("/")     # drop `!`, `[[`, the `/`
-    if not qual:
-        return None
-    return {k for k in (_dirkey(qual), _dirkey(note_dir + "/" + qual))
-            if k is not None}
-
-
 #: A folder qualification sitting immediately before a matched basename, in
 #: either syntax: `[[Sources/PDFs/` or `](Sources/PDFs/`.  Anchored at the end
 #: so it only matches when it abuts the name.  The basename branch of
@@ -1101,13 +1077,14 @@ def _link_dirs(open_text, note_dir):
 _QUAL_BEFORE = re.compile(r"(?:!?\[\[|\]\()(?!\w+:)([^\[\]()\n|#]*/)\Z")
 
 
-def _qual_before(body, start):
-    """The folder qualification abutting a basename match, or None."""
+def _qualifies_at(body, start, name, dirs, note_dir):
+    """Check the qualification and syntax abutting a basename match."""
     m = _QUAL_BEFORE.search(body, max(0, start - 400), start)
-    return m.group(1) if m else None
+    return _qualifies_qual(m.group(1) if m else None, name, dirs, note_dir,
+                           allow_suffix=bool(m and m.group(0).lstrip("!").startswith("[[")))
 
 
-def _qualifies_qual(qual, name, dirs, note_dir):
+def _qualifies_qual(qual, name, dirs, note_dir, *, allow_suffix=False):
     """`_qualifies`, given the qualification text rather than a match."""
     if dirs is None:
         return True
@@ -1116,10 +1093,10 @@ def _qualifies_qual(qual, name, dirs, note_dir):
         return True
     if not qual:
         return True                      # bare: resolves by basename vault-wide
-    got = {k for k in (_dirkey(qual.rstrip("/")),
-                       _dirkey(note_dir + "/" + qual.rstrip("/")))
-           if k is not None}
-    return not got or bool(got & want)
+    target = qual.rstrip("/") + "/" + name
+    return any(local_link_matches(target, directory + "/" + name if directory else name,
+                                  note_dir=note_dir, allow_suffix=allow_suffix)
+               for directory in want)
 
 
 def _qualifies(m, name, dirs, note_dir):
@@ -1145,13 +1122,8 @@ def _qualifies(m, name, dirs, note_dir):
     holds no entry for is the same case: unlocated, so unjudgeable, so counted
     as a reference exactly as before.
     """
-    if dirs is None:
-        return True
-    want = dirs.get(name)
-    if not want:
-        return True
-    got = _link_dirs(m.group("open"), note_dir)
-    return got is None or bool(got & want)
+    qualification = m.group("open").lstrip("!")[2:].strip()
+    return _qualifies_qual(qualification, name, dirs, note_dir, allow_suffix=True)
 
 
 def references(vault, names, dirs=None, directory_names=()):
@@ -1223,8 +1195,7 @@ def references(vault, names, dirs=None, directory_names=()):
                         found.add(name)
                 else:
                     name = _canonical_name(lut, m.group("name"))
-                    if _qualifies_qual(_qual_before(part, m.start("name")),
-                                       name, dirs, note_dir):
+                    if _qualifies_at(part, m.start("name"), name, dirs, note_dir):
                         found.add(name)
         found.discard(os.path.basename(md))           # a note naming itself
         if found:
@@ -1441,8 +1412,8 @@ def rewrite_text(text, ren, stem_ren, dirs=None, note_dir="",
                     return m.group(0)
                 return m.group("open") + _canonical_name(new_stem_of, stem)
             name = m.group("name")
-            if not _qualifies_qual(_qual_before(part, m.start("name")),
-                                   _canonical_name(lut, name), dirs, note_dir):
+            if not _qualifies_at(part, m.start("name"),
+                                _canonical_name(lut, name), dirs, note_dir):
                 return m.group(0)
             return _canonical_name(new_of, name)
 

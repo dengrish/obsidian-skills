@@ -109,11 +109,11 @@ def parse_queue(data):
     source_digest = digest(data)
     items, reports = [], []
     completed = 0
-    frontmatter = bool(lines and lines[0].lstrip("\ufeff").strip() == "---")
+    frontmatter = bool(lines and lines[0].lstrip("\ufeff").rstrip("\r\n \t") == "---")
     body_at = 0
     if frontmatter:
         body_at = next((i + 1 for i, line in enumerate(lines[1:], 1)
-                        if line.strip() in ("---", "...")), len(lines))
+                        if line.rstrip("\r\n \t") in ("---", "...")), len(lines))
     # The shared Markdown view distinguishes real comments from literal
     # delimiters in inline/fenced code, including soft-wrapped code spans.
     # Keep YAML outside that view and retain the raw text for exact patches.
@@ -125,7 +125,8 @@ def parse_queue(data):
         offset += len(raw.encode("utf-8"))
         line = raw.rstrip("\r\n")
         if frontmatter:
-            if number > 1 and line.strip() in ("---", "..."):
+            # An indented fence belongs to a YAML block scalar, not the body.
+            if number > 1 and line.rstrip(" \t") in ("---", "..."):
                 frontmatter = False
             continue
         if fence:

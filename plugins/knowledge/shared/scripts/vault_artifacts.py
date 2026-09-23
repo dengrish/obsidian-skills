@@ -48,6 +48,7 @@ __all__ = [
     "PDFSelection",
     "FigureInventory",
     "portable_identity",
+    "local_link_matches",
     "inventory_pdfs",
     "verify_selected_pdf",
     "source_stem_groups",
@@ -60,6 +61,51 @@ __all__ = [
 def _sort_key(value):
     text = os.fspath(value).replace(os.sep, "/")
     return portable_identity(text), text
+
+
+def local_link_matches(target, actual, *, note_dir="", allow_suffix=True):
+    """Match a decoded local link path to one known vault-relative file.
+
+    Accept a bare basename, a vault-relative or note-relative path, or a
+    component-aligned shortest suffix. Never discard a wrong qualification.
+    This is a lexical match, not an inventory/uniqueness or write-authority
+    check; callers must separately prove the selected file has one owner.
+    Ordinary Markdown paths use allow_suffix=False; shortest-suffix lookup is
+    an Obsidian wikilink behavior.
+    """
+    def parts(value):
+        return [piece.strip() for piece in value.replace("\\", "/").split("/")]
+
+    def collapse(pieces):
+        result = []
+        for piece in pieces:
+            if piece in ("", "."):
+                continue
+            if piece == "..":
+                if not result:
+                    return None
+                result.pop()
+            else:
+                result.append(portable_identity(piece))
+        return result
+
+    if not isinstance(target, str) or not isinstance(actual, str):
+        return False
+    target, actual = target.strip(), actual.strip()
+    if (not target or not actual or target.startswith(("/", "\\"))
+            or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", target)
+            or any(char in target for char in "\r\n\0")):
+        return False
+    wanted, known = parts(target), collapse(parts(actual))
+    if not known or not wanted[-1]:
+        return False
+    for candidate in (collapse(wanted), collapse(parts(note_dir) + wanted)):
+        if candidate == known:
+            return True
+    # An explicit relative path cannot also mean an arbitrary suffix.
+    return (allow_suffix and not any(piece in ("", ".", "..") for piece in wanted)
+            and len(wanted) <= len(known)
+            and [portable_identity(piece) for piece in wanted] == known[-len(wanted):])
 
 
 def _snapshot(item):
@@ -701,6 +747,22 @@ def run_self_test():
         if not condition:
             state["bad"] += 1
             print("FAIL %s" % label)
+
+    for target, actual, note_dir, expected in (
+            ("Study.pdf", "Sources/PDFs/Study.pdf", "Articles", True),
+            ("PDFs/Study.pdf", "Sources/PDFs/Study.pdf", "Articles", True),
+            ("../Sources/PDFs/Study.pdf", "Sources/PDFs/Study.pdf", "Articles", True),
+            ("../../Sources/PDFs/Study.pdf", "Sources/PDFs/Study.pdf", "Articles", False),
+            ("Missing/Study.pdf", "Sources/PDFs/Study.pdf", "Articles", False),
+            ("Other/PDFs/Study.pdf", "Sources/PDFs/Study.pdf", "Articles", False),
+            ("Sources/PDFs/Study.pdf/", "Sources/PDFs/Study.pdf", "Articles", False),
+            ("/Sources/PDFs/Study.pdf", "Sources/PDFs/Study.pdf", "Articles", False),
+            ("https://example.org/Study.pdf", "Sources/PDFs/Study.pdf", "", False),
+            ("Sources/PDFs/Other.pdf", "Sources/PDFs/Study.pdf", "", False),
+            ("pdfs/Cafe\u0301.pdf", "Sources/PDFs/Caf\u00e9.pdf", "Articles", True),
+            ("sub/Study.pdf", "Articles/sub/Study.pdf", "Articles", True)):
+        check("qualified local target: " + target,
+              local_link_matches(target, actual, note_dir=note_dir), expected)
 
     tmp = tempfile.mkdtemp(prefix="vault-artifacts-selftest-")
     try:

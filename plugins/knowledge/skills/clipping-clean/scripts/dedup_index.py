@@ -498,10 +498,10 @@ def check(entries, index):
         else:
             status = "new"
             live.setdefault(norm, [])
-        seen_this_run.setdefault(norm, ent.get("id"))
         results.append({**ent, "normalized": norm, "status": status,
                         "matches": list(matches)})
         if status == "new":
+            seen_this_run[norm] = ent.get("id")
             live[norm].append(ent.get("id") or "<pending write>")
     return results
 

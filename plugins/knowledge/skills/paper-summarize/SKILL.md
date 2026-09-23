@@ -62,6 +62,10 @@ this skill's note; a URL identifies a clipping. Legacy `source:` is read only if
 establish ownership, including quoted/escaped duplicate keys. Readable
 single-line flow lists are accepted for existing ownership; new notes retain
 the canonical block form. Multiple portable-equivalent basenames are a collision.
+For an existing qualified PDF origin, its folder components must also match
+the selected PDF's actual vault-relative or note-relative path, or a unique suffix of it. A
+matching basename at a different or missing qualified path is not ownership.
+Without a vault anchor, qualified origins remain unproved and block replacement.
 
 | Scan result | Action |
 |---|---|
