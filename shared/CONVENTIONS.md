@@ -462,9 +462,9 @@ read: false
 ```
 
 - **`aliases` is the only omittable key** (omit when there are none).
-- **`tags` is a required nonempty block list** of double-quoted, `#`-prefixed
-  enum values. Use `"#misc"` alone when no specific discipline fits; never
-  combine it with specific tags. Blank, empty, missing, or malformed Wiki
+- **`tags` is a required block list containing exactly one** double-quoted,
+  `#`-prefixed enum value. Use `"#misc"` when no specific discipline fits.
+  Multiple, blank, empty, missing, or malformed Wiki
   tags are QC errors. This requirement does not change source-note schemas.
 - **`parents` is a list, and an empty one is written `parents: []`** — never a
   bare `parents:`. The vault pins the property as `multitext` in
@@ -768,32 +768,39 @@ tags:
   - "#machine-learning"
 ```
 
-- **Tags are not wikilinks.** They reference no note, need no target file, and
-  require no additional entry.
+- **Tags are not wikilinks.** Each active tag has a corresponding Wiki root
+  entry, maintained by wiki-lint's hierarchy workflow. The tag itself remains
+  a quoted `#` value; links to that entry use `[[Wiki/<discipline-slug>]]`.
 - **The quotes are mandatory.** An unquoted `- #machine-learning` parses as a
   YAML comment and the discipline is silently lost.
-- **Wiki cardinality: one or more.** Most entities have a single canonical
-  home. Add a specific discipline only when the entity is genuinely a
-  primary topic in it. When no specific discipline fits, use `"#misc"` as
-  the sole tag. Never combine `#misc` with another tag or leave Wiki tags
-  blank/empty. Source notes retain their own schema rules permitting blank
+- **Wiki cardinality: exactly one.** Choose the best home for the concept as
+  explained in this entry. Cross-disciplinary relationships belong in prose
+  and Related links, not extra tags. When no specific discipline fits, use
+  `"#misc"`. Never leave Wiki tags blank/empty. Source notes retain their own schema rules permitting blank
   tags; adding this enum member does not require a nonempty value there.
 - **Selection test:** tag the discipline that *owns* the entity — where it would
   be a primary topic in a textbook table of contents — not every discipline that
-  *uses* it.
+  *uses* it. In this vault, predictive modeling, model fitting, regression,
+  classification, losses, model evaluation, and model-specific components
+  belong to `#machine-learning`, including classical statistical models.
+  General descriptive statistics and sampling methodology remain statistics;
+  general mathematical structures remain mathematics. Classify the meaning
+  actually explained: a decision-tree leaf belongs with decision trees.
 - **Derived artifact:** the MOC filename is the tag value with the `#` stripped
   plus `.md`, in **`MOCs/`** (`#machine-learning` →
-  `MOCs/machine-learning.md`). MOC links and root `parents:` values always use
-  the qualified extensionless form `[[MOCs/machine-learning]]`. This keeps
-  the navigation note distinct from a possible `Wiki/machine-learning.md` entry;
+  `MOCs/machine-learning.md`). MOC navigation links use
+  `[[MOCs/machine-learning]]`; **no MOC may be a `parents:` target**.
+  The hierarchy root is `[[Wiki/machine-learning]]`, whose own parents are
+  `[]`. Every active discipline has its corresponding Wiki root entry. This keeps
+  the navigation note distinct from the `Wiki/machine-learning.md` entry;
   generated MOC tree links always use the full extensionless vault-relative
   entry path, e.g. `[[Wiki/machine-learning|Machine learning]]`. Entry-valued
   parents also retain path qualification when needed to identify one owner.
 - **Misc Wiki entries:** the sole tag `"#misc"` maps to `MOCs/misc.md`.
-  wiki-lint writes a flat list sorted by case/Unicode-normalized canonical
+  wiki-lint writes the `Wiki/misc` root followed by one level of members sorted by case/Unicode-normalized canonical
   title, with exact vault-relative paths as tie-breakers; labels keep the
-  complete canonical title. Every listed entry has `[[MOCs/misc]]` as its
-  sole parent, with no special eponymous branch. Existing genuinely blank
+  complete canonical title. Every member has `[[Wiki/misc]]` as its
+  sole parent; the root has `parents: []`. Existing genuinely blank
   or empty tags are a QC repair worklist: inspect the note and assign its
   specific home, or `"#misc"` when none fits. Missing, malformed, mixed, or
   uncertain metadata is not blindly replaced with the fallback. New entries
@@ -1126,8 +1133,8 @@ does not change the canonical output forms in §2.
 | Form | Use |
 |---|---|
 | `[[slug]]` | body link whose display label would equal the slug |
-| `[[MOCs/<discipline-slug>]]` | discipline MOC navigation link or root `parents:` value; always vault-relative and extensionless |
-| `[[MOCs/misc]]` | navigation link and sole hierarchy parent for every Wiki entry tagged only `#misc` |
+| `[[MOCs/<discipline-slug>]]` | discipline MOC navigation link only; never a `parents:` value |
+| `[[Wiki/<discipline-slug>]]` | discipline root parent, including `Wiki/misc`; the root entry itself has `parents: []` |
 | `[[Wiki/<relative-entry-path>\|Canonical Title]]` | every generated MOC tree entry link; use the actual vault-relative Wiki folder prefix and no `.md` |
 | `[[slug\|Display Label]]` | body link whose label differs by case, spacing or alias |
 | `[[slug\|Canonical Title]]` | **every** `**Related:**` footer link — always piped, even when slug-equal |
@@ -1156,8 +1163,8 @@ Rules that hold everywhere:
   `refer to [[…]]`, or `consult [[…]]`. State how the concepts relate, or keep
   a purely navigational link in the Related footer.
 - **No wikilinks in image captions, table captions, or table cells.**
-- **Every entity-link target must be a real file in `Wiki/`.** MOC navigation
-  links and root `parents:` values instead name a real file in `MOCs/` using
+- **Every entity-link and `parents:` target must be a real file in `Wiki/`.** MOC navigation
+  links instead name a real file in `MOCs/` using
   the qualified form above. No entry target, no entity link: an
   entity with no entry stays bare text.
   wiki-build either writes the entry or defers the entity (report-only);

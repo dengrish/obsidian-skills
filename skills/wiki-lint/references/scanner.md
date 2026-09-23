@@ -59,10 +59,11 @@ QC findings do not exclude an otherwise valid misc tag.
   missing discipline or misc coverage. `unresolved_parents` records `missing`, `ambiguous`,
   `unparsed`, `unreadable`, `legacy-moc`, or `noncanonical-moc` targets.
   `noncanonical-moc` identifies a real `MOCs/<unknown>.md` file outside the
-  discipline enum that cannot serve as a recognized MOC root. A legacy root note
-  cannot satisfy a canonical `[[MOCs/<discipline>]]` parent. `parent_state_findings`
-  uses `misc-parent-mismatch` for an entry validly tagged only `#misc` with populated parents
-  other than exactly `MOCs/misc`; empty parents produce a misc placement gap.
+  discipline enum that cannot serve as a recognized MOC root. No MOC, canonical or legacy, can supply a conceptual parent. `parent_state_findings`
+  reports `moc-parent` for forbidden MOC ancestors, `missing-discipline-root`
+  for active groups without a valid Wiki root, `root-parent-mismatch` for roots
+  with populated parents, and `misc-parent-mismatch` for misc members not
+  pointing solely to their Wiki root. Roots alone may have empty parents.
 - `moc_file_states` inventories each active discipline plus known existing
   MOCs, including existing zero-member discipline MOCs and misc when present
   or needed. Each record includes
@@ -91,12 +92,11 @@ QC findings do not exclude an otherwise valid misc tag.
   Preserve inactive discipline MOCs and report legacy paths; these findings do not
   authorize a move, deletion, or scope expansion.
 - `moc_consistency_findings` validates the complete content of every readable
-  or empty recognized MOC. It checks bullet structure and indentation, the
-  three-level limit, canonical targets/labels, wrong-discipline
+  or empty recognized MOC. It checks bullet structure and indentation, canonical targets/labels, wrong-discipline
   links, entry coverage, duplicate same-parent placements,
   discipline eponymous-root shape, and exact parent-union consistency. For
-  misc, a `misc-format` finding identifies nested bullets or plain category
-  terms. A `misc-order` finding identifies violations of folded canonical
+  misc, a `misc-format` finding identifies plain categories or nesting beyond
+  the root and its single member level. A `misc-order` finding identifies violations of folded canonical
   title order with exact vault-relative path tie-breakers. A
   `wrong-discipline-link` finding also identifies entries without a valid
   misc-only tag list when listed in misc. An empty active
@@ -107,8 +107,8 @@ QC findings do not exclude an otherwise valid misc tag.
   and frontmatter are malformed outline lines. Authorized Task 3 regenerates
   the complete outline and follows the shared provenance preservation rules.
 - Every generated entry target uses its full extensionless vault-relative
-  path, such as `Wiki/methods/k-means`; root parents use `MOCs/<discipline>`
-  or `MOCs/misc`.
+  path, such as `Wiki/methods/k-means`; root parents use `Wiki/<discipline>`
+  (including `Wiki/misc`), with the actual Wiki folder prefix. The roots themselves have `[]`.
   Entry parents keep qualification when a basename is shared. File-state
   inspection and tree parsing use the same guarded snapshot.
 - Exact union comparison requires every required group MOC to be readable/empty and

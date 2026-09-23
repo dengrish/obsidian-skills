@@ -171,15 +171,15 @@ unambiguous format fixes: block-list form, `#`, double quotes, exact enum case,
 safe abbreviation expansion, wikilink-to-tag conversion for a known enum
 member, and duplicate removal after canonicalization.
 
-Semantic disciplinary ownership remains a judgment. Re-home or add a tag only
+Semantic disciplinary ownership remains a judgment. Re-home or reduce multiple tags to one only
 when the entry and vault make the canonical home unambiguous; otherwise report
-the competing candidates. Wiki tags must be a nonempty quoted block list.
+the competing candidates. Wiki tags must be a quoted block list containing exactly one home.
 For a genuinely blank key or empty list, inspect the note and assign its
-supported specific disciplines, or `"#misc"` alone if none fits. Never combine
+best supported specific discipline, or `"#misc"` alone if none fits. Never combine
 misc with specific tags. Missing, malformed, mixed, or uncertain metadata
 requires its own evidence-based resolution, not blind replacement with misc.
 Entries tagged only `#misc` belong to `MOCs/misc.md` and receive
-`[[MOCs/misc]]` during Task 3; preserve prior group evidence across the rescan
+`[[Wiki/misc]]` during Task 3 (the misc root itself keeps `parents: []`); preserve prior group evidence across the rescan
 so retagging closes the old and new hierarchy together.
 
 ### 9. Body structure, coherence, flow, and scope
@@ -206,6 +206,15 @@ their relationships. Report source/tutorial scaffolding and application
 catalogs only when they do not serve the entry, and report duplicated
 explanatory treatments by conceptual owner. Length, a missing transition word,
 list shape, or lexical similarity alone proves nothing.
+
+**Caveat review.** Inspect qualifications and final paragraphs for rare edge
+cases, implementation failure handling, and defensive distinctions that do not
+help explain the ordinary concept. Do not add them from memory. Routine lint
+can remove empty rhetoric but preserves substantive claims; an explicit
+request to simplify such content activates source-backed correction across
+the requested scope, including similar cases beyond named examples. Verify
+the affected passages against each entry's cited sources and retain essential
+conditions. A source-supported detail can still be unnecessary to this entry.
 
 **Local editorial repairs.** Apply these autonomously when the existing entry
 establishes an unambiguous meaning:

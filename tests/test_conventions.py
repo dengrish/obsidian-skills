@@ -7097,11 +7097,11 @@ def check_moc_placement(rep, conv):
     if not re.search(r"MOCs/(?:<discipline(?:-slug)?>|machine-learning)\.md", conv) \
             or "[[MOCs/machine-learning]]" not in conv:
         rep.fail(check, "CONVENTIONS.md §3 no longer states the MOC file "
-                        "shape (`MOCs/<discipline>.md`) and qualified root link -- "
+                        "shape (`MOCs/<discipline>.md`) and qualified navigation link -- "
                         "the location every restatement is held to",
                  rel(CONVENTIONS))
     else:
-        rep.ok(check, "§3 states `MOCs/<discipline>.md` and qualified root links",
+        rep.ok(check, "§3 states `MOCs/<discipline>.md` and qualified navigation links",
                rel(CONVENTIONS))
     stated = 0
     for skill, path, text in walk_skill_files():

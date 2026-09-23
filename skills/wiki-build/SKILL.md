@@ -302,8 +302,8 @@ item numbers used by `lint_entry.py` and `wiki-lint`.
    characters, with the entity in canonical running form as subject and tense
    matching its status. Count before writing and after every later edit. See
    [description](references/writing.md#description).
-8. **Tags** — keep the key; when populated, use one or more quoted,
-   `#`-prefixed discipline-enum values in block form. Use `"#misc"` alone when no specific discipline fits; blank/empty tags and mixed misc/specific tags are invalid. Judge canonical
+8. **Tags** — keep the key; use exactly one quoted,
+   `#`-prefixed discipline-enum value in block form. Use `"#misc"` alone when no specific discipline fits; blank/empty tags and mixed misc/specific tags are invalid. Judge canonical
    ownership rather than source context. See [tags](references/writing.md#tags)
    and [tag calibration](references/calibration.md).
 9. **Body structure, flow, sentence clarity, and atomic scope** — open

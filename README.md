@@ -282,18 +282,19 @@ the origin used for deduplication, and a body marker distinguishes wiki-add's
 research extracts from full-text clippings. wiki-add reuses suitable existing
 source notes and images without overwriting them. Market research, MOCs, proposal
 logs and the topic queue stay outside `Wiki/` so they are not treated as entries. MOC
-links and root parents use `[[MOCs/<discipline>]]`, so a same-named entity
-can coexist in `Wiki/`. Generated outline links use qualified entry paths
+links use `[[MOCs/<discipline>]]`; parents use Wiki entries only. Each active
+tag has a `Wiki/<discipline>.md` root with empty parents. Generated outline links use qualified entry paths
 such as `[[Wiki/machine-learning|Machine learning]]`. Each recognized discipline
 MOC is generated as a whole note: a nested bullet outline without marker
 comments, H1, or frontmatter. Task 3 reads the existing outline for continuity,
 regenerates from current entries, and skips unchanged output. Obsolete MOC
 markers or prose need no separate formatting approval; safe snapshots still
-protect later edits and unrelated files. Wiki entries require a nonempty tag list. When no specific discipline fits,
+protect later edits and unrelated files. Wiki entries require exactly one home tag. When no specific discipline fits,
 use `"#misc"` alone; these entries appear alphabetically by title in
-`MOCs/misc.md` with parent `[[MOCs/misc]]`. Blank, missing, malformed, or mixed
+`MOCs/misc.md` under `Wiki/misc`, with parent `[[Wiki/misc]]`. Blank, missing, malformed, or mixed
 misc/specific tags remain QC errors until resolved. New entries from wiki-build/wiki-add still start with
-`parents: []`; wiki-lint supplies their hierarchy placement.
+`parents: []`; wiki-lint supplies their hierarchy placement and reviews every tree and parent
+for conceptual coherence, without a fixed depth limit.
 
 Every skill can record evidenced improvements in its own suggestion log or
 the log of a producer whose output it used. Verified resolutions are removed
