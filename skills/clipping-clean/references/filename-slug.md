@@ -22,7 +22,7 @@ stem after the helper reports its shortening or symbol notes.
 
 Use the surname of the first author. Resolve it in two stages so commas do not confuse the name with a list:
 
-1. **Pick the first author.** Authors normally arrive as a YAML list (one entry per verified author), so the first author is simply the first list entry. If instead the authors are mashed into a *single string* — multiple names joined by `and`, `&`, `;`, or a comma-separated list like `Buck, Carlsmith, and Greenblatt` — take only the portion before the first such separator as the first author, and ignore the rest.
+1. **Pick the first author.** Authors normally arrive as a YAML list (one entry per supported human byline), so the first author is simply the first list entry. If instead the authors are mashed into a *single string* — multiple names joined by `and`, `&`, `;`, or a comma-separated list like `Buck, Carlsmith, and Greenblatt` — take only the portion before the first such separator as the first author, and ignore the rest.
 2. **Take that first author's surname** — the last whitespace-separated token of their name, kept in original case (it's a proper noun).
 
 The comma-flip for surname-first names applies **only within a single author's name**, and only when the comma genuinely marks surname-first order: a name written `Smith, John` / `van der Berg, Jürgen` flips to natural order (`John Smith`) so the last token is the real surname. Two guards so the flip doesn't misfire:
@@ -68,4 +68,6 @@ Other punctuation (`:`, `,`, `?`, `'`, `"`, `—`, `–`) is removed, not replac
 
 The **image filename slug is the same string as the note filename** (case preserved), with `_fig_<N>.<ext>` appended: `Teslo_Pancreatic_Cancer_2026.md` → `Teslo_Pancreatic_Cancer_2026_fig_<N>.<ext>`. Keeping the casing consistent makes the note ↔ image relationship visually obvious when scanning the Sources/Images folder — and it is also exactly the `[source_stem]_fig_<N>` pattern `wiki-build` looks up in `Sources/Images/` when the cleaned note is later processed as a source, since the note's filename stem *is* the source stem. Don't diverge from it.
 
-Use the **corrected** author and title from [metadata verification](metadata-verification.md), so the slug reflects the verified metadata — this is why getting source verification right matters for findability, not just for the YAML.
+Use the author and title retained by [metadata verification](metadata-verification.md):
+corrected live evidence when available, otherwise supported capture values
+reported as unverified. The slug and frontmatter must identify the same source.

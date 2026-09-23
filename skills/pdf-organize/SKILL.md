@@ -145,16 +145,10 @@ unreadable notes, and blockers. Omit `--dest` for a source already under
 `Sources/PDFs/`; omit both `--dest` and `--vault` outside the vault. A supplied
 vault destination must be absolute and inside that vault.
 
-When the canonical year segment changes, the plan also reconciles the owned
-paper-summary note's top-level `published` field in that same atomic rewrite.
-A target `nd` writes `published: null`. A numeric target preserves a valid
-existing month and day; an existing null becomes `YYYY-01-01` under the
-summary schema's padding rule. Missing, duplicate, quoted, invalid, or
-otherwise ambiguous publication metadata blocks the whole rename so it can be
-corrected from the document before re-planning. A date whose month/day is not
-valid in the target year also blocks rather than losing those components.
-Never change `published` in an ordinary citing note: that date describes the
-note's own source, not the PDF it happens to mention.
+Changing the canonical year also reconciles the owned paper-summary note's
+`published` field. The [rename plan rules](references/rename-repair.md#review-the-plan-before-writing)
+define date preservation and blockers; ordinary citing notes never receive
+this metadata repair.
 
 Read [rename repair](references/rename-repair.md) **before applying a plan
 that moves derived files, rewrites notes, or updates figure sidecars**, and

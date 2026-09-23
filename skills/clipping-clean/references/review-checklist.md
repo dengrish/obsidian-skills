@@ -108,9 +108,11 @@ suggested detector; do not edit an installed plugin during clipping processing.
   is used only when current `sources:` is absent. This is not a PDF summary.
   The output has its one preserved capture URL, no substituted canonical URL.
 - [ ] Corrected title, byline and publication date match their evidence. Every
-  `author:` value is a verified human byline; publication names, editorial
+  `author:` value is a human byline supported by the capture or usable source;
+  capture-only values remain explicitly unverified against an unavailable live
+  page. Publication names, editorial
   desks and social accounts are omitted rather than credited as people. The
-  filename's optional author segment agrees with the first verified human
+  filename's optional author segment agrees with the first retained human
   author. Unverified values and padded dates are reported. Every published note
   has an evidence-backed title. A missing publication year is represented only
   by `published: null` plus the `nd` filename segment; a capture missing its

@@ -101,7 +101,10 @@ malformed or conflicting sidecars. Do not force a partial family through.
   guard and rollback. A target `nd` uses `null`; a numeric target retains a
   valid month/day, or uses `01-01` when the old value was null. Missing,
   duplicate, quoted, invalid, multiline, or contradictory date metadata is a
-  blocker. Notes that merely cite the PDF never receive this metadata repair.
+  blocker, as is a month/day that is invalid in the target year. Correct the
+  metadata from the document before re-planning; never discard date components
+  to force the rename through. Notes that merely cite the PDF never receive
+  this metadata repair.
 
 Filing moves only the source PDF to `Sources/PDFs/`. Figures remain in
 `Sources/Images/`, the source note in `Articles/`, and a chapter family under

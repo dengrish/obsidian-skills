@@ -19,37 +19,48 @@ below, not the whole shared manual at startup.
 ## 1. Select and inventory the work
 
 A named PDF selects that file, chapters included. A folder request selects that
-folder recursively. Keep this **processing scope** separate from the read-only
-inventory: scan the whole configured `Sources/PDFs/` tree so basename conflicts
-and books beside their chapter folders remain visible, then process only rows
-inside the requested scope, in path order. An inventory row outside that scope
-is never authorization to summarize it. With canonical `Sources/Images/`
-output, the helper also checks each selected PDF's basename across the whole
-vault, including `Inbox/`; a smaller source selection cannot bypass this
-uniqueness guard. The shared walker follows directory
-symlinks under their logical vault paths, but an unreadable subtree, changed
-directory, or ancestor cycle makes the inventory incomplete and blocks the run.
-Organization precedes summaries:
-notes, source links and figures all depend on the
-[PDF's canonical, vault-unique stem](../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first).
+folder recursively. Record those selected files before any move. For ordinary
+vault processing, invoke `pdf-organize` for selected PDFs that need naming or
+filing, including Inbox PDFs, **before requiring a `Sources/PDFs/` inventory**.
+Track each resulting path so moving a PDF out of the requested folder does not
+drop it from the selection. Notes, source links and figures depend on this
+[canonical source identity](../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first).
+Honor explicit no-rename/no-import instructions; report and carry a deliberate
+`--allow-unorganized` exception when a preserved name is noncanonical.
 
 Exclude feed-owned `x-<post-id>-<asset-hash>.pdf` attachments from ordinary
 folder sweeps. For an explicitly named attachment, preserve its collector-owned
 path and report the deliberate `--allow-unorganized` exception at scan and final
 note lint; do not rename it or change feed receipts to obtain a canonical stem.
 
-Before scanning a fresh vault, confirm that the resolved vault anchor, the
-configured `Sources/PDFs/` inventory root and the selected PDF(s) already exist.
-For content output, create only this skill's canonical folders, `Articles/` and
-`Sources/Images/`, if absent. Do not create a missing source root or a guessed
-vault path: either means the anchor or input is wrong, not that the inventory is
-empty.
+Confirm that the resolved vault anchor and current selected inputs exist.
+Create `Articles/` and `Sources/Images/` if absent. The organizer may create
+`Sources/PDFs/` while filing; this summary skill does not create an empty source
+root to make a missing input look valid.
+
+Keep the **processing scope** above separate from read-only inventory. Scan the
+whole configured `Sources/PDFs/` tree when present so books and their chapters
+remain visible:
 
 ```bash
 python3 '<skill>/scripts/paper_scan.py' \
     --src '<vault>/Sources/PDFs' \
     --notes '<vault>/Articles' --images '<vault>/Sources/Images'
 ```
+
+For selected PDFs deliberately retained outside that tree, repeat the command
+with `--src '<selected PDF or folder>'`, retaining the same notes/images paths
+and any naming exception. Combine rows by PDF path and process only selected
+files, in path order; inventorying another file never authorizes summarizing it.
+If the configured tree is absent because all selected inputs are deliberately
+retained elsewhere, scan those inputs directly. An unexpectedly absent tree
+after filing is an incomplete handoff to resolve, not an empty inventory.
+
+With canonical `Sources/Images/` output, each scan also inventories PDF basenames
+across the whole vault, including `Inbox/`; selected files outside the configured
+tree do not bypass uniqueness. A readable external scratch copy still needs one
+vault PDF owner. Directory symlinks retain logical paths, but an unreadable
+subtree, changed directory or ancestor cycle blocks an incomplete inventory.
 
 For a named chapter, add `--include-chapters`; for a named split-book PDF, add
 `--include-split-books`, but still ignore every other row. `Articles/` also
@@ -106,6 +117,10 @@ python3 '<plugin>/skills/figure-extract/scripts/batch_extract.py' \
     --src '<pdf path>' --out '<vault>/Sources/Images'
 ```
 
+Carry the intake's deliberate `--allow-unorganized` exception into this command
+and any extractor repair commands; it never waives source uniqueness or image
+ownership checks.
+
 Read its diagnostics and re-run the scan before selecting exhibits. Respect its
 naming/ownership refusals. When it flags a bad automatic crop, complete the
 extractor's own review-and-explicit-crop workflow, then re-run both extraction
@@ -131,15 +146,10 @@ when those elements apply, and always record its supporting page before drafting
 prose.
 
 Read [summary standards](references/summary-standards.md) before choosing claims
-and confidence. Four requirements apply throughout the note, including headings,
-callout and captions, whenever their claim type occurs: keep the scope; put
-reported absolute numbers beside relative ones; name the comparator; describe a
-null as a failure to detect, with its uncertainty, never as proof of no effect.
-State the contribution plainly, then qualify it in the next sentence. Confidence
-is capped by both the design and the authors' claim. Animal, cell and simulation
-findings remain claims about those systems. The reference owns the confidence
-ladder and design-specific criteria; [special paper types](references/edge-cases.md)
-cover notices, missing sections, OCR and other reading exceptions.
+and confidence. Its scope, comparison, null-result and confidence rules apply
+throughout the note, including headings, callout and captions. Use
+[reading exceptions](references/edge-cases.md) for notices, unusual designs,
+missing sections, OCR and unreadable text.
 
 If text extraction is unavailable, repair the permitted environment or read the
 PDF pages directly. OCR, when needed and available, goes to a unique scratch
@@ -149,43 +159,20 @@ could not be read.
 
 ## 3. Assemble the draft and its exhibits
 
-Read [the note format](references/note-format.md) before writing. It owns the
-source-note frontmatter, exact output shape, citation syntax, length limits and
-brevity targets.
-Use the shared [source-note schema](../../shared/CONVENTIONS.md#2b-source-note--a-note-about-a-document)
-with this PDF's bare wikilink first; a second URL is allowed only for a DOI/arXiv
-identifier actually printed in the document, never for `Book`. Do not infer a
-publisher page. Preserve printed date components, report `01` padding for
-missing month/day, and use `published: null` only when the organized PDF's
-canonical stem carries its explicit `_nd` year segment. Never invent a year.
-
-The note has a Summary callout, one `___` separator and six ordered sections.
-Choose the empirical, argument/synthesis or notice body mode in the note-format
-reference before assigning their meanings. Empirical notes retain the six roles:
-question, methods, results, interpretation, limitations and availability.
-Non-empirical notes use the same lintable positions but describe their thesis,
-basis, contribution and implications rather than inventing a study design or
-result. Headings state what this document says instead of printing role labels.
-
-Keep the main contribution central. Empirical notes report harms and negative
-findings beside benefits; argument/synthesis notes include material contrary
-evidence or exceptions the document discusses; notices distinguish what changed
-from what remains unresolved. Mark interpretations that are not the authors'. Funding, competing
-interests, peer-review status and ethics approval are out of scope.
-Preregistration is methodological and remains in scope. Availability uses the
-categories relevant to the selected body mode: empirical notes name Data and
-add Code or Materials when relevant; argument/synthesis notes use Sources,
-Materials, Data or Code as applicable; notices use Record, Evidence or Materials. Use
-“not stated” when a relevant category could apply but the document gives no
-disclosure; do not fill an inapplicable mode with boilerplate.
+Read [the note format](references/note-format.md) before writing. It applies the
+shared source-note schema and owns PDF-specific field choices, body shape,
+citation syntax, length limits and brevity targets. Choose its empirical,
+argument/synthesis or notice body mode
+before drafting; that choice determines what the six section positions mean.
+Keep the document's main contribution and material contrary evidence central,
+without inventing a study design for a non-empirical source.
 
 If the scan listed figures or a main contribution merits a table, read
 [exhibit selection](references/figures.md). Embed only inventoried files and
-inspect their contents. Rebuild selected tables from the printed values, without
-rounding or recomputation, and disclose trimming. Put exhibits under the claims
-they support. **The note is self-contained:** include an exhibit the argument
-needs or state the supported claim in prose; never point to an unseen figure,
-table or supplement. Figure/table numbers do not appear in the prose or captions.
+inspect their contents; follow that reference for selection, placement, captions
+and faithful table reconstruction. **The note is self-contained:** include an
+exhibit the argument needs or state the supported claim in prose; never point
+to an unseen figure, table or supplement.
 
 On creation write `read: false`; on an authorized rewrite preserve the existing
 review value and do not use format cleanup to discard unrelated user metadata.
@@ -199,22 +186,10 @@ Never put an unfinished note in `Articles/`. Use the
 ## 4. Verify the draft against the source
 
 Read [the verification checklist](references/review-checklist.md). This is an
-independent pass against the PDF, not a reread of fluent draft prose. Check every
-number, proper noun and scope clause using short tokens copied from the source:
-
-```bash
-python3 '<skill>/scripts/paper_text.py' '<pdf path>' \
-    --find '13.2 months' --find '0.62' --find 'previously treated'
-```
-
-An unfound needle exits 1. Retry once in the source's own wording, then correct
-or cut an unsupported claim; never soften it into a vaguer assertion. Inspect
-`loose` matches on the page. A found token does not establish the claim's scope
-or show it is this document's contribution: open the cited page and distinguish
-the document's own claims from quoted prior work. Check physical page bounds and
-correct citations with any corrected claim. Verify image identity, table digits
-and caption meaning.
-Direct page verification remains necessary even after a clean token search.
+independent pass against the PDF, not a reread of fluent draft prose. The
+checklist owns the finder command, exact/loose/missing match handling, source-page
+checks and verification report. Correct or cut unsupported claims. A clean
+token search never replaces direct page verification.
 
 ## 5. Lint the complete draft
 
@@ -231,7 +206,9 @@ including sentence/step length against the
 one-item empirical Limitations section against the anti-filler exception.
 When inventory used the deliberate `--allow-unorganized` exception, add that
 flag here too; otherwise a noncanonical source name remains a publication
-blocker. The flag disables only source-stem/year agreement checks.
+blocker. This permits the deliberately preserved noncanonical name and a
+source-backed null date when that name cannot establish a year; it does not
+waive source verification or other format rules.
 The linter checks format, file references, and mode-specific list rules, not
 factual accuracy, image contents, page upper bounds or whether the selected body mode fits the document;
 it does not replace the source verification above.
@@ -250,30 +227,17 @@ authorized rewrite; do not stamp skipped or unchanged notes.
 The destination is `Articles/<pdf stem>.md`, without a disambiguating suffix.
 Re-inventory `Articles/` under the same NFC/case-folded basename identity before
 publication; an equivalent spelling that arrived after intake is an occupied
-destination. Stage the final bytes in a unique private temporary directory
-outside the note folder and beside the **resolved real `Articles/` directory**,
-on the same filesystem. Continue publishing through the selected logical path;
-a symlinked `Articles/` directory must not send staging to a different volume.
-Follow the shared [safe-write protocol and Python API
-recipe](../../shared/SAFE_WRITES.md#call-the-shared-python-api) for both new
-notes and rewrites. Import `shared/scripts/atomic_move.py`; do not execute it as
-a publication command or call `os.link` directly. For a new note, call
-`atomic_move.publish_new(..., atomic_move.regular_file_snapshot, ...)`; any
-occupied destination, including a dangling symlink, must fail unchanged. Keep
-the private stage and report its path on every publication failure, including
-`LinkUnavailable`.
+destination. Read and follow the shared [safe-write protocol and Python API
+recipe](../../shared/SAFE_WRITES.md#call-the-shared-python-api); it owns snapshot,
+staging, permission, concurrency and recovery handling. For this workflow, stage
+beside the resolved real `Articles/` directory and publish through the selected
+logical path. Use `atomic_move.publish_new(..., atomic_move.regular_file_snapshot, ...)`
+for creation or `atomic_move.replace_expected` for an authorized rewrite, with
+the original snapshot and expected PDF origin retained from intake.
 
-For an authorized rewrite, confirm the destination is the same regular,
-non-symlink note inspected at the start, with unchanged contents and the expected
-PDF origin. Preserve its permissions and review state, and pass the exact
-snapshot retained when those bytes were read to `atomic_move.replace_expected`;
-do not refresh it at publication time. A recheck followed by `os.replace` can
-still clobber a later editor save. If safe publication or restoration is
-unavailable, retain the draft and report the original, current, and any
-recovery paths rather than using an ordinary overwrite. Verify that the
-published snapshot returned by the helper and the final public bytes match the
-reviewed draft before reporting completion. Do not move/delete the PDF, rename
-images or write wiki entries.
+Verify the published bytes against the reviewed draft. On failure, retain and
+report the draft and every staging/recovery path according to the shared
+protocol. Do not move/delete the PDF, rename images or write wiki entries.
 
 ## 7. Report
 

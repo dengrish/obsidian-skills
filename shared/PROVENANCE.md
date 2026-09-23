@@ -47,8 +47,10 @@ Stamp only a note this skill actually creates or changes. Preserve known
 `generated_by` on edits and record the current skill as `updated_by`. For a
 historical note without provenance, creation remains `generated_by: null`;
 only the verified update is attributed. Do not guess its original producer or
-bulk-edit unchanged notes just to fill missing metadata. An unchanged body is
-a no-op: retain the complete original bytes, even when a newer skill ran.
+bulk-edit unchanged notes just to fill missing metadata. If neither ordinary
+content nor frontmatter changes, retain the complete original bytes; a newer
+skill version alone is not a reason to restamp. An authorized metadata repair
+still counts as a note change, even when its body stays unchanged.
 For a new suggestion log, record the skill that actually initialized it, not
 the skill named by the log's filename. A sibling workflow invoked for its own
 output records its own skill; a consumer merely following shared writing rules

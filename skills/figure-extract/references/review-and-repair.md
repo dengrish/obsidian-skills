@@ -33,23 +33,13 @@ files, and review findings. Do not merge these into one extraction count.
 | Zero pages | Report an empty PDF separately; OCR cannot supply missing pages. |
 | Stem collisions | Neither colliding source is extracted or adopted, even with `--overwrite`. A canonical `<vault>/Sources/Images/` output makes this a whole-vault PDF-basename check even when `--src` names one file or a smaller subtree; arbitrary external outputs use the explicit source scope. Use `pdf-organize` to establish distinct source identities, then retry. |
 
-A clean summary is still insufficient for multi-column papers: a bounding box
-may include a neighboring picture without including its caption. Inspect the
-actual figures. Review marks suppress geometry warnings, so mark only figures
-that have been visually checked and repaired where necessary.
-
-The automatic side-caption detector has one conservative top-of-page
-exception. A wide caption can be read as sitting beside its figure only when
-strong, isolated drawing content fills the opposite side of its vertical band
-and there is no drawing above the caption supporting the usual below-figure
-layout. Several separated vector parts may jointly supply that anchor. The crop
-then grows through nearby drawing stages and explanatory text confined to the
-anchor-selected column; it does not bridge a larger blank gap to a later
-figure. Every crop produced through this exception remains flagged: inspect it
-against the source page and set an explicit crop if a separated panel or stage
-is missing. This is an agent verification step, not a mandatory human review.
-A top-page continuation caption without the initial side evidence remains a
-failed, degenerate detection for explicit repair.
+The [main visual-review gate](../SKILL.md#3-inspect-the-summary-and-verify-crops)
+still applies when no diagnostic fires. Top-of-page side-caption exceptions
+always remain flagged: compare the complete figure with the crop, especially
+separated panels or stages, and set an explicit crop for missing content. A
+top-page continuation caption may instead produce a degenerate detection that
+needs explicit repair. These are agent verification steps, not mandatory human
+reviews.
 
 ## Ownership, legacy adoption, and review records
 
@@ -91,21 +81,12 @@ or replaced. The refusal preserves every occupant and reports its stored name.
 A conflicting different figure slot does not block a named crop; an incomplete
 inventory still blocks because the requested slot cannot be proved free.
 
-Crop bytes are staged outside the flat image folder and must pass nonblank
-read-back before publication. A new name is created exclusively, so a file
-that arrives after preflight is preserved. `--overwrite` carries the verified
-digest into publication, displaces and rechecks that exact occupant, and never
-replaces blindly over the live name. If two other writers race for one name and
-the displaced file cannot be restored there, the refusal reports the hidden
-sibling recovery directory that preserves it; inspect both occupants before
-moving anything or retrying.
-
-The manifest and review ledger use the same fail-closed publication rule. A
-missing sidecar is created exclusively. An existing sidecar is replaced only
-while its identity, permissions, and exact bytes still match the version the
-caller parsed; a concurrent mark or ownership update is retained and the stale
-write fails. If restoration is blocked by another writer, the error names the
-outside-Images recovery directory holding the displaced bytes.
+The helpers apply the shared [safe-write protocol](../../../shared/SAFE_WRITES.md)
+to crops and sidecars: new names are exclusive, and replacements require the
+inspected file to remain unchanged. Crops also pass nonblank read-back before
+publication. On a concurrent-write or restoration failure, preserve the named
+staging/recovery directory and inspect both occupants before retrying; do not
+replace a newer file or discard displaced bytes to force success.
 
 The default batch treats every occupied name without an ownership record as
 unclaimed. A matching canonical stem is not provenance: a URL-origin clipping

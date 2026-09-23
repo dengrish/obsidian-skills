@@ -61,8 +61,10 @@ Feed collection saves images and PDFs locally, and retains videos as labeled
 source links without downloading or transcribing them.
 
 Figure extraction supplies images to paper-summarize and wiki-build.
-Both paper-summarize and wiki-build read the **original PDF**; the summary
-is a finished reading note, not a source for wiki-build. A cleaned clipping
+Both paper-summarize and wiki-build read the **original PDF**. The summary
+is a finished reading note; builder may use it only under its
+[verified missing-PDF fallback](skills/wiki-build/references/source-intake.md#resolve-a-markdown-source).
+A cleaned clipping
 is itself the source and can be used directly. wiki-add can reuse existing
 sources, acquire PDFs through pdf-organize, or save a clearly marked,
 agent-written research extract for each web page in `Articles/`; these extracts

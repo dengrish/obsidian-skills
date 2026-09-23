@@ -36,67 +36,21 @@ For a folder, process sources in deterministic filename order: steps 1–6 per s
 
 ### 1. Read the source
 
-**Resolve the real source and prior coverage before reading or writing entries.** A source must be a durable file in the vault. A bare URL is not a source file: request its Web Clipper capture and route that capture through `clipping-clean` first. For pasted text, use an existing user-named vault file or obtain the exact destination before saving it; never invent a persistent source filename or publish wiki entries with an unresolvable citation.
+Read [source intake and prior coverage](references/source-intake.md) before
+processing each source. It owns durable-file intake, Markdown/PDF pairing,
+canonical PDF naming and ownership, the verified-path coverage query, and
+source classification. Resolve those gates before extraction; a shared stem,
+body mention, or unconfirmed basename candidate never proves prior coverage.
 
-The topic-list workflow in `wiki-add` has its own
-[research-source intake](../wiki-add/references/research.md): it may acquire
-durable sources without a manual clipping. A marked research extract is an
-attributed selection of evidence, not a full captured webpage; preserve that
-distinction when reading it. This does not change ordinary builder intake or
-authorize broad extraction from an online search result.
+**A confirmed prior match defaults to skip.** Proceed only with explicit rerun
+or resume intent, or the narrow candidate-specific synthesis request. Resume
+uses this skill's complete extraction and merge workflow; wiki-lint does not
+recover unfinished source processing. An all-skipped run goes directly to
+closeout without auditing unrelated entries.
 
-For a Markdown source, read [source intake](references/source-intake.md#resolve-a-markdown-source) and use its validated frontmatter parser. A decoded first origin pointing to a local PDF identifies a PDF/summary pair: resolve the actual PDF and consume it, reporting the substitution. A URL-origin clipping is independent, even if its stem matches a PDF. Inspect legacy `source:` when appropriate. Missing PDFs, unpaired notes, malformed metadata, and ambiguous targets have distinct outcomes; **a shared stem or incomplete lookup never authorizes claiming or skipping a source**.
-
-For every resolved PDF, verify the shared canonical filename contract before
-deriving citations, figure stems, or prior-coverage keys. Then prove that its
-portable basename has exactly one owner across the selected vault; the bare
-page links this skill writes cannot disambiguate two paths:
-
-```bash
-python3 '<skill>/../../shared/scripts/naming.py' canonical '<pdf path>'
-python3 '<skill>/../../shared/scripts/vault_artifacts.py' pdfs \
-    --vault '<vault>' --selected '<resolved pdf path>'
-```
-
-A non-canonical PDF is not an override opportunity. Route it through
-`pdf-organize`, then restart source resolution with its final name. Markdown
-sources keep their literal on-disk names. Read the inventory JSON even when
-the second command exits nonzero. An incomplete walk or zero/multiple portable
-basename owners blocks PDF processing; run `pdf-organize` to establish a
-unique final name, then rerun both checks.
-
-When `Wiki/` exists, check decoded frontmatter membership with the index. For
-a later source in the same run, use the current private resolution tree from
-step 3 so prior staged sources participate in this check:
-
-```bash
-IDX=$(mktemp '<scratch>/vault-index.XXXXXX')
-python3 '<skill>/scripts/vault_index.py' '<coverage-tree>' \
-  --vault '<vault>' --source '<vault>/Sources/PDFs/Foo.pdf' \
-  --source '<vault>/Articles/Foo.md' -o "$IDX"
-```
-
-Use the real Wiki as `<coverage-tree>` before any draft exists, otherwise the
-private overlaid tree, adding `--wiki-origin '<vault>/Wiki'` for that mirror
-(use the actual public Wiki location if overridden). Use one actual source
-path for an unpaired source and both paths for a confirmed PDF/note pair; the
-names need not share a stem. Read `$IDX` even when the command exits 1: either
-the Wiki or source inventory may be partial. Inspect `source_matches`,
-`source_match_candidates`, `source_problems`, `source_inventory_complete`, and
-the ordinary index `problems`; exit 0 or `ok: true` does not clear these findings.
-Only a verified-paths match with `identity_confirmed: true`, complete inventories,
-and resolved ownership/metadata problems can establish coverage. A bare
-basename query without `--vault` returns unconfirmed candidates, not skip
-evidence. Body mentions are not prior coverage. For uncertain or incomplete results, read [the coverage
-protocol](references/source-intake.md#check-prior-coverage) and resolve/report
-the uncertainty before deciding. If no public Wiki or staged entry exists,
-omit the check; create the public folder only at authorized publication.
-
-**A confirmed prior source match defaults to skip.** Proceed only with explicit rerun or resume intent in the user's request—“reprocess,” “resume the interrupted run,” “finish the incomplete run,” “apply the new rules,” or equivalent; a plain “process Foo.pdf” is not rerun intent. Resume is handled here, not by wiki-lint: re-read the source and run the normal extraction, collision, source-no-op-merge, and audit gates so missing source-dependent work can be completed safely. Ordinary rerun/resume intent applies to the batch. Explicit candidate-specific multi-source synthesis is the narrow exception: it reopens only the named candidate and sources. An all-skipped run changes no entries: report the skips and proceed directly to closeout using evidence already obtained, without new audits or writes to unrelated entries.
-
-Read the complete source, mapping headings first for long documents and tracking the **physical PDF page** introducing each entity. PDFs can be read with available PDF tools, `pdftotext -layout`, or PyMuPDF; inspect rendered pages when needed. Those renderings are for comprehension, not figure embeds: use the existing source images under the media rules.
-
-Classify by primary purpose: **primary** sources teach durable knowledge; **secondary** sources primarily report transient news, earnings, announcements, or opinion. Ambiguous → secondary. Incidental explanation does not turn a news roundup into a primary source; the durability filter below can still admit that explanation. Report the classification; [source intake](references/source-intake.md#read-and-classify) gives the detailed distinction.
+For a source that proceeds, read the complete source, track each
+entity's introducing physical PDF page, and report the primary/secondary
+classification. Comprehension renderings are not figure assets.
 
 ### 2. Extract entities
 
@@ -268,7 +222,7 @@ when none are supported.
 
 ## The entry
 
-The canonical [field definitions and quoting](references/writing.md#1-frontmatter-fields) live in the writing guide, with one [complete entry example](references/writing.md#complete-entry-example).
+Shared [CONVENTIONS §2](../../shared/CONVENTIONS.md#2-frontmatter-schemas) owns schema and quoting. The writing guide owns [semantic field choices](references/writing.md#1-frontmatter-fields) and the [complete entry example](references/writing.md#complete-entry-example).
 
 Field order: `title`, `type`, `aliases`, `sources`, `created`, `updated`, `description`, `tags`, `parents`, `read`. Only `aliases` may be omitted. `tags:` is a nonempty quoted block list, using `"#misc"` alone when no specific discipline applies; empty parents are `[]`, never null.
 

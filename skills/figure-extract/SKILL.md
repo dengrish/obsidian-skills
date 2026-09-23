@@ -96,25 +96,11 @@ An unknown or conflicting occupant is protected in
 both batch and explicit-coordinate extraction. Malformed, protected, or
 symlinked ownership manifests block extraction. Do not delete sidecars or
 occupied images to force a run.
-Ownership is checked for the whole portable figure slot, not only the intended
-`.png` pathname. A `.jpg`, `.webp`, or other inventoried image with the same
-case/Unicode-normalized `<stem>_fig_<label>` identity blocks publication; an
-exact existing PNG proceeds only when its manifest digest verifies ownership.
-Every conflicting file is preserved and named in the occupied-output report.
-Read [review and repair](references/review-and-repair.md) when ownership or
-legacy migration needs attention.
-
-No occupied image is adopted automatically, even when its filename matches a
-canonical PDF stem: a Web Clipper image can occupy that same name. To migrate
-an unrecorded historical extractor crop, inspect it and select that exact slot
-with the repeatable option
-`--adopt-legacy '<pdf_stem>:<figure_label>'`. The helper accepts only a complete
-PNG for one eligible, uniquely identified PDF in the selected scope, records
-only those named files, and reports every selection. An existing manifest does
-not block migration of another unrecorded slot, but a recorded slot must be
-reconciled as an ownership record rather than adopted again.
-Do not combine `--adopt-legacy` with `--overwrite`: establish ownership in one
-run, then request any re-extraction separately.
+Ownership covers the whole case/Unicode-normalized figure slot across image
+extensions. No occupied image is adopted automatically. If ownership or legacy
+migration needs attention, read [ownership, adoption and review records](references/review-and-repair.md#ownership-legacy-adoption-and-review-records)
+before proceeding; that section owns the exact `--adopt-legacy` procedure and
+sidecar/recovery rules.
 
 Choose `--ed-prefix ED` when Supplementary Figure 1 and Extended Data Figure 1
 are distinct figures; the default folds both into `S`. `SI` remains distinct.
@@ -145,13 +131,9 @@ Use [review and repair](references/review-and-repair.md) for any flagged crop,
 caption collision, partial detection, missing figures, duplicate pixels, or
 ownership failure. Render the relevant pages and compare them with the PNGs.
 A “PARTIAL” result may be a real missed figure or an unresolved external
-reference; inspect it rather than assuming either. A canonically named split
-chapter's different-prefix figure references are reported separately only when
-its filename and every detected numeric caption establish one local chapter
-namespace and the exact caption is found in the one canonical same-book sibling
-chapter. An absent, ambiguous, unreadable, or nonmatching sibling leaves the
-reference PARTIAL. Duplicates are review findings,
-not authority to delete files.
+reference; the diagnostics reference explains when a verified cross-chapter
+reference is reported separately. Duplicates are review findings, not authority
+to delete files.
 
 **Inspect figures from multi-column papers even when the summary is clean.**
 A crop can contain its neighbor's chart without triggering a warning. More
@@ -165,14 +147,10 @@ repairing a flagged figure may you record `--mark-reviewed '<stem>:<fig>'`;
 that option suppresses future warnings and does not itself verify anything.
 The explicit crop helper performs the same complete, portable whole-vault PDF
 basename check before reading an ownership sidecar or writing into canonical
-`Sources/Images`; it cannot bypass the batch namespace gate. An arbitrary
-external output keeps one-off behavior. If the batch used a deliberate
-`--allow-unorganized` exception, pass it to the explicit repair too; it relaxes
-only canonical naming, never uniqueness or image ownership. The reference
-provides the crop and review commands with coordinate units. The page renderer refuses the whole
-requested set if any preview pathname is occupied; use a unique scratch
-directory. Remove ordinary previews and decrypted scratch copies after the
-verified repair, while preserving every recovery path named by a failed write.
+`Sources/Images`; it cannot bypass the batch namespace gate. Follow the
+reference's [explicit repair procedure](references/review-and-repair.md#set-and-verify-an-explicit-crop)
+for coordinate units, naming exceptions, readable scratch copies, review marks
+and cleanup. Preserve every recovery path named by a failed write.
 
 ### 4. Report completed and unresolved work
 

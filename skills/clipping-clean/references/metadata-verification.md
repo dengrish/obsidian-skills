@@ -31,10 +31,12 @@ Report padding and corrections as old → new; do not invent a missing year.
 
 A short page (roughly under 500 body words) with “subscribe to continue”, “sign
 in to read” or similar gating text is a paywall stub, not verification evidence.
-For timeout, 404, network failure or paywall, retain the raw values and report
-which remain unverified. Recover missing fields from a usable page when
-possible. An unknown author has the canonical fallback `author: []`; never use
-bare `author:`, which is YAML null rather than an empty list.
+For timeout, 404, network failure or paywall, retain usable raw values and report
+which remain unverified against the live page. A human byline in the capture
+may therefore remain; a publication account or editorial desk does not become
+a human author merely because verification failed. Recover missing fields from
+a usable page when possible. If neither source identifies a human author, use
+`author: []`; never use bare `author:`, which is YAML null rather than an empty list.
 
 `title` has no unknown-value fallback because it establishes the note's identity.
 When it remains absent after the raw capture and usable page evidence are
@@ -55,7 +57,7 @@ procedure applies.
 Follow the shared source-note schema rather than copying a second schema here.
 The clipping-specific choices are:
 
-- `title`: the verified full title, using the shared schema's YAML quoting rule
+- `title`: the evidence-backed full title, using the shared schema's YAML quoting rule
   (plain unless YAML syntax requires quotes); abbreviate only the filename,
   never the title.
 - `format`: `Article` for editorial/institutional articles, `Post` for personal
@@ -64,8 +66,9 @@ The clipping-specific choices are:
   can be `Article`.
 - `sources`: exactly the preserved capture URL as the first and only list item.
   A canonical URL found during verification is not a replacement origin.
-- `author`: block-form list of all known authors in source byline order, or
-  exactly `author: []` when no human author can be verified.
+- `author`: block-form list of human authors supported by the captured or
+  verified byline, in byline order, or exactly `author: []` when neither supplies
+  one. Report capture-only values as unverified when the live fetch failed.
 - `published` and `created`: the dates determined above; do not confuse them.
   `published` is a full evidence-backed date or the explicit null for an undated
   page; `created` is never its substitute.

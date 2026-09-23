@@ -424,35 +424,17 @@ from the entry's already-established main claim, with `??` and the canonical
 primary answer. This restores the required card without selecting a different
 tested facet; itemize the addition in the run report.
 
-The scanner checks each card's contiguous definition / cue / answer content.
-Line 1 is a self-contained, capitalized, period-ended sentence with inline
-LaTeX as its only markup; it must neither expose nor semantically reconstruct
-the answer. The agent checks every card against the canonical
-[line-1 equation-coverage rule](../../wiki-build/references/flashcards-and-emphasis.md#line-1-equation-coverage),
-even when its prose is accurate or the scanner is silent; the targeted repair
-and history limits are defined in [flashcard maintenance](flashcards.md).
-Line 2 is `??` or
-the user's preserved `!!`. Line 3's content, before any protected attachment,
-is the plain-text canonical title or qualified title's base/mathematical plain
-form, plus
-only a qualifying opener-established, alias-bound counterpart. The qualifying
-classes are the canonical acronym/full-form pair, direct “short for” expansion,
-and direct scientific abbreviation. The executing agent still checks whether a
-qualifying pair was omitted from the opener.
-
-The canonical card-format rule defines the protected same-line, immediately
-following-line, metadata-callout, and block-ID attachments. A blank line closes
-the attachment position. Preserve each recognized attachment byte-for-byte and
-in place; line-3 plainness never authorizes removing a block ID. Other visible
-or comment content is malformed. When legacy content has multiple cards,
-identify the one satisfying the complete primary-answer contract, preserve
-every card and attachment, quote each extra card verbatim in the report, and
-propose a split when a cited source supports the extra term as a real entity.
-Routine lint does not delete an extra card. Move or remove one only under an
-explicitly authorized source-backed refactor that accounts for its claim and
-attachments, or an explicit request to delete that card. Visible metadata
-absence does not establish a fresh card; apply the [history-aware rewrite
-bar](flashcards.md) before changing a definition.
+Use the card-format guide for the three content lines and recognized
+attachments; use flashcard maintenance for the rewrite threshold and legacy
+extras. Inspect every card semantically, including whether the primary answer
+omits a qualifying opener binding and whether its definition leaks or
+reconstructs the answer. Apply the canonical
+[line-1 equation-coverage rule](../../wiki-build/references/flashcards-and-emphasis.md#line-1-equation-coverage)
+even when the prose is accurate and the scanner is silent. Preserve existing
+cues and every recognized scheduling/block-ID attachment byte-for-byte and in
+place; missing visible metadata does not establish a fresh card. Multiple
+cards remain report-only unless the user's request supplies the explicit
+refactor/deletion authority defined in flashcard maintenance.
 
 **The checklist ends at 19.** Existing `importance:` remains valid and
 preserved under item 2.
