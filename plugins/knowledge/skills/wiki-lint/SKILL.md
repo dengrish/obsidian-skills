@@ -42,11 +42,6 @@ pathname. New files use exclusive creation; existing entries and MOCs use
 verified displacement and exclusive publication. If a later edit wins, preserve
 it and re-read/rejudge the file rather than applying a stale repair.
 
-Stamp every note actually changed by QC, link repair, or hierarchy work under
-[note provenance](../../shared/PROVENANCE.md), preserving a known creator and
-recording `wiki-lint` as updater. Do not backfill or rewrite unchanged notes.
-Keep the footer outside cards and navigation bullets; re-scan the stamped bytes.
-
 ### Dates
 
 For existing notes during ordinary Tasks 1–3, the linter does not set `created:` or `updated:`; invalid dates remain unchanged and are reported as nonblocking unresolved metadata. It does not reset, infer, or invent review state. Only `item2/read-type` with a recognizable boolean meaning is a format repair: for example, quoted `"false"` becomes bare `false`. Missing, null, arbitrary-string, and list-valued `read:` stay unchanged and are reported without blocking the run. New Task 3 roots and their new source extracts receive creation dates and `read: false` under the [new-artifact exception](references/hierarchy.md#establish-discipline-roots). Source-backed correction and refactor modes follow wiki-build's substantive-body-change rules while still refusing to guess unknown user state. See [QC field handling](references/qc-items.md#source-independent-item-guide) before repairing metadata.
@@ -216,7 +211,7 @@ Preserve inactive discipline MOCs; an authorized empty-misc refresh follows
 the guide's different rule. Create missing roots and durable research extracts
 only through its narrow [source-backed prerequisite](references/hierarchy.md#establish-discipline-roots).
 
-Recognized MOCs are fully generated notes, including their provenance footer;
+Recognized MOCs are fully generated notes;
 unknown files remain outside that ownership. Apply the shared safe-write guard
 to every publication and re-scan the final bytes against the guide's
 [completion checks](references/hierarchy.md#read-diagnostics-and-verify-completion).

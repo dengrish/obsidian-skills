@@ -11,10 +11,6 @@
 Read before drafting. This file owns the output shape, writing limits and
 brevity targets; [summary standards](summary-standards.md) owns factual claims and
 confidence, and [figures](figures.md) owns exhibit selection and captions.
-The final [skill-provenance footer](../../../shared/PROVENANCE.md) is publication
-metadata outside these sections and their prose/list budgets; it leaves the
-frontmatter and six-section outline unchanged.
-
 ## Frontmatter
 
 Use the shared [source-note schema](../../../shared/CONVENTIONS.md#2b-source-note--a-note-about-a-document)

@@ -338,22 +338,15 @@ Markdown. Link preserved estimate snapshots and their availability receipts from
 the record and summarize the relevant values; those source observations remain
 immutable JSON files. Use the helper's verified availability when applying a cutoff.
 
-Finish the draft in owned scratch, with the actual completion time, then stamp
-its verified installed-plugin identity under [note provenance](../../shared/PROVENANCE.md).
+Finish the draft in owned scratch, with the actual completion time.
 Use `--vault` when forming/evaluating comparison cards: their bulky calendars,
 source metadata and full rosters belong in immutable digest-verified attachments,
 with a concise visible summary in the note. Preserve historical inline records.
-Here `<plugin>` means this skill's installed root, never the development checkout.
 
 ```bash
-python3 '<plugin>/shared/scripts/note_provenance.py' stamp --plugin '<plugin>' --skill stock-research --draft '<run>/draft.md' --output '<run>/daily-stamped.md'
-python3 '<skill>/scripts/market_notes.py' lint '<run>/daily-stamped.md'
-python3 '<skill>/scripts/market_notes.py' outcomes --vault '<vault>' --draft '<run>/daily-stamped.md' --run-receipt '<run>/run.json'
+python3 '<skill>/scripts/market_notes.py' lint '<run>/draft.md'
+python3 '<skill>/scripts/market_notes.py' outcomes --vault '<vault>' --draft '<run>/draft.md' --run-receipt '<run>/run.json'
 ```
-
-Each new edition must identify this bundle as its creator. Never use `--previous`
-for a new edition or relabel an unchanged historical note. The metadata footer
-remains separate from financial evidence.
 
 Before publication, audit the claims that determine selection, readiness or risk
 against their retained evidence and calculations. Check citations, timestamps,
@@ -380,7 +373,7 @@ Complete the visible [coverage journals](references/coverage.md) in the Research
 record and check them against the saved feeds and prior editions:
 
 ```bash
-python3 '<skill>/scripts/stock_coverage.py' check --vault '<vault>' --as-of '<cutoff>' --mode '<mode>' --draft '<run>/daily-stamped.md'
+python3 '<skill>/scripts/stock_coverage.py' check --vault '<vault>' --as-of '<cutoff>' --mode '<mode>' --draft '<run>/draft.md'
 ```
 
 Distinguish valid accounting from completed research. A report may truthfully
@@ -389,17 +382,17 @@ steps; it cannot label unperformed research complete. The publisher repeats this
 check and refuses lost backlog, missing dispositions and invalid reuse links.
 
 Only after the checks above have finished and any findings are resolved, record
-their completion for the **exact stamped draft**, then publish it. For example,
+their completion for the **exact final draft**, then publish it. For example,
 a run that declared an independent checker completes both checks:
 
 ```bash
-python3 '<skill>/scripts/market_notes.py' review-complete --vault '<vault>' --run-receipt '<run>/run.json' --draft '<run>/daily-stamped.md' --check independent-review
-python3 '<skill>/scripts/market_notes.py' review-complete --vault '<vault>' --run-receipt '<run>/run.json' --draft '<run>/daily-stamped.md' --check final-review
-python3 '<skill>/scripts/market_notes.py' publish '<run>/daily-stamped.md' --vault '<vault>' --run-receipt '<run>/run.json'
+python3 '<skill>/scripts/market_notes.py' review-complete --vault '<vault>' --run-receipt '<run>/run.json' --draft '<run>/draft.md' --check independent-review
+python3 '<skill>/scripts/market_notes.py' review-complete --vault '<vault>' --run-receipt '<run>/run.json' --draft '<run>/draft.md' --check final-review
+python3 '<skill>/scripts/market_notes.py' publish '<run>/draft.md' --vault '<vault>' --run-receipt '<run>/run.json'
 ```
 
 A receipt records completed declared checks, not proof of factual truth. Any edit
-to the draft, completion time or provenance requires restamping/revalidation and
+to the draft or completion time requires revalidation and
 fresh completion records for the revised bytes. Repeated independent launches
 need distinct check names. Do not clear a pending checker to bypass the gate.
 

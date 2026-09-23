@@ -57,9 +57,9 @@ conditions and next check together under that heading. Use deeper headings for
 detail. The helper copies the exact published assessment into the stock note;
 do not write a second version whose values or conclusion could diverge.
 
-The helper supplies consistent identity, created/updated metadata and verified
-skill provenance, the latest assessment and dated links to previous daily
-assessments. Preserve original company/security identity across updates. Where
+The helper supplies consistent identity, created/updated metadata, the latest
+assessment and dated links to previous daily assessments. Verified skill identity
+stays in its private receipt. Preserve original company/security identity across updates. Where
 available, retain a verified stable identifier with a standalone daily line such
 as `Company ID: SEC:0000320193`. This allows a verified company-name change
 without silently changing the issuer identity. A recycled ticker,
@@ -138,8 +138,8 @@ The example CIK above is illustrative, not a default for other companies. The pr
 binds the published daily bytes and prior stock-note bytes. Changed inputs require
 repreparation; do not alter the captured receipt or copy a foreign assessment.
 
-Read back the published stock notes and check their daily links, identity, cutoff,
-status and provenance. Unchanged retries reuse the same assessment without adding
+Read back the published stock notes and check their daily links, identity, cutoff
+and status. Unchanged retries reuse the same assessment without adding
 duplicate history. On an interrupted run, retain the named recovery artifacts and
 resume the missing stock updates from the already published daily report; never
 rewrite the report or create a fresh daily edition merely to repair this step.

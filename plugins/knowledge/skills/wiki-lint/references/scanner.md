@@ -74,7 +74,7 @@ QC findings do not exclude an otherwise valid misc tag.
   carry `error`; unsafe directory or leaf ownership must not be mistaken for
   a missing file ready for creation. The state describes the file, not an
   owned region; recognized discipline and misc MOCs are generated as whole notes.
-  A valid provenance footer is excluded when deciding whether the outline is
+  A valid legacy provenance footer is excluded when deciding whether the outline is
   `empty`, so a footer-only misc note remains an empty navigation list.
 - `legacy_moc_states` inventories recognized preexisting specific-discipline root
   `<discipline>-moc.md` occupants, never `misc-moc.md`, with the same file-state
@@ -148,7 +148,7 @@ and label checks.
 | `item2/parents-null` | A present but valueless bare `parents:` key where the canonical empty list is `parents: []`. |
 | `item2/parents-form` | `parents:` is scalar, populated flow form, contains a noncanonical/non-wikilink item, or repeats a target. |
 | `item2/obsidian-key` | A valid Obsidian-owned appearance/publish key, not a schema violation. |
-| `item2/provenance` | Malformed, duplicate or misplaced skill-provenance metadata. Historical notes without a footer are not defects or evidence of a particular producer. |
+| `item2/provenance` | Malformed, duplicate or misplaced legacy skill-provenance metadata. Missing footers are not defects or evidence of a particular producer. |
 | `item3/report-only` | `created` is later than `updated`; ordinary `item3` also detects date format/calendar problems. The ordering finding is nonblocking because wiki-lint does not write either date. |
 | `item4` | Missing, scalar, malformed, or exactly duplicated source references, including invalid PDF page anchors and anchored Markdown sources. |
 | `item4/source-identity` | PDF and Markdown references share a normalized stem; this does not prove they are one source. |
