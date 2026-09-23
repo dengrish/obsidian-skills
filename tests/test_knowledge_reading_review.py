@@ -85,7 +85,7 @@ class FigureRepairWorkflowTests(unittest.TestCase):
         env = dict(os.environ, OBSIDIAN_VAULT_SHARED=str(ROOT / "shared" / "scripts"))
         return subprocess.run(
             [sys.executable, str(FIGURES / name), *map(str, args)],
-            cwd=self.vault, env=env, text=True, capture_output=True, timeout=60)
+            cwd=self.vault, env=env, text=True, encoding="utf-8", capture_output=True, timeout=60)
 
     def repair(self, *args):
         return self.run_tool(
@@ -119,7 +119,7 @@ class FigureRepairWorkflowTests(unittest.TestCase):
         self.assertEqual(reviewed.returncode, 0, reviewed.stdout + reviewed.stderr)
         self.assertEqual(image.read_bytes(), repaired_crop)
         self.assertEqual(self.source.read_bytes(), original_source)
-        manifest = (self.images / ".figure-manifest.tsv").read_text()
+        manifest = (self.images / ".figure-manifest.tsv").read_text(encoding="utf-8")
         self.assertIn(hashlib.sha256(repaired_crop).hexdigest(), manifest)
 
     def test_override_keeps_the_whole_vault_duplicate_source_guard(self):
@@ -149,10 +149,10 @@ class SummaryPublicationGateTests(unittest.TestCase):
             env = dict(os.environ, OBSIDIAN_VAULT_SHARED=str(ROOT / "shared" / "scripts"))
 
             def check(text):
-                note.write_text(text)
+                note.write_text(text, encoding="utf-8")
                 return subprocess.run(
                     [sys.executable, str(READING / "note_lint.py"), str(note),
-                     "--mode", "argument"], cwd=scratch, env=env, text=True,
+                     "--mode", "argument"], cwd=scratch, env=env, text=True, encoding="utf-8",
                     capture_output=True, timeout=60)
 
             good = argument_note()

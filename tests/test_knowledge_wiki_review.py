@@ -30,7 +30,7 @@ class SourceCoverageTests(unittest.TestCase):
     def source(self, relative):
         path = self.vault / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("Verified source fixture.\n")
+        path.write_text("Verified source fixture.\n", encoding="utf-8")
         return path
 
     def note(self, slug, source, *, tree=None):
@@ -44,7 +44,7 @@ class SourceCoverageTests(unittest.TestCase):
             "description: A fixture verifies source identity.", "tags:",
             '  - "#engineering"', "parents: []", "read: false", "---",
             "**" + title + "** verifies a source.", "",
-        ]))
+        ]), encoding="utf-8")
         return path
 
     def index(self, *sources, tree=None, origin=None, strict=True, returncode=0):
@@ -57,7 +57,7 @@ class SourceCoverageTests(unittest.TestCase):
             command += ["--source", str(source)]
         environment = dict(os.environ, OBSIDIAN_VAULT_SHARED=str(ROOT / "shared/scripts"))
         result = subprocess.run(command, cwd=self.root, env=environment,
-                                text=True, capture_output=True, timeout=30)
+                                text=True, encoding="utf-8", capture_output=True, timeout=30)
         self.assertEqual(result.returncode, returncode, result.stdout + result.stderr)
         return json.loads(result.stdout)
 
@@ -66,7 +66,7 @@ class SourceCoverageTests(unittest.TestCase):
         images.mkdir(parents=True, exist_ok=True)
         result = subprocess.run([sys.executable, str(SCAN), str(self.wiki),
                                  "--images", str(images)], cwd=self.root,
-                                text=True, capture_output=True, timeout=30,
+                                text=True, encoding="utf-8", capture_output=True, timeout=30,
                                 env=dict(os.environ, OBSIDIAN_VAULT_SHARED=str(ROOT / "shared/scripts")))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return json.loads(result.stdout)
@@ -144,7 +144,7 @@ class SourceCoverageTests(unittest.TestCase):
         self.assertEqual(missing["source_matches"], [])
         self.assertTrue(missing["source_problems"])
         outside = self.root / "outside.md"
-        outside.write_text("Outside content.\n")
+        outside.write_text("Outside content.\n", encoding="utf-8")
         actual.symlink_to(outside)
         unsafe = self.index(actual)
         self.assertEqual(unsafe["source_matches"], [])
@@ -161,13 +161,13 @@ class SourceCoverageTests(unittest.TestCase):
         environment = dict(os.environ, OBSIDIAN_VAULT_SHARED=str(ROOT / "shared/scripts"))
         scan = subprocess.run([sys.executable, str(BACKLOG), "scan", str(queue),
                                "--out", str(snapshot)], env=environment,
-                              text=True, capture_output=True, timeout=30)
+                              text=True, encoding="utf-8", capture_output=True, timeout=30)
         self.assertEqual(scan.returncode, 0, scan.stdout + scan.stderr)
-        item = json.loads(snapshot.read_text())["items"][0]["id"]
+        item = json.loads(snapshot.read_text(encoding="utf-8"))["items"][0]["id"]
         complete = subprocess.run([sys.executable, str(BACKLOG), "complete",
                                    "--snapshot", str(snapshot), "--item", item,
                                    "--wiki", str(self.wiki), "--entry", str(upper)],
-                                  env=environment, text=True, capture_output=True, timeout=30)
+                                  env=environment, text=True, encoding="utf-8", capture_output=True, timeout=30)
         self.assertEqual(complete.returncode, 0, complete.stdout + complete.stderr)
         self.assertEqual(queue.read_bytes(), b"- [x] Topic\r\n")
         self.assertEqual(upper.read_bytes(), before)
@@ -175,11 +175,11 @@ class SourceCoverageTests(unittest.TestCase):
     def test_note_relative_links_and_parents_resolve_from_each_entry(self):
         self.note("neighbor", "[[Explanation.md]]")
         note = self.note("nested/probe", "[[Explanation.md]]")
-        text = note.read_text().replace("parents: []", 'parents:\n  - "[[../neighbor]]"')
+        text = note.read_text(encoding="utf-8").replace("parents: []", 'parents:\n  - "[[../neighbor]]"')
         text += ("\nIts mechanism extends [[../neighbor#Mechanism|Neighbor]].\n"
                  "Neighbor remains a distinct topic.\n"
                  "\n**Related:** [[../neighbor|Neighbor]]\n")
-        note.write_text(text)
+        note.write_text(text, encoding="utf-8")
         result = self.scan()
         failures = [item for item in result["problems"] if item["slug"] == "probe"
                     and item["item"] in {"item10/dangling", "item10/case", "item11"}]
@@ -193,8 +193,8 @@ class SourceCoverageTests(unittest.TestCase):
         self.note("deeper/neighbor", "[[Explanation.md]]")
         self.note("Other/elsewhere", "[[Explanation.md]]")
         note = self.note("nested/probe", "[[Explanation.md]]")
-        note.write_text(note.read_text() + "\nA link to [[../neighbor|Neighbor]] and "
-                        "[[../../Other/elsewhere|Elsewhere]] is absent.\n")
+        note.write_text(note.read_text(encoding="utf-8") + "\nA link to [[../neighbor|Neighbor]] and "
+                        "[[../../Other/elsewhere|Elsewhere]] is absent.\n", encoding="utf-8")
         result = self.scan()
         dangling = [item["message"] for item in result["problems"]
                     if item["slug"] == "probe" and item["item"] == "item10/dangling"]
@@ -205,7 +205,7 @@ class SourceCoverageTests(unittest.TestCase):
         self.note("neighbor", "[[Explanation.md]]")
         mocs = self.vault / "MOCs"
         mocs.mkdir()
-        (mocs / "engineering.md").write_text("- [[../Wiki/neighbor|Neighbor]]\n")
+        (mocs / "engineering.md").write_text("- [[../Wiki/neighbor|Neighbor]]\n", encoding="utf-8")
         result = self.scan()
         findings = result["hierarchy_diagnostic"]["moc_consistency_findings"]
         self.assertFalse(any(item["kind"] == "unresolved-link" for item in findings))
