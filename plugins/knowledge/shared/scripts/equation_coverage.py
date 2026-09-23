@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Conservative candidates for defining math missing canonical display form.
 
-Equation coverage is ultimately semantic: an agent must decide whether the
-note's prose states every operand and operation, then typeset only that stated
-relationship.  This helper supplies a narrow deterministic floor for wording
+Equation coverage is ultimately semantic: an agent must first decide whether
+notation would clarify the concept. A candidate can remain prose-only when
+a formula merely restates a simple verbal rule. If useful, verify the
+relationship and its operands before typesetting. This helper supplies a
+narrow deterministic floor for wording
 that has already produced real omissions. It recognizes three families:
 explicit square-root-of-variance definitions, defining equations left inline,
 and a small set of prose calculations whose operands and operation are named.

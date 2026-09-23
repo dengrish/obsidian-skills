@@ -3,10 +3,10 @@
   "plugin": "knowledge",
   "plugin_version": "1.1.0",
   "repository": "https://github.com/dengrish/obsidian-skills",
-  "source_commit": "f8f2b0869cddf1f2f81b5bf6effa9c21fcd38d0b",
-  "source_url": "https://github.com/dengrish/obsidian-skills/commit/f8f2b0869cddf1f2f81b5bf6effa9c21fcd38d0b",
+  "source_commit": "50056d62d3c33595d88212497fcdf9ffa61de242",
+  "source_url": "https://github.com/dengrish/obsidian-skills/commit/50056d62d3c33595d88212497fcdf9ffa61de242",
   "source_status": "committed",
-  "runtime_sha256": "eab1195d5fb27507147bfbcb4bc1f906948327da803c1187cdb3195b793235e1",
+  "runtime_sha256": "2f198465ad2dd92c0a384d22c616fe11e305e5603a5e63b0db56c04052adc1b4",
   "files": {
     ".claude-plugin/plugin.json": "e7264367efea201b4b82b2d6534c80056c2cfa1017fa85013703c03f1b7ce04f",
     ".codex-plugin/plugin.json": "0306cb59589627128e8244672c21976efcc9504668c3a99116b002d4b55f1bb0",
@@ -21,7 +21,7 @@
     "shared/scripts/atomic_move.py": "63227fce4d9cf6057321b6dc596bce1a09c8d427a71cd2e4a1058a88f433a51e",
     "shared/scripts/code_typography.py": "d0d8e4faefa81f589ad4b3d7ff807d079e69ee3892ead465bc65d4c7210730bc",
     "shared/scripts/entry_structure.py": "010199ec671823925f3263db654be92e1e114076cd570b036b03ac5017813854",
-    "shared/scripts/equation_coverage.py": "139ec145a70354f3e66dfc4bc77200a117dff8e15959f002c7ccf41175ee311e",
+    "shared/scripts/equation_coverage.py": "8369f2cf1760f0f5488c1e2f034ea1942aab0a609164166c2146e2f28777d099",
     "shared/scripts/figure_state.py": "55753a01333c5e693d175df944f17e3dc0774d91f274dd98bbb18091c62b1f77",
     "shared/scripts/introduced_aliases.py": "f036b286eabf90262377bc6ed1a63a176a811c7b6f5e7b29e9f3cfbbaa84c045",
     "shared/scripts/markdown_tables.py": "9151849bf12f452b0642858860b51e8ccaa183f75115be849c0f715cce0226d4",
@@ -86,7 +86,7 @@
     "skills/wiki-build/references/source-intake.md": "8ac409d9d01ed9b400f2a2337079cc8db719109dea787b425bf57c57d2ca3fad",
     "skills/wiki-build/references/writing.md": "89b9414b5436b89e3400ac71668c8c39288daacc832822170fbc926824e1632a",
     "skills/wiki-build/scripts/find_collisions.py": "e88e22ed1a2b8fbb5f9dc4a635e3942bac0d7efed1964444e4e354bf6d13fa61",
-    "skills/wiki-build/scripts/lint_entry.py": "e38de65a5a39560d70114b80f4cc43faa1c0247fb57a60466e0a6f2979bc049c",
+    "skills/wiki-build/scripts/lint_entry.py": "0730f1ae58540ef1c259aa0c89cd291b579e64f85385844db7e9dfdabc4381f0",
     "skills/wiki-build/scripts/vault_index.py": "cc704127ca7fbc981bc59c0ad9b826f10edb969e2a4ea77f488f7d0655bd7833",
     "skills/wiki-lint/SKILL.md": "90ec65bc0d552061f0a6a360f15e5e60f912d8b7e69df16a0bbb76a9a76a7f11",
     "skills/wiki-lint/references/backlogs.md": "6c1f3653cc7e8e4032345e6cf67f5662d56adfdca002b38883a5903f7e9f0f68",
@@ -98,6 +98,6 @@
     "skills/wiki-lint/references/refactors.md": "3782c1d4e42f7cc646fefbbfc8149dbd8870b2d57fcd1b71b142026905e1085d",
     "skills/wiki-lint/references/scanner.md": "e49d341e33e6fdd444a1136a4b8a47eac2defba9f0d0283f0199e634865ab3d4",
     "skills/wiki-lint/references/source-backed-corrections.md": "35d74ed4b313e99cbb2c198bf41b48c8f787a41485075d334ba18fceb944002a",
-    "skills/wiki-lint/scripts/scan_vault.py": "99e1bfa4183de73e7e7cf08dd3e9a78d07d838769598419d7c59179a3462ce48"
+    "skills/wiki-lint/scripts/scan_vault.py": "d45c5a8ee3dd747ab1d47f48f2b90031990dca6d178a3750a9e42b27f6a0757b"
   }
 }

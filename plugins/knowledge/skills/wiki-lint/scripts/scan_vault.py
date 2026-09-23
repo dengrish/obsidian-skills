@@ -2868,11 +2868,12 @@ def scan(wiki, images=None):
             problems.append((
                 sl, "item12/equation-coverage-candidate",
                 "prose or inline math appears to define a calculation "
-                "without canonical nearby display form "
+                "without a nearby display equation "
                 f"(kind(s): {_kinds}; prose line(s) {_lines}) — executing "
-                "agent: verify the definition in context, bind every "
-                "symbol nearby, and typeset only the stated relationship "
-                "under wiki-build/references/equations.md; a "
+                "agent: first judge explanatory value under "
+                "wiki-build/references/equations.md. Keep simple verbal "
+                "rules in prose when notation adds no understanding; "
+                "otherwise verify the relationship and define its symbols. A "
                 "square-root-of-variance cue never authorizes inferring a "
                 "population or sample denominator"))
         _equation_form_candidates = \
