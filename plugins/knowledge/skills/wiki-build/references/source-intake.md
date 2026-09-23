@@ -1,10 +1,29 @@
 # Source intake and prior coverage
 
-Read this before resolving a Markdown source, uncertain source identity, or incomplete prior-coverage results in [workflow step 1](../SKILL.md#1-read-the-source). The normal PDF route and its skip gate remain in the entrypoint. This reference owns the validated parser recipe, legacy-origin handling, and detailed source classification.
+Read this at [workflow step 1](../SKILL.md#1-read-the-source), before
+extracting from any source. This reference owns source-file intake, identity,
+prior-coverage decisions, and classification.
 
+- [Require a durable source](#require-a-durable-source)
 - [Resolve a Markdown source](#resolve-a-markdown-source)
+- [Verify a resolved PDF](#verify-a-resolved-pdf)
 - [Check prior coverage](#check-prior-coverage)
 - [Read and classify](#read-and-classify)
+
+## Require a durable source
+
+A source must be a durable file in the selected vault. For a bare URL, request
+its Web Clipper capture and route that capture through `clipping-clean` first.
+For pasted text, use an existing user-named vault file or obtain the exact
+destination before saving it. Never invent a persistent source filename or
+publish entries with unresolvable citations. Markdown sources keep their
+literal on-disk names.
+
+The separate [wiki-add research workflow](../../wiki-add/references/research.md)
+may acquire durable sources for requested topics. Its marked research extracts
+are attributed evidence selections, not full captured webpages. Consume that
+distinction without importing its acquisition authority into an ordinary
+builder run or treating a search result as a source.
 
 ## Resolve a Markdown source
 
@@ -27,9 +46,26 @@ print(json.dumps({"sources": fm.values("sources"),
 PY
 ```
 
-**A first `sources:` item of the form `"[[Something.pdf]]"` means the note is *about* that PDF, and the PDF is the source.** Run `python3 '<skill>/../../shared/scripts/vault_artifacts.py' pdfs --vault '<vault>'` and resolve the decoded target from its complete inventory, honoring folder qualification while comparing every path component with NFC normalization and case folding; preserve suffixes such as `_2` and `_01_ChapterName`. Then run the same helper with `--selected '<resolved pdf path>'`, because this skill ultimately writes a bare PDF basename even when the input link was folder-qualified. Process the resolved PDF instead of the note, and record the substitution in the run report. If the inventory is incomplete or several files match a basename, report the uncertainty and resolve it before reading or automatically skipping the source. **This is not a preference:** an `Articles/` note is somebody's hedged restatement of the paper, so extracting entries from it builds the vault on a summary while the document itself goes unread, and every `sources:` item it produces is an anchorless `[[Foo.md]]`. Only if a complete inventory proves the PDF genuinely missing from disk does the note become the source — say so in the report, since those entries get no page anchors. A first item that is a **URL** is a web clipping: that note *is* the source, and you carry on with it.
+**A first `sources:` item of the form `"[[Something.pdf]]"` means the note is *about* that PDF, and the PDF is the source.** Run `python3 '<skill>/../../shared/scripts/vault_artifacts.py' pdfs --vault '<vault>'` and resolve the decoded target from its complete inventory, honoring folder qualification while comparing every path component with NFC normalization and case folding; preserve suffixes such as `_2` and `_01_ChapterName`. Apply [the resolved-PDF gate](#verify-a-resolved-pdf) before continuing. Process the resolved PDF instead of the note, and record the substitution in the run report. If the inventory is incomplete or several files match a basename, report the uncertainty and resolve it before reading or automatically skipping the source. **This is not a preference:** an `Articles/` note is somebody's hedged restatement of the paper, so extracting entries from it builds the vault on a summary while the document itself goes unread, and every `sources:` item it produces is an anchorless `[[Foo.md]]`. Only if a complete inventory proves the PDF genuinely missing from disk does the note become the source — say so in the report, since those entries get no page anchors. A first item that is a **URL** is a web clipping: that note *is* the source, and you carry on with it.
 
 **A current `sources:` key takes precedence even when its list is empty.** Only when that key is absent may the decoded `legacy_source` scalar supply the origin; classify that eligible fallback as above. Never fall through from an empty current list to `source:`. If the selected origin field is absent or empty in otherwise valid frontmatter, the note is an **unpaired markdown source**: process it as one and record the call in the run report. A markdown source with no frontmatter can likewise be unpaired after inspecting it. Malformed YAML, a non-list `sources:`, a null item, or conflicting current and older origins is not evidence of an unpaired source: report it and establish the identity before proceeding. Do not silently fall back to the summary or infer an automatic skip from malformed metadata.
+
+## Verify a resolved PDF
+
+Before deriving citations, figure stems, or prior-coverage keys, verify the
+canonical filename and unique portable-basename ownership across the vault.
+Bare PDF page links cannot disambiguate two paths:
+
+```bash
+python3 '<skill>/../../shared/scripts/naming.py' canonical '<resolved pdf path>'
+python3 '<skill>/../../shared/scripts/vault_artifacts.py' pdfs \
+    --vault '<vault>' --selected '<resolved pdf path>'
+```
+
+Read the inventory JSON even on a nonzero exit. A non-canonical filename,
+incomplete inventory, or zero/multiple owners blocks PDF processing. Route
+naming or ownership repairs through `pdf-organize`, then restart intake with
+the final name and rerun both checks; there is no naming override.
 
 ## Check prior coverage
 
@@ -61,7 +97,9 @@ Verified-paths matching uses decoded frontmatter `sources:`, preserves numeric
 disambiguators, and compares each path component with NFC and case folding.
 Bare, vault-relative, note-relative, and shortest-suffix wikilinks can confirm
 the actual file; a wrong folder qualification cannot. Unresolved candidates
-remain visible separately and never establish prior coverage. A legacy query
+remain visible separately and never establish prior coverage. Only a verified-paths
+match with `identity_confirmed: true`, complete inventories, and resolved
+ownership/metadata problems can establish coverage. A legacy query
 without `--vault` returns only `identity_confirmed: false` basename candidates.
 A body example mentioning `[[Foo.pdf]]` does not count as having processed Foo.
 
@@ -89,13 +127,12 @@ free slug or reading the link target as a vault-owned entry.
 
 ## Read and classify
 
-For the separate topic-list workflow, [wiki-add](../../wiki-add/SKILL.md)
-owns web acquisition and candidate-specific source reuse. Its marked research
-extracts follow [the research-source contract](../../wiki-add/references/research.md);
-read them as attributed evidence selections, not full captured pages. Their
-use does not replay an ordinary whole-source run or relax its skip/merge rules.
-
-Read the whole source in one pass — extraction needs relationships across sections, not within chunks. PDFs: first pass the `SKILL.md` canonical-name gate, then use the host's available PDF-reading tools, `pdftotext -layout`, or PyMuPDF, rasterizing pages where you need to see figure content (for your comprehension only — embedded figures come from `Sources/Images/`, never from your rasterization). Markdown: read directly. For very long sources, map the headings first, then read in entity-dense passes; keep one source inside one run. Note the canonical on-disk filename, and track **the physical page where each entity is introduced** — each entity gets its own `#page=N`. Sources are real files on disk. A bare URL needs a Web Clipper capture processed by `clipping-clean`; pasted text needs an existing user-named vault file or the user's exact destination before it can support persistent wiki citations.
+Read the complete source, mapping headings first for long documents and
+reading in entity-dense passes when needed. Track the canonical on-disk name
+and the **physical PDF page introducing each entity**. Use available PDF tools,
+`pdftotext -layout`, or PyMuPDF and inspect rendered pages when useful.
+Renderings support comprehension only; embedded figures follow the separate
+[media rules](media.md). Read Markdown directly.
 
 **Classify the source.** *Primary* = teaching durable knowledge is its main purpose (papers, chapters, reviews, substantive explainers, lecture notes) → the substance test alone gates extraction. *Secondary* = primarily transient signal (news, earnings, announcements, opinion posts) → the durability test applies **in addition**.
 

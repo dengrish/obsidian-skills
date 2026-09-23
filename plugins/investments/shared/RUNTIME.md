@@ -7,8 +7,10 @@ does not grant access to a vault, install Python packages, or enable browser too
 
 `SKILL.md` gives the active workflow and its decision gates. Follow its links
 when a step requires a reference; do not load every reference preemptively.
-The active skill's references own its folder layout, naming, metadata,
-research method and artifact ownership. Read [input safety](INPUT_SAFETY.md)
+The active skill and its references define workflow-specific procedures and
+scope. For a shared schema, naming, ownership or publication rule, use the
+shared guide the workflow names; a workflow summary is not a competing
+definition. Read [input safety](INPUT_SAFETY.md)
 before handling external values or content. Before publishing a generated or
 changed Markdown note, follow [note provenance](PROVENANCE.md) to record the
 verified installed skill, source commit and runtime fingerprint without

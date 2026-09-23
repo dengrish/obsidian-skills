@@ -71,16 +71,26 @@ one.
 
 Keep each claim and its qualification together without packing design, population, comparator and numbers into one long sentence.
 
-**One plain sentence, then one qualifying sentence.** The claim goes first, in words a scientist from another field can take at speed. The scope, the comparator and the figures follow behind it. The **pair** is what has to satisfy the four rules; neither sentence has to on its own. The qualifier is also where the rung's limit sentence goes — the sentence that says what the study does not show (see the confidence ladder below).
+State the claim plainly and keep the scope, comparator, numbers and any needed
+design limit with it. Use one sentence when it remains clear, or adjacent
+sentences in the same paragraph or callout bullet. That unit must satisfy the
+four rules; each sentence need not repeat every element. The confidence ladder
+below determines whether a separate design limit is needed. Do not invent one
+merely to complete a two-sentence pattern.
 
-| One sentence, every rule satisfied, nobody can read it | The same claim as a pair |
+| A crowded sentence | The claim explained in adjacent sentences |
 |---|---|
 | Faecal transplant likely reduced recurrence of *C. difficile* infection from 45% to 8% within eight weeks in previously-treated adults with at least two prior recurrences, against placebo, in a 219-patient double-blind trial. | The trial shows that the transplant cuts recurrence by about four fifths. Recurrence fell from 45% to 8% within eight weeks, against placebo. The 219 adults had all had at least two prior recurrences. |
 | eUniRep likely raises the rate of better-than-wild-type designs well above a one-hot sequence encoding given as few as 24 assayed mutants, in avGFP and TEM-1 β-lactamase. | Twenty-four measured mutants were enough to design a better protein. About one design in ten beat the natural protein. The same pipeline without pre-training gave almost none. The test covered two proteins. |
 
-**The limit sentence sits immediately behind the result sentence, never further away.** Callout bullets are read out of order and section headings are read alone, so the pair has to survive being read as a unit of two. A modal verb alone does not explain the design constraint; state what the study does not show. Separate the two and the sentence that gets read is the unqualified one.
+Keep a needed limit immediately beside the claim it qualifies; a modal verb
+alone does not explain a design constraint. Each callout bullet must carry its
+own qualification because bullets can be read out of order. Headings must be
+accurately scoped on their own: a qualifying sentence in the body cannot repair
+an overstated heading. Rung 1 needs no separate limitation beyond its scope.
 
-Verify scope clauses as claims in their own right. A fluent finding followed by no qualification is still an overstatement.
+Verify scope clauses as claims in their own right. Fluent wording does not
+repair an omitted necessary qualification.
 
 ## Naming the size of a number
 

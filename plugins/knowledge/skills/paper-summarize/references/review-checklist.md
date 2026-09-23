@@ -101,7 +101,8 @@ Walk the callout, headings, body and captions with their supporting pages open:
 - [ ] The title, author order, format and date components come from this PDF.
   Only unstated month/day components are padded. Any second `sources:` URL is
   grounded in a printed DOI/arXiv identifier, not inferred; Book has none. An
-  undated PDF pairs its canonical `_nd` stem with `published: null`.
+  undated PDF uses `published: null` with its canonical `_nd` stem, or the
+  deliberately preserved noncanonical name recorded at intake.
 - [ ] The first `sources:` PDF exists with the selected unique stem, and the
   final note uses that exact stem. Citations target this PDF and lie within its
   physical page count.

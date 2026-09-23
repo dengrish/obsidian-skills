@@ -60,11 +60,17 @@ read: false
   Pad an unstated month/day with `01` and report the padding. Do not look up a
   more precise date elsewhere. If the year is absent, the organized PDF must
   already carry its canonical `_nd` segment; write the explicit YAML null
-  `published: null` and report it. A dated value paired with `_nd`, or a null
+  `published: null` and report it. Under intake's deliberate noncanonical-name
+  exception, such as a named collector attachment, retain that filename and use
+  `published: null` when the source is undated; carry `--allow-unorganized` to
+  lint rather than inventing a year or forcing an `_nd` rename.
+  For canonical filenames, a dated value paired with `_nd`, or a null
   paired with a year-bearing stem, routes back to `pdf-organize` rather than
   being reconciled from outside knowledge.
-- **Created:** the date the note is written. Clippings instead preserve their
-  capture date; do not import that producer's rule here.
+- **Created:** on creation, the date the note is written. Preserve it on an
+  authorized rewrite unless correcting that field is specifically in scope.
+  Clippings instead preserve their capture date; do not import that producer's
+  rule here.
 - **Description:** one factual sentence, at most 110 characters. Keep the main
   subject and contribution, preferring specifics over filler. This field alone may
   compress the full scope clause to fit; the callout must state it in full.
@@ -388,12 +394,7 @@ Every embed/table has its italic caption on the next line. No figure or table
 number appears in the prose or captions. End after Availability with a single
 newline.
 
-Run `note_lint.py --mode <empirical|argument|notice>` on the complete draft,
-using the body mode selected above. Fix its violations and review its
-advisories using the targets above. Its result covers mechanical
-format and the selected mode's list contract, not whether the mode was chosen
-correctly, the scientific meaning, physical page upper bounds or image contents.
-Add `--allow-unorganized` only when the source inventory used that same
-deliberate override; this makes the otherwise blocking filename exception
-visible while leaving all other lint checks active.
-The [verification checklist](review-checklist.md) covers those independent checks.
+After drafting, follow the [verification checklist](review-checklist.md), then
+[workflow step 5](../SKILL.md#5-lint-the-complete-draft) for the lint command,
+mode and image arguments, naming exceptions and advisory handling. Clean format
+lint does not establish that the document's claims or selected body mode are correct.

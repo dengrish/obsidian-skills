@@ -42,6 +42,11 @@ pathname. New files use exclusive creation; existing entries and MOCs use
 verified displacement and exclusive publication. If a later edit wins, preserve
 it and re-read/rejudge the file rather than applying a stale repair.
 
+Stamp every note actually changed by QC, link repair, or hierarchy work under
+[note provenance](../../shared/PROVENANCE.md), preserving a known creator and
+recording `wiki-lint` as updater. Do not backfill or rewrite unchanged notes.
+Keep the footer outside cards and navigation bullets; re-scan the stamped bytes.
+
 ### Dates
 
 For existing notes during ordinary Tasks 1–3, the linter does not set `created:` or `updated:`; invalid dates remain unchanged and are reported as nonblocking unresolved metadata. It does not reset, infer, or invent review state. Only `item2/read-type` with a recognizable boolean meaning is a format repair: for example, quoted `"false"` becomes bare `false`. Missing, null, arbitrary-string, and list-valued `read:` stay unchanged and are reported without blocking the run. New Task 3 roots and their new source extracts receive creation dates and `read: false` under the [new-artifact exception](references/hierarchy.md#establish-discipline-roots). Source-backed correction and refactor modes follow wiki-build's substantive-body-change rules while still refusing to guess unknown user state. See [QC field handling](references/qc-items.md#source-independent-item-guide) before repairing metadata.
@@ -83,7 +88,7 @@ Do not reinterpret it as ordinary link hygiene or a text replacement.
 
 - Scan `<vault>/Wiki`, **not the vault root**. Apply user folder overrides for this run without editing installed skills.
 - The scanner derives `<vault>` from the supplied `Sources/Images` path when available, otherwise from the nearest `.obsidian` ancestor of an overridden Wiki folder, falling back to the Wiki folder's parent. It uses that root only for MOC inventory/file diagnostics and resolving qualified MOC parent links. It does not lint suggestion logs or unrelated root notes.
-- Validate embeds against `<vault>/Sources/Images` with `--images` on every real scan. The same inventory reports nested files/directories, recognizable staging residue, unreadable scope, and grouped case/NFC-equivalent basename collisions; these folder findings never authorize moving, renaming, or deleting anything.
+- Validate embeds against `<vault>/Sources/Images` with `--images` on every apply-capable scan. Follow Step 0 for a genuinely absent default folder; read-only runs may report image checks unavailable. The same inventory reports nested files/directories, recognizable staging residue, unreadable scope, and grouped case/NFC-equivalent basename collisions; these folder findings never authorize moving, renaming, or deleting anything.
 - Task 3 writes `<vault>/MOCs/<discipline-slug>.md`, one per tag with at least one member, including `MOCs/misc.md` for entries tagged only `#misc`, and uses `[[Wiki/<discipline-slug>]]` for discipline root parents. MOCs are navigation only and never parents. Generated tree links use full extensionless vault-relative entry paths such as `[[Wiki/machine-learning|Machine learning]]`. MOCs remain outside `Wiki/` so they are not scanned as entries. Misc uses `[[Wiki/misc]]` with one title-ordered level of members; the root has empty parents.
 - Inventory existing canonical MOCs and recognized old root occupants before creating a file. Preserve and report an unexpected old root note; routine lint does not move it or initialize a competing MOC. Whole-outline regeneration honors its [Task 3 closure](references/hierarchy.md). Recognized discipline and misc MOCs are fully generated notes; unknown files and suggestion logs remain outside that ownership. Reject `MOCs/` folder collisions/symlinks and duplicate MOC owners; preserve the connected closure when blocked.
 - Suggestion logs live in `<vault>/Reviews/`: one for each current skill plus `wiki-notes-suggestions.md` for note-content gaps. Follow [shared suggestion rules](../../shared/SUGGESTIONS.md) for destination ownership and verified issue removal; these logs never authorize editing skill sources during maintenance.
@@ -104,13 +109,26 @@ connected-closure recovery rule below.
 
 ## Step 0 — Inventory the vault
 
+Before scanning, verify the selected vault and image path. If the canonical
+`Sources/Images` is genuinely absent, an apply-capable run may create that empty
+directory and its missing `Sources` parent. First inspect the existing parent
+entries for case/NFC-equivalent names, symlinks, non-directory occupants, or
+unreadable scope; any such conflict blocks setup rather than authorizing
+replacement. A missing or invalid explicit override is not this default-folder
+case: report it and block checks or writes that depend on it.
+
+A preview/report-only run creates no vault folders. If the default image folder
+is absent, run the read-only scan below **without `--images`**, report image
+existence and folder checks as unavailable, and perform the other permitted
+checks. This partial coverage is never a clean image audit.
+
 ```bash
 SCAN=$(mktemp '<scratch>/wiki-scan.XXXXXX')
 python3 '<skill>/scripts/scan_vault.py' '<vault>/Wiki' \
   --images '<vault>/Sources/Images' --out "$SCAN"
 ```
 
-Use the selected paths, keep the output filename unique to this run, and retain it for subsequent slices. A fixed shared temporary filename can supply another vault's results. The image directory must exist; an invalid path is a usage error, not evidence that every figure is missing. Treat `hierarchy_diagnostic` as report-only evidence from the previously written hierarchy. Its placement, unresolved-parent, parent-state, MOC-inventory/legacy-path, MOC-file, MOC-consistency, self-parent, and cycle worklists do not authorize a write; a fresh builder note normally has a placement gap until Task 3 runs. An `unreadable` MOC state or unsafe/ambiguous path ownership blocks the connected closure described in [hierarchy](references/hierarchy.md). Non-outline formatting in a generated MOC is a repair finding, not an extra approval gate.
+Use the selected paths, keep the output filename unique to this run, and retain it for subsequent slices. A fixed shared temporary filename can supply another vault's results. When supplied, the image directory must exist; an invalid path is a usage error, not evidence that every figure is missing. Treat `hierarchy_diagnostic` as report-only evidence from the previously written hierarchy. Its placement, unresolved-parent, parent-state, MOC-inventory/legacy-path, MOC-file, MOC-consistency, self-parent, and cycle worklists do not authorize a write; a fresh builder note normally has a placement gap until Task 3 runs. An `unreadable` MOC state or unsafe/ambiguous path ownership blocks the connected closure described in [hierarchy](references/hierarchy.md). Non-outline formatting in a generated MOC is a repair finding, not an extra approval gate.
 
 **The scanner reads and reports; it never fixes the vault.** Save its initial `run_timestamp` for backlog updates unless a coordinating run already supplied one. Read the JSON in slices rather than loading a large vault report wholesale. Use `inventory`, `discipline_tags`, and `untagged_entries` for scope; `problems` for QC/link work; `collision_candidates` and `rename_candidates` for proposals; `backfill_candidates` for Task 2; `image_folder_findings` for report-only layout/staging/readability/portable-name observations; and `hierarchy_diagnostic` for Task 3. Counts and `problem_tally` also provide report/proposal evidence.
 
@@ -185,52 +203,24 @@ Backfill only eligible first occurrences, remove surrounding emphasis when linki
 ## Task 3 — Hierarchy: `parents:` and MOCs
 
 Read [hierarchy](references/hierarchy.md) before deriving a tree or writing
-parents/MOCs. Close scope over current/prior groups, all members, Wiki roots,
-and MOCs. Review every included tree and parent assignment for conceptual
-coherence, even when membership is unchanged and the scanner is clean.
-Create missing active discipline roots only through the guide's source-backed
-prerequisite. Each tree starts at its Wiki root, whose parents are `[]`;
-descendants point to their nearest linked Wiki ancestors. MOCs never appear
-in `parents:`. Enforce one home tag and keep related modeling concepts in
-machine learning. Misc uses its Wiki root and one title-sorted child level.
+parents/MOCs. It owns scope closure, missing-root research, placement, complete
+MOC regeneration, publication/recovery, and the completion checks. Review every
+included tree and parent assignment for conceptual coherence on every run,
+even when membership is unchanged and the scanner is clean.
 
-In discipline trees, use entries for existing category nodes and unlinked
-terms for missing categories. Recompute stale/self-cyclic parents inside the
-authorized closure and write the MOC in the same task. **The entire recognized
-discipline or misc MOC is generated:** read its previous tree for continuity, derive
-from current entries, and publish the complete bullet outline with the final
-[provenance footer](../../shared/PROVENANCE.md), but no other comments, H1,
-frontmatter, or separate prose. Other non-outline comments and prose are
-obsolete formatting; repair them in this Task 3 without a separate region or
-span approval. This whole-note ownership excludes unknown files, unrelated
-notes, and suggestion logs. Reorganize when coverage warrants it and skip
-unchanged output. Preserve inactive discipline MOCs unless cleanup is requested.
-An authorized misc refresh clears an existing zero-member list to no bullets,
-retaining or updating its provenance footer under the shared rules, and
-keeps the file; an explicit request may create empty misc.
+Derive parents and MOCs from one plan within the complete authorized closure.
+Wiki roots have empty parents; descendants point to their nearest linked Wiki
+ancestors, never MOCs. Misc has its own root and one title-sorted member level.
+Preserve inactive discipline MOCs; an authorized empty-misc refresh follows
+the guide's different rule. Create missing roots and durable research extracts
+only through its narrow [source-backed prerequisite](references/hierarchy.md#establish-discipline-roots).
 
-Apply the safe-write guard to every parent and whole-MOC publication. Create a
-missing MOC exclusively after folder/ownership preflight; conditionally replace
-an existing MOC only against the complete bytes and identity read when deriving
-its replacement. An unreadable or unsafe path blocks the connected closure.
-Per-file guards do not make Task 3 transactional: after an interrupted write,
-report actual paths and re-read/re-derive the same authorized closure before
-retrying. Later edits must survive.
-
-Stamp every note actually changed by QC, link repair, or hierarchy work under
-[note provenance](../../shared/PROVENANCE.md), preserving a known creator and
-recording `wiki-lint` as updater. Do not backfill or rewrite unchanged notes.
-Keep the footer outside cards and navigation bullets; re-scan the stamped bytes.
-
-Afterward, re-scan. Included entries with valid membership must have no placement gap, invalid or
-unresolved parent, self-parent, or cycle. Every active included MOC must have
-`moc_file_states` state `readable` (or `empty` for zero-member misc), contain
-only the generated outline and valid provenance footer when present, and
-have no `moc_consistency_findings` record. Each entry's complete parent
-union must match its nearest linked ancestors across the included MOCs, or `[[Wiki/misc]]` for misc members; discipline roots have empty parents. After
-a full-vault pass these conditions hold for every active discipline, misc, and
-requested entry; inactive discipline MOCs and skipped closures stay reported and
-preserved. Re-derive any incomplete active closure before declaring completion.
+Recognized MOCs are fully generated notes, including their provenance footer;
+unknown files remain outside that ownership. Apply the shared safe-write guard
+to every publication and re-scan the final bytes against the guide's
+[completion checks](references/hierarchy.md#read-diagnostics-and-verify-completion).
+An interrupted Task 3 requires rereading and rederiving the same connected
+closure before retrying; per-file guards do not make the group transactional.
 
 ## Report and backlogs
 

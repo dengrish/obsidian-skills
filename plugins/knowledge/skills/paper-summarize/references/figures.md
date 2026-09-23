@@ -17,7 +17,7 @@ format](note-format.md) owns the complete note shape and body modes.
 Only files that are already in `Sources/Images/` under this PDF's stem. The scan lists them; nothing else is embeddable.
 
 - **Never invent a filename.** An embed of a file that does not exist renders in Obsidian as ordinary text — no broken-image marker, no error, nothing. It is the most silently-wrong thing this skill can write.
-- **Never extract, crop or rename one.** PDF figure cropping has exactly one implementation in this plugin, in `figure-extract`, and a second copy is the bug the shared layer exists to prevent (`CONVENTIONS.md` §8b).
+- **Use the intake handoff for extraction or crop repair.** Follow `figure-extract` there; do not implement another cropper or rename images inside this skill (`CONVENTIONS.md` §8b).
 - **Do not re-run extraction during drafting.** Prepare the figure inventory during [intake](../SKILL.md#1-select-and-inventory-the-work), before selecting exhibits. An unresolved extraction gap is reported; carry the supported claim in prose.
 
 The scan matches on `[source_stem]_fig` and accepts any extension, which is §8a's consumer glob exactly. Matching the tighter `_fig_` instead would make figures written before this plugin's naming converged invisible — and invisible in the way that raises nothing (`CONVENTIONS.md` §8a, §8c).
@@ -145,7 +145,7 @@ The shape, exactly, and it mirrors the figure shape:
 - **Italic caption on the very next line**, no blank line between — again as for a figure, and for the same rendering reason.
 - **No table number**, in the caption or anywhere else.
 - **Values verbatim.** Copy the digits the source printed. Do not round, rescale, convert units, or recompute an average from the subset of rows you kept: a recomputed number is one the [verification finder](review-checklist.md#locate-the-claims) cannot locate, and the source never made that claim. Bolding the row or cell the claim is about is fine — that is emphasis, not arithmetic.
-- **Trim to what the claim needs, and say so in the caption.** A 28-row benchmark becomes its four group averages; a 12-column table becomes the three columns compared. **A trimmed table that does not announce the trim is the most misleading thing this note can contain**, because unlike a vague sentence it looks complete and precise. One clause fixes it: *"the four task groups; the 28 subtasks are in the paper"*.
+- **Trim to what the claim needs, and say so in the caption.** A 28-row benchmark may be reduced to four group averages only if the source already prints those averages; never compute them for the note. A 12-column table may retain the three columns compared. Disclose each omission so the subset cannot look complete: *"Four reported task-group averages; individual subtask rows are omitted."*
 - **Keep the paper's orientation** — systems in columns if that is how the paper set them, rows if not. Transposing is a silent re-presentation, and two tables under two orientations read as two notes.
 - **Four tables at most, one or two preferred.** Across both forms, aim for no
   more than about five total figure embeds plus rebuilt tables. That combined

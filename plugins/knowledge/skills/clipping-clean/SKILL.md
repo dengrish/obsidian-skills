@@ -88,7 +88,7 @@ a user decision; do not publish an empty polished note.
 Read [metadata verification and frontmatter](references/metadata-verification.md).
 Verify the title, author and publication date against the source. Preserve the
 capture URL and clipping date; if the fetch fails or returns a paywall stub,
-retain the raw values and report them as unverified. Corrections are reported
+retain usable raw values and report them as unverified. Corrections are reported
 as old → new. If no usable raw or fetched evidence supplies a title, retain the
 raw capture, skip that input, and report the missing title because there is no
 stable identity to publish. If only the publication year is missing, keep the
@@ -189,20 +189,11 @@ new note before it copies anything.
 ## 4. Assemble the complete draft
 
 Use the shared [source-note schema](../../shared/CONVENTIONS.md#2b-source-note--a-note-about-a-document)
-and the producer rules in [metadata verification and frontmatter](references/metadata-verification.md#frontmatter-for-the-polished-note).
-Clippings use `Article`, `Post` or `Video`; transcript content takes precedence
-over its host. `sources:` contains exactly the preserved capture URL.
-Use [discipline tags](../../shared/CONVENTIONS.md#3-the-discipline-tag-enum), not
-ad hoc synonyms, and keep `description` factual and at most 110 characters.
-
-Write `read: false` only on creation. On an approved reprocess preserve the
-existing review state (including absent/unknown values), capture URL and clipping
-date. Report an unknown state; if a required format check cannot accept it, keep
-the original and leave the draft unpublished. Regenerate the summary,
-format, description and tags, reporting that those edits were replaced. Preserve
-unrelated existing metadata, reporting conflicts or values that cannot be
-interpreted. Raw Web Clipper `source:` becomes output `sources:` while its
-capture URL stays unchanged.
+and read [the clipping frontmatter rules](references/metadata-verification.md#frontmatter-for-the-polished-note)
+when assembling it. That reference owns field choices and rewrite preservation;
+an approved reprocess is not permission to reset review state or strip user
+metadata. Keep a draft unpublished if a required check cannot accept the
+preserved state.
 
 The Summary callout carries the main claim first, then the supporting argument
 in source order. Each bullet stands alone, uses complete sentences, preserves
@@ -258,19 +249,23 @@ original producer on an authorized rewrite and leave no-op notes untouched.
 Publish only the completed, audited and reviewed bytes to `Articles/<slug>.md`.
 Recheck the destination immediately before publication. A collision discovered
 now returns to the naming decision; it is not permission to overwrite or rename
-foreign figures. Follow the shared [safe-write protocol and Python API
-recipe](../../shared/SAFE_WRITES.md#call-the-shared-python-api)
-for the note and for any old-path cleanup; a final check followed by
-`os.replace` or `unlink` is still overwrite-capable if another edit lands in
-between.
+foreign figures.
 
-For a new note, stage bytes in a unique hidden temporary directory beside the
-resolved real `Articles/` directory, outside the note folder and on its filesystem, and call the imported
-`atomic_move.publish_new(..., atomic_move.regular_file_snapshot, ...)`. Do not
-execute `atomic_move.py` as a publication command or call `os.link` directly;
-the shared wrapper also verifies the public bytes and conditionally withdraws
-only its own failed publication. Any occupant, including a dangling symlink,
-must fail unchanged. If safe publication is unavailable, stop and report it.
+**For an authorized rewrite or changed slug**, read and execute
+[the complete replacement procedure](references/duplicates-and-reprocessing.md#publish-an-approved-replacement).
+It owns note publication, existing-image handoff, new-image placement,
+dependency repair and old-path cleanup. Retain the unchanged original until
+publication succeeds, and keep both resolving versions while handoff blockers
+remain. Do not apply the new-note sequence below to a reprocess.
+
+**For a new note**, follow the shared [safe-write protocol and Python API
+recipe](../../shared/SAFE_WRITES.md#call-the-shared-python-api)
+to stage beside the resolved real `Articles/` directory, outside the note folder
+and on its filesystem. Call the imported
+`atomic_move.publish_new(..., atomic_move.regular_file_snapshot, ...)` as shown
+there; do not replace it with a shell move or direct filesystem primitive.
+Any occupant, including a dangling symlink, must fail unchanged. If safe
+publication is unavailable, stop and report it.
 After the note is public, place each staged image through the guarded helper,
 using the published note as ownership evidence:
 
@@ -286,21 +281,9 @@ images already placed and safely replace the failed embed with the documented
 placeholder. Never withdraw the only note that proves ownership of files
 already placed. Report the conflict and retained scratch file.
 
-For an authorized rewrite or renamed clipping, read and execute
-[the finalization procedure](references/duplicates-and-reprocessing.md#publish-an-approved-replacement).
-It owns the complete sequence and commands. Retain the unchanged original until
-publication succeeds, preserving its permissions and user metadata. A same-path
-rewrite needs no image handoff.
-
-For a changed slug, both owner notes must be public before prepare. Keep its
-exact image mapping and dependency report; repair dependencies only under the
-authorization and `wiki-lint` scope defined in that procedure. Finalize only
-after the unchanged dependency re-probe returns `ok: true`, then conditionally
-retire the exact old note. Keep both resolving versions while blockers remain.
-Never substitute manual copies or unchecked cleanup. Report any refused phase,
-retained recovery paths, or mixed state;
-success requires both image finalization and old-note cleanup. Raw captures and
-foreign notes/images remain untouched.
+Read back the published note and verify its final embeds before reporting
+completion. Report refused phases and retained recovery paths; a changed-slug
+reprocess is complete only after image finalization and old-note cleanup.
 
 ## 7. Report
 

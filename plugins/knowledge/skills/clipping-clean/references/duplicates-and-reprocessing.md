@@ -11,10 +11,12 @@ in [Select the captures](../SKILL.md#1-select-the-captures-and-check-ownership).
 
 ## Reprocessing an existing note
 
-Only a note whose first current `sources:` item is a web URL belongs to this
-skill. Read legacy `source:` only when `sources:` is absent; malformed or
-ambiguous current metadata cannot establish ownership through a stale value.
-A PDF wikilink belongs to `paper-summarize` and is not a clipping rewrite.
+An eligible clipping's first current `sources:` item is a web URL, and the note
+does not carry the `<!-- obsidian:wiki-add-research-source -->` marker.
+Marked research extracts remain distinct even when their URL matches a raw
+capture; leave them unchanged. Read legacy `source:` only when `sources:` is
+absent; malformed or ambiguous current metadata cannot establish ownership
+through a stale value. A PDF origin belongs to `paper-summarize`.
 
 Naming a file already in `Articles/` for reprocessing authorizes that owned
 rewrite. Naming a raw capture that matches another note requires an explicit
@@ -31,12 +33,10 @@ Remove only its leading Summary callout and following `___` separator to get
 the article body. Keep existing body prose, embeds and still-valid audit
 placeholders. Do not summarize the old summary as if it were source prose.
 
-Regenerate the summary, `format`, `description` and `tags`; report that manual
-edits to those generated fields were replaced. Preserve `read:` as found, including an absent/unknown state, plus the capture URL,
-clipping date and unrelated user metadata. Report an absent/unknown review state;
-do not fill it with `false` to satisfy the generated schema. Follow the
-[frontmatter rules](metadata-verification.md#frontmatter-for-the-polished-note)
-and report conflicting or uninterpretable unrelated metadata without removing it.
+Apply the [frontmatter rules](metadata-verification.md#frontmatter-for-the-polished-note)
+to decide which fields regenerate and which preserve user state. In particular,
+an unknown or absent review state is not permission to supply `false`; report
+that state and any metadata conflicts as required there.
 
 Retain existing figure numbers. An unchanged slug leaves existing attachments
 alone; new remote images use the next free number. A changed slug needs a
