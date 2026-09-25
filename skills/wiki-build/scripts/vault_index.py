@@ -57,7 +57,13 @@ unconfirmed basename candidates, never an automatic skip decision.
 Per-entry record:
     slug, path, relpath, title, type, aliases[], sources[], created, updated,
     description, tags[], parents[],
-    body_wikilink_targets[], related_wikilink_targets[], errors[]
+    body_wikilink_targets[], related_wikilink_targets[], errors[],
+    identity_complete
+
+``identity_complete`` is false when an error can hide the entry's slug, title
+or alias ownership: an unread, unsafe or unparsed file, or a malformed title or
+aliases field. Date, source, tag, type, description and filename/title errors
+leave it true.
 
 ``importance`` is NOT in the record: the field left the schema, and nothing
 downstream read it (neither ``lint_entry.py``, which parses frontmatter
@@ -83,7 +89,6 @@ from pathlib import Path
 import re
 import stat
 import sys
-import unicodedata as _ud
 
 _OBSIDIAN_SHARED_MODULES = (
     "entry_structure", "markdown_tables", "portable_names", "slugify", "vault_artifacts", "yaml_scalars",
@@ -130,6 +135,7 @@ from yaml_scalars import (parse_scalar, split_flow as _split_flow,
                           strip_comment)  # noqa: E402
 from entry_structure import mask_body_comments, mask_escaped_wikilinks  # noqa: E402
 from slugify import SlugError, slug_stem  # noqa: E402
+from portable_names import portable_identity  # noqa: E402
 from vault_artifacts import inventory_sources, local_link_matches  # noqa: E402
 
 
@@ -142,11 +148,19 @@ def fold_name(s):
     that can store both; a raw-string comparison would make safety depend on
     the host filesystem.
     """
-    return _ud.normalize("NFC", s or "").casefold()
+    return portable_identity(s or "")
+
+
+def duplicate_slug_problem(slug, paths):
+    """The index problem for one folded slug owned by several files."""
+    return ("slug %r occurs in %d files (subfolder and case/normalization "
+            "variants share one portable link identity): %s"
+            % (slug, len(paths), ", ".join(paths)))
 
 __all__ = [
     "Field",
     "Frontmatter",
+    "duplicate_slug_problem",
     "fold_name",
     "parse_frontmatter",
     "split_sections",
@@ -172,11 +186,15 @@ SCHEMA_ORDER = [
 
 LIST_FIELDS = {"aliases", "sources", "tags", "parents"}
 
-_KEY_RE = re.compile(r"^(?P<key>[A-Za-z_][A-Za-z0-9_-]*)\s*:(?P<rest>.*)$")
+#: A key's colon must be followed by whitespace or the end of the line, as
+#: YAML requires; ``title:"x"`` is one plain scalar, not a key.
+_KEY_RE = re.compile(
+    r"^(?P<key>[A-Za-z_][A-Za-z0-9_-]*)\s*:(?=\s|$)(?P<rest>.*)$")
 #: The same key shape, INDENTED -- i.e. nested under another key, which the
 #: schema has no form for.  Reported by name rather than as an unparseable
 #: line, and never adopted as a field of this entry.
-_INDENTED_KEY_RE = re.compile(r"^\s+(?P<key>[A-Za-z_][A-Za-z0-9_-]*)\s*:")
+_INDENTED_KEY_RE = re.compile(
+    r"^\s+(?P<key>[A-Za-z_][A-Za-z0-9_-]*)\s*:(?=\s|$)")
 _ITEM_RE = re.compile(r"^(?P<indent>\s*)-(?:\s+(?P<val>.*)|\s*)$")
 # [[target]] / [[target|label]] -- the leading (?<!!) rejects ![[embeds]]
 _WIKILINK_RE = re.compile(r"(?<!\!)\[\[([^\[\]]+?)\]\]")
@@ -531,6 +549,8 @@ def index_entry(path, text=None, root=None):
         "tags": [], "parents": [],
         "body_wikilink_targets": [], "related_wikilink_targets": [],
         "errors": [],
+        # Stays false on every early return: unread bytes can hide aliases.
+        "identity_complete": False,
     }
 
     if text is None:
@@ -590,6 +610,9 @@ def index_entry(path, text=None, root=None):
 
     fm = parse_frontmatter(text)
     record["errors"].extend(fm.errors)
+    # Any parser error (a skipped line, a duplicate key) may have dropped a
+    # title or alias; so may a malformed title or aliases field below.
+    identity_complete = not fm.errors
 
     record["title"] = fm.scalar("title")
     record["type"] = fm.scalar("type")
@@ -606,15 +629,22 @@ def index_entry(path, text=None, root=None):
         if field and field.is_list:
             record["errors"].append(
                 "%s: expected a scalar, not a list" % key)
+            if key == "title":
+                identity_complete = False
     for key in SCHEMA_ORDER:
         if key not in LIST_FIELDS:
             continue
         record[key] = [v for v in fm.values(key) if v not in (None, "")]
         field = fm.get(key)
+        malformed = False
         if field and field.kind == "scalar":
             record["errors"].append("%s: expected a list, not a scalar" % key)
+            malformed = True
         if field and any(v is None for v in field.values):
             record["errors"].append("%s: null or malformed list item" % key)
+            malformed = True
+        if malformed and key == "aliases":
+            identity_complete = False
     for source in record["sources"]:
         if not _SOURCE_REF_RE.fullmatch(source):
             record["errors"].append("sources: malformed local source reference %r" % source)
@@ -623,6 +653,7 @@ def index_entry(path, text=None, root=None):
             expected_slug = slug_stem(record["title"])
         except SlugError as exc:
             record["errors"].append("title cannot produce a canonical slug: %s" % exc)
+            identity_complete = False
         else:
             if fold_name(expected_slug) != fold_name(record["slug"]):
                 record["errors"].append(
@@ -640,6 +671,7 @@ def index_entry(path, text=None, root=None):
         val = record[key]
         if val and not _DATE_RE.match(val):
             record["errors"].append("%s: %r is not YYYY-MM-DD" % (key, val))
+    record["identity_complete"] = identity_complete
     return record
 
 
@@ -719,10 +751,7 @@ def build_index(root):
         pairs[0][0]: [p for _s, p in pairs]
         for _f, pairs in by_slug.items() if len(pairs) > 1}
     for slug, paths in sorted(index["duplicate_slugs"].items()):
-        index["problems"].append(
-            "slug %r occurs in %d files (subfolder and case/normalization "
-            "variants share one portable link identity): %s"
-            % (slug, len(paths), ", ".join(paths)))
+        index["problems"].append(duplicate_slug_problem(slug, paths))
     return index
 
 
@@ -1000,9 +1029,31 @@ def run_self_test():
               sorted(["slug", "path", "relpath", "title", "type", "aliases",
                       "sources", "created", "updated", "description", "tags",
                       "parents", "body_wikilink_targets",
-                      "related_wikilink_targets", "errors"]))
+                      "related_wikilink_targets", "errors",
+                      "identity_complete"]))
         check("`importance` is deliberately absent from the record",
               "importance" in anchor, False)
+        check("a clean entry has complete identity metadata",
+              anchor["identity_complete"], True)
+        identity_cases = (
+            ("a malformed date", ("created: 2026-01-01", "created: 2026-1-1"), True),
+            ("a malformed source", ("[[Doe_X_2025.pdf#page=2]]", "placeholder"), True),
+            ("a filename/title mismatch", ('title: "Anchor"', 'title: "Renamed"'), True),
+            ("a scalar aliases field",
+             ('aliases:\n  - "anchor-alias"\n  - "anchor-second"',
+              'aliases: "anchor-alias"'), False),
+            ("a null alias item", ('  - "anchor-second"', "  - null"), False),
+            ("a list-valued title", ('title: "Anchor"', "title: [Anchor]"), False),
+            ("an indented key", ("type: Concept", "type: Concept\n  nested: x"), False),
+            ("a key without a space after its colon",
+             ("type: Concept", "type:Concept"), False))
+        check("only errors that can hide slug, title or alias ownership make "
+              "identity incomplete",
+              [(label, index_entry(os.path.join(wiki, "anchor.md"),
+                                   text=_st_entry_text("Anchor").replace(*edit),
+                                   root=wiki)["identity_complete"])
+               for label, edit, _want in identity_cases],
+              [(label, want) for label, _edit, want in identity_cases])
         check("relpath is relative to the wiki root",
               [r["relpath"] for r in idx["entries"] if r["slug"] == "nested"],
               [os.path.join("sub", "nested.md")])
@@ -1072,8 +1123,9 @@ def run_self_test():
                   for e in r["errors"]), True)
         binary = [r for r in idx["entries"] if r["slug"] == "binary"][0]
         check("invalid UTF-8 cannot establish metadata ownership",
-              (binary["title"], binary["aliases"], binary["sources"]),
-              (None, [], []))
+              (binary["title"], binary["aliases"], binary["sources"],
+               binary["identity_complete"]),
+              (None, [], [], False))
         check("valid-looking frontmatter in a tainted file cannot source-match",
               source_matches(idx, ["Tainted_Source.pdf"]), [])
         leaf_records = [r for r in idx["entries"] if r["slug"] == "leaf-link"]
@@ -1159,6 +1211,14 @@ def run_self_test():
         fm = parse_frontmatter('---\ntitle: "A"\nparents:\n---\nbody\n')
         check("a bare key is `blank`, not a scalar",
               (fm.get("parents").kind, fm.values("parents")), ("blank", []))
+        fm = parse_frontmatter('---\r\ntitle: "A"\r\nparents:\r\n---\r\n')
+        check("a bare CRLF key is still `blank`",
+              (fm.get("parents").kind, fm.errors), ("blank", []))
+        fm = parse_frontmatter('---\ntitle:"A"\ntype:Concept\n---\nbody\n')
+        check("`key:value` without a space is invalid YAML, never a field",
+              (fm.get("title"), fm.get("type"),
+               sum("unparseable frontmatter line" in e for e in fm.errors)),
+              (None, None, 2))
 
         # -- sections ---------------------------------------------------------
         sec = split_sections("Prose one.\n\n**Related:** [[a|A]]\n\n---\n\n"
@@ -1222,8 +1282,11 @@ def run_self_test():
               (_split_flow(""),
                [bool(parse_frontmatter(
                    '---\naliases: [' + raw + ']\n---\n').errors)
-                for raw in (",", '"a",', ',"a"', '"a",,"b"')]),
+                for raw in (",", '"a",,', ',"a"', '"a",,"b"')]),
               ([], [True] * 4))
+        fm = parse_frontmatter('---\naliases: ["a",]\n---\n')
+        check("a single trailing comma after an item is valid YAML",
+              (fm.errors, fm.values("aliases")), ([], ["a"]))
 
         # -- a bad date is reported on the record ------------------------------
         rec = index_entry(os.path.join(wiki, "anchor.md"),

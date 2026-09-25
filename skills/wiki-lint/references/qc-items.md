@@ -35,7 +35,7 @@ ownership.
 | `item2/type-enum` | Write the exact enum spelling only when the body makes the intended type unambiguous; otherwise preserve and report. |
 | `item2/read-missing`, `item2/read-null`, `item2/read-unknown` | Preserve and report; supplying a boolean would invent user-owned state. |
 | `item2/parents-null` | Write `parents: []`; this changes only the spelling of an already empty value. |
-| `item2/parents-form` | Preserve usable targets while normalizing representation and unambiguous target spelling. Re-derive invalid relationships only in Task 3's authorized closure. |
+| `item2/parents-form` | Preserve usable targets while normalizing representation and unambiguous target spelling. A parent that resolves to a MOC is report-only here and never respelled; Task 3 replaces it (`moc-parent`). Re-derive invalid relationships only in Task 3's authorized closure. |
 | `item2/obsidian-key` | Report and preserve exactly; it is valid user configuration. |
 | `item2/provenance` | Preserve the record and report malformed, duplicate or misplaced attribution. Legacy metadata is read-only compatibility data; do not add or refresh it or infer a historical creator. |
 | `item3`, `item3/report-only` | Report date problems; wiki-lint writes neither date. |
@@ -58,10 +58,10 @@ ownership.
 | `image_folder_findings` | Report and preserve nested, staging, unreadable, or portable-name-collision paths. Collision records retain all owner paths; an unreadable inventory also suppresses missing-image claims. |
 | `item17/alias-candidate` | Apply the same-entity, collision, cross-domain, and Organism-common-name gates before adding anything. |
 | `item19` | Apply the format floor only after reading [flashcard maintenance](flashcards.md). |
-| `rename_candidates` | Propose with inbound count and collision warning; apply only with explicit authorization in the request and a complete reference rewrite. |
+| `rename_candidates` | Propose with inbound count and collision warning; apply only under an explicit rename request, through the [entry-retitle protocol](../../../shared/CONVENTIONS.md#retitling-an-existing-wiki-entry). |
 | `collision_candidates` | Report; routine lint never merges existing entries. |
-| `hierarchy_diagnostic.parent_state_findings`, `moc_file_states`, `moc_inventory_findings`, `legacy_moc_states`, `moc_consistency_findings` | Use as report-only Task 3 inputs. Re-derive whole generated MOCs and complete parent unions from one authorized connected closure. Non-outline formatting needs no separate span approval; unsafe paths, unexpected old root occupants, and unknown files remain protected. |
-| Semantic-invalid alias | Propose the canonical owner and inbound rewrite; remove only through the approved alias-refactor protocol. |
+| `hierarchy_diagnostic.parent_state_findings`, `moc_file_states`, `moc_inventory_findings`, `legacy_moc_states`, `moc_consistency_findings` | Use as report-only Task 3 inputs. Re-derive whole generated MOCs and complete parent unions from one authorized connected closure. Non-outline formatting needs no separate span approval; unsafe paths, legacy vault-root MOCs, and unknown files remain protected. |
+| Semantic-invalid alias | Propose the canonical owner and inbound rewrite; remove only under an explicit request, through the [alias-removal protocol](../../../shared/CONVENTIONS.md#4b-aliases-use-the-same-slug-rule). |
 
 ## Source-independent item guide
 
@@ -75,8 +75,9 @@ for its mechanical coverage; do not infer permission from a scanner message.
 Apply builder [item 1](../../wiki-build/SKILL.md#quality-checklist) and the
 [frontmatter guide](../../wiki-build/references/writing.md#1-frontmatter-fields).
 The opening fence is on file line 1; a BOM is tolerated, a leading blank is not.
-Flow lists may be empty only as `[]`; leading, middle, or trailing empty
-elements are invalid. Repair only values the file unambiguously establishes.
+Flow lists may be empty only as `[]`. One trailing comma after the last item
+is valid YAML; any other empty element is invalid. Repair only values the file
+unambiguously establishes.
 
 ### 2. Field order and quoting
 
@@ -112,7 +113,8 @@ not contain.
 ### 3. Dates
 
 Require valid `YYYY-MM-DD` dates with `created <= updated`, as builder
-[item 3](../../wiki-build/SKILL.md#quality-checklist) defines. The linter
+[item 3](../../wiki-build/SKILL.md#quality-checklist) and the
+[date fields](../../wiki-build/references/writing.md#created--updated) define. The linter
 writes neither field. Report invalid values, impossible ordering, and any
 history-dependent question; do not guess which date is wrong or try to make
 `updated:` equal a presumed merge date.
@@ -140,6 +142,10 @@ flag the same pair, report only the most specific probe label; no probe chooses
 an entry owner. The linter deliberately omits the noisy create-time
 token-superset probe. While reading, also report semantic synonym duplicates
 that shape probes cannot find.
+
+A bare-slug common-noun finding is a rename proposal under the cross-domain
+naming rule: report the qualified title. Report an unsluggable title with a
+representable alternative. Neither is renamed without an explicit request.
 
 ### 6. Type and API surface
 
@@ -171,16 +177,18 @@ unambiguous format fixes: block-list form, `#`, double quotes, exact enum case,
 safe abbreviation expansion, wikilink-to-tag conversion for a known enum
 member, and duplicate removal after canonicalization.
 
-Semantic disciplinary ownership remains a judgment. Re-home or reduce multiple tags to one only
-when the entry and vault make the canonical home unambiguous; otherwise report
-the competing candidates. Wiki tags must be a quoted block list containing exactly one home.
-For a genuinely blank key or empty list, inspect the note and assign its
+Semantic disciplinary ownership remains a judgment; Wiki tags hold exactly
+one home. Re-home a single-tag entry only when the entry and vault make the
+canonical home unambiguous; otherwise report the competing candidates. Reduce
+a legacy multi-tag list to one of its tags using the entry's main treatment
+and the calibration's governing test and defaults, reporting a close call with
+its two-option framing. Leave multiple tags only when the entry's identity is
+unresolved (for example, it conflates two concepts that need a split), and
+report that blocker. For a genuinely blank key or empty list, inspect the note and assign its
 best supported specific discipline, or `"#misc"` alone if none fits. Never combine
 misc with specific tags. Missing, malformed, mixed, or uncertain metadata
 requires its own evidence-based resolution, not blind replacement with misc.
-Entries tagged only `#misc` belong to `MOCs/misc.md` and receive
-`[[Wiki/misc]]` during Task 3 (the misc root itself keeps `parents: []`); preserve prior group evidence across the rescan
-so retagging closes the old and new hierarchy together.
+When retagging, keep the old group as prior-group evidence for Task 3's closure.
 
 ### 9. Body structure, coherence, flow, and scope
 
@@ -193,8 +201,11 @@ There is no body sentence, paragraph, word, or heading-count target.
 opener, equations, flashcard, and close neighbors. They must identify the same
 entity and sense without incompatible scope, conditions, direction, or
 notation. A conflict that requires choosing or changing a fact is a
-source-backed proposal. A neighbor conflict may expose a wrong link, duplicate,
-or split candidate; it does not authorize cross-entry redistribution.
+source-backed proposal. Prefer proposing to narrow a claim's own wording, or
+to trim a detail that belongs to a neighbor's subject down to the relationship
+and a wikilink, over appending qualifications. A neighbor conflict may expose
+a wrong link, duplicate, or split candidate; it does not authorize cross-entry
+redistribution.
 
 **Editorial and ownership review.** Apply the shared
 [prose principles](../../wiki-build/references/writing.md#prose-principles)
@@ -207,14 +218,21 @@ catalogs only when they do not serve the entry, and report duplicated
 explanatory treatments by conceptual owner. Length, a missing transition word,
 list shape, or lexical similarity alone proves nothing.
 
-**Caveat review.** Inspect qualifications and final paragraphs for rare edge
-cases, implementation failure handling, and defensive distinctions that do not
-help explain the ordinary concept. Do not add them from memory. Routine lint
-can remove empty rhetoric but preserves substantive claims; an explicit
-request to simplify such content activates source-backed correction across
-the requested scope, including similar cases beyond named examples. Verify
-the affected passages against each entry's cited sources and retain essential
-conditions. A source-supported detail can still be unnecessary to this entry.
+**Caveat review.** Inspect qualifications and final paragraphs for the caveats
+the [prose principles](../../wiki-build/references/writing.md#prose-principles)
+exclude because they do not help explain the ordinary concept. Do not add them
+from memory. Routine lint removes empty rhetoric and repetition under the
+local repairs below and well-definedness boilerplate under item 12, but
+preserves substantive claims. Record the remaining over-qualified passages in
+`Reviews/wiki-notes-suggestions.md`, one item per pattern naming each entry,
+passage, and why it does not help explain the concept, as a proposal for
+source-backed simplification. A pattern that a producer's rules keep
+generating also goes to that producer's log under
+[proposal scope](backlogs.md#proposal-scope). An explicit request to
+simplify such content activates source-backed correction across the requested
+scope, including similar cases beyond named examples. Verify the affected
+passages against each entry's cited sources and retain essential conditions.
+A source-supported detail can still be unnecessary to this entry.
 
 **Local editorial repairs.** Apply these autonomously when the existing entry
 establishes an unambiguous meaning:
@@ -238,7 +256,8 @@ establishes an unambiguous meaning:
 the knowledge recorded. Preserve every substantive claim, condition, degree,
 uncertainty, attribution, and scenario boundary. An illustrative example must
 remain an example; a small improvement must not become an unqualified one.
-Keep existing link tokens, citations, math spans and numerical values,
+Nor may an edit add a caveat, exception, or clarification the explanation
+does not need. Keep existing link tokens, citations, math spans and numerical values,
 image/table-plus-caption units, the complete flashcard section, and frontmatter
 verbatim during an item 9 edit. Do not drop a link or a qualifier when removing
 repetition. Descriptions follow item 7; links, equations, exhibits, and cards
@@ -253,10 +272,7 @@ repair for each changed entry; there is no shortening quota or human sign-off.
 
 If the change crosses a section, changes a fact, removes substantive content,
 chooses between claims, or redistributes material across entries, preserve it
-and propose a source-backed follow-up. Entry splits,
-merges, and redistribution also require authorization that names the operation,
-or the affected entries and intended outcome. Pure renames keep their separate
-approval rule.
+and propose a source-backed follow-up.
 
 For a missing `Person`/`Event` opener date, copy the exact date only when it is
 already present elsewhere in the entry. Normalize an existing malformed date
@@ -264,7 +280,8 @@ only when all values and qualifiers are unambiguous. Otherwise report it.
 
 ### 10. Wikilinks
 
-Apply the canonical [link rules](../../wiki-build/references/writing.md#link-form).
+Apply [CONVENTIONS §6](../../../shared/CONVENTIONS.md#6-wikilink-forms) and the
+builder's [link form guidance](../../wiki-build/references/writing.md#link-form).
 Judge first occurrence by resolved entry, not raw spelling; a real file outranks
 an alias, while ambiguous basename or alias ownership stays unresolved. In
 Task 1, canonicalize unambiguous case, Unicode, path, `.md`, or alias variants
@@ -285,8 +302,8 @@ before disputing a finding or treating literal sample syntax as a link.
 Use the canonical [Related footer](../../wiki-build/references/writing.md#the-related-footer).
 Keep one ` · `-separated line and pipe every target to its canonical title,
 with no slug-equal exception, including all-lowercase titles. Converting a bare
-footer link to that form is determinate; inherited excess is reported rather
-than pruned.
+footer link to that form is determinate. A footer with more than roughly 12
+links, the guide's merge-growth bound, is reported rather than pruned.
 
 ### 12. Equations, images, and tables
 
@@ -333,7 +350,11 @@ Preserve assumptions that determine the mathematical claim, following the
 Do not add exhaustive boundary handling from memory or turn an explanatory
 formula into an implementation specification. Under an explicit simplification
 request, verify and remove unhelpful equations, notation-only prose, corresponding card math, and unnecessary caveats through source-backed correction;
-ordinary lint does not silently remove substantive conditions.
+ordinary lint does not silently remove substantive conditions. A
+well-definedness qualifier that only says a formula's inputs exist is not a
+substantive condition: ordinary lint removes it under the equation guide,
+including from symbol bindings, and reports the removal.
+Flashcard line 1 follows [flashcard maintenance](flashcards.md).
 
 **Equation form and notation.** Promote a defining inline equation to its own
 display block; keep inline symbol references, bounds, complexity, and worked
@@ -345,13 +366,14 @@ notation and report genuinely ambiguous choices.
 Per [Dates](../SKILL.md#dates), equation fixes write neither `created:`,
 `updated:`, nor `read:`. An insertion into an entry whose `read:` is `true` is
 named under *Notes for the user* with the slug and equation, so the user may
-decide whether to clear their checkbox. Group every insertion, promotion, and
-notation change under item 12 in the run report.
+decide whether to clear their checkbox. Group every insertion, promotion,
+removal, and notation change under item 12 in the run report.
 
 ### 13. Merge integrity
 
 In a source-independent run, apply only the structural floor of builder
-[item 13](../../wiki-build/SKILL.md#quality-checklist): one opener and no
+[item 13](../../wiki-build/SKILL.md#quality-checklist) and its
+[merge logic](../../wiki-build/references/merge.md#merge-logic): one opener and no
 stacked-body scars such as duplicated openings, stray frontmatter keys,
 unexpected `---` fences, or standalone digit lines. Listings are excluded; a
 schema-shaped line inside a `Software` example is not a repair target. Actual
@@ -369,8 +391,9 @@ authors” do not.
 
 ### 15. Example discipline
 
-Apply builder [item 15](../../wiki-build/SKILL.md#quality-checklist) during
-semantic review. Identify an unnecessary, tangential, repetitive, or overly
+Apply builder [item 15](../../wiki-build/SKILL.md#quality-checklist) and
+[prose principle 7](../../wiki-build/references/writing.md#prose-principles)
+during semantic review. Identify an unnecessary, tangential, repetitive, or overly
 long example by purpose, never by sentence or note length. Trimming substantive
 example content or verifying its values needs the source, so record a specific
 proposal in `Reviews/wiki-notes-suggestions.md`. Source/tutorial scaffolding and
@@ -406,7 +429,8 @@ owner plus complete inbound rewrite.
 ### 18. Alias form, collisions, and display labels
 
 Apply builder [item 18](../../wiki-build/SKILL.md#quality-checklist) and the
-canonical [display-label rule](../../wiki-build/references/writing.md#display-label-casing).
+[display-label rule](../../wiki-build/references/writing.md#display-label-casing)
+and [§6's carve-outs](../../../shared/CONVENTIONS.md#6-wikilink-forms).
 Normalize determinate alias form and duplicates; report cross-entry ownership
 conflicts. Never auto-retarget a display whose exact surface belongs to another
 entry. Preserve the three deliberate display-label carve-outs: a
@@ -428,9 +452,9 @@ Use the card-format guide for the three content lines and recognized
 attachments; use flashcard maintenance for the rewrite threshold and legacy
 extras. Inspect every card semantically, including whether the primary answer
 omits a qualifying opener binding and whether its definition leaks or
-reconstructs the answer. Apply the canonical
-[line-1 equation-coverage rule](../../wiki-build/references/flashcards-and-emphasis.md#line-1-equation-coverage)
-even when the prose is accurate and the scanner is silent. Preserve existing
+reconstructs the answer. Check any line-1 math against the
+[line-1 equation rule](../../wiki-build/references/flashcards-and-emphasis.md#line-1-equation-coverage),
+even when the scanner is silent; line-1 math is optional. Preserve existing
 cues and every recognized scheduling/block-ID attachment byte-for-byte and in
 place; missing visible metadata does not establish a fresh card. Multiple
 cards remain report-only unless the user's request supplies the explicit
@@ -460,24 +484,20 @@ preserved under item 2.
   recipe, identifier catalog, or listing while preserving conceptual claims.
   Neither permits discretionary rewrites of conforming prose or bypasses the
   protected-content rules.
-- Fact changes, conflict resolution, source-content selection, and substantive
-  trimming need a source-backed request. A named entry may be corrected from
-  sources it already cites under the
-  [correction protocol](source-backed-corrections.md); a new source routes to
-  builder. Cross-entry splits, merges, deletion, and redistribution use the
-  refactor protocol and also need authorization; an existing request covering
-  the refactor supplies it, so do not ask twice.
+- Fact changes, conflict resolution, source-content selection, and
+  substantive trimming use
+  [source-backed correction mode](../SKILL.md#source-backed-correction-mode),
+  which corrects or simplifies existing entries from sources each already
+  cites; a new source routes to builder. Cross-entry splits, merges, deletion,
+  and redistribution use
+  [explicit refactor mode](../SKILL.md#explicit-source-backed-refactor-mode).
 - A retitle or re-slug is a rename. Propose it during routine lint, with inbound
   count and collision risk. Apply only when the request explicitly authorizes
   it, using the full
   [entry-retitle protocol](../../../shared/CONVENTIONS.md#retitling-an-existing-wiki-entry).
-- Semantic-invalid alias removal follows the same approved refactor: establish
-  identity and owner, inventory inbound alias-target entry links, rewrite every
-  resolving surface, verify, then remove the alias. Text matches in sources,
-  embeds, and logs are not entry links.
-- Blank or empty Wiki tags need the item-8 home/fallback repair above.
-  `parents: []` remains valid producer handoff syntax, with placement completed by Task 3. Missing or unrecognizable `read:`
-  is different because supplying a boolean would invent user-owned state.
+- Semantic-invalid alias removal is the same kind of approved refactor,
+  through the [alias-removal protocol](../../../shared/CONVENTIONS.md#4b-aliases-use-the-same-slug-rule).
+  Text matches in sources, embeds, and logs are not entry links.
 
 ## Coding content in non-Software entries (item 6)
 

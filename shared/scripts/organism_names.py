@@ -5,11 +5,22 @@ The helpers here provide a conservative mechanical floor.  They distinguish
 scientific, common, and ambiguous Organism titles only when local text supplies
 enough evidence; ambiguous typography remains a source-aware model judgment.
 
-Stdlib only, Python 3.10+ (the plugin runtime floor).
+Stdlib only (apart from sibling shared helpers), Python 3.10+ (the plugin
+runtime floor).
 """
 
 import argparse
+import os
 import re
+import sys
+
+# Keep sibling imports working when a harness loads this file directly by path
+# rather than running it as a script (where Python supplies this path).
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+from entry_structure import split_sentences
 
 __all__ = [
     "bound_common_names",
@@ -18,29 +29,6 @@ __all__ = [
     "scientific_abbreviation_matches",
     "taxon_title_parts",
 ]
-
-
-_INITIAL_RE = re.compile(r"(?:^|[^0-9A-Za-z'’])[A-Za-z]\.$")
-_NEXT_INITIAL_RE = re.compile(r"^\s+[A-Za-z]\.\s")
-_PREVIOUS_INITIAL_TAIL_RE = re.compile(r"(?:^|\s)[A-Za-z]\.\s*$")
-_HONORIFIC_TAIL_RE = re.compile(r"(?:^|\s)(?:Dr|Prof|Mr|Mrs|Ms)\.\s*$")
-_ABBREVS = (
-    "e.g.", "i.e.", "cf.", "et al.", "approx.", "vs.", "ca.", "c.",
-    "fl.", "Dr.", "Prof.", "Mr.", "Mrs.", "Ms.", "St.", "Jr.",
-    "Sr.", "Fig.", "b.", "d.", "r.", "U.S.", "U.K.", "var.",
-    "subsp.", "ssp.", "sp.", "spp.", "aff.", "cv.", "fo.",
-    "Dept.", "Inc.", "vol.", "pp.",
-)
-_ABBREV_RE = re.compile(
-    r"(?:^|[^0-9A-Za-z])(?:%s)$"
-    % "|".join(re.escape(value) for value in sorted(
-        _ABBREVS, key=len, reverse=True)), re.IGNORECASE)
-_CASE_SENSITIVE_ABBREV_RE = re.compile(r"(?:^|[^0-9A-Za-z])No\.$")
-_STRONG_SENTENCE_START_RE = re.compile(
-    r"^\s+(?:A|An|The|This|That|These|Those|It|Its|He|His|She|Her|"
-    r"They|Their|We|Our|You|Your|I|My|However|Therefore|Thus|"
-    r"Meanwhile|Moreover|Nevertheless|By|In|On|At|When|Where|Why|"
-    r"How|After|Before|During|Although|Because|If|As)\b")
 
 
 _LATIN_TAXON_RE = re.compile(
@@ -88,35 +76,9 @@ _BOLD_PAREN_RE = re.compile(
 
 
 def first_sentence(text):
-    """Return the first sentence while preserving initials/abbreviations."""
-    compact = " ".join((text or "").split())
-    for match in re.finditer(r"[.!?]+", compact):
-        cursor = match.end()
-        following = compact[cursor:cursor + 1]
-        if following and not following.isspace():
-            continue
-        if not following:
-            return compact[:cursor]
-        if match.group(0) == ".":
-            head = compact[max(0, cursor - 16):cursor]
-            head_plain = head.replace("*", "").replace("_", "")
-            initial = bool(_INITIAL_RE.search(head_plain))
-            abbreviation = bool(
-                _ABBREV_RE.search(head_plain)
-                or _CASE_SENSITIVE_ABBREV_RE.search(head_plain))
-            if initial or abbreviation:
-                before = compact[:match.start()]
-                after = compact[cursor:]
-                name_initial = bool(
-                    initial
-                    and (_NEXT_INITIAL_RE.match(after)
-                         or _PREVIOUS_INITIAL_TAIL_RE.search(before)
-                         or _HONORIFIC_TAIL_RE.search(before)))
-                strong_next = bool(_STRONG_SENTENCE_START_RE.search(after))
-                if name_initial or not strong_next:
-                    continue
-        return compact[:cursor]
-    return compact
+    """Return the first sentence, split by the shared sentence rules."""
+    sentences = split_sentences(text)
+    return sentences[0] if sentences else ""
 
 
 def _plain_markup(text):
@@ -376,6 +338,10 @@ def _self_test():
         ("sentence-final capital is not treated as a name initial",
          first_sentence("The genotype is X. The other genotype is Y."),
          "The genotype is X."),
+        ("a period inside closing quotation marks ends the first sentence",
+         first_sentence(
+             'Mus musculus is called the "house mouse." It is a rodent.'),
+         'Mus musculus is called the "house mouse."'),
     ]
     bad = [(name, got, want) for name, got, want in cases if got != want]
     for name, got, want in bad:

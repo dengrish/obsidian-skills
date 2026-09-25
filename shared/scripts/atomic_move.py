@@ -14,10 +14,12 @@ The guarantees are about concurrent directory-entry changes while the process
 is running. They do not claim power-loss durability; callers needing that must
 also flush file data and the affected directories according to the host
 filesystem's durability contract before reporting a durable commit.
-On a host that lacks an exclusive rename primitive, process termination during
-the regular-file fallback can leave the source under a sibling
-``.atomic-move-*`` directory. Preserve such a directory and inspect its
-``.removed``/``.observed`` entries; it is recovery state, not disposable cache.
+Every move stages privately under an ``.atomic-move-*`` directory, beside the
+source or, for a regular file, under a supplied ``stage_parent``. Process
+termination or a reported ``MoveIncomplete`` can leave the source there as
+``.observed``/``.removed`` (regular files) or ``.held`` (directories).
+Preserve such a directory and inspect its entries; it is recovery state, not
+disposable cache.
 
 This module is a programmatic import library, not a publication CLI. Its
 command line intentionally exposes only ``--test`` for the adversarial cases.
@@ -170,8 +172,9 @@ def regular_file_snapshot(path):
 
     ``RegularFileSnapshot.mode`` is the permission mode to copy to a staged
     replacement. The other fields make the object suitable as both the
-    ``expected`` value and the ``snapshot`` callback result used by this
-    module's regular-file publication primitives.
+    ``expected`` value and the ``snapshot`` callback result of
+    ``publish_new``, ``replace_expected`` and ``remove_expected``.
+    ``move_noreplace`` takes only its ``.identity``.
     """
     path = os.fspath(path)
     before = os.lstat(path)
@@ -371,10 +374,9 @@ def replace_expected(staged, target, expected, snapshot, stage_dir,
     ``snapshot(path)`` returns any equality-comparable identity+content value.
     The caller supplies a fresh, unique ``stage_dir`` for each operation
     (including rollback), never reusing one from a prior call, and retains it
-    when a raised
-    :class:`PublicationConflict` or :class:`LinkUnavailable` has ``keep_stage``
-    true. A named recovery path is exposed on the exception whenever the
-    displaced predecessor could not reclaim the public name.
+    after any exception, as SAFE_WRITES requires. A named recovery path is
+    exposed on the exception whenever the displaced predecessor could not
+    reclaim the public name.
     """
     stage_parent = stage_parent or os.path.dirname(stage_dir)
     _validate_stage_dir(
@@ -844,9 +846,13 @@ def _move_directory_via_private(src, dst, expected):
 def move_noreplace(src, dst, expected=None, stage_parent=None):
     """Move ``src`` without replacing either a late source or destination.
 
-    Common hosts use atomic exclusive rename. A regular-file fallback retains
-    the expected inode, conditionally displaces the public source into private
-    staging, and exclusively publishes the retained link. Case/normalization
+    ``expected`` is the ``file_identity(src)`` tuple captured at planning
+    (a retained ``RegularFileSnapshot.identity``), never a whole snapshot
+    token, which is refused as :class:`SourceChanged`.
+
+    Regular files always retain the expected inode, conditionally displace the
+    public source into private staging, and publish the retained link
+    exclusively; they never take a direct native rename. Case/normalization
     aliases take the same two-step route, so the spelling change never relies
     on overwrite-capable ``os.rename(src, dst)``. Directories require the host
     exclusive-rename primitive and otherwise fail before mutation. Callers

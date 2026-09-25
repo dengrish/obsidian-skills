@@ -33,7 +33,10 @@ extraction. If a permitted standalone Playwright is already available,
 `goto(url, wait_until="networkidle", timeout=30000)` and `page.content()` can
 supply rendered markup. Do not install or change permissions just to bypass an
 unavailable browser. Report whether the audit used static or rendered content
-and any inspection limits.
+and any inspection limits. If body cleaning flagged a possibly hidden
+AI-directed passage, check it in this markup; remove it from the scratch draft
+only when the markup shows readers never saw it, and report the outcome either
+way.
 
 Every capture needs one explicit verdict in the final report:
 
@@ -83,7 +86,8 @@ this audit must not recover the poster first and mark the animation done.
 ## Recover missing images
 
 For a confidently missing figure with a downloadable image URL and no Lottie,
-use [the guarded image pipeline](images.md#download-and-publish). Continue after
+stage it into a new child directory through
+[the guarded image pipeline](images.md#download-and-publish). Continue after
 the highest occupied figure number; filenames identify assets, not display
 order. Insert the embed beside its source caption or neighboring sentence. If
 placement is uncertain, use the most-related paragraph and report it as

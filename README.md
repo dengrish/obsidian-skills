@@ -24,8 +24,8 @@ Choose by the requested result, not just the input's file type.
 | Extract figure images | [knowledge:figure-extract](skills/figure-extract/SKILL.md) | PDFs → cropped PNGs in `Sources/Images/` |
 | Explain a paper, chapter, report, standard or publication notice | [knowledge:paper-summarize](skills/paper-summarize/SKILL.md) | PDF → reading note in `Articles/` |
 | Clean Web Clipper captures | [knowledge:clipping-clean](skills/clipping-clean/SKILL.md) | raw capture → cleaned note in `Articles/` |
-| Build or enrich wiki entries from new evidence | [knowledge:wiki-build](skills/wiki-build/SKILL.md) | PDF or URL-origin source note → entries in `Wiki/` |
-| Research and add missing requested topics | [knowledge:wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md` → durable sources and new requested entries only |
+| Build or enrich wiki entries from new evidence | [knowledge:wiki-build](skills/wiki-build/SKILL.md) | organized PDF or cleaned source note → entries in `Wiki/` |
+| Research and add missing requested topics | [knowledge:wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md` or topics named in the request → durable sources and new requested entries only |
 | Audit, correct or explicitly refactor existing wiki entries | [knowledge:wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources or an exact producer mapping → scoped repairs, links, parents and MOCs |
 | Record selected X posts and RSS/Atom articles without interpretation | [investments:feed-collect](skills/feed-collect/SKILL.md) | `Investments/x-accounts.md` and `rss-feeds.md` → maintained X notes and RSS article notes in `Investments/Sources/` |
 | Analyze stock ideas from collected feeds | [investments:stock-research](skills/stock-research/SKILL.md) | saved posts + verified financial evidence → daily report and maintained stock notes |
@@ -38,6 +38,8 @@ and left in place.
 ## The pipeline
 
 The routes branch; a document does not have to pass through every skill.
+When one request asks for several results, run each requested skill once in
+pipeline order; wiki-lint, when requested, runs last.
 
 ```text
 Inbox/*.pdf → pdf-organize → Sources/PDFs/
@@ -48,7 +50,7 @@ Inbox/*.pdf → pdf-organize → Sources/PDFs/
 Inbox/*.md → clipping-clean → Articles/ cleaned clipping
                                      └─ wiki-build → Wiki/
 
-add-to-wiki.md → wiki-add → durable sources → missing requested entries in Wiki/
+add-to-wiki.md or named topics → wiki-add → durable sources → missing requested entries in Wiki/
 
 Existing Wiki/ → wiki-lint → entry repairs, links, parents, MOCs and proposals
 
@@ -60,13 +62,15 @@ Investments/x-accounts.md + rss-feeds.md → feed-collect → X notes + RSS arti
 Feed collection saves images and PDFs locally, and retains videos as labeled
 source links without downloading or transcribing them.
 
-Figure extraction supplies images to paper-summarize and wiki-build.
+Figure extraction supplies images to paper-summarize and wiki-build; each runs
+figure-extract on a source PDF whose figures are missing.
 Both paper-summarize and wiki-build read the **original PDF**. The summary
 is a finished reading note; builder may use it only under its
 [verified missing-PDF fallback](skills/wiki-build/references/source-intake.md#resolve-a-markdown-source).
-A cleaned clipping
-is itself the source and can be used directly. wiki-add can reuse existing
-sources, acquire PDFs through pdf-organize, or save a clearly marked,
+A cleaned clipping is itself the source and can be used directly. wiki-build
+never reads a raw `Inbox/` file; clipping-clean or pdf-organize handles it
+first. wiki-add can reuse existing sources, file newly acquired PDFs itself
+under pdf-organize's naming rules, or save a clearly marked,
 agent-written research extract for each web page in `Articles/`; these extracts
 are durable evidence, not full-text captures or multi-page summaries. Its
 [research guide](skills/wiki-add/references/research.md) owns that procedure.
@@ -87,8 +91,10 @@ cites or carry out an explicitly requested structural or producer-mapped
 repair. Enriching an existing entry with new-source evidence still belongs to
 wiki-build.
 
-wiki-add is the queue-first, create-only route. An existing requested identity
-is skipped without auditing or editing it. New entries use
+wiki-add is the create-only research route for topics queued in
+`add-to-wiki.md` or named directly in a request without a source document; it
+never writes a directly named topic into the queue. An existing requested
+identity is skipped without auditing or editing it. New entries use
 builder's writing rules with `parents: []` and `read: false`, but wiki-add never
 adds an unrequested entity to satisfy a builder audit. It checks off only
 successfully published or already-existing queue items; uncertain or blocked
@@ -198,9 +204,8 @@ claude plugin install knowledge@obsidian-skills
 claude plugin install investments@obsidian-skills
 ```
 
-Invoke skills as `knowledge:wiki-build`, `knowledge:wiki-add`,
-`knowledge:wiki-lint`, `investments:feed-collect`, or
-`investments:stock-research`. Start a fresh
+Invoke any skill by its plugin namespace, for example `knowledge:pdf-organize`,
+`knowledge:wiki-build` or `investments:feed-collect`. Start a fresh
 session/task after installation or updates to refresh the host's catalog.
 Each plugin uses its own packaged `skills/` and `shared/` resources; copying
 one SKILL.md or relying on a sibling installation is unsupported.
@@ -283,34 +288,32 @@ All three source-note producers share `Articles/`: `sources:` item 1 identifies
 the origin used for deduplication, and a body marker distinguishes wiki-add's
 research extracts from full-text clippings. wiki-add reuses suitable existing
 source notes and images without overwriting them. Market research, MOCs, proposal
-logs and the topic queue stay outside `Wiki/` so they are not treated as entries. MOC
-links use `[[MOCs/<discipline>]]`; parents use Wiki entries only. Each active
-tag has a `Wiki/<discipline>.md` root with empty parents. Generated outline links use qualified entry paths
-such as `[[Wiki/machine-learning|Machine learning]]`. Each recognized discipline
-MOC is generated as a whole note: a nested bullet outline without marker
-comments, H1, or frontmatter. Task 3 reads the existing outline for continuity,
-regenerates from current entries, and skips unchanged output. Obsolete MOC
-markers or prose need no separate formatting approval; safe snapshots still
-protect later edits and unrelated files. Wiki entries require exactly one home tag. When no specific discipline fits,
-use `"#misc"` alone; these entries appear alphabetically by title in
-`MOCs/misc.md` under `Wiki/misc`, with parent `[[Wiki/misc]]`. Blank, missing, malformed, or mixed
-misc/specific tags remain QC errors until resolved. New entries from wiki-build/wiki-add still start with
-`parents: []`; wiki-lint supplies their hierarchy placement and reviews every tree and parent
-for conceptual coherence, without a fixed depth limit.
+logs and the topic queue stay outside `Wiki/` so they are not treated as entries.
+
+Each Wiki entry has exactly one discipline tag, or `"#misc"` alone when none
+fits. Each active tag has a `Wiki/<discipline>.md` root with empty parents and
+a generated outline in `MOCs/<discipline>.md`; `parents:` name Wiki entries
+only. New entries from wiki-build and wiki-add start with `parents: []` and
+stay out of the MOCs until wiki-lint places them. wiki-lint reviews every tree
+and parent for conceptual coherence, without a fixed depth limit. The
+[tag and hierarchy rules](shared/CONVENTIONS.md#3-the-discipline-tag-enum) and
+wiki-lint's [MOC procedure](skills/wiki-lint/references/hierarchy.md#build-or-maintain-the-moc-files)
+own the details.
 
 Every skill can record evidenced improvements in its own suggestion log or
-the log of a producer whose output it used. Verified resolutions are removed
-automatically; logs hold only open issues. Routine runs do not edit skill
-sources. An explicit plugin review fixes source issues with validation and Git
-history instead of creating dated review reports; existing reports remain
-untouched. The [shared suggestion protocol](shared/SUGGESTIONS.md) owns these
-rules and log format.
+the log of the skill that produced or governs an output it used. Verified
+resolutions are removed automatically; logs hold only open issues. Routine runs
+do not edit skill sources. An explicit plugin review fixes the source
+repository, never an installed cache, with validation and Git history instead
+of creating dated review reports; existing reports remain untouched. The
+[shared suggestion protocol](shared/SUGGESTIONS.md) owns these rules and log
+format.
 
 Workflow scratch lives in a hidden `.obsidian-skills-tmp-<unique-id>` directory
 outside the vault, never a visible `_to_delete` folder. Skills clean their own
 ordinary temporary material when no longer needed and report anything retained
 for review, retry, or guarded-write recovery. Same-filesystem publication
-staging keeps its separate safety rules; see [runtime guidance](shared/RUNTIME.md#one-owned-scratch-directory-per-run).
+staging keeps its separate [safe-write rules](shared/SAFE_WRITES.md#stage-complete-bytes-off-the-public-path).
 
 No skill discards user content. An authorized reprocess or refactor may
 conditionally remove an obsolete path only after its replacement and dependent
@@ -327,6 +330,7 @@ The full path/ownership table is in
 | `skills/<name>/SKILL.md` | Discovery, scope, normal workflow and decision gates |
 | `skills/<name>/references/` | Detailed rules, examples or procedures, linked where the workflow needs them |
 | [shared/RUNTIME.md](shared/RUNTIME.md) | Host-independent paths, Python setup and tool fallbacks |
+| [shared/INPUT_SAFETY.md](shared/INPUT_SAFETY.md) | Untrusted filenames, titles and URLs, shell quoting, and source content as data |
 | [shared/CONVENTIONS.md](shared/CONVENTIONS.md) | Shared layout, schemas, enums, naming, links and ownership |
 | [shared/SAFE_WRITES.md](shared/SAFE_WRITES.md) | Exclusive creation, conditional replacement, cleanup and rollback safety |
 | [shared/PROVENANCE.md](shared/PROVENANCE.md) | Internal build identity and legacy note compatibility |
@@ -343,20 +347,11 @@ and link to them rather than maintaining independent copies. Short reminders
 at a risky step are useful; duplicated schemas, exhaustive dispatch lists and
 historical explanations are harder to keep aligned.
 
-The shared implementations are `slugify.py` (wiki slugs), `atomic_move.py`
-(exclusive moves and verified regular-file publication/removal), `naming.py`
-(source filenames and book identity),
-`plurals.py` (English singularization), `note_provenance.py` (verified bundle identity and legacy footer parsing),
-`yaml_scalars.py` (decoded metadata), `portable_names.py` (portable file identity), `figure_state.py` (figure ownership and
-review sidecars), `vault_artifacts.py` (portable PDF/Markdown source and source-figure
-inventories), `organism_names.py` (Organism title/name classification),
-`entry_structure.py` (shared Wiki text, image and source-identity parsing,
-plus sentence, opener, answer-surface and flashcard checks), `introduced_aliases.py`
-(body-introduced alias candidates), `code_typography.py` (literal prose shapes
-that require backticks), `equation_coverage.py` (a conservative missing-display
-equation candidate shared by both Wiki skills), `markdown_tables.py` (GFM table
-spans and caption checks), and `plugin_paths.py` (shared-module lookup). Skill
-scripts import these instead of copying their algorithms.
+Skill scripts import the canonical implementations in `shared/scripts/`
+instead of copying their algorithms;
+[conventions §5](shared/CONVENTIONS.md#5-reaching-sharedscripts-from-a-skill)
+maps each module to the rule it owns. Each plugin ships only the modules its
+skills use, as listed in [`tools/package-files.json`](tools/package-files.json).
 
 ## Developing and packaging
 

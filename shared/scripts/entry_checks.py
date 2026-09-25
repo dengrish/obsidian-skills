@@ -1,0 +1,1089 @@
+#!/usr/bin/env python3
+"""Per-entry Wiki checks shared by wiki-build's gate and wiki-lint's scanner.
+
+wiki-build's ``lint_entry.py`` (the publication gate that wiki-add and
+wiki-lint's source-backed corrections also run) and wiki-lint's
+``scan_vault.py`` read these source-independent Quality Checklist floors from
+this one copy, so an entry that passes the builder gate does not fail the next
+maintenance scan on the same mechanical rule.
+
+Covered: item 5's bare cross-domain slug floor (``COMMON_NOUNS``) and the
+item-17 hint for a single-word alias candidate, item 6's API-surface shapes in
+non-Software entries, item 13's stacked-merge scars, item 14's source-meta
+phrasing, item 16's unenumerated bold and emphasis around a wikilink, math or
+code span, item 18's display-label markup and label/target surface test
+(with the Organism common-name carve-out), and item 19's choice of the
+primary card among several.
+
+Every check returns plain dictionaries carrying a ``check`` name, a
+``message`` and evidence fields. Callers choose the finding key and severity:
+``scan_vault`` reports the messages under its ``itemN`` keys, while
+``lint_entry`` maps each check to its own ``N-...`` finding id. ``prose`` is
+an entry's comment-masked explanatory body (up to the Related footer or the
+Flashcards section), with the blank lines after the frontmatter removed.
+
+Stdlib only (apart from sibling shared helpers), Python 3.10+ (the plugin
+runtime floor).
+"""
+
+import argparse
+import os
+import re
+import sys
+
+# Keep sibling imports working when a harness loads this file directly by path
+# rather than running it as a script (where Python supplies this path).
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+from code_typography import FILE_EXTENSIONS  # noqa: E402
+from entry_structure import (  # noqa: E402
+    _BOLD_OUTER_RE,
+    mask_body_comments,
+    math_title_plain_text,
+    normalized_answer_surface,
+    strip_code,
+    strip_fenced,
+    strip_indented,
+)
+from markdown_tables import markdown_block_start, mask_line_spans  # noqa: E402
+from organism_names import bound_common_names, first_sentence  # noqa: E402
+from plurals import pluralize  # noqa: E402
+from slugify import base_term, has_parenthetical  # noqa: E402
+
+
+__all__ = [
+    "BARE_WORD_ALIAS_HINT",
+    "BOLD_OUTER_RE",
+    "COMMON_NOUNS",
+    "DISPLAY_LINK_RE",
+    "LIBS",
+    "SHARED_MUTATIONS",
+    "SHARED_QUIET",
+    "api_surface_findings",
+    "bare_common_noun_slug",
+    "bare_word_alias_candidate",
+    "bold_parts",
+    "display_label_links",
+    "display_label_markup",
+    "emphasis_span_findings",
+    "label_shares_surface",
+    "merge_scar_findings",
+    "organism_common_name_bound",
+    "organism_common_name_surfaces",
+    "plural_surface",
+    "primary_line3_faults",
+    "pure_math_opener_markup",
+    "source_meta_findings",
+    "unenumerated_bold_findings",
+]
+
+
+# ---------------------------------------------------------------------------
+# item 5: the cross-domain common-noun floor
+# ---------------------------------------------------------------------------
+
+#: The explicit mechanical floor in wiki-build/references/writing.md,
+#: Cross-domain term disambiguation, test (c).  The prose rule remains broader
+#: (dictionary and drafting tests catch terms outside a finite set); every term
+#: it names explicitly must at least be guarded, both from a bare filename and
+#: from becoming an automatic backfill destination.
+COMMON_NOUNS = frozenset({
+    "activation", "agent", "attention", "bias", "cell", "classification",
+    "clustering", "domain", "ensemble", "entropy", "feature", "field",
+    "filter", "function", "gradient", "inertia", "kernel", "label", "model",
+    "normalization", "policy", "regression", "return", "shrinkage",
+    "temperature", "tensor", "transformer", "vector",
+})
+
+#: Appended to an item-17 alias-candidate message for a single-word candidate
+#: of a disambiguated or cross-domain subject (writing.md cross-domain tests).
+BARE_WORD_ALIAS_HINT = (
+    "a single-word synonym of a disambiguated or cross-domain subject stays "
+    "out unless the cross-domain tests show it names only this subject")
+
+
+def bare_common_noun_slug(slug):
+    """Whether a filename stem is a bare term from the cross-domain floor."""
+    return "-" not in (slug or "") and slug in COMMON_NOUNS
+
+
+def bare_word_alias_candidate(candidate_slug, title, surface=""):
+    """Whether a one-word alias candidate needs the cross-domain hint.
+
+    It does when the title carries a disambiguator or the word itself is a
+    named cross-domain term. An acronym such as ``TPR`` (a ``surface`` with no
+    lowercase letter) is not a bare common word.
+    """
+    if surface and not re.search(r"[a-z]", surface):
+        return False
+    return ("-" not in (candidate_slug or "")
+            and (has_parenthetical(title or "")
+                 or candidate_slug in COMMON_NOUNS))
+
+
+# ---------------------------------------------------------------------------
+# item 6: API surface in a non-Software entry
+# ---------------------------------------------------------------------------
+
+#: Libraries named by the API-surface failure strings.
+LIBS = ["PyTorch", "TensorFlow", "JAX", "NumPy", "Pandas", "scikit-learn",
+        "sklearn", "Keras", "SciPy", "Matplotlib", "Hugging Face", "XGBoost",
+        "LightGBM", "CatBoost"]
+
+_LIB_ALT = "|".join(re.escape(lib) for lib in LIBS)
+_API_FAILURE_STRINGS = [
+    (rf"\bIn ({_LIB_ALT})\b", "In-<library> framing"),
+    (rf"\b({_LIB_ALT})\s+(provides|offers|exposes|has)\b",
+     "<library> provides/offers framing"),
+    (r"\bbuilt with `", "'built with `…`' how-to signpost"),
+    (r"\bconstructed (with|via) `",
+     "'constructed with/via `…`' how-to signpost"),
+    (r"\bcreated (with|by) `", "'created with/by `…`' how-to signpost"),
+    (r"\bavailable (through|via|in) `",
+     "'available through `…`' how-to signpost"),
+    (r"\buse `[^`]+` to\b", "'use `…` to' how-to signpost"),
+    (r"\bflag enables\b", "kwarg/flag documentation"),
+    (r"`[A-Za-z_][A-Za-z0-9_]*\s*=",
+     "backticked kwarg/default-value (`name=`)"),
+    (r"`(True|False|None)`", "Python language literal in code form"),
+]
+_CODE_IDENTIFIER_TITLE_RE = re.compile(r"^[A-Za-z_][\w]*(\.[A-Za-z_][\w]*)+$")
+_SPECIAL_TOKEN_LITERAL_RE = re.compile(r"\[[^\]\n]+\]")
+
+
+def _file_extension_literal(token):
+    """A bare file extension such as ``.csv``, or a compound one.
+
+    A compound whose first or last part is a known extension (``.tar.gz``,
+    ``.tar.zst``, ``.nii.gz``, ``.d.ts``) passes; a dotted chain such as
+    ``.str.lower`` stays an identifier.
+    """
+    if not re.fullmatch(r"(?:\.[A-Za-z0-9]+)+", token):
+        return False
+    parts = [part.lower() for part in token.split(".")[1:]]
+    return (len(parts) == 1 or parts[0] in FILE_EXTENSIONS
+            or parts[-1] in FILE_EXTENSIONS)
+
+
+def api_surface_findings(entry_type, title, prose, body):
+    """Item 6's mechanical API-surface shapes; empty for a Software entry.
+
+    Checks are ``code-identifier-title``, ``api-string`` (the first library
+    framing or how-to signpost, else a code-form ``… or …`` alternative),
+    ``fenced-code`` (read from the whole comment-masked ``body``: the fence is
+    the finding) and ``backticked-identifiers`` (the zero cap; a file
+    extension such as ``.csv`` or ``.tar.gz`` and a bracket special token are
+    not identifiers).
+    """
+    if entry_type == "Software":
+        return []
+    title = title or ""
+    prose = prose or ""
+    findings = []
+    if _CODE_IDENTIFIER_TITLE_RE.match(title) or "()" in title:
+        findings.append({
+            "check": "code-identifier-title",
+            "message": f'title looks like a code identifier: "{title}"'})
+    for pattern, label in _API_FAILURE_STRINGS:
+        if re.search(pattern, prose):
+            findings.append({"check": "api-string", "label": label,
+                             "message": f'API-surface failure string — {label}'})
+            break
+    else:
+        for alternatives in re.finditer(
+                r"`([^`\n]+)`\s+or\s+`([^`\n]+)`", prose):
+            values = [value.strip() for value in alternatives.groups()]
+            if not all(_file_extension_literal(value)
+                       or _SPECIAL_TOKEN_LITERAL_RE.fullmatch(value)
+                       for value in values):
+                label = "`…` or `…` alternative signposts"
+                findings.append({
+                    "check": "api-string", "label": label,
+                    "message": "API-surface failure string — " + label})
+                break
+    # Both fence spellings: markdown opens a block with ``` or ~~~.
+    if re.search(r"(?m)^\s*(?:`{3}|~{3,})", mask_body_comments(body or "")):
+        findings.append({
+            "check": "fenced-code",
+            "message": "fenced code block — mechanically allowed only after "
+                       "genuine Software classification; reclassification "
+                       "does not waive Software's artifact-wide relevance "
+                       "gate"})
+    inline = re.findall(r"`([^`\n]+)`",
+                        re.sub(r"`{3}.*?`{3}", " ", prose, flags=re.S))
+    identifiers = [token.strip() for token in inline if token.strip()
+                   and not _file_extension_literal(token.strip())
+                   and not re.fullmatch(r"\[.+\]", token.strip())]
+    if identifiers:
+        findings.append({
+            "check": "backticked-identifiers", "identifiers": identifiers,
+            "message": f'{len(identifiers)} backticked identifier(s) (cap is 0 '
+                       "in a non-Software entry; Software may retain only "
+                       "artifact-wide design/interface API, never a usage "
+                       f'catalog): {", ".join(identifiers[:6])}'})
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# item 13: stacked-merge scars
+# ---------------------------------------------------------------------------
+
+# `importance` is a legacy key, so a legacy entry's stacked-merge scar can
+# still be an `importance:` line stranded in the body. `read:` is the schema's
+# last key, so a partial scar plausibly leaves exactly a `read: false` line.
+_SCHEMA_KEY_LINE_RE = re.compile(
+    r"(?m)^(title|type|aliases|sources|created|updated|description|tags|"
+    r"importance|parents|read):")
+_DISPLAY_MATH_BLOCK_RE = re.compile(
+    r"(?ms)^ {0,3}\$\$[ \t]*(?:\n.*?\n|.*?) {0,3}\$\$[ \t]*$")
+_DIGIT_LINE_RE = re.compile(r"(?m)^\s*[0-9]+\s*$")
+
+
+def _line_of(text, offset):
+    return text.count("\n", 0, offset) + 1
+
+
+def merge_scar_findings(prose, separator_line=None):
+    """Item 13's body scars: a schema key, a stray ``---`` or a digit line.
+
+    Listings are masked first: a Software entry legitimately shows YAML in a
+    fence, and deleting a line from the entry's own example is destructive.
+    ``separator_line`` is a zero-based prose line to ignore: the structural
+    separator before Flashcards when a missing Related footer leaves it inside
+    ``prose``. Each finding's ``line`` is one-based within ``prose``.
+    """
+    lines = strip_code(prose or "").split("\n")
+    if separator_line is not None and 0 <= separator_line < len(lines):
+        lines[separator_line] = ""
+    scan = "\n".join(lines)
+    findings = []
+    key = _SCHEMA_KEY_LINE_RE.search(scan)
+    if key:
+        findings.append({
+            "check": "frontmatter-key", "line": _line_of(scan, key.start()),
+            "message": "stray frontmatter key in the body — stacked-merge "
+                       "scar; remove it"})
+    stray = [index for index, line in enumerate(lines)
+             if re.fullmatch(r"\s*---\s*", line)
+             and not (index > 0 and lines[index - 1].strip()
+                      and not markdown_block_start(lines[index - 1]))]
+    if stray:
+        findings.append({
+            "check": "stray-rule", "line": stray[0] + 1,
+            "message": "stray `---` fence in explanatory body prose — "
+                       "stacked-merge scar; the only body separator belongs "
+                       "between Related and Flashcards"})
+    if _DIGIT_LINE_RE.search(_DISPLAY_MATH_BLOCK_RE.sub("", scan)):
+        # The decision reads the scanner's historical view; the evidence line
+        # comes from a newline-preserving copy of it.
+        kept = _DISPLAY_MATH_BLOCK_RE.sub(
+            lambda match: "\n" * match.group(0).count("\n"), scan)
+        digit = re.search(r"(?m)^[ \t]*[0-9]+[ \t]*$", kept)
+        findings.append({
+            "check": "digit-line",
+            "line": _line_of(kept, digit.start()) if digit else None,
+            "message": "standalone bare digit line in explanatory body prose "
+                       "— stacked-merge scar; remove it or restore the content "
+                       "it was detached from"})
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# item 14: source-meta phrasing
+# ---------------------------------------------------------------------------
+
+#: Source-meta patterns for every entry type.
+SOURCE_META_PATTERNS = (
+    r"\bthis paper\b", r"\bthe chapter\b",
+    # “source code” names software material, not the document; the other
+    # technical compounds (“the source domain/node/sentence”) name a concept's
+    # own source side, and “the source of” names an origin (the source of a
+    # river). The carve-out is symmetric for “the” and “this,” including the
+    # ordinary hyphenated spelling. Text, file, material and document stay
+    # source-meta.
+    r"\b(?:the|this) source\b(?!\s+of\b)(?!\s*(?:-| )\s*(?:code|domain"
+    r"|language|sentence|sequence|node|vertex|vertices|distribution|task"
+    r"|signal|term)s?\b)",
+    r"\bas (?:mentioned|discussed|noted|shown|described) "
+    r"(?:above|below|earlier|previously|later)\b",
+    r"\bin the previous section\b", r"\bas we saw\b",
+    r"\bthe figure (?:above|below)\b",
+)
+#: In a Work entry, “the paper”, “the book” or “the article” can name the
+#: entry's own subject, so these are source-meta only outside Work entries.
+#: Finance's book value and book-to-market ratio are not the document.
+NON_WORK_META_PATTERNS = (
+    r"\bthe paper\b",
+    r"\bthe book\b(?![\s-]+(?:value|values|to-market)\b)",
+    r"\bthe article\b")
+
+_WIKILINK_START_RE = re.compile(r"\[\[[^\[\]\n]+\]\]")
+_EMPHASIZED_TITLE_RE = re.compile(r"([*_]{1,3})[^*_\n]+\1")
+# A capitalized name or acronym such as SGDR or GPT-3, not a determiner.
+_NAME_TOKEN_RE = re.compile(r"(?!(?:The|This|These|That|Those|A|An)\b)[A-Z]\w*")
+
+
+def _names_linked_or_emphasized_work(text, match):
+    """Single-entry floor: ``the author(s) of`` a link, italic title or name.
+
+    A capitalized name or acronym (``the authors of SGDR``) also passes.
+    """
+    of_match = re.match(r"\s+of\s+", text[match.end():], re.IGNORECASE)
+    if not of_match:
+        return False
+    remainder = text[match.end() + of_match.end():]
+    return bool(_WIKILINK_START_RE.match(remainder)
+                or _EMPHASIZED_TITLE_RE.match(remainder)
+                or _NAME_TOKEN_RE.match(remainder))
+
+
+def source_meta_findings(prose, entry_type, names_work=None):
+    """Item 14: the first source-meta phrase, else a bare ``the author(s)``.
+
+    ``names_work(text, match)`` decides whether one ``the author(s)`` match
+    names an existing entry, such as a Work or a named method. The vault
+    scanner resolves the entry; the single-entry default accepts ``the
+    author(s) of`` followed by a wikilink, an emphasized title, or a
+    capitalized name or acronym, which it cannot verify.
+    """
+    patterns = list(SOURCE_META_PATTERNS)
+    if entry_type != "Work":
+        patterns.extend(NON_WORK_META_PATTERNS)
+    text = strip_code(prose or "")
+    for pattern in patterns:
+        found = re.search(pattern, text, re.I)
+        if found:
+            return [{"check": "phrase", "pattern": pattern,
+                     "text": found.group(0),
+                     "message": f'source-meta phrasing "{found.group(0)}"'}]
+    names_work = names_work or _names_linked_or_emphasized_work
+    authors = list(re.finditer(r"\bthe authors?\b", text, re.IGNORECASE))
+    if any(not names_work(text, match) for match in authors):
+        return [{"check": "authors",
+                 "message": "source-meta phrasing uses bare `the author(s)` "
+                            "rather than naming an existing entry"}]
+    return []
+
+
+# ---------------------------------------------------------------------------
+# item 16: emphasis
+# ---------------------------------------------------------------------------
+
+# One outer-bold reader for all title shapes (entry_structure's).  The inner
+# expression admits an italic span, so it reads ordinary ``**Title**``,
+# combined ``***Latin binomial***``, and the mixed taxon/strain form
+# ``***E. coli* K-12**`` as one bold span instead of starting at the wrong
+# pair of asterisks.
+BOLD_OUTER_RE = _BOLD_OUTER_RE
+_ANYLINK_RE = re.compile(r"!?\[\[[^\]]*\]\]")
+_INLINE_CODE_RE = re.compile(r"(`+)[^\n]*?\1(?!`)")
+_CAPTION_LINE_RE = re.compile(r"^\s*\*(?!\*).*\*\s*$")
+# A bolded bullet anchor may be followed by a short parenthetical or bracketed
+# qualifier (optionally italicized) before the delimiter, as in wiki-build's
+# `- **True positives** (TP) — positives correctly predicted as positive`.
+# The anchor itself is read like the outer bold, so an italic taxon
+# (`- ***Mus musculus*** —`) is an anchor too.
+_BULLET_ANCHOR_RE = re.compile(
+    r"^\s*[-*]\s+\*\*(?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?\*\*(?!\*)"
+    r"(?:\s*[*_]?[\(\[][^)\]\n]{1,60}[\)\]][*_]?)*\s*[—–:\-]")
+_SINGLE_SPAN_RE = re.compile(r"\[\[[^\]]*\]\]|\$[^$]+\$|`[^`]+`")
+_EMPHASIS_SPAN_RE = re.compile(
+    r"(\*\*|\*)(\[\[[^\]\n]*\]\]|\$[^$\n]+\$|`[^`\n]+`)(\*\*|\*)")
+
+
+def bold_parts(match):
+    """Return ``(visible_text, style, italic_prefix)`` for an outer bold.
+
+    ``style`` is ``plain``, ``full-italic``, or ``mixed``.  The mixed form is
+    the only legal spelling for a taxon followed by a plain strain designator.
+    """
+    raw = match.group(1)
+    if raw.startswith("*"):
+        close = raw.find("*", 1)
+        if close > 1:
+            italic = raw[1:close]
+            suffix = raw[close + 1:]
+            return (italic + suffix,
+                    "full-italic" if not suffix else "mixed", italic)
+    return raw, "plain", None
+
+
+def unenumerated_bold_findings(prose, table_spans=()):
+    """Item 16: bold outside the title, bullet anchors and ``**Related:**``.
+
+    The opener's first bold is the title slot (the opener check owns its
+    form); the opener starts at the first visible line, so a leading comment
+    does not end it. Whole-line italic captions belong to item 12. Wikilinks
+    are masked so markup in a display label stays item 18's finding, and bold
+    around a single link, math or code span is left to
+    ``emphasis_span_findings``.
+    """
+    masked = mask_line_spans(strip_code(prose or ""), table_spans)
+    masked = _ANYLINK_RE.sub(lambda match: " " * len(match.group(0)), masked)
+    findings = []
+    in_opener, opener_skipped, seen_text = True, False, False
+    for index, line in enumerate(masked.split("\n")):
+        if line.strip():
+            seen_text = True
+        elif in_opener and seen_text:
+            in_opener = False
+        if _CAPTION_LINE_RE.match(line) or _BULLET_ANCHOR_RE.match(line):
+            continue
+        for bold in BOLD_OUTER_RE.finditer(line):
+            if in_opener and not opener_skipped:
+                opener_skipped = True
+                continue
+            span = bold_parts(bold)[0].strip()
+            if not span or span == "Related:":
+                continue
+            if _SINGLE_SPAN_RE.fullmatch(span):
+                continue
+            findings.append({
+                "check": "unenumerated-bold", "span": span, "line": index + 1,
+                "message": f'unenumerated bold "**{span}**" — bold is only for '
+                           "the title, `- **Term** (qualifier) —` bullet "
+                           "anchors, and **Related:** (use italics or a "
+                           "wikilink)"})
+    return findings
+
+
+def emphasis_span_findings(prose, related="", table_spans=(),
+                           opener_markup=None):
+    """Item 16: bold or italic wrapped around a wikilink, math or code span.
+
+    The markup itself already styles the span. ``opener_markup`` is the exact
+    opener bold of a title made from one inline-math span (see
+    ``pure_math_opener_markup``): its first occurrence in the opener is the
+    one allowed exception; the opener starts at the first visible text. Code
+    contents are blanked but their delimiters kept, so emphasis shown inside a
+    code sample is not rendered emphasis.
+    """
+    prose = prose or ""
+    zones = (mask_line_spans(strip_indented(strip_fenced(prose)), table_spans)
+             + "\n" + (related or ""))
+    zones = _INLINE_CODE_RE.sub(
+        lambda match: (match.group(1)
+                       + " " * (len(match.group(0)) - 2 * len(match.group(1)))
+                       + match.group(1)),
+        zones)
+    lead = len(zones) - len(zones.lstrip())
+    opener_break = re.search(r"\n[ \t]*\n", zones[lead:])
+    opener_limit = lead + opener_break.start() if opener_break else len(prose)
+    findings = []
+    for match in _EMPHASIS_SPAN_RE.finditer(zones):
+        if match.group(1) != match.group(3):
+            continue
+        inner = match.group(2)
+        if inner.startswith("[["):
+            kind, fix = "wikilink", "the link"
+        elif inner.startswith("$"):
+            kind, fix = "math", "LaTeX"
+        else:
+            kind, fix = "code", "backticks"
+        if opener_markup == match.group(0) and match.start() < opener_limit:
+            opener_markup = None
+            continue
+        findings.append({
+            "check": "emphasis-around-span", "kind": kind,
+            "span": inner[:30], "line": _line_of(zones, match.start()),
+            "message": f'{"bold" if match.group(1) == "**" else "italic"} '
+                       f'around a {kind} ({inner[:30]}) — remove the emphasis; '
+                       f'{fix} already provides the styling'})
+    return findings
+
+
+def _first_letter_ci_equal(a, b):
+    return a[:1].lower() + a[1:] == b[:1].lower() + b[1:]
+
+
+def pure_math_opener_markup(running_title, opener):
+    """The opener bold allowed around a title made of one inline-math span.
+
+    ``running_title`` is the title without a disambiguating parenthetical and
+    ``opener`` the opening paragraph. Returns ``None`` unless the first outer
+    bold spells that title in the shared mathematical plain form.
+    """
+    if not re.fullmatch(r"\$[^$\n]+\$", running_title or ""):
+        return None
+    bold = BOLD_OUTER_RE.search(opener or "")
+    if not bold:
+        return None
+    shown = math_title_plain_text(bold_parts(bold)[0].strip())
+    wanted = math_title_plain_text(running_title)
+    if shown and wanted and not _first_letter_ci_equal(shown, wanted):
+        return None
+    return bold.group(0)
+
+
+# ---------------------------------------------------------------------------
+# item 18: wikilink display labels
+# ---------------------------------------------------------------------------
+
+DISPLAY_LINK_RE = re.compile(
+    r"\[\[([^\]|#^]+)(?:[#^][^\]|]*)?\|([^\]\n]+)\]\]")
+
+
+def display_label_markup(display):
+    """Markup kinds inside one display label; labels render as plain text."""
+    marks = []
+    if "$" in display:
+        marks.append("$ (LaTeX)")
+    if "`" in display:
+        marks.append("backtick")
+    if "**" in display:
+        marks.append("** (bold)")
+    elif re.search(r"\*\w[^*]*\*", display):
+        marks.append("* (italic)")
+    return marks
+
+
+def display_label_links(text):
+    """Every piped wikilink in ``text`` with its label markup.
+
+    ``text`` is the listing- and table-masked body prose plus the
+    listing-masked Related footer. Each dictionary has ``target``,
+    ``display``, ``marks`` and ``line`` (one-based within ``text``), plus a
+    ``message`` when the label carries markup.
+    """
+    links = []
+    for match in DISPLAY_LINK_RE.finditer(text or ""):
+        target, display = match.group(1).strip(), match.group(2).strip()
+        marks = display_label_markup(display)
+        link = {"target": target, "display": display, "marks": marks,
+                "line": _line_of(text, match.start())}
+        if marks:
+            link["message"] = (
+                f'wikilink display label "{display[:40]}" has markup '
+                f'({", ".join(marks)}) — labels render as plain text; put '
+                "math/emphasis in the surrounding prose")
+        links.append(link)
+    return links
+
+
+def _label_tokens(text):
+    """Lowercased tokens, hyphens as spaces, a parenthetical dropped."""
+    text = re.sub(r"\s*\([^)]*\)\s*", " ", (text or "").lower())
+    return re.findall(r"[a-z0-9]+", text.replace("-", " "))
+
+
+def _token_stem(token):
+    """Crude inflection stem: tuning/tuned/tunes/tune -> tun."""
+    for suffix in ("ing", "ed", "es", "s"):
+        if token.endswith(suffix) and len(token) - len(suffix) >= 3:
+            token = token[: -len(suffix)]
+            break
+    if token.endswith("e") and len(token) >= 4:
+        token = token[:-1]
+    return token
+
+
+def _tokens_match(a, b):
+    """Inflection- and truncation-tolerant token equality.
+
+    The four-character common-prefix floor alone misses short e-drop verb
+    stems ("tuned" and "tuning" share only "tun"), so equal stems also match;
+    a genuinely different word ("tuner", "transfer") still does not.
+    """
+    if a in b or b in a or len(os.path.commonprefix([a, b])) >= 4:
+        return True
+    stem_a, stem_b = _token_stem(a), _token_stem(b)
+    return len(stem_a) >= 3 and stem_a == stem_b
+
+
+def label_shares_surface(display, surfaces):
+    """Whether a display label shares a surface with a title or alias.
+
+    A label passes when, for some surface, its tokens are a subset of the
+    surface (a bare display of a qualified link, an inflection) or a superset
+    of it (a more specific display that adds a qualifier). An exact-match
+    test false-flags both, and "fixing" a bare display by adding the bare
+    alias is the cross-domain collision wiki-build exists to prevent. Do not
+    re-tighten it to exact match or add a single-token strict-subset guard,
+    which re-flags bare terms. A label with no word tokens passes.
+    """
+    label = _label_tokens(display)
+    if not label:
+        return True
+    for surface in surfaces:
+        # A math title also counts in its plain form ("chi-squared test").
+        for variant in {surface, math_title_plain_text(surface)}:
+            form = _label_tokens(variant)
+            if not form:
+                continue
+            subset = all(any(_tokens_match(d, t) for t in form) for d in label)
+            superset = all(any(_tokens_match(d, t) for d in label)
+                           for t in form)
+            if subset or superset:
+                return True
+    return False
+
+
+def plural_surface(title):
+    """The plural surface of a title: only the head (last) token inflects.
+
+    ``pluralize`` takes one token, so a whole title would miss every irregular
+    in its table ("Confusion matrix" must become "Confusion matrices").
+    """
+    match = re.search(r"([A-Za-z]+)([^A-Za-z]*)$", title or "")
+    if not match:
+        return title
+    head = match.group(1)
+    plural = pluralize(head.lower())
+    if head[:1].isupper():
+        plural = plural[:1].upper() + plural[1:]
+    return title[:match.start(1)] + plural + match.group(2)
+
+
+def organism_common_name_surfaces(entry_type, title, description, opener):
+    """Common names an Organism's description or opening sentence binds.
+
+    ``opener`` is the entry's prose; its first sentence is read. The names are
+    link-label surfaces, never global aliases.
+    """
+    if entry_type != "Organism":
+        return []
+    title = title or ""
+    running_title = base_term(title) if has_parenthetical(title) else title
+    names = bound_common_names(running_title, description or "",
+                               first_sentence(opener or ""))
+    out = []
+    for name in names:
+        if name.casefold() not in {x.casefold() for x in out}:
+            out.append(name)
+    return out
+
+
+def organism_common_name_bound(entry_type, title, description, opener,
+                               display):
+    """Item 18's Organism carve-out: the entry binds ``display`` to its title.
+
+    A mention elsewhere in the body or a global alias is not enough: the
+    description or opening sentence must equate the title with the complete
+    common name (singular or plural).
+    """
+    label = " ".join((display or "").split())
+    if (entry_type != "Organism"
+            or not re.fullmatch(r"[A-Za-z][A-Za-z'’ -]{0,49}", label)):
+        return False
+    valid = set()
+    for surface in organism_common_name_surfaces(
+            entry_type, title, description, opener):
+        valid.add(surface.casefold())
+        valid.add(plural_surface(surface).casefold())
+    return label.casefold() in valid
+
+
+# ---------------------------------------------------------------------------
+# item 19: the primary flashcard
+# ---------------------------------------------------------------------------
+
+def primary_line3_faults(card_count, rows, term, counterpart):
+    """Item 19: the line-3 faults to report, plus any missing-primary message.
+
+    ``rows`` are ``(card_label, line3, fault_or_None)`` for each card with a
+    line 3; ``term`` and ``counterpart`` are the entry's primary answer. With
+    one card every fault is reported. With several, a passing card is the
+    primary one and extra cards keep their own answers; otherwise the one card
+    whose line-3 term normalizes to the primary answer is reported, or the
+    message asks for a primary card.
+    """
+    faults = [row for row in rows if row[2]]
+    if card_count <= 1 or not faults:
+        return faults, None
+    if len(faults) < len(rows):
+        return [], None
+    keys = {normalized_answer_surface(value)
+            for value in (term, counterpart) if value} - {""}
+    near = [row for row in faults if normalized_answer_surface(
+        re.sub(r" \([^()\n]+\)$", "", row[1].strip())) in keys]
+    if len(near) == 1:
+        return near, None
+    if not term:
+        return [], None
+    answer = term + (" (%s)" % counterpart if counterpart else "")
+    return [], ('no card carries the primary answer "%s"; preserve every '
+                "existing card and attachment and add or identify the primary "
+                "card (extra cards keep their own answers)" % answer)
+
+
+# ---------------------------------------------------------------------------
+# Differential fixtures
+# ---------------------------------------------------------------------------
+
+#: Body paragraphs that both linters must flag, inserted after a clean
+#: entry's opener: ``(name, paragraph, scan_vault key, lint_entry id,
+#: lint_entry needs a folder)``. ``{self}`` is the entry's own slug and
+#: ``precision`` a second entry titled "Precision". Both self-tests run every
+#: row, so a shared rule cannot silently drop out of one tool.
+SHARED_MUTATIONS = (
+    ("item6 library framing", "In PyTorch the rate is a tensor.",
+     "item6", "6-api-surface", False),
+    ("item6 backticked identifier", "The rate is stored as `rate_value`.",
+     "item6", "6-api-surface", False),
+    ("item6 fenced code", "```python\nrate = 1\n```",
+     "item6", "6-api-surface", False),
+    ("item13 body key", "read: false", "item13", "13-merge-scar", False),
+    ("item13 stray rule", "---", "item13", "13-merge-scar", False),
+    ("item13 digit line", "3", "item13", "13-merge-scar", False),
+    ("item14 source phrase", "As shown in the paper, the rate rises.",
+     "item14", "14-source-meta", False),
+    ("item14 bare authors", "The authors argue that the rate rises.",
+     "item14", "14-source-meta", False),
+    ("item16 unenumerated bold", "The rate is **very important** here.",
+     "item16", "16-unenumerated-bold", False),
+    ("item16 emphasis around a link",
+     "The rate follows *[[precision|precision]]*.",
+     "item16", "16-emphasis-markup", False),
+    ("item16 emphasis around math", "The rate is **$r$** here.",
+     "item16", "16-emphasis-markup", False),
+    ("item18 label markup", "The rate follows [[precision|*exact* precision]].",
+     "item18", "18-display-label", False),
+    ("item18 label shares no surface", "The rate follows [[precision|zebra]].",
+     "item18", "18-label-target", True),
+    ("item10 self-link", "The rate links [[{self}|itself]].",
+     "item10/self", "10-self-link", False),
+)
+
+#: Body paragraphs that neither linter may flag under the named keys:
+#: ``(name, paragraph, scan_vault key, lint_entry id)``, checked in folder
+#: mode. Both self-tests add an Organism ``mus-musculus`` whose description
+#: and opener say "Mus musculus is the mouse" and an entry ``l-2-norm``
+#: titled "$L^2$ norm".
+SHARED_QUIET = (
+    ("item6 compound file extension", "The rate ships as a `.tar.gz` bundle.",
+     "item6", "6-api-surface"),
+    ("item6 compound with one known part",
+     "Scans ship as `.nii.gz` and `.tar.zst`.", "item6", "6-api-surface"),
+    ("item14 the source of an origin",
+     "Lake Victoria is the source of the White Nile.",
+     "item14", "14-source-meta"),
+    ("item14 finance's book value",
+     "It divides the share price by the book value per share.",
+     "item14", "14-source-meta"),
+    ("item16 italic taxon bullet anchor",
+     "- ***Mus musculus*** — the house mouse.",
+     "item16", "16-unenumerated-bold"),
+    ("item18 bound Organism common name",
+     "The rate is measured in the [[mus-musculus|mouse]].",
+     "item18", "18-label-target"),
+    ("item18 plain form of a math title",
+     "The rate uses the [[l-2-norm|L-squared norm]].",
+     "item18", "18-label-target"),
+)
+
+
+# ---------------------------------------------------------------------------
+# self-test
+# ---------------------------------------------------------------------------
+
+def run_self_test(verbose=False):
+    cases = []
+
+    def check(label, got, want):
+        cases.append((label, got == want, got, want))
+
+    def checks(findings):
+        return [finding["check"] for finding in findings]
+
+    # item 5
+    check("every named common noun is a bare cross-domain slug",
+          all(bare_common_noun_slug(term) for term in COMMON_NOUNS), True)
+    check("a qualified slug and an unnamed bare word pass the floor",
+          [bare_common_noun_slug(value) for value in
+           ("entropy-information-theory", "precision", "", None)],
+          [False, False, False, False])
+    check("single-word alias candidates of qualified or common subjects",
+          [bare_word_alias_candidate(slug, title) for slug, title in (
+              ("sensitivity", "Recall (machine learning)"),
+              ("kernel", "Filter"),
+              ("true-positive-rate", "Recall (machine learning)"),
+              ("tpr", "Recall"))],
+          [True, True, False, False])
+    check("an acronym candidate is not a bare common word",
+          [bare_word_alias_candidate(slug, title, surface)
+           for slug, title, surface in (
+               ("tpr", "Recall (machine learning)", "TPR"),
+               ("pca", "Principal component analysis (statistics)", "PCA"),
+               ("sensitivity", "Recall (machine learning)", "sensitivity"))],
+          [False, False, True])
+
+    # item 6
+    check("a Software entry keeps its API surface",
+          api_surface_findings("Software", "numpy.linalg",
+                               "In NumPy use `np.dot` to multiply.",
+                               "```py\nx\n```"), [])
+    check("code-identifier titles",
+          [checks(api_surface_findings("Concept", title, "", ""))
+           for title in ("numpy.linalg", "fit()", "Gradient descent", "SU(2)")],
+          [["code-identifier-title"], ["code-identifier-title"], [], []])
+    check("library framing reports one API string and stops",
+          checks(api_surface_findings(
+              "Concept", "Rate", "In PyTorch it is built with `x`.", "")),
+          ["api-string", "backticked-identifiers"])
+    check("each failure string is recognized",
+          [checks(api_surface_findings("Concept", "Rate", prose, ""))[:1]
+           for prose in ("SciPy provides a solver.", "The flag enables it.",
+                         "The value is available via `x`.")],
+          [["api-string"]] * 3)
+    check("code-form alternatives are a signpost, presentation literals not",
+          [checks(api_surface_findings("Concept", "Rate", prose, ""))
+           for prose in ("Pick `mean` or `sum`.", "Save `.csv` or `.tsv`.",
+                         "Use `[CLS]` or `[SEP]`.")],
+          [["api-string", "backticked-identifiers"], [], []])
+    check("compound file extensions are literals; dotted chains are not",
+          ([checks(api_surface_findings("Concept", "Rate", prose, ""))
+            for prose in ("Ship a `.tar.gz` or `.zip` bundle.",
+                          "Read the `.tar.bz2` file.")],
+           api_surface_findings("Concept", "Rate",
+                                "Call `np.dot` then `.str.lower`.",
+                                "")[-1]["identifiers"]),
+          ([[], []], ["np.dot", ".str.lower"]))
+    check("a compound with one known end part is a literal",
+          [checks(api_surface_findings("Concept", "Rate", prose, ""))
+           for prose in ("Scans ship as `.nii.gz` and `.fastq.gz` files.",
+                         "Archives use `.tar.zst` or `.tar.gz`.",
+                         "Types live in `.d.ts` files.")],
+          [[], [], []])
+    check("both fence spellings are found in the comment-masked body",
+          [checks(api_surface_findings("Concept", "Rate", "", body))
+           for body in ("```\nx\n```", "~~~\nx\n~~~", "<!--\n```\n-->")],
+          [["fenced-code"], ["fenced-code"], []])
+    check("the identifier cap names each identifier",
+          api_surface_findings("Concept", "Rate",
+                               "Use `alpha` and `beta` with `.csv`.",
+                               "")[-1]["identifiers"],
+          ["alpha", "beta"])
+
+    # item 13
+    check("schema keys, stray rules and digit lines are scars",
+          [checks(merge_scar_findings(prose)) for prose in (
+              "Opener.\n\nread: false", "Opener.\n\n---\n\nMore.",
+              "Opener.\n\n3\n\nMore.")],
+          [["frontmatter-key"], ["stray-rule"], ["digit-line"]])
+    check("scar evidence lines are one-based within the prose",
+          [finding["line"] for finding in merge_scar_findings(
+              "Opener.\n\ntags: x\n\n---\n\n$$\nx\n$$\n\n7")],
+          [3, 5, 11])
+    check("listings, Setext underlines, the ignored separator and display "
+          "math are not scars",
+          [merge_scar_findings(prose, separator) for prose, separator in (
+              ("Opener.\n\n```yaml\ntype: Software\n```", None),
+              ("Heading\n---", None),
+              ("Opener.\n\n---", 2),
+              ("Opener.\n\n$$\n2\n$$", None))],
+          [[], [], [], []])
+
+    # item 14
+    check("source-meta phrases and the technical source compounds",
+          [checks(source_meta_findings(prose, "Concept")) for prose in (
+              "As shown in the paper, it holds.", "This source gives it.",
+              "The source text states it.", "It maps the source domain.",
+              "It reads the source-code tree.")],
+          [["phrase"], ["phrase"], ["phrase"], [], []])
+    check("the paper, the book and the article are source-meta outside Work "
+          "entries; this paper is source-meta everywhere",
+          [[checks(source_meta_findings(prose, kind))
+            for kind in ("Concept", "Work")]
+           for prose in ("The book argues it.", "The paper argues it.",
+                         "In this paper we argue it.")],
+          [[["phrase"], []], [["phrase"], []], [["phrase"], ["phrase"]]])
+    check("the source of an origin and finance's book value are not "
+          "source-meta",
+          [checks(source_meta_findings(prose, "Concept")) for prose in (
+              "Lake Victoria is the source of the White Nile.",
+              "It divides the price by the book value per share.",
+              "It sorts firms by the book-to-market ratio.",
+              "The book argues that book value matters.")],
+          [[], [], [], ["phrase"]])
+    check("a source-meta message quotes the matched phrase",
+          source_meta_findings("This source gives it.", "Concept")[0]["message"],
+          'source-meta phrasing "This source"')
+    check("bare authors are flagged; a named work passes the default floor",
+          [checks(source_meta_findings(prose, "Concept")) for prose in (
+              "The authors argue it.",
+              "The authors of [[attention-paper]] argue it.",
+              "The authors of *Attention Is All You Need* argue it.")],
+          [["authors"], [], []])
+    check("the default floor accepts a capitalized name or acronym, not a "
+          "determiner",
+          [checks(source_meta_findings(prose, "Concept")) for prose in (
+              "The authors of SGDR recommend restarting it.",
+              "The authors of GPT-3 argue it.",
+              "The authors of a study argue it.",
+              "The authors of The study argue it.")],
+          [[], [], ["authors"], ["authors"]])
+    check("a caller's resolver decides whether the authors name a Work",
+          checks(source_meta_findings(
+              "The authors of [[transformer]] argue it.", "Concept",
+              names_work=lambda text, match: False)), ["authors"])
+
+    # item 16
+    check("only the opener's first bold is the title slot",
+          [finding["span"] for finding in unenumerated_bold_findings(
+              "**Rate** and **second** open.\n\nThe **third** follows.")],
+          ["second", "third"])
+    # A masked comment is blank to the checks; the opener starts after it.
+    check("a leading masked comment or blank line does not end the opener",
+          [[finding["span"] for finding in unenumerated_bold_findings(prose)]
+           for prose in ("              \n\n**Rate** opens.\n\n"
+                         "The **third** follows.",
+                         "             \n**Rate** opens.",
+                         "   \n**Rate** opens.")],
+          [["third"], [], []])
+    check("bullet anchors, captions, Related and single spans are exempt",
+          unenumerated_bold_findings(
+              "**Rate** opens.\n\n- **True positives** (TP) — correct.\n"
+              "*A **caption** line.*\n\n**Related:**\n\n"
+              "It is **$r$** and **[[x]]**."), [])
+    check("an italic taxon or strain can be a bullet anchor",
+          unenumerated_bold_findings(
+              "**Rate** opens.\n\n- ***Mus musculus*** — the house mouse.\n"
+              "- ***E. coli* K-12** — a lab strain."), [])
+    check("an anchor without a delimiter is still unenumerated bold",
+          checks(unenumerated_bold_findings(
+              "**Rate** opens.\n\n- ***Mus musculus*** lives here.")),
+          ["unenumerated-bold"])
+    check("tables and code are masked",
+          unenumerated_bold_findings(
+              "**Rate** opens.\n\nA | B\n---|---\n**x** | y\n\n`**code**`",
+              ((2, 4),)), [])
+    check("emphasis around a link, math or code span",
+          [finding["kind"] for finding in emphasis_span_findings(
+              "**Rate** opens.\n\nIt is *[[x]]*, **$r$** and *`c`*.")],
+          ["wikilink", "math", "code"])
+    check("unbalanced delimiters and code samples are not emphasis",
+          emphasis_span_findings(
+              "**Rate** opens.\n\nIt is **[[x]]* and `*[[y]]*`."), [])
+    check("the Related footer is read for emphasis around a link",
+          checks(emphasis_span_findings("**Rate** opens.",
+                                        "**Related:** *[[x|X]]*")),
+          ["emphasis-around-span"])
+    markup = pure_math_opener_markup("$x$", "**$x$** is a variable.")
+    check("a pure-math title's opener bold is exempt once, in the opener",
+          (markup, checks(emphasis_span_findings(
+              "**$x$** is a variable.\n\nLater **$x$** again.",
+              opener_markup=markup))),
+          ("**$x$**", ["emphasis-around-span"]))
+    check("the pure-math exemption holds after a leading masked comment",
+          [finding["line"] for finding in emphasis_span_findings(
+              "              \n\n**$x$** is a variable.\n\nLater **$x$** again.",
+              opener_markup=markup)],
+          [5])
+    check("the exemption needs a pure-math title spelled by the opener bold",
+          [pure_math_opener_markup(title, opener)
+           for title, opener in (("Rate", "**Rate** opens."),
+                                 ("$x$", "**$y$** opens."),
+                                 ("$x$", "No bold."))],
+          [None, None, None])
+    check("the outer-bold reader is entry_structure's",
+          BOLD_OUTER_RE is _BOLD_OUTER_RE, True)
+    matched = BOLD_OUTER_RE.search("***E. coli* K-12** is a strain.")
+    check("the outer-bold reader keeps the mixed taxon/strain form",
+          bold_parts(matched), ("E. coli K-12", "mixed", "E. coli"))
+
+    # item 18
+    check("display-label markup kinds",
+          [display_label_markup(label) for label in (
+              "$x$ rate", "`x`", "**x**", "*x* rate", "plain label", "a * b")],
+          [["$ (LaTeX)"], ["backtick"], ["** (bold)"], ["* (italic)"], [], []])
+    check("piped links report markup with a message; plain labels do not",
+          [(link["target"], "message" in link) for link in display_label_links(
+              "See [[gamma-delta|*gamma* delta]] and [[x#Part|x part]].\n"
+              "[[y]]")],
+          [("gamma-delta", True), ("x", False)])
+    check("labels sharing a surface pass; an invented label does not",
+          [label_shares_surface(label, surfaces) for label, surfaces in (
+              ("entropy", ["Entropy (information theory)"]),
+              ("deep neural networks", ["Neural network"]),
+              ("fine-tuned", ["Fine-tuning"]),
+              ("zebra", ["Gamma delta", "gd"]),
+              ("tuner", ["Tuning"]),
+              ("—", ["Gamma"]))],
+          [True, True, True, False, False, True])
+    check("a math title's plain form is a shared surface",
+          [label_shares_surface(label, surfaces) for label, surfaces in (
+              ("chi-squared test", ["$\\chi^2$ test"]),
+              ("ell-one regularization", ["$\\ell_1$ regularization"]),
+              ("chi-squared", ["$\\chi^2$ test"]),
+              ("zebra", ["$\\chi^2$ test"]))],
+          [True, True, True, False])
+    check("plural_surface inflects the head token",
+          [plural_surface(title) for title in (
+              "Confusion matrix", "Hypothesis", "ROC curve", "")],
+          ["Confusion matrices", "Hypotheses", "ROC curves", ""])
+    mouse = ("Organism", "Mus musculus",
+             "Mus musculus is the mouse, a small rodent.",
+             "***Mus musculus*** is the mouse, a small rodent.\n\nMore.")
+    check("an Organism binds its common name in the description or opener",
+          (organism_common_name_surfaces(*mouse),
+           organism_common_name_surfaces("Concept", *mouse[1:])),
+          (["mouse"], []))
+    check("a bound common name, or its plural, is a valid label",
+          [organism_common_name_bound(*mouse, label)
+           for label in ("mouse", "Mice", "rodent", "[[x]]")],
+          [True, True, False, False])
+    dog = ("Organism", "Canis lupus familiaris",
+           "Canis lupus familiaris is commonly known as the domestic dog.",
+           "***Canis lupus familiaris*** is a model organism.")
+    check("a binding covers the complete common-name phrase, not its head",
+          [organism_common_name_bound(*dog, label)
+           for label in ("domestic dog", "dog")], [True, False])
+
+    # item 19
+    one = [("flashcard", "Bias–variance trade-off", "fault")]
+    check("with one card every line-3 fault is reported",
+          primary_line3_faults(1, one, "Bias-variance trade-off", None),
+          (one, None))
+    near = [("card 1", "Bias–variance trade-off", "fault"),
+            ("card 2", "Overfitting", "fault")]
+    check("with several failing cards, the one near miss is reported",
+          primary_line3_faults(2, near, "Bias-variance trade-off", None),
+          (near[:1], None))
+    check("a passing primary card leaves the extra cards alone",
+          primary_line3_faults(
+              2, [("card 1", "Bias-variance trade-off", None),
+                  ("card 2", "Overfitting", "fault")],
+              "Bias-variance trade-off", None), ([], None))
+    missing = primary_line3_faults(
+        2, [("card 1", "Underfitting", "fault"),
+            ("card 2", "Overfitting", "fault")],
+        "Recall", "TPR")
+    check("with no near miss, ask for the primary card, naming its answer",
+          (missing[0], missing[1].startswith(
+              'no card carries the primary answer "Recall (TPR)"; ')),
+          ([], True))
+    check("with no primary term, nothing is asked",
+          primary_line3_faults(2, near, "", None), ([], None))
+
+    # differential fixtures
+    check("each shared mutation names both tools' finding keys",
+          all(len(row) == 5 and row[2] and row[3] for row in SHARED_MUTATIONS),
+          True)
+    check("each shared quiet row names both tools' finding keys",
+          all(len(row) == 4 and row[2] and row[3] for row in SHARED_QUIET),
+          True)
+
+    failed = [case for case in cases if not case[1]]
+    for label, ok, got, want in cases:
+        if verbose or not ok:
+            print(("PASS" if ok else "FAIL") + ": " + label)
+        if not ok:
+            print("  expected %r\n  got      %r" % (want, got))
+    print("%d/%d self-test cases pass" % (len(cases) - len(failed), len(cases)))
+    return 1 if failed else 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--test", action="store_true", help="run self-tests")
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args(argv)
+    if not args.test:
+        parser.error("no action requested; use --test")
+    return run_self_test(args.verbose)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

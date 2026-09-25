@@ -7,7 +7,8 @@ parenthetical in one of wiki-build's documented forms immediately follows
 the first outer-bold subject; a year later in the sentence may describe
 something else.
 
-Stdlib only, Python 3.10+ (the plugin runtime floor).
+Stdlib only (apart from sibling shared helpers), Python 3.10+ (the plugin
+runtime floor).
 """
 
 import argparse
@@ -101,6 +102,19 @@ _SUPERSCRIPT_CHARS = {
     "ⁱ": "i", "ⁿ": "n",
 }
 _SUPERSCRIPT_RE = re.compile(r"[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁱⁿ]+")
+# A Unicode chemical formula keeps its subscript digits, as its slug does
+# (H₂O -> H2O, not H-twoO).  A token counts as a formula only when it holds at
+# least two element symbols, all real, and a subscript digit, so a one-symbol
+# math index (L₂, H₀) and a non-element name (SL₂) are still spoken.
+_ELEMENT_SYMBOLS = frozenset("""
+    H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co
+    Ni Cu Zn Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb
+    Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os
+    Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm
+    Md No Lr Rf Db Sg Bh Hs Mt Ds Rg Cn Nh Fl Mc Lv Ts Og
+""".split())
+_FORMULA_TOKEN_RE = re.compile(
+    r"(?<!\w)(?=[A-Z(])(?:[A-Z][a-z]?|[()]|[₀-₉])+(?=[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]*(?!\w))")
 _SUBSCRIPT_CHARS = {
     "₀": "0", "₁": "1", "₂": "2", "₃": "3", "₄": "4",
     "₅": "5", "₆": "6", "₇": "7", "₈": "8", "₉": "9",
@@ -346,16 +360,28 @@ def _plain_exponent(raw):
     if exponent == "3":
         return "-cubed"
     compact = re.sub(r"\s+", "", exponent).replace("−", "-")
+    # A sign, with or without a count, is a charge (Ca²⁺ -> Ca2-plus, Cl⁻ ->
+    # Cl-minus), matching the slug; R⁺ still reads R-plus.
+    if re.fullmatch(r"[0-9]*[+-]", compact):
+        return compact[:-1] + ("-plus" if compact.endswith("+") else "-minus")
     if compact == "-1":
         return "-inverse"
     if compact in {"1/2", "1over2"}:
         return "-to-the-one-half"
-    if compact == "+":
-        return "-plus"
     if not exponent:
         return ""
     spoken = _spoken_script_fragment(exponent)
     return ("-to-the-" + spoken) if spoken else ""
+
+
+def _plain_formula_subscripts(match):
+    """Fold a Unicode chemical formula's subscript digits to ASCII digits."""
+    token = match.group(0)
+    symbols = re.findall(r"[A-Z][a-z]?", token)
+    if (len(symbols) >= 2 and _ELEMENT_SYMBOLS.issuperset(symbols)
+            and re.search("[₀-₉]", token)):
+        return token.translate(str.maketrans("₀₁₂₃₄₅₆₇₈₉", "0123456789"))
+    return token
 
 
 def math_title_plain_text(text):
@@ -365,10 +391,15 @@ def math_title_plain_text(text):
     formatting commands are removed while their content remains; Greek names
     and scripts are spoken so ``$A^{*}$ search`` becomes ``A-star search``,
     ``$\\ell_1$ norm`` becomes ``ell-one norm``, and both ``$\\chi^2$ test``
-    and ``χ² test`` become ``chi-squared test``. Unknown LaTeX commands keep a
-    readable command name rather than disappearing.
+    and ``χ² test`` become ``chi-squared test``. Chemical notation keeps the
+    slug's reading: ``Ca²⁺`` becomes ``Ca2-plus`` and a Unicode formula with
+    two or more element symbols keeps its subscript digits (``H₂O`` becomes
+    ``H2O``), while a single-symbol subscript is still spoken (``O₂`` becomes
+    ``O-two``). Unknown LaTeX commands keep a readable command name rather than
+    disappearing.
     """
     value = text or ""
+    value = _FORMULA_TOKEN_RE.sub(_plain_formula_subscripts, value)
     value = value.translate(str.maketrans(_UNICODE_MATH_NAMES))
     value = _SUPERSCRIPT_RE.sub(
         lambda match: _plain_exponent(
@@ -439,7 +470,7 @@ _ABBREVS = [
     "Dr.", "Prof.", "Mr.", "Mrs.", "Ms.", "St.", "Jr.", "Sr.", "Fig.",
     "b.", "d.", "r.", "U.S.", "U.K.", "var.", "subsp.", "ssp.",
     "sp.", "spp.", "aff.", "cv.", "fo.", "Dept.", "Inc.", "vol.",
-    "pp.",
+    "pp.", "etc.", "Eq.", "Eqs.", "Sec.", "Ch.", "Ref.",
 ]
 _ABBREV_RE = re.compile(
     r"(?:^|[^0-9A-Za-z])(?:%s)$"
@@ -457,7 +488,7 @@ _PREVIOUS_INITIAL_TAIL_RE = re.compile(r"(?:^|\s)[A-Za-z]\.\s*$")
 _STRONG_SENTENCE_START_RE = re.compile(
     r"^\s+(?:A|An|The|This|That|These|Those|It|Its|He|His|She|Her|"
     r"They|Their|We|Our|You|Your|I|My|"
-    r"However|But|Yet|Meanwhile|Therefore)\b")
+    r"However|But|Yet|Meanwhile|Therefore|Thus|Moreover|Nevertheless)\b")
 _CLAUSE_END_ABBREV_RE = re.compile(
     r"(?:^|[^0-9A-Za-z])(?:U\.S\.|U\.K\.|et al\.)$", re.IGNORECASE)
 _SENTENCE_CLOSERS = "\"'”’»)]}"
@@ -1334,6 +1365,15 @@ def run_self_test(verbose=False):
         ("positive superscripts use a stable plus reading",
          [math_title_plain_text(value) for value in (r"$R^{+}$", "R⁺")],
          ["R-plus", "R-plus"]),
+        ("charges keep the slug's count-and-sign reading",
+         [math_title_plain_text(value) for value in (
+             "Ca²⁺", "Cl⁻", r"$\mathrm{Ca}^{2+}$", "Fe³⁺")],
+         ["Ca2-plus", "Cl-minus", "Ca2-plus", "Fe3-plus"]),
+        ("chemical formulas keep subscript digits; one-symbol indices are spoken",
+         [math_title_plain_text(value) for value in (
+             "H₂O", "C₆H₁₂O₆", "SO₄²⁻", "Mg(OH)₂", "L₂", "SL₂ group")],
+         ["H2O", "C6H12O6", "SO42-minus", "Mg(OH)2", "L-two",
+          "SL-two group"]),
         ("general negative exponents do not create repeated hyphens",
          math_title_plain_text(r"$x^{-2}$ moment"),
          "x-to-the-negative-two moment"),
@@ -1379,6 +1419,15 @@ def run_self_test(verbose=False):
           ["Acme Inc. builds tools.", "It ships them."],
           ["See vol. 2 for details.", "It continues."],
           ["See pp. 2–4 for details.", "It continues."]]),
+        ("reference abbreviations stay inside their sentence",
+         [count_sentences(value) for value in (
+             "It covers regression, classification, etc. using labeled data.",
+             "The gradient is given by Eq. 3 in the source.",
+             "See Sec. 2, Ch. 4 and Ref. 12 for details.")],
+         [1, 1, 1]),
+        ("etc. may end a sentence before a strong sentence start",
+         split_sentences("It covers A, B, etc. The model works."),
+         ["It covers A, B, etc.", "The model works."]),
         ("lowercase no is an ordinary sentence ending",
          count_sentences("Answer yes or no. The result matters."), 2),
         ("a terminal one-letter label still ends a sentence",
@@ -1406,6 +1455,8 @@ def run_self_test(verbose=False):
              "Smith et al. Its method differs.")], [2, 2]),
         ("a country abbreviation may end before a possessive pronoun",
          count_sentences("This follows U.S. Their method differs."), 2),
+        ("an abbreviation may end before a discourse adverb",
+         count_sentences("Smith et al. Thus the method differs."), 2),
         ("clean card line passes",
          flashcard_line1_faults("A complete answer-key definition."), []),
         ("quoted clean card passes",

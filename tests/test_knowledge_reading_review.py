@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Exercise figure repair handoffs in disposable vaults through public CLIs."""
+"""Exercise figure repair handoffs and summary-note lint gates in disposable vaults."""
 
 import hashlib
+import importlib.util
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import pymupdf
 
@@ -15,6 +17,32 @@ import pymupdf
 ROOT = Path(__file__).resolve().parents[1]
 FIGURES = ROOT / "skills" / "figure-extract" / "scripts"
 READING = ROOT / "skills" / "paper-summarize" / "scripts"
+SHARED = ROOT / "shared" / "scripts"
+
+
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    with patch.dict(os.environ, {"OBSIDIAN_VAULT_SHARED": str(SHARED)}):
+        spec.loader.exec_module(module)
+    return module
+
+
+def worked_example_note():
+    """The first untagged fence after the worked example's output heading."""
+    doc = (ROOT / "skills" / "paper-summarize" / "references"
+           / "worked-example.md").read_text(encoding="utf-8")
+    lines = doc.split("\n")
+    i = lines.index("## The output note") + 1
+    while i < len(lines):
+        if lines[i] == "```":
+            end = lines.index("```", i + 1)
+            return "\n".join(lines[i + 1:end]) + "\n"
+        if lines[i].startswith("```"):
+            i = lines.index("```", i + 1)
+        i += 1
+    return None
 
 
 def argument_note():
@@ -165,6 +193,16 @@ class SummaryPublicationGateTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
             commented = check(good.replace("read: false", "read: false\n  # A user comment"))
             self.assertEqual(commented.returncode, 0, commented.stdout + commented.stderr)
+
+    def test_worked_example_note_lints_clean_without_an_image_inventory(self):
+        text = worked_example_note()
+        self.assertIsNotNone(text, "no untagged fence follows '## The output note'")
+        self.assertTrue(text.startswith("---\n"), text[:80])
+        note_lint = load("reading_review_note_lint", READING / "note_lint.py")
+        advisories = []
+        self.assertEqual(
+            note_lint.lint(text, mode="empirical", advisories=advisories), [])
+        self.assertEqual(advisories, [])
 
 
 if __name__ == "__main__":

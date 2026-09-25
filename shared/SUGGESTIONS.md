@@ -29,14 +29,17 @@ factual corrections and keeps ideas, watchlist changes, and outcome learning
 in its research records. Skill logs track evidenced workflow defects; they
 are not topic backlogs or copies of the workflow's deliverables.
 
-A skill may update its own log and the logs of producers whose outputs it
-actually consumed in this run. Attribute a proposal to the behavior that
-caused the evidenced defect, using verified provenance or the run's handoff
-record; a file's folder alone does not establish its producer. A producer may
-have run under another independently installed plugin; verified provenance
-permits an update to that consumed producer's existing canonical log without
-requiring its plugin or invoking its skill. Ordinary setup does not initialize
-logs for an absent plugin.
+A skill may update its own log and the log of the skill that produced or
+governs an output it actually consumed in this run. Attribute a proposal to
+the behavior that caused the evidenced defect. Establish the producer from the
+run's handoff record, a valid legacy provenance footer, or a producer record
+in the owning skill's private state. Notes otherwise carry no producer record:
+attribute a recurring output pattern, or one serious well-evidenced defect, to
+the skill whose instructions govern that output, and say in **Evidence** that
+attribution is by governing rule. A file's folder alone establishes neither.
+That skill may belong to another independently installed plugin; update its
+existing canonical log without requiring its plugin or invoking its skill.
+Ordinary setup does not initialize logs for an absent plugin.
 Do not blame a producer for work owned by its consumer: missing retrospective
 link backfill is not a builder defect. If attribution is uncertain, report
 that uncertainty without inventing an upstream owner.
@@ -57,8 +60,8 @@ unresolved items. Update an existing item's evidence and reporting skills when
 new observations warrant it; increment recurrence at most once per logical
 run, even across rescans, retries, or delegated checks. Use one run timestamp
 in `YYYY-MM-DD HH:MM` form. A coordinating agent passes that timestamp and the
-already-counted log/issue IDs to invoked skills; use an initial scanner
-timestamp only when none was inherited. Combine parallel subtasks' findings
+already-counted log/issue IDs to invoked skills; when none was inherited, use
+the run's start time. Combine parallel subtasks' findings
 before updating the same log. Keep the first timestamp and update latest only
 on a new occurrence. `Reported by` names the observing skill or skills, or
 `plugin review` for a source-development review.
@@ -125,9 +128,11 @@ parallel old filenames or delete unrecognized reports during ordinary runs.
 ## Reviewing the plugin itself
 
 An explicit request to review or improve the plugin authorizes fixing its
-source now, with the relevant validation and Git history as the durable record.
-Do not substitute suggestions for authorized source fixes. Routine skill runs
-never edit skill sources. Do not create dated `obsidian-plugin-review-*` or
+canonical source repository now, with the relevant validation and Git history
+as the durable record; never edit the installed plugin or its cache. Without
+access to that repository, report the proposed fixes instead. Do not
+substitute suggestions for authorized source fixes. Routine skill runs never
+edit skill sources. Do not create dated `obsidian-plugin-review-*` or
 `wiki-review-*` reports by default; the run response reports changes and checks.
 Leave existing reports untouched unless the user explicitly requests their
 migration or removal. Remove a corresponding open suggestion only after its

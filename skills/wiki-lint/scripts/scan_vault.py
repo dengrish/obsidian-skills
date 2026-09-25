@@ -43,17 +43,6 @@ import sys
 import unicodedata
 
 
-def fold_name(s):
-    """Portable case/Unicode identity for a slug or link target.
-
-    The plugin treats case and normalization variants as one ownership class,
-    then canonicalizes references to the exact on-disk spelling. This yields
-    the same collision decision on filesystems that alias those spellings and
-    ones that can store both; raw strings would make safety host-dependent.
-    """
-    return unicodedata.normalize("NFC", s or "").casefold()
-
-
 # Disciplines are the fixed tag enum (VALID_TAGS below).
 
 # ===========================================================================
@@ -73,6 +62,7 @@ def fold_name(s):
 
 _OBSIDIAN_SHARED_MODULES = (
     'code_typography',
+    'entry_checks',
     'entry_structure',
     'equation_coverage',
     'introduced_aliases',
@@ -80,6 +70,7 @@ _OBSIDIAN_SHARED_MODULES = (
     'note_provenance',
     'organism_names',
     'plurals',
+    'portable_names',
     'slugify',
     'yaml_scalars',
 )
@@ -129,6 +120,19 @@ from slugify import (  # noqa: E402
 )
 from yaml_scalars import parse_scalar, split_flow, strip_comment  # noqa: E402
 from note_provenance import split_provenance  # noqa: E402
+from portable_names import portable_identity  # noqa: E402
+
+
+def fold_name(s):
+    """Portable case/Unicode identity for a slug or link target.
+
+    The plugin treats case and normalization variants as one ownership class,
+    then canonicalizes references to the exact on-disk spelling. This yields
+    the same collision decision on filesystems that alias those spellings and
+    ones that can store both; raw strings would make safety host-dependent.
+    """
+    return portable_identity(s or "")
+
 
 # ===========================================================================
 # NO SINGULARIZER LIVES HERE EITHER, and for the same reason.  The item-5
@@ -144,11 +148,10 @@ from note_provenance import split_provenance  # noqa: E402
 # conformance suite.  Do NOT paste a copy back.
 # ===========================================================================
 from plurals import (  # noqa: E402
-    pluralize, real_permutation, singular_keys,
+    real_permutation, singular_keys,
     stem_key, wordorder_key_singular,
 )
 from organism_names import (  # noqa: E402
-    bound_common_names,
     first_sentence,
     organism_title_classification,
     scientific_abbreviation_matches,
@@ -189,6 +192,32 @@ from markdown_tables import (  # noqa: E402
     markdown_table_spans,
     mask_line_spans,
 )
+# The per-entry, source-independent checks wiki-build's lint_entry.py also
+# runs (items 5, 6, 13, 14, 16, 18 and 19's primary card). One copy keeps a
+# published entry from failing this scan on a rule the builder gate already
+# applied.
+from entry_checks import (  # noqa: E402
+    BARE_WORD_ALIAS_HINT,
+    BOLD_OUTER_RE as _BOLD_OUTER_RE,
+    COMMON_NOUNS,
+    SHARED_MUTATIONS,
+    SHARED_QUIET,
+    api_surface_findings,
+    bare_common_noun_slug,
+    bare_word_alias_candidate,
+    bold_parts as _bold_parts,
+    display_label_links,
+    emphasis_span_findings,
+    label_shares_surface,
+    merge_scar_findings,
+    organism_common_name_bound as _organism_common_name_bound,
+    organism_common_name_surfaces as _organism_common_name_surfaces,
+    plural_surface,
+    primary_line3_faults,
+    pure_math_opener_markup,
+    source_meta_findings,
+    unenumerated_bold_findings,
+)
 
 
 def slug(title):
@@ -206,24 +235,6 @@ def slug(title):
         return _slug_stem(str(title))
     except _SlugError:
         return ""
-
-
-# The explicit mechanical floor in wiki-build/references/writing.md,
-# Cross-domain term disambiguation.  The prose rule remains broader (dictionary
-# and drafting tests catch terms outside a finite set); every term it names
-# explicitly must at least be guarded here, both from a bare filename and from
-# becoming an automatic backfill destination.
-COMMON_NOUNS = {
-    "activation", "agent", "attention", "bias", "cell", "classification",
-    "clustering", "domain", "ensemble", "entropy", "feature", "field",
-    "filter", "function", "gradient", "inertia", "kernel", "label", "model",
-    "normalization", "policy", "regression", "return", "shrinkage",
-    "temperature", "tensor", "transformer", "vector",
-}
-
-# libraries used in item-6 API-surface failure-string scan
-LIBS = ["PyTorch","TensorFlow","JAX","NumPy","Pandas","scikit-learn","sklearn","Keras",
-        "SciPy","Matplotlib","Hugging Face","XGBoost","LightGBM","CatBoost"]
 
 
 _LEADING_ARTICLE_RE = re.compile(r"^(?:a|an|the)\s+", re.IGNORECASE)
@@ -261,8 +272,6 @@ def description_has_entity_subject(description, title):
     return False
 
 
-_BOLD_OUTER_RE = re.compile(
-    r"(?<!\*)\*\*((?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)\*\*(?!\*)")
 _BOLD_PAREN_RE = re.compile(
     r"(?<!\*)\*\*(?P<bold>(?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)"
     r"\*\*(?!\*)(?:\s+algorithm)?\s*"
@@ -337,50 +346,21 @@ def _acronym_counterpart(term, candidate):
     )
 
 
-def _bold_parts(match):
-    """Return visible text, style, and italic prefix for an outer bold span."""
-    raw = match.group(1)
-    if raw.startswith("*"):
-        close = raw.find("*", 1)
-        if close > 1:
-            italic = raw[1:close]
-            suffix = raw[close + 1:]
-            return italic + suffix, ("full-italic" if not suffix else "mixed"), italic
-    return raw, "plain", None
+def _organism_fields(entry):
+    """A record's ``(type, title, description, prose)`` for entry_checks."""
+    entry = entry or {}
+    return (entry.get("type"), entry.get("title"), entry.get("desc"),
+            entry.get("prose"))
 
 
 def organism_common_name_surfaces(entry):
     """Locally bound common names; link surfaces, never global aliases."""
-    if not entry or entry.get("type") != "Organism":
-        return []
-    title = entry.get("title") or ""
-    running_title = base_term(title) if has_parenthetical(title) else title
-    opener = first_sentence(entry.get("prose") or "")
-    names = bound_common_names(running_title, entry.get("desc") or "", opener)
-    out = []
-    for name in names:
-        if name.casefold() not in {x.casefold() for x in out}:
-            out.append(name)
-    return out
+    return _organism_common_name_surfaces(*_organism_fields(entry))
 
 
 def organism_common_name_bound(entry, display):
-    """Whether an Organism explicitly equates its canonical title to label.
-
-    This is the narrow item-18 carve-out.  A mention elsewhere in the body or
-    an unsafe global alias is not enough: the description or opening sentence
-    must make the title/common-name equation directly.
-    """
-    if not entry or entry.get("type") != "Organism":
-        return False
-    label = " ".join((display or "").split())
-    if not re.fullmatch(r"[A-Za-z][A-Za-z'’ -]{0,49}", label):
-        return False
-    valid = set()
-    for surface in organism_common_name_surfaces(entry):
-        valid.add(surface.casefold())
-        valid.add(plural_surface(surface).casefold())
-    return label.casefold() in valid
+    """Item 18's Organism common-name carve-out (shared with lint_entry)."""
+    return _organism_common_name_bound(*_organism_fields(entry), display)
 
 
 def _clean_paren_name(raw):
@@ -783,8 +763,9 @@ def split_frontmatter(text, bad=None):
 # Key regex shared by parse_fm, the key_order scan and the item-2 quoting scan, so
 # all three see the same keys.  It admits digits and hyphens ("f1-score:"); the old
 # ^([A-Za-z_]+): silently dropped such keys, so an off-schema key with a digit in it
-# was never reported and never counted as a duplicate.
-FM_KEY = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*:(.*)$")
+# was never reported and never counted as a duplicate.  As YAML requires, the
+# colon must be followed by whitespace or end of line: `title:"x"` is not a key.
+FM_KEY = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*:(?=\s|$)(.*)$")
 FM_ITEM = re.compile(r"^\s*-(?:\s+(.*)|\s*)$")
 
 def unquote(raw):
@@ -1062,27 +1043,6 @@ WORD = re.compile(r"[A-Za-z0-9]+")
 #: break, but honouring that lets one stray backtick swallow the rest of an
 #: entry and HIDE real links, which is the costlier direction to be wrong in.
 _INLINE_CODE = re.compile(r"(`+)[^\n]*?\1(?!`)")
-
-def plural_surface(title):
-    """The plural SURFACE form of a title: only the HEAD (last) token inflects.
-
-    `pluralize` is a one-TOKEN function (shared/scripts/plurals.py); handing it
-    a whole title fails every irregular in its table, because a phrase is never
-    a key in it — "Confusion matrix" came back "Confusion matrixes" (the final
-    `x` read as a sibilant) and "Hypothesis" as "Hypothesises".  So the real
-    plural of an irregular-headed title never entered the surface map, and no
-    entry could ever be backfilled from a text that spells it correctly.
-    Capitalisation is irrelevant here — the surface map is keyed lowercased —
-    but the table lookups are lowercase-only, so the head is folded for them.
-    """
-    m = re.search(r"([A-Za-z]+)([^A-Za-z]*)$", title or "")
-    if not m:
-        return title
-    head = m.group(1)
-    plural = pluralize(head.lower())
-    if head[:1].isupper():                       # keep the title's own casing
-        plural = plural[:1].upper() + plural[1:]
-    return title[:m.start(1)] + plural + m.group(2)
 
 def _index_surfaces(surf_map):
     """Group surface forms by their token sequence: "roc curve" -> [surface, ...].
@@ -2274,23 +2234,24 @@ def scan(wiki, images=None, vault=None):
             selected[-1] += extension
         return "/".join(canonical_prefix + selected)
 
-    _work_surfaces = set()
+    # Any existing entry is a named referent: a Work, or a named method such
+    # as SGDR (writing.md's "the authors of SGDR").
+    _named_surfaces = set()
     for _entry in entries.values():
-        if _entry.get("type") != "Work":
-            continue
         _title = _entry.get("title") or ""
         for _surface in ([_title, base_term(_title)] +
                          list(_entry.get("aliases", []))):
             _surface = " ".join((_surface or "").split()).strip()
             if not _surface:
                 continue
-            _work_surfaces.add(_surface)
+            _named_surfaces.add(_surface)
             if "-" in _surface:
-                _work_surfaces.add(_surface.replace("-", " "))
-    _work_surfaces = sorted(_work_surfaces, key=lambda value: (-len(value), value))
+                _named_surfaces.add(_surface.replace("-", " "))
+    _named_surfaces = sorted(_named_surfaces,
+                             key=lambda value: (-len(value), value))
 
-    def _authors_phrase_names_work(text, match, note_path=None):
-        """Whether ``the author(s) of ...`` names an existing Work entry."""
+    def _authors_phrase_names_entry(text, match, note_path=None):
+        """Whether ``the author(s) of ...`` names an existing entry."""
         after = text[match.end():]
         of_match = re.match(r"\s+of\s+", after, re.IGNORECASE)
         if not of_match:
@@ -2304,7 +2265,7 @@ def scan(wiki, images=None, vault=None):
             if (record is None and status == "missing"
                     and key not in ambiguous_aliases and key in alias_of):
                 record = entries.get(alias_of[key][0])
-            return bool(record is not None and record.get("type") == "Work")
+            return record is not None
 
         # Work titles are often italicized in prose. Strip only a leading
         # emphasis delimiter; the boundary after the matched surface may be
@@ -2312,7 +2273,7 @@ def scan(wiki, images=None, vault=None):
         visible = re.sub(r"^[*_]{1,3}", "", remainder)
         return any(re.match(re.escape(surface) + r"(?![A-Za-z0-9])",
                             visible, re.IGNORECASE)
-                   for surface in _work_surfaces)
+                   for surface in _named_surfaces)
 
     for e in diagnostic_records:
         sl = e["slug"]
@@ -2328,7 +2289,7 @@ def scan(wiki, images=None, vault=None):
                                         f'user for an ASCII-representable, shorter title; DO NOT rename the file'))
         elif title and _newslug != sl:
             problems.append((sl,"item5",f'title "{title}" slugs to "{_newslug}" ≠ filename'))
-        if "-" not in sl and sl in COMMON_NOUNS:
+        if bare_common_noun_slug(sl):
             problems.append((sl,"item5",f'bare-slug common noun "{sl}" — qualify the title'))
         # ---- item 2: field order, required keys, duplicate keys, quoting ----
         known = [k for k in e["key_order"] if k in CANON]
@@ -2496,12 +2457,27 @@ def scan(wiki, images=None, vault=None):
                     # Canonical naming is deterministic even before creation;
                     # existence remains the hierarchy diagnostic's finding.
                     _parent_canonical = _moc_canonical_by_fold[_parent_key]
+                _parent_is_moc = (
+                    (_parent_owner or "").startswith("@moc:")
+                    or (_parent_owner is None
+                        and _parent_key in _moc_canonical_by_fold))
                 if (_parent_canonical is not None
                         and _parent_target != _parent_canonical):
-                    problems.append((
-                        sl, "item2/parents-form",
-                        f'parent target "{_parent_target}" resolves to '
-                        f'"{_parent_canonical}" — use this canonical target'))
+                    if _parent_is_moc:
+                        # A MOC is never a parent: respelling it would cement
+                        # the invalid edge that Task 3 replaces (moc-parent).
+                        problems.append((
+                            sl, "item2/parents-form",
+                            f'parents: item "{_parent_target}" names the navigation '
+                            f'note "{_parent_canonical}"; a MOC is never a parent. '
+                            "Report only; do not respell it. Task 3 replaces it with "
+                            "the discipline root or nearest Wiki ancestor "
+                            "(hierarchy_diagnostic moc-parent)"))
+                    else:
+                        problems.append((
+                            sl, "item2/parents-form",
+                            f'parent target "{_parent_target}" resolves to '
+                            f'"{_parent_canonical}" — use this canonical target'))
                 elif _parent_target.lower().endswith(".md"):
                     problems.append((sl, "item2/parents-form",
                                      "parent targets omit the `.md` suffix"))
@@ -2515,7 +2491,7 @@ def scan(wiki, images=None, vault=None):
                     _parent_seen[_parent_identity] = _parent
         # No missing-importance: check — the field left the schema (see CANON above).
         if "tags" not in e["key_order"]:
-            problems.append((sl,"item2","missing tags: key (mandatory — requires at least one discipline tag)"))
+            problems.append((sl,"item2","missing tags: key (mandatory — requires exactly one discipline tag)"))
         if not e["type"]:
             problems.append((sl,"item2/type-enum",
                              "type: is blank or non-scalar — it must be one of the 15 canonical type values"))
@@ -2668,54 +2644,12 @@ def scan(wiki, images=None, vault=None):
                              f'whether it summarizes that PDF. A URL-origin clipping can be '
                              f'independent. Preserve both sources until their identity is confirmed'))
         # ---- item 6: type / API surface (non-Software entries) ----
-        if e["type"] != "Software":
-            if re.match(r"^[A-Za-z_][\w]*(\.[A-Za-z_][\w]*)+$", title) or "()" in title:
-                problems.append((sl,"item6",f'title looks like a code identifier: "{title}"'))
-            libalt = "|".join(re.escape(l) for l in LIBS)
-            api_fails = [
-                (rf"\bIn ({libalt})\b", "In-<library> framing"),
-                (rf"\b({libalt})\s+(provides|offers|exposes|has)\b", "<library> provides/offers framing"),
-                (r"\bbuilt with `", "'built with `…`' how-to signpost"),
-                (r"\bconstructed (with|via) `", "'constructed with/via `…`' how-to signpost"),
-                (r"\bcreated (with|by) `", "'created with/by `…`' how-to signpost"),
-                (r"\bavailable (through|via|in) `", "'available through `…`' how-to signpost"),
-                (r"\buse `[^`]+` to\b", "'use `…` to' how-to signpost"),
-                (r"\bflag enables\b", "kwarg/flag documentation"),
-                (r"`[A-Za-z_][A-Za-z0-9_]*\s*=", "backticked kwarg/default-value (`name=`)"),
-                (r"`(True|False|None)`", "Python language literal in code form"),
-            ]
-            for pat,label in api_fails:
-                if re.search(pat, e["prose"]):
-                    problems.append((sl,"item6",f'API-surface failure string — {label}')); break
-            else:
-                for _alternatives in re.finditer(
-                        r"`([^`\n]+)`\s+or\s+`([^`\n]+)`", e["prose"]):
-                    _values = [value.strip() for value in _alternatives.groups()]
-                    _presentation_only = all(
-                        re.fullmatch(r"\.[A-Za-z0-9]+|\[[^\]\n]+\]", value)
-                        for value in _values)
-                    if not _presentation_only:
-                        problems.append((
-                            sl, "item6",
-                            "API-surface failure string — `…` or `…` "
-                            "alternative signposts"))
-                        break
-            # fenced code block — code listings don't belong in a non-Software entry.
-            # Both fence spellings: markdown opens a block with ``` or ~~~, and
-            # `strip_fenced` above has always known that, so a `~~~` listing sat
-            # in a Concept entry unreported by the one check that exists to find it.
-            if re.search(r"(?m)^\s*(?:`{3}|~{3,})", mask_body_comments(e["body"])):
-                problems.append((sl,"item6","fenced code block — mechanically allowed only after genuine Software classification; reclassification does not waive Software's artifact-wide relevance gate"))
-            # API-identifier cap — ZERO backticked identifiers in a non-Software entry.
-            # Software is the only mechanically eligible type; its separate
-            # artifact-wide relevance gate can still reject the identifier. A
-            # bare extension and bracket special token are not identifiers.
-            inline = re.findall(r"`([^`\n]+)`", re.sub(r"`{3}.*?`{3}", " ", e["prose"], flags=re.S))
-            idtoks = [t.strip() for t in inline if t.strip()
-                      and not re.fullmatch(r"\.[A-Za-z0-9]+", t.strip())   # not a bare file extension (.csv)
-                      and not re.fullmatch(r"\[.+\]", t.strip())]          # not a bracket special token ([CLS])
-            if len(idtoks) >= 1:
-                problems.append((sl,"item6",f'{len(idtoks)} backticked identifier(s) (cap is 0 in a non-Software entry; Software may retain only artifact-wide design/interface API, never a usage catalog): {", ".join(idtoks[:6])}'))
+        # Shared with lint_entry: the code-identifier title, the first API
+        # failure string, fenced code (read unmasked by listings: here the
+        # fence IS the finding) and the zero backticked-identifier cap.
+        for _api_finding in api_surface_findings(
+                e["type"], title, e["prose"], e["body"]):
+            problems.append((sl, "item6", _api_finding["message"]))
         # ---- item 7: description length + presence ----
         if not e["desc"]: problems.append((sl,"item7","missing description"))
         elif len(e["desc"]) > 110: problems.append((sl,"item7",f'description {len(e["desc"])} chars > 110'))
@@ -2767,14 +2701,14 @@ def scan(wiki, images=None, vault=None):
                                      "description does not start with a capitalized word"))
             if not ends_with_sentence_period(e["desc"]):
                 problems.append((sl,"item7","description does not end with a period"))
-        # ---- item 8: required nonempty discipline tags; misc is a sole-tag fallback ----
+        # ---- item 8: exactly one discipline tag; misc is the sole fallback ----
         e_tags_raw, e_tag_slugs = e["tags_raw"], e["tag_slugs"]
         if e["tags_value_count"] > 1:
             problems.append((sl, "item8", "tags: must contain exactly one discipline home; "
                              "choose from the entry's meaning, not the first listed tag"))
         raw_tags = raw_scalar(fm_raw, "tags")
         if e["tags_valid_empty"]:
-            problems.append((sl, "item8", "tags: must contain at least one discipline tag; "
+            problems.append((sl, "item8", "tags: must contain exactly one discipline tag; "
                              "use only #misc when no specific discipline fits"))
         elif "tags" in e["key_order"] and not e_tags_raw:
             problems.append((sl, "item8", "tags: has no valid discipline values; "
@@ -2828,7 +2762,7 @@ def scan(wiki, images=None, vault=None):
         if not body_opens_with_prose(e["prose"]):
             problems.append((sl,"item9","body does not open with a prose sentence"))
         if e["type"] in ("Person","Event"):
-            opener = opening_paragraph(e["prose"])
+            opener = opening_paragraph(e["prose"].lstrip())
             date_status = opener_subject_date_status(opener, e["type"])
             if date_status == "missing":
                 problems.append((sl,"item9",f'{e["type"]} opener needs a date '
@@ -3017,7 +2951,8 @@ def scan(wiki, images=None, vault=None):
                                  f'the new stem. Deleting the embed throws away the one record '
                                  f'of which figure belongs here'))
         # ---- item 16: opener title text plus type-specific emphasis ----------
-        opener = opening_paragraph(e["prose"])
+        # A masked leading comment is blank; the opener starts at visible text.
+        opener = opening_paragraph(e["prose"].lstrip())
         mo = _BOLD_OUTER_RE.search(opener)
         # The PRESENCE half: an opener with no bold span at all used to be
         # silent (the coherence check below is gated on a bold to compare),
@@ -3030,7 +2965,7 @@ def scan(wiki, images=None, vault=None):
         if mo and title:
             b, bold_style, italic_prefix = _bold_parts(mo)
             b = b.strip()
-            t_norm = re.sub(r"\s*\([^)]*\)\s*$", "", title).strip()   # drop a trailing disambiguation parenthetical
+            t_norm = base_term(title)   # drop a trailing disambiguation parenthetical
             taxon_status, taxon = (
                 organism_title_classification(
                     t_norm, e["aliases"], first_sentence(opener))
@@ -3047,13 +2982,12 @@ def scan(wiki, images=None, vault=None):
                     "plain form and dropping a disambiguation "
                     "parenthetical)"))
             else:
-                if re.fullmatch(r"\$[^$\n]+\$", t_norm):
-                    # A title made entirely from one inline-math span has
-                    # no surrounding prose text to carry the required
-                    # first-title bold. Its exact opener span is the one
-                    # narrow exception to the general ban on wrapping
-                    # LaTeX itself in Markdown emphasis.
-                    _pure_math_opener_markup = mo.group(0)
+                # A title made entirely from one inline-math span has no
+                # surrounding prose text to carry the required first-title
+                # bold. Its exact opener span is the one narrow exception to
+                # the general ban on wrapping LaTeX itself in emphasis.
+                _pure_math_opener_markup = pure_math_opener_markup(
+                    t_norm, opener)
                 if taxon_status == "ambiguous":
                     # The semantic item-16 pass still checks the source, but
                     # there is no stored resolution bit with which a scanner
@@ -3080,62 +3014,17 @@ def scan(wiki, images=None, vault=None):
                             f'body opener title has the wrong emphasis for {e["type"]}; '
                             f'use "{expected_markup}"'))
         # ---- item 16b: unenumerated bold — only title-first-mention, `- **Term** —` anchor, **Related:** ----
-        in_opener = True; opener_skipped = False
-        _item16_prose = mask_line_spans(
-            strip_code(e["prose"]), e.get("table_spans", ()))
-        # Markup inside a wikilink display label is item 18's violation. Mask
-        # the complete link here so its inner ``**Label**`` does not also
-        # produce item 16's misleading "use italics or a wikilink" remedy.
-        # Outer emphasis around the link remains owned by the dedicated item-16
-        # pass below, which reads the unmasked prose.
-        _item16_prose = ANYLINK.sub(
-            lambda match: " " * len(match.group(0)), _item16_prose)
-        for ln in _item16_prose.split("\n"):
-            if in_opener and ln.strip() == "": in_opener = False   # opener = the first paragraph
-            if re.match(r"^\s*\*(?!\*).*\*\s*$", ln):              # caption line (whole-line italic) — item-12 owns it
-                continue
-            # bullet term-anchor line: legit. The bolded anchor may be followed by a short parenthetical or
-            # bracketed qualifier (optionally italicized) before the delimiter — wiki-build's own canonical
-            # definition bullet is `- **True positives** (TP) — positives correctly predicted as positive`,
-            # which a dash-must-follow-the-`**` pattern wrongly flagged as unenumerated bold (and wiki-build
-            # re-emitted it every run). Prose after the anchor with no delimiter is still flagged.
-            if re.match(r"^\s*[-*]\s+\*\*[^*\n]+\*\*(?:\s*[*_]?[\(\[][^)\]\n]{1,60}[\)\]][*_]?)*\s*[—–:\-]", ln):
-                continue
-            for bold_match in _BOLD_OUTER_RE.finditer(ln):
-                if in_opener and not opener_skipped:               # opener's title slot — item 16 owns its form
-                    opener_skipped = True; continue
-                spn, _sp_style, _sp_prefix = _bold_parts(bold_match)
-                spn = spn.strip()
-                if not spn or spn == "Related:":
-                    continue
-                if re.fullmatch(r"\[\[[^\]]*\]\]|\$[^$]+\$|`[^`]+`", spn):   # emphasis around a single wikilink/math/code → emphasis-misuse check owns it
-                    continue
-                problems.append((sl,"item16",f'unenumerated bold "**{spn}**" — bold is only for the title, `- **Term** (qualifier) —` bullet anchors, and **Related:** (use italics or a wikilink)'))
+        # Shared with lint_entry. Markup inside a wikilink display label is
+        # item 18's violation, and bold around a single link/math/code span is
+        # the emphasis check's below.
+        for _bold_finding in unenumerated_bold_findings(
+                e["prose"], e.get("table_spans", ())):
+            problems.append((sl, "item16", _bold_finding["message"]))
         # ---- item 16: emphasis (bold/italic) around a wikilink/math/code span — the markup itself is the styling ----
-        emphasis_zones = mask_line_spans(
-            strip_indented(strip_fenced(e["prose"])),
-            e.get("table_spans", ())) + "\n" + e["rel"]
-        # Keep the backtick delimiters visible so emphasis wrapped around an
-        # actual code span is still detected, but blank its contents. Markup
-        # shown *inside* a code sample (for example `` `*[[x]]*` ``) is not
-        # rendered emphasis or a wikilink and must not create item 16.
-        emphasis_zones = _INLINE_CODE.sub(
-            lambda _m: (_m.group(1)
-                        + " " * (len(_m.group(0)) - 2 * len(_m.group(1)))
-                        + _m.group(1)),
-            emphasis_zones)
-        opener_break = re.search(r"\n[ \t]*\n", emphasis_zones)
-        opener_limit = (opener_break.start() if opener_break
-                        else len(e["prose"]))
-        for m in re.finditer(r"(\*\*|\*)(\[\[[^\]\n]*\]\]|\$[^$\n]+\$|`[^`\n]+`)(\*\*|\*)", emphasis_zones):
-            if m.group(1) != m.group(3): continue              # require balanced ** ** or * *
-            inner = m.group(2)
-            kind, fix = ("wikilink","the link") if inner.startswith("[[") else (("math","LaTeX") if inner.startswith("$") else ("code","backticks"))
-            if (_pure_math_opener_markup == m.group(0)
-                    and m.start() < opener_limit):
-                _pure_math_opener_markup = None
-                continue
-            problems.append((sl,"item16",f'{"bold" if m.group(1)=="**" else "italic"} around a {kind} ({inner[:30]}) — remove the emphasis; {fix} already provides the styling'))
+        for _emphasis_finding in emphasis_span_findings(
+                e["prose"], e["rel"], e.get("table_spans", ()),
+                opener_markup=_pure_math_opener_markup):
+            problems.append((sl, "item16", _emphasis_finding["message"]))
         # ---- item 16: two literal prose shapes that require backticks ----
         # The shared helper is intentionally conservative for extensions and
         # excludes headings, captions, tables, math, link/embed syntax, and
@@ -3148,59 +3037,22 @@ def scan(wiki, images=None, vault=None):
                 sl, "item16",
                 'bare %(kind)s %(token)r on prose line %(line)d — wrap the '
                 'literal shape in backticks' % occurrence))
-        # ---- item 13: stray frontmatter key mid-body (stacked-merge scar) ----
-        # `importance` stays in this alternation on purpose: it is a legacy key, so a legacy
-        # entry's stacked-merge scar can still be an `importance:` line stranded in the body.
-        # That is an item-13 structural scar, not an importance rule — there is no item-20 check.
-        # Fenced code is masked first. A `Software` entry legitimately SHOWS
-        # YAML/config in a listing (`type: Software`, `tags: [...]`), and a
-        # scar-detector that reads a listing as a scar told the linter to
-        # delete a line out of the entry's own example — the one place in this
-        # scan where the fix is destructive and the finding was always false.
-        # item 6 keeps its own unmasked view: there, the fence IS the finding.
-        # `read` is in this alternation like every other schema key: `read:` is
-        # the schema's LAST key, so a partial stacked-merge scar plausibly
-        # leaves exactly a `read: false` line — omitting it made qc-items'
-        # "any schema key" claim false for the likeliest single-line scar.
-        _merge_lines = strip_code(e["prose"]).split("\n")
-        # If Related is missing, regions() reaches the legitimate separator
-        # before Flashcards. Item 11 should report the missing footer without
+        # ---- item 13: stray frontmatter key, `---` or digit line mid-body (stacked-merge scars) ----
+        # Shared with lint_entry, which masks listings first. If Related is
+        # missing, regions() reaches the legitimate separator before
+        # Flashcards. Item 11 should report the missing footer without
         # cascading into an item-13 "stray separator" false positive.
+        _structural_separator_i = None
         if e.get("flashcard_indexes"):
             _flash_i = e["flashcard_indexes"][0]
             _structural_separator_i = next(
                 (i for i in range(_flash_i - 1, -1, -1)
                  if e["body_lines"][i].strip()), None)
             if (_structural_separator_i is not None
-                    and e["body_lines"][_structural_separator_i].strip() == "---"
-                    and _structural_separator_i < len(_merge_lines)):
-                _merge_lines[_structural_separator_i] = ""
-        _merge_scan = "\n".join(_merge_lines)
-        if re.search(r"(?m)^(title|type|aliases|sources|created|updated|description|tags|importance|parents|read):",
-                     _merge_scan):
-            problems.append((sl,"item13","stray frontmatter key in the body — stacked-merge scar; remove it"))
-        _merge_scan_lines = _merge_scan.split("\n")
-        _stray_rule = any(
-            re.fullmatch(r"\s*---\s*", _line)
-            and not (_index > 0 and _merge_scan_lines[_index - 1].strip()
-                     and not markdown_block_start(
-                         _merge_scan_lines[_index - 1]))
-            for _index, _line in enumerate(_merge_scan_lines))
-        if _stray_rule:
-            problems.append((
-                sl, "item13",
-                "stray `---` fence in explanatory body prose — stacked-merge "
-                "scar; the only body separator belongs between Related and "
-                "Flashcards"))
-        _digit_scan = re.sub(
-            r"(?ms)^ {0,3}\$\$[ \t]*(?:\n.*?\n|.*?) {0,3}\$\$[ \t]*$",
-            "", _merge_scan)
-        if re.search(r"(?m)^\s*[0-9]+\s*$", _digit_scan):
-            problems.append((
-                sl, "item13",
-                "standalone bare digit line in explanatory body prose — "
-                "stacked-merge scar; remove it or restore the content it was "
-                "detached from"))
+                    and e["body_lines"][_structural_separator_i].strip() != "---"):
+                _structural_separator_i = None
+        for _scar in merge_scar_findings(e["prose"], _structural_separator_i):
+            problems.append((sl, "item13", _scar["message"]))
         # ---- item 19: Flashcards presence/absence + one-card cap + per-card structure / markup / answer-leak ----
         if not e["has_flashcards"]:
             problems.append((sl,"item19","entry missing ## Flashcards section"))
@@ -3254,6 +3106,9 @@ def scan(wiki, images=None, vault=None):
                     "card and attachment, and move/remove an extra only under an "
                     "explicitly authorized refactor that accounts for its claim"))
             alias_forms = list(e["aliases"])
+            _expected_term, _expected_counterpart = flashcard_primary_answer(
+                title, e["aliases"], opener, e["type"])
+            _line3_faults = []
             for ci, cl in enumerate(cards, 1):
                 tag = (f"card {ci}" if len(cards) > 1 else "flashcard")
                 if len(cl) < 3:
@@ -3292,7 +3147,7 @@ def scan(wiki, images=None, vault=None):
                 # leak check: line 1 must not contain THIS card's answer — its own line-3 term (+ parenthetical
                 # expansion); add the entry's aliases only when this card's term is the entry title (the primary
                 # card). A secondary card legitimately names the primary entity, so don't test it against the title.
-                mt = re.match(r"^(.*?)\s*(?:\(([^)]*)\))?\s*$", line3.strip())
+                mt = re.match(r"^(.*?)(?:\s+\(([^)]*)\))?\s*$", line3.strip())
                 term_main = (mt.group(1) if mt else line3).strip()
                 paren = mt.group(2).strip() if (mt and mt.group(2)) else ""
                 # the parenthetical is a leak candidate only when it is a real acronym/expansion of the term; a
@@ -3305,9 +3160,6 @@ def scan(wiki, images=None, vault=None):
                 # ("Feature", not "Feature (machine learning)"), so an exact
                 # compare skipped the alias needles for exactly the entries that
                 # carry them — every disambiguated entry sat in the blind spot.
-                opener = opening_paragraph(e["prose"])
-                _expected_term, _expected_counterpart = flashcard_primary_answer(
-                    title, e["aliases"], opener, e["type"])
                 if _expected_term and term_main == _expected_term:
                     cands += alias_forms
                 # Unicode punctuation, slash/dash variants, and whitespace are
@@ -3337,12 +3189,20 @@ def scan(wiki, images=None, vault=None):
                 elif re.search(r"\*\w[^*]*\*", line3): l3.append("italic")
                 if l3:
                     problems.append((sl,"item19",f'{tag} line 3 (term) has {", ".join(l3)} — the term is the plain-text primary answer derived from the title (no markup, including LaTeX)'))
-                line3_fault = flashcard_line3_fault(
-                    line3, title, e["aliases"], opener, e["type"])
-                if line3_fault:
-                    problems.append((sl, "item19",
-                                     f'{tag} line 3 is "{line3[:40]}" — '
-                                     f'{line3_fault}'))
+                _line3_faults.append((tag, line3, flashcard_line3_fault(
+                    line3, title, e["aliases"], opener, e["type"])))
+            # The line-3 term contract binds the primary card only. A legacy
+            # extra card keeps its own answer: rewriting it would repoint that
+            # card's review schedule. lint_entry makes the same choice.
+            _report_line3, _no_primary = primary_line3_faults(
+                len(cards), _line3_faults, _expected_term,
+                _expected_counterpart)
+            if _no_primary:
+                problems.append((sl, "item19", _no_primary))
+            for tag, line3, line3_fault in _report_line3:
+                problems.append((sl, "item19",
+                                 f'{tag} line 3 is "{line3[:40]}" — '
+                                 f'{line3_fault}'))
         # ---- item 11: exactly one terminal Related footer on entries ----
         # ``regions`` intentionally stops prose at the first rendered marker.
         # Without this topology check, a second footer or ordinary prose after
@@ -3428,39 +3288,13 @@ def scan(wiki, images=None, vault=None):
 
 
         # ---- item 14: source-meta phrasings (prose only) ----
-        META = [
-            r"\b(?:the|this) paper\b", r"\bthe chapter\b",
-            # “source code” names software material, not the document. The
-            # carve-out is symmetric for “the” and “this,” including the
-            # ordinary hyphenated spelling.
-            r"\b(?:the|this) source\b(?!\s*(?:-| )\s*code\b)",
-            r"\bas (?:mentioned|discussed|noted|shown|described) "
-            r"(?:above|below|earlier|previously|later)\b",
-            r"\bin the previous section\b", r"\bas we saw\b",
-            r"\bthe figure (?:above|below)\b",
-        ]
-        # In a Work entry, “the book” or “the article” can name the entry's
-        # own subject rather than the source currently being processed. The
-        # mechanical scan cannot distinguish those readings, so it must not
-        # prescribe deleting either phrase there.
-        if e.get("type") != "Work":
-            META.extend((r"\bthe book\b", r"\bthe article\b"))
-        _meta_text = strip_code(e["prose"])
-        _meta_found = False
-        for pat in META:
-            if re.search(pat, _meta_text, re.I):
-                problems.append((sl,"item14",f'source-meta phrasing /{pat}/'))
-                _meta_found = True
-                break
-        if not _meta_found:
-            _author_matches = list(re.finditer(r"\bthe authors?\b", _meta_text,
-                                               re.IGNORECASE))
-            if any(not _authors_phrase_names_work(_meta_text, match, _entry_vault_target(e))
-                   for match in _author_matches):
-                problems.append((
-                    sl, "item14",
-                    "source-meta phrasing uses bare `the author(s)` rather than "
-                    "naming an existing Work entry"))
+        # Shared with lint_entry. Named `the author(s) of …` passes only when
+        # it names an existing entry, which this scan can resolve.
+        for _meta_finding in source_meta_findings(
+                e["prose"], e.get("type"),
+                names_work=lambda text, match: _authors_phrase_names_entry(
+                    text, match, _entry_vault_target(e))):
+            problems.append((sl, "item14", _meta_finding["message"]))
         # ---- item 17: names introduced for this subject but absent in aliases ----
         # The shared detector is exactly the one wiki-build runs on a new or
         # merged entry. It supplies a deterministic candidate; same-entity,
@@ -3473,7 +3307,11 @@ def scan(wiki, images=None, vault=None):
                 f'the body introduces "{_candidate}" ({_where}) as a name for '
                 f'the subject, but aliases: does not contain '
                 f'"{_candidate_slug}" — review same-entity and cross-domain '
-                f'safety before adding it'))
+                f'safety before adding it'
+                + ("; " + BARE_WORD_ALIAS_HINT
+                   if bare_word_alias_candidate(
+                       _candidate_slug, title, _candidate)
+                   else "")))
         # ---- item 10: dangling targets; first-occurrence dup within PROSE ----
         # A target that misses every entry exactly but has one portable
         # case/normalization owner is not a genuine missing target. It gets its
@@ -3795,25 +3633,6 @@ def scan(wiki, images=None, vault=None):
                                     if own_sl == sl else "")))
             elif k not in alias_owner:
                 alias_owner[k] = (sl, a, e["path_key"])
-    def _toks(s):                                    # tokens: lowercased, hyphens→spaces, a disambiguation parenthetical dropped
-        s = re.sub(r"\s*\([^)]*\)\s*", " ", s.lower())
-        return re.findall(r"[a-z0-9]+", s.replace("-", " "))
-    def _stem(t):                                     # crude inflection stem: tuning/tuned/tunes/tune -> tun
-        for suf in ("ing", "ed", "es", "s"):          # one suffix, longest first; keep >=3 chars of stem
-            if t.endswith(suf) and len(t) - len(suf) >= 3:
-                t = t[: -len(suf)]; break
-        if t.endswith("e") and len(t) >= 4:           # e-drop stems: tune -> tun, so tuned/tuning match tune
-            t = t[:-1]
-        return t
-    def _tok_match(a, b):                             # tolerant of inflection/truncation between a display token and a title token
-        # The 4-char common-prefix floor alone misses short e-drop verb stems: "tuned" vs "tuning" share only
-        # "tun" (3), so [[fine-tuning|fine-tuned]] false-flagged on a real vault even though the display-label
-        # carve-out explicitly permits natural verb inflections. Stems must be EQUAL (not prefixes) so a
-        # genuinely different word ("tuner", "transfer") still flags.
-        if a in b or b in a or len(os.path.commonprefix([a, b])) >= 4:
-            return True
-        sa, sb = _stem(a), _stem(b)
-        return len(sa) >= 3 and sa == sb
     for e in diagnostic_records:
         sl = e["slug"]
         problems.current_path = (
@@ -3830,26 +3649,16 @@ def scan(wiki, images=None, vault=None):
                 f'wikilink [[{_target}|{_target}]] in body prose has a '
                 f'display label identical to its slug — use [[{_target}]]'))
         _display_label_text = _display_label_prose + "\n" + strip_code(e["rel"])
-        for m in re.finditer(r"\[\[([^\]|#^]+)(?:[#^][^\]|]*)?\|([^\]\n]+)\]\]",
-                             _display_label_text):
-            tgt, disp = m.group(1).strip(), m.group(2).strip()
-            dmark = []
-            if "$" in disp: dmark.append("$ (LaTeX)")
-            if "`" in disp: dmark.append("backtick")
-            if "**" in disp: dmark.append("** (bold)")
-            elif re.search(r"\*\w[^*]*\*", disp): dmark.append("* (italic)")
-            if dmark:
-                problems.append((sl,"item18",f'wikilink display label "{disp[:40]}" has markup ({", ".join(dmark)}) — labels render as plain text; put math/emphasis in the surrounding prose'))
+        # Label markup and the label/target surface floor are shared with
+        # lint_entry (its folder mode resolves targets for the surface test).
+        for _link in display_label_links(_display_label_text):
+            tgt, disp = _link["target"], _link["display"]
+            if _link["marks"]:
+                problems.append((sl, "item18", _link["message"]))
                 continue
-            # Display label is valid when, for some title/alias form, the label's tokens are a SUBSET of the form
-            # (inflection/truncation tolerant) — this accepts the bare display of a cross-domain qualified link,
-            # [[information-entropy|entropy]], which wiki-build MANDATES and FORBIDS as an alias so it can never be
-            # in a surface set — OR a SUPERSET of the form, i.e. the label contains all the form's tokens plus extras,
-            # which accepts a more-specific display that prepends a qualifier, [[neural-network|deep neural networks]].
-            # An exact-match check false-flagged both (108-of-110 false positives on a real run); "fixing" the bare
-            # case by adding the bare alias is exactly the silent cross-domain collision wiki-build exists to prevent.
-            # Do NOT re-tighten to exact match, and do NOT add a single-token-strict-subset guard (re-flags bare terms).
-            # Still flags a label that is neither subset nor superset of any form (a wrong target / invented label).
+            # A label passes when its tokens are a subset or a superset of
+            # the target's title or an alias (entry_checks.label_shares_surface
+            # explains why the test must stay that loose).
             target_key = entry_link_key(tgt)
             target_record, target_status, _target_path = _resolve_entry_file(tgt, _entry_vault_target(e))
             if (target_record is None and target_status == "missing"
@@ -3902,18 +3711,11 @@ def scan(wiki, images=None, vault=None):
                         f'rather than the chosen target "{chosen_title}" — review '
                         f'the target or label; do not auto-retarget'))
                     continue
-                forms = ([_toks(target_record["title"])]
-                         + [_toks(a) for a in target_record["aliases"]])
-                dt = _toks(disp)
-                ok = False
-                for form in forms:
-                    if not form: continue
-                    sub = all(any(_tok_match(d, t) for t in form) for d in dt)   # label ⊆ form: bare term / inflection
-                    sup = all(any(_tok_match(d, t) for d in dt) for t in form)   # label ⊇ form: qualifier-prefixed, more specific
-                    if sub or sup: ok = True; break
+                ok = label_shares_surface(
+                    disp, [target_record["title"]] + target_record["aliases"])
                 if not ok and organism_common_name_bound(target_record, disp):
                     ok = True
-                if dt and not ok:
+                if not ok:
                     target_title = target_record.get("title") or target_slug
                     location = _target_path or target_slug
                     problems.append((sl,"item18",f'wikilink [[{tgt}|{disp}]] — "{disp}" shares no surface form with the canonical target "{target_title}" at "{location}" (its title/aliases), and no explicit Organism common-name binding applies; likely wrong target or invented label'))
@@ -4109,7 +3911,11 @@ def scan(wiki, images=None, vault=None):
         t[0] += 1; t[1].add(sl)
     nentries = len(entries) or 1
     entry_set = set(entries)
-    tally_out = [dict(item=item, entries=len(ents), pct_of_entries=100*len(ents & entry_set)//nentries, issues=cnt)
+    # `entries` also counts unreadable item0 paths; `pct_of_entries` is the
+    # one-decimal share of parsed entries.
+    tally_out = [dict(item=item, entries=len(ents),
+                      pct_of_entries=round(100 * len(ents & entry_set) / nentries, 1),
+                      issues=cnt)
                  for item,(cnt,ents) in sorted(tally.items(),
                                                key=lambda kv: (-len(kv[1][1]), -kv[1][0], kv[0]))]
 
@@ -4137,6 +3943,12 @@ def scan(wiki, images=None, vault=None):
         if not _new or _new == _sl: continue
         _rename_targets.setdefault(fold_name(_new), []).append(_sl)
         renames.append([_sl, _new, inbound.get(_e["path_key"], 0)])
+    # Alias owners from every parsed record, even when the alias inventory
+    # has gaps: an incomplete inventory must not hide a known owner here.
+    _any_alias_owners = {}
+    for _e in diagnostic_records:
+        for _a in _e["aliases"]:
+            _any_alias_owners.setdefault(fold_name(_a), set()).add(_e["slug"])
     for _r in renames:
         # target_exists ⇒ likely duplicate/disambiguation; do NOT rename into it, flag both.
         # Compared folded because a destination is taken whenever a file shares
@@ -4154,11 +3966,17 @@ def scan(wiki, images=None, vault=None):
         # broken.md`, which destroys it. Both sets are the same question —
         # "does a file already answer to this name?" — and only their union
         # answers it.
+        #
+        # Another entry's alias is taken too: the renamed file would outrank
+        # that alias and capture every link that now resolves through it.
+        # The entry's own alias is not a collision.
         _fold_new = fold_name(_r[1])
         _owner = fold_of.get(_fold_new)
         _r.append((_owner is not None and _owner != _r[0])
                   or _fold_new in on_disk_fold
-                  or len(_rename_targets[_fold_new]) > 1)
+                  or len(_rename_targets[_fold_new]) > 1
+                  or _fold_new in ambiguous_aliases
+                  or bool(_any_alias_owners.get(_fold_new, set()) - {_r[0]}))
 
     # ---- Hierarchy diagnostic (Task 3): existing parent/MOC state ----------
     # Reflect existing parents. Generated trees root at their discipline entry,
@@ -4834,9 +4652,13 @@ def run_self_test():
                   _st_entry("Stray line", "**Stray line** is a worked example.")
                   .replace("type: Concept\n",
                            "type: Concept\nnot a key or a list item\n"))
+        _st_write(v, "unspaced-key.md",
+                  _st_entry("Unspaced key", "**Unspaced key** is a worked example.")
+                  .replace("type: Concept\n", "type:Concept\n"))
         for _name, _raw in (("flow-leading", ',"alias"'),
                             ("flow-middle", '"alias",,"other"'),
-                            ("flow-trailing", '"alias",')):
+                            ("flow-trailing", '"alias",,'),
+                            ("flow-one-trailing-comma", '"alias",')):
             _st_write(v, _name + ".md", _st_entry(
                 _name.replace("-", " ").capitalize(),
                 "**%s** is a worked example."
@@ -4864,6 +4686,8 @@ def run_self_test():
               ["item1" in _st_keys(res, slug_) for slug_ in
                ("flow-leading", "flow-middle", "flow-trailing")],
               [True] * 3)
+        check("one trailing comma after an item is valid YAML, not item 1",
+              "item1" in _st_keys(res, "flow-one-trailing-comma"), False)
 
         check("a schema-clean entry produces no finding at all",
               _st_keys(res, "anchor"), [])
@@ -4884,6 +4708,9 @@ def run_self_test():
               (_st_keys(res, "stray-line"),
                "not a key or a list item" in _st_msg(res, "stray-line", "item1")),
               (["item1"], True))
+        check("a key with no space after its colon is an unparseable item1 line",
+              "unparseable frontmatter line: 'type:Concept'"
+              in _st_msg(res, "unspaced-key", "item1"), True)
         check("CRLF line endings parse", _st_keys(res, "crlf"), [])
         check("...and a CRLF blank line after the frontmatter is still item9",
               _st_keys(res, "crlf-blank"), ["item9"])
@@ -4902,7 +4729,7 @@ def run_self_test():
               True)
         check("valid-frontmatter records remain inventoried while the four "
               "unreadable or non-frontmatter files are excluded",
-              res["inventory"]["entries"], 10 + (1 if have_symlink else 0))
+              res["inventory"]["entries"], 12 + (1 if have_symlink else 0))
 
         # zero entries, and one entry
         empty = os.path.join(tmp, "empty")
@@ -5280,6 +5107,18 @@ def run_self_test():
             "??\nTwocards\n",
             "??\nTwocards\n\nA Twocards example illustrates another notion.\n"
             "??\nSecond idea\n"))
+        _st_write(v, "no-primary-card.md", _st_entry(
+            "No primary card", "**No primary card** is a worked example.",
+            tags=('"#physics"',)).replace(
+            "??\nNo primary card\n",
+            "??\nFirst other idea\n\nAnother notion is stated here.\n"
+            "??\nSecond other idea\n"))
+        _st_write(v, "near-primary-card.md", _st_entry(
+            "Near primary card", "**Near primary card** is a worked example.",
+            tags=('"#physics"',)).replace(
+            "??\nNear primary card\n",
+            "??\nnear primary card\n\nAnother notion is stated here.\n"
+            "??\nOther idea\n"))
         _st_write(v, "joined-cards.md", _st_entry(
             "Joined cards", "**Joined cards** is a worked example.",
             tags=()).replace(
@@ -5400,6 +5239,30 @@ def run_self_test():
               ("report-only" in _st_msg(res, "twocards", "item19")
                and "preserve every card" in _st_msg(
                    res, "twocards", "item19")), True)
+        check("an extra card keeps its own line-3 answer without a term finding",
+              "line 3 is" in _st_msg(res, "twocards", "item19"), False)
+        _no_primary = _st_msg(res, "no-primary-card", "item19").split(" | ")
+        check("several cards with no primary answer get one finding, not one per card",
+              ([msg for msg in _no_primary if " line 3 is" in msg],
+               sum("no card carries the primary answer" in msg
+                   for msg in _no_primary)),
+              ([], 1))
+        check("a near-miss primary card gets its own line-3 fault; the extra card none",
+              [msg[:msg.index(" line 3")] for msg in
+               _st_msg(res, "near-primary-card", "item19").split(" | ")
+               if " line 3 is" in msg],
+              ["card 1"])
+        # A notation parenthetical such as SU(2) is part of the name unless the
+        # shared slugify rule calls it a disambiguator; no private regex here.
+        _v_notation = os.path.join(tmp, "v-notation-title")
+        _st_write(_v_notation, "su2.md", _st_entry(
+            "SU(2)", "**SU(2)** is a worked example.", card="SU(2)"))
+        _notation_res = scan(_v_notation)
+        _notation_split = has_parenthetical("SU(2)")
+        check("opener and card-term checks follow the shared disambiguator rule",
+              ("item16" in _st_keys(_notation_res, "su2"),
+               "line 3 is" in _st_msg(_notation_res, "su2", "item19")),
+              (_notation_split, _notation_split))
         check("a second card joined without a blank line is malformed visible content",
               "visible lines" in _st_msg(res, "joined-cards", "item19"), True)
         check("a non-SR line-four HTML comment is malformed visible content",
@@ -6211,6 +6074,11 @@ def run_self_test():
                 if row["kind"] == "moc-parent"],
                "MOCs/biology" in _st_msg(res, "leaf", "item2/parents-form")),
               ([], ["leaf", "reader"], True))
+        check("a MOC-resolving parent is report-only, never respelled to its MOC",
+              ("use this canonical target" in _st_msg(res, "leaf", "item2/parents-form"),
+               "Report only" in _st_msg(res, "leaf", "item2/parents-form"),
+               "item2/parents-form" in _st_keys(res, "reader")),
+              (False, True, False))
         _st_write(v, "alias-owner.md", _st_entry(
             "Alias owner", "**Alias owner** is a worked example.",
             tags=(), aliases=('"biology"',)))
@@ -6661,7 +6529,7 @@ def run_self_test():
                      if row["kind"] == "wrong-discipline-link"),
               sorted(set(_tag_forms) - {"valid-block", "valid-flow"}))
         check("blank tags require repair and duplicate canonical misc values retain duplicate QC",
-              (all("at least one discipline tag" in _st_msg(res, name, "item8")
+              (all("exactly one discipline tag" in _st_msg(res, name, "item8")
                    for name in ("blank-block", "blank-flow")),
                "#misc must be the sole tag" in _st_msg(res, "mixed", "item8"),
                'discipline "#misc" tagged more than once' in _st_msg(res, "twice", "item8")),
@@ -6715,6 +6583,14 @@ def run_self_test():
             "Occupied", "**Occupied** is a worked example."))
         _st_write(v, "occupied.md", _st_entry(
             "Occupied elsewhere", "**Occupied elsewhere** is a worked example."))
+        _st_write(v, "recall-owner.md", _st_entry(
+            "Recall owner", "**Recall owner** is a worked example.",
+            aliases=('"tpr"',)))
+        _st_write(v, "true-pos.md", _st_entry(
+            "TPR", "**TPR** is a worked example."))
+        _st_write(v, "own-alias-old.md", _st_entry(
+            "Own alias", "**Own alias** is a worked example.",
+            aliases=('"own-alias"',)))
         _st_write(v, "a/path-old.md", _st_entry(
             "Alpha renamed", "**Alpha renamed** is a worked example."))
         _st_write(v, "b/path-old.md", _st_entry(
@@ -6738,6 +6614,20 @@ def run_self_test():
         check("a rename onto a destination held by a PARSED entry is still "
               "target_exists",
               _tx.get("taken-name"), True)
+        check("a rename onto another entry's alias is target_exists; onto "
+              "the entry's own alias it is not",
+              (_tx.get("true-pos"), _tx.get("own-alias-old")), (True, False))
+        _st_write(v, "typo.md", _st_entry(
+            "Typo", "**Typo** is a worked example.").replace(
+                "read: false", "read:false"))
+        _gap_res = scan(v)
+        check("an alias-inventory gap elsewhere does not hide a known alias "
+              "owner from target_exists",
+              (("typo", "item1") in _st_items(_gap_res),
+               {r["slug"]: r["target_exists"]
+                for r in _gap_res["rename_candidates"]}.get("true-pos")),
+              (True, True))
+        os.remove(os.path.join(v, "typo.md"))
         _path_rename = next(r for r in res["rename_candidates"]
                             if r["slug"] == "path-old")
         check("rename inbound counts resolve path-qualified and explicit-.md links "
@@ -7606,7 +7496,7 @@ def run_self_test():
         res = scan(v)
         check("problem percentages use every parsed entry as the denominator",
               [(p["entries"], p["pct_of_entries"]) for p in res["problem_tally"]
-               if p["item"] == "item4"], [(2, 66)])
+               if p["item"] == "item4"], [(2, 66.7)])
 
         v = os.path.join(tmp, "v19-backfill-ownership")
         _st_write(v, 'aaa-technique.md', _st_entry('AAA technique',
@@ -8549,6 +8439,9 @@ def run_self_test():
         _st_write(v, "introduced-alias.md", _st_entry(
             "Introduced alias", "**Introduced alias** — which many people "
             "call *alternate name* — is a worked example."))
+        _st_write(v, "feature-machine-learning.md", _st_entry(
+            "Feature (machine learning)", "**Feature** — which many people "
+            "call *predictor* — is a measurable input to a model."))
         _st_write(v, "component-name.md", _st_entry(
             "Component name", "**Component name** has a part. The part, also "
             "called the *auxiliary unit*, is not the entry subject."))
@@ -8587,6 +8480,7 @@ def run_self_test():
             tags=(), parents=('"[[root]]"',)))
         for _slug, _sentence in (
                 ("meta-source", "This source gives the result."),
+                ("meta-source-text", "The source text states the result."),
                 ("meta-later", "As discussed later, the result holds."),
                 ("meta-section", "In the previous section, the case was introduced."),
                 ("meta-saw", "As we saw, the case is representative."),
@@ -8600,7 +8494,8 @@ def run_self_test():
         _st_write(v, "meta-near-misses.md", _st_entry(
             "Meta near misses", "**Meta near misses** explains source code, "
             "credits the authors of SGDR, explains this source code, returns "
-            "later, and stays above zero."))
+            "later, and stays above zero. It maps the source domain to a "
+            "target domain and routes flow from the source node to the sink."))
         _st_write(v, "meta-unnamed-authors.md", _st_entry(
             "Meta unnamed authors", "**Meta unnamed authors** says the authors "
             "of a study reported the result."))
@@ -8648,6 +8543,12 @@ def run_self_test():
                '"alternate-name"' in _st_msg(
                    res, "introduced-alias", "item17/alias-candidate")),
               (True, True))
+        check("a single-word synonym of a disambiguated subject defaults to staying out",
+              ("stays out" in _st_msg(res, "feature-machine-learning",
+                                      "item17/alias-candidate"),
+               "stays out" in _st_msg(res, "introduced-alias",
+                                      "item17/alias-candidate")),
+              (True, False))
         check("a component's synonym is not promoted to the entry's alias",
               "item17/alias-candidate" in _st_keys(res, "component-name"), False)
         check("empty and own-slug aliases are item18 findings",
@@ -8661,9 +8562,10 @@ def run_self_test():
               [True] * 7)
         check("every previously omitted exact source-meta phrase is item14",
               ["item14" in _st_keys(res, slug_) for slug_ in
-               ("meta-source", "meta-later", "meta-section", "meta-saw",
-                "meta-figure")], [True] * 5)
-        check("named-work, source-code, temporal-later, and geometric-above uses stay clean",
+               ("meta-source", "meta-source-text", "meta-later", "meta-section",
+                "meta-saw", "meta-figure")], [True] * 6)
+        check("named-work, technical source compounds, temporal-later, and "
+              "geometric-above uses stay clean",
               "item14" in _st_keys(res, "meta-near-misses"), False)
         check("authors of an unnamed study remains source-meta phrasing",
               "item14" in _st_keys(res, "meta-unnamed-authors"), True)
@@ -8683,6 +8585,95 @@ def run_self_test():
               ["item19" in _st_keys(res, slug_) for slug_ in
                ("separator-spacing", "heading-spacing")],
               [True, True])
+
+        # The per-entry checks shared with wiki-build's lint_entry.py: its
+        # self-test runs the same rows, so each moved mutation is flagged by
+        # both tools.
+        v = os.path.join(tmp, "shared-checks")
+        _st_write(v, "precision.md", _st_entry(
+            "Precision", "**Precision** is a worked example."))
+        for number, row in enumerate(SHARED_MUTATIONS, 1):
+            slug_ = "mutation-%d" % number
+            _st_write(v, slug_ + ".md", _st_entry(
+                "Mutation %d" % number,
+                "**Mutation %d** describes a rate.\n\n%s"
+                % (number, row[1].replace("{self}", slug_))))
+        res = scan(v)
+        for number, (name, _paragraph, scan_key, _lint_id, _folder) in \
+                enumerate(SHARED_MUTATIONS, 1):
+            check("lint_entry parity, %s: %s" % (name, scan_key),
+                  scan_key in _st_keys(res, "mutation-%d" % number), True)
+        check("the shared-check reference entry stays clean",
+              _st_keys(res, "precision"), [])
+        # ...and each quiet row stays unflagged by both tools.
+        v = os.path.join(tmp, "shared-quiet")
+        _st_write(v, "mus-musculus.md", _st_entry(
+            "Mus musculus",
+            "***Mus musculus*** is the mouse, a small rodent.",
+            type_="Organism",
+            description="Mus musculus is the mouse, a small rodent."))
+        _st_write(v, "l-2-norm.md", _st_entry(
+            "$L^2$ norm", "The **$L^2$ norm** measures a vector's length."))
+        for number, row in enumerate(SHARED_QUIET, 1):
+            _st_write(v, "quiet-%d.md" % number, _st_entry(
+                "Quiet %d" % number,
+                "**Quiet %d** describes a rate.\n\n%s" % (number, row[1])))
+        res = scan(v)
+        for number, (name, _paragraph, scan_key, _lint_id) in \
+                enumerate(SHARED_QUIET, 1):
+            check("lint_entry parity, quiet %s: %s" % (name, scan_key),
+                  scan_key in _st_keys(res, "quiet-%d" % number), False)
+        # A preserved comment before the opener leaves the title's bold in
+        # the opener (lint_entry's self-test runs the same cases).
+        v = os.path.join(tmp, "leading-comment")
+        _st_write(v, "comment-lead.md", _st_entry(
+            "Comment lead",
+            "%% user note %%\n\n**Comment lead** is a worked example."))
+        _st_write(v, "html-lead.md", _st_entry(
+            "Html lead",
+            "<!-- reviewed 2026-01 -->\n**Html lead** is a worked example."))
+        _st_write(v, "r-plus.md", _st_entry(
+            "$R^{+}$", "%% user note %%\n\n**$R^{+}$** is a worked example.",
+            card="R-plus"))
+        _st_write(v, "unbolded-lead.md", _st_entry(
+            "Unbolded lead", "%% note %%\n\nUnbolded lead is a worked example."))
+        res = scan(v)
+        check("a leading comment keeps the title's bold in the opener; a "
+              "missing opener bold after it is still found",
+              [_st_keys(res, slug_) for slug_ in
+               ("comment-lead", "html-lead", "r-plus", "unbolded-lead")],
+              [[], [], [], ["item16"]])
+        # `the authors of` any existing entry is named attribution, such as a
+        # method named by its paper; an unknown name stays source-meta.
+        v = os.path.join(tmp, "authors-named-entry")
+        _st_write(v, "sgdr.md", _st_entry(
+            "SGDR", "**SGDR** is a learning-rate schedule with warm restarts."))
+        _st_write(v, "cosine-annealing.md", _st_entry(
+            "Cosine annealing", "**Cosine annealing** lowers the rate along a "
+            "cosine. The authors of SGDR recommend restarting it periodically."))
+        _st_write(v, "unknown-authors.md", _st_entry(
+            "Unknown authors", "**Unknown authors** is a worked example. "
+            "The authors of Adam recommend it."))
+        res = scan(v)
+        check("the authors of an existing Concept entry are named attribution; "
+              "an unknown name stays source-meta",
+              ("item14" in _st_keys(res, "cosine-annealing"),
+               "item14" in _st_keys(res, "unknown-authors")),
+              (False, True))
+        v = os.path.join(tmp, "alias-hint")
+        _st_write(v, "recall-machine-learning.md", _st_entry(
+            "Recall (machine learning)",
+            "**Recall** (**TPR**), also called *sensitivity*, is the share "
+            "of actual positives that a classifier finds.",
+            aliases=('"true-positive-rate"',), card="Recall"))
+        res = scan(v)
+        check("the cross-domain alias hint skips an acronym candidate",
+              sorted((p["message"].split('"')[1],
+                      BARE_WORD_ALIAS_HINT in p["message"])
+                     for p in res["problems"]
+                     if p["slug"] == "recall-machine-learning"
+                     and p["item"] == "item17/alias-candidate"),
+              [("TPR", False), ("sensitivity", True)])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

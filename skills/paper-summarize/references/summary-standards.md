@@ -8,7 +8,6 @@
 - [The limitations taxonomy, by mode and design](#the-limitations-taxonomy-by-mode-and-design)
 - [What an empirical document should have disclosed](#what-an-empirical-document-should-have-disclosed)
 - [A phrasing bank](#a-phrasing-bank)
-- [Sources](#sources)
 
 Read before recording claims or drafting a summary. This reference owns claim
 scope, confidence and evidential limitations. [Note format](note-format.md) owns
@@ -80,14 +79,20 @@ merely to complete a two-sentence pattern.
 
 | A crowded sentence | The claim explained in adjacent sentences |
 |---|---|
-| Faecal transplant likely reduced recurrence of *C. difficile* infection from 45% to 8% within eight weeks in previously-treated adults with at least two prior recurrences, against placebo, in a 219-patient double-blind trial. | The trial shows that the transplant cuts recurrence by about four fifths. Recurrence fell from 45% to 8% within eight weeks, against placebo. The 219 adults had all had at least two prior recurrences. |
-| eUniRep likely raises the rate of better-than-wild-type designs well above a one-hot sequence encoding given as few as 24 assayed mutants, in avGFP and TEM-1 β-lactamase. | Twenty-four measured mutants were enough to design a better protein. About one design in ten beat the natural protein. The same pipeline without pre-training gave almost none. The test covered two proteins. |
+| Faecal transplant likely reduced recurrence of *C. difficile* infection from 45% to 8% within eight weeks in previously-treated adults with at least two prior recurrences, against placebo, in a 219-patient double-blind trial. | In adults with at least two prior recurrences, the transplant cut recurrence within eight weeks from 45% on placebo to 8%. The 219-patient trial was randomised and double-blind. |
+| eUniRep likely raises the rate of better-than-wild-type designs well above a one-hot sequence encoding given as few as 24 assayed mutants, in avGFP and TEM-1 β-lactamase. | In two test proteins, 24 measured mutants were enough to design variants that beat the natural protein. About one design in ten did so; the same pipeline without pre-training gave almost none. |
 
 Keep a needed limit immediately beside the claim it qualifies; a modal verb
-alone does not explain a design constraint. Each callout bullet must carry its
-own qualification because bullets can be read out of order. Headings must be
-accurately scoped on their own: a qualifying sentence in the body cannot repair
-an overstated heading. Rung 1 needs no separate limitation beyond its scope.
+alone does not explain a design constraint. Callout bullets, headings and
+captions can be read alone, so each carries the scope of the claim it makes and
+any claim-level qualification, such as the comparator or the rung's design
+limit. A body sentence cannot repair an overstated heading. A document-level
+caveat that bounds every claim, such as single runs, a short horizon or a use
+the document proposes but never tests, is different: explain it once, in
+Limitations. The Limitations heading may name it, and one short callout bullet
+may state it when it is the chief caveat. Elsewhere, word each claim within
+that boundary ("on the authors' four benchmarks", "within 8 weeks") instead of
+restating the caveat. Rung 1 needs no separate limitation beyond its scope.
 
 Verify scope clauses as claims in their own right. Fluent wording does not
 repair an omitted necessary qualification.
@@ -98,23 +103,26 @@ A reader outside the field cannot tell whether a hazard ratio of 0.62, a fold ch
 
 | Fails | Holds |
 |---|---|
-| a hazard ratio of 0.62 | a 38% lower estimated event hazard, the instantaneous event rate among people still at risk (hazard ratio 0.62) |
-| Pearson r = 0.51 | a positive linear association between the two measured variables (r = 0.51); this does not establish causation |
-| a 3.1× improvement | 3.1 times as many, from 10 to 31, when those are the counts the paper reports |
+| a hazard ratio of 0.62 | an estimated 38% lower rate of events among people still event-free (hazard ratio 0.62) |
+| Pearson r = 0.51 | higher values of one measure tended to go with higher values of the other, though far from perfectly (r = 0.51) |
+| a 3.1× improvement | 3.1 times as many (31 versus 10) |
+
+Give underlying counts only when the paper reports them; never back-calculate
+them from a ratio.
 
 This is not a substitute for the absolute numbers of rule 2 — it sits beside them. And it is done **once per quantity**: a note that re-explains the same statistic at every mention is as tiring as one that never explains it.
 
 **Keep the measures distinct.** A hazard ratio is not a cumulative risk ratio or a ratio of event counts, and an odds ratio is not a risk ratio. Absolute risk also needs a population and a time horizon. Use the paper's reported absolute figures; if they are absent, name the gap rather than converting the ratio by intuition. See [Cochrane Handbook, effect measures](https://www.cochrane.org/authors/handbooks-and-manuals/handbook/current/chapter-06) and [time-to-event outcomes](https://www.cochrane.org/authors/handbooks-and-manuals/handbook/current/chapter-14#section-14-1-5-2).
 
-Squaring a correlation is not a general-purpose estimate of explained variation. That interpretation requires the corresponding regression setup, such as simple least-squares regression with an intercept, and does not imply a causal explanation. Preserve the statistic and explain the association when the paper does not establish that setup.
+Do not restate a correlation as variance explained, or as a cause, unless the paper does.
 
 ## The hedge ladder, and what sets its ceiling
 
 | Rung | When | The second sentence |
 |---|---|---|
-| 1 | an adequately powered randomised controlled experiment with its reported outcome prespecified | none needed beyond the scope: *"The trial shows that the transplant reduces recurrence."* |
+| 1 | an adequately powered randomised experiment whose reported outcome was prespecified (registered, or in a cited protocol or analysis plan) | none needed beyond the scope: *"The trial shows that the transplant reduces recurrence."* |
 | 2 | strong quasi-experimental design, or consistent evidence across designs, with the confounders addressed | *"The design is not randomised. Other causes are possible, and the authors tested for the known ones."* |
-| 3 | a single observational study, a correlational finding, an underpowered or unregistered experiment | *"It does not show that exercise causes the difference."* |
+| 3 | a single observational study, a correlational finding, an underpowered experiment, or one whose reported outcome was not prespecified | *"It does not show that exercise causes the difference."* |
 | 4 | mechanistic, in-vitro, animal-only, simulation, a pilot, or a case series | *"The test was in cells only. The paper does not show an effect in people."* |
 
 The rung governs a claim and its adjacent qualification, not a hedge word.
@@ -124,8 +132,8 @@ These statements sit off the effect ladder:
   onto an undetected effect.
 - A **non-evidential statement** is attributed to whoever made it, not graded.
 - A **descriptive qualitative finding** characterises the participants studied;
-  attribute it and make no frequency estimate. A claim extending beyond those
-  participants needs the conservative design limit, at rung 4.
+  attribute it and make no frequency estimate. The design does not support a
+  claim beyond those participants.
 - A **theoretical argument, formal result or normative recommendation** is
   attributed to the document and assessed through its premises, reasoning and
   cited evidence. Do not assign it an effect rung unless the document separately
@@ -140,7 +148,7 @@ unexplained. For effect claims, apply the design ceiling below.
 
 | Design | Ceiling | Why |
 |---|---|---|
-| Randomised controlled trial, adequately powered, preregistered, outcome as registered | rung 1 | randomisation is what licenses a causal verb |
+| Randomised controlled trial, adequately powered, reported outcome prespecified | rung 1 | randomisation is what licenses a causal verb |
 | Randomised trial with a switched primary outcome, heavy attrition, or a subgroup-only result | rung 3 | the randomisation no longer protects the comparison being reported |
 | Regression discontinuity, difference-in-differences, instrumental variable, natural experiment, with the identifying assumption argued | rung 2 | causal identification without randomisation, and it rests on an assumption the reader should see named |
 | Prospective cohort with pre-specified confounders | rung 3 | confounding by indication cannot be excluded |
@@ -155,9 +163,9 @@ unexplained. For effect claims, apply the design ceiling below.
 
 **Take the more conservative (numerically higher) of two rungs — the design's,
 and the authors' own.** Authors overstate their own observational findings
-routinely; that does not license the note to. The reverse also holds: a rung-1
-design whose authors hedge is written at their hedge, with a line noting that
-the design would have supported more.
+routinely; that does not license the note to. The reverse also holds: when a
+rung-1 design's authors hedge, write at their hedge and attribute it to them;
+do not invent a design weakness to explain it.
 
 **Peer-review status does not move a rung**, and this note does not report it ([scope](note-format.md#body-content)). A preprint's design is its design; describe the design and let the rung follow from it. "Preprint" is not a design and can never stand in for one.
 
@@ -173,10 +181,9 @@ the design would have supported more.
 
 ## The limitations taxonomy, by mode and design
 
-For an empirical note, consider all six categories below; normally write 2–4
-limitations that would change how a reader acts on or cites the finding. One is
-allowed only when a second material limitation would be filler, with that
-advisory exception explained in the run report:
+For an empirical note, consider all six categories below and keep only
+limitations that would change how a reader acts on or cites the finding;
+[note format](note-format.md#body-content) sets how many:
 
 1. What the design cannot show.
 2. Who or what was studied, and the population/setting it does not cover.
@@ -189,8 +196,9 @@ advisory exception explained in the run report:
 
 Merge related limitations, fold repeated author caveats into the relevant
 bullet, and omit categories that do not apply. Put a caveat about one number
-beside that number, not again in Limitations. State the document-level constraint
-once; avoid generic “more research is needed” filler.
+beside that number, not again in Limitations. State a document-level constraint
+once, as [where the qualification goes](#where-the-qualification-goes) sets
+out; avoid generic “more research is needed” filler.
 
 For an argument/synthesis note, instead consider its declared scope and source
 selection, premises not supported by its supplied evidence, counterarguments it
@@ -215,7 +223,7 @@ Use these design-specific prompts to find candidates:
 - **Case series** — selection: these are the cases someone chose to write up, which is the strongest possible selection effect.
 - **Qualitative** — who was recruited and who was not; the analyst's framing; and that transferability, not generalisability, is the relevant question.
 
-**A proxy outcome is a limitation on every empirical design.** A biomarker standing in for survival, a benchmark score standing in for capability, an intention standing in for a behaviour, a surrogate endpoint standing in for the thing the reader cares about — name the substitution, in the note, in the *Limitations* section, whether or not the paper does.
+**A proxy outcome is a limitation on every empirical design.** A biomarker standing in for survival, a benchmark score standing in for capability, an intention standing in for a behaviour, a surrogate endpoint standing in for the thing the reader cares about — name the specific substitution (what was measured in place of what) once, in the *Limitations* section, whether or not the paper does. A generic "benchmarks are proxies" sentence does not satisfy this.
 
 
 ## What an empirical document should have disclosed
@@ -245,16 +253,8 @@ prompts above rather than pretending an empirical checklist applies.
 | proves / confirms | the trial found; the data are consistent with |
 | a breakthrough / a game-changer | state the specific improvement and the population or system studied; claim firstness only when the source establishes it |
 | significantly better | statistically significantly better, at a difference of X points |
-| safe | no serious adverse events were reported in N participants over M weeks; that observation does not establish overall safety |
+| safe | no serious adverse events were reported among N participants over M weeks |
 | shows that X causes Y | in a randomised trial, X reduced Y from A to B (rung 1); or: X is associated with lower Y; the design cannot separate that from the reasons people had X (rung 3) |
 | more research is needed | the open question is specifically whether the effect holds past 12 weeks |
 | the authors conclude | *(only where they actually do — and then say it plainly)* |
 | experts say | identify the speaker and the source-supported statement, or omit the unsupported appeal to authority |
-
-
-## Sources
-
-Background standards: Cochrane's plain-language summary standard; the eLife digest and PNAS Significance Statement formats; the PLOS author-summary guidance; the EU's Good Lay Summary Practice; ISO 24495-1:2023 on plain language; CONSORT, STROBE, PRISMA, ARRIVE, STARD and GRADE for what a complete report contains; the ASA statement on p-values and SAMPL for statistical reporting; and the IPCC AR6 visual style guide for the one-message-per-figure caption rule ([figures](figures.md)).
-
-
-Figure selection remains judgment guided by the claim; [figures](figures.md#which-ones-to-carry) uses citation frequency only as a tiebreak.

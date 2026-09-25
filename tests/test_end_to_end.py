@@ -1168,9 +1168,13 @@ raise SystemExit(main(fixture['args'], client))
         chapter_plan = Path(self.scratch.name) / "chapters.json"
         chapter_plan.write_text(json.dumps(chapters), encoding="utf-8")
         chapter_dir = self.pdfs / book.stem
-        self.run_script("skills/pdf-organize/scripts/organize.py", "split", book,
-                        "--chapters", chapter_plan, "--out", chapter_dir,
-                        "--vault", self.vault)
+        split_args = ("skills/pdf-organize/scripts/organize.py", "split", book,
+                      "--chapters", chapter_plan, "--out", chapter_dir,
+                      "--vault", self.vault)
+        plan = self.run_script(*split_args)
+        self.assertIn("Plan only", plan.stdout)
+        self.assertFalse(chapter_dir.exists())
+        self.run_script(*split_args, "--apply")
         chapter_paths = [chapter_dir / item["filename"] for item in chapters]
         self.assertTrue(all(path.is_file() for path in chapter_paths))
 

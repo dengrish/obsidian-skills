@@ -10,9 +10,17 @@ model.
 
 Implemented checks (Quality Checklist item -> finding ``item`` slug):
 
-  1   1-valid-yaml            frontmatter fenced by ---, parses, no dupe keys
+      0-encoding, 0-unreadable, 0-lint-error
+                              the file could not be decoded (it is linted
+                              with replacement characters), read, or linted
+  1   1-valid-yaml            frontmatter fenced by ---, parses (a key's colon
+                              is followed by a space), no dupe keys
   2   2-field-order           schema order; mandatory keys present
                               (parents: present, `[]` when empty; read: last)
+  2   2-obsidian-key          an Obsidian-owned appearance/publish key; info,
+                              report only, preserved on merge
+  2   2-provenance            a legacy skill-provenance footer that does not
+                              parse
   2   2-type-enum             type: is one of the 15 enum values
   2   2-quoting               Quoting Policy: lossless plain or double-quoted
                               title/description/aliases; sources/tags/parents
@@ -30,11 +38,17 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               (stems compared case- and
                               NFC-insensitively, anchor and folder stripped)
   5   5-slug                  re-run slugify on title:; must equal the filename
+  5   5-bare-common-noun      the filename is a bare term from writing.md's
+                              cross-domain corpus (shared COMMON_NOUNS)
+  6   6-api-surface           non-Software entry: fenced code or any
+                              backticked identifier (error); a
+                              code-identifier title or a library/how-to
+                              failure string (warning, author test decides)
   7   7-description           one sentence, <= 110 chars (count reported),
                               plain text, no LaTeX/Markdown/HTML,
                               capitalised, ends "."
-  8   8-tags                  nonempty, #-prefixed, double-quoted, in the
-                              28-slug enum; #misc is a sole fallback tag
+  8   8-tags                  exactly one #-prefixed, double-quoted enum slug
+                              in block form; #misc is the sole fallback
   9   9-body-structure        body starts immediately with prose; body headings
                               use plain-text ATX `##`, never Setext
   9   9-person-event-date     Person/Event opener has a date parenthetical in
@@ -54,8 +68,16 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               table cell, where links are forbidden
       10-redundant-pipe       exact `[[slug|slug]]` in body prose; the Related
                               footer keeps its mandatory canonical-title pipe
-  11  11-related-display      in folder mode, every Related-footer link is
-                              piped to the resolved target's canonical title
+      10-self-link            a body or Related link resolves to this entry
+                              (its filename or own alias); single-file mode
+                              compares bare targets, folder mode resolves all
+  11  11-related-footer       exactly one terminal `**Related:**` line (bare
+                              label or ` · `-separated whole wikilinks) before
+                              the Flashcards separator, with a blank line
+                              before `---`
+  11  11-related-display      every Related-footer link is piped; folder mode
+                              also requires the resolved target's canonical
+                              title
   12  12-image-caption        every Obsidian or Markdown image embed has an
                               immediate italic, plain-text caption
       12-table-caption        every Markdown table has an immediate italic,
@@ -67,17 +89,29 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               as its `$$` delimiters
       12-equation-typography  raw ell-norm or micrometre symbols in body/card
                               surfaces that require inline LaTeX
+      12-literal-dollar       unescaped literal `$` in body prose; escape it
+                              as `\\$`
+  13  13-merge-scar           a schema key, stray `---` or bare digit line in
+                              the explanatory body (listings masked)
+  14  14-source-meta          source-meta phrasing or a bare `the author(s)`
+                              (warning: a named entry is the carve-out)
   16  16-bold-opener          first outer-bold span equals the title/base/math
                               skeleton and uses the type-specific plain,
                               bold-italic, or mixed taxon/strain style
       16-code-typography      known bracket special tokens and common literal
                               file extensions use backticks in running prose
+      16-unenumerated-bold    bold outside the title slot, `- **Term** —`
+                              bullet anchors and **Related:**
+      16-emphasis-markup      bold/italic wrapped around a wikilink, math or
+                              code span (a pure-math title's opener excepted)
   17  17-alias-completeness   an alternative name the body introduces for the
                               entry's own subject -- an italicized also-called
                               synonym, or the opener's acronym/expansion
                               parenthetical -- whose slug is missing from
                               aliases: (warning: the same-entity test and the
-                              cross-domain carve-out stay with the executing agent)
+                              cross-domain carve-out stay with the executing agent;
+                              a single-word candidate of a qualified or
+                              common-noun subject carries the scanner's hint)
   19  19-flashcards          `## Flashcards` present on every entry,
                               preceded by a `---` separator, holding exactly
                               one card; line 1 one capitalized, period-ended
@@ -86,7 +120,10 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               `??` (or the user's `!!`); line 3 the canonical
                               title (base term for a parenthetical title, math
                               skeleton for a symbol title; optional
-                              opener-established, alias-bound counterpart)
+                              opener-established, alias-bound counterpart).
+                              Extra cards are report-only and keep their own
+                              line-3 answers; the section needs one card that
+                              carries the primary answer
   19  19-flashcard-leak       Unicode/case/punctuation-normalized answer-
                               surface search of card line 1 (including inside
                               $...$) for that card's own line-3 answer and
@@ -94,14 +131,35 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               for the canonical/base/math-plain primary card
   18  18-alias-collision      across a folder, no two entries share an alias
   18  18-alias-duplicate      the same alias listed twice within one entry
-  18  18-alias-form           every alias is itself in slug form (warning)
+  18  18-alias-form           every alias is itself in slug form (warning); a
+                              non-list field, empty item or self alias is an
+                              error
+  18  18-display-label        a wikilink display label carries LaTeX, code,
+                              bold or italic markup
+  18  18-label-target         folder mode, body prose: a label exactly names a
+                              different entry, or shares no surface with the
+                              resolved target's title/aliases (a math title's
+                              plain form counts) and is not an Organism
+                              target's bound common name (warning)
+
+Items 5, 6, 13, 14, 16 and 18, and item 19's choice of the primary card,
+share their per-entry rules with wiki-lint's scanner through
+``shared/scripts/entry_checks.py``. Item 10's self-link rule is implemented
+here and in the scanner; ``SHARED_MUTATIONS`` holds both to the same fixtures.
 
 NOT implemented (out of scope by design): item 4's file existence and page
-correctness, item 6, item 9's semantic flow/atomicity judgments, item 12 beyond
-image/table caption form and its conservative equation candidates, items 13-15, 17 beyond the
-introduced-alias scan, and the
-interpretive halves of 8/18/19. Item 11's canonical target-title check needs
-folder mode; a single file does not contain the target inventory.
+correctness, item 9's semantic flow/atomicity judgments, item 10's dangling
+targets (a whole-vault question for wiki-lint's scanner and the review
+orphan-link audit), item 12 beyond image/table caption form and its
+conservative equation candidates, item 13's merge-content integrity, item
+15, 17 beyond the introduced-alias scan, and the interpretive halves of
+6/8/14/18/19.
+
+Folder mode (a directory target) adds the checks a single file cannot run:
+``18-alias-collision``, alias- and path-aware ``10-duplicate-wikilink`` and
+``10-self-link``, ``18-label-target``, and the canonical-title half of
+``11-related-display``. A link target may be qualified by the folder's own
+name or by ``Wiki/``.
 
 Severity: ``error`` (a stated rule is violated), ``warning`` (very likely a
 violation but the rule has a documented carve-out), ``info`` (advisory).
@@ -118,8 +176,7 @@ CLI:
 
 Output: {root, entries:[{file, findings:[{item, severity, message,
 evidence}], title, aliases, description_chars}], alias_collisions[],
-summary, problems[]}.  ``18-alias-collision`` only has meaning in folder
-scope; ``18-alias-form`` (each alias is itself in slug form) is a warning.
+summary{..., clean}, problems[]}.
 
 A populated ``parents:`` is deliberately NOT flagged -- wiki-lint writes
 that field on every entry, so a value there is the expected steady
@@ -139,18 +196,16 @@ writing ``read: false``
 into an entry the user had already marked read destroys the state the field
 exists to hold.
 
-``importance:`` was dropped from the schema (it measured 97 high / 7 medium /
-1 low across 123 entries -- a field carrying no information).  New entries
-omit the key; legacy entries in the vault still carry it, populated.  It gets
-the same treatment as a populated ``parents:`` -- NO finding at any severity:
-it is absent from ``MANDATORY_KEYS`` (never required), absent from
-``NEVER_QUOTED`` (its value is never inspected), and there is no enum
-check for it.  It stays in ``vault_index.SCHEMA_ORDER`` on purpose, so that a
-legacy entry carrying it in its historical slot is neither reported as an
-out-of-order key nor as an unknown one.
+A legacy ``importance:`` key (no longer in the schema; new entries omit it)
+is treated like a populated ``parents:`` -- NO finding at any severity: it is
+never required, its value is never inspected, and it stays in
+``vault_index.SCHEMA_ORDER`` so that its historical slot is neither out of
+order nor unknown.
 
-Exit code is 0 when no finding meets the selected severity floor, 1 when one
-does, and 2 for invocation or I/O failure.
+Findings never set the exit status: read ``summary.clean`` and the findings.
+Exit 0: complete report. Exit 1: incomplete scope (missing target or
+unreadable directory), report-write failure, or a failed ``--test``. Exit 2:
+missing target argument or other usage error.
 """
 
 from __future__ import annotations
@@ -162,10 +217,10 @@ import os
 import re
 import stat
 import sys
-import unicodedata
 
 _OBSIDIAN_SHARED_MODULES = (
     'code_typography',
+    'entry_checks',
     'entry_structure',
     'equation_coverage',
     'introduced_aliases',
@@ -247,8 +302,6 @@ from entry_structure import (  # noqa: E402
     flashcard_line1_markup,
     flashcard_line1_faults,
     math_title_plain_text,
-    mask_body_comments,
-    mask_escaped_wikilinks,
     normalized_answer_surface,
     opening_paragraph,
     opener_subject_date_status,
@@ -259,6 +312,29 @@ from markdown_tables import (  # noqa: E402
     markdown_block_start,
     markdown_table_spans,
     mask_line_spans,
+)
+# The per-entry, source-independent checks wiki-lint's scanner also runs
+# (items 5, 6, 13, 14, 16, 18 and 19's primary card). One copy keeps a
+# published entry from failing the next maintenance scan on a rule this gate
+# already applied.
+from entry_checks import (  # noqa: E402
+    BARE_WORD_ALIAS_HINT,
+    BOLD_OUTER_RE as _BOLD_OUTER_RE,
+    SHARED_MUTATIONS,
+    SHARED_QUIET,
+    api_surface_findings,
+    bare_common_noun_slug,
+    bare_word_alias_candidate,
+    bold_parts as _bold_parts,
+    display_label_links,
+    emphasis_span_findings,
+    label_shares_surface,
+    merge_scar_findings,
+    organism_common_name_bound,
+    primary_line3_faults,
+    pure_math_opener_markup,
+    source_meta_findings,
+    unenumerated_bold_findings,
 )
 from vault_index import (  # noqa: E402
     SCHEMA_ORDER,
@@ -309,32 +385,11 @@ _YAML_TYPED_PLAIN_RE = re.compile(
     r"^(?:null|~|true|false|yes|no|on|off|\.nan|[+-]?\.inf|"
     r"[+-]?(?:0|[1-9][0-9_]*)(?:\.[0-9_]*)?(?:e[+-]?[0-9]+)?|"
     r"[0-9]{4}-[0-9]{2}-[0-9]{2})$", re.IGNORECASE)
-# One outer-bold reader for all title shapes.  The inner expression admits an
-# italic span, so it reads ordinary ``**Title**``, combined
-# ``***Latin binomial***``, and the mixed taxon/strain form
-# ``***E. coli* K-12**`` as one bold span instead of starting at the wrong pair
-# of asterisks.
-_BOLD_OUTER_RE = re.compile(
-    r"(?<!\*)\*\*((?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)\*\*(?!\*)")
+
+
 def _f(item, severity, message, evidence=None):
     return {"item": item, "severity": severity, "message": message,
             "evidence": evidence}
-
-
-def _bold_parts(match):
-    """Return ``(visible_text, style, italic_prefix)`` for an outer bold.
-
-    ``style`` is ``plain``, ``full-italic``, or ``mixed``.  The mixed form is
-    the only legal spelling for a taxon followed by a plain strain designator.
-    """
-    raw = match.group(1)
-    if raw.startswith("*"):
-        close = raw.find("*", 1)
-        if close > 1:
-            italic = raw[1:close]
-            suffix = raw[close + 1:]
-            return italic + suffix, ("full-italic" if not suffix else "mixed"), italic
-    return raw, "plain", None
 
 
 def _organism_title_parts(title, aliases=(), opening=""):
@@ -861,6 +916,14 @@ def _check_related_footer(sections, findings):
             "Related footer must be exactly `**Related:**`, optionally followed "
             "by whole-line wikilinks separated with ` · `",
             {"body_line": index + 1, "text": line[:160]}))
+    # Folder mode adds the resolved canonical title to these findings.
+    for target, display in extract_wikilinks(line):
+        if display is None:
+            findings.append(_f(
+                "11-related-display", "error",
+                "Related footer link [[%s]] must be piped to the target's "
+                "canonical plain-text title" % target,
+                {"target": target}))
 
     flash = sections.get("flashcards_index")
     if flash is not None:
@@ -917,8 +980,8 @@ def _check_tags(fm, findings):
     if not values:
         findings.append(_f(
             "8-tags", "error",
-            "tags: must contain at least one valid discipline tag; use #misc "
-            "only when no specific discipline applies",
+            "tags: must contain exactly one discipline tag; use only #misc "
+            "when no specific discipline fits",
             {"line": field.line}))
         return
     if len(values) != 1 or len(field.values) != 1:
@@ -930,8 +993,8 @@ def _check_tags(fm, findings):
     if "#misc" in values and (len(values) != 1 or len(field.values) != 1):
         findings.append(_f(
             "8-tags", "error",
-            "#misc must be the sole tag; use specific discipline tags "
-            "without the fallback when they apply",
+            "#misc must be the sole tag; use the one specific discipline tag "
+            "instead when it applies",
             {"line": field.line, "values": values}))
     for raw, value, line in zip(field.raw_items, field.values, field.item_lines):
         if not isinstance(value, str) or not value:
@@ -1172,7 +1235,8 @@ def _clean_paren_name(raw):
 
 def _opening_block(sections):
     """The first contiguous run of non-empty prose lines (the opener)."""
-    block = opening_paragraph("\n".join(sections["prose_lines"]))
+    # A masked leading comment is blank; the opener starts at visible text.
+    block = opening_paragraph("\n".join(sections["prose_lines"]).lstrip())
     return " ".join(line.strip() for line in block.splitlines())
 
 
@@ -1197,12 +1261,15 @@ def _check_alias_completeness(fm, sections, findings, filename):
     prose_lines = strip_code("\n".join(sections["prose_lines"])).split("\n")
     for cand, where, cslug in missing_introduced_aliases(
             prose_lines, title, aliases, stem):
+        # wiki-lint's scanner adds the same hint to its alias candidate.
+        hint = ("; " + BARE_WORD_ALIAS_HINT
+                if bare_word_alias_candidate(cslug, title, cand) else "")
         findings.append(_f(
             "17-alias-completeness", "warning",
             "the body introduces %r (%s) as a name for the subject, but "
             "aliases: does not carry %r -- add it if it names this same "
             "entity; a cross-domain bare term or a wrong-entity name stays "
-            "out (checklist item 17)" % (cand, where, cslug),
+            "out (checklist item 17)%s" % (cand, where, cslug, hint),
             {"candidate": cand, "where": where, "expected_alias": cslug}))
 
 
@@ -1563,6 +1630,186 @@ def _check_code_typography(sections, findings):
             occurrence))
 
 
+# --------------------------------------------------------------------------
+# checks shared with wiki-lint's scanner (shared/scripts/entry_checks.py)
+# --------------------------------------------------------------------------
+
+def _shared_prose(fm, sections):
+    """``(prose, first_line)`` in the scanner's view of the explanatory body.
+
+    The scanner reads the body without the blank lines after the frontmatter
+    (``9-body-structure`` reports those), so they are dropped here too.
+    ``first_line`` is the file line of the returned prose's first line.
+    """
+    lines = sections["prose_lines"]
+    lead = 0
+    while lead < len(lines) and lines[lead] == "":
+        lead += 1
+    return "\n".join(lines[lead:]), fm.body_start_line + lead
+
+
+def _file_line(first_line, finding):
+    line = finding.get("line")
+    return first_line + line - 1 if line else None
+
+
+def _check_bare_common_noun(findings, filename):
+    """Item 5: a bare filename from writing.md's cross-domain corpus.
+
+    The error is ``report_only``: a merge into an existing bare-slug entry
+    reports the rename proposal it may not apply, while a new entry must
+    still be qualified.
+    """
+    stem = os.path.splitext(os.path.basename(filename))[0]
+    if bare_common_noun_slug(stem):
+        findings.append(_f(
+            "5-bare-common-noun", "error",
+            "bare-slug common noun %r -- qualify a new entry's title as "
+            "writing.md's cross-domain tests require and re-run "
+            "find_collisions.py on it; an existing entry's rename stays a "
+            "proposal" % stem,
+            {"slug": stem, "report_only": True}))
+
+
+def _check_api_surface(fm, sections, findings):
+    """Item 6: API surface in a non-Software entry.
+
+    Fenced code and the zero backticked-identifier cap are errors. The
+    code-identifier title and the library/how-to failure strings are
+    warnings: a name such as ``Amazon.com`` and a framing sentence may be a
+    legitimate non-API use, so the author test in api-surface.md decides.
+    """
+    prose, _first_line = _shared_prose(fm, sections)
+    for finding in api_surface_findings(
+            fm.scalar("type") or "", fm.scalar("title") or "", prose, fm.body):
+        severity = ("error" if finding["check"] in
+                    ("fenced-code", "backticked-identifiers") else "warning")
+        evidence = {"check": finding["check"]}
+        for key in ("label", "identifiers"):
+            if key in finding:
+                evidence[key] = finding[key]
+        findings.append(_f("6-api-surface", severity,
+                           finding["message"], evidence))
+
+
+def _check_merge_scars(fm, sections, findings):
+    """Item 13: a schema key, stray ``---`` or bare digit line in the body."""
+    prose, first_line = _shared_prose(fm, sections)
+    for finding in merge_scar_findings(prose):
+        findings.append(_f(
+            "13-merge-scar", "error", finding["message"],
+            {"check": finding["check"],
+             "line": _file_line(first_line, finding)}))
+
+
+def _check_source_meta(fm, sections, findings):
+    """Item 14: source-meta phrasing (warning).
+
+    The named-entry carve-out needs the vault: this gate accepts ``the
+    author(s) of`` a wikilink, an emphasized title, or a capitalized name or
+    acronym, and wiki-lint's scanner verifies that it names an existing
+    entry.
+    """
+    prose, _first_line = _shared_prose(fm, sections)
+    for finding in source_meta_findings(prose, fm.scalar("type") or ""):
+        evidence = {"check": finding["check"]}
+        if "text" in finding:
+            evidence["text"] = finding["text"]
+        findings.append(_f(
+            "14-source-meta", "warning",
+            finding["message"] + " -- re-subject the sentence on the concept "
+            "(checklist item 14)", evidence))
+
+
+def _check_emphasis(fm, sections, findings):
+    """Item 16: unenumerated bold and emphasis around a link/math/code span."""
+    prose, first_line = _shared_prose(fm, sections)
+    tables = markdown_table_spans(strip_indented(strip_fenced(prose)))
+    for finding in unenumerated_bold_findings(prose, tables):
+        findings.append(_f(
+            "16-unenumerated-bold", "error", finding["message"],
+            {"span": finding["span"],
+             "line": _file_line(first_line, finding)}))
+    title = fm.scalar("title") or ""
+    running_title = base_term(title) if has_parenthetical(title) else title
+    opener_markup = pure_math_opener_markup(
+        running_title, opening_paragraph(prose.lstrip()))
+    for finding in emphasis_span_findings(
+            prose, sections["related_line"] or "", tables,
+            opener_markup=opener_markup):
+        findings.append(_f(
+            "16-emphasis-markup", "error", finding["message"],
+            {"kind": finding["kind"], "span": finding["span"]}))
+
+
+def _display_label_text(sections, related=True):
+    """Listing- and table-masked body prose, plus the masked Related footer."""
+    prose = "\n".join(sections["prose_lines"])
+    text = mask_line_spans(strip_code(prose), _markdown_tables(prose)[1])
+    if related:
+        text += "\n" + strip_code(sections["related_line"] or "")
+    return text
+
+
+def _check_display_labels(sections, findings):
+    """Item 18: wikilink display labels render as plain text."""
+    for link in display_label_links(_display_label_text(sections)):
+        if link["marks"]:
+            findings.append(_f(
+                "18-display-label", "error", link["message"],
+                {"target": link["target"], "display": link["display"],
+                 "markup": link["marks"]}))
+
+
+def _link_key(target):
+    """Portable key for a link target: path kept, ``.md`` and anchors gone."""
+    normalized = target.replace("\\", "/").strip().strip("/")
+    if normalized.lower().endswith(".md"):
+        normalized = normalized[:-3]
+    return fold_name(normalized)
+
+
+def _self_link_occurrences(sections):
+    """Rendered links in table-masked body prose and the Related footer."""
+    prose = "\n".join(sections["prose_lines"])
+    regions = (
+        ("body prose",
+         mask_line_spans(strip_code(prose), _markdown_tables(prose)[1])),
+        ("Related footer", strip_code(sections["related_line"] or "")))
+    occurrences = []
+    for region, text in regions:
+        for target, display in extract_wikilinks(text):
+            key = _link_key(target)
+            # Explicit MOC navigation never names this Wiki entry.
+            if key and not key.startswith("mocs/"):
+                occurrences.append({"target": target, "key": key,
+                                    "display": display, "region": region})
+    return occurrences
+
+
+def _self_link_finding(occurrence):
+    return _f(
+        "10-self-link", "error",
+        "wikilink target %r in %s resolves to this entry itself -- remove the "
+        "redundant footer link or render a subject mention as plain text; if "
+        "an anchored body link is deliberate navigation, use a local anchor"
+        % (occurrence["target"], occurrence["region"]),
+        {"target": occurrence["target"], "region": occurrence["region"]})
+
+
+def _check_self_links(fm, sections, findings, filename):
+    """Item 10: no link to the entry itself (its filename or its own alias).
+
+    A single file cannot tell which folder a path-qualified target names, so
+    only bare targets are compared here; folder mode re-resolves every link.
+    """
+    stem = os.path.splitext(os.path.basename(filename))[0]
+    own = {fold_name(stem)} | {fold_name(a) for a in fm.values("aliases") if a}
+    for occurrence in _self_link_occurrences(sections):
+        if "/" not in occurrence["key"] and occurrence["key"] in own:
+            findings.append(_self_link_finding(occurrence))
+
+
 def _check_bold_opener(fm, sections, findings):
     title = fm.scalar("title")
     if not title:
@@ -1714,12 +1961,20 @@ def _flashcard_primary_answer(fm, sections):
     return term, counterpart
 
 
+_LINE3_RE = re.compile(r"(?P<term>.*?)(?: \((?P<paren>[^()\n]+)\))?")
+
+
+def _line3_parts(line3):
+    """Split card line 3 into its term and optional parenthetical."""
+    line3 = line3.strip()
+    match = _LINE3_RE.fullmatch(line3)
+    return (match.group("term"), match.group("paren")) if match else (line3, None)
+
+
 def _flashcard_line3_fault(line3, fm, sections):
     """Explain a line-3 contract violation, or return ``None``."""
     expected_term, required_counterpart = _flashcard_primary_answer(fm, sections)
-    match = re.fullmatch(r"(?P<term>.*?)(?: \((?P<paren>[^()\n]+)\))?", line3.strip())
-    term = match.group("term") if match else line3.strip()
-    counterpart = match.group("paren") if match else None
+    term, counterpart = _line3_parts(line3)
     if expected_term and term != expected_term:
         return "the term must be exactly %r (same canonical casing)" % expected_term
 
@@ -1813,6 +2068,7 @@ def _check_flashcards_present(fm, sections, findings):
     # there as `k-fold`), plus the entry's own opener-established, alias-bound
     # counterpart.
     title = fm.scalar("title")
+    line3_checks = []
     for card_no, card in enumerate(cards, 1):
         if len(card) < 3:
             # A 1- or 2-line block is not a card at all (canon: definition /
@@ -1860,13 +2116,25 @@ def _check_flashcards_present(fm, sections, findings):
                     {"card": card_no, "line2": line2[:40]}))
         if len(card) >= 3 and title:
             line3 = card[2].strip()
-            fault = _flashcard_line3_fault(line3, fm, sections)
-            if fault:
-                findings.append(_f(
-                    "19-flashcards", "error",
-                    "flashcard %d line 3 is %r -- %s"
-                    % (card_no, line3[:40], fault),
-                    {"card": card_no, "line3": line3[:60], "title": title}))
+            line3_checks.append(
+                (card_no, line3, _flashcard_line3_fault(line3, fm, sections)))
+
+    # A preserved extra card keeps its own answer: with several cards, only
+    # the primary card is held to the line-3 contract (the scanner makes the
+    # same choice through entry_checks).
+    term, counterpart = _flashcard_primary_answer(fm, sections)
+    faults, no_primary = primary_line3_faults(
+        len(cards), line3_checks, term, counterpart)
+    if no_primary:
+        findings.append(_f(
+            "19-flashcards", "error", no_primary,
+            {"expected_line3": term + (" (%s)" % counterpart
+                                       if counterpart else "")}))
+    for card_no, line3, fault in faults:
+        findings.append(_f(
+            "19-flashcards", "error",
+            "flashcard %d line 3 is %r -- %s" % (card_no, line3[:40], fault),
+            {"card": card_no, "line3": line3[:60], "title": title}))
 
 
 def _check_flashcard_leak(fm, sections, findings):
@@ -1882,11 +2150,7 @@ def _check_flashcard_leak(fm, sections, findings):
     aliases = [alias for alias in fm.values("aliases") if alias]
     for card_no, card in enumerate(parse_flashcards(sections["flashcard_lines"]), 1):
         line1 = card[0]
-        line3 = card[2].strip() if len(card) >= 3 else ""
-        match = re.fullmatch(
-            r"(?P<term>.*?)(?: \((?P<paren>[^()\n]+)\))?", line3)
-        term_main = match.group("term") if match else line3
-        paren = match.group("paren") if match else None
+        term_main, paren = _line3_parts(card[2] if len(card) >= 3 else "")
         paren_is_discipline = False
         if paren:
             try:
@@ -2002,6 +2266,7 @@ def lint_text(text, filename):
     _check_sources(fm, findings)
     _check_source_duplicates(fm, findings)
     _check_slug(fm, findings, filename)
+    _check_bare_common_noun(findings, filename)
     _check_description(fm, findings, title=result["title"])
     _check_tags(fm, findings)
     _check_aliases(fm, findings, filename)
@@ -2011,6 +2276,7 @@ def lint_text(text, filename):
     _check_table_cell_wikilinks(fm, sections, findings)
     _check_redundant_piped_wikilinks(sections, findings)
     _check_duplicate_wikilinks(sections, findings)
+    _check_self_links(fm, sections, findings, filename)
     _check_integrated_wikilinks(fm, sections, findings)
     _check_person_event_date(fm, sections, findings)
     _check_image_captions(fm, sections, findings)
@@ -2020,6 +2286,11 @@ def lint_text(text, filename):
     _check_table_captions(fm, sections, findings)
     _check_bold_opener(fm, sections, findings)
     _check_code_typography(sections, findings)
+    _check_emphasis(fm, sections, findings)
+    _check_api_surface(fm, sections, findings)
+    _check_merge_scars(fm, sections, findings)
+    _check_source_meta(fm, sections, findings)
+    _check_display_labels(sections, findings)
     _check_flashcards_present(fm, sections, findings)
     _check_flashcard_leak(fm, sections, findings)
     return result
@@ -2147,6 +2418,20 @@ def _check_alias_collisions(results):
     return collisions
 
 
+def _strip_wiki_root(key, root):
+    """Drop a leading root qualifier: the folder's own name or ``Wiki/``.
+
+    Root-qualified targets are how links name discipline roots and other
+    basename collisions, and a private review tree need not be named ``Wiki``.
+    scan_vault accepts the same prefixes, longest first.
+    """
+    prefixes = {fold_name(os.path.basename(os.path.abspath(root))) + "/", "wiki/"}
+    for prefix in sorted(prefixes, key=lambda value: (-len(value), value)):
+        if key.startswith(prefix):
+            return key[len(prefix):]
+    return key
+
+
 def _recheck_folder_duplicate_wikilinks(results, root, snapshot_text):
     """Re-run item 10 with the folder's unambiguous alias ownership.
 
@@ -2156,7 +2441,6 @@ def _recheck_folder_duplicate_wikilinks(results, root, snapshot_text):
     or aliases remain unresolved rather than choosing an owner by walk order.
     """
     root = os.path.abspath(root)
-    root_key = fold_name(os.path.basename(root))
     file_owners = set()
     basename_owners = {}
     owner_for_file = {}
@@ -2171,14 +2455,7 @@ def _recheck_folder_duplicate_wikilinks(results, root, snapshot_text):
 
     alias_owners = {}
     for result in results:
-        # A scalar/null aliases field is not a valid alias list.  scan_vault
-        # excludes it from its alias resolver too, so folder lint must not let
-        # malformed metadata establish ownership.
-        malformed_shape = any(
-            finding["item"] == "18-alias-form"
-            and (finding.get("evidence") or {}).get("kind") in ("scalar", "blank")
-            for finding in result["findings"])
-        if malformed_shape:
+        if _malformed_alias_field(result):
             continue
         owner = owner_for_file[result["file"]]
         for alias in result["aliases"]:
@@ -2188,8 +2465,7 @@ def _recheck_folder_duplicate_wikilinks(results, root, snapshot_text):
 
     def resolve(occurrence):
         key = occurrence["key"]
-        root_prefix = root_key + "/"
-        lookup = key[len(root_prefix):] if key.startswith(root_prefix) else key
+        lookup = _strip_wiki_root(key, root)
 
         # Prefer an exact path from the Wiki root.  If a shorter path suffix is
         # used, accept it only when it identifies one file.  A bare basename
@@ -2242,19 +2518,31 @@ def _recheck_folder_duplicate_wikilinks(results, root, snapshot_text):
             result["findings"], occurrences, resolve=resolve)
 
 
-def _check_folder_related_labels(results, root, snapshot_text):
-    """Item 11: resolve footer targets and require their canonical titles.
+def _malformed_alias_field(result):
+    """Whether single-file lint found a scalar or blank ``aliases:`` field.
 
-    This is intentionally folder-only. A single entry cannot know whether a
-    target, basename, or alias has one owner, and choosing one would turn an
-    ambiguous link into a destructive false prescription.
+    scan_vault excludes such a field from its alias resolver too, so folder
+    lint must not let malformed metadata establish ownership.
+    """
+    return any(
+        finding["item"] == "18-alias-form"
+        and (finding.get("evidence") or {}).get("kind") in ("scalar", "blank")
+        for finding in result["findings"])
+
+
+def _folder_resolver(results, root):
+    """Folder-scope link resolution: ``(resolve, owner_for_file, owners)``.
+
+    ``resolve(target)`` returns the owning entry's root-relative key, or
+    ``None`` when the target is missing or ambiguous. An exact path wins; a
+    shorter path suffix or a bare basename must identify one file; a unique
+    alias applies only when no file has that basename. ``owners`` maps each
+    key to its per-file result.
     """
     root = os.path.abspath(root)
-    root_key = fold_name(os.path.basename(root))
     owners = {}
     basenames = {}
     owner_for_file = {}
-    titles = {}
     for result in results:
         relative = os.path.relpath(result["file"], root).replace(os.sep, "/")
         if relative.lower().endswith(".md"):
@@ -2263,30 +2551,20 @@ def _check_folder_related_labels(results, root, snapshot_text):
         owner_for_file[result["file"]] = owner
         owners[owner] = result
         basenames.setdefault(owner.rsplit("/", 1)[-1], set()).add(owner)
-        if result.get("title"):
-            titles[owner] = result["title"]
 
     alias_owners = {}
     for result in results:
-        owner = owner_for_file[result["file"]]
-        malformed = any(
-            finding["item"] == "18-alias-form"
-            and (finding.get("evidence") or {}).get("kind") in ("scalar", "blank")
-            for finding in result["findings"])
-        if malformed:
+        if _malformed_alias_field(result):
             continue
+        owner = owner_for_file[result["file"]]
         for alias in result.get("aliases", []):
             key = fold_name(alias)
             if key:
                 alias_owners.setdefault(key, set()).add(owner)
 
     def resolve(target):
-        normalized = target.replace("\\", "/").strip().strip("/")
-        if normalized.lower().endswith(".md"):
-            normalized = normalized[:-3]
-        key = fold_name(normalized)
-        prefix = root_key + "/"
-        lookup = key[len(prefix):] if key.startswith(prefix) else key
+        key = _link_key(target)
+        lookup = _strip_wiki_root(key, root)
         basename = lookup.rsplit("/", 1)[-1]
         basename_matches = basenames.get(basename, set())
         if lookup in owners:
@@ -2301,6 +2579,20 @@ def _check_folder_related_labels(results, root, snapshot_text):
             return None
         alias_matches = alias_owners.get(lookup, set())
         return next(iter(alias_matches)) if len(alias_matches) == 1 else None
+
+    return resolve, owner_for_file, owners
+
+
+def _check_folder_related_labels(results, root, snapshot_text):
+    """Item 11: resolve footer targets and require their canonical titles.
+
+    The title comparison is folder-only. A single entry cannot know whether a
+    target, basename, or alias has one owner, and choosing one would turn an
+    ambiguous link into a destructive false prescription.
+    """
+    resolve, _owner_for_file, owners = _folder_resolver(results, root)
+    titles = {owner: result["title"] for owner, result in owners.items()
+              if result.get("title")}
 
     for result in results:
         text = snapshot_text.get(result["file"])
@@ -2318,11 +2610,21 @@ def _check_folder_related_labels(results, root, snapshot_text):
             if not canonical:
                 continue
             if display is None:
-                result["findings"].append(_f(
+                # Enrich the single-file finding instead of repeating it.
+                finding = _f(
                     "11-related-display", "error",
                     "Related footer link [[%s]] must be piped to the target's "
                     "canonical plain-text title %r" % (target, canonical),
-                    {"target": target, "expected_display": canonical}))
+                    {"target": target, "expected_display": canonical})
+                findings = result["findings"]
+                pending = next(
+                    (i for i, old in enumerate(findings)
+                     if old["item"] == "11-related-display"
+                     and old.get("evidence") == {"target": target}), None)
+                if pending is None:
+                    findings.append(finding)
+                else:
+                    findings[pending] = finding
             elif display != canonical:
                 result["findings"].append(_f(
                     "11-related-display", "error",
@@ -2330,6 +2632,85 @@ def _check_folder_related_labels(results, root, snapshot_text):
                     "plain-text title %r" % (display, canonical),
                     {"target": target, "display": display,
                      "expected_display": canonical}))
+
+
+def _check_folder_link_targets(results, root, snapshot_text):
+    """Items 10 and 18 with folder ownership: self-links and label targets.
+
+    Every self-link is re-resolved here, including path-qualified targets and
+    aliases, replacing the single-file bare-target floor. A body-prose label
+    with no markup is compared with the resolved target's title and aliases
+    (warning): it must not exactly name a different entry, and it must share a
+    surface with the target unless an Organism target binds it as a common
+    name. Related-footer labels are held to the stricter canonical title by
+    ``11-related-display``.
+    """
+    resolve, owner_for_file, owners = _folder_resolver(results, root)
+    organism_fields = {}
+
+    def binds_common_name(owner, display):
+        """Whether an Organism target binds ``display`` as its common name."""
+        if owner not in organism_fields:
+            target_fm = parse_frontmatter(
+                snapshot_text.get(owners[owner]["file"]) or "")
+            organism_fields[owner] = (
+                (target_fm.scalar("type") or "", target_fm.scalar("title") or "",
+                 target_fm.scalar("description") or "",
+                 _shared_prose(target_fm,
+                               split_sections(target_fm.body))[0])
+                if target_fm.found else None)
+        fields = organism_fields[owner]
+        return bool(fields) and organism_common_name_bound(*fields, display)
+
+    for result in results:
+        text = snapshot_text.get(result["file"])
+        if text is None:
+            continue
+        fm = parse_frontmatter(text)
+        if not fm.found:
+            continue
+        sections = split_sections(fm.body)
+        own = owner_for_file[result["file"]]
+        findings = [finding for finding in result["findings"]
+                    if finding["item"] != "10-self-link"]
+        for occurrence in _self_link_occurrences(sections):
+            if resolve(occurrence["target"]) == own:
+                findings.append(_self_link_finding(occurrence))
+        for link in display_label_links(
+                _display_label_text(sections, related=False)):
+            owner = resolve(link["target"]) if not link["marks"] else None
+            target = owners.get(owner) if owner else None
+            if (target is None or not target.get("title")
+                    or _malformed_alias_field(target)):
+                continue
+            display = link["display"]
+            try:
+                display_owner = resolve(slug_stem(display))
+            except SlugError:
+                display_owner = None
+            evidence = {"target": link["target"], "display": display,
+                        "target_title": target["title"]}
+            if display_owner is not None and display_owner != owner:
+                findings.append(_f(
+                    "18-label-target", "warning",
+                    "wikilink [[%s|%s]] uses a display label that exactly names "
+                    "a different entry, %r, rather than the chosen target %r -- "
+                    "review the target or the label; do not auto-retarget"
+                    % (link["target"], display,
+                       owners[display_owner].get("title") or display_owner,
+                       target["title"]),
+                    dict(evidence, display_owner=display_owner)))
+            elif not (label_shares_surface(
+                    display, [target["title"]] + list(target.get("aliases", [])))
+                      or binds_common_name(owner, display)):
+                findings.append(_f(
+                    "18-label-target", "warning",
+                    "wikilink [[%s|%s]]: the label shares no surface form with "
+                    "the target's title %r or its aliases, and the target binds "
+                    "no such Organism common name -- likely a wrong target or "
+                    "an invented label"
+                    % (link["target"], display, target["title"]), evidence))
+        result["findings"] = findings
 
 
 def lint_path(target, severity_floor=None):
@@ -2349,7 +2730,8 @@ def lint_path(target, severity_floor=None):
     else:
         report["problems"].append("no such file or folder: %s" % target)
         report["summary"] = {"files": 0, "files_with_findings": 0,
-                             "findings": 0, "by_severity": {}, "by_item": {}}
+                             "findings": 0, "by_severity": {}, "by_item": {},
+                             "clean": False}
         return report
 
     # Cross-file checks consume the exact guarded reads used above. Reopening
@@ -2360,6 +2742,7 @@ def lint_path(target, severity_floor=None):
         report["alias_collisions"] = _check_alias_collisions(results)
         _recheck_folder_duplicate_wikilinks(results, target, snapshot_text)
         _check_folder_related_labels(results, target, snapshot_text)
+        _check_folder_link_targets(results, target, snapshot_text)
 
     order = {"error": 0, "warning": 1, "info": 2}
     floor = order.get(severity_floor, 2) if severity_floor else 2
@@ -2613,8 +2996,11 @@ def run_self_test():
     check("flow lists with leading, middle, or trailing empty elements are invalid YAML",
           ["1-valid-yaml" in items(mutate(
               'aliases:\n  - "auroc"\n', 'aliases: [' + raw + ']\n'))
-           for raw in (',"auroc"', '"auroc",,"roc"', '"auroc",')],
+           for raw in (',"auroc"', '"auroc",,"roc"', '"auroc",,')],
           [True] * 3)
+    check("a key without a space after its colon is invalid YAML",
+          "1-valid-yaml" in items(mutate('title: "ROC curve"',
+                                         'title:"ROC curve"')), True)
     for raw in ('null', '~'):
         bad = lint_text(mutate('title: "ROC curve"', 'title: ' + raw), 'roc-curve.md')
         check("a null title never creates a rename target",
@@ -2990,6 +3376,9 @@ def run_self_test():
     check("the mandatory piped Related form is outside the body-only check",
           items(mutate("[[precision|Precision]]", "[[precision|precision]]")),
           [])
+    check("an unpiped Related link is an error even in single-file mode",
+          items(mutate("[[precision|Precision]]", "[[precision]]")),
+          ["11-related-display"])
     check("a ^block anchor is stripped, so the same target twice is still a dup",
           items(mutate("decision threshold moves.\n",
                        "decision threshold moves, per [[precision|p]] and "
@@ -3017,7 +3406,7 @@ def run_self_test():
               "as a decision threshold moves.",
               "A ROC curve plots a trade-off.\n   \n"
               "Later prose names **ROC curve** explicitly.")),
-          ["16-bold-opener"])
+          ["16-bold-opener", "16-unenumerated-bold"])
     check("the parenthetical base-term carve-out",
           items(mutate('title: "ROC curve"', 'title: "ROC curve (statistics)"')
                 .replace("ROC curve\n??", "ROC curve\n??"),
@@ -3193,7 +3582,9 @@ def run_self_test():
                        "## Files named .csv\n\n"
                        "Format | Token\n--- | ---\n.csv | [CLS]\n"
                        "*A .csv lookup table.*\n\n"
-                       "```text\n[CLS] .csv\n```\n")), [])
+                       "```text\n[CLS] .csv\n```\n")),
+          # The fence itself is item 6's finding in a non-Software entry.
+          ["6-api-surface"])
 
     # -- item 19: presence, then the answer leak ---------------------------
     check("a entry with NO ## Flashcards section",
@@ -3436,6 +3827,34 @@ def run_self_test():
     check("a legacy secondary card may name the primary while its own answer "
           "remains leak-free",
           items(secondary_names_primary), ["19-flashcards"])
+
+    def card_findings(text):
+        """Item-19 findings other than the report-only extra-card count."""
+        return [f for f in lint_text(text, "roc-curve.md")["findings"]
+                if f["item"] == "19-flashcards"
+                and not (f.get("evidence") or {}).get("report_only")]
+
+    extra_card = "\n\nAnother idea stated.\n??\nGamma\n"
+    check("an extra card keeps its own line-3 answer beside the primary card",
+          card_findings(mutate("??\nROC curve\n", "??\nROC curve\n" + extra_card)),
+          [])
+    check("with no primary card, one finding asks for it without naming an "
+          "extra card's answer as wrong",
+          [f["message"].startswith("no card carries the primary answer "
+                                   '"ROC curve"')
+           for f in card_findings(mutate("??\nROC curve\n",
+                                         "??\nAlpha\n" + extra_card))],
+          [True])
+    check("a punctuation-variant primary card is the scanner's near miss",
+          [f["evidence"]["card"] for f in card_findings(
+              mutate('title: "ROC curve"', 'title: "ROC-curve"')
+              .replace("\nROC curve\n", "\nROC–curve\n" + extra_card, 1))],
+          [1])
+    check("a near-miss primary card gets its own line-3 fault",
+          [(f["evidence"]["card"], "canonical casing" in f["message"])
+           for f in card_findings(mutate("??\nROC curve\n",
+                                         "??\nroc curve\n" + extra_card))],
+          [(1, True)])
     check("a short title is not leaked by a mid-word substring",
           items(mutate('title: "ROC curve"', 'title: "C"')
                 .replace("A **ROC curve** plots", "A **C** creates")
@@ -3479,7 +3898,7 @@ def run_self_test():
                         "\n\n## `Details`\n\nA narrower claim.\n\n**Related:**"))),
           (["9-body-structure"], ["9-body-structure"],
            ["9-body-structure"], ["9-body-structure"],
-           ["9-body-structure"]))
+           ["6-api-surface", "9-body-structure"]))
     check("a Setext body heading cannot evade the exactly-## rule",
           items(mutate("\n**Related:**",
                        "\n\nDetails\n-------\n\nA narrower claim.\n\n**Related:**")),
@@ -3626,7 +4045,7 @@ def run_self_test():
                        "It links [[precision|Precision]] once in prose.\n\n"
                        "```\n[[precision]]\n```\n\n"
                        "**Related:** [[precision|Precision]]")),
-          []),
+          ["6-api-surface"]),
     check("a navigation-only cue pointing straight at a wikilink is item 9",
           items(mutate("decision threshold moves.\n",
                        "decision threshold moves (see [[precision]]).\n")),
@@ -3642,7 +4061,7 @@ def run_self_test():
     check("a navigation cue shown in a fenced listing is ignored",
           items(mutate("\n**Related:**",
                        "\n\n```markdown\nsee [[precision]]\n```\n\n**Related:**")),
-          [])
+          ["6-api-surface"])
     images = mutate(
         "\n**Related:**",
         "\n\n![[figure.png]]\n"
@@ -3688,7 +4107,9 @@ def run_self_test():
         check("an image caption rejects %s markup" % label,
               [(f["item"], fault in f["message"])
                for f in result["findings"]],
-              [("12-image-caption", True)])
+              [("12-image-caption", True)]
+              # A backticked caption word is also an item-6 identifier.
+              + ([("6-api-surface", True)] if label == "backtick" else []))
     check("an empty italic caption is rejected",
           items(images.replace("*A remote figure with a plain caption.*", "* *")),
           ["12-image-caption"])
@@ -3697,7 +4118,7 @@ def run_self_test():
         "\n\n```\n![[fenced.png]]\n```\n\n"
         "    ![Indented](indented.png)\n\n**Related:**")
     check("image syntax in fenced and indented listings needs no caption",
-          items(listing_images), [])
+          items(listing_images), ["6-api-surface"])
     table = mutate(
         "\n**Related:**",
         "\n\n| Method | Score |\n| --- | --- |\n| A | 0.8 |\n"
@@ -3741,7 +4162,7 @@ def run_self_test():
           ["12-table-caption"])
     check("caption code markup is rejected even though table detection masks listings",
           items(table.replace("held-out", "`held-out`")),
-          ["12-table-caption"])
+          ["12-table-caption", "6-api-surface"])
     check("...same for an inline code span",
           items(mutate("**Related:** [[precision|Precision]]",
                        "It links [[precision|Precision]] once in prose, and "
@@ -3794,7 +4215,7 @@ def run_self_test():
           items(mutate("A **ROC curve** plots",
                        "A **receiver plot**, formally the ***ROC curve***, "
                        "plots")),
-          ["16-bold-opener"])
+          ["16-bold-opener", "16-unenumerated-bold"])
     # Case/normalization-variant aliases within one entry are one name twice.
     check("two alias spellings folding to one name are 18-alias-duplicate "
           "(the non-slug-form spelling is real fallout, reported too)",
@@ -3905,6 +4326,208 @@ def run_self_test():
     check("a singular/plural-only alias of the canonical slug is rejected",
           items(mutate('  - "auroc"', '  - "roc-curves"')),
           ["18-alias-form"])
+
+    # -- checks shared with wiki-lint's scanner (shared/entry_checks.py) ----
+    def with_paragraph(paragraph, base=None):
+        """The clean fixture with one body paragraph after its opener."""
+        return mutate("decision threshold moves.\n",
+                      "decision threshold moves.\n\n" + paragraph + "\n", base)
+
+    def found(text, prefix, filename="roc-curve.md"):
+        return [(f["item"], f["severity"])
+                for f in lint_text(text, filename)["findings"]
+                if f["item"].startswith(prefix)]
+
+    shared_tmp = tempfile.mkdtemp(prefix="lint_entry-shared-")
+    try:
+        with open(os.path.join(shared_tmp, "precision.md"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(precision)
+        # The same rows run through scan_vault's self-test: each moved
+        # mutation must be flagged by both tools.
+        for name, paragraph, _scan_key, lint_id, needs_folder in SHARED_MUTATIONS:
+            mutated = with_paragraph(paragraph.replace("{self}", "roc-curve"))
+            with open(os.path.join(shared_tmp, "roc-curve.md"), "w",
+                      encoding="utf-8") as fh:
+                fh.write(mutated)
+            folder_items = sorted({
+                f["item"] for entry in lint_path(shared_tmp)["entries"]
+                if os.path.basename(entry["file"]) == "roc-curve.md"
+                for f in entry["findings"]})
+            check("scanner parity, %s: %s" % (name, lint_id),
+                  (lint_id in items(mutated), lint_id in folder_items),
+                  (not needs_folder, True))
+        with open(os.path.join(shared_tmp, "roc-curve.md"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(with_paragraph(
+                "It is the [[Wiki/roc-curve|curve]] shown beside "
+                "[[precision|precision values]]."))
+        check("folder mode resolves a path-qualified self-link; a label "
+              "sharing its target's surface passes",
+              sorted({f["item"] for entry in lint_path(shared_tmp)["entries"]
+                      for f in entry["findings"]}), ["10-self-link"])
+        # The rows neither tool may flag (scan_vault runs them too).
+        for name, text in (
+                ("mus-musculus.md", retitled(
+                    "Mus musculus", "m-musculus",
+                    "Mus musculus is the mouse, a small rodent.",
+                    "***Mus musculus*** is the mouse, a small rodent.",
+                    "Mus musculus", type_="Organism")),
+                ("l-2-norm.md", retitled(
+                    "$L^2$ norm", "l2-norm",
+                    "The L-squared norm measures a vector's length.",
+                    "The **$L^2$ norm** measures a vector's length.",
+                    "L-squared norm"))):
+            with open(os.path.join(shared_tmp, name), "w",
+                      encoding="utf-8") as fh:
+                fh.write(text)
+        for name, paragraph, _scan_key, lint_id in SHARED_QUIET:
+            quiet = with_paragraph(paragraph)
+            with open(os.path.join(shared_tmp, "roc-curve.md"), "w",
+                      encoding="utf-8") as fh:
+                fh.write(quiet)
+            folder_items = sorted({
+                f["item"] for entry in lint_path(shared_tmp)["entries"]
+                if os.path.basename(entry["file"]) == "roc-curve.md"
+                for f in entry["findings"]})
+            check("scanner parity, quiet %s: %s" % (name, lint_id),
+                  (lint_id in items(quiet), lint_id in folder_items),
+                  (False, False))
+    finally:
+        shutil.rmtree(shared_tmp, ignore_errors=True)
+
+    entropy = retitled(
+        "Entropy", "shannon-entropy",
+        "Entropy measures the uncertainty of a distribution.",
+        "**Entropy** measures the uncertainty of a distribution.", "Entropy")
+    check("a bare cross-domain common-noun slug is item 5's error; a "
+          "qualified one is not",
+          (found(entropy, "5-", "entropy.md"),
+           found(entropy.replace('title: "Entropy"',
+                                 'title: "Entropy (information theory)"'),
+                 "5-", "entropy-information-theory.md")),
+          ([("5-bare-common-noun", "error")], []))
+    check("the bare common-noun error is report-only, so a merge into an "
+          "existing bare-slug entry reports the rename it may not apply",
+          [(f["severity"], f["evidence"]) for f in lint_text(
+              entropy, "entropy.md")["findings"]
+           if f["item"] == "5-bare-common-noun"],
+          [("error", {"slug": "entropy", "report_only": True})])
+    check("item 6: identifiers and fences are errors, framing is a warning",
+          sorted((f["evidence"]["check"], f["severity"])
+                 for f in lint_text(with_paragraph(
+                     "In NumPy the curve is kept as `roc_points`.\n\n"
+                     "```python\nx = 1\n```"), "roc-curve.md")["findings"]
+                 if f["item"] == "6-api-surface"),
+          [("api-string", "warning"), ("backticked-identifiers", "error"),
+           ("fenced-code", "error")])
+    check("item 6: a code-identifier title is a warning; Software keeps its API",
+          ([(f["evidence"]["check"], f["severity"]) for f in lint_text(
+              mutate('title: "ROC curve"', 'title: "numpy.linalg"'),
+              "numpy-linalg.md")["findings"] if f["item"] == "6-api-surface"],
+           found(with_paragraph("In NumPy use `np.dot` to multiply.",
+                                mutate("type: Concept", "type: Software")),
+                 "6-")),
+          ([("code-identifier-title", "warning")], []))
+    scarred = with_paragraph("importance: high")
+    check("item 13: a merge scar is an error reported at its file line",
+          [(f["severity"], f["evidence"]["line"])
+           for f in lint_text(scarred, "roc-curve.md")["findings"]
+           if f["item"] == "13-merge-scar"],
+          [("error", scarred.split("\n").index("importance: high") + 1)])
+    check("item 14 is a warning; the authors of a linked work pass this gate",
+          (found(with_paragraph("As shown in the paper, the curve bends."),
+                 "14-"),
+           found(with_paragraph("The authors of [[precision|Precision]] "
+                                "argue that the curve bends."), "14-")),
+          ([("14-source-meta", "warning")], []))
+    check("item 14: the authors of a named method pass this gate; the "
+          "authors of an unnamed study do not",
+          (found(with_paragraph("The authors of SGDR recommend restarting "
+                                "it periodically."), "14-"),
+           found(with_paragraph("The authors of a study argue that the "
+                                "curve bends."), "14-")),
+          ([], [("14-source-meta", "warning")]))
+    check("item 16: unenumerated bold and emphasis around a span are errors",
+          sorted(found(with_paragraph("The **area** under it is *$A$*."),
+                       "16-")),
+          [("16-emphasis-markup", "error"), ("16-unenumerated-bold", "error")])
+    check("item 16: only the pure-math title's opener bold is exempt",
+          (found(positive_superscript, "16-", "r-plus.md"),
+           found(mutate("worked mathematical example.\n",
+                        "worked mathematical example.\n\n"
+                        "Later **$R^{+}$** returns.\n", positive_superscript),
+                 "16-", "r-plus.md")),
+          ([], [("16-emphasis-markup", "error")]))
+    check("a preserved comment before the opener leaves the title's bold "
+          "in the opener; a missing opener bold is still found",
+          ([items(text, filename) for text, filename in (
+              (mutate("---\nA **ROC curve**",
+                      "---\n%% user note %%\n\nA **ROC curve**"),
+               "roc-curve.md"),
+              (mutate("---\nA **ROC curve**",
+                      "---\n<!-- reviewed 2026-01 -->\nA **ROC curve**"),
+               "roc-curve.md"),
+              (mutate("---\n**$R^{+}$**", "---\n%% user note %%\n\n**$R^{+}$**",
+                      positive_superscript), "r-plus.md"))],
+           found(mutate("---\nA **ROC curve**", "---\n%% note %%\n\nA ROC curve"),
+                 "16-")),
+          ([[], [], []], [("16-bold-opener", "error")]))
+    check("item 18: label markup is an error; the label/target test needs "
+          "the folder",
+          (found(with_paragraph(
+              "It trades against [[precision|*exact* precision]]."), "18-"),
+           found(with_paragraph("It trades against [[precision|zebra]]."),
+                 "18-")),
+          ([("18-display-label", "error")], []))
+    check("item 10: a link to the entry itself by slug, case, anchor, alias "
+          "or in the footer",
+          [found(text, "10-") for text in (
+              with_paragraph("It is the [[roc-curve|curve]] itself."),
+              with_paragraph("It is the [[ROC-Curve.md#Uses|curve]] itself."),
+              with_paragraph("It is the [[auroc]] itself."),
+              mutate("[[precision|Precision]]",
+                     "[[precision|Precision]] · [[roc-curve|ROC curve]]"))],
+          [[("10-self-link", "error")]] * 4)
+    check("a single file leaves path-qualified self-links to folder mode; "
+          "MOC navigation and table cells are not self-links",
+          [found(text, "10-self") for text in (
+              with_paragraph("It is the [[Wiki/roc-curve|curve]] itself."),
+              with_paragraph("It is listed in [[MOCs/roc-curve]]."),
+              with_paragraph("Curve | Value\n--- | ---\n[[roc-curve]] | 1\n"
+                             "*Values by curve.*"))],
+          [[], [], []])
+    recall = retitled(
+        "Recall (machine learning)", "true-positive-rate",
+        "Recall is the share of actual positives that a classifier finds.",
+        "**Recall**, also called *sensitivity*, is the share of actual "
+        "positives that a classifier finds.", "Recall")
+    check("a single-word synonym of a qualified subject carries the scanner's "
+          "cross-domain hint; an ordinary candidate does not",
+          ([BARE_WORD_ALIAS_HINT in f["message"] for f in lint_text(
+              recall, "recall-machine-learning.md")["findings"]
+            if f["item"] == "17-alias-completeness"],
+           [BARE_WORD_ALIAS_HINT in f["message"] for f in lint_text(
+               good.replace("\n**Related:**", "\nIt is also called "
+                            "*operating curve*.\n\n**Related:**"),
+               "roc-curve.md")["findings"]
+            if f["item"] == "17-alias-completeness"]),
+          ([True], [False]))
+    check("an acronym alias candidate carries no cross-domain hint",
+          [BARE_WORD_ALIAS_HINT in f["message"] for f in lint_text(
+              recall.replace("**Recall**, also called *sensitivity*,",
+                             "**Recall** (**TPR**)"),
+              "recall-machine-learning.md")["findings"]
+           if f["item"] == "17-alias-completeness"],
+          [False])
+    su2 = retitled(
+        "SU(2)", "special-unitary-group-of-degree-two",
+        "SU(2) is the group of two-by-two unitary matrices with determinant one.",
+        "**SU(2)** is the group of two-by-two unitary matrices with "
+        "determinant one.", "SU(2)")
+    check("a notation parenthesis is part of the name: an SU(2) entry lints "
+          "clean",
+          items(su2, slug_stem("SU(2)") + ".md"), [])
 
     tmp = tempfile.mkdtemp(prefix="lint_entry-selftest-")
     try:
@@ -4061,6 +4684,47 @@ def run_self_test():
                for f in e["findings"]
                if f["item"] == "10-duplicate-wikilink"], [])
 
+        # A private review tree need not be named Wiki; `Wiki/`-qualified
+        # links must still resolve there.
+        review = os.path.join(tmp, "review-tree")
+        review_entries = {
+            "precision.md": precision,
+            "wrong-footer.md": named_good(
+                "Wrong footer", "wrong-footer-alias",
+                "Wrong footer exercises a root-qualified footer link.",
+                "**Wrong footer** exercises a root-qualified footer link.")
+            .replace("[[precision|Precision]]",
+                     "[[Wiki/precision|Positive predictive value]]"),
+            "bare-footer.md": named_good(
+                "Bare footer", "bare-footer-alias",
+                "Bare footer exercises an unpiped footer link.",
+                "**Bare footer** exercises an unpiped footer link.")
+            .replace("[[precision|Precision]]", "[[precision]]"),
+            "qualified-reader.md": named_good(
+                "Qualified reader", "qualified-reader-alias",
+                "Qualified reader repeats one root-qualified destination.",
+                "**Qualified reader** compares [[Wiki/precision|Precision]] "
+                "with [[precision|the positive predictive value]]."),
+        }
+        os.makedirs(review)
+        for name, text in review_entries.items():
+            with open(os.path.join(review, name), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        review_report = lint_path(review)
+        check("a review tree with another name resolves `Wiki/`-qualified links, "
+              "and an unpiped footer link is reported once with its title",
+              {os.path.basename(e["file"]): [
+                  (f["item"], (f.get("evidence") or {}).get("expected_display"))
+                  for f in e["findings"]]
+               for e in review_report["entries"]},
+              {"precision.md": [],
+               "wrong-footer.md": [("11-related-display", "Precision")],
+               "bare-footer.md": [("11-related-display", "Precision")],
+               # A label sharing no surface with its target is item 18's
+               # folder warning, as in wiki-lint's scanner.
+               "qualified-reader.md": [("10-duplicate-wikilink", None),
+                                       ("18-label-target", None)]})
+
         bom = put("bom.md", "﻿" + good.replace('title: "ROC curve"',
                                                     'title: "Bom"')
                   .replace("A ROC curve plots", "Bom records")
@@ -4139,6 +4803,9 @@ def run_self_test():
             rc = main([os.path.join(tmp, "missing")])
         check("an unreadable lint scope exits nonzero with its problem report",
               (rc, "no such file or folder" in buf.getvalue()), (1, True))
+        check("a missing lint target reports summary.clean false",
+              lint_path(os.path.join(tmp, "missing"))["summary"].get("clean"),
+              False)
 
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
@@ -4165,7 +4832,8 @@ def _build_parser():
         prog="lint_entry.py",
         description="Mechanical Quality Checklist checks for wiki-build "
                     "entries (stdlib only). Findings do not set the exit "
-                    "status; invocation and report-write failures do.",
+                    "status; an incomplete scope, a report-write failure or "
+                    "a usage error does.",
         epilog="example: lint_entry.py ~/Vault/Wiki --severity error",
     )
     # `nargs="?"`, so `--test` is reachable: argparse refuses a missing

@@ -15,11 +15,12 @@ error, it is a crop of the wrong part of the page: a 612pt-wide US Letter
 page is 850px wide at 100 DPI, so pixel coordinates land about 39% too far
 right and too far down.
 
-**y1 must stay above the caption.** The caption's top edge is the hard
-bottom limit for a figure crop — `auto_fig_bbox.py` prints the caption rect
-next to every bbox for exactly this, and a y1 below the caption's y0 puts
-the caption text in the PNG, which is the one thing this skill promises it
-never does. Crops that overlap a detected caption are warned about by name.
+**Keep every caption out of the crop.** A caption rect is a hard limit on the
+side it faces: below the figure, y1 stays above its y0; above it, y0 stays
+below its y1; beside it, the crop's x-range stays clear. `auto_fig_bbox.py`
+prints the caption rect next to every bbox for exactly this, and caption text
+in the PNG is the one thing this skill promises it never delivers. Crops that
+overlap a detected caption are warned about by name.
 
 Existing files are skipped only after their ownership record and current
 bytes are verified, matching `batch_extract.py`. Pass --overwrite to replace
@@ -48,20 +49,19 @@ and reported nothing wrong. Do not vendor a second copy — call this one.
 Usage:
     python3 extract_figures.py input.pdf \\
         --out '<vault>/Sources/Images' \\
-        --stem Prince_UDL_2023_02_SupLearn_src \\
         --crop "3:2.1:70,130,300,330" \\
         --crop "4:2.2:95,130,540,510" \\
         --crop "5:S1:95,130,540,350"
 
     # Replace figures a batch run already wrote:
-    python3 extract_figures.py input.pdf --overwrite --out ... --stem ... --crop ...
+    python3 extract_figures.py input.pdf --overwrite --out ... --crop ...
 
     # The adversarial fixtures this module is held to.
     python3 extract_figures.py --test
 
-`--stem` is the source PDF's on-disk filename stem (including any `_src`
-suffix it carries) — that is what `wiki-build` globs for when it looks up
-`Sources/Images/[source_stem]_fig*`.
+Output names use the source PDF's on-disk filename stem (including any `_src`
+suffix it carries), which is what `wiki-build` globs for when it looks up
+`Sources/Images/[source_stem]_fig*`; `--stem`, if given, must equal it.
 """
 import argparse
 import errno
@@ -116,10 +116,10 @@ if _here != _shared:
 # --- end bootstrap ---
 
 from figure_state import (MANIFEST_FILE, file_digest, read_manifest,
-                          read_manifest_snapshot, write_manifest, manifest_key,
-                          figure_identity, check_manifest_writable)
+                          read_manifest_snapshot, read_sidecar, write_manifest,
+                          manifest_key, figure_identity, check_manifest_writable)
 import atomic_move
-from naming import looks_canonical
+from naming import is_feed_attachment, looks_canonical
 from render_page import MAX_RENDER_PIXELS, checked_render_dimensions
 from vault_artifacts import (inventory_source_figures, output_vault_root,
                              verify_selected_pdf)
@@ -144,8 +144,39 @@ def _require_pymupdf():
         raise SystemExit(_PYMUPDF_ERROR)
 
 
+#: pdf-organize refuses every copy of a shared vault PDF basename, so only the
+#: user can resolve one. Both extraction commands give this remedy.
+DUPLICATE_BASENAME_REMEDY = (
+    "another vault file shares this PDF basename; pdf-organize refuses both "
+    "copies, so ask the user to remove the redundant copy or to rename or "
+    "move one out of the vault, then retry")
+#: A PDF with no vault owner; pdf-organize never imports an external file.
+UNOWNED_PDF_REMEDY = (
+    "a readable scratch copy must keep its vault PDF's exact basename; "
+    "otherwise use an external --out for a one-off, or, with the user's "
+    "approval, copy the PDF into Inbox/ for pdf-organize to file and extract "
+    "from the filed path")
+
+
+def vault_refusal(decision):
+    """(category, remedy) for a canonical-output refusal of one selected PDF.
+
+    `decision` is `verify_selected_pdf`'s non-unique result.
+    """
+    if not decision.inventory.complete:
+        return ("vault inventory incomplete",
+                "repair or remove the unreadable vault paths named, then retry")
+    if not decision.matches:
+        return ("no vault PDF owns this basename", UNOWNED_PDF_REMEDY)
+    if len(decision.matches) > 1:
+        return ("vault basename not unique", DUPLICATE_BASENAME_REMEDY)
+    return ("vault owner not usable",
+            decision.reason + "; inspect that vault PDF")
+
+
+# ASCII digits only: the label becomes part of a filename.
 _FIG_LABEL = re.compile(
-    r"(?:SI|ED|S)?\d+(?:[.\-–]\d+)*|[A-Z][.\-–]?\d+(?:[.\-–]\d+)*")
+    r"(?:SI|ED|S)?[0-9]+(?:[.\-–][0-9]+)*|[A-Z][.\-–]?[0-9]+(?:[.\-–][0-9]+)*")
 
 
 def parse_crop(spec):
@@ -864,6 +895,10 @@ def run_self_test():
     msg = exits("parse_crop with an arbitrary label", parse_crop,
                 "1:results*:1,2,3,4")
     ok("...a label outside the producer grammar is refused",
+       msg and "whole-figure label" in msg)
+    msg = exits("parse_crop with a fullwidth digit label", parse_crop,
+                "1:\uff11:1,2,3,4")
+    ok("...a non-ASCII digit is refused before it reaches a filename",
        msg and "whole-figure label" in msg)
     msg = exits("parse_crop with a NaN coordinate", parse_crop,
                 "1:2:1,nan,3,4")
@@ -1631,7 +1666,9 @@ def run_self_test():
         # An exact --adopt-legacy selection (or an earlier tracked run)
         # established ownership before an explicit replacement is allowed.
         write_manifest(os.path.join(outdir, MANIFEST_FILE),
-                       {os.path.basename(png): file_digest(png)})
+                       {os.path.basename(png): file_digest(png)},
+                       expected=read_sidecar(
+                           os.path.join(outdir, MANIFEST_FILE))[1])
         code, so, se = run(base + ["--crop", "1:1:100,150,500,350", "--dpi",
                                    "72", "--no-trim"])
         check("a second run exits 0", code, 0)
@@ -1677,6 +1714,8 @@ def run_self_test():
         write_manifest(
             os.path.join(cli_replace_dir, MANIFEST_FILE),
             {os.path.basename(cli_replace_path): cli_replace_digest},
+            expected=read_sidecar(
+                os.path.join(cli_replace_dir, MANIFEST_FILE))[1],
         )
         cli_replace_bytes = b"foreign bytes written while the crop rendered"
 
@@ -1755,7 +1794,8 @@ def run_self_test():
         os.makedirs(late_manifest_dir)
         late_manifest_path = os.path.join(late_manifest_dir, MANIFEST_FILE)
         write_manifest(late_manifest_path,
-                       {"Keep_fig_1.png": "a" * 64})
+                       {"Keep_fig_1.png": "a" * 64},
+                       expected=read_sidecar(late_manifest_path)[1])
         late_manifest_body = (
             "Keep_fig_1.png\t" + "a" * 64 + "\n"
             "Concurrent_fig_2.png\t" + "b" * 64 + "\n")
@@ -1945,9 +1985,25 @@ def run_self_test():
         ])
         ok("manual canonical repair refuses a vault-wide PDF basename collision",
            code != 0 and "unique basename" in str(code))
+        ok("...and leaves the duplicate to the user, not pdf-organize",
+           "ask the user to remove the redundant copy" in str(code))
         check("collision refusal writes no figure or sidecar",
               os.listdir(repair_images), [])
         os.unlink(repair_collision)
+
+        ownerless_pdf = os.path.join(tmp, "ownerless", "Roe_Other_2024.pdf")
+        os.makedirs(os.path.dirname(ownerless_pdf))
+        shutil.copyfile(pdf, ownerless_pdf)
+        code, so, se = run([
+            ownerless_pdf, "--out", repair_images,
+            "--stem", "Roe_Other_2024",
+            "--crop", "1:6:100,150,500,350", "--dpi", "72", "--no-trim",
+        ])
+        ok("an external PDF with no vault owner is routed through Inbox/",
+           code != 0 and "no vault PDF owns" in str(code)
+           and "into Inbox/ for pdf-organize" in str(code))
+        check("the ownerless refusal writes no figure or sidecar",
+              os.listdir(repair_images), [])
 
         unorganized_pdf = os.path.join(repair_pdfs, "download (1).pdf")
         shutil.copyfile(pdf, unorganized_pdf)
@@ -1960,6 +2016,25 @@ def run_self_test():
            code != 0 and "pdf-organize" in str(code))
         check("the unorganized vault crop publishes nothing",
               os.listdir(repair_images), [])
+
+        # A feed-owned attachment keeps its collector name: pdf-organize
+        # refuses it, so the refusal names only --allow-unorganized.
+        feed_stem = "rss-" + "0123456789abcdef" * 2
+        feed_pdf = os.path.join(repair_pdfs, feed_stem + ".pdf")
+        shutil.copyfile(pdf, feed_pdf)
+        code, so, se = run([
+            feed_pdf, "--out", repair_images,
+            "--crop", "1:1:100,150,500,350", "--dpi", "72", "--no-trim",
+        ])
+        ok("a vault crop of a feed-owned attachment is refused by default",
+           code != 0 and "feed-owned attachment" in str(code)
+           and "--allow-unorganized" in str(code))
+        ok("...and is not routed to pdf-organize",
+           "Organize it first" not in str(code)
+           and "pdf-organize" not in str(code))
+        check("the feed-owned refusal publishes nothing",
+              os.listdir(repair_images), [])
+        os.unlink(feed_pdf)
 
         # A readable external scratch representation is allowed when one vault
         # source uniquely owns its basename (the encrypted-PDF recovery route).
@@ -1980,8 +2055,15 @@ def run_self_test():
         # The missing-argument path: named, not an argparse usage dump, and
         # exit 2 the way `paper_scan.py` reports the same thing.
         code, so, se = run([pdf, "--out", outdir])
-        check("missing --stem/--crop exits 2", code, 2)
-        ok("...naming both", "--stem" in se and "--crop" in se)
+        check("missing --crop exits 2", code, 2)
+        ok("...naming it, and not the optional --stem",
+           "--crop" in se and "--stem" not in se)
+        nostem_out = os.path.join(tmp, "NoStem")
+        code, so, se = run([pdf, "--out", nostem_out, "--crop",
+                            "1:7:100,150,500,350", "--dpi", "72", "--no-trim"])
+        check("an explicit crop without --stem succeeds", code, 0)
+        ok("...naming the output after the PDF's own stem",
+           os.path.isfile(os.path.join(nostem_out, "Doe_Figs_2025_fig_7.png")))
 
         # An HTML error page saved as `.pdf` opens fine in PyMuPDF and reads as
         # a document. Without the is_pdf guard the crop is written from it.
@@ -2029,7 +2111,8 @@ def run_self_test():
         tracked["DOE_FIGS_2025_FIG_1.PNG"] = tracked.pop("Doe_Figs_2025_fig_1.png")
         tracked["Unrelated_fig_8.png"] = "a" * 64
         tracked_path = os.path.join(owned, MANIFEST_FILE)
-        save_manifest(tracked_path, tracked)
+        save_manifest(tracked_path, tracked,
+                      expected=load_manifest(tracked_path)[1])
         owned_png = os.path.join(owned, "Doe_Figs_2025_fig_1.png")
         before = open(owned_png, "rb").read()
         code, so, se = run([pdf, "--out", owned, "--stem", "Doe_Figs_2025",
@@ -2081,7 +2164,8 @@ def main(argv=None):
     p.add_argument("--out", help="Output directory (e.g. Sources/Images/)")
     p.add_argument(
         "--stem",
-        help="Filename stem, e.g. Prince_UDL_2023_02_SupLearn",
+        help=("Optional; must equal the source PDF's exact on-disk stem "
+              "(default: derived from the PDF path)."),
     )
     p.add_argument(
         "--crop",
@@ -2114,7 +2198,7 @@ def main(argv=None):
         action="store_false",
         help=(
             "Skip the warning when a crop rect overlaps a detected caption. "
-            "The check is on by default: y1 below the caption's y0 puts the "
+            "The check is on by default: a crop that overlaps a caption puts "
             "caption text in the PNG."
         ),
     )
@@ -2147,7 +2231,7 @@ def main(argv=None):
     # `--test` takes no PDF and no crops: with the flags marked required,
     # argparse rejects the self-test invocation before `main()` can see it.
     # Same shape and same exit code as `paper_scan.py`'s missing-argument path.
-    missing = [f for f in ("pdf", "out", "stem", "crop")
+    missing = [f for f in ("pdf", "out", "crop")
                if not getattr(args, f)]
     if missing:
         print("missing required argument(s): %s"
@@ -2157,13 +2241,15 @@ def main(argv=None):
     _require_pymupdf()
 
     out_dir = os.path.expanduser(args.out)
-    # `--stem` is free text on the command line: the model types it, and it is
-    # not necessarily a PDF's on-disk stem. It goes straight into
-    # `os.path.join(out_dir, f"{stem}_fig_{n}.png")`, so a separator or a
-    # parent-directory hop writes outside `--out` entirely — `--stem
-    # ../../x` lands two directories above the Sources/Images folder. A stem is
-    # a filename fragment, not a path; refuse anything else, the same way
-    # clipping-clean's `fetch_images.py` refuses a `--slug`.
+    pdf_path = os.path.expanduser(args.pdf)
+    pdf_stem = os.path.splitext(os.path.basename(pdf_path))[0]
+    # The stem defaults to, and must equal, the PDF's on-disk stem. It goes
+    # straight into `os.path.join(out_dir, f"{stem}_fig_{n}.png")`, so the
+    # filename-fragment checks below stay as defense in depth: a separator or
+    # a parent-directory hop would write outside `--out`, the same way
+    # clipping-clean's `fetch_images.py` refuses such a `--slug`.
+    if args.stem is None:
+        args.stem = pdf_stem
     for bad in ("/", os.sep, "\x00"):
         if bad and bad in args.stem:
             sys.exit(f"--stem {args.stem!r} contains {bad!r}: a stem is a "
@@ -2179,8 +2265,6 @@ def main(argv=None):
         # same incident.
         sys.exit(f"--stem {args.stem!r} is only dots/spaces: the files would "
                  "be invisible dotfiles. Pass the PDF's real stem")
-    pdf_path = os.path.expanduser(args.pdf)
-    pdf_stem = os.path.splitext(os.path.basename(pdf_path))[0]
     if args.stem != pdf_stem:
         sys.exit(f"--stem {args.stem!r} does not equal the source PDF's exact "
                  f"on-disk stem {pdf_stem!r}. Figure identity follows that "
@@ -2204,6 +2288,14 @@ def main(argv=None):
     # external output remains an explicit one-off target.
     vault_root = output_vault_root(out_dir)
     if vault_root is not None:
+        if (is_feed_attachment(pdf_stem, is_stem=True)
+                and not args.allow_unorganized):
+            sys.exit(
+                "Refusing explicit crops into the vault's canonical "
+                "Sources/Images folder: %r is a feed-owned attachment. The "
+                "collector's durable state records this name; keep it. To "
+                "crop under it deliberately, re-run with "
+                "--allow-unorganized." % pdf_stem)
         if not looks_canonical(pdf_stem, is_stem=True) and not args.allow_unorganized:
             sys.exit(
                 "Refusing explicit crops into the vault's canonical "
@@ -2222,11 +2314,12 @@ def main(argv=None):
                 detail += "; " + "; ".join(
                     "%s: %s" % (item.path, item.message)
                     for item in errors[:3])
+            _category, remedy = vault_refusal(decision)
             sys.exit(
                 "Refusing explicit crops into the vault's canonical "
-                "Sources/Images folder: %s. Give every vault PDF a unique "
-                "basename with pdf-organize, then retry. No sidecar or "
-                "figure was written." % detail)
+                "Sources/Images folder: the source needs a unique basename "
+                "with one vault PDF owner, but %s. %s%s. No sidecar or "
+                "figure was written." % (detail, remedy[0].upper(), remedy[1:]))
 
     if args.allow_unorganized and not looks_canonical(pdf_stem, is_stem=True):
         print("Source naming exception (--allow-unorganized): crops remain "
@@ -2255,10 +2348,10 @@ def main(argv=None):
         die(f"{pdf_path}: not a PDF — opened as {fmt} (an HTML error page "
             f"or a truncated download saved with a .pdf extension)")
     if getattr(doc, "needs_pass", False) or getattr(doc, "is_encrypted", False):
-        die(f"{pdf_path}: encrypted/password-protected PDF. Decrypt a unique "
-            "scratch directory outside Sources/PDFs, keep this exact basename "
-            "for the readable copy, preserve the organized source unchanged, "
-            "then run the explicit crop against that copy")
+        die(f"{pdf_path}: encrypted/password-protected PDF. Decrypt into a "
+            "unique scratch directory outside the vault, keep this exact "
+            "basename for the readable copy, preserve the organized source "
+            "unchanged, then run the explicit crop against that copy")
     if len(doc) == 0:
         die(f"{pdf_path}: PDF has zero pages — nothing to extract")
 
@@ -2339,10 +2432,10 @@ def main(argv=None):
 
     blank_crops = 0
     for spec, page_idx, fig_suffix, (x0, y0, x1, y1) in parsed_crops:
-        # The crop must end above the caption. This is the constraint every
-        # hand-set crop gets wrong first, and nothing about the result says
-        # so: the PNG is written, looks fine at a glance, and carries the
-        # caption text the skill exists to leave out.
+        # The crop must stay clear of every caption, whichever side it sits
+        # on. This is the constraint every hand-set crop gets wrong first, and
+        # nothing about the result says so: the PNG is written, looks fine at
+        # a glance, and carries the caption text the skill exists to leave out.
         if find_caption_blocks is not None:
             for cap_num, cap_raw, cap in find_caption_blocks(doc[page_idx]):
                 # `--crop` coordinates are the ones `get_pixmap(clip=...)`
@@ -2352,10 +2445,11 @@ def main(argv=None):
                 cap = to_page_space(doc[page_idx], cap)
                 if y1 > cap.y0 and x1 > cap.x0 and x0 < cap.x1 and y0 < cap.y1:
                     print(
-                        f"WARNING: --crop {spec!r} reaches y1={y1:.0f}, below the "
-                        f"top of the caption for {cap_raw!r} (y0={cap.y0:.1f}) — "
-                        f"the caption will be in the PNG. Use y1 <= "
-                        f"{cap.y0 - 0.5:.1f}.",
+                        f"WARNING: --crop {spec!r} overlaps the caption for "
+                        f"{cap_raw!r} (x={cap.x0:.1f}-{cap.x1:.1f}, "
+                        f"y={cap.y0:.1f}-{cap.y1:.1f}) — the caption will be "
+                        f"in the PNG. Move the crop edge facing the caption "
+                        f"(for a caption below, y1 <= {cap.y0 - 0.5:.1f}).",
                         file=sys.stderr,
                     )
         out_path = os.path.join(out_dir, f"{args.stem}_fig_{fig_suffix}.png")
@@ -2419,10 +2513,7 @@ def main(argv=None):
             # that replaced it between the guarded publication and sidecar CAS.
             manifest[manifest_key(manifest, name) or name] = publication[1]
             manifest_snapshot = write_manifest(
-                manifest_path, manifest,
-                "# figure-extract output manifest.\n"
-                "# One per line: <figure filename><TAB><sha256 of the bytes written>\n",
-                expected=manifest_snapshot)
+                manifest_path, manifest, expected=manifest_snapshot)
         except (OSError, UnicodeError, ValueError) as exc:
             die(f"Crop written to {out_path}, but its ownership record could not be updated: {exc}. "
                 "Do not run automatic overwrite; preserve this explicit crop while repairing the sidecar.")

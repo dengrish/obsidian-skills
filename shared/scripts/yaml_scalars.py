@@ -49,8 +49,9 @@ def strip_comment(raw):
 def split_flow(inner):
     """Split a valid non-nested flow-list payload.
 
-    An empty payload is the valid list ``[]``. A comma-delimited empty element
-    is invalid YAML and raises ``ValueError`` instead of being silently dropped.
+    An empty payload is the valid list ``[]``. A single trailing comma after an
+    item is valid YAML and is ignored; any other empty comma-delimited element
+    is invalid and raises ``ValueError`` instead of being silently dropped.
     """
     if not inner.strip():
         return []
@@ -79,6 +80,8 @@ def split_flow(inner):
             buf.append(ch)
         i += 1
     out.append("".join(buf).strip())
+    if len(out) > 1 and out[-1] == "" and out[-2] != "":
+        out.pop()
     if any(x == "" for x in out):
         raise ValueError("flow list contains an empty comma-delimited item")
     return out
@@ -330,7 +333,8 @@ def self_test():
                 split_flow('"a,b", \'O\'\'Reilly, Inc.\', bare'),
                 ['"a,b"', "'O''Reilly, Inc.'", "bare"],
             )
-            for inner in (",", '"a",', ',"a"', '"a",,"b"'):
+            self.assertEqual(split_flow('"a", '), ['"a"'])
+            for inner in (",", '"a",,', ',"a"', '"a",,"b"'):
                 with self.subTest(inner=inner), self.assertRaises(ValueError):
                     split_flow(inner)
 

@@ -11,15 +11,18 @@ both may use the same selected vault.
 | [knowledge:paper-summarize](skills/paper-summarize/SKILL.md) | Write PDF reading notes |
 | [knowledge:clipping-clean](skills/clipping-clean/SKILL.md) | Clean Web Clipper captures |
 | [knowledge:wiki-build](skills/wiki-build/SKILL.md) | Build or enrich entries from new sources |
-| [knowledge:wiki-add](skills/wiki-add/SKILL.md) | Research missing queued topics |
+| [knowledge:wiki-add](skills/wiki-add/SKILL.md) | Research missing queued or named topics |
 | [knowledge:wiki-lint](skills/wiki-lint/SKILL.md) | Maintain entries, links, parents and MOCs |
 
 ## Setup
 
-Read [runtime setup](shared/RUNTIME.md) and [vault conventions](shared/CONVENTIONS.md).
-Python 3.10+ is required. Wiki and clipping helpers use the standard library;
-PDF workflows need the packages in [requirements.txt](requirements.txt),
-installed into an isolated environment using the runtime guide. Install this
+Read [runtime setup](shared/RUNTIME.md) once per task; each skill links the
+[vault conventions](shared/CONVENTIONS.md) sections it needs.
+Python 3.10+ is required. Wiki and clipping helpers use the standard library.
+Any workflow that parses PDFs or images, including a Wiki skill reading a
+source PDF, needs the packages in [requirements.txt](requirements.txt),
+installed into an isolated environment using the runtime guide, and checks the
+installed versions with `shared/scripts/check_parsers.py`. Install this
 whole package so its relative skill and helper paths stay intact.
 
 Use the vault already selected for the task. Sources and reading notes retain

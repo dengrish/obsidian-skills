@@ -12,12 +12,9 @@ scope. For a shared schema, naming, ownership or publication rule, use the
 shared guide the workflow names; a workflow summary is not a competing
 definition. Read [input safety](INPUT_SAFETY.md)
 before handling external values or content. Do not append skill-provenance
-footers to Markdown notes. Build identity stays in the plugin's bundled
-`provenance.json`; helpers may retain it in private operational state.
-At closeout, read
-[SUGGESTIONS.md](SUGGESTIONS.md) for the shared `Reviews/` logs: record only
-evidenced issues in the owning skill or consumed producer's log, remove
-specifically verified resolutions, and make no log writes on a report-only run.
+footers to Markdown notes; [build identity](PROVENANCE.md) stays in the
+plugin's bundled `provenance.json`. At closeout, follow the
+[shared suggestion-log rules](SUGGESTIONS.md).
 
 Before creating, replacing, moving, or removing a vault artifact, follow the
 shared [safe-write protocol](SAFE_WRITES.md). A scan or preflight does not
@@ -102,37 +99,28 @@ unknown additions, another run's files, a shared temporary base, or unrelated
 caches. Dependencies and reusable virtual environments belong outside disposable
 scratch unless deliberately created as disposable for this run.
 
-Helper-managed internal temporary files and existing hidden staging/recovery
-names retain their own guards and cleanup rules. Final publication staging is
-the narrow exception to ordinary scratch staying outside the vault: it may
-need a hidden directory beside the resolved real destination on its filesystem,
-always outside scanned output folders. Do not relocate it to `<scratch>` when
-that would cross filesystems or discard recovery state.
-
-Guarded publication of regular files also needs hard links on the vault's
-filesystem and a final staging directory on that same filesystem. This is a
-filesystem capability, not an operating-system promise: FAT/exFAT and some
-network mounts do not support it. `atomic_move.py` reports that condition as
-`LinkUnavailable`; keep the staged result and report the limitation instead of
-falling back to an overwrite-capable copy or cross-device move. See
-[`SAFE_WRITES.md`](SAFE_WRITES.md) for the recovery rules.
+Final publication staging is not ordinary scratch. The
+[safe-write protocol](SAFE_WRITES.md#stage-complete-bytes-off-the-public-path)
+places it on the destination's filesystem, possibly inside the vault but
+outside scanned output folders, and owns the hard-link requirement and
+`LinkUnavailable` handling. Helper-managed temporary files and existing
+staging or recovery entries keep their own guards and cleanup rules. Do not
+relocate any of them into `<scratch>`.
 
 ## Use one Python environment
 
 The helpers require Python 3.10+; use a release that is still receiving security
 fixes. Examples use `python3`; substitute the full path to a suitable interpreter
 supplied by the host when available. Use the same interpreter for dependency
-installation and every script invocation. Standard-library-only workflows,
-including core investment retrieval, screening and note handling, need no package
-installation. Optional commands can declare additional dependencies, such as the
-investment filing parser. Use only the active workflow's dependencies from the
-current plugin's `requirements.txt` or its documented optional requirements file;
-another plugin is never a setup dependency.
+installation and every script invocation. Standard-library-only workflows need
+no package installation. Install only the active workflow's dependencies, from
+the current plugin's `requirements.txt` or an optional requirements file that
+workflow documents; another plugin is never a setup dependency.
 
 A workflow using named timezones also needs the system IANA timezone database,
-normally present on macOS and Linux. Investment research uses
-`America/New_York`. If that data is unavailable, report the missing timezone
-data; do not substitute a fixed UTC offset that breaks daylight-saving cutoffs.
+normally present on macOS and Linux. If that data is unavailable, report the
+missing timezone data; do not substitute a fixed UTC offset that breaks
+daylight-saving cutoffs.
 
 When required dependencies are missing, create a virtual environment in an
 approved, writable location outside the installed plugin cache, then use its
@@ -150,67 +138,18 @@ report the missing dependency and complete only work that does not depend on it.
 
 ### Only for PDF and image workflows
 
-Skip this section for standard-library-only workflows. PDF reading/splitting
-needs `pypdf`, and figure extraction needs PyMuPDF and Pillow. The plugin that
-ships those workflows supplies their requirements; these are not dependencies
-of investment research. Python 3.9 is end-of-life, and the supported PyMuPDF
-and Pillow security floors require Python 3.10 or newer.
-
-PDFs and existing image files are untrusted parser input. An import-only check
-can silently accept an old vulnerable package, so verify installed versions as
-well. Do not disable Pillow's decompression-bomb protection, and do not run the
-helpers with elevated operating-system privileges. The minimum versions below
-mirror `requirements.txt`; keep the two locations synchronized.
-
-After setting up that environment, check its supported parser versions before
-using a PDF or image workflow:
-
-```bash
-'<venv>/bin/python' - <<'PY'
-import re
-import sys
-from importlib.metadata import PackageNotFoundError, version
-
-minimums = {
-    "pypdf": (6, 16, 1),
-    "PyMuPDF": (1, 28, 0),
-    "Pillow": (12, 3, 0),
-}
-problems = []
-if sys.version_info < (3, 10):
-    problems.append("Python 3.10 or newer is required")
-for package, minimum in minimums.items():
-    try:
-        installed = version(package)
-    except PackageNotFoundError:
-        problems.append(f"{package} is not installed")
-        continue
-    match = re.match(r"^(\d+)\.(\d+)\.(\d+)", installed)
-    release = tuple(map(int, match.groups())) if match else ()
-    suffix = installed[match.end():].lower() if match else ""
-    prerelease_at_floor = (
-        release == minimum
-        and suffix.startswith(("a", "b", "rc", ".dev", "dev"))
-    )
-    if release < minimum or prerelease_at_floor:
-        problems.append(
-            f"{package} {installed} is below {'.'.join(map(str, minimum))}"
-        )
-if problems:
-    raise SystemExit("dependency check failed: " + "; ".join(problems))
-
-import pypdf
-import PIL
-import pymupdf
-PY
-```
+PDFs and existing image files are untrusted parser input. A workflow that
+parses them names its installed-version check in its setup. Run that check
+with the environment's interpreter after creating the environment and before
+using the workflow, because an import-only check can accept an old vulnerable
+package. Do not disable Pillow's decompression-bomb protection, and do not run
+the helpers with elevated operating-system privileges.
 
 ## Use the host's available tools
 
 Read/write files and run scripts with the host's file and shell tools. Inspect
 PDFs or rendered page images with its available viewing tools. Search/fetch
-source pages with its web tools; `web_fetch` in older examples means that
-capability, not a required callable tool name. Use an available browser when
+source pages with its web tools. Use an available browser when
 rendered content is needed and follow that browser's access rules. If the host
 cannot provide the required view, report the limitation rather than claiming
 the source or image was verified.
@@ -222,9 +161,9 @@ tool. The independently installable plugins do not require one another.
 A separately installed PDF or browser skill is optional; use it only when
 available and relevant.
 
-Playwright/Chromium and OCR are optional, task-specific dependencies. The
-Lottie conversion recipe needs Playwright, Pillow, and a usable browser; check
-the existing environment first and install missing packages only into the
-chosen virtual environment. Never purge unrelated caches or scratch files to
-make room. If setup or network access is unavailable, use the documented
-poster/link fallback and name what could not be checked or converted.
+Playwright/Chromium and OCR are optional, task-specific dependencies named by
+the workflow that uses them. Check the existing environment first and install
+missing packages only into the chosen virtual environment. Never purge
+unrelated caches or scratch files to make room. If setup or network access is
+unavailable, use that workflow's documented fallback and name what could not
+be checked or converted.

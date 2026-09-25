@@ -1,4 +1,4 @@
 # Security floors for parsing untrusted PDFs and images. Keep these synchronized
-# with the installed-version probe in shared/RUNTIME.md.
+# with MINIMUMS in shared/scripts/check_parsers.py.
 PyMuPDF>=1.28.0
 Pillow>=12.3.0

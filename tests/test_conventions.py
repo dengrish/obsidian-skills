@@ -1886,8 +1886,8 @@ def _slug_producers(mod, fingerprinted):
 #: so each trigger is deliberately narrow: reading one of those as a slug
 #: claim would report the harness's own confusion as drift.
 SLUG_CLI_RE = re.compile(
-    r"slugify\.py\s+\"([^\"\n]{1,60})\"[^\n]*?#\s*->\s*(?:\{[^\n]*?\"slug\"\s*:\s*\")?"
-    r"([a-z0-9][a-z0-9-]*)")
+    r"slugify\.py'?\s+([\"'])([^\"'\n]{1,60})\1[^\n]*?#\s*->\s*"
+    r"(?:\{[^\n]*?\"slug\"\s*:\s*\")?([a-z0-9][a-z0-9-]*)")
 SLUG_TABLE_ROW_RE = re.compile(
     r"^\|\s*`?([^`|\n]{1,60}?)`?\s*\|\s*`?([a-z0-9][a-z0-9-]*(?:\.md)?)`?\s*\|", re.M)
 SLUG_PROSE_RE = re.compile(
@@ -1916,7 +1916,7 @@ def _check_slug_claims(rep, check, canon):
     for path, text in walk_plugin_files():
         if not path.endswith(".md"):
             continue
-        claims = [(m.group(1), m.group(2), m.start())
+        claims = [(m.group(2), m.group(3), m.start())
                   for m in SLUG_CLI_RE.finditer(text)]
         for block, boff in _tables(text):
             head = block.splitlines()[0].lower()
@@ -1966,7 +1966,7 @@ def _check_slug_claims(rep, check, canon):
 #: cheapest way to keep the suite green was to leave the gaps alone -- and
 #: CONVENTIONS.md §4a named three real ones (Greek capitals, final sigma, CJK)
 #: that stayed open for exactly that reason.  A shrink is still a failure.
-SLUG_SELFTEST_MIN = 71          # the 2026-09-02 tally; shrink = FAIL
+SLUG_SELFTEST_MIN = 80          # the 2026-09-25 tally; shrink = FAIL
 
 
 def _check_slug_exports(rep, check, canon):
@@ -2402,7 +2402,7 @@ FIG_EMBED_RE = re.compile(r"^!\[\[([^\]\n]+)\]\][ \t]*$", re.M)
 #: Floor, not a pin -- exactly like SLUG_SELFTEST_MIN.  Coverage may grow
 #: freely; only a shrink fails, which is what stops a case being quietly
 #: deleted to make a regression go away.
-NAMING_SELFTEST_MIN = 191       # the 2026-09-02 tally; shrink = FAIL
+NAMING_SELFTEST_MIN = 228       # the 2026-09-25 tally; shrink = FAIL
 
 #: Corpus floor for figure-naming (c), separately from behavioral case counts.
 #: Rebased after the 2026-08-31 documentation consolidation: 352 occurrences
@@ -5964,28 +5964,30 @@ SELFTEST_TALLY = re.compile(
 #: fails.  Lowering a number here is a deliberate, reviewable statement that
 #: cases went away; a script with no line is checked for a clean tally only.
 SELFTEST_MIN_CASES = {
-    # Updated after the full review of 2026-09-06. Raising after growth is the
+    # Updated after the full review of 2026-09-25. Raising after growth is the
     # mirror duty of the "lowering is a deliberate, reviewable statement" rule
     # below: new regression cases must not disappear with the harness green.
     "shared/scripts/atomic_move.py": 32,
-    "shared/scripts/code_typography.py": 16,
+    "shared/scripts/check_parsers.py": 26,
+    "shared/scripts/code_typography.py": 20,
+    "shared/scripts/entry_checks.py": 52,
     "shared/scripts/equation_coverage.py": 160,
-    "shared/scripts/figure_state.py": 10,
+    "shared/scripts/figure_state.py": 13,
     "shared/scripts/introduced_aliases.py": 23,
     "shared/scripts/markdown_tables.py": 42,
-    "shared/scripts/naming.py": 191,
+    "shared/scripts/naming.py": 228,
     "shared/scripts/note_provenance.py": 12,
-    "shared/scripts/organism_names.py": 29,
-    "shared/scripts/entry_structure.py": 143,
+    "shared/scripts/organism_names.py": 30,
+    "shared/scripts/entry_structure.py": 148,
     "shared/scripts/plugin_paths.py": 110,
     "shared/scripts/portable_names.py": 5,
     "shared/scripts/plurals.py": 251,
-    "shared/scripts/slugify.py": 74,  # device-name restrictions removed
-    "shared/scripts/vault_artifacts.py": 39,
+    "shared/scripts/slugify.py": 80,  # device-name restrictions removed
+    "shared/scripts/vault_artifacts.py": 66,
     "shared/scripts/yaml_scalars.py": 12,
-    "skills/clipping-clean/scripts/dedup_index.py": 168,
-    "skills/clipping-clean/scripts/fetch_images.py": 539,
-    "skills/clipping-clean/scripts/slug.py": 133,  # device-name guards removed
+    "skills/clipping-clean/scripts/dedup_index.py": 173,
+    "skills/clipping-clean/scripts/fetch_images.py": 543,
+    "skills/clipping-clean/scripts/slug.py": 146,  # device-name guards removed
     "skills/feed-collect/scripts/feed_collect.py": 13,
     "skills/feed-collect/scripts/feed_media.py": 4,
     "skills/feed-collect/scripts/rss_source.py": 4,
@@ -6016,19 +6018,19 @@ SELFTEST_MIN_CASES = {
     "skills/stock-research/scripts/market_prices.py": 28,
     "skills/stock-research/scripts/market_public.py": 140,
     "skills/stock-research/scripts/market_screen.py": 25,
-    "skills/paper-summarize/scripts/note_lint.py": 228,
-    "skills/paper-summarize/scripts/paper_scan.py": 162,
-    "skills/paper-summarize/scripts/paper_text.py": 55,
-    "skills/figure-extract/scripts/auto_fig_bbox.py": 346,
-    "skills/figure-extract/scripts/batch_extract.py": 354,
-    "skills/figure-extract/scripts/extract_figures.py": 185,
+    "skills/paper-summarize/scripts/note_lint.py": 240,
+    "skills/paper-summarize/scripts/paper_scan.py": 173,
+    "skills/paper-summarize/scripts/paper_text.py": 63,
+    "skills/figure-extract/scripts/auto_fig_bbox.py": 349,
+    "skills/figure-extract/scripts/batch_extract.py": 410,
+    "skills/figure-extract/scripts/extract_figures.py": 195,
     "skills/figure-extract/scripts/render_page.py": 66,
-    "skills/pdf-organize/scripts/organize.py": 335,
-    "skills/wiki-add/scripts/backlog.py": 32,
-    "skills/wiki-build/scripts/find_collisions.py": 67,
-    "skills/wiki-build/scripts/lint_entry.py": 319,
-    "skills/wiki-build/scripts/vault_index.py": 79,
-    "skills/wiki-lint/scripts/scan_vault.py": 457,
+    "skills/pdf-organize/scripts/organize.py": 363,
+    "skills/wiki-add/scripts/backlog.py": 48,
+    "skills/wiki-build/scripts/find_collisions.py": 73,
+    "skills/wiki-build/scripts/lint_entry.py": 365,
+    "skills/wiki-build/scripts/vault_index.py": 84,
+    "skills/wiki-lint/scripts/scan_vault.py": 497,
 }
 
 
@@ -6512,8 +6514,7 @@ def check_bootstrap(rep, conv):
 
 #: Loader limits.  Like the XML-tag rule above these come from outside the
 #: plugin, so they are written here rather than read from CONVENTIONS.md --
-#: the skills did not agree them and cannot change them.  The tree's longest
-#: description currently sits 5 characters under the cap.
+#: the skills did not agree them and cannot change them.
 SKILL_DESCRIPTION_MAX = 1024
 SKILL_NAME_MAX = 64
 
@@ -6684,8 +6685,8 @@ def check_manifest_validity(rep, conv):
         # 3. The frontmatter must be parseable at all.  An unbalanced quote or
         #    bracket in a hand-edited description is the same class of
         #    install-time rejection as the `<N>` incident, and just as easy to
-        #    reintroduce -- these descriptions are ~1000 characters of prose
-        #    full of quotes and brackets.
+        #    reintroduce -- these descriptions are hand-edited prose that
+        #    often contains quotes and brackets.
         problems = _yaml_frontmatter_problems(fm)
         if problems:
             rep.fail(check, "%s: frontmatter does not parse as YAML -- %s. The "
@@ -6894,10 +6895,10 @@ def check_note_headings(rep, conv):
     limit_names = (
         "MAX_DESCRIPTION",
         "MIN_HEADING", "MAX_HEADING", "MIN_HEADING_WORDS",
-        "MIN_BULLETS", "MAX_BULLETS",
+        "MIN_BULLETS", "MAX_BULLETS", "MAX_CALLOUT_BULLET_WORDS",
         "MAX_SENTENCE_WORDS", "MAX_STEP_WORDS",
         "MAX_PARAGRAPH_SENTENCES",
-        "MIN_STEPS", "MAX_STEPS", "MAX_RESULTS_CHARS",
+        "MIN_STEPS", "MAX_STEPS", "MAX_METHODS_CHARS", "MAX_RESULTS_CHARS",
         "MIN_LIMITATIONS", "PREFERRED_MIN_EMPIRICAL_LIMITATIONS", "MAX_LIMITATIONS",
         "MAX_LIMITATION_CHARS",
         "MIN_AVAILABILITY", "MAX_AVAILABILITY",
@@ -7412,11 +7413,13 @@ def check_safe_write_programmatic_api(rep, _conv):
         ("safe", "published = atomic_move.publish_new("),
         ("safe", "published = atomic_move.replace_expected("),
         ("safe", "Keep `stage_dir` and report its path on **any**"),
+        ("safe", "expected=identity"),
         ("atomic", "programmatic import library, not a publication CLI"),
         ("builder", "SAFE_WRITES.md#call-the-shared-python-api"),
         ("linter", "SAFE_WRITES.md#call-the-shared-python-api"),
         ("clipping", "SAFE_WRITES.md#call-the-shared-python-api"),
         ("clipping", "`atomic_move.publish_new(..., atomic_move.regular_file_snapshot, ...)`"),
+        ("clipping", "`atomic_move.replace_expected`"),
         ("paper", "SAFE_WRITES.md#call-the-shared-python-api"),
         ("paper", "`atomic_move.publish_new(..., atomic_move.regular_file_snapshot, ...)`"),
         ("paper", "`atomic_move.replace_expected`"),
@@ -7449,6 +7452,7 @@ def check_safe_write_programmatic_api(rep, _conv):
             "staged", "target", "expected", "snapshot", "stage_dir"],
         "remove_expected": [
             "target", "expected", "snapshot", "stage_dir"],
+        "move_noreplace": ["src", "dst", "expected"],
     }
     for name, prefix in signatures.items():
         if functions.get(name, [])[:len(prefix)] != prefix:

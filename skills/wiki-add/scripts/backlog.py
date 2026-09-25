@@ -2,7 +2,8 @@
 """Scan a topic queue and checkpoint one verified public entry.
 
 Semantic identity and entry quality remain the caller's responsibility.
-Exit 2 means invalid input/evidence; exit 3 means stale state/publication failure.
+Exit 2 means invalid input/evidence; exit 3 means stale state, an existing
+snapshot path, or a publication failure. Each scan needs a new --out path.
 """
 
 from __future__ import annotations
@@ -64,6 +65,8 @@ from entry_structure import mask_body_comments
 SCHEMA = "obsidian-wiki-add-backlog-v1"
 LIST = re.compile(r"^([-+*]|[0-9]{1,9}[.)])([ \t]+)(.*)$")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+THEMATIC_BREAK = re.compile(r" {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*")
+CHECKED = re.compile(r"^\[[xX]\](?:[ \t]|$)")
 NOTICE = "File evidence is verified; semantic identity and note quality require caller judgment."
 
 
@@ -103,9 +106,30 @@ def token_json(token):
             "sha256": token.digest, "size": token.size, "mode": token.mode}
 
 
+def markdown_lines(text):
+    """Split at Markdown line endings only (CRLF, CR, LF), keeping them.
+
+    str.splitlines also splits at U+2028, form feed and similar characters,
+    which would truncate a request and shift every later line number.
+    """
+    return re.findall(r"[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+\Z", text)
+
+
+def content_column(lead, marker, gap):
+    """Column where a list item's content starts, as CommonMark counts it.
+
+    The marker at column `lead` is followed by 1-4 columns of `gap` (tabs
+    expand to multiples of 4); a wider gap starts the content one column
+    after the marker.
+    """
+    start = lead + len(marker)
+    width = len((" " * lead + marker + gap).expandtabs(4)) - start
+    return start + (width if 1 <= width <= 4 else 1)
+
+
 def parse_queue(data):
     """Parse flush-left list requests without normalizing any source bytes."""
-    lines = data.decode("utf-8").splitlines(keepends=True)
+    lines = markdown_lines(data.decode("utf-8"))
     source_digest = digest(data)
     items, reports = [], []
     completed = 0
@@ -117,12 +141,19 @@ def parse_queue(data):
     # The shared Markdown view distinguishes real comments from literal
     # delimiters in inline/fenced code, including soft-wrapped code spans.
     # Keep YAML outside that view and retain the raw text for exact patches.
-    comment_lines = lines[:body_at] + mask_body_comments(
-        "".join(lines[body_at:])).splitlines(keepends=True)
-    fence, comment, parent, offset = None, False, None, 0
+    comment_lines = lines[:body_at] + markdown_lines(mask_body_comments(
+        "".join(lines[body_at:])))
+    # `floor` is the smallest indent that can continue the open parent item.
+    fence, comment, parent, floor, offset = None, False, None, 0, 0
+    opened_at = 1  # line of the frontmatter, fence or comment still open
     for number, raw in enumerate(lines, 1):
         start = offset
         offset += len(raw.encode("utf-8"))
+        comment_view = comment_lines[number - 1].rstrip("\r\n")
+        if number == 1 and raw.startswith("\ufeff"):
+            # A byte-order mark is not part of the first line's Markdown.
+            raw, comment_view = raw[1:], comment_view.lstrip("\ufeff")
+            start += len("\ufeff".encode("utf-8"))
         line = raw.rstrip("\r\n")
         if frontmatter:
             # An indented fence belongs to a YAML block scalar, not the body.
@@ -138,7 +169,6 @@ def parse_queue(data):
         # them become syntax. Keep the visible part of an inline request.
         visible = []
         cursor = 0
-        comment_view = comment_lines[number - 1].rstrip("\r\n")
         while cursor < len(line):
             if comment:
                 end = line.find(comment, cursor)
@@ -155,26 +185,49 @@ def parse_queue(data):
                 begin = cursor + opening.start()
                 visible.append(line[cursor:begin])
                 comment = "-->" if opening[0] == "<!--" else "%%"
+                opened_at = number
                 cursor = begin + len(opening[0])
         clean = "".join(visible)
-        # A comment before/in the list marker is not a flush-left request.
+        # A comment before/in the list marker is not a request. Check the
+        # marker after up to three leading spaces, so a commented indented
+        # item still reaches the indented-item report below.
         original_match = LIST.match(line)
-        if clean != line and (original_match is None or
-                              not clean.startswith(original_match[1] + original_match[2])):
+        lead = len(line) - len(line.lstrip(" "))
+        marker_line = LIST.match(line[lead:]) if lead < 4 else None
+        if clean != line and (marker_line is None or
+                              not clean[lead:].startswith(marker_line[1] + marker_line[2])):
             continue
         opening = FENCE.match(clean)
         if opening and not (opening[1][0] == "`" and "`" in opening[2]):
             fence = (opening[1][0], len(opening[1]))
+            opened_at = number
+            parent = None
+            continue
+        indent = len(clean) - len(clean.lstrip(" "))
+        inside = parent is not None and (clean[:1] == "\t" or indent >= floor)
+        if not inside and THEMATIC_BREAK.fullmatch(clean):
+            # `* * *` and `- - -` are rules, not requests.
             parent = None
             continue
         match = LIST.match(clean)
         if not match:
-            if parent is not None and clean[:1] in (" ", "\t"):
+            # A list item indented 1-3 spaces that cannot belong to the open
+            # item is still a top-level item in Markdown: surface it rather
+            # than dropping it or hiding it as context.
+            shifted = LIST.match(clean[indent:]) if 0 < indent < 4 and not inside else None
+            if shifted:
+                if not CHECKED.match(shifted[3]):
+                    reports.append({"line": number, "raw_line": line,
+                                    "reason": "indented list item is not a top-level request"})
+                parent = {"context_lines": []}
+                floor = content_column(indent, shifted[1], shifted[2])
+            elif parent is not None and clean[:1] in (" ", "\t"):
                 parent["context_lines"].append(clean)
             elif clean.strip():
                 parent = None
             continue
-        parent = None
+        # Nested lines under a skipped or reported item are discarded context.
+        parent, floor = {"context_lines": []}, content_column(0, match[1], match[2])
         body = match[3]
         prefix = match[1] + match[2]
         if original_match and prefix != original_match[1] + original_match[2]:
@@ -213,7 +266,9 @@ def parse_queue(data):
         items.append(item)
         parent = item
     if frontmatter or fence or comment:
-        reports.append({"line": len(lines), "reason": "unclosed frontmatter, fence or comment"})
+        reports.append({"line": opened_at,
+                        "raw_line": lines[opened_at - 1].lstrip("\ufeff").rstrip("\r\n"),
+                        "reason": "unclosed frontmatter, fence or comment"})
     return items, reports, {"pending": len(items), "completed_skipped": completed,
                             "report_only": len(reports)}
 
@@ -235,6 +290,10 @@ def write_snapshot(report, output):
     output = absolute_leaf(output)
     if output == Path(report["backlog"]) or any(p.casefold() == "wiki" for p in output.parts):
         raise ValueError("snapshot must be private, outside Wiki and distinct from backlog")
+    if os.path.lexists(output):
+        # Snapshots are never replaced; exclusive publication below still
+        # guards a path that appears after this check.
+        raise Conflict("snapshot %s already exists; write each scan to a new --out path" % output)
     stage = Path(tempfile.mkdtemp(prefix=".wiki-add-scan-", dir=output.parent))
     try:
         staged = stage / "snapshot.json"
@@ -409,6 +468,67 @@ def run_self_tests():
               ([item["text"] for item in soft_items],
                soft_items[0]["context_lines"], soft_reports),
               (["Explain ``code", "Visible topic"], ["  <!-- literal -->``"], []))
+        rule_items, rule_reports, _ = parse_queue(
+            b"- [ ] A\n\n* * *\n\n- - -\n___\n- [ ] B\n")
+        check("thematic breaks are neither requests nor reports",
+              ([item["text"] for item in rule_items], rule_reports), (["A", "B"], []))
+
+        indented_items, indented_reports, indented_counts = parse_queue(
+            b"# Topics\n - [ ] Indented one\n    continuation\n   - nested under it\n"
+            b"- [ ] Flush\n - [ ] One-space sibling\n  - [x] Nested done\n"
+            b" - [x] Indented done\n1. Numbered\n   - numbered context\n")
+        check("indented top-level items are reported, never silently dropped",
+              ([item["text"] for item in indented_items],
+               [(row["line"], row["reason"]) for row in indented_reports]),
+              (["Flush", "Numbered"],
+               [(2, "indented list item is not a top-level request"),
+                (6, "indented list item is not a top-level request")]))
+        check("real nested context stays with its parent",
+              (indented_items[1]["context_lines"], indented_counts["report_only"]),
+              (["   - numbered context"], 2))
+        indent_report = [(2, "indented list item is not a top-level request")]
+        check("the marker's spacing sets the column a nested item needs",
+              [([item["text"] for item in found],
+                [(row["line"], row["reason"]) for row in reported])
+               for found, reported, _ in map(parse_queue, (
+                   b"1.  Topic A\n   - [ ] Topic B\n",
+                   b"-   [ ] Topic A\n  - [ ] Topic B\n",
+                   b"-\tTopic A\n  - [ ] Topic B\n",
+                   b"- [ ] A\n -   [ ] B\n   - [ ] C\n"))],
+              [(["Topic A"], indent_report), (["Topic A"], indent_report),
+               (["Topic A"], indent_report),
+               (["A"], indent_report + [(3, indent_report[0][1])])])
+        check("wide marker spacing keeps a properly nested line as context",
+              [(item["context_lines"], reported)
+               for queue in (b"1.  Topic A\n    - nested\n",
+                             b"-      Topic A\n  - nested\n")
+               for found, reported, _ in [parse_queue(queue)]
+               for item in found],
+              [(["    - nested"], []), (["  - nested"], [])])
+        check("a nested line under a skipped item is not reported",
+              parse_queue(b"- [x] Done\n  - [ ] nested follow-up\n- [ ] Next\n")[1], [])
+        check("a commented indented item is still reported",
+              [(r["line"], r["reason"]) for r in parse_queue(
+                  b"# H\n - [ ] Topic <!-- c -->\n- [ ] B %% x %%\n")[1]],
+              [(2, "indented list item is not a top-level request")])
+
+        unclosed = "unclosed frontmatter, fence or comment"
+        comment_items, comment_reports, _ = parse_queue(b"- [ ] A\n<!--\n- [ ] B\n- [ ] C\n")
+        check("an unclosed comment is reported at its opener",
+              ([item["text"] for item in comment_items], comment_reports),
+              (["A"], [{"line": 2, "raw_line": "<!--", "reason": unclosed}]))
+        check("unclosed frontmatter and fences are reported at their openers",
+              [[(r["line"], r["raw_line"]) for r in parse_queue(queue)[1]] for queue in (
+                  b"\xef\xbb\xbf---\n- [ ] A\n- [ ] B\n",
+                  b"```\nx\n```\n- [ ] A\n~~~\n- [ ] B\n")],
+              [[(1, "---")], [(5, "~~~")]])
+
+        separator_items, _, _ = parse_queue(
+            "- [ ] Topic with line\u2028separator inside\r\n- [ ] Next\r\n".encode("utf-8"))
+        check("only CR/LF end a line, so U+2028 cannot truncate a request",
+              [(item["line"], item["text"]) for item in separator_items],
+              [(1, "Topic with line\u2028separator inside"), (2, "Next")])
+
         literal_path = root / "literal-queue.md"
         literal_path.write_bytes(literal_queue)
         literal_snapshot = root / "literal.json"
@@ -449,6 +569,26 @@ def run_self_tests():
         complete(second_snapshot, second["items"][0]["id"], wiki, entry)
         check("unmarked completion inserts a marker byte-exactly",
               queue.read_bytes(), b"- [x] Cr\xc3\xa8me\r\n2. [x] Plain")
+
+        bom_queue = root / "bom-queue.md"
+        bom_bytes = b"\xef\xbb\xbf- [ ] Alpha\n- [ ] Beta\n"
+        bom_queue.write_bytes(bom_bytes)
+        bom_scan = save_scan(bom_queue, root / "bom.json")
+        check("a byte-order mark does not hide the first request",
+              [item["text"] for item in bom_scan["items"]], ["Alpha", "Beta"])
+        complete(root / "bom.json", bom_scan["items"][0]["id"], wiki, entry)
+        check("completion after a byte-order mark patches the checkbox byte",
+              bom_queue.read_bytes(), b"\xef\xbb\xbf- [x] Alpha\n- [ ] Beta\n")
+
+        cr_queue = root / "cr-queue.md"
+        cr_queue.write_bytes(b"- [ ] One\r- Two\r")
+        cr_scan = save_scan(cr_queue, root / "cr.json")
+        check("a bare-CR queue yields one request per line",
+              [(item["line"], item["text"]) for item in cr_scan["items"]],
+              [(1, "One"), (2, "Two")])
+        complete(root / "cr.json", cr_scan["items"][1]["id"], wiki, entry)
+        check("bare-CR completion changes only the selected line",
+              cr_queue.read_bytes(), b"- [ ] One\r- [x] Two\r")
 
         # Missing, outside, and symlink evidence must leave a fresh queue
         # byte-for-byte untouched. Exercise the CLI's documented exit 2 for
@@ -536,6 +676,18 @@ def run_self_tests():
                   exclusive_report, exclusive_out)))
         check("exclusive-output refusal preserves the first snapshot",
               exclusive_out.read_bytes(), snapshot_before)
+        check("a reused snapshot path leaves no recovery directory",
+              list(root.glob(".wiki-add-scan-*")), [])
+
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            scan_rc = main(["scan", str(exclusive_q), "--out", str(root / "printed.json")])
+        shown = json.loads(printed.getvalue())
+        saved = json.loads((root / "printed.json").read_text(encoding="utf-8"))
+        check("scan stdout omits the backlog bytes that the snapshot keeps",
+              (scan_rc, "bytes_base64" in shown["source"],
+               "bytes_base64" in saved["source"], shown["items"] == saved["items"]),
+              (0, False, True, True))
         wiki_out = wiki / "snapshot.json"
         check("snapshot output inside Wiki is rejected",
               raises(ValueError, lambda: write_snapshot(
@@ -559,7 +711,8 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command")
     scan = commands.add_parser("scan", help="inventory pending top-level requests")
     scan.add_argument("backlog")
-    scan.add_argument("--out", required=True, help="new private snapshot file")
+    scan.add_argument("--out", required=True,
+                      help="new private snapshot file; never an existing path")
     checkpoint = commands.add_parser("complete", help="check off one reviewed item")
     checkpoint.add_argument("--snapshot", required=True, help="private scan snapshot")
     checkpoint.add_argument("--item", required=True, help="pending item id from that scan")
@@ -574,6 +727,9 @@ def main(argv=None):
         if args.command == "scan":
             report = scan_document(args.backlog)
             write_snapshot(report, args.out)
+            # Only `complete` needs the exact bytes, and it reads the snapshot.
+            report = dict(report, source={key: value for key, value in report["source"].items()
+                                          if key != "bytes_base64"})
         else:
             report = complete(args.snapshot, args.item, args.wiki, args.entry)
         print(json.dumps(report, ensure_ascii=False, indent=2))

@@ -1,13 +1,12 @@
 # Duplicates and reprocessing
 
 - [Reprocessing an existing note](#reprocessing-an-existing-note)
-- [Manual dedup index](#manual-dedup-index)
 - [Settle a slug before writing images](#settle-a-slug-before-writing-images)
 - [Publish an approved replacement](#publish-an-approved-replacement)
+  - [Finish a pending changed-slug handoff](#finish-a-pending-changed-slug-handoff)
 
-Use this reference for an approved rewrite, a filename collision, or the manual
-fallback when the dedup helper cannot run. The normal scan and its verdicts are
-in [Select the captures](../SKILL.md#1-select-the-captures-and-check-ownership).
+Use this reference for an approved rewrite or a filename collision. The normal
+scan and its verdicts are in [Select the captures](../SKILL.md#1-select-the-captures-and-check-ownership).
 
 ## Reprocessing an existing note
 
@@ -24,14 +23,31 @@ overwrite-or-skip decision; honor one already given in the conversation. An
 explicit request to resume an interrupted clipping run or reprocess a selected
 batch supplies that decision for matching notes this skill owns: re-read each
 raw and run the complete workflow from its current files rather than continuing
-an old scratch draft. Ordinary batch mode never overwrites a duplicate or
-selects polished notes on its own.
+an old scratch draft. A published pending changed-slug handoff instead follows
+[Finish a pending changed-slug handoff](#finish-a-pending-changed-slug-handoff),
+which reruns prepare before step 6. Ordinary batch mode never overwrites a
+duplicate or selects polished notes on its own.
 
 Record the original bytes, file identity, permissions and metadata before
-preparing the replacement. Exclude this one note from its own dedup scan.
-Remove only its leading Summary callout and following `___` separator to get
-the article body. Keep existing body prose, embeds and still-valid audit
-placeholders. Do not summarize the old summary as if it were source prose.
+preparing the replacement: `expected = atomic_move.regular_file_snapshot(<note>)`,
+kept unchanged through publication and cleanup. Exclude this one note from its
+own dedup scan.
+
+**Body source.** For a named `Articles/` note, remove only its leading Summary
+callout and following `___` separator to get the article body. Keep existing
+body prose, embeds and still-valid audit placeholders. Do not summarize the old
+summary as if it were source prose. For an authorized overwrite or resume from
+a raw capture, clean the raw afresh and stage its images and any audit
+recoveries to scratch. Match each staged image to an attachment the existing
+note already embeds, by identical bytes or else by caption, alt text and
+position as in the [completeness audit](completeness-audit.md#inventory-and-match-media).
+Use the matching embed name (only its slug changes for a changed slug) and
+discard the staged copy; only unmatched images take new numbers. Keep an
+equivalent existing converted-GIF embed or placeholder. Carry every unmatched
+existing embed into the draft at its old position with its caption, under its
+mapped name for a changed slug; never delete an attachment. Prepare requires
+every old-slug attachment in the new note, so if an old embed cannot be placed,
+stop and ask whether to keep the old slug.
 
 Apply the [frontmatter rules](metadata-verification.md#frontmatter-for-the-polished-note)
 to decide which fields regenerate and which preserve user state. In particular,
@@ -39,62 +55,17 @@ an unknown or absent review state is not permission to supply `false`; report
 that state and any metadata conflicts as required there.
 
 Retain existing figure numbers. An unchanged slug leaves existing attachments
-alone; new remote images use the next free number. A changed slug needs a
-reviewed dry-run rename plan, not early changes to files the original note uses.
-
-## Manual dedup index
-
-Use this only if `dedup_index.py` is unavailable and the complete `Articles/`
-scope can still be read. An unreadable directory is a failed inventory, not an
-empty one. Stop before notes or images are created if a complete scan cannot be
-established.
-
-Read each Markdown note's closed YAML frontmatter and first current `sources:`
-item. Only if that key is absent may legacy scalar `source:` supply the origin.
-Keep quoted scalars and lists intact; do not extract a later URL or infer
-ownership from duplicate keys, an empty current list or malformed YAML. Report
-unindexable notes and existing URL collisions. A valid first PDF wikilink is a
-PDF reading note, not an unindexable clipping. Decode the complete note strictly
-as UTF-8 (accepting a leading BOM) before trusting its frontmatter; invalid bytes
-anywhere make the note unindexable rather than an owner. A Markdown-named
-symlink or other non-regular `Articles/` entry occupies the output namespace but
-cannot establish URL ownership through its target; report it as unindexable.
-
-Normalize URLs for comparison only; retain the original URL in the note:
-
-- Reject origins with a missing host or an invalid, empty or zero port; they do
-  not establish a dedup key.
-- Lowercase scheme and host, drop a leading `www.`, and strip trailing path
-  slashes. Do not rewrite other host/path variants such as `m.` or `/amp`.
-- Drop ordinary fragments, but keep routing fragments (`#/posts/1`, `#!/posts/1`).
-- Strip only conventional tracking parameters: `utm_*`, `fbclid`, `gclid`,
-  `mc_cid` and `mc_eid`; strip `r` and `showWelcome` only on `substack.com`
-  and its subdomains, and strip the share parameters `s` and `t` only on
-  `x.com`, `twitter.com` and `mobile.twitter.com` (with or without `www.`).
-  Preserve `ref`, `referrer`, `share`, generic-domain `r`, `showWelcome`, `s`
-  and `t`, and unknown parameters, which can identify different pages.
-- Preserve the order and original spelling of surviving query fields. Origins
-  may distinguish `+` from `%20`, a bare flag from `flag=`, or signed query
-  bytes, as well as interpret repeated keys in order. Parsing/re-encoding or
-  sorting them can collapse distinct pages into one false duplicate.
-- Drop an empty trailing `?`. Preserve literal URL characters, including an
-  unpaired apostrophe; quote decoding is a YAML operation, not URL trimming.
-
-Build `{normalized URL → note path(s)}` once per batch and update it after each
-publication. Compare raw captures against both the existing index and earlier
-inputs. Different bodies at the same origin are still duplicates: retain the
-user's processed version unless they authorize a rewrite. Mobile/AMP variants
-can evade URL matching; the filename check below is a second guard, not license
-to silently merge them.
-
-An earlier raw input is only a pending candidate. A
-`duplicate-of-earlier-input` verdict becomes an ordinary skip only after that
-capture publishes successfully. If it fails or remains deferred, probe the
-later capture again against the current Articles index; it may still be new.
-Two captures matching an already published owner both remain `duplicate`, with
-that actual note as their ownership evidence.
+alone; new images continue after the highest occupied number. A changed slug
+needs a reviewed dry-run rename plan, not early changes to files the original
+note uses.
 
 ## Settle a slug before writing images
+
+Different bodies at the same origin are still duplicates: keep the user's
+processed version unless they authorize a rewrite. URL variants the normalizer
+keeps apart (scheme, an `m.` or AMP host, retained query fields) can pass the
+URL check. This slug check treats such a variant as the same article (skip or
+ask), never as license to merge silently or to create a `_2` copy.
 
 Check `Articles/<slug>.md` with `dedup_index.py --slug '<slug>'`; check
 PDF stems throughout recursive
@@ -108,8 +79,8 @@ free name.
 
 | Existing owner | Action |
 |---|---|
-| Note with the same normalized web origin | Batch: skip, keep raw, report the existing path and both URLs if the initial check missed them. Named capture: use the explicit overwrite decision, not filename similarity as authorization. |
-| Different article, PDF summary, PDF or loose figure set | Choose `<slug>_2`, then `_3`, … until the note and image stem are free. Use the suffix for both. Report the collision. |
+| The same article: a note with the same normalized web origin, or one whose origin differs only by scheme, an `m.`/AMP host or path alias, or query fields the normalizer keeps, and whose title and author/date match this capture's verified metadata | Batch: skip, keep the raw, and report a dedup escape with the existing path and both URLs. Named capture: use the explicit overwrite-or-skip decision, not filename similarity as authorization. If sameness is uncertain, treat it as this row, not the next. A marked research extract is skipped and reported, never offered for overwrite. |
+| A different source (URL and title/identity differ), PDF summary, PDF or loose figure set | Choose `<slug>_2`, then `_3`, … until the note and image stem are free. Use the suffix for both. Report the collision. |
 | Current note being explicitly reprocessed | Keep its stem if still correct, or plan its own note/image rename below. |
 
 Do not rename another owner's figures to free a stem. If a new collision appears
@@ -139,10 +110,13 @@ never moved, deleted or rewritten, including after a successful reprocess.
    resolved real `Articles/` directory, outside the note folder and on its filesystem. Preserve the original note's
    permissions. Recheck the destination before publication.
 4. Publish the complete staged note through the shared
-   [safe-write protocol](../../../shared/SAFE_WRITES.md). At a free destination
-   use exclusive creation. For an authorized rewrite, displace and verify the
-   exact snapshotted note before linking the staged replacement into the empty
-   public name; a recheck followed by `os.replace` still has a race. If
+   [safe-write API](../../../shared/SAFE_WRITES.md#call-the-shared-python-api).
+   At a free destination (a changed slug), call
+   `atomic_move.publish_new(staged, target, atomic_move.regular_file_snapshot, stage_parent)`.
+   For a same-name or same-file-spelling rewrite, call
+   `atomic_move.replace_expected(staged, target, expected, atomic_move.regular_file_snapshot, stage_dir, stage_parent=stage_parent)`
+   with the token recorded above and a fresh `stage_dir`. Never take a fresh
+   snapshot at commit time, and never recheck and then call `os.replace`. If
    publication fails, no attachment has moved and the unchanged old note still
    resolves.
 5. Read back the published note. For a same-path rewrite, place every newly
@@ -168,7 +142,10 @@ never moved, deleted or rewritten, including after a successful reprocess.
    exact old bytes to the new names, rolls back copies it cannot complete, and
    retains every old name. Its JSON supplies the exact one-to-one mapping and
    complete dependency report by checking every Markdown note outside the owner.
-   Keep that report unchanged for the next step.
+   Keep that report unchanged for the next step. Its top-level `ok: true` means
+   only that the new-name copies exist; remaining dependents are listed in
+   `dependency.blockers` (with `dependency.ok: false`), each a `path` and its
+   `references`.
    A refusal is not permission to copy by hand; retain the old note and images,
    conditionally withdraw only the exact new note if safe, and report every
    named recovery path.
@@ -178,13 +155,17 @@ never moved, deleted or rewritten, including after a successful reprocess.
    Resolve a refused placement with the documented placeholder and retain its
    scratch file. Once any new image has been published, keep its owner note
    public even if the later dependency handoff remains blocked.
-6. Do not finalize while prepare reports blockers. If every blocker is a Wiki
-   entry or recognized MOC (including one in `MOCs/`) and the dependency rewrite is authorized, pass
-   the exact prepare report and mapping to `wiki-lint`'s
-   [producer-mapped dependency repair](../../wiki-lint/references/external-artifact-repair.md).
-   The old and new images both resolve while it works. Foreign Markdown,
-   unreadable files, an incomplete scan, or an unauthorized rewrite remain
-   blockers; leave both versions in place and report the pending handoff.
+6. Do not finalize while prepare's `dependency.blockers` is nonempty. If every
+   blocker is a Wiki entry or recognized MOC (including one in `MOCs/`) and the
+   dependency rewrite is authorized, pass `wiki-lint`'s
+   [producer-mapped dependency repair](../../wiki-lint/references/external-artifact-repair.md)
+   the unchanged prepare JSON, the absolute old and new note paths, and the
+   step-7 `dependencies` command exactly as it will be re-run. If the user's
+   request did not already authorize rewriting those entries, ask once, naming
+   the blocker paths; the prepare report alone is not authorization. The old
+   and new images both resolve while it works. Foreign Markdown, unreadable
+   files, an incomplete scan, or an unauthorized rewrite remain blockers; leave
+   both versions in place and report the pending handoff.
 7. After the repair, run the same complete Markdown dependency re-probe:
 
    ```bash
@@ -215,14 +196,30 @@ never moved, deleted or rewritten, including after a successful reprocess.
    external dependencies around every retirement. A newly introduced link causes
    rollback. If any check fails, it retains both sets and reports the blocker or
    recovery path.
-9. After finalize succeeds, conditionally remove the distinct old note through
-   the shared protocol: displace it, verify the preflight identity and contents,
-   then discard only that verified version. Do not use a check followed by
-   `unlink`, remove it for the same-file spelling case, or remove it if it
-   changed. A cleanup refusal keeps the path; never delete first and report
-   broken references afterward. Report a mixed state rather than hiding it.
+9. After finalize succeeds, conditionally remove the distinct old note with
+   `atomic_move.remove_expected(old_note, expected, atomic_move.regular_file_snapshot, stage_dir, stage_parent=stage_parent)`,
+   passing the token recorded before the rewrite (or when finishing a pending
+   handoff) and a fresh `stage_dir`; clean that `stage_dir` only after success.
+   Do not use a check followed by `unlink`, remove it for the same-file
+   spelling case, or remove it if it changed. A cleanup refusal
+   keeps the path; never delete first and report broken references afterward.
+   Report a mixed state rather than hiding it.
 
 If the filesystem cannot provide safe publication, stop and report the refusal.
 Read back the published note and verify its embeds. Report note and attachment
 renames and the dependency re-probe result; do not modify unrelated notes or
 claim a failed rename completed.
+
+### Finish a pending changed-slug handoff
+
+When the user asks to finish or resume a pending handoff left by step 6
+(naming either note of the same-URL pair), confirm that both notes share the
+web origin, the old note embeds the old-slug images and the new note embeds
+their mapped names. Record `expected = atomic_move.regular_file_snapshot(<old note>)`
+from the old note you read for this check; step 9 passes that token. Rerun
+`rename --phase prepare --dry-run` with the original paths and slugs, review
+it, then run the identical live command. Copies prepared earlier are verified
+as `already-prepared`, and it returns the current mapping and dependency
+report. Continue at step 6, then steps 7–9. Do not re-clean the raw or redraft
+either note. A plain reprocess request for either note reports the pending
+handoff and asks whether to finish it first.

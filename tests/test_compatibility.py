@@ -245,28 +245,48 @@ class CompatibilityTests(unittest.TestCase):
             self.assertTrue(path.is_file())
             self.assertEqual(os.stat(path).st_mode & 0o777, 0o640)
 
-    def test_runtime_probe_enforces_supported_dependency_floors(self):
+    def test_parser_check_enforces_supported_dependency_floors(self):
         runtime = (ROOT / "shared/RUNTIME.md").read_text(encoding="utf-8")
-        figure_requirements = (
-            ROOT / "skills/figure-extract/scripts/requirements.txt"
-        ).read_text(encoding="utf-8")
-        root_requirements = (ROOT / "requirements.txt").read_text(
-            encoding="utf-8")
-        self.assertIn("PyMuPDF>=1.28.0", figure_requirements)
-        self.assertIn("Pillow>=12.3.0", figure_requirements)
-        self.assertIn("pypdf>=6.16.1", root_requirements)
         self.assertIn("Python 3.10+", runtime)
-        for probe in (
-                '"pypdf": (6, 16, 1)',
-                '"PyMuPDF": (1, 28, 0)',
-                '"Pillow": (12, 3, 0)'):
-            self.assertIn(probe, runtime)
-        self.assertIn("import pymupdf", runtime)
-        self.assertNotIn("import fitz", runtime)
+        self.assertIn("installed-version check", runtime)
+        self.assertNotIn("importlib.metadata", runtime)
+        script = ROOT / "shared/scripts/check_parsers.py"
+        checker = load("compat_check_parsers", script)
+        self.assertEqual(checker.MIN_PYTHON, (3, 10))
+        self.assertEqual(checker.IMPORTS["PyMuPDF"], "pymupdf")
+        self.assertNotIn("import fitz", script.read_text(encoding="utf-8"))
+        requirement = re.compile(r"(?m)^([A-Za-z0-9_.-]+)>=([0-9]+(?:\.[0-9]+)*)\s*$")
+        floors = {}
+        for path in ("requirements.txt",
+                     "skills/figure-extract/scripts/requirements.txt"):
+            text = (ROOT / path).read_text(encoding="utf-8")
+            self.assertIn("shared/scripts/check_parsers.py", text, path)
+            self.assertNotIn("RUNTIME.md", text, path)
+            for name, floor in requirement.findall(text):
+                floors[name] = tuple(int(part) for part in floor.split("."))
+        self.assertEqual(checker.MINIMUMS, floors)
+        mapping = json.loads(
+            (ROOT / "tools/package-files.json").read_text(encoding="utf-8"))
+        self.assertIn("shared/scripts/check_parsers.py", mapping["knowledge"])
+        self.assertNotIn("shared/scripts/check_parsers.py", mapping["investments"])
+        for skill in ("pdf-organize", "figure-extract", "paper-summarize",
+                      "wiki-build", "wiki-add", "wiki-lint"):
+            with self.subTest(skill=skill):
+                text = (ROOT / "skills" / skill / "SKILL.md").read_text(
+                    encoding="utf-8")
+                self.assertIn(
+                    "python3 '<plugin>/shared/scripts/check_parsers.py'", text)
+        # The path agents actually run: main() imports the three parsers.
+        result = subprocess.run([sys.executable, str(script)],
+                                capture_output=True, text=True,
+                                encoding="utf-8", timeout=120)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("parser check passed", result.stdout)
 
     def test_shared_helper_docs_use_the_plugin_python_floor(self):
         helpers = (
             "code_typography.py",
+            "entry_checks.py",
             "entry_structure.py",
             "equation_coverage.py",
             "introduced_aliases.py",

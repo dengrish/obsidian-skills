@@ -16,8 +16,13 @@ in order of preference:
 
 1. **Prefer the bundled script and structured arguments.** Pass each value as
    one argv element through a process API rather than pasting it into command
-   text. Use the active workflow's existing helpers for their supported
-   checks and mutations; their input validation remains required.
+   text. When a helper accepts a file of values, such as a JSON list of
+   titles or a reviewed plan, write the list to a file under `<scratch>` with
+   the host's file-writing tool and pass that file's path. Otherwise use the
+   helper's documented form (a repeated option, several positional arguments,
+   or one comma-separated argument), single-quoting each argument under rule 2
+   on a command line. Use the active workflow's existing helpers for their
+   supported checks and mutations; their input validation remains required.
 2. **Single-quote, never double-quote**, any untrusted value that must reach
    a POSIX command line. Inside `'…'` the shell expands nothing. Escape a
    literal apostrophe by ending the quote, writing `\'`, and reopening it:

@@ -42,11 +42,12 @@ _SPECIAL_RE = re.compile(
     r"(?<![!\[])\[(?:"
     + "|".join(re.escape(token) for token in SPECIAL_TOKENS)
     + r")\](?!\])")
+_EXTENSION_ALT = "|".join(sorted((re.escape(ext) for ext in FILE_EXTENSIONS),
+                                 key=len, reverse=True))
+# A compound extension that starts with a known one, such as ``.tar.gz`` or
+# ``.tar.zst``, is one literal shape and is reported whole.
 _EXTENSION_RE = re.compile(
-    r"(?<![\w/`])\.(?:"
-    + "|".join(sorted((re.escape(ext) for ext in FILE_EXTENSIONS),
-                      key=len, reverse=True))
-    + r")(?![\w`])",
+    r"(?<![\w/`])\.(?:%s)(?:\.[A-Za-z0-9]{1,10})*(?![\w`])" % _EXTENSION_ALT,
     re.IGNORECASE,
 )
 _DISPLAY_MATH_RE = re.compile(r"\$\$.*?\$\$", re.DOTALL)
@@ -139,6 +140,8 @@ def run_self_test(verbose=False):
         ("table span is excluded", "A | B\n---|---\n.csv | [CLS]", 0, ((0, 2),)),
         ("ordinary prose after a table stays visible",
          "A | B\n---|---\nx | y\n\nThen save .csv.", 1, ((0, 2),)),
+        ("a compound extension is one shape", "Ship a .tar.gz or .tar.bz2 file.", 2),
+        ("a backticked compound extension is not bare", "Ship a `.tar.gz` file.", 0),
     ]
     failed = 0
     for case in cases:
@@ -151,7 +154,22 @@ def run_self_test(verbose=False):
         if not ok:
             print("  expected %r, got %r" % (expected, got))
             failed += 1
-    print("%d/%d self-test cases pass" % (len(cases) - failed, len(cases)))
+    token_cases = [
+        ("compound extension token is whole",
+         "Ship a .tar.gz or .tar.bz2 file.", [".tar.gz", ".tar.bz2"]),
+        ("a compound after a known extension is reported whole",
+         "Archives ship as .tar.zst files.", [".tar.zst"]),
+    ]
+    for name, text, expected in token_cases:
+        tokens = [item["token"] for item in find_bare_code_shapes(text)]
+        ok = tokens == expected
+        if verbose or not ok:
+            print(("PASS" if ok else "FAIL") + ": " + name)
+        if not ok:
+            print("  expected %r, got %r" % (expected, tokens))
+            failed += 1
+    total = len(cases) + len(token_cases)
+    print("%d/%d self-test cases pass" % (total - failed, total))
     return failed
 
 

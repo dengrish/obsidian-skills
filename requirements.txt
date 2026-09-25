@@ -1,5 +1,5 @@
-# Full plugin runtime and convention-test dependencies.
+# Knowledge plugin runtime dependencies.
 -r skills/figure-extract/scripts/requirements.txt
 # Security floor for parsing and rewriting untrusted PDFs. Keep this synchronized
-# with the installed-version probe in shared/RUNTIME.md.
+# with MINIMUMS in shared/scripts/check_parsers.py.
 pypdf>=6.16.1

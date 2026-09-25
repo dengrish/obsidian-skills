@@ -29,6 +29,34 @@ import atomic_move
 MANIFEST_FILE = ".figure-manifest.tsv"
 REVIEW_FILE = ".figure-review.txt"
 
+#: The header every writer of the ownership manifest publishes. Both
+#: extraction helpers use this one copy, so whichever wrote last keeps the
+#: destructive-edit warning.
+MANIFEST_HEADER = (
+    "# figure-extract output manifest.\n"
+    "# One per line: <figure filename><TAB><sha256 of the bytes written>\n"
+    "# This is how a re-run tells its own output from another skill's file at\n"
+    "# the same name (Sources/Images/ is shared -- see CONVENTIONS.md 8b).\n"
+    "# Removing a record or file is destructive: first verify the exact figure\n"
+    "# and obtain any authorization the current task has not already supplied.\n"
+)
+
+#: The header a fresh review ledger starts with.
+REVIEW_HEADER = (
+    "# figure-extract review marks.\n"
+    "# One per line: <pdf_stem><TAB><figure label>[<TAB>note]\n"
+    "# A flagged bbox listed here is reported as reviewed, not as needing\n"
+    "# review, so a crop you have already checked (or fixed explicitly) stops\n"
+    "# coming back every run. Delete a line to un-review it.\n"
+)
+
+# A hand-written `STEM:FIG` review row, spelled as --mark-reviewed accepts it
+# (spaces may follow the colon). The key is lazy, so a stem may hold a
+# colon, and the label must end the row or precede a `#` comment, so a colon
+# inside that comment never becomes the separator.
+_HAND_REVIEW_ROW = re.compile(
+    r"(?P<key>.+?): *(?P<label>[A-Za-z0-9][A-Za-z0-9.-]*)(?=\s+#|\s*\Z)")
+
 
 class SidecarConflict(FileExistsError):
     """A sidecar no longer matches the version a caller read and edited."""
@@ -93,11 +121,12 @@ def _records(text, kind):
             if "\t" in raw:
                 fields = raw.split("\t", 2)
                 key, value = fields[:2]
+                value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
             else:
-                key, sep, value = raw.rpartition(":")
-                if not sep:
+                match = _HAND_REVIEW_ROW.match(raw)
+                if not match:
                     raise ValueError("review line %d: expected stem<TAB>label or STEM:FIG" % number)
-            value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
+                key, value = match.group("key"), match.group("label")
             if not _fragment(key) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", value):
                 raise ValueError("review line %d: invalid stem or figure label" % number)
             yield number - 1, key, value, (0, len(key))
@@ -260,7 +289,7 @@ def _publish_sidecar(staged, path, expected):
         ) from exc
 
 
-def _write_sidecar(path, body, expected=None):
+def _write_sidecar(path, body, *, expected):
     """Conditionally publish one validated sidecar, preserving its mode.
 
     Stage beside the destination directory, not inside the flat image folder.
@@ -268,10 +297,15 @@ def _write_sidecar(path, body, expected=None):
     revalidated against the exact snapshot their caller parsed; no operation
     blindly replaces the public pathname. A killed process cannot leave
     unfinished metadata among the files consumers list.
+
+    `expected` is the snapshot (from `read_sidecar`) the caller parsed before
+    planning `body`. It is required: a snapshot taken only here would adopt and
+    overwrite an intervening edit instead of detecting it (SAFE_WRITES.md).
     """
-    check_manifest_writable(path)
     if expected is None:
-        _current, expected = read_sidecar(path)
+        raise ValueError("%s: a sidecar write needs the snapshot its caller "
+                         "parsed; read it with read_sidecar first" % path)
+    check_manifest_writable(path)
     mode = expected[3] if expected[0] else None
     directory = os.path.dirname(path) or "."
     os.makedirs(directory, exist_ok=True)
@@ -309,14 +343,14 @@ def _write_sidecar(path, body, expected=None):
             shutil.rmtree(stage_dir, ignore_errors=True)
 
 
-def write_manifest(path, manifest, header="", expected=None):
+def write_manifest(path, manifest, *, expected, header=MANIFEST_HEADER):
     """Atomically write valid ownership records, preserving existing modes."""
     body = header + "".join("%s\t%s\n" % (key, manifest[key]) for key in sorted(manifest))
     parse_manifest(body)
     return _write_sidecar(path, body, expected=expected)
 
 
-def write_review(path, body, expected=None):
+def write_review(path, body, *, expected):
     """Atomically write a complete, valid review ledger."""
     parse_reviewed(body)
     return _write_sidecar(path, body, expected=expected)
@@ -327,7 +361,49 @@ def self_test():
     import unittest
     from unittest import mock
 
+    def _now(path):
+        """The snapshot a caller would have parsed just before planning."""
+        return read_sidecar(path)[1]
+
     class StateTests(unittest.TestCase):
+        def test_hand_written_review_comments_keep_their_mark(self):
+            text = ("Doe_Study_2025:2 # checked: ok\n"
+                    "Doe_Study_2025:3 # checked: crop ok\n"
+                    "A:B:10-5 # colon stem: fine\n"
+                    "Report #3:4\n")
+            self.assertEqual(parse_reviewed(text), {
+                ("Doe_Study_2025", "2"), ("Doe_Study_2025", "3"),
+                ("A:B", "10-5"), ("Report #3", "4")})
+            updated = rewrite_sidecar(
+                text, {"Doe_Study_2025": "Doe_Study_2026"}, "review")
+            self.assertEqual(
+                updated, text.replace("Doe_Study_2025", "Doe_Study_2026"))
+            for bad in ("Doe:2 extra\n", "no separator\n", "Doe: 2 extra\n"):
+                with self.assertRaises(ValueError):
+                    parse_reviewed(bad)
+
+        def test_hand_written_review_allows_space_after_colon(self):
+            # The spelling --mark-reviewed accepts ('Doe: 2') stays a valid
+            # ledger row, so an older hand-typed ledger keeps parsing.
+            self.assertEqual(parse_reviewed("Doe: 2\n"), {("Doe", "2")})
+            self.assertEqual(parse_reviewed("Doe:  2 # c: x\n"), {("Doe", "2")})
+            self.assertEqual(parse_reviewed("A:B: 10-5\n"), {("A:B", "10-5")})
+            self.assertEqual(
+                rewrite_sidecar("Doe: 2\n", {"Doe": "Roe"}, "review"), "Roe: 2\n")
+
+        def test_writers_require_the_parsed_snapshot(self):
+            with tempfile.TemporaryDirectory() as directory:
+                path = os.path.join(directory, MANIFEST_FILE)
+                with self.assertRaises(TypeError):
+                    write_manifest(path, {"A_fig_1.png": "a" * 64})
+                with self.assertRaises(ValueError):
+                    write_review(path, "A\t1\n", expected=None)
+                self.assertFalse(os.path.lexists(path))
+                write_manifest(path, {"A_fig_1.png": "a" * 64},
+                               expected=_now(path))
+                with open(path, encoding="utf-8") as fh:
+                    self.assertTrue(fh.read().startswith(MANIFEST_HEADER))
+
         def test_roundtrip_and_preservation(self):
             text = "# keep this\r\nOld_fig_1.png\t" + "a" * 64 + "\r\nOther_fig_2.png\t" + "b" * 64 + "\r\n"
             updated = rewrite_sidecar(text, {"Old_fig_1.png": "New_fig_1.png"}, "manifest")
@@ -342,14 +418,14 @@ def self_test():
             with tempfile.TemporaryDirectory() as directory:
                 images = os.path.join(directory, "Images")
                 path = os.path.join(images, REVIEW_FILE)
-                write_review(path, text)
+                write_review(path, text, expected=_now(path))
                 before = open(path, "rb").read()
                 interrupted = None
                 with mock.patch.dict(globals(), {
                         "_publish_sidecar": mock.Mock(
                             side_effect=OSError("interrupted"))}):
                     with self.assertRaises(OSError) as caught:
-                        write_review(path, text + "New\t4\n")
+                        write_review(path, text + "New\t4\n", expected=_now(path))
                     interrupted = caught.exception
                 self.assertEqual(open(path, "rb").read(), before)
                 self.assertTrue(os.path.isfile(os.path.join(
@@ -464,7 +540,7 @@ def self_test():
 
                 with mock.patch.object(tempfile, "mkdtemp",
                                        side_effect=tracked_mkdtemp):
-                    write_manifest(path, {"A_fig_1.png": "a" * 64})
+                    write_manifest(path, {"A_fig_1.png": "a" * 64}, expected=_now(path))
                 self.assertEqual(stage_parents, [os.path.realpath(real_root)])
                 self.assertFalse(any(name.startswith(".figure-state-stage-")
                                      for name in os.listdir(real_root)))
@@ -475,7 +551,7 @@ def self_test():
                         "_publish_sidecar": mock.Mock(
                             side_effect=OSError("blocked publication"))}):
                     with self.assertRaises(OSError) as caught:
-                        write_manifest(path, {"B_fig_1.png": "b" * 64})
+                        write_manifest(path, {"B_fig_1.png": "b" * 64}, expected=_now(path))
                 self.assertEqual(open(path, "rb").read(), before)
                 self.assertTrue(os.path.isfile(os.path.join(
                     caught.exception.staging_path, MANIFEST_FILE)))
@@ -492,7 +568,8 @@ def self_test():
                 with mock.patch.object(atomic_move, "publish_new",
                                        side_effect=refuse_link):
                     with self.assertRaises(atomic_move.LinkUnavailable) as caught:
-                        write_manifest(no_link, {"C_fig_1.png": "c" * 64})
+                        write_manifest(no_link, {"C_fig_1.png": "c" * 64},
+                                       expected=_now(no_link))
                 self.assertEqual(caught.exception.recovery_path,
                                  caught.exception.staging_path)
                 self.assertTrue(os.path.isfile(os.path.join(
@@ -500,7 +577,7 @@ def self_test():
                     os.path.basename(no_link))))
                 shutil.rmtree(caught.exception.staging_path)
                 with self.assertRaises(ValueError):
-                    write_manifest(path, {"A_fig_1.png": "bad"})
+                    write_manifest(path, {"A_fig_1.png": "bad"}, expected=_now(path))
                 self.assertEqual(open(path, "rb").read(), before)
                 self.assertEqual(read_manifest(path), {"A_fig_1.png": "a" * 64})
                 self.assertEqual(read_manifest(os.path.join(real_images, "absent")), {})
@@ -515,7 +592,8 @@ def self_test():
                 linked_path = os.path.join(logical_images, MANIFEST_FILE)
                 with mock.patch.object(tempfile, "mkdtemp",
                                        side_effect=tracked_mkdtemp):
-                    write_manifest(linked_path, {"A_fig_1.png": "a" * 64})
+                    write_manifest(linked_path, {"A_fig_1.png": "a" * 64},
+                                   expected=_now(linked_path))
                 self.assertEqual(stage_parents, [os.path.realpath(real_root)])
                 self.assertTrue(os.path.isfile(os.path.join(
                     real_images, MANIFEST_FILE)))
@@ -523,7 +601,7 @@ def self_test():
         def test_stale_snapshot_and_late_new_occupant_are_preserved(self):
             with tempfile.TemporaryDirectory() as directory:
                 path = os.path.join(directory, MANIFEST_FILE)
-                write_manifest(path, {"A_fig_1.png": "a" * 64})
+                write_manifest(path, {"A_fig_1.png": "a" * 64}, expected=_now(path))
                 _manifest, expected = read_manifest_snapshot(path)
                 late = b"B_fig_1.png\t" + b"b" * 64 + b"\n"
                 with open(path, "wb") as fh:
@@ -547,7 +625,7 @@ def self_test():
                 images = os.path.join(directory, "Images")
                 os.makedirs(images)
                 path = os.path.join(images, MANIFEST_FILE)
-                write_manifest(path, {"A_fig_1.png": "a" * 64})
+                write_manifest(path, {"A_fig_1.png": "a" * 64}, expected=_now(path))
                 _manifest, expected = read_manifest_snapshot(path)
                 foreign = b"B_fig_1.png\t" + b"b" * 64 + b"\n"
                 real_move = atomic_move.move_noreplace
@@ -598,7 +676,7 @@ def self_test():
                 self.assertEqual(open(recovery_path, "rb").read(), foreign)
 
                 post_path = os.path.join(images, "post-publication.tsv")
-                write_manifest(post_path, {"Old_fig_1.png": "a" * 64})
+                write_manifest(post_path, {"Old_fig_1.png": "a" * 64}, expected=_now(post_path))
                 original = open(post_path, "rb").read()
                 _manifest, post_expected = read_manifest_snapshot(post_path)
                 after = b"Late_fig_1.png\t" + b"f" * 64 + b"\n"
@@ -683,24 +761,24 @@ def self_test():
         def test_read_only_and_linked_sidecars_remain_untouched(self):
             with tempfile.TemporaryDirectory() as directory:
                 path = os.path.join(directory, MANIFEST_FILE)
-                write_manifest(path, {"A_fig_1.png": "a" * 64})
+                write_manifest(path, {"A_fig_1.png": "a" * 64}, expected=_now(path))
                 before = open(path, "rb").read()
                 os.chmod(path, 0o444)
                 try:
                     with self.assertRaises(ValueError):
-                        write_manifest(path, {"B_fig_1.png": "b" * 64})
+                        write_manifest(path, {"B_fig_1.png": "b" * 64}, expected=_now(path))
                     self.assertEqual(open(path, "rb").read(), before)
                     self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o444)
                 finally:
                     os.chmod(path, 0o640)
-                write_manifest(path, {"B_fig_1.png": "b" * 64})
+                write_manifest(path, {"B_fig_1.png": "b" * 64}, expected=_now(path))
                 self.assertEqual(
                     stat.S_IMODE(os.stat(path).st_mode), 0o640)
                 link = os.path.join(directory, "linked.tsv")
                 os.symlink(path, link)
                 before = open(path, "rb").read()
                 with self.assertRaises(ValueError):
-                    write_manifest(link, {"C_fig_1.png": "c" * 64})
+                    write_manifest(link, {"C_fig_1.png": "c" * 64}, expected=_now(path))
                 self.assertTrue(os.path.islink(link))
                 self.assertEqual(open(path, "rb").read(), before)
 

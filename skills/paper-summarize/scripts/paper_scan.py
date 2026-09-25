@@ -17,6 +17,11 @@ that decide a run:
     (`CONVENTIONS.md` §1a).  Every figure and every note in this pipeline keys
     to the PDF's on-disk stem, so a rename afterwards orphans the whole set
     under a name nothing looks for — invisibly.
+  * **Which are feed-owned attachments** (`CONVENTIONS.md` §1): the
+    collector's `x-…`/`rss-…` PDFs (`naming.is_feed_attachment`).  Their names
+    belong to its receipts, so a folder sweep skips them as `feed` and never
+    routes them to pdf-organize.  They still count in the vault-wide
+    basename inventory.
   * **Which figures exist for each stem**, under §8a's consumer glob
     `[source_stem]_fig*` — matched on `_fig`, never the stricter `_fig_`, and
     at any extension.
@@ -54,7 +59,9 @@ Add `--json` for the machine-readable form, `--test` to run the self-test.
 Three overrides relax a skip: `--allow-unorganized`, `--include-split-books`
 and `--include-chapters`.
 Naming a single PDF processes it whatever it is -- explicit naming overrides
-every folder filter, so a named chapter is a `new`, not a `chapter`.
+every folder filter, so a named chapter is a `new`, not a `chapter`.  A feed
+attachment is the one exception: named, it still needs `--allow-unorganized`
+and keeps its collector name; in a folder sweep it is always `feed`.
 """
 
 _OBSIDIAN_SHARED_MODULES = ('naming', 'portable_names', 'vault_artifacts', 'yaml_scalars')
@@ -102,9 +109,10 @@ import os
 import re
 import stat
 import sys
-import unicodedata
 
-from naming import chapter_book_stem, core_stem, looks_canonical, stem_of
+from naming import (chapter_book_stem, core_stem, is_feed_attachment,
+                    looks_canonical, stem_of)
+from portable_names import portable_identity
 from vault_artifacts import (inventory_pdfs, inventory_source_figures,
                              local_link_matches, output_vault_root, verify_selected_pdf)
 from yaml_scalars import parse_source_fields
@@ -120,7 +128,7 @@ _BIG = 10 ** 9
 
 #: The status set, whole.  Nothing else is ever emitted, and the order here is
 #: the order the resolver applies them in (see `classify`).
-STATUSES = ("book", "chapter", "unorganized", "collision", "legacy",
+STATUSES = ("book", "chapter", "feed", "unorganized", "collision", "legacy",
             "done", "new")
 
 def _frontmatter_fence(line):
@@ -165,7 +173,7 @@ def figure_parts(label):
 
 
 def _name_key(name):
-    return unicodedata.normalize("NFC", name).casefold()
+    return portable_identity(name)
 
 
 def article_note_index(notes):
@@ -515,8 +523,8 @@ def books_in(stems):
 
 
 def classify(stem, books, note_state, allow_unorganized=False,
-             include_books=False, include_chapters=False):
-    """One PDF's status.  Two skips, then a refusal, then the note check.
+             include_books=False, include_chapters=False, named=False):
+    """One PDF's status.  Three skips, then a refusal, then the note check.
 
     `note_state` is "absent", "ours" (a note of this stem whose `source:` names
     this PDF and whose body is a real summary), "legacy" (same `source:`, but
@@ -533,6 +541,11 @@ def classify(stem, books, note_state, allow_unorganized=False,
 
     `include_chapters` is what explicit single-file naming sets: a chapter is
     skipped by a folder sweep and processed when the user names it.
+
+    A feed-owned attachment (`CONVENTIONS.md` §1) is skipped as `feed` unless
+    it was `named` AND `allow_unorganized` accepts its collector name: the
+    override alone never pulls one into a folder sweep, and nothing here ever
+    routes one to pdf-organize for a rename.
     """
     # Folded on BOTH sides: `books_in` folds what it produces, and a caller
     # passing a raw set (the self-test does) must get the same answer.
@@ -541,6 +554,8 @@ def classify(stem, books, note_state, allow_unorganized=False,
         return "book"
     if chapter_book_stem(stem, is_stem=True) and not include_chapters:
         return "chapter"
+    if is_feed_attachment(stem, is_stem=True) and not (named and allow_unorganized):
+        return "feed"
     if not looks_canonical(stem, is_stem=True) and not allow_unorganized:
         return "unorganized"
     if note_state == "theirs":
@@ -555,8 +570,9 @@ def scan(src, notes, images, allow_unorganized=False,
     note_index = article_note_index(notes)
     # Explicit naming overrides every folder filter, here as everywhere else
     # in this plugin: `--src` pointed at one PDF means process that PDF.
+    named = os.path.isfile(src)
     if include_chapters is None:
-        include_chapters = os.path.isfile(src)
+        include_chapters = named
     pdfs = find_pdfs(src)
     vault_root = output_vault_root(images)
     vault_inventory = (inventory_pdfs(vault_root)
@@ -603,14 +619,17 @@ def scan(src, notes, images, allow_unorganized=False,
             ]))
             source_gate_error = selected_gate.reason
         status = classify(stem, books, state, allow_unorganized,
-                          include_books, include_chapters)
+                          include_books, include_chapters, named)
+        feed = is_feed_attachment(stem, is_stem=True)
         if (conflicts or source_gate_error) \
-                and status not in ("book", "chapter", "unorganized"):
+                and status not in ("book", "chapter", "feed", "unorganized"):
             # Basename-only sources cannot distinguish two different PDFs in
             # nested folders, and both would otherwise write the same note.
             status = "collision"
         try:
-            figures = figures_for(images, stem)
+            # A skipped feed attachment is not a unit of work, so its image
+            # slots are not inspected and cannot change the exit status.
+            figures = [] if status == "feed" else figures_for(images, stem)
             figure_inventory_error = ""
         except ValueError as exc:
             # Keep the rest of a vault scan useful. This one paper remains
@@ -629,8 +648,10 @@ def scan(src, notes, images, allow_unorganized=False,
             "note_conflicts": note_conflicts,
             "figures": figures,
             "figure_inventory_error": figure_inventory_error,
+            "feed_attachment": feed,
             "unorganized_override": bool(
-                allow_unorganized and not looks_canonical(stem, is_stem=True)),
+                allow_unorganized and status != "feed"
+                and not looks_canonical(stem, is_stem=True)),
         })
     counts = {s: sum(1 for r in rows if r["status"] == s) for s in STATUSES}
     return {"src": src, "notes": notes, "images": images,
@@ -644,12 +665,13 @@ def render(result):
 
     lines = []
     c = result["counts"]
-    lines.append("%d PDF(s): %d new, %d already summarised, %d book(s) and "
-                 "%d chapter(s) skipped, %d refused as unorganized, "
+    lines.append("%d PDF(s): %d new, %d already summarised, %d book(s), "
+                 "%d chapter(s) and %d feed-owned attachment(s) skipped, "
+                 "%d refused as unorganized, "
                  "%d name collision(s), %d legacy embed-note(s)"
                  % (sum(c.values()), c["new"], c["done"], c["book"],
-                    c["chapter"], c["unorganized"], c["collision"],
-                    c["legacy"]))
+                    c["chapter"], c["feed"], c["unorganized"],
+                    c["collision"], c["legacy"]))
     for row in result["pdfs"]:
         figs = row["figures"]
         # Whole figures, panels, and derived variants share one logical count,
@@ -677,6 +699,13 @@ def render(result):
         if len(logical) > 12:
             shown += ", …"
         lines.append("  [%-11s] %s" % (row["status"], shown_text(row["stem"])))
+        if row["status"] == "feed":
+            # Not a unit of work: its image slots were never inspected.
+            lines.append("      feed-owned, skipped: the collector's receipts "
+                         "record this name (CONVENTIONS.md §1), so never "
+                         "rename it. Only when the user names it, rescan this "
+                         "file alone with --allow-unorganized")
+            continue
         lines.append("      figures: %d%s%s"
                      % (len(logical), ("  (" + shown + ")") if logical else "",
                         ("  + %d panel(s) of them, in %d file(s)"
@@ -707,7 +736,11 @@ def render(result):
                          "the user which is current; do not embed either on a "
                          "guess." % (shown_text(label), ", ".join(
                              shown_text(name) for name in names)))
-        if row.get("unorganized_override"):
+        if row.get("unorganized_override") and row.get("feed_attachment"):
+            lines.append("      OVERRIDE: a feed-owned attachment used under "
+                         "its collector name with --allow-unorganized; never "
+                         "rename it (CONVENTIONS.md §1)")
+        elif row.get("unorganized_override"):
             lines.append("      OVERRIDE: this stem is still unorganized; "
                          "--allow-unorganized changed the status but did not "
                          "make the filename durable")
@@ -724,7 +757,10 @@ def render(result):
             if row.get("source_conflicts"):
                 lines.append("      %s shares this PDF basename and the same "
                              "output note: %s. Nothing may be written until "
-                             "pdf-organize gives the sources distinct names."
+                             "the duplicate is resolved: pdf-organize refuses "
+                             "both copies, so ask the user to remove the "
+                             "redundant copy or to rename or move one out of "
+                             "the vault, then retry."
                              % (", ".join(shown_text(p) for p in
                                           row["source_conflicts"]),
                                 shown_text(row["note"])))
@@ -835,6 +871,12 @@ _CLASSIFY_CASES = [
     ("Kuhn_X_2012_src", {"kuhn_x_2012"}, "absent", "book"),
     # NEAR MISS: folding must not pair two genuinely different documents.
     ("Kuhn_Y_2012", {"kuhn_x_2012"}, "absent", "new"),
+    # Feed-owned collector attachments (CONVENTIONS §1) are skipped -- never
+    # refused as unorganized, which would route them to a rename.
+    ("rss-04dbe4d2aaf17884aaf0f2878cca8178", set(), "absent", "feed"),
+    ("x-1234567890-0123456789abcdef01234567", set(), "absent", "feed"),
+    # NEAR MISS: a short hash is an ordinary unorganized name.
+    ("rss-04dbe4d2", set(), "absent", "unorganized"),
 ]
 
 
@@ -1024,6 +1066,17 @@ def run_self_test():
                 include_chapters=True) != "new":
         bad += 1
         print("FAIL explicit naming did not clear the chapter skip")
+    # A feed attachment is selected only when named AND accepted under its
+    # collector name; the override alone never pulls one into a sweep.
+    _rss = "rss-04dbe4d2aaf17884aaf0f2878cca8178"
+    for kwargs, want in (({"allow_unorganized": True}, "feed"),
+                         ({"named": True}, "feed"),
+                         ({"allow_unorganized": True, "named": True}, "new")):
+        n += 1
+        if classify(_rss, set(), "absent", **kwargs) != want:
+            bad += 1
+            print("FAIL classify(feed attachment, %r) -> %r, expected %r"
+                  % (kwargs, classify(_rss, set(), "absent", **kwargs), want))
     # The two skips must beat the refusal, or a scoping decision reaches the
     # user as a naming complaint.  This is the ordering the docstring claims.
     n += 1
@@ -1477,6 +1530,13 @@ def run_self_test():
     if "shares this PDF basename" not in render(conflicted):
         bad += 1
         print("FAIL source collisions did not explain the conflicting PDF paths")
+    # pdf-organize refuses every copy of a shared basename, so the remedy is
+    # the user's, never a pdf-organize rename.
+    n += 1
+    if ("ask the user to remove the redundant copy" not in render(conflicted)
+            or "pdf-organize gives" in render(conflicted)):
+        bad += 1
+        print("FAIL a duplicate basename was not handed to the user to resolve")
     single_conflicted = scan(
         os.path.join(_v, "Sources", "PDFs", "first", "Dup_Study_2025.pdf"),
         os.path.join(_v, "Articles"), os.path.join(_v, "Sources", "Images"))
@@ -1626,6 +1686,57 @@ def run_self_test():
         if len(_whole_vault_calls) != 1:
             bad += 1
             print("FAIL folder scan did not reuse one whole-vault PDF inventory")
+
+    # A folder sweep skips feed-owned attachments with an informational line:
+    # exit 0, no refusal, and never an instruction to run pdf-organize.  A
+    # named one keeps its collector name under --allow-unorganized and still
+    # meets the vault-wide basename gate.
+    with tempfile.TemporaryDirectory(dir=_d, prefix="feed-vault-") as _feed_vault:
+        for _sub in ("Sources/PDFs", "Sources/Images", "Articles", "Inbox"):
+            os.makedirs(os.path.join(_feed_vault, _sub))
+        _feed_pdfs = os.path.join(_feed_vault, "Sources", "PDFs")
+        _rss_pdf = os.path.join(_feed_pdfs, _rss + ".pdf")
+        for _file in (_rss_pdf, os.path.join(
+                _feed_pdfs, "x-1234567890-0123456789abcdef01234567.pdf"),
+                os.path.join(_feed_pdfs, "Doe_Feed_2025.pdf")):
+            with open(_file, "wb") as _handle:
+                _handle.write(b"%PDF-1.4\n")
+        _feed_notes = os.path.join(_feed_vault, "Articles")
+        _feed_images = os.path.join(_feed_vault, "Sources", "Images")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = main(["--src", _feed_pdfs, "--notes", _feed_notes,
+                         "--images", _feed_images])
+        _sweep = output.getvalue()
+        n += 1
+        if (code != 0 or "2 feed-owned attachment(s) skipped" not in _sweep
+                or "0 refused as unorganized" not in _sweep
+                or _sweep.count("feed-owned, skipped") != 2
+                or "pdf-organize" in _sweep):
+            bad += 1
+            print("FAIL a folder sweep did not skip feed attachments cleanly "
+                  "(code=%r):\n%s" % (code, _sweep))
+        n += 1
+        if scan(_rss_pdf, _feed_notes, _feed_images)["pdfs"][0]["status"] != "feed":
+            bad += 1
+            print("FAIL a named feed attachment was selected without "
+                  "--allow-unorganized")
+        _chosen = scan(_rss_pdf, _feed_notes, _feed_images, allow_unorganized=True)
+        _row = _chosen["pdfs"][0]
+        n += 1
+        if (_row["status"] != "new" or not _row["feed_attachment"]
+                or "never rename" not in render(_chosen)
+                or "pdf-organize" in render(_chosen)):
+            bad += 1
+            print("FAIL a named feed attachment lost its --allow-unorganized "
+                  "route: %r" % _row)
+        with open(os.path.join(_feed_vault, "Inbox", _rss + ".pdf"), "wb") as _handle:
+            _handle.write(b"%PDF-1.4\n")
+        n += 1
+        if scan(_rss_pdf, _feed_notes, _feed_images,
+                allow_unorganized=True)["pdfs"][0]["status"] != "collision":
+            bad += 1
+            print("FAIL a feed attachment left the vault-wide basename inventory")
 
     # Real directory enumeration errors must not become clean inventories.
     # The independent integration fixture also exercises these with chmod000.

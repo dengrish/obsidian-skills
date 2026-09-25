@@ -2,31 +2,15 @@
 """Canonical English inflection and light collision-stem helpers.
 
 Two skills ask the same question and must not answer it differently.
-`wiki-build` probes a *candidate* title against the vault (`SKILL.md` step 3,
-probes (c), (e), and (f)); `wiki-lint` sweeps the *whole vault* for near-duplicate
-pairs, and CONVENTIONS.md §9 gives whole-vault dedup detection to wiki-lint
-alone. Both rest on one fact — which two word forms are the same word — and
-until this module existed each held its own copy: `singularize()` in
-`wiki-build/scripts/find_collisions.py`, with its irregular tables and its
-length floors, and a three-rule regular-plural stripper called `singular()` in
-`wiki-lint/scripts/scan_vault.py`. The two disagreed on every irregular:
-
-    token        find_collisions   scan_vault
-    hypotheses   hypothesis        hypothes
-    analyses     analysis          analys
-    matrices     matrix            matrice
-    indices      index             indice
-    leaves       leaf              leave
-    axes         axis              ax
-    series       series            sery
-
-so `hypothesis-testing` / `testing-hypotheses` fired for wiki-build, probing
-one new candidate against the vault, and *not* for wiki-lint's sweep — and
-the sweep is the only thing that ever looks at a pair already sitting in the
-vault, so a pair that got in was seen by nobody, forever. Nothing raises; the
-vault simply keeps two entries for one concept. CONVENTIONS.md §4a is the
-precedent (the slug algorithm lives in `shared/scripts/slugify.py` and both
-skills import it) and §9 is the ownership split this restores.
+`wiki-build` probes a *candidate* title against the vault (collision probes
+(c), (e) and (f) in `references/merge.md`, run by `find_collisions.py`);
+`wiki-lint` sweeps the *whole vault* for near-duplicate pairs, and
+CONVENTIONS.md §9 gives whole-vault dedup detection to wiki-lint alone. Both
+rest on one fact — which two word forms are the same word — so both import
+this module rather than keeping a singulariser of their own. Separate copies
+once disagreed on every irregular plural (`hypotheses`, `matrices`, `axes`),
+so the vault sweep never saw a pair that the create-time probe would have
+caught.
 
     Token level                     Slug level (the probe keys)
     -----------                     ---------------------------
@@ -217,12 +201,8 @@ def plural_key(slug):
 def wordorder_key_singular(slug):
     """Probe (e) key with each token singularised first.
 
-    wiki-build's SKILL.md states probe (e) as a pure token sort and then gives
-    ``weight-tying`` vs ``tying-weights.md`` as its worked example, claiming
-    "both produce [tying, weight] after sort".  They do not -- ``weights`` does
-    not sort to ``weight``.  Probe (e) is therefore run on both the raw and the
-    per-token-singularised forms, so the skill's own worked example actually
-    fires.
+    ``weight-tying`` matches ``tying-weights`` only through this key; callers
+    also keep the raw token sort as a separate key.
     """
     return "-".join(sorted(singularize(t) for t in slug.split("-") if t))
 

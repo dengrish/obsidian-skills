@@ -1,6 +1,6 @@
 # Flashcards — when a card may be rewritten (Task 1, item 19)
 
-**Read this whenever a card may be added or changed** — on any `item19` finding, and on every entry when Task 1 runs a definition review. It is the judgment layer on top of item 19's mechanical floor (`references/qc-items.md`); the targeted coverage repair and rewrite bars below govern existing cards.
+**Read this whenever a card may be added or changed** — on any `item19` finding, and on every entry when Task 1 runs a definition review. It is the judgment layer on top of item 19's mechanical floor (`references/qc-items.md`); the targeted line-1 math repair and rewrite bars below govern existing cards.
 
 ## Flashcard definition review (item 19)
 
@@ -10,27 +10,33 @@ The leak scan — item 19's mechanical floor, spelled out in `references/qc-item
 - **Backward (term → definition): the canonical answer.** Given the term, the definition must be the answer a learner is fairly expected to recall. For the primary card, this is the entity's **main defining claim** (the same scope as the body's opening sentence), not an arbitrary true fact about it. A preserved extra card keeps its own answer and tested claim: judge it against that term and its established body evidence, without substituting the entry's main claim or title. "An architecture introduced in 2017" is true of the Transformer but backward-unfair (and not self-contained); the fair answer names the essential property — self-attention replacing recurrence. If the body defines the subject with an equation, compare the card against it and retain every defining operation. A card for an Lp norm that mentions the sum of p-th powers but omits the p-th root defines a different quantity.
 - **Succinct.** One sentence, as short as unambiguity allows; lengthen only as far as needed to rule out other candidates. The shared mechanical floor conservatively reports an obvious second sentence while excluding common abbreviations, initials, decimals, and version dots; the executing agent still judges grammatical self-containment and any boundary the conservative counter cannot prove.
 
-**Equation coverage is a required current-rule repair.** Inspect every card
-against the canonical [line-1 equation-coverage rule](../../wiki-build/references/flashcards-and-emphasis.md#line-1-equation-coverage),
-even when the scanner reports nothing and the verbal definition was already
-accurate. Add missing directly supported math to line 1, with only the wording
-needed for its cue, conditions, and bindings. This narrow repair applies to
-pre-existing cards with known or unknown history; it does not authorize a
-cosmetic rewrite, a different tested claim, or invented body math. Preserve the
-cue, answer-line bytes, and all scheduling/block-ID attachments exactly.
-Ordinary lint also preserves `created:`, `updated:`, and `read:`. Report the
-repair; the maintenance request supplies authorization without another review.
+**Line-1 math follows the compact equation rule.** Line-1 math is optional.
+Check any math a card carries against the canonical
+[line-1 equation rule](../../wiki-build/references/flashcards-and-emphasis.md#line-1-equation-coverage),
+even when the scanner reports nothing. Trimming material that rule excludes is
+a targeted current-rule repair when the tested claim is unchanged:
+well-definedness conditions, parameter ranges, augmentation or storage
+conventions, surplus symbol bindings, or an unrecallably long formula (replace
+it with its compact equivalent or the verbal form). Restoring a defining
+operation the math omits, such as an Lp norm's p-th root, is the same repair.
+It applies to pre-existing cards with known or unknown history; it does not
+authorize a cosmetic rewrite, a different tested claim, or invented body math.
+Adding math to an accurate verbal card is an ordinary wording change under the
+bars below. Preserve the cue, answer-line bytes, and all scheduling/block-ID
+attachments exactly. Ordinary lint also preserves `created:`, `updated:`, and
+`read:`. Report the repair; the maintenance request supplies authorization
+without another review.
 
 **The bar for other wording changes depends on whether the card is known to be fresh.** The Obsidian Spaced Repetition plugin may keep its schedule in any note-backed attachment recognized by the canonical [card-format rule](../../wiki-build/references/flashcards-and-emphasis.md#4-flashcards), or outside the note in plugin data. A recognized attachment proves that the card carries state; its absence proves nothing about review history. Because a schedule can remain attached while a line-1 edit changes what is tested, a cosmetic rewrite can silently repoint months of ratings. Review-history continuity is the load-bearing asset, so there are two bars:
 
-- **Other wording changes on pre-existing cards — history present or unknown — use the high bar.** Beyond required equation-coverage and structural repairs, replace line 1 **only when the new definition is meaningfully more accurate or unambiguous** than the existing one (wiki-build's *Flashcards on merge* threshold — in `wiki-build/references/merge.md` — the same one it applies to `description:`). A genuine defect qualifies: the definition leaks the answer, is factually wrong, is ambiguous against a sibling entity, or is backward-unfair against its own tested term (for the primary card, the entity's main defining claim). **Cosmetic improvement does not:** a verbose-but-correct sentence, a phrasing that is merely sharper, a stylistic preference. Leave those alone and, if the shortfall is real but sub-threshold, note it in `Reviews/wiki-notes-suggestions.md` rather than rewriting. Metadata-free existing cards stay in this class because their history is unknown.
+- **Other wording changes on pre-existing cards — history present or unknown — use the high bar.** Beyond the line-1 math and structural repairs, replace line 1 **only when the new definition is meaningfully more accurate or unambiguous** than the existing one (wiki-build's *Flashcards on merge* threshold — in `wiki-build/references/merge.md` — the same one it applies to `description:`). A genuine defect qualifies: the definition leaks the answer, is factually wrong, is ambiguous against a sibling entity, or is backward-unfair against its own tested term (for the primary card, the entity's main defining claim). **Cosmetic improvement does not:** a verbose-but-correct sentence, a phrasing that is merely sharper, a stylistic preference. Leave those alone and, if the shortfall is real but sub-threshold, note it in `Reviews/wiki-notes-suggestions.md` rather than rewriting. Metadata-free existing cards stay in this class because their history is unknown.
 - **Only a card known to have been created or restored during this run uses the low bar.** No prior card existed for review history to attach to, so fix any genuine shortfall down to minor ones such as verbosity, borderline ambiguity, or a meaningfully sharper phrasing. This status comes from the current run's own action record, never from absence of visible metadata.
 
 A missing card has no card-level scheduling state to preserve. Restore the required primary card under QC item 19 with `??`; because this run created it, the low bar applies for the rest of this run.
 
 A **structural** fix — one the mechanical floor demands, such as removing forbidden Markdown or HTML, repairing a math delimiter, or removing a literal answer leak — is applied to **every** card regardless of history: those are violations of wiki-build's schema, not stylistic preferences, and leaving them in place is not an option.
 
-- **Churn-avoidance still applies, at either bar.** Even the known-fresh bar fixes *real* flaws only; it does **not** reword for its own sake. A definition that already reads as one succinct, uniquely-identifying, backward-fair sentence and satisfies equation coverage is **left byte-for-byte** — don't churn a sound card each run (this also keeps the pass idempotent).
+- **Churn-avoidance still applies, at either bar.** Even the known-fresh bar fixes *real* flaws only; it does **not** reword for its own sake. A definition that already reads as one succinct, uniquely-identifying, backward-fair sentence and follows the line-1 equation rule is **left byte-for-byte** — don't churn a sound card each run (this also keeps the pass idempotent).
 - **Two hard invariants never relax** (these are not part of the threshold): preserve every recognized schedule/comment, exact metadata callout, and trailing block ID on every pre-existing card **byte-for-byte and in place**, and never move an attachment between cards. A block ID is an inbound-link anchor; line-3 plainness never authorizes deleting it. Quote every additional card in full, including all attachments, in the report. Other visible content after the three content lines is malformed and receives the item-19 repair rather than being mistaken for plugin state. wiki-lint does content QC of every preserved definition; the Spaced Repetition plugin still owns its schedule, untouched and unaudited.
 
 The mechanical scan now covers **every** card in the section (structure, line-2 form, line-1 capitalization and terminal period, conservative sentence count, Markdown/HTML markup, per-card answer leak, and line-3 plainness); this bidirectional-clarity review is the judgment layer on top of it, also applied to every card.

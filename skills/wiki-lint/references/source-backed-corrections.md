@@ -1,7 +1,8 @@
 # Source-backed corrections to an existing entry
 
-Read this when the user asks to correct or simplify existing entries from
-their cited sources. A request covering a class of defects or the whole Wiki
+Read this when the user asks to correct or simplify existing entries. The
+evidence is limited to the sources each entry already cites; the request need
+not name them. A request covering a class of defects or the whole Wiki
 applies to every matching entry in that scope, not just named examples. A generic lint request does not
 activate this mode. A source not already cited by the target is a new
 contribution and belongs to `wiki-build`; a split, merge, retitle, deletion,
@@ -18,7 +19,10 @@ or cross-entry redistribution uses [source-backed refactors](refactors.md).
 2. Locate the exact supporting and conflicting passages and, for PDFs, their
    physical pages. If the cited files do not settle the correction, preserve
    the note and report what evidence is missing. Do not turn a request to
-   “correct this note” into a search for new sources.
+   “correct this note” into a search for new sources. In a cleaned clipping,
+   locate passages in its captured body, not in its Summary callout or other
+   clipping-clean annotations
+   ([rule](../../wiki-build/references/source-intake.md#read-and-classify)).
 3. Keep each correction within its affected entry. If the correction reveals a distinct
    entity, changes another entry, or requires choosing which entry owns content,
    stop that part and route it to builder or the structural refactor protocol.
@@ -38,8 +42,12 @@ content under the builder's body-change rule; a metadata-, link-, or
 format-only correction preserves it. Missing or unknown review state is never
 invented.
 
-Lint the complete private draft with builder's `lint_entry.py`, then review its
-source fidelity and paragraph flow. The correction must introduce no new lint
+Lint the complete private draft with
+`python3 '<plugin>/skills/wiki-build/scripts/lint_entry.py' '<draft>'`. Before
+publication, check every added or changed wikilink and alias against the Step 0
+inventory: each target must be an existing, unambiguous entry, and a changed
+alias must not collide with another entry's title or alias. Then review the
+draft's source fidelity and paragraph flow. The correction must introduce no new lint
 finding, and every baseline finding on a field or passage changed by this run
 must be resolved. Unrelated pre-existing findings remain unchanged and are
 reported; they neither widen the authorization into general cleanup nor block a
