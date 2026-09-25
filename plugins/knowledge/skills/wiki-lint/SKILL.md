@@ -14,7 +14,7 @@ description: >
 
 Maintain the existing wiki through three tasks: source-independent QC, retrospective link hygiene, and a consistent hierarchy rendered as `parents:` plus MOCs. Default to all three in order; honor requests for a narrower task or entry set.
 
-**Setup:** read [shared/RUNTIME.md](../../shared/RUNTIME.md) once for vault selection, paths, Python, and host tools. Apply the relevant [shared conventions](../../shared/CONVENTIONS.md) at each action below. Before a special mode or a missing-root search reads a PDF, set up the environment and run `python3 '<plugin>/shared/scripts/check_parsers.py'` with its interpreter. While the check fails, run no helper that parses PDFs or images: repair the permitted environment or read the PDF pages directly, and report the failed check.
+**Setup:** read [shared/RUNTIME.md](../../shared/RUNTIME.md) once for vault selection, paths, Python, and host tools. Apply the relevant [shared conventions](../../shared/CONVENTIONS.md) at each action below. Before a special mode or a missing-root search reads a PDF, set up the environment and run `python3 '<plugin>/shared/scripts/check_parsers.py'` with its interpreter under the [parser-check rule](../../shared/RUNTIME.md#only-for-pdf-and-image-workflows); while it fails, read the PDF pages directly.
 
 ## Scope and ownership
 

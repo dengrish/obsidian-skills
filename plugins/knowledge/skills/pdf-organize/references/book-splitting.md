@@ -55,8 +55,10 @@ and `end_idx=78`.
 `heading_text` must be text from the chapter's opening page as pypdf's
 `extract_text()` returns it; matching ignores case and collapses whitespace.
 Outside contents pages it may appear on at most two pages (the opening and a
-title page just before it). Running headers usually repeat bare titles, so
-include the printed chapter label (`Chapter 2 The Route to Normal Science`).
+title page just before it). Running headers often repeat the title, with or
+without its label; then extend the heading with the line the opening page
+prints after the title, such as its first section heading. Add the chapter
+label only where the opening page prints it with the title.
 
 `split_book` checks each start against its `heading_text`. When the mapped
 page lacks it, the nearest page within ±2 that carries it becomes the start;
@@ -66,7 +68,8 @@ A chapter opening that mentions another chapter's bare label (`Chapter 2`)
 counts as one, so give the label plus the title. A standalone title page
 immediately before the start is taken in. An end set to the next chapter's
 requested start follows that start's correction, an end past the next start
-is trimmed, and pages between chapters that no chapter covers are reported.
+is trimmed, and pages between chapters or after the last one that no chapter
+covers are reported.
 These adjustments do not replace checking the TOC-to-page mapping.
 
 ## 3. Choose chapter names once
@@ -133,6 +136,10 @@ python3 '<skill>/scripts/organize.py' split '<book PDF path>' \
     --out '<vault>/Sources/PDFs/<book stem>' --vault '<vault>'
 ```
 
+Plan lines and notes give one-based physical pages: `pages A-B` means
+`start_idx = A - 1` and `end_idx = B`, and a start corrected to page A means
+`start_idx = A - 1`.
+
 A corrected start or a trimmed end means the page mapping may be off:
 re-check every start and end against the TOC mapping, put the verified values
 in the JSON, and re-plan. A title page taken in, and an end that moved with
@@ -198,6 +205,9 @@ checking. This skill does not extract or delete figures.
 - **Corrupt download, HTML saved as PDF, or zero-byte input:** report the
   open error. This needs a valid source, not OCR.
 - **Encrypted input that cannot be unlocked:** report and stop that file.
+- **Another vault file shares the book's basename:** `split` refuses either
+  copy; resolve it as [SKILL step 3](../SKILL.md#3-check-references-and-prepare-the-complete-rename-plan)
+  describes.
 - **Already a single chapter or an existing split:** leave the chapter set
   intact; a chapter may be renamed through the normal guard, not split again.
 - **Parser check fails (including missing or outdated `pypdf`):** follow

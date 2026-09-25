@@ -2235,18 +2235,23 @@ def scan(wiki, images=None, vault=None):
         return "/".join(canonical_prefix + selected)
 
     # Any existing entry is a named referent: a Work, or a named method such
-    # as SGDR (writing.md's "the authors of SGDR").
+    # as SGDR (writing.md's "the authors of SGDR"). A lowercase match counts
+    # only when it spells a title exactly, so "the authors of machine
+    # learning textbooks" stays source-meta.
     _named_surfaces = set()
+    _title_surfaces = set()
     for _entry in entries.values():
         _title = _entry.get("title") or ""
-        for _surface in ([_title, base_term(_title)] +
-                         list(_entry.get("aliases", []))):
+        _titles = {" ".join(_title.split()),
+                   " ".join(base_term(_title).split())}
+        for _surface in list(_titles) + list(_entry.get("aliases", [])):
             _surface = " ".join((_surface or "").split()).strip()
             if not _surface:
                 continue
-            _named_surfaces.add(_surface)
-            if "-" in _surface:
-                _named_surfaces.add(_surface.replace("-", " "))
+            _variants = {_surface, _surface.replace("-", " ")}
+            _named_surfaces |= _variants
+            if _surface in _titles:
+                _title_surfaces |= _variants
     _named_surfaces = sorted(_named_surfaces,
                              key=lambda value: (-len(value), value))
 
@@ -2271,9 +2276,13 @@ def scan(wiki, images=None, vault=None):
         # emphasis delimiter; the boundary after the matched surface may be
         # the closing delimiter itself.
         visible = re.sub(r"^[*_]{1,3}", "", remainder)
-        return any(re.match(re.escape(surface) + r"(?![A-Za-z0-9])",
-                            visible, re.IGNORECASE)
-                   for surface in _named_surfaces)
+        for surface in _named_surfaces:
+            found = re.match(re.escape(surface) + r"(?![A-Za-z0-9])",
+                             visible, re.IGNORECASE)
+            if found and (found.group(0) in _title_surfaces
+                          or found.group(0) != found.group(0).lower()):
+                return True
+        return False
 
     for e in diagnostic_records:
         sl = e["slug"]
@@ -8654,12 +8663,29 @@ def run_self_test():
         _st_write(v, "unknown-authors.md", _st_entry(
             "Unknown authors", "**Unknown authors** is a worked example. "
             "The authors of Adam recommend it."))
+        _st_write(v, "machine-learning.md", _st_entry(
+            "Machine learning", "**Machine learning** fits models to data."))
+        _st_write(v, "direct-preference-optimization.md", _st_entry(
+            "Direct preference optimization",
+            "**Direct preference optimization** tunes a model on preferences.",
+            aliases=('"dpo"',)))
+        _st_write(v, "generic-authors.md", _st_entry(
+            "Generic authors", "**Generic authors** is a worked example. "
+            "The authors of machine learning textbooks recommend it."))
+        _st_write(v, "acronym-authors.md", _st_entry(
+            "Acronym authors", "**Acronym authors** is a worked example. "
+            "The authors of DPO recommend it."))
         res = scan(v)
         check("the authors of an existing Concept entry are named attribution; "
               "an unknown name stays source-meta",
               ("item14" in _st_keys(res, "cosine-annealing"),
                "item14" in _st_keys(res, "unknown-authors")),
               (False, True))
+        check("a lowercase generic phrase naming no entry exactly stays "
+              "source-meta; a capitalized alias names its entry",
+              ("item14" in _st_keys(res, "generic-authors"),
+               "item14" in _st_keys(res, "acronym-authors")),
+              (True, False))
         v = os.path.join(tmp, "alias-hint")
         _st_write(v, "recall-machine-learning.md", _st_entry(
             "Recall (machine learning)",

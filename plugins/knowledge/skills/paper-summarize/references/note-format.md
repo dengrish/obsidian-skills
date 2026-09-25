@@ -271,14 +271,14 @@ procedure detail and secondary numbers to the body. Bullet 1 gives the main
 contribution with its scope; in empirical mode it adds the absolute comparison
 where one applies and any design limit its rung requires. Later bullets cover,
 as applicable, harms or nulls, one supporting result or mechanism, and the
-single chief caveat. For argument/synthesis, give the thesis, decisive support
-and material boundary; for notice mode, give the action, stated grounds and
-consequence. Each bullet stands alone with its own scope and comparator, states
-the claim directly and preserves exact technical terms. Bold only terms that
-could stand as their own wiki entry, such as a named model, method, dataset,
-organization, person or defined concept; never generic words, ordinary
-technical vocabulary or whole phrases. Do not put URLs or page citations in the
-callout.
+single chief caveat unless bullet 1 already states it. For argument/synthesis,
+give the thesis, decisive support and material boundary; for notice mode, give
+the action, stated grounds and consequence. Each bullet stands alone with its
+own scope and comparator, states the claim directly and preserves exact
+technical terms. Bold only terms that could stand as their own wiki entry,
+such as a named model, method, dataset, organization, person or defined
+concept; never generic words, ordinary technical vocabulary or whole phrases.
+Do not put URLs or page citations in the callout.
 
 ## Citations
 

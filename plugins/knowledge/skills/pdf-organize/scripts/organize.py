@@ -286,10 +286,14 @@ def vault_names(vault):
     to hand the blocker whichever copy `os.walk` reached first — so the
     message named one arbitrary file and the user fixed that one, re-ran, and
     was stopped again by the copy it had not mentioned.
+
+    Hidden (dot-prefixed) files and folders are skipped, as in the shared
+    `vault_artifacts` inventory the consumer skills use.
     """
     out = {}
     for dirpath, dirnames, filenames in _walk(vault):
-        for f in filenames + dirnames:
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        for f in [f for f in filenames if not f.startswith(".")] + dirnames:
             # `_nfc_low`, not bare `lower()`: an NFD twin and a derived NFC
             # destination share one portable collision identity.
             out.setdefault(_nfc_low(f), []).append(os.path.join(dirpath, f))
@@ -1628,14 +1632,8 @@ def _image_ownership_blockers(vault, source, keyed):
                 "Repair the figure records before renaming." % exc]
 
 
-def _shared_basename_blockers(path, existing):
-    """Refuse a source whose basename another vault file already has.
-
-    `existing` is the `vault_names` map. Figures, a summary note, a chapter
-    folder and bare references are keyed to the basename, so with two copies
-    none of them can be attributed to the selected one: an Inbox re-download
-    of a filed paper would otherwise take over its whole derived family.
-    """
+def _shared_basename_others(path, existing):
+    """Other paths with `path`'s basename in the `vault_names` map."""
     real = os.path.realpath(path)
 
     def same(other):
@@ -1648,15 +1646,35 @@ def _shared_basename_blockers(path, existing):
         except OSError:
             return False
 
-    others = [p for p in existing.get(_nfc_low(os.path.basename(path)), [])
-              if not same(p)]
+    return [p for p in existing.get(_nfc_low(os.path.basename(path)), [])
+            if not same(p)]
+
+
+def _shared_basename_blockers(path, existing, vault=None, keyed=None):
+    """Refuse a source whose basename another vault file already has.
+
+    `existing` is the `vault_names` map. Figures, a summary note, a chapter
+    folder and bare references are keyed to the basename, so with two copies
+    none of them can be attributed to the selected one: an Inbox re-download
+    of a filed paper would otherwise take over its whole derived family.
+    Given the `vault` and the source's `keyed` family, a non-canonical name
+    that owns nothing else and that no note cites is exempt: renaming that
+    copy moves and rewrites nothing else, and it resolves the ambiguity.
+    """
+    name = os.path.basename(path)
+    others = _shared_basename_others(path, existing)
     if not others:
         return []
-    return ["%s shares its basename with %s. Figures, notes, chapter folders "
-            "and bare references keyed to this name cannot be attributed to "
-            "one copy, so pdf-organize cannot rename or file either copy. Ask "
-            "the user to remove the redundant copy or to rename or move one "
-            "out of the vault, then retry; never delete or move either copy "
+    if (keyed is not None and len(keyed) == 1 and not looks_canonical(name)
+            and not references(vault, {name}, keyed_dirs(vault, keyed))):
+        return []
+    return ["%s shares its basename with %s. Notes, figures and references "
+            "keyed to that name cannot be attributed to one copy, so "
+            "pdf-organize will not rename, file or split this one. Ask the "
+            "user to remove the redundant copy, or to rename or move the "
+            "newcomer (normally the copy outside Sources/PDFs/) out of the "
+            "vault: renaming the filed copy would hand its note, figures and "
+            "citations to the newcomer. Never delete or move either copy "
             "yourself." % (path, ", ".join(sorted(others)))]
 
 
@@ -1973,18 +1991,18 @@ def plan_rename(vault, path, new_basename, dest=None):
             existing = vault_names(vault)
         except InventoryFailed as exc:
             existing_error = exc
-    duplicate = _shared_basename_blockers(path, existing)
-    if duplicate:
-        return [], Edits(), duplicate
 
     try:
         keyed = keyed_files(vault, path) if have_vault \
             else {path: src_basename}
+        duplicate = (
+            _shared_basename_blockers(path, existing, vault, keyed)
+            + _family_basename_blockers(path, keyed, existing)
+            if have_vault else [])
     except InventoryFailed as exc:
         return [], Edits(), [
             "%s The owned source family cannot be established, so nothing "
             "may be renamed." % exc]
-    duplicate = _family_basename_blockers(path, keyed, existing)
     if duplicate:
         return [], Edits(), duplicate
     ren = {b: _derive(old_stem, b, new_stem) for b in keyed.values()}
@@ -2728,8 +2746,10 @@ def _resolve(chapters, text, n_pages, out_dir, taken, book_stem=None):
             problems.append(
                 "%s: heading_text %r appears on %d pages besides the contents, "
                 "so it may be a running header and cannot verify the start "
-                "page. Include the printed chapter label, or use a longer "
-                "heading unique to the chapter opening."
+                "page. Copy a longer run of text from the chapter's opening "
+                "page, such as the title plus the line after it, or the "
+                "printed chapter label with the title when that page prints "
+                "them together."
                 % (name, ch["heading_text"], len(heading_pages)))
             continue
 
@@ -2772,8 +2792,8 @@ def _resolve(chapters, text, n_pages, out_dir, taken, book_stem=None):
                            ", ".join(map(str, listed))))
                 else:
                     problems.append("%s: heading %r not found within +/-2 "
-                                    "pages of %s" % (name, ch["heading_text"],
-                                                     ch["start_idx"]))
+                                    "pages of physical page %d"
+                                    % (name, ch["heading_text"], start + 1))
                 continue
             notes.append("%s: start corrected from page %d to %d — the "
                          "heading is not on the page the mapping gave"
@@ -2824,7 +2844,7 @@ def _resolve(chapters, text, n_pages, out_dir, taken, book_stem=None):
     # long — refuse. An end the caller set to the next chapter's requested
     # start follows that start's correction; an end that still runs into the
     # next chapter or past EOF is trimmed. Both are reported, as are pages
-    # between chapters that no chapter covers.
+    # between chapters or after the last one that no chapter covers.
     for i in range(1, len(plan)):
         if plan[i][0] <= plan[i - 1][0]:
             problems.append("%s: starts at page %d, at or before %s (%d) — the "
@@ -2852,6 +2872,12 @@ def _resolve(chapters, text, n_pages, out_dir, taken, book_stem=None):
                          "pages %d-%d" % (previous[1] + 1, following[0]))
                 notes.append("%s, between %s and %s, belongs to no chapter"
                              % (pages, previous[3], following[3]))
+        if plan and plan[-1][1] < n_pages:
+            last_end = plan[-1][1]
+            pages = ("page %d" % n_pages if last_end + 1 == n_pages else
+                     "pages %d-%d" % (last_end + 1, n_pages))
+            notes.append("%s, after %s, belongs to no chapter"
+                         % (pages, plan[-1][3]))
     return plan, problems, notes
 
 
@@ -2948,7 +2974,9 @@ def split_book(pdf_path, chapters, out_dir, taken=None, verbose=True,
     `filename`, `start_idx` and `end_idx` (0-based; `end_idx` exclusive) —
     see `references/book-splitting.md`.  `taken` is `vault_names(vault)`:
     every basename already in the vault, so a chapter cannot collide with a
-    file in another folder.  Returns the list of `note:` strings.  Without
+    file in another folder, and a book whose basename another vault file
+    shares is refused, even one that `check` exempts.  Returns the list
+    of `note:` strings.  Without
     `apply` it resolves and reports the final ranges and notes, writes
     nothing and creates no folder, so corrections are reviewed before any
     chapter becomes authoritative.
@@ -3032,6 +3060,17 @@ def split_book(pdf_path, chapters, out_dir, taken=None, verbose=True,
             "Leave it unchanged; do not create a second split."
             % (out_dir, ", ".join(sorted(existing_chapters))))
     taken = taken or {}
+    others = _shared_basename_others(pdf_path, taken)
+    if others:
+        # `check` and `rename` may still accept this copy (the exemption in
+        # `_shared_basename_blockers`), so this refusal claims only the split.
+        raise SplitRefused(
+            "Not splitting %s: it shares its basename with %s. If `check` "
+            "accepts this copy, rename it first; otherwise ask the user to "
+            "remove the redundant copy, or to rename or move the newcomer "
+            "(normally the copy outside Sources/PDFs/) out of the vault "
+            "(CONVENTIONS.md §1a). Nothing was written."
+            % (os.path.basename(pdf_path), ", ".join(sorted(others))))
     # `_reader` first, and the writer import after it: both come from pypdf,
     # and `_reader` is the one that turns a missing pypdf into a `SplitRefused`
     # with an install line in it. Importing PdfWriter above that call meant the
@@ -3211,9 +3250,9 @@ def _cmd_check(args):
         return 1
     try:
         names = vault_names(vault)
-        duplicate = _shared_basename_blockers(path, names)
-        keyed = {} if duplicate else keyed_files(vault, path)
-        duplicate = duplicate or _family_basename_blockers(path, keyed, names)
+        keyed = keyed_files(vault, path)
+        duplicate = (_shared_basename_blockers(path, names, vault, keyed)
+                     + _family_basename_blockers(path, keyed, names))
     except InventoryFailed as exc:
         print("Reference check incomplete: %s" % exc, file=sys.stderr)
         return 1
@@ -4617,9 +4656,9 @@ def _selftest():
     _plan, _probs, _ = _resolve(
         _ch, [_norm(_p) for _p in ("a", "b", "c", "d", "e")], 5, "/tmp/x", {},
         "Doe_Book_2025")
-    check("a heading on no nearby page keeps the plain refusal",
+    check("a heading on no nearby page keeps the plain refusal, in one-based pages",
           _probs, ["Doe_Book_2025_01_Alpha.pdf: heading 'Chapter 1 Alpha' not "
-                   "found within +/-2 pages of 2"])
+                   "found within +/-2 pages of physical page 3"])
     _ch = [{"heading_text": "Chapter 1 Alpha",
             "filename": "Doe_Book_2025_01_Alpha.pdf", "start_idx": 2, "end_idx": 5}]
     _txt = [_norm(_p) for _p in ("x", "Chapter 1 Alpha " + "body " * 60,
@@ -4639,6 +4678,14 @@ def _selftest():
           (_probs, _notes),
           ([], ["page 3, between Doe_Book_2025_01_Alpha.pdf and "
                 "Doe_Book_2025_02_Beta.pdf, belongs to no chapter"]))
+    # Pages after the last chapter are reported too, so a short final end
+    # cannot silently truncate that chapter.
+    _plan, _probs, _notes = _resolve(_ch[:1], _txt[:3], 3, "/tmp/x", {},
+                                     "Doe_Book_2025")
+    check("pages after the last chapter that no chapter covers are reported",
+          (_probs, _notes),
+          ([], ["page 3, after Doe_Book_2025_01_Alpha.pdf, belongs to no "
+                "chapter"]))
 
     # The extracted PNG follows a rename, so its ownership and review records
     # must follow too. Otherwise the next batch refuses this plugin's own file.
@@ -5526,6 +5573,89 @@ def _selftest():
         check("rename refuses a book whose chapter shares a basename",
               (_code, "shares its basename with" in _stdout,
                _tree(_v) == _before), (1, True, True))
+
+    # split applies the same rule to either copy, planned or applied.
+    with _tf.TemporaryDirectory(prefix="org-shared-split-test-") as _v:
+        _stem = "Kuhn_X_2012"
+        _copies = (_put(_v, "Sources/PDFs/%s.pdf" % _stem, b"filed book"),
+                   _put(_v, "Inbox/%s.pdf" % _stem, b"incoming book"))
+        _chapters = _put(_v, "chapters.json", json.dumps([
+            {"heading_text": "Chapter 1 Intro",
+             "filename": _stem + "_01_Intro.pdf", "start_idx": 0,
+             "end_idx": 1}]))
+        _before = _tree(_v)
+        for _source in _copies:
+            for _apply in ([], ["--apply"]):
+                _code, _, _stderr = _run_cli([
+                    "split", _source, "--chapters", _chapters, "--out",
+                    os.path.join(_v, "Sources/PDFs", _stem), "--vault", _v]
+                    + _apply)
+                check("split refuses either copy of a shared book basename "
+                      "(%s%s)" % (os.path.relpath(_source, _v), _apply),
+                      (_code, "shares its basename with" in _stderr,
+                       _tree(_v) == _before), (1, True, True))
+
+    # A copy that `check` exempts is still not split, and the refusal says
+    # to rename it first instead of claiming pdf-organize cannot rename it.
+    with _tf.TemporaryDirectory(prefix="org-shared-split-exempt-test-") as _v:
+        _incoming = _put(_v, "Inbox/download.pdf", b"incoming book")
+        _put(_v, "Attachments/download.pdf", b"unrelated PDF")
+        _chapters = _put(_v, "chapters.json", json.dumps([
+            {"heading_text": "Chapter 1 Intro",
+             "filename": "download_01_Intro.pdf", "start_idx": 0,
+             "end_idx": 1}]))
+        _before = _tree(_v)
+        _check_code, _, _ = _run_cli(["check", _incoming, "--vault", _v])
+        _code, _, _stderr = _run_cli([
+            "split", _incoming, "--chapters", _chapters, "--out",
+            os.path.join(_v, "Sources/PDFs/download"), "--vault", _v])
+        check("split refuses a copy that check exempts, pointing to rename",
+              (_check_code, _code, "shares its basename with" in _stderr,
+               "If `check` accepts this copy, rename it first" in _stderr,
+               "will not rename" in _stderr, _tree(_v) == _before),
+              (0, 1, True, True, False, True))
+
+    # A non-canonical download that owns nothing and that no note cites can be
+    # renamed beside a same-named file; renaming it resolves the ambiguity. A
+    # link qualified to the other copy is not a citation, but a bare one is,
+    # and a canonical name always blocks.
+    for _label, _name, _link, _blocked in (
+            ("an unreferenced non-canonical download", "download.pdf",
+             "![[Attachments/download.pdf]]\n", False),
+            ("a bare link to the shared download name", "download.pdf",
+             "![[download.pdf]]\n", True),
+            ("a canonical shared name", "Doe_Paper_2020.pdf", "", True)):
+        with _tf.TemporaryDirectory(prefix="org-shared-generic-test-") as _v:
+            _incoming = _put(_v, "Inbox/" + _name, b"incoming PDF")
+            _other = _put(_v, "Attachments/" + _name, b"unrelated PDF")
+            _note = _put(_v, "Wiki/n.md", _link)
+            _code, _stdout, _ = _run_cli(["check", _incoming, "--vault", _v])
+            _check_code = _code
+            _code, _stdout, _ = _run_cli([
+                "rename", _incoming, "--vault", _v, "--to",
+                "Doe_Study_2025.pdf", "--dest", os.path.join(_v, "Sources/PDFs"),
+                "--apply"])
+            check("a shared basename blocks only when something depends on "
+                  "it (%s)" % _label,
+                  (_check_code, _code, "shares its basename with" in _stdout,
+                   os.path.exists(_incoming), Path(_other).read_bytes(),
+                   Path(_note).read_text(encoding="utf-8")),
+                  (1, 1, True, True, b"unrelated PDF", _link) if _blocked else
+                  (0, 0, False, False, b"unrelated PDF", _link))
+    # Hidden folders (a sync archive) are outside every vault inventory, so a
+    # copy there blocks neither the check nor filing under the same name.
+    with _tf.TemporaryDirectory(prefix="org-shared-hidden-test-") as _v:
+        _stem = "Doe_Paper_2020"
+        _incoming = _put(_v, "Inbox/%s.pdf" % _stem, b"incoming PDF")
+        _archived = _put(_v, ".sync/Archive/Inbox/%s.pdf" % _stem, b"archived")
+        _check_code, _, _ = _run_cli(["check", _incoming, "--vault", _v])
+        _code, _stdout, _ = _run_cli([
+            "rename", _incoming, "--vault", _v, "--to", _stem + ".pdf",
+            "--dest", os.path.join(_v, "Sources/PDFs"), "--apply"])
+        check("a same-named copy under a hidden folder blocks nothing",
+              (_check_code, _code, os.path.exists(
+                  os.path.join(_v, "Sources/PDFs", _stem + ".pdf")),
+               Path(_archived).read_bytes()), (0, 0, True, b"archived"))
 
     # Collector-owned feed attachments keep their names (CONVENTIONS.md §1):
     # `canonical` reports them as skipped without failing a sweep, and check

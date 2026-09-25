@@ -32,7 +32,7 @@ files, and review findings. Do not merge these into one extraction count.
 | No extractable text | Inspect the PDF; it may be a scan without OCR. Use available OCR on a [readable working copy](#readable-working-copies) if appropriate, following runtime tool guidance. |
 | Could not open or fully read PDF (including encrypted) | Report the file and error. An encrypted PDF needs a [readable working copy](#readable-working-copies). Corrupt downloads, HTML saved as PDF, or damaged pages need a valid source, not automatically OCR. Other PDFs continue and completed crops retain ownership records, but the run fails. |
 | Zero pages | Report an empty PDF separately; OCR cannot supply missing pages. |
-| Stem collisions | Neither colliding source is extracted or adopted, even with `--overwrite`. A canonical `<vault>/Sources/Images/` output makes this a whole-vault PDF-basename check even when `--src` names one file or a smaller subtree; arbitrary external outputs use the explicit source scope. When another vault file shares the basename, `pdf-organize` refuses both copies: ask the user to remove the redundant copy or to rename or move one out of the vault, then retry. For two colliding sources outside the vault, give one a unique stem with `pdf-organize` run without `--vault`. |
+| Stem collisions | Neither colliding source is extracted or adopted, even with `--overwrite`. A canonical `<vault>/Sources/Images/` output makes this a whole-vault PDF-basename check even when `--src` names one file or a smaller subtree; arbitrary external outputs use the explicit source scope. When another vault file shares the basename, report both paths and give the user the [shared-basename remedy](../../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first). For two colliding sources outside the vault, give one a unique stem with `pdf-organize` run without `--vault`. |
 
 The [visual-review scope defined in the main workflow](../SKILL.md#3-inspect-the-summary-and-verify-crops)
 still applies when no diagnostic fires. Top-of-page side-caption exceptions
@@ -45,19 +45,21 @@ reviews.
 ### Extended Data and Supplementary figures
 
 Under the default prefix, Extended Data and Supplementary figures share
-`_fig_S<N>`. The fix is `--ed-prefix ED`:
+`_fig_S<N>`. To switch a PDF to `--ed-prefix ED` after a default run:
 
 1. Remove any review rows for that PDF's S labels.
 2. Run the rerun command the summary prints: that PDF alone, with
-   `--ed-prefix ED --overwrite`.
-3. Compare every S and ED PNG with its page.
+   `--ed-prefix ED --overwrite-supplementary`. It replaces only `_fig_S<N>`
+   crops, so repairs of other figures survive.
+3. View every PNG it lists under `wrote:` and compare it with its page.
 4. The ED run lists any `_fig_S<N>` that no Supplementary caption claims. It
    may still hold an older Extended Data crop: report it as mislabelled and
    delete it only with authorization. To keep a checked one, run the
    `--mark-reviewed` command the summary prints for it.
 
-Later default-prefix runs skip a PDF whose manifest records `_fig_ED<N>`
-crops and print its `--ed-prefix ED` command; run that PDF with that option.
+A default-prefix sweep skips a PDF whose manifest records `_fig_ED<N>` crops,
+and a default run naming it refuses it. Both print its `--ed-prefix ED`
+command with the run's `--overwrite` and `--dry-run`; run that command.
 
 ## Readable working copies
 

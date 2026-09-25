@@ -11,10 +11,10 @@ must preserve, not a separate way to rename files.
 `keyed_files` collects the candidate family: the PDF, its same-stem
 `Sources/Images/<stem>_fig*` images, an `Articles/` note whose origin
 identifies this PDF, and any split-book folder with its chapters. Each
-chapter has its own family. The plan is blocked when another vault file
-shares the basename of the source or of a chapter in its family;
+chapter has its own family. A basename shared with another vault file blocks
+the plan as
 [SKILL step 3](../SKILL.md#3-check-references-and-prepare-the-complete-rename-plan)
-gives the user's remedy. The rename plan moves only proven members and
+describes. The rename plan moves only proven members and
 repairs Markdown references vault-wide; it never independently renames
 unrelated notes or images. Resolve each blocker at its cause, then re-plan:
 

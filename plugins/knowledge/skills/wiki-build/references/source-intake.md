@@ -21,11 +21,23 @@ to [wiki-add](../../wiki-add/SKILL.md). Never invent a persistent source
 filename or publish entries with unresolvable citations. Markdown sources keep
 their literal on-disk names.
 
-Files under `Inbox/` are intake material, not sources. Route a raw `.md`
-capture through `clipping-clean` and an Inbox PDF through `pdf-organize`, then
-process the resulting `Articles/` note or `Sources/PDFs/` file; when
-clipping-clean reports the capture as a duplicate, process the existing note it
-names. Never cite the raw capture, which stays in `Inbox/`.
+Files under `Inbox/` are intake material, not sources; never cite one while it
+is there.
+
+- Route a raw `.md` capture through `clipping-clean` and an Inbox PDF through
+  `pdf-organize`, then process the resulting `Articles/` note or
+  `Sources/PDFs/` file.
+- When clipping-clean reports the capture as a duplicate, process the existing
+  note it names. If that note is a wiki-add research extract (listed in
+  `research_extracts`), do not substitute it: report that the capture stays
+  uncleaned behind the extract, and ask whether to use the extract instead.
+- A user's own note, with no capture URL in its origin field or text, is local
+  input that clipping-clean leaves alone. Ask the user to move it to a durable
+  folder outside `Inbox/`, or to approve a named destination, then process it
+  there as an unpaired Markdown source.
+- In a preview or no-apply run, use the producer only in its own preview mode.
+  Extract from the raw file, and label the producer's proposed path, or the
+  note its duplicate verdict names, as a provisional citation.
 
 A folder run never selects an `Inbox/` file or a
 [feed-owned attachment](../../../shared/CONVENTIONS.md#1-vault-folder-layout),
@@ -88,9 +100,10 @@ processing:
   import it; without that approval, stop and report. Leave the external
   original in place, then restart intake from the filed `Sources/PDFs/` path
   and rerun both checks.
-- Several owners: another vault file shares this PDF basename; pdf-organize
-  refuses both copies, so ask the user to remove the redundant copy or to
-  rename or move one out of the vault, then retry.
+- Several owners: another vault file shares this PDF basename. Report both
+  paths, follow the
+  [duplicate-basename remedy](../../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first),
+  and retry once it is resolved.
 - Anything else, such as an incomplete inventory: report the blocker.
 
 The only naming exception is an explicitly named
@@ -118,6 +131,11 @@ document:
   separate sources in chapter order; report the substitution. Process the
   whole-book file only when the user explicitly asks for that file despite
   its chapters.
+- Chapter files omit what the split excluded, such as unlabeled introductions,
+  appendices and glossaries. Whenever chapters stand in for the book, check
+  its table of contents and report each substantive section no chapter covers
+  as not processed; processing it takes an explicit request for the whole-book
+  file.
 - Prior coverage stays a per-file query, plus a query for the paired
   representation: a confirmed citation of the whole book covers its chapters,
   and a chapter citation covers that chapter. Without rerun intent, skip the

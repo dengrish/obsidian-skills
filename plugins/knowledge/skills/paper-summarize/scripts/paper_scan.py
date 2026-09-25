@@ -756,11 +756,11 @@ def render(result):
         if row["status"] == "collision":
             if row.get("source_conflicts"):
                 lines.append("      %s shares this PDF basename and the same "
-                             "output note: %s. Nothing may be written until "
-                             "the duplicate is resolved: pdf-organize refuses "
-                             "both copies, so ask the user to remove the "
-                             "redundant copy or to rename or move one out of "
-                             "the vault, then retry."
+                             "output note: %s. Write nothing; ask the user to "
+                             "remove the redundant copy, or to rename the "
+                             "newcomer (normally the copy outside "
+                             "Sources/PDFs/) or move it out of the vault, then "
+                             "retry (CONVENTIONS.md §1a)."
                              % (", ".join(shown_text(p) for p in
                                           row["source_conflicts"]),
                                 shown_text(row["note"])))
@@ -1530,13 +1530,19 @@ def run_self_test():
     if "shares this PDF basename" not in render(conflicted):
         bad += 1
         print("FAIL source collisions did not explain the conflicting PDF paths")
-    # pdf-organize refuses every copy of a shared basename, so the remedy is
-    # the user's, never a pdf-organize rename.
+    # The remedy (CONVENTIONS.md 1a) goes to the user and names the newcomer:
+    # renaming the filed copy would hand its note, figures and citations to
+    # the other.
     n += 1
     if ("ask the user to remove the redundant copy" not in render(conflicted)
             or "pdf-organize gives" in render(conflicted)):
         bad += 1
         print("FAIL a duplicate basename was not handed to the user to resolve")
+    n += 1
+    if ("rename the newcomer" not in render(conflicted)
+            or "rename or move one" in render(conflicted)):
+        bad += 1
+        print("FAIL the duplicate-basename remedy did not name the newcomer")
     single_conflicted = scan(
         os.path.join(_v, "Sources", "PDFs", "first", "Dup_Study_2025.pdf"),
         os.path.join(_v, "Articles"), os.path.join(_v, "Sources", "Images"))

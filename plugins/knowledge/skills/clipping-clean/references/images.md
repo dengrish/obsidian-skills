@@ -28,9 +28,10 @@ is published: each renamed old-slug embed must map to an existing old file
 ([review checklist](review-checklist.md#check-attachments-and-audit-results)).
 Prepare's inventory is the backstop and checks the note in both directions: an
 old-slug image embed with no exact attachment is a blocking result, including
-legacy loose `_figN` spellings. Either restore the file or stop the
-changed-slug operation and first publish a separate approved same-slug rewrite
-that replaces the broken embed with
+legacy loose `_figN` spellings. Either restore the file from the raw's staged
+image ([body source](duplicates-and-reprocessing.md#reprocessing-an-existing-note))
+or stop the changed-slug operation and first publish a separate approved
+same-slug rewrite that replaces the broken embed with
 `<!-- missing attachment: Oldslug_fig_N.ext -->`; retain a report entry, then
 restart the rename from a fresh snapshot. Do not edit the owner note under
 a plan already in flight. The missing reference is never silently omitted from

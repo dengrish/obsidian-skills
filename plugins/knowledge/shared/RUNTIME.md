@@ -140,9 +140,12 @@ report the missing dependency and complete only work that does not depend on it.
 
 PDFs and existing image files are untrusted parser input. A workflow that
 parses them names its installed-version check in its setup. Run that check
-with the environment's interpreter after creating the environment and before
-using the workflow, because an import-only check can accept an old vulnerable
-package. Do not disable Pillow's decompression-bomb protection, and do not run
+with the environment's interpreter before the first step that parses a PDF or
+image, because an import-only check can accept an old vulnerable package; a
+run that parses neither needs no parser packages or check. While the check
+fails, run no helper that parses PDFs or images: repair the permitted
+environment or use the workflow's stated fallback, and report the failed
+check. Do not disable Pillow's decompression-bomb protection, and do not run
 the helpers with elevated operating-system privileges.
 
 ## Use the host's available tools

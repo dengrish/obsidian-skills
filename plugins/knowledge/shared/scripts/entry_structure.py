@@ -384,6 +384,27 @@ def _plain_formula_subscripts(match):
     return token
 
 
+def _plain_tex_formula_subscripts(fragment):
+    """Give an inline-LaTeX chemical formula the Unicode formula's digits."""
+    unwrapped = fragment
+    for _ in range(8):
+        rewritten = _FORMATTING_RE.sub(r"\1", unwrapped)
+        if rewritten == unwrapped:
+            break
+        unwrapped = rewritten
+    marked = re.sub(
+        r"_\s*(?:\{([0-9]+)\}|([0-9]))",
+        lambda match: (match.group(1) or match.group(2)).translate(
+            str.maketrans("0123456789", "₀₁₂₃₄₅₆₇₈₉")), unwrapped)
+    folded = _FORMULA_TOKEN_RE.sub(_plain_formula_subscripts, marked)
+    if folded == marked:
+        return fragment
+    # Other subscripts in the fragment return to LaTeX to be spoken as usual.
+    return _SUBSCRIPT_RE.sub(
+        lambda match: "_{%s}" % match.group(0).translate(
+            str.maketrans(_SUBSCRIPT_CHARS)), folded)
+
+
 def math_title_plain_text(text):
     """Convert a mathematical wiki title to a meaning-preserving plain form.
 
@@ -392,11 +413,11 @@ def math_title_plain_text(text):
     and scripts are spoken so ``$A^{*}$ search`` becomes ``A-star search``,
     ``$\\ell_1$ norm`` becomes ``ell-one norm``, and both ``$\\chi^2$ test``
     and ``χ² test`` become ``chi-squared test``. Chemical notation keeps the
-    slug's reading: ``Ca²⁺`` becomes ``Ca2-plus`` and a Unicode formula with
-    two or more element symbols keeps its subscript digits (``H₂O`` becomes
-    ``H2O``), while a single-symbol subscript is still spoken (``O₂`` becomes
-    ``O-two``). Unknown LaTeX commands keep a readable command name rather than
-    disappearing.
+    slug's reading: ``Ca²⁺`` becomes ``Ca2-plus`` and a formula with two or
+    more element symbols keeps its subscript digits in Unicode or inline LaTeX
+    (``H₂O`` and ``$\\mathrm{H_2O}$`` both become ``H2O``), while a
+    single-symbol subscript is still spoken (``O₂`` becomes ``O-two``). Unknown
+    LaTeX commands keep a readable command name rather than disappearing.
     """
     value = text or ""
     value = _FORMULA_TOKEN_RE.sub(_plain_formula_subscripts, value)
@@ -409,7 +430,8 @@ def math_title_plain_text(text):
             match.group(0).translate(str.maketrans(_SUBSCRIPT_CHARS))), value)
     value = re.sub(
         r"\$([^$\n]*)\$",
-        lambda match: "$%s$" % _plain_tex_subscripts(match.group(1)), value)
+        lambda match: "$%s$" % _plain_tex_subscripts(
+            _plain_tex_formula_subscripts(match.group(1))), value)
     value = value.replace("$", "")
 
     # Resolve braces from the inside out so formatting nested inside an
@@ -470,17 +492,26 @@ _ABBREVS = [
     "Dr.", "Prof.", "Mr.", "Mrs.", "Ms.", "St.", "Jr.", "Sr.", "Fig.",
     "b.", "d.", "r.", "U.S.", "U.K.", "var.", "subsp.", "ssp.",
     "sp.", "spp.", "aff.", "cv.", "fo.", "Dept.", "Inc.", "vol.",
-    "pp.", "etc.", "Eq.", "Eqs.", "Sec.", "Ch.", "Ref.",
+    "pp.",
 ]
 _ABBREV_RE = re.compile(
     r"(?:^|[^0-9A-Za-z])(?:%s)$"
     % "|".join(re.escape(a) for a in sorted(_ABBREVS, key=len, reverse=True)),
     re.IGNORECASE,
 )
-# ``No.`` is an abbreviation only with its conventional capitalization.
-# Folding it case-insensitively made the ordinary sentence ending in
-# ``yes or no.`` disappear from the sentence count.
-_CASE_SENSITIVE_ABBREV_RE = re.compile(r"(?:^|[^0-9A-Za-z])No\.$")
+# These are abbreviations only with their conventional capitalization, so
+# ``yes or no.``, ``the SEC.`` and ``one sec.`` still end sentences.
+_CASE_SENSITIVE_ABBREV_RE = re.compile(
+    r"(?:^|[^0-9A-Za-z])(?:No|Eqs?|Sec|Ch|Ref)\.$")
+# A lowercase ``etc.`` ends its sentence exactly when a capital follows,
+# other than a parenthetical reference such as ``(Fig. 2)``.
+_ETC_RE = re.compile(r"(?:^|[^0-9A-Za-z])etc\.$")
+_CAPITALIZED_NEXT_RE = re.compile(
+    r"^\s+(?!\((?:Fig(?:ure)?|Table|Eq|Ref|Sec)s?\b)[\"'“‘(\[*_]*[A-Z]")
+# ``Eq. 3``, ``eq. 3``, ``Sec. A.2`` or ``Eq. S1`` never end at the dot.
+_REFERENCE_ABBREV_RE = re.compile(
+    r"(?:^|[^0-9A-Za-z])(?:[Ee]qs?|[Ss]ec|[Cc]h|[Rr]ef)\.$")
+_REFERENCE_TARGET_RE = re.compile(r"^\s+(?:[\d(\[]|[A-Z]\.?\d)")
 _INITIAL_RE = re.compile(r"(?:^|[^0-9A-Za-z'’])[A-Za-z]\.$")
 _NEXT_INITIAL_RE = re.compile(r"^\s+[A-Za-z]\.\s")
 _HONORIFIC_TAIL_RE = re.compile(r"(?:^|\s)(?:Dr|Prof|Mr|Mrs|Ms)\.\s*$")
@@ -488,7 +519,9 @@ _PREVIOUS_INITIAL_TAIL_RE = re.compile(r"(?:^|\s)[A-Za-z]\.\s*$")
 _STRONG_SENTENCE_START_RE = re.compile(
     r"^\s+(?:A|An|The|This|That|These|Those|It|Its|He|His|She|Her|"
     r"They|Their|We|Our|You|Your|I|My|"
-    r"However|But|Yet|Meanwhile|Therefore|Thus|Moreover|Nevertheless)\b")
+    r"However|But|Yet|Meanwhile|Therefore|Thus|Moreover|Nevertheless|"
+    r"By|In|On|At|When|Where|Why|How|After|Before|During|Although|"
+    r"Because|If|As)\b(?!-)")
 _CLAUSE_END_ABBREV_RE = re.compile(
     r"(?:^|[^0-9A-Za-z])(?:U\.S\.|U\.K\.|et al\.)$", re.IGNORECASE)
 _SENTENCE_CLOSERS = "\"'”’»)]}"
@@ -560,8 +593,21 @@ def _sentence_end_offsets(compact):
         if not following:
             yield cursor
             continue
+        after = compact[cursor:]
+        # Punctuation that closes an aside, as in ``(water bear!) is``, does
+        # not end the sentence around it.
+        if (any(char in ")]" for char in compact[match.end():cursor])
+                and re.match(r"\s+[a-z]", after)):
+            continue
         if match.group(0) == ".":
             head = compact[max(0, match.end() - 16):match.end()]
+            if _ETC_RE.search(head):
+                if _CAPITALIZED_NEXT_RE.match(after):
+                    yield cursor
+                continue
+            if (_REFERENCE_ABBREV_RE.search(head)
+                    and _REFERENCE_TARGET_RE.match(after)):
+                continue
             initial = bool(_INITIAL_RE.search(head))
             abbreviation = bool(
                 _ABBREV_RE.search(head)
@@ -572,7 +618,6 @@ def _sentence_end_offsets(compact):
             # while recognizing ``U.S. It runs online.``.
             if initial or abbreviation:
                 before = compact[:match.start()]
-                after = compact[cursor:]
                 # Initial chains and honorific + initial forms are names, not
                 # sentence boundaries. This matters especially for ``J. A.``:
                 # the next ``A.`` otherwise looks like the article ``A``.
@@ -589,8 +634,7 @@ def _sentence_end_offsets(compact):
                         and not re.search(r"(?:^|[^A-Za-z])(?:Dr|Prof|Mr|Mrs|Ms)\.$",
                                           head)):
                     clause_end = True
-                strong_next = bool(
-                    _STRONG_SENTENCE_START_RE.search(compact[cursor:]))
+                strong_next = bool(_STRONG_SENTENCE_START_RE.search(after))
                 if not (clause_end and strong_next):
                     continue
         yield cursor
@@ -1374,6 +1418,13 @@ def run_self_test(verbose=False):
              "H₂O", "C₆H₁₂O₆", "SO₄²⁻", "Mg(OH)₂", "L₂", "SL₂ group")],
          ["H2O", "C6H12O6", "SO42-minus", "Mg(OH)2", "L-two",
           "SL-two group"]),
+        ("LaTeX chemical formulas match their Unicode plain form",
+         [math_title_plain_text(value) for value in (
+             r"$\mathrm{H_2O}$", r"$H_2O$", r"$\mathrm{H}_2\mathrm{O}$",
+             r"$\mathrm{NO_3^-}$", "NO₃⁻", r"$\mathrm{C_6H_{12}O_6}$",
+             r"$L_2$ norm", r"$F_1$ score", r"$x_{12}$ and $H_2O$")],
+         ["H2O", "H2O", "H2O", "NO3-minus", "NO3-minus", "C6H12O6",
+          "L-two norm", "F-one score", "x-12 and H2O"]),
         ("general negative exponents do not create repeated hyphens",
          math_title_plain_text(r"$x^{-2}$ moment"),
          "x-to-the-negative-two moment"),
@@ -1428,6 +1479,41 @@ def run_self_test(verbose=False):
         ("etc. may end a sentence before a strong sentence start",
          split_sentences("It covers A, B, etc. The model works."),
          ["It covers A, B, etc.", "The model works."]),
+        ("etc. ends a sentence exactly before a capital",
+         [count_sentences(value) for value in (
+             "Cells, tissues, etc. In development they change.",
+             "Cells, tissues, etc. Many die young.",
+             "Cells, tissues, etc. are common.",
+             "Cheap tools (sieves, etc.) are common.")],
+         [2, 2, 1, 1]),
+        ("all-caps acronyms and unnumbered words end sentences",
+         [count_sentences(value) for value in (
+             "Insider trading is policed by the SEC. Penalties include fines.",
+             "Companies file reports with the SEC. 10-K filings are public.",
+             "The product is an ETC. Investors hold it.",
+             "It is explained in the REF. Such claims recur.",
+             "The bond matures in one sec. Afterwards it pays out.",
+             "See eq. 3 for the loss.")],
+         [2, 2, 2, 2, 2, 1]),
+        ("lettered and Roman reference targets stay inside their sentence",
+         [count_sentences(value) for value in (
+             "See Sec. II for details.",
+             "See Eq. S1 for the loss.",
+             "Described in Ch. IV of the book.",
+             "See Sec. A.2 for details.",
+             "Given in Eq. $3$ of the paper.",
+             "Cells, tissues, etc. (Fig. 2) are common.")],
+         [1, 1, 1, 1, 1, 1]),
+        ("a reference abbreviation may still end before a sentence start",
+         count_sentences("Details are in Sec. The rest follows."), 2),
+        ("an abbreviation may end before an opening preposition",
+         count_sentences("Smith et al. In English it differs."), 2),
+        ("punctuation closing an aside does not end the sentence",
+         [count_sentences(value) for value in (
+             "**Rat** (really?) is a rodent.",
+             "**Tardigrade** (water bear!) is an animal.",
+             "**Rat** (sp. nov.) is a rodent.")],
+         [1, 1, 1]),
         ("lowercase no is an ordinary sentence ending",
          count_sentences("Answer yes or no. The result matters."), 2),
         ("a terminal one-letter label still ends a sentence",
@@ -1465,6 +1551,9 @@ def run_self_test(verbose=False):
          flashcard_line1_faults(
              r"The value $f(x)=\text{e.g. A or B}$ applies under the "
              "stated condition."), []),
+        ("an equation reference in inline LaTeX is one sentence",
+         flashcard_line1_faults(
+             "The loss is defined in Eq. $3$ of the paper."), []),
         ("a real second sentence after inline LaTeX remains visible",
          flashcard_line1_faults(
              r"The value $f(x)=\text{e.g. A or B}$ applies. Another follows."),

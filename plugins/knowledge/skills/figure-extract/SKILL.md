@@ -16,12 +16,11 @@ description: >
 
 Read [shared/RUNTIME.md](../../shared/RUNTIME.md) once per task for vault
 selection, script paths, Python dependencies, and host tools. Use one
-interpreter with PyMuPDF and Pillow for all commands, and first run
-`python3 '<plugin>/shared/scripts/check_parsers.py'` with it. While the check
-fails, run no helper that parses PDFs or images: repair the permitted
-environment, or extract nothing and report the failed check. The shipped
-scripts are the implementation; do not copy their caption detection or crop
-logic into a separate script.
+interpreter with PyMuPDF and Pillow for all commands. Before extracting, run
+`python3 '<plugin>/shared/scripts/check_parsers.py'` with it under the
+[parser-check rule](../../shared/RUNTIME.md#only-for-pdf-and-image-workflows);
+while it fails, extract nothing. The shipped scripts are the implementation;
+do not copy their caption detection or crop logic into a separate script.
 
 The deliverable is **whole-figure PNGs**, not PDF renames, summaries, or wiki
 entries. `paper-summarize` owns document explanations and reading notes,
@@ -50,28 +49,26 @@ that downstream source identity will depend on the current name. The shared
 rule is [conventions §1a](../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first).
 
 Folder sweeps skip [feed-owned attachments](../../shared/CONVENTIONS.md#1-vault-folder-layout)
-and list them as skipped; that does not fail the run. If the user names one,
-keep its name and use the `--allow-unorganized` exception, and report it. Never
-rename a collector-owned file or treat its photo attachments as
-extractor-owned figures.
+and list them without failing the run. If the user names one, keep its name,
+use the `--allow-unorganized` exception, and report it. Never rename a
+collector-owned file or treat its photo attachments as extractor-owned
+figures.
 
-`--src` takes one PDF or a folder scanned recursively (directory symlinks are
-followed); an unreadable subtree or a symlink loop blocks the run instead of
-silently omitting sources. When `--out` is the vault's canonical
-`Sources/Images/`, each selected PDF's basename, including case and Unicode
-variants, must have exactly one owner across the whole vault, even for a
-single named file, and nothing is written if the vault cannot be inventoried
-completely. An external PDF therefore has no owner there and is refused: use
-an external `--out` for a one-off, or, when the user wants it in the vault,
-copy it into `Inbox/` with their approval for `pdf-organize` to file, then
-extract from the filed path. A
+`--src` takes one PDF or a folder scanned recursively, following directory
+symlinks; an unreadable subtree or a symlink loop blocks the run. When `--out`
+is the vault's canonical `Sources/Images/`, each selected PDF's basename,
+including case and Unicode variants, must have exactly one owner across the
+whole vault, even for a single named file, and nothing is written if the vault
+cannot be inventoried completely. An external PDF therefore has no owner there
+and is refused: use an external `--out` for a one-off, or, when the user wants
+it in the vault, copy it into `Inbox/` with their approval for `pdf-organize`
+to file, then extract from the filed path. A
 [readable scratch copy](references/review-and-repair.md#readable-working-copies)
 of a vault PDF keeps that PDF's exact basename. A refused PDF writes and
 adopts nothing, even with `--overwrite`; other PDFs continue and the run exits
-nonzero. When another vault file shares a PDF basename, `pdf-organize`
-refuses both copies: ask the user to remove the redundant copy or to rename
-or move one out of the vault, then retry
-([conventions §8b](../../shared/CONVENTIONS.md#8b-the-producer-conventions)).
+nonzero. When another vault file shares a PDF basename, report both paths and
+give the user the
+[shared-basename remedy](../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first).
 An arbitrary external `--out` checks collisions only within `--src`.
 
 **In a recursive run containing both a book and its chapters, extract the
@@ -96,32 +93,26 @@ directory. For less common options, use the script's `--help`.
 Crops recorded in `.figure-manifest.tsv` with matching bytes are skipped;
 `--overwrite` re-crops them unless a review mark protects them. Limit a batch
 `--overwrite` to the affected PDFs with `--src` unless the user asked for a
-folder-wide refresh: every verified crop without a review mark is re-cropped
-and needs visual review again. Any other file in a figure's slot is reported
-as occupied and never replaced, even with `--overwrite`: another extension, a
-case or Unicode variant, or an unrecorded or changed PNG. A malformed or
-symlinked manifest blocks the run. Never delete sidecars or images to force a
-run. A `Sources/Images/` folder holding PDF crops but no `.figure-manifest.tsv`
-predates ownership records, so every such crop is reported as occupied until
-the inspected legacy set is adopted. For occupied names, legacy adoption,
-sidecar failures, or a source PDF revised at the same path (a verified skip
-proves ownership, not freshness), follow
+folder-wide refresh: every re-cropped PNG needs visual review again. Any other
+occupant of a figure's slot is never replaced, even with `--overwrite`, and a
+malformed or symlinked manifest blocks the run; never delete sidecars or
+images to force a run. For occupied names (including every crop in a
+`Sources/Images/` without a manifest), legacy adoption, sidecar failures, or a
+source PDF revised at the same path (a verified skip proves ownership, not
+freshness), follow
 [ownership, adoption and review records](references/review-and-repair.md#ownership-legacy-adoption-and-review-records).
 
-When a PDF has both Supplementary and Extended Data figures, extract it alone
-with `--ed-prefix ED` before any default run; the default folds both into `S`,
-and `SI` remains distinct. Later default-prefix runs skip a PDF whose manifest
-records `_fig_ED<N>` crops and print its `--ed-prefix ED` command; run that
-PDF with that option. Switching after a default run does not re-crop existing
-`_fig_S<N>` files; follow
-[Extended Data and Supplementary figures](references/review-and-repair.md#extended-data-and-supplementary-figures).
-Use `--keep-frame` if the publisher's surrounding frame should be preserved;
-otherwise detected frames are cropped away.
+Extract a PDF alone with `--ed-prefix ED` when its captions number Extended
+Data figures alongside its main figures, or when `<stem>_fig_ED*` files exist;
+the default folds Extended Data into `S` (`SI` stays distinct). For a PDF
+skipped or refused for its ED namespace, or a switch after a default run,
+follow [Extended Data and Supplementary figures](references/review-and-repair.md#extended-data-and-supplementary-figures).
+Use `--keep-frame` to keep a publisher's surrounding frame, which is otherwise
+cropped away.
 
-Large folder summaries can exceed a host's displayed command output. Capture
-stdout and stderr into unique files under the active run's `<scratch>`, retain
-the exit status, and read both files completely in slices. Truncated UI output
-is not the complete summary required by the next step.
+Large folder summaries can exceed a host's displayed output: capture stdout
+and stderr into unique files under the run's `<scratch>`, keep the exit status,
+and read both files completely in slices before the next step.
 
 Output is `[pdf_stem]_fig_<label>.png`, with the exact PDF stem including
 `_src` and disambiguators. The label comes from the caption, **not extraction
@@ -141,41 +132,38 @@ not proof that an image reached disk.
 Use [review and repair](references/review-and-repair.md) for any flagged crop,
 caption collision, partial detection, missing figures, duplicate pixels, or
 ownership failure. A “PARTIAL” result may be a real missed figure or an
-unresolved external reference; the diagnostics reference explains when a
-verified cross-chapter reference or an explicit crop is reported separately.
-Duplicates are review findings, not authority to delete files.
+unresolved external reference. Duplicates are review findings, not authority
+to delete files.
 
-**Visually review the output.** View every PNG this run wrote or replaced;
-verified skips need no re-check. Render and compare the source page for every
-flagged crop, every crop from a multi-column page, and any PNG that shows
-caption text, neighboring content or a cut-off edge: a crop can contain its
-neighbor's chart without triggering a warning. If viewing every new PNG is
-impractical, as in a large folder sweep, view at least the flagged and
-multi-column crops and report the rest as not visually verified. If image
-viewing is unavailable, report that limit and leave uncertain crops
-unresolved.
+**Visually review the output.** View every PNG this run wrote or replaced
+(listed under each PDF as `wrote:`); verified skips need no re-check. Compare
+these with their rendered pages: every flagged crop, every crop from a
+multi-column page, and any PNG showing caption text, neighboring content or a
+cut-off edge (a crop can hold its neighbor's chart without a warning). If
+viewing every new PNG is impractical, as in a large folder sweep, view at
+least the flagged and multi-column crops and report the rest as not visually
+verified. If image viewing is unavailable, report that limit and leave
+uncertain crops unresolved.
 
 Caption text in a crop must be removed before a note embeds it. Repair a bad
-crop with the reference's [explicit repair procedure](references/review-and-repair.md#set-and-verify-an-explicit-crop),
-which covers coordinate units, naming exceptions, readable scratch copies,
-review marks and cleanup. After viewing any explicitly repaired crop, flagged
-or not, record `--mark-reviewed '<stem>:<fig>'`. The mark silences future
-warnings for that crop and stops a later batch `--overwrite` from putting the
-automatic crop back. It verifies nothing itself, so record it only after you
-have looked. Preserve every recovery path named by a failed write.
+crop with the reference's [explicit repair procedure](references/review-and-repair.md#set-and-verify-an-explicit-crop)
+for coordinate units, naming exceptions, scratch copies, review marks and
+cleanup. Record `--mark-reviewed '<stem>:<fig>'` for every explicitly repaired
+crop, flagged or not, only after viewing it: the mark verifies nothing,
+silences its warnings and protects the crop from a later batch `--overwrite`.
+Preserve every recovery path named by a failed write.
 
 ### 4. Report completed and unresolved work
 
 Give the source scope, output folder, figures written, verified skips, and any
 legacy adoptions. Name any non-default option that later repairs or consumers
 must repeat: `--ed-prefix`, `--keep-frame`, `--dpi`, `--allow-unorganized`, or
-a custom `--review-file`. Name skipped whole books, skipped feed-owned
-attachments, PDFs skipped for their `--ed-prefix ED` namespace, refused
-sources, conflicting occupants, failed PDFs, remaining warnings, and explicit
-crop repairs. State what visual review was completed
-and any review marks recorded. Other PDFs may have succeeded during a nonzero
-run; report that partial outcome without calling the whole request complete.
-Preserve originals, legacy panels, and all unrelated images.
+a custom `--review-file`. Name skipped whole books, feed-owned attachments and
+ED-namespace PDFs, refused sources, conflicting occupants, failed PDFs,
+remaining warnings, and explicit crop repairs. State what visual review was
+completed and any review marks recorded. After a nonzero run, report the PDFs
+that succeeded without calling the whole request complete. Preserve originals,
+legacy panels, and all unrelated images.
 
 At closeout, read the [shared suggestion-log rules](../../shared/SUGGESTIONS.md)
 and apply them to `Reviews/figure-extract-suggestions.md` and to the logs of

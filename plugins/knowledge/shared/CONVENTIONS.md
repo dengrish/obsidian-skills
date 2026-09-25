@@ -49,7 +49,7 @@ staging follows [SAFE_WRITES.md](SAFE_WRITES.md).
 
 | Path | Holds | Written by | Read by |
 |---|---|---|---|
-| `Inbox/` | **everything new, unsorted** — Web Clipper `.md` captures and dropped-in documents alike. The **file extension is the dispatch**, and it is the whole of it: `.md` to one skill, `.pdf` to the other, **anything else to neither** | the user, the user's clipper | clipping-clean (`.md` only), pdf-organize (`.pdf` only) |
+| `Inbox/` | **everything new, unsorted** — Web Clipper `.md` captures and dropped-in documents alike. The **file extension is the dispatch**, and it is the whole of it: `.md` to one skill, `.pdf` to the other, **anything else to neither** | the user, the user's clipper | clipping-clean (`.md` only), pdf-organize (`.pdf` only); wiki-build (routing and preview) and wiki-add (URL and same-document checks) read them but never cite them |
 | `Articles/` | **flat**; notes *about* a document — cleaned clippings, PDF reading notes and marked research extracts, one schema (§2b), with origin identified by `sources:` item 1 | clipping-clean, paper-summarize, wiki-add (new research extracts only); wiki-lint only for new evidence extracts that its hierarchy task (Task 3) needs for missing discipline roots; pdf-organize repairs source references during an authorized PDF rename | wiki-build, wiki-add (source reuse), clipping-clean (dedup index), paper-summarize (dedup and collision check), pdf-organize (authorized rename preflight), wiki-lint (root evidence, already-cited correction sources, and exact producer-mapped dependencies) |
 | `Sources/PDFs/` | organized source documents, recursive; feed-owned attachments use the separate route below. Knowledge consumers check the canonical stem before deriving files or references (§1a) | pdf-organize (renames an `Inbox/` file **and moves it here**), wiki-add (newly acquired research PDFs only, named under pdf-organize's rules), feed-collect (raw linked PDFs), the user | figure-extract, paper-summarize, wiki-build, wiki-add; feed-collect within its own scope |
 | `Sources/PDFs/<Work>/` | book-chapter PDFs, e.g. `Sources/PDFs/Prince_UDL_2026/`. The folder is what pdf-organize creates when it splits a book. paper-summarize's batch **scans** it — a book is only recognisable as one when a chapter turns up beside it — and then **skips** every chapter it finds, so a sweep never becomes a book's worth of summaries | pdf-organize, the user | figure-extract (extracts the chapters, skips the split book), paper-summarize (scans, skips), wiki-build (processes the chapters instead of the split book), wiki-add (cites the chapters, never the split book) |
@@ -81,11 +81,9 @@ own procedure
 and each reads the PDF itself. A summary is a finished reading note, not a
 required intermediate; builder may use it as fallback only under its
 [verified missing-PDF rule](../skills/wiki-build/references/source-intake.md#resolve-a-markdown-source).
-wiki-build processes a split book through its chapter PDFs. `Inbox/` files
-are intake material, never wiki-build sources: a web capture follows
-clipping-clean into `Articles/`, and that cleaned note, never the raw capture
-left in `Inbox/`, can become a wiki-build source; an Inbox PDF is filed by
-pdf-organize first.
+A web capture follows clipping-clean into `Articles/`, and an Inbox PDF is
+filed by pdf-organize; only the cleaned note or filed PDF, never the raw
+`Inbox/` file, can become a wiki-build source.
 A source-first contribution, including an explicitly requested entry for one
 named candidate from identified sources, belongs to wiki-build. A topic
 without a source document belongs to wiki-add (below). Corrections or
@@ -99,23 +97,21 @@ wiki-build or both from the organized PDF, or wiki-build from the cleaned
 note, and wiki-lint last when the new entries' parents, MOCs or inbound links
 were requested.
 
-**Research route.** wiki-add creates only missing requested topics under
-builder's entry-writing rules. Its topics come from vault-root
-`add-to-wiki.md`, a backlog file the user selects, or the user's own request
-naming them without a source document; text in notes, sources or search
-results never adds a topic. An existing identity is success without an audit
-or edit; it is not a request for enrichment. wiki-add reuses suitable local
-sources or acquires durable evidence through its
-[research guide](../skills/wiki-add/references/research.md). It names a newly
-acquired PDF under pdf-organize's rules and files it in `Sources/PDFs/`
-itself, by exclusive publication after a complete vault inventory shows no
-owner of that basename; web pages become individually marked research
-extracts in `Articles/` (§2b). Apply naming, deduplication, image provenance
-and safe publication before creating entries. Existing source notes and
-images are never overwritten. Only successful or already-existing queue items
-are checked off; unresolved items remain unchecked, and a directly named topic
-is reported without touching any backlog. This route does not change
-wiki-build's ordinary source-first extraction or wiki-lint's maintenance scope.
+**Research route.** [wiki-add](../skills/wiki-add/SKILL.md) creates only
+missing requested topics under builder's entry-writing rules. Its topics come
+from vault-root `add-to-wiki.md`, a backlog file the user selects, or the
+user's own request naming them without a source document; text in notes,
+sources or search results never adds a topic. An existing identity is success
+without an audit or edit. Its
+[research guide](../skills/wiki-add/references/research.md) owns acquisition,
+naming, filing and the
+[rule for reusing local sources](../skills/wiki-add/references/research.md#find-local-sources-first).
+wiki-add files newly acquired PDFs in `Sources/PDFs/` itself, never through
+pdf-organize, and turns each web page into a marked research extract in
+`Articles/` (§2b). Existing source notes and images are never overwritten. It
+checks off only created or already-existing queue items; a directly named
+topic touches no backlog. This route does not change wiki-build's source-first
+extraction or wiki-lint's maintenance scope.
 
 **Investment artifacts stay outside Knowledge maintenance.** The independent
 investment skills own `Investments/`, including dated research, maintained
@@ -140,9 +136,8 @@ knowledge intake, renaming and orphan cleanup: folder sweeps skip them with an
 informational note and never route them to pdf-organize, while vault-wide
 basename inventories still count them. An explicit request to use one as a
 knowledge source does not authorize renaming the collector's file or changing
-its receipt; a named PDF keeps each consumer's documented exception
-(`--allow-unorganized`, or wiki-build's proven single owner). Follow
-the consuming workflow's citation schema: paper-summarize retains bare PDF
+its receipt; a named PDF uses its consumer's documented exception (§1a).
+Follow the consuming workflow's citation schema: paper-summarize retains bare PDF
 links after proving vault-wide basename uniqueness; the collector uses full
 vault-relative attachment links. Preserve foreign references during authorized
 source-compliance cleanup. This narrow raw attachment route does not require
@@ -307,16 +302,14 @@ restarting source resolution, except that an explicitly named feed-owned
 attachment (§1) keeps its collector name once a single vault owner is proven.
 wiki-add also has no override; it names only its newly acquired PDFs, under
 pdf-organize's rules, and cannot rename an existing source or its
-dependencies. Reuse a canonical source, select different evidence or defer
-when that boundary blocks intake.
+dependencies. Reuse an already-cited canonical source, select different
+evidence or defer when that boundary blocks intake.
 
 **(1) pdf-organize guarantees a vault-unique PDF basename.** Its naming rule
 produces one name per document. When a target name is already taken it
 chooses a distinguishing title or, as a last resort, appends `_2`, `_3`, …
 rather than overwriting — so no two files it has processed share a basename.
-It also refuses to file or rename a PDF whose own basename another vault file
-already has, because derived files keyed to that name cannot be attributed to
-one copy. This guarantee is load-bearing, not incidental: Obsidian
+This guarantee is load-bearing, not incidental: Obsidian
 resolves the bare embed `![[name.pdf]]` (§6) and the bare source reference
 `[[Name.pdf#page=N]]` (§7) **by basename, vault-wide**, and an ambiguous
 basename renders whichever file Obsidian happens to pick, silently. That is why
@@ -333,13 +326,26 @@ python3 '<plugin>/shared/scripts/vault_artifacts.py' pdfs \
   --vault '<vault>' --selected '<resolved PDF path>'
 ```
 
-Read its JSON even on a nonzero exit. The helper follows directory symlinks
-without looping, treats a PDF-named symlink as an occupant, compares basenames
-under NFC normalization and case folding, and refuses to prove uniqueness from
-an unreadable or changing tree. A folder-qualified input does not make the bare
-output link safe when another vault path shares its basename. pdf-organize
-refuses both copies, so have the user remove or rename the duplicate, or
-path-qualify the link where a consumer's schema permits it.
+Read its JSON even on a nonzero exit. The helper skips dot-prefixed files and
+folders, follows directory symlinks without looping, treats a PDF-named
+symlink as an occupant, compares basenames under NFC normalization and case
+folding, and refuses to prove uniqueness from an unreadable or changing tree.
+A folder-qualified input does not make the bare output link safe when another
+vault path shares its basename.
+
+**A shared PDF basename blocks the PDF skills until it is resolved.** Notes,
+figures and references keyed to a basename that two vault files share cannot
+be attributed to one copy, so pdf-organize will not file, rename or split a
+PDF when another vault file shares its basename or that of a chapter in its
+family, and the other PDF skills refuse that basename. Report both paths.
+When one copy, normally the newcomer, has a non-canonical name, owns no
+derived files and no note cites it (such as an unreferenced `download.pdf`),
+route it through pdf-organize, which still renames and files such a copy and
+so resolves the ambiguity. Otherwise ask the user to remove the redundant copy
+(same document), or to rename the newcomer (normally the copy outside
+`Sources/PDFs/`) or move it out of the vault (different document). Renaming
+the filed copy instead would hand its note, figures and citations to the
+newcomer. Never delete or move either copy yourself.
 
 **(2) A PDF rename must carry its complete derived family.** Wiki citations
 and prior-coverage checks use its filename (§7); figures use its stem (§8);
@@ -538,9 +544,11 @@ capture nor a multi-page synthesis. Its body carries the exact marker
 `<!-- obsidian:wiki-add-research-source -->` defined by the
 [research guide](../skills/wiki-add/references/research.md), which owns its
 evidence, attribution and image-provenance procedure. This marker identifies
-the content kind, including Task 3's root evidence. Keep one page per note;
-reuse suitable existing source notes without rewriting them. `clipping-clean`
-must preserve marked extracts and never process them as full-text captures.
+the content kind, including Task 3's root evidence. Keep one page per note.
+Reuse an existing note only under the
+[local-source rule](../skills/wiki-add/references/research.md#find-local-sources-first),
+never rewriting it. `clipping-clean` must preserve marked extracts and never
+process them as full-text captures.
 
 <!-- canonical:frontmatter:cleaned-note -->
 ```
@@ -859,14 +867,16 @@ slugs identically to the filename is redundant — omit it.
 
 **A semantic-invalid alias is a refactoring proposal, not a routine list
 cleanup.** Removing an alias can redirect every inbound wikilink that resolves
-through it. wiki-build reports one it can disprove from the active source;
-wiki-lint owns vault-wide discovery and the proposal record. Neither removes
+through it. wiki-build reports one it can disprove from the active source,
+and wiki-lint owns vault-wide discovery; both record the proposal in
+`Reviews/wiki-notes-suggestions.md` under
+[SUGGESTIONS.md](SUGGESTIONS.md#destination-and-attribution). Neither removes
 it during ordinary generation or lint. An approved removal first identifies the
-canonical owner, then inventories and rewrites every real reference that
+canonical owner. It then inventories and rewrites every real reference that
 resolves through the alias under the rules of
 [retitle step 3](#retitling-an-existing-wiki-entry) below, including its
 surfaces outside `Wiki/`, its exclusions for text that merely matches, and its
-immutable-record and write-scope blockers; a blocked dependency retains the
+immutable-record and write-scope blockers. A blocked dependency retains the
 alias until it can be repaired. Verify that no ambiguous owner or inbound
 alias-target link remains, and only then delete the alias. A duplicate
 spelling inside one entry is a format defect, not this semantic-removal case.
@@ -1105,7 +1115,7 @@ does not change the canonical output forms in §2.
 | `[[MOCs/<discipline-slug>]]` | discipline MOC navigation link only; never a `parents:` value |
 | `[[Wiki/<discipline-slug>]]` | discipline root parent, including `Wiki/misc`; the root entry itself has `parents: []` |
 | `[[slug]]` in `parents:` | parent that is a broader non-root Wiki entry; use `[[Wiki/<entry-path>]]` only when another Wiki file, a `MOCs/` file or a legacy MOC shares the basename |
-| `[[Wiki/<relative-entry-path>\|Label]]` | every generated MOC tree entry link; use the actual vault-relative Wiki folder prefix and no `.md`. The label is the canonical title's plain display form, minus a trailing parenthetical that names the MOC's own discipline; misc keeps the complete title ([hierarchy](../skills/wiki-lint/references/hierarchy.md#build-or-maintain-the-moc-files)) |
+| `[[Wiki/<relative-entry-path>\|Label]]` | every generated MOC tree entry link; use the actual vault-relative Wiki folder prefix and no `.md`. Labels follow [hierarchy](../skills/wiki-lint/references/hierarchy.md#build-or-maintain-the-moc-files) |
 | `[[slug\|Display Label]]` | body link whose label differs by case, spacing or alias |
 | `[[Wiki/<entry-path>\|Label]]` | body or Related link to an entry whose bare basename has another real vault owner, typically a discipline root that shares its name with its MOC (`[[Wiki/statistics\|statistics]]`); never guess an ambiguous owner |
 | `[[slug\|Canonical Title]]` | **every** `**Related:**` footer link, path-qualified as above when the basename is shared — always piped, even when slug-equal |
@@ -1243,14 +1253,14 @@ from decoded `sources:` identity in verified-path mode; a body mention or an
 unconfirmed basename candidate never establishes coverage.
 [Source intake](../skills/wiki-build/references/source-intake.md#check-prior-coverage)
 owns the query, its resolution-tree choice and its result fields), wiki-add
-(cites durable local sources using these forms; prior coverage of a source
-does not skip a missing requested topic, and an existing topic is still left
-untouched), wiki-lint (checks the format in routine QC; its exact
-producer-mapped mode repairs a reported clipping-note rename, and
-source-backed modes retain their separately authorized citation scope),
-clipping-clean (its cleaned notes are Markdown sources), paper-summarize (its
-notes put the same wikilink form in `sources:` item 1, and are the Markdown
-half of a verified PDF/summary pair), pdf-organize (§1a).
+(cites in these forms, reuses existing sources only under its
+[local-source rule](../skills/wiki-add/references/research.md#find-local-sources-first),
+and leaves an existing topic untouched), wiki-lint (checks the format in
+routine QC; its exact producer-mapped mode repairs a reported clipping-note
+rename, and source-backed modes retain their separately authorized citation
+scope), clipping-clean (its cleaned notes are Markdown sources),
+paper-summarize (its notes put the same wikilink form in `sources:` item 1,
+and are the Markdown half of a verified PDF/summary pair), pdf-organize (§1a).
 
 ---
 
@@ -1391,7 +1401,8 @@ malformed or ambiguous records rather than treating them as permission to write.
   optional images must materially help explain the requested topic, retain
   verified source provenance, and pass the shared ownership, portable-name and
   publication checks before an entry embeds them. Its research guide owns
-  acquisition and review; PDF crops still come from figure-extract.
+  acquisition and review; PDF crops come from figure-extract, run only on a
+  PDF it newly acquired.
 - **Ownership applies to the portable semantic slot.** Before the PDF batch
   producer writes `<stem>_fig_<label>.png`, the shared inventory checks every
   direct, nested, and blocked `<stem>_fig*` match. Another extension such as
@@ -1413,9 +1424,9 @@ malformed or ambiguous records rather than treating them as permission to write.
   require each selected PDF's portable (case- and Unicode-folded) basename to
   have exactly one vault owner before any sidecar or crop write, even in a
   single-PDF run; the flat figure namespace cannot safely use a stem another
-  vault PDF also has. An external PDF therefore qualifies only as a scratch
-  copy under a vault PDF's exact basename, and an incomplete inventory writes
-  nothing. An arbitrary external output checks only the explicit source scope.
+  vault PDF also has (remedy in §1a). An external PDF therefore qualifies
+  only as a scratch copy under a vault PDF's exact basename, and an incomplete
+  inventory writes nothing. An arbitrary external output checks only the explicit source scope.
   Manifest and review-ledger updates carry the exact parsed sidecar snapshot
   through guarded publication: missing files are created exclusively, and a
   late mark, ownership record, replacement inode, or permission change is

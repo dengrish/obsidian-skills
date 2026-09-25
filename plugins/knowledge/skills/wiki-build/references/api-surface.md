@@ -30,9 +30,9 @@ A version-specific behavior claim needs a durable source that establishes that v
 
 ## Mechanical pre-finalize scan (this is the binding check)
 
-`lint_entry.py` reports these shapes as `6-api-surface`: fenced code and every backticked span other than a bare file extension or a bracket special token are errors; a code-identifier title and the `In <Library>` / `<Library> provides|offers|exposes|has` framings and `flag enables` are warnings. Resolve every hit with the author test below, and search the body for the unbackticked variants the helper does not enumerate (`[Library] implements`, `flag controls`, `argument controls`, `argument enables`, `kwarg`):
+`lint_entry.py` reports most of these shapes as `6-api-surface` (backticked spans and fenced code as errors, framings as warnings). Resolve every hit with the author test below, and search the body by hand for the phrasings listed here, because the helper does not check all of them:
 
-- **Any backticked span.** Under the zero cap this is the whole check, and `lint_entry.py` reports every hit. The only backticked spans that survive in a non-Software entry are the two non-identifier shapes above (a bare file extension, a bracket special token); everything else is a violation.
+- **Any backticked span** other than the two non-identifier shapes above is a violation.
 - `"In PyTorch"` / `"In TensorFlow"` / `"In NumPy"` / `"In Hugging Face"` / `"In [Library]"` as a sentence opener — sentence openers of this shape almost always introduce how-to content. **Corpus:** *"In PyTorch a causal mask can be built with `torch.triu`, and an `is_causal` flag enables performance optimizations when the mask is known to be causal."* (`causal-mask.md`) — three independent failures in one sentence: the `"In PyTorch"` opener, the ``"built with `X`"`` form, and the `"flag enables"` kwarg documentation.
 - `"[Library] implements"` / `"[Library] provides"` / `"[Library] exposes"` / `"[Library] offers"` — these verbs invite the model to describe *what* the library object does: how-to content, and under the zero cap the identifier it introduces is itself a violation.
 - ``"built with `"`` / ``"built using `"`` / ``"constructed via `"`` / ``"constructed with `"`` / ``"created by `"`` / ``"Building one in [Library] uses `"`` / ``"Building one with `"`` — every variant of the "built with X" form is forbidden.
