@@ -49,18 +49,26 @@ they still do not override the explanatory-value test.
 **A special-case equation keeps its conditions attached.** A source may explain a general concept through one loss function, distribution, or other restricted case. State that condition in the sentence introducing the display and keep the description, opener, and flashcard at the concept's actual scope. For example, squared-error gradient boosting fits residuals because those residuals are the negative loss gradient in that case; residual fitting must not become the unqualified definition of gradient boosting. If the source supplies only the special case, present it explicitly as an example or qualified case rather than silently generalizing it.
 
 **State the assumptions needed for understanding.** Bind the symbols and keep
-conditions that materially determine the claim, such as the loss under which
-an update is valid, the data used to fit normalization, or whether a formula
-describes a population or a sample. Use the source's ordinary case. Do not
+every condition, range, coding, or excluded term the relationship needs: the
+loss under which an update is valid, the data used to fit normalization,
+population versus sample, $0 \le \lambda \le 1$ in the convexity inequality,
+$p \ge 1$ for an Lp norm, $y \in \{0,1\}$ in log loss, or an unpenalized
+intercept. An operation or property of the concept itself is content too: the
+pseudoinverse reciprocates only nonzero singular values, and softmax outputs
+sum to one. Use the source's ordinary case. Do not
 append exhaustive domain checks, positive-count reminders, tie-breaking rules,
 zero-denominator recovery, clipping tolerances, or implementation alternatives
 unless that detail is central to this entry and supported by the source. A
-formula presupposes its ordinary domain, so omit conditions that only say its
-inputs exist: write “the mean of the points assigned to the cluster,” not
-“for a nonempty cluster,” and leave out $m \ge 1$, $n \ge 2$, nonzero
-denominators or variance, and probabilities that sum to one. Never invent an
-operational convention to make an illustrative formula specify a complete
-implementation.
+formula presupposes its ordinary domain, so omit well-definedness boilerplate:
+write “the mean of the points assigned to the cluster,” not “for a nonempty
+cluster,” and leave out $m \ge 1$, nonzero denominators or variance, input
+probabilities that sum to one, and conventional parameter ranges such as
+$\alpha \ge 0$. A range is conventional when the parameter's name already
+implies it: a regularization strength is nonnegative, and a mix ratio or
+probability cutoff lies in $[0,1]$. Keep a range on a quantified variable or
+family index the definition needs, such as $\lambda$ and $p$ above. Never
+invent an operational convention to make an illustrative formula specify a
+complete implementation.
 Keep an exact definition distinct from numerical approximations when the
 source makes that distinction relevant; do not silently add clipping or tolerances.
 
@@ -82,7 +90,7 @@ A display block may sit mid-sentence — "…it is the [[cost-function|cost func
 
 **Structure the layout in display math:** `\frac{…}{…}` rather than the inline slash, `\left( … \right)` around tall content, `\sqrt{…}`, `\sum_{i=1}^{m}`. The slash form stays fine *inline*, where a stacked fraction would break line height.
 
-Display blocks appear only in body prose. `description:` is plain text (writing.md §1); captions and flashcard line 1 allow **inline** math only; flashcard line 3 is plain. Flashcard definitions follow the canonical [line-1 equation-coverage rule](flashcards-and-emphasis.md#line-1-equation-coverage): applicable equations share the description's physical line, never a display block or the answer line.
+Display blocks appear only in body prose. `description:` is plain text (writing.md §1); captions and flashcard line 1 allow **inline** math only; flashcard line 3 is plain. Flashcard line-1 math is optional; when used, it follows the canonical [line-1 equation-coverage rule](flashcards-and-emphasis.md#line-1-equation-coverage) and shares the description's physical line, never a display block or the answer line.
 
 ## 3. Notation — one symbol per role, vault-wide
 
@@ -121,7 +129,7 @@ This is the notation the vault's equation-bearing entries already use — Géron
 - **Variance uses the form the relationship needs.** Write $\operatorname{Var}(X)$ when applying the variance operator to a bound quantity $X$; write $\sigma^2$ for the scalar variance paired with an already established standard deviation $\sigma$. These are consistent forms of the same quantity, not competing notation to normalize away.
 - **Named norms** as $\ell_1$, $\ell_2$, $\ell_\infty$ (`\ell`); the general form $\|\cdot\|_p$. Never write raw `ℓ1` or `ℓ₁` in body prose or flashcard line 1.
 - **Unit symbols containing Greek letters use inline LaTeX, with the unit upright.** Write `10 $\mu\mathrm{m}$`, not raw `10 μm` or `10 µm`. The ordinary measured number remains plain under writing.md's numbers-in-prose rule; only the symbol-bearing unit needs math markup. Descriptions remain plain text: they may keep Unicode `μm`, but spell ℓ-norms in words (`ell-one`, `ell-two`).
-- **Every symbol is bound in nearby prose.** Each symbol a display equation uses is introduced in the sentences around it — "For a dataset of $m$ instances with feature vectors $\mathbf{x}^{(i)}$ and labels $y^{(i)}$, and a prediction function $h$…" is the worked pattern (the vault's `RMSE` entry). Bind symbols by role in the display's lead-in or a following *where* clause, not in the opening sentence, and attach no count or domain conditions to the binding. The table standardizes *which* symbol to pick; it does not excuse the entry from saying what the symbol means, because entries are self-contained (prose principle 5) and the table is not in front of the reader.
+- **Every symbol is bound in nearby prose.** Each symbol a display equation uses is introduced in the sentences around it — "For a dataset of $m$ instances with feature vectors $\mathbf{x}^{(i)}$ and labels $y^{(i)}$, and a prediction function $h$…" is the worked pattern (the vault's `RMSE` entry). Bind symbols by role in the display's lead-in or a following *where* clause, not in the opening sentence. A binding keeps a range or coding the relationship needs, such as $\lambda \in [0,1]$ or $y \in \{0,1\}$, and omits the boilerplate §1 lists. The table standardizes *which* symbol to pick; it does not excuse the entry from saying what the symbol means, because entries are self-contained (prose principle 5) and the table is not in front of the reader.
 
 ## 4. Normalization — the source's symbols do not survive contact
 

@@ -23,7 +23,7 @@ A fictional paper, realistic in every detail that matters. `Sources/PDFs/Doe_Gut
 - **Primary outcome,** page 5: recurrence within 8 weeks — 8.2% (9 of 110) on transplant against 45.0% (49 of 109) on placebo; absolute reduction 36.8 percentage points (95% CI 25.9 to 47.7), risk ratio 0.18 (95% CI 0.09 to 0.36).
 - **Harms,** page 6: abdominal cramping in the first 48 hours, 27 of 110 against 11 of 109; one *Escherichia coli* bacteraemia in the transplant arm within 7 days, adjudicated possibly related; no deaths in either arm within 8 weeks.
 - **One null secondary,** page 6: gastrointestinal quality of life at 8 weeks (GIQLI, 144 points) — mean difference 2.6 points, 95% CI −3.1 to +8.3.
-- **Exploratory engraftment,** page 7: 96 week-8 stool samples; donor strains detectable in 71 of 78 recurrence-free patients and in 4 of 18 who recurred.
+- **Exploratory engraftment,** page 7: week-8 stool samples from 87 transplant-arm patients; donor strains detectable in 71 of 78 who stayed recurrence-free and in 4 of 9 who recurred.
 - **The authors' conclusions,** page 8: offer encapsulated transplant after a second recurrence in adults who completed vancomycin; the capsule route avoids colonoscopy without losing the effect size.
 - **The authors' own limitations,** page 8: follow-up ends at 8 weeks; everyone enrolled had already relapsed at least twice; one donor supplied 38% of the capsules given.
 - **Availability,** page 8: de-identified participant data 12 months after publication under a data-access agreement; no analysis code offered.
@@ -87,11 +87,11 @@ The trial was randomised, double-blind and placebo-controlled, at 14 hospitals i
 
 **A secondary outcome with no detected difference.** On gastrointestinal quality of life at 8 weeks the trial did not detect a difference between the arms. The mean difference was 2.6 points on the 144-point GIQLI, 95% CI −3.1 to +8.3.<sup>[[Doe_GutMicrobiome_2025.pdf#page=6|6]]</sup> The interval leaves room for a benefit of up to 8.3 points or a deficit of up to 3.1.
 
-**Engraftment, exploratory.** In week-8 samples, donor strains persisted in 71 of 78 who stayed well and 4 of 18 who recurred, an association outside the randomisation.<sup>[[Doe_GutMicrobiome_2025.pdf#page=7|7]]</sup>
+**Engraftment, exploratory.** In week-8 transplant-arm samples, donor strains persisted in 71 of 78 who stayed well and 4 of 9 who recurred, an association outside the randomisation.<sup>[[Doe_GutMicrobiome_2025.pdf#page=7|7]]</sup>
 
 ## Authors recommend capsules after a second recurrence in adults
 
-The authors conclude that encapsulated transplant should be offered after a second recurrence, in adults who have completed vancomycin. They also conclude that the capsule route removes the need for colonoscopy without giving up the effect size.<sup>[[Doe_GutMicrobiome_2025.pdf#page=8|8]]</sup>
+The authors conclude that encapsulated transplant should be offered after a second recurrence, in adults who have completed vancomycin. They also conclude that the capsule route removes the need for colonoscopy without giving up the effect size colonoscopic transplant has shown.<sup>[[Doe_GutMicrobiome_2025.pdf#page=8|8]]</sup> This trial did not compare the two routes.
 
 ## Eight weeks of follow-up, and one donor supplied 38%
 
@@ -120,8 +120,8 @@ The authors conclude that encapsulated transplant should be offered after a seco
   not repeat it in a table.
 - The eight-week horizon is explained once, in Limitations, and stated in one
   short callout bullet. Other sections word their claims within 8 weeks
-  instead of repeating the caveat, and Interpretation reports only the
-  authors' conclusions.
+  instead of repeating the caveat. Interpretation attributes the authors'
+  conclusions and adds only the limit their route comparison needs.
 - The title page supplies only `2025`, so the note pads month/day to `01` and
   the report records that choice. The DOI is included because the fictional
   document prints it; neither date nor URL requires outside lookup.

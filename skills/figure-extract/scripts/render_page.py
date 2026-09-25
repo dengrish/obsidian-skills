@@ -467,6 +467,9 @@ def run_self_test():
         ok("the run states the px → pt factor for the DPI it used",
            "multiply by 1.000" in so)
         ok("...and says --crop takes points", "POINTS" in so)
+        ok("...with the caption rule for a caption above, below or beside",
+           "y1 <= cap_y0 - 0.5" in so and "y0 >= cap_y1 + 0.5" in so
+           and "x-range clear" in so and "hard limit" not in so)
         code, so, se = run([pdf, "1", "--out", out, "--dpi", "100"])
         ok("at 100 DPI the same page is 850x1100 px", "850x1100 px" in so)
         ok("...and the factor follows the DPI", "multiply by 0.720" in so)
@@ -719,8 +722,10 @@ def main(argv=None):
             )
             print(
                 f"  px → pt: multiply by {scale:.3f} "
-                f"(x_pt = x_px * {scale:.3f}). --crop takes POINTS, and the "
-                f"caption's top edge is the hard limit for y1."
+                f"(x_pt = x_px * {scale:.3f}). --crop takes POINTS. Keep "
+                f"every caption out of the crop: below the figure, "
+                f"y1 <= cap_y0 - 0.5; above it, y0 >= cap_y1 + 0.5; beside "
+                f"it, keep the crop's x-range clear."
             )
         if automatic_out:
             print("  Temporary preview directory: %s. Remove it after visual "

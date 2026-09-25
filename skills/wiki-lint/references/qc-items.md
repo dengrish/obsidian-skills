@@ -221,16 +221,16 @@ list shape, or lexical similarity alone proves nothing.
 **Caveat review.** Inspect qualifications and final paragraphs for the caveats
 the [prose principles](../../wiki-build/references/writing.md#prose-principles)
 exclude because they do not help explain the ordinary concept. Do not add them
-from memory. Routine lint removes empty rhetoric and repetition under the
-local repairs below and well-definedness boilerplate under item 12, but
-preserves substantive claims. Record the remaining over-qualified passages in
-`Reviews/wiki-notes-suggestions.md`, one item per pattern naming each entry,
-passage, and why it does not help explain the concept, as a proposal for
-source-backed simplification. A pattern that a producer's rules keep
+from memory. A limitation or contrast the source teaches is explanation, not
+over-qualification. Routine lint removes empty rhetoric and repetition under
+the local repairs below and well-definedness boilerplate under item 12, but
+preserves substantive claims. Record the remaining over-qualified passages as
+[Over-qualification](backlogs.md#proposing-note-improvements) proposals in
+`Reviews/wiki-notes-suggestions.md`; a pattern that a producer's rules keep
 generating also goes to that producer's log under
-[proposal scope](backlogs.md#proposal-scope). An explicit request to
-simplify such content activates source-backed correction across the requested
-scope, including similar cases beyond named examples. Verify the affected
+[proposal scope](backlogs.md#proposal-scope). An explicit request to simplify
+such content activates source-backed correction across the requested scope,
+including similar cases beyond named examples. Verify the affected
 passages against each entry's cited sources and retain essential conditions.
 A source-supported detail can still be unnecessary to this entry.
 
@@ -350,10 +350,10 @@ Preserve assumptions that determine the mathematical claim, following the
 Do not add exhaustive boundary handling from memory or turn an explanatory
 formula into an implementation specification. Under an explicit simplification
 request, verify and remove unhelpful equations, notation-only prose, corresponding card math, and unnecessary caveats through source-backed correction;
-ordinary lint does not silently remove substantive conditions. A
-well-definedness qualifier that only says a formula's inputs exist is not a
-substantive condition: ordinary lint removes it under the equation guide,
-including from symbol bindings, and reports the removal.
+ordinary lint does not silently remove substantive conditions. The
+well-definedness boilerplate that guide lists for body prose is not a
+substantive condition: ordinary lint removes it, including from symbol
+bindings, and reports the removal.
 Flashcard line 1 follows [flashcard maintenance](flashcards.md).
 
 **Equation form and notation.** Promote a defining inline equation to its own

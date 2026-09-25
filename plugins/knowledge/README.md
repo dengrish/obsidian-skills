@@ -19,11 +19,10 @@ both may use the same selected vault.
 Read [runtime setup](shared/RUNTIME.md) once per task; each skill links the
 [vault conventions](shared/CONVENTIONS.md) sections it needs.
 Python 3.10+ is required. Wiki and clipping helpers use the standard library.
-Any workflow that parses PDFs or images, including a Wiki skill reading a
-source PDF, needs the packages in [requirements.txt](requirements.txt),
-installed into an isolated environment using the runtime guide, and checks the
-installed versions with `shared/scripts/check_parsers.py`. Install this
-whole package so its relative skill and helper paths stay intact.
+Parsing a PDF or image, including a Wiki skill reading a source PDF, needs the
+packages in [requirements.txt](requirements.txt) in an isolated environment and
+a passing `shared/scripts/check_parsers.py`, as the runtime guide describes.
+Install this whole package so its relative skill and helper paths stay intact.
 
 Use the vault already selected for the task. Sources and reading notes retain
 their `Inbox/`, `Articles/` and `Sources/` routes; entries remain in `Wiki/`

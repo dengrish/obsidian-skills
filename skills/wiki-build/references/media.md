@@ -30,9 +30,9 @@ or the cleaned Markdown note's stem for a clipping.
 
 ### Missing PDF figures
 
-When a PDF source's complete, safe step-4 inventory has no `candidates` and
-the source shows or refers to figures, an apply run whose setup parser check
-passed extracts them once before selecting exhibits, from that PDF alone:
+Sometimes a PDF source shows or refers to figures, but its complete, safe
+step-4 inventory has no `candidates`. After the parser check passes, an apply
+run then extracts that PDF alone, once, before selecting exhibits:
 
 ```bash
 python3 '<plugin>/skills/figure-extract/scripts/batch_extract.py' \
@@ -41,18 +41,22 @@ python3 '<plugin>/skills/figure-extract/scripts/batch_extract.py' \
 
 Carry an intake exception such as `--allow-unorganized`, and any non-default
 option that an earlier extraction report or the extractor's printed rerun
-command names, into this command and any repair command. Use `--ed-prefix ED`
-for a PDF with both Supplementary and Extended Data figures. Respect the
-extractor's naming, collision and ownership refusals, and read its
-diagnostics. For a crop it flags, follow
-[figure-extract](../../figure-extract/SKILL.md)'s review-and-explicit-crop
-workflow, and only for crops this run produced. Then re-run the inventory.
-Never overwrite, adopt or repair a pre-existing image. After that the image
-folder is read-only, except that a crop this run produced that proves
-defective at selection returns here for its explicit-crop repair and a fresh
-inventory. A preview/no-apply run writes nothing and reports the gap. An unsafe
-or partial inventory, or an extraction that cannot supply a figure, leaves that
-figure unavailable and reported under *Unused source figures*.
+command names, into this command and any repair command. Pass
+`--ed-prefix ED` when `<stem>_fig_ED*` files exist or the captions number
+Extended Data figures alongside the main figures. Respect the extractor's
+naming, collision and ownership refusals, and read its diagnostics.
+
+Then complete figure-extract's
+[visual review](../../figure-extract/SKILL.md#3-inspect-the-summary-and-verify-crops)
+of the crops this run wrote: view each one, or at least every flagged and
+multi-column crop. Repair only crops this run produced, through
+figure-extract's explicit-crop workflow: one the review flags, or one that
+proves defective at [selection](#selection). Re-run the inventory after the
+extraction and after each repair. Never overwrite, adopt or repair a
+pre-existing image; the image folder is otherwise read-only. A preview/no-apply
+run writes nothing and reports the gap. An unsafe or partial inventory, or an
+extraction that cannot supply a figure, leaves that figure unavailable and
+reported under *Unused source figures*.
 
 ## Selection
 

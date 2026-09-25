@@ -19,7 +19,7 @@ For a topic without a source document, whether queued in `add-to-wiki.md` or
 named directly, use [wiki-add](../wiki-add/SKILL.md). It reuses these entry
 standards with a create-only scope and never merges or audits an existing entry.
 
-**Setup:** read [shared/RUNTIME.md](../../shared/RUNTIME.md) once for the selected vault, host tools, Python, and paths. Use the relevant sections of [shared/CONVENTIONS.md](../../shared/CONVENTIONS.md) at the action points below. After setting up the environment, run `python3 '<plugin>/shared/scripts/check_parsers.py'` with its interpreter. While the check fails, run no helper that parses PDFs or images: repair the permitted environment or read the PDF pages directly, and report the failed check.
+**Setup:** read [shared/RUNTIME.md](../../shared/RUNTIME.md) once for the selected vault, host tools, Python, and paths. Use the relevant sections of [shared/CONVENTIONS.md](../../shared/CONVENTIONS.md) at the action points below. Before a step parses a PDF or runs figure extraction, set up the environment and run `python3 '<plugin>/shared/scripts/check_parsers.py'` with its interpreter under the [parser-check rule](../../shared/RUNTIME.md#only-for-pdf-and-image-workflows); while it fails, read the PDF pages directly. A run that reads only Markdown needs neither.
 
 A required helper is usable only when it completes with the documented output.
 A missing helper, crash, malformed result, or incomplete inventory is not a
@@ -112,7 +112,7 @@ with or ignore, earlier work. For an absent Wiki, use a unique empty scratch
 directory. Do not create the public folder during collision planning,
 especially in a preview/no-apply run.
 
-**A decisive exact/µ match permits a merge only when it has one existing owner.** Multiple owners and all broader probe matches require adjudication; never choose an owner by index order. A malformed/unreadable index keeps “no match” uncertain. Resolve that uncertainty before creating a file. On any match, read [collision decisions and merging](references/merge.md#collision-decisions); similar names can denote different entities. An empty wiki still requires candidate-to-candidate checks. A result marked `naming: ["bare-common-noun"]` has a bare cross-domain slug: qualify the title under the [cross-domain tests](references/writing.md#cross-domain-term-disambiguation) and probe again before drafting.
+**A decisive exact/µ match permits a merge only when it has one existing owner.** Multiple owners and all broader probe matches require adjudication; never choose an owner by index order. A malformed/unreadable index keeps “no match” uncertain. Resolve that uncertainty before creating a file. On any match, read [collision decisions and merging](references/merge.md#collision-decisions); similar names can denote different entities. An empty wiki still requires candidate-to-candidate checks. A result marked `naming: ["bare-common-noun"]` has a bare cross-domain slug. Qualify a new entry's title under the [cross-domain tests](references/writing.md#cross-domain-term-disambiguation) and probe again before drafting. When it matches an existing bare-slug entry of the same sense, merge into it and propose the qualified rename; for a different sense, qualify the candidate and probe again.
 
 A leaf `.md` symlink is an occupied slug, not merge input: the index keeps it
 in collision ownership, reports it, and suppresses its target's metadata. Do
@@ -155,35 +155,47 @@ Finish with a frequency-inverted check: take accepted entities from most-mention
 Build a unique private **combined review tree** before linting: a scratch
 directory named like the real Wiki folder, such as `<scratch>/review/Wiki`.
 Copy each readable regular entry from the current Wiki snapshots into it, using
-ordinary byte copies rather than hard links. Lint that copied mirror once with
-`lint_entry.py` and keep its findings as the baseline. Then overlay the run's
-staged creates and replacements at their intended relative paths. Preserve the
-real index's occupied-slug and unreadable/symlink findings alongside that
-mirror; never follow a leaf symlink into the review tree. This gives
-cross-entry checks the final proposed state without exposing a draft in the
-vault.
+ordinary byte copies rather than hard links. Lint that copied mirror with
+`lint_entry.py` and keep its findings as the baseline; take a fresh baseline
+whenever the combined view is rebuilt from new snapshots. Then overlay the
+run's staged creates and replacements at their intended relative paths.
+Preserve the real index's occupied-slug and unreadable/symlink findings
+alongside that mirror; never follow a leaf symlink into the review tree.
 
 Lint every staged created or merged entry with
 `python3 '<skill>/scripts/lint_entry.py' '<file>'`, then lint the combined
 review tree once. Folder mode adds the cross-entry checks a single file cannot
-run, including alias collisions, Related-footer canonical titles,
-path-qualified self-links and body display-label targets.
-**Resolve every finding on a staged entry, and every alias collision involving
-one, in the private working set, then rebuild and re-lint until nothing
-fixable remains.** Do not edit an unmodified copy: its baseline findings belong
-to wiki-lint and do not block publication. A finding on a copy that is absent
-from the baseline was introduced by the overlay: resolve it in the staged
-draft, or report it as an unresolved in-scope finding. If any lint cannot run
-or its result is malformed or incomplete, leave all dependent drafts
-unpublished and report the blocker; a prose-only review is not a clean lint.
+run. **Resolve in the private working set every finding on a staged entry and
+every finding the overlay introduces (one absent from the baseline), except
+those listed below, then rebuild and re-lint until nothing fixable remains.**
+If any lint cannot run or its result is malformed or incomplete, leave all
+dependent drafts unpublished and report the blocker; a prose-only review is not
+a clean lint.
+
+Leave a baseline finding on an unmodified copy to wiki-lint: unedited,
+unreported and non-blocking.
+
+**Report, without repairing, what this run may not change.** None of these
+blocks publication or completion:
+
+- an overlay finding on an unmodified copy whose existing link or Related
+  label now resolves to or names a new entry (such as `11-related-display` or
+  `18-label-target`), under *Notes for the user* for wiki-lint;
+- inherited state on a merged entry that the
+  [merge rules](references/merge.md#frontmatter-and-related-footer) preserve.
+  An alias shared with an untouched entry, a filename to rename, or a legacy
+  extra card a cited source supports as a split gets its proposal at closeout.
+  A key outside the schema, missing or unknown `read:` state and other
+  `report_only: true` user state go only under *Notes for the user*, never as
+  a repair proposal;
+- a merged entry's missing `Person`/`Event` date under the
+  [rare-types report rule](references/rare-types.md#dates-in-the-opener-person-and-event).
 
 Re-read every active-source passage behind a new or changed claim and compare
 the draft's conditions, population or version, time frame, causal direction,
 units and numbers, and uncertainty with it. Correct or narrow what the source
 does not support, and handle priority and superlative wording under
-[prose principle 3](references/writing.md#prose-principles). Check both
-directions: restore a lost condition or qualifier that limits a stated claim,
-and remove any qualification this run added that the prose principles exclude.
+[prose principle 3](references/writing.md#prose-principles).
 This verification is autonomous and requires no separate sign-off. Then apply
 the [editorial reread](references/writing.md#editorial-reread) and re-check
 atomic scope and the protected-content rules; word count does not establish
@@ -197,13 +209,7 @@ that candidate even if it remains in the lint output and `summary.clean` is
 false. Record the finding and its rule-based disposition, then carry that
 decision into the final check. Do not add notation or rewrite clear prose to
 force a zero-finding report. This does not waive errors, incomplete checks,
-unresolved candidates, or new findings in the published bytes. On a merged
-entry, inherited state that the merge preserves and reports does not block
-publication of that merge: a lint finding whose evidence carries
-`report_only: true` (such as a legacy extra card or an unknown `read:` value),
-and a missing `Person`/`Event` date under the
-[rare-types report rule](references/rare-types.md#dates-in-the-opener-person-and-event).
-Report each one.
+unresolved candidates, or new findings in the published bytes.
 
 **Renaming or deleting a pre-existing entry, or removing a semantic-invalid
 alias, is never a review fix.** Report the reason or source evidence and the
@@ -240,8 +246,8 @@ replacements only against their original snapshots; handle a partial failure
 under the [multi-file rule](../../shared/SAFE_WRITES.md#multi-file-operations).
 Finally refresh the public index and re-lint the published entries and the
 whole Wiki collision surface. Claim completion only when the published bytes
-equal the reviewed bytes and no in-scope finding remains unresolved;
-explicitly adjudicated review-only candidates follow the rule above.
+equal the reviewed bytes and no in-scope finding remains unresolved; reported
+findings and adjudicated review-only candidates follow the rules above.
 
 Report actual creates/regular merges/source-no-op merges, skipped/deferred entities and reasons, review-state decisions, every audit count (including zero), unresolved findings, and unused source figures with the media rule's permitted reasons. Use the complete [report specification](references/review.md#run-report); do not describe proposals as applied. An all-skipped run reports skips without source-entry audits.
 

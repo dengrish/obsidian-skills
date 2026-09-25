@@ -20,13 +20,18 @@ through a stale value. A PDF origin belongs to `paper-summarize`.
 Naming a file already in `Articles/` for reprocessing authorizes that owned
 rewrite. Naming a raw capture that matches another note requires an explicit
 overwrite-or-skip decision; honor one already given in the conversation. An
-explicit request to resume an interrupted clipping run or reprocess a selected
-batch supplies that decision for matching notes this skill owns: re-read each
-raw and run the complete workflow from its current files rather than continuing
-an old scratch draft. A published pending changed-slug handoff instead follows
-[Finish a pending changed-slug handoff](#finish-a-pending-changed-slug-handoff),
-which reruns prepare before step 6. Ordinary batch mode never overwrites a
-duplicate or selects polished notes on its own.
+explicit request to reprocess a selected batch supplies that decision for
+matching notes this skill owns: re-read each raw and run the complete workflow
+from its current files rather than continuing an old scratch draft. Ordinary
+batch mode never overwrites a duplicate or selects polished notes on its own.
+
+**Resume.** Raws accumulate in `Inbox/`, so resuming an interrupted clipping
+run is narrower. Process captures that are still `new`. For a matching owned
+note whose embeds lack their attachments, restore those attachments from the
+raw's staged images as under *Body source* below, without rewriting the note.
+Finish a pending changed-slug handoff by
+[its procedure](#finish-a-pending-changed-slug-handoff). Leave every other
+matching note as a `duplicate` skip.
 
 Record the original bytes, file identity, permissions and metadata before
 preparing the replacement: `expected = atomic_move.regular_file_snapshot(<note>)`,
@@ -36,18 +41,31 @@ own dedup scan.
 **Body source.** For a named `Articles/` note, remove only its leading Summary
 callout and following `___` separator to get the article body. Keep existing
 body prose, embeds and still-valid audit placeholders. Do not summarize the old
-summary as if it were source prose. For an authorized overwrite or resume from
-a raw capture, clean the raw afresh and stage its images and any audit
-recoveries to scratch. Match each staged image to an attachment the existing
-note already embeds, by identical bytes or else by caption, alt text and
-position as in the [completeness audit](completeness-audit.md#inventory-and-match-media).
-Use the matching embed name (only its slug changes for a changed slug) and
-discard the staged copy; only unmatched images take new numbers. Keep an
-equivalent existing converted-GIF embed or placeholder. Carry every unmatched
-existing embed into the draft at its old position with its caption, under its
-mapped name for a changed slug; never delete an attachment. Prepare requires
-every old-slug attachment in the new note, so if an old embed cannot be placed,
-stop and ask whether to keep the old slug.
+summary as if it were source prose. For an authorized overwrite from a raw
+capture, clean the raw afresh and stage its images and any audit recoveries to
+scratch. Match each staged image to an attachment the existing note already
+embeds, by identical bytes or else by caption, alt text and position as in the
+[completeness audit](completeness-audit.md#inventory-and-match-media). Use the
+matching embed name (only its slug changes for a changed slug). Discard the
+staged copy only when that embed's attachment exists. If it is missing, as
+after an interrupted placement, restore it under the existing note's name
+before drafting or running prepare:
+
+```bash
+python3 '<skill>/scripts/fetch_images.py' place \
+    --attachments '<vault>/Sources/Images' --slug '<existing slug>' \
+    --index '<N>' --from-file '<staged path>' --owner-note '<existing note>'
+```
+
+Report a refused restore, such as an extension mismatch; a rewrite replaces
+that embed with the `<!-- missing attachment: … -->` placeholder from
+[image handling](images.md#existing-embeds-on-a-reprocess). Only unmatched
+images take new numbers. Keep an equivalent existing converted-GIF embed or
+placeholder. Carry every unmatched existing embed into the draft at its old
+position with its caption, under its mapped name for a changed slug; never
+delete an attachment. Prepare requires every old-slug attachment in the new
+note, so if an old embed cannot be placed, stop and ask whether to keep the
+old slug.
 
 Apply the [frontmatter rules](metadata-verification.md#frontmatter-for-the-polished-note)
 to decide which fields regenerate and which preserve user state. In particular,

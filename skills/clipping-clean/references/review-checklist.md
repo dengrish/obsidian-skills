@@ -121,10 +121,10 @@ suggested detector; do not edit an installed plugin during clipping processing.
   title was retained raw and skipped rather than receiving an invented identity.
   Meaningful Unicode remains.
 - [ ] Description is factual and at most 110 characters, and attributes an
-  argued thesis, forecast or recommendation to its named author; format follows
-  content (`Article`, `Post`, or `Video` for a substantive transcript), and tags
-  follow the shared enum rather than invented synonyms (`tags: []` when none
-  fits).
+  argued thesis, forecast or recommendation to its named author (or the
+  publication or issuing body when `author: []`); format follows content
+  (`Article`, `Post`, or `Video` for a substantive transcript), and tags follow
+  the shared enum rather than invented synonyms (`tags: []` when none fits).
 - [ ] A new note uses bare `read: false`. A rewrite preserves the review state,
   including absent/unknown values, and reports those states rather than forcing
   a boolean. If a required schema check rejects that state, the draft stays
@@ -143,8 +143,9 @@ suggested detector; do not edit an installed plugin during clipping processing.
   fewer) and retains scope, confidence, terms and numbers. Long enumerations
   are condensed to their size and key members, and background asides stay in
   the body. Opinions, forecasts and recommendations are attributed to a named
-  author; reported facts are stated directly. No contextless “It/This/They”,
-  unnamed meta-framing (“the article says”) or links.
+  author (or the publication or issuing body when `author: []`); reported
+  facts are stated directly. No contextless “It/This/They”, unnamed
+  meta-framing (“the article says”) or links.
 - [ ] Bold marks only terms that could stand as their own wiki entry, never
   generic words or whole clauses; bullet count is appropriate to the article's
   length.

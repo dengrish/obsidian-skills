@@ -69,11 +69,12 @@ is a finished reading note; builder may use it only under its
 [verified missing-PDF fallback](skills/wiki-build/references/source-intake.md#resolve-a-markdown-source).
 A cleaned clipping is itself the source and can be used directly. wiki-build
 never reads a raw `Inbox/` file; clipping-clean or pdf-organize handles it
-first. wiki-add can reuse existing sources, file newly acquired PDFs itself
-under pdf-organize's naming rules, or save a clearly marked,
-agent-written research extract for each web page in `Articles/`; these extracts
-are durable evidence, not full-text captures or multi-page summaries. Its
-[research guide](skills/wiki-add/references/research.md) owns that procedure.
+first. wiki-add can reuse sources that Wiki entries already cite, file newly
+acquired PDFs itself under pdf-organize's naming rules, or save a clearly
+marked, agent-written research extract for each web page in `Articles/`; these
+extracts are durable evidence, not full-text captures or multi-page summaries.
+Its [research guide](skills/wiki-add/references/research.md) owns that
+procedure.
 
 **Organize PDFs before deriving filenames and links from them.** Later renames
 must carry the dependent notes, figures, references and sidecars together,
@@ -91,14 +92,11 @@ cites or carry out an explicitly requested structural or producer-mapped
 repair. Enriching an existing entry with new-source evidence still belongs to
 wiki-build.
 
-wiki-add is the create-only research route for topics queued in
-`add-to-wiki.md` or named directly in a request without a source document; it
-never writes a directly named topic into the queue. An existing requested
-identity is skipped without auditing or editing it. New entries use
-builder's writing rules with `parents: []` and `read: false`, but wiki-add never
-adds an unrequested entity to satisfy a builder audit. It checks off only
-successfully published or already-existing queue items; uncertain or blocked
-items remain unchecked. Existing-entry enrichment remains wiki-build's job.
+[wiki-add](skills/wiki-add/SKILL.md) is the create-only research route for
+topics queued in `add-to-wiki.md` or a backlog the user selects, or named
+directly without a source document. It leaves every existing entry unchanged
+and checks off only queued topics it created or found already present;
+enriching an existing entry remains wiki-build's job.
 
 stock-research analyzes ideas in feed-collect’s saved X notes and RSS articles for long-only
 buying opportunities in liquid U.S.-listed stocks over a 3–12 month momentum
@@ -286,9 +284,10 @@ PDFs move out of `Inbox/`; raw clippings stay as the record of what was
 captured. The clipping dedup index determines whether a capture was processed.
 All three source-note producers share `Articles/`: `sources:` item 1 identifies
 the origin used for deduplication, and a body marker distinguishes wiki-add's
-research extracts from full-text clippings. wiki-add reuses suitable existing
-source notes and images without overwriting them. Market research, MOCs, proposal
-logs and the topic queue stay outside `Wiki/` so they are not treated as entries.
+research extracts from full-text clippings. wiki-add reuses existing source
+notes only when Wiki entries already cite them, and reuses existing images,
+without overwriting either. Market research, MOCs, proposal logs and the topic
+queue stay outside `Wiki/` so they are not treated as entries.
 
 Each Wiki entry has exactly one discipline tag, or `"#misc"` alone when none
 fits. Each active tag has a `Wiki/<discipline>.md` root with empty parents and

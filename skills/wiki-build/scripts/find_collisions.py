@@ -51,8 +51,10 @@ Output: per candidate {candidate, slug, matches:[{probe, matched_slug,
 matched_via, alias?, entry_slug, implies}], verdict, naming?}, plus the top-level
 ``candidate_collisions[]``, ``index_problems[]`` and ``summary``.
 ``naming: ["bare-common-noun"]`` marks a candidate whose slug is a bare term
-from writing.md's cross-domain corpus: qualify the title and probe again. It
-never changes the verdict; ``lint_entry.py`` reports the same slug as
+from writing.md's cross-domain corpus: qualify a new entry's title and probe
+again. A merge into an existing same-sense bare-slug entry keeps its filename
+and reports the rename as a proposal. The mark never changes the verdict;
+``lint_entry.py`` reports the same slug as report-only
 ``5-bare-common-noun``. Every index
 problem is reported. Only those that can hide slug, title or alias ownership
 turn an otherwise-new candidate into ``adjudicate``: ``ok: false`` (even when

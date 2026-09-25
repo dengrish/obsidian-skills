@@ -920,7 +920,7 @@ def _stale_default_prefix_crops(out_dir, stem, manifest, labels, reviewed):
 def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                 reviewed=(), seen_hashes=None, *, manifest,
                 chapter_pdfs=(), chapter_caption_cache=None,
-                manifest_commit=None, ed_prefix="S"):
+                manifest_commit=None, ed_prefix="S", overwrite_s=False):
     """Detect and extract every figure in one PDF.
 
     Args:
@@ -946,10 +946,13 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
         ed_prefix: the run's `--ed-prefix`. With "ED", recorded `_fig_S<N>`
             crops that no detected caption claims are reported as possible
             leftovers of an earlier default-prefix run.
+        overwrite_s: `--overwrite-supplementary`; `overwrite` limited to
+            `_fig_S<N>` crops, so the switch to "ED" keeps other repairs.
 
     Returns a dict summarizing what happened — used by the caller to build
     the run-end report. Keys:
         extracted:  int   — figures newly written to disk
+        written:    list  — their filenames, a replacement marked "(replaced)"
         skipped:    int   — figures whose output already existed BEFORE this run
         collisions: list  — (kept label, kept page, dropped label, dropped
                             page, dropped caption excerpt) where two captions
@@ -1037,6 +1040,7 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
         seen_hashes = {}
     result = {
         "extracted": 0,
+        "written": [],
         "skipped": 0,
         "collisions": [],
         "reviewed_collisions": [],
@@ -1204,7 +1208,8 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                 # current detection remains reviewable even on an idempotent
                 # skip. Preserve that established behavior.
                 record_reason()
-                if not overwrite:
+                if not (overwrite or (overwrite_s and _S_LABEL_RE.fullmatch(
+                        figure_identity(fig_suffix)))):
                     written_this_run[out_path] = (raw_label, page_idx + 1)
                     result["skipped"] += 1
                     _note_output(result, seen_hashes, out_path, fig_num, stem,
@@ -1239,8 +1244,11 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                 )
                 continue
 
+            written_name = os.path.basename(out_path) + (
+                " (replaced)" if replace_digest is not None else "")
             if dry_run:
                 result["extracted"] += 1
+                result["written"].append(written_name)
                 written_this_run[out_path] = (raw_label, page_idx + 1)
                 if stale_mark:
                     result["stale_review"].append(fig_num)
@@ -1259,6 +1267,7 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                     result["blank"].append((fig_num, page_idx + 1))
                     continue
                 result["extracted"] += 1
+                result["written"].append(written_name)
                 written_this_run[out_path] = (raw_label, page_idx + 1)
                 if stale_mark:
                     result["stale_review"].append(fig_num)
@@ -1462,7 +1471,7 @@ def _s_ed_twins(path, other):
 def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
                   dry_run=False, *, ed_prefix="S", keep_frame=False,
                   allow_unorganized=False, dpi=250,
-                  refused=(), feed_skipped=(), ed_skipped=()):
+                  refused=(), feed_skipped=(), ed_skipped=(), run_flags=()):
     """Print a human-readable summary of the batch run.
 
     Sections, in order: header, counts, refused PDFs (not processed), skipped
@@ -1481,7 +1490,9 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
     `refused` holds (path, reason, remedy) for every PDF refused before
     processing; `feed_skipped` holds the feed-owned attachments a folder
     sweep left alone, and `ed_skipped` the PDFs a default-prefix sweep left
-    alone because their manifest records `_fig_ED<N>` crops.
+    alone because their manifest records `_fig_ED<N>` crops. `run_flags`
+    holds the run's overwrite and `--dry-run` flags, which each skipped PDF's
+    printed command repeats.
     """
     context = dict(ed_prefix=ed_prefix, keep_frame=keep_frame,
                    allow_unorganized=allow_unorganized,
@@ -1611,7 +1622,7 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
         print("run so their Extended Data crops are not written again as _fig_S<N>.")
         print("Run each with that option:")
         for path in sorted(ed_skipped, key=str):
-            print("  " + _batch_command(path, out_dir, [],
+            print("  " + _batch_command(path, out_dir, list(run_flags),
                                         **dict(context, ed_prefix="ED")))
         print()
 
@@ -1726,10 +1737,11 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
         if ed_pairs:
             print("  Extended Data and Supplementary figures share _fig_S<N> under the default")
             print("  prefix. Remove any review rows for these PDFs' S labels, then rerun each")
-            print("  PDF alone and compare every S and ED PNG with its page:")
+            print("  PDF alone (it replaces only _fig_S<N> crops) and view every PNG it writes:")
+            switch = ["--overwrite-supplementary"] + (["--dry-run"] if dry_run else [])
             for pdf_path in ed_pairs:
                 print("    " + _batch_command(
-                    pdf_path, out_dir, ["--overwrite"],
+                    pdf_path, out_dir, switch,
                     **dict(context, ed_prefix="ED")))
         print()
 
@@ -1837,8 +1849,8 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
             print("  An S<N>/ED<N> pair usually means _fig_S<N> still holds the Extended Data")
             print("  crop from an earlier default-prefix run. If that S label has its own")
             print("  Supplementary caption, remove any review rows for the S labels and rerun")
-            print("  that PDF alone with --ed-prefix ED --overwrite; otherwise report the S")
-            print("  file as a stale mislabelled crop. Compare every S and ED PNG with its page.")
+            print("  that PDF alone with --ed-prefix ED --overwrite-supplementary; otherwise")
+            print("  report the S file as a stale mislabelled crop. View every PNG a rerun writes.")
         else:
             print("  The detector could not separate these figures — side-by-side panels with")
             print("  a caption each is the usual cause. Set explicit crops (see the skill's")
@@ -3753,13 +3765,14 @@ def run_self_test():
 
         # Extended Data and Supplementary figures share _fig_S<N> under the
         # default prefix. The collision report prints the targeted ED rerun;
-        # that rerun replaces the stale S crop and reports an S slot that only
-        # an Extended Data crop ever held.
+        # that rerun replaces the stale S crop, keeps an unmarked repair of a
+        # main figure, and reports an S slot only an Extended Data crop held.
         ed_src = Path(tmp) / "ed-namespace"
         ed_src.mkdir()
         ed_pdf = ed_src / "Doe_Namespaces_2025.pdf"
         edoc = fitz.open()
-        for cap, fill in (("Extended Data Figure 1. First.", (1, 0, 0)),
+        for cap, fill in (("Figure 1. Main.", (0.5, 0.5, 0)),
+                          ("Extended Data Figure 1. First.", (1, 0, 0)),
                           ("Extended Data Figure 2. Second.", (0, 0.6, 0)),
                           ("Supplementary Figure 1. Third.", (0, 0, 1))):
             epage = edoc.new_page(width=612, height=792)
@@ -3773,15 +3786,40 @@ def run_self_test():
         check("a default run with an ED/Supplementary collision fails", code, 1)
         hints = [line.strip() for line in so.splitlines()
                  if line.strip().startswith(shlex.quote(sys.executable) + " ")
-                 and "--ed-prefix ED" in line and "--overwrite" in line]
+                 and "--ed-prefix ED" in line
+                 and "--overwrite-supplementary" in line]
         check("...and prints one targeted --ed-prefix ED rerun", len(hints), 1)
+        ok("...which replaces only S crops, not every verified crop",
+           all("--overwrite" not in shlex.split(h) for h in hints))
         s1 = ed_out / "Doe_Namespaces_2025_fig_S1.png"
         s1_before = s1.read_bytes() if s1.exists() else b""
+        main_png = ed_out / "Doe_Namespaces_2025_fig_1.png"
+        main_auto = main_png.read_bytes() if main_png.exists() else b""
+        main_repair = subprocess.run(
+            [sys.executable,
+             str(Path(__file__).resolve().with_name("extract_figures.py")),
+             str(ed_pdf), "--out", str(ed_out), "--stem", ed_pdf.stem,
+             "--crop", "1:1:150,250,450,350", "--dpi", "72", "--no-trim",
+             "--overwrite"],
+            capture_output=True, text=True, encoding="utf-8", cwd=tmp)
+        main_repaired = main_png.read_bytes() if main_png.exists() else b""
+        check("an unmarked explicit repair of main Figure 1 changes its crop",
+              (main_repair.returncode, bool(main_auto),
+               main_repaired != main_auto), (0, True, True))
         if hints:
             code, so, se = run(shlex.split(hints[0])[2:])
             check("the targeted ED rerun succeeds", code, 0)
             ok("...replacing the S1 crop that held Extended Data Figure 1",
                s1.read_bytes() != s1_before)
+            ok("...keeping the unmarked repair of main Figure 1",
+               main_repaired and main_png.read_bytes() == main_repaired)
+            wrote = [line for line in so.splitlines()
+                     if line.startswith("    wrote: ")]
+            ok("...and listing each PNG it wrote or replaced",
+               len(wrote) == 1
+               and "Doe_Namespaces_2025_fig_S1.png (replaced)" in wrote[0]
+               and "Doe_Namespaces_2025_fig_ED1.png" in wrote[0]
+               and "Doe_Namespaces_2025_fig_1.png" not in wrote[0])
             ok("...reporting S2 as an unclaimed default-prefix crop",
                "Unclaimed S crops (ED run):       1" in so
                and "Doe_Namespaces_2025_fig_S2.png" in so)
@@ -3823,11 +3861,22 @@ def run_self_test():
                any("--ed-prefix ED" in line and str(ed_pdf) in line
                    and "--overwrite" not in line
                    for line in so.splitlines()))
+            code, so, se = run(["--src", str(ed_src), "--out", str(ed_out),
+                                "--dpi", "72", "--overwrite", "--dry-run"])
+            skip_commands = [shlex.split(line.strip())
+                             for line in so.splitlines()
+                             if "--ed-prefix ED" in line and str(ed_pdf) in line]
+            ok("...repeating a refresh or preview sweep's --overwrite and "
+               "--dry-run", len(skip_commands) == 2 and all(
+                   "--overwrite" in argv and "--dry-run" in argv
+                   for argv in skip_commands) and not s2.exists())
             code, so, se = run(["--src", str(ed_pdf), "--out", str(ed_out),
-                                "--dpi", "72"])
+                                "--dpi", "72", "--overwrite"])
             check("a default run naming that PDF refuses it", code, 1)
-            ok("...with the same command",
-               "REFUSED" in so and "--ed-prefix ED" in so
+            ok("...with the same command, repeating --overwrite",
+               "REFUSED" in so and any(
+                   "--ed-prefix ED" in line and "--overwrite" in line
+                   for line in so.splitlines())
                and not s2.exists())
         configure_marker_prefix("Extended Data", "S")
 
@@ -4046,6 +4095,9 @@ def run_self_test():
         ok("...and external sources are renamed with pdf-organize without --vault",
            "run without --vault" in so and "outside any vault" in so
            and "redundant copy" not in so)
+        ok("...and a vault copy's remedy names the newcomer",
+           "move the newcomer out of the vault" in so
+           and "rename or remove one" not in so)
         check("neither colliding source publishes an image",
               sorted(collision_out.glob("*.png")), [])
         collision_mark_out = Path(tmp) / "colliding-review-output"
@@ -4397,6 +4449,12 @@ def main(argv=None):
               "current bytes match. Never claim an unknown or changed file."),
     )
     p.add_argument(
+        "--overwrite-supplementary", action="store_true",
+        help=("Like --overwrite, but only for _fig_S<N> crops; other verified "
+              "crops are skipped. The printed switch to --ed-prefix ED uses "
+              "it, so repairs of other figures survive that rerun."),
+    )
+    p.add_argument(
         "--adopt-legacy", action="append", default=[], metavar="STEM:FIG",
         help=("Record one exact complete PNG in an unrecorded figure slot as "
               "historical extractor output (repeatable). Existing manifest "
@@ -4481,7 +4539,7 @@ def main(argv=None):
               % ", ".join("--" + m for m in missing), file=sys.stderr)
         return 2
     _require_pymupdf()
-    if args.adopt_legacy and args.overwrite:
+    if args.adopt_legacy and (args.overwrite or args.overwrite_supplementary):
         print("REFUSED: --adopt-legacy cannot be combined with --overwrite. "
               "First record and verify the exact historical crops without "
               "changing them; re-extract in a later run.", file=sys.stderr)
@@ -4706,16 +4764,16 @@ def main(argv=None):
             return False
 
     def collision_remedy(group):
-        # pdf-organize refuses both copies of a shared vault basename; it can
-        # still rename a source outside any vault in place. The sources decide
+        # A shared vault basename follows CONVENTIONS.md 1a; pdf-organize can
+        # rename a source outside any vault in place. The sources decide
         # this, not --out.
         if any((vault_root is not None and in_vault(p)) or _inside_vault(p)
                for p in group):
             return DUPLICATE_BASENAME_REMEDY
         return ("if these sources are all outside any vault, give one a "
                 "unique stem with pdf-organize (run without --vault), then "
-                "re-run; if any is a vault PDF, pdf-organize refuses every "
-                "copy, so ask the user to rename or remove one")
+                "re-run; if any is a vault PDF, ask the user to move the "
+                "newcomer out of the vault or rename it (CONVENTIONS.md §1a)")
 
     def sentence(remedy):
         return "  " + remedy[0].upper() + remedy[1:] + "."
@@ -4796,12 +4854,18 @@ def main(argv=None):
             listed.add(p)
             refused.append((p, "feed-owned name",
                             "keep the name; pass --allow-unorganized"))
+    # A printed follow-up command repeats this run's overwrite and preview
+    # choices: a skipped PDF must get the refresh or dry run the user asked for.
+    run_flags = [flag for flag, enabled in (
+        ("--overwrite", args.overwrite),
+        ("--overwrite-supplementary", args.overwrite_supplementary),
+        ("--dry-run", args.dry_run)) if enabled]
     ed_skipped = [p for p in pdfs if p in ed_namespace]
     ed_refused = []
     if ed_skipped:
         pdfs = [p for p in pdfs if p not in ed_namespace]
         commands = [_batch_command(
-            p, out_dir, [], ed_prefix="ED", keep_frame=args.keep_frame,
+            p, out_dir, run_flags, ed_prefix="ED", keep_frame=args.keep_frame,
             allow_unorganized=args.allow_unorganized, review_file=review_file,
             dpi=args.dpi) for p in sorted(ed_skipped)]
         if os.path.isfile(src_dir):         # named directly: a refusal
@@ -4908,6 +4972,7 @@ def main(argv=None):
                 chapter_caption_cache=chapter_caption_cache,
                 manifest_commit=(None if args.dry_run else commit_manifest),
                 ed_prefix=args.ed_prefix,
+                overwrite_s=args.overwrite_supplementary,
             )
             per_pdf[pdf_path] = result
             n = result["extracted"]
@@ -4969,6 +5034,11 @@ def main(argv=None):
                     parts.append(
                         f"{ownership_f} ownership save failed (crop exists)")
                 print(f"  → {', '.join(parts)}")
+            if result["written"]:
+                # The PNGs that need viewing; counts alone cannot separate a
+                # replacement from a new file or a review-protected keep.
+                print(("    would write: " if args.dry_run else "    wrote: ")
+                      + ", ".join(result["written"]))
             if manifest_commit_failed[0]:
                 break
 
@@ -4984,7 +5054,7 @@ def main(argv=None):
                   ed_prefix=args.ed_prefix, keep_frame=args.keep_frame,
                   allow_unorganized=args.allow_unorganized, dpi=args.dpi,
                   refused=refused, feed_skipped=feed_skipped,
-                  ed_skipped=ed_skipped)
+                  ed_skipped=ed_skipped, run_flags=run_flags)
 
     # The exit code has to say whether the run did what it was asked. It was
     # always 0 — a run that refused every PDF, could not open half of them, or

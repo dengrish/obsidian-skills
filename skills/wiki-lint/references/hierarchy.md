@@ -25,10 +25,12 @@ multi-tagged entries connect all their old groups while Task 1 selects one home.
 Run Task 3 only when the request covers that complete set; otherwise report
 the required expansion and complete the narrower authorized tasks. Never
 publish part of a MOC or leave parents derived from a different plan. Blank,
-missing, malformed, or multiple tags need Task 1 resolution before placement;
-they do not imply misc. If an entry still lacks exactly one valid tag, skip
-Task 3 for its connected closure and report the item-8 blocker. An entry with
-one valid tag is placed under it even when its home is a reported close call.
+missing, malformed, or multiple tags need Task 1 resolution; they do not imply
+misc. If one stays unresolved, report the item-8 blocker and still complete the
+closure: an entry naming no enum discipline stays unplaced with its existing
+parents; otherwise place it in each named group (misc only when `#misc` is its
+sole tag) with the union of its nearest linked ancestors. An entry with one
+valid tag is placed under it even when its home is a reported close call.
 
 ## Establish discipline roots
 
@@ -36,23 +38,22 @@ Reuse the canonical Wiki entry for each active tag, checking filename, identity,
 and tag ownership rather than treating a same-named MOC or alias as the root.
 When a root is missing, Task 3 may create that narrow prerequisite using
 builder's entry rules and [wiki-add's durable-source research](../../wiki-add/references/research.md).
-Prefer suitable local evidence, reused read-only under that guide's
+Prefer suitable already-cited local evidence under that guide's
 [local-source rules](../../wiki-add/references/research.md#find-local-sources-first),
-including its not-yet-built report; otherwise create only the new webpage
-research extracts the missing roots need. This prerequisite never
-downloads or files a PDF and never downloads or places images. Do not
-fabricate citations or create every unused enum root.
+which report an unbuilt source for wiki-build instead of citing it; otherwise
+create only the new webpage research extracts the missing roots need. This
+prerequisite never downloads or files a PDF and never downloads or places
+images. Do not fabricate citations or create every unused enum root.
 This exception creates only the roots needed by the authorized closure and
 does not alter the user's topic queue or extract unrelated entities.
 
 A discipline root is a short explanation of the field, not a duplicate MOC.
-The misc root is `Wiki/misc` with the fixed title `Misc`, so its slug stays
-`misc`. It is a brief source-backed definition of a miscellany, a collection of
-assorted items with no shared category; source it like any root, for example
-with a concise dictionary extract for "miscellaneous". It makes no claim about
-this vault's contents, because `MOCs/misc.md` carries the membership. Use the
-ordinary entry schema, one matching tag, a primary-definition card, and
-`parents: []`.
+The misc root is `Wiki/misc` with the fixed title `Misc`: a brief
+source-backed definition of a miscellany (assorted items with no shared
+category), sourced like any root, for example from a dictionary extract for
+"miscellaneous". It makes no claim about this vault's contents; `MOCs/misc.md`
+carries the membership. Use the ordinary entry schema, one matching tag, a
+primary-definition card, and `parents: []`.
 New roots use today's `created:` and `updated:` dates and `read: false`;
 the ordinary maintenance freeze applies to existing notes, not this authorized
 new-entry case. Newly acquired source extracts retain the research-source
@@ -74,8 +75,10 @@ Fix existing conceptual defects even when no entries were added. Keep an
 already coherent structure stable rather than reorganizing for variety.
 
 - Put the discipline's Wiki root at the single top-level bullet.
-- Group by concepts. Each child must be a kind of its parent, a component of
-  it, or a method for it. Association alone does not establish a
+- Group by concepts. The root may directly hold any topic in its field, such
+  as Generalization. Below another linked entry, each child must be a kind of
+  it, a component of it, a method for it, or a narrower topic chiefly about it
+  (overfitting under generalization). Association alone does not establish a
   broader/narrower relationship: a quantity computed from an entry (precision
   from a confusion matrix), an application of it, or an independent general
   tool it merely uses (a radial basis function used to build features) is not
@@ -86,10 +89,10 @@ already coherent structure stable rather than reorganizing for variety.
   for several tasks under its broader model concept. Keep a model's own
   variants beneath it (polynomial, ridge, lasso, and elastic-net regression
   under linear regression).
-- Use an existing broader entry as a linked category only when this
-  kind/component/method test holds. Otherwise use an unlinked category (for
-  example, `Classification metrics` holding precision, recall, and F1 beside
-  the confusion matrix), and skip it when deriving parents.
+- Use an existing broader entry as a linked category only when one of these
+  relationships holds. Otherwise use an unlinked category (for example,
+  `Classification metrics` holding precision, recall, and F1 beside the
+  confusion matrix), and skip it when deriving parents.
 - Use as much depth as the conceptual relationships need. Do not flatten
   genuine subtrees to satisfy a fixed depth limit. Avoid empty or redundant
   categories and chains that contribute no useful distinction.
@@ -123,16 +126,14 @@ Misc members receive `[[Wiki/misc]]`, and its root keeps `[]`.
 Write populated parents as a block list of double-quoted wikilinks. Preserve
 unknown relationships until their QC or scope blocker is resolved. Recompute
 stale, self-linked, or cyclic edges within the complete authorized closure.
-For genuine multiple placements within the single home, take the nearest
-ancestor union. Never infer parents across unrelated disciplines.
+For genuine multiple placements, take the nearest-ancestor union. Never infer
+a parent from a discipline the entry's tags do not name.
 
-**Use unambiguous paths.** Root links use the actual extensionless vault-relative
-Wiki path, e.g. `[[Wiki/machine-learning]]`, and so do generated MOC links.
-Every other entry parent uses the bare slug (`[[ensemble-learning]]`), not the
-tree's `Wiki/` path; qualify it only when another Wiki file, a `MOCs/` file,
-or a legacy vault-root MOC shares its basename. `item2/parents-form` reports
-any other spelling. MOC navigation links remain `[[MOCs/<discipline-slug>]]`
-and can never supply a parent.
+**Use unambiguous paths.** Root parents and generated MOC links use the actual
+extensionless vault-relative Wiki path, e.g. `[[Wiki/machine-learning]]`; every
+other parent uses the [§6 parent form](../../../shared/CONVENTIONS.md#6-wikilink-forms),
+and `item2/parents-form` reports any other spelling. MOC navigation links
+remain `[[MOCs/<discipline-slug>]]` and can never supply a parent.
 
 Before creating a same-named Wiki root, inventory bare links to the existing
 MOC across the vault. Preserve their proven navigation owner by qualifying

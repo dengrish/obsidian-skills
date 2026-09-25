@@ -85,14 +85,16 @@ merely to complete a two-sentence pattern.
 Keep a needed limit immediately beside the claim it qualifies; a modal verb
 alone does not explain a design constraint. Callout bullets, headings and
 captions can be read alone, so each carries the scope of the claim it makes and
-any claim-level qualification, such as the comparator or the rung's design
-limit. A body sentence cannot repair an overstated heading. A document-level
-caveat that bounds every claim, such as single runs, a short horizon or a use
-the document proposes but never tests, is different: explain it once, in
-Limitations. The Limitations heading may name it, and one short callout bullet
-may state it when it is the chief caveat. Elsewhere, word each claim within
-that boundary ("on the authors' four benchmarks", "within 8 weeks") instead of
-restating the caveat. Rung 1 needs no separate limitation beyond its scope.
+any qualification only that claim needs, such as its comparator. A body
+sentence cannot repair an overstated heading. A caveat that bounds every claim
+is document-level: single runs, a short horizon, a use the document proposes
+but never tests, or a rung limit every claim shares (one cohort, an animal or
+cell study, a pilot or a simulation). Explain it once, in Limitations, whose
+heading may name it; one callout bullet may state it (bullet 1 for a rung
+limit, otherwise the chief-caveat bullet). Elsewhere, word each claim within
+that boundary ("in male C57BL/6 mice", "was associated with", "within 8
+weeks") instead of restating the caveat. Rung 1 needs no separate limitation
+beyond its scope.
 
 Verify scope clauses as claims in their own right. Fluent wording does not
 repair an omitted necessary qualification.
@@ -114,7 +116,9 @@ This is not a substitute for the absolute numbers of rule 2 — it sits beside t
 
 **Keep the measures distinct.** A hazard ratio is not a cumulative risk ratio or a ratio of event counts, and an odds ratio is not a risk ratio. Absolute risk also needs a population and a time horizon. Use the paper's reported absolute figures; if they are absent, name the gap rather than converting the ratio by intuition. See [Cochrane Handbook, effect measures](https://www.cochrane.org/authors/handbooks-and-manuals/handbook/current/chapter-06) and [time-to-event outcomes](https://www.cochrane.org/authors/handbooks-and-manuals/handbook/current/chapter-14#section-14-1-5-2).
 
-Do not restate a correlation as variance explained, or as a cause, unless the paper does.
+Do not restate a correlation as variance explained unless the paper reports
+that quantity, and never as a cause, even when the paper's own wording is
+causal: the design ceiling below governs.
 
 ## The hedge ladder, and what sets its ceiling
 

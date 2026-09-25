@@ -75,8 +75,10 @@ The clipping-specific choices are:
   page; `created` is never its substitute.
 - `description`: one factual, informative sentence of at most 110 characters,
   quoted by the same rule as `title`. Attribute an argued thesis, forecast or
-  recommendation to its named author ('Aschenbrenner argues…'). Count
-  characters before publication; retain essential scope when shortening.
+  recommendation to its named author ('Aschenbrenner argues…'), or to the
+  publication or issuing body when `author` is `[]`; this is summary
+  attribution, not an `author:` value. Count characters before publication;
+  retain essential scope when shortening.
 - `tags`: choose one or more subjects from the shared
   [discipline enum](../../../shared/CONVENTIONS.md#3-the-discipline-tag-enum).
   Judge the article's substance, not an incidental mention or the publication's
@@ -88,10 +90,11 @@ The clipping-specific choices are:
   leave the draft unpublished, per [review-state rules](../../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox).
 
 Regenerate `format`, description, tags and Summary on an approved rewrite, and
-report that manual edits to those generated fields were replaced. Preserve
-unrelated user metadata, and report conflicting or uninterpretable values
-without silently deleting or converting them. The generated schema is not
-permission to strip existing fields outside it.
+report that manual edits to those generated fields were replaced. A rewrite
+from a raw capture also re-cleans the body; report that any manual body edits
+were replaced. Preserve unrelated user metadata, and report conflicting or
+uninterpretable values without silently deleting or converting them. The
+generated schema is not permission to strip existing fields outside it.
 
 Convert a raw Web Clipper scalar `source:` to output `sources:` without changing
 the established capture URL. Current `sources:` takes precedence whenever

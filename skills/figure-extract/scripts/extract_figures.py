@@ -144,12 +144,15 @@ def _require_pymupdf():
         raise SystemExit(_PYMUPDF_ERROR)
 
 
-#: pdf-organize refuses every copy of a shared vault PDF basename, so only the
-#: user can resolve one. Both extraction commands give this remedy.
+#: The remedy for a shared vault PDF basename (CONVENTIONS.md 1a), given by
+#: both extraction commands; renaming the filed copy would hand its figures
+#: to the newcomer.
 DUPLICATE_BASENAME_REMEDY = (
-    "another vault file shares this PDF basename; pdf-organize refuses both "
-    "copies, so ask the user to remove the redundant copy or to rename or "
-    "move one out of the vault, then retry")
+    "another vault file shares this PDF basename; ask the user to remove the "
+    "redundant copy or to rename the newcomer (normally the copy outside "
+    "Sources/PDFs/) or move it out of the vault, then retry. If pdf-organize "
+    "`check` accepts the newcomer, pdf-organize may rename it instead "
+    "(CONVENTIONS.md §1a)")
 #: A PDF with no vault owner; pdf-organize never imports an external file.
 UNOWNED_PDF_REMEDY = (
     "a readable scratch copy must keep its vault PDF's exact basename; "
@@ -1987,6 +1990,11 @@ def run_self_test():
            code != 0 and "unique basename" in str(code))
         ok("...and leaves the duplicate to the user, not pdf-organize",
            "ask the user to remove the redundant copy" in str(code))
+        ok("...naming the newcomer, not either copy, as the one to rename",
+           "rename the newcomer" in str(code) and "move one" not in str(code))
+        ok("...and noting that pdf-organize may rename an exempt newcomer",
+           "refuses both" not in str(code)
+           and "`check` accepts the newcomer" in str(code))
         check("collision refusal writes no figure or sidecar",
               os.listdir(repair_images), [])
         os.unlink(repair_collision)

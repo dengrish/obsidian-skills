@@ -19,12 +19,13 @@ durable explanations over transient news.
 
 Inspect the actual page or document and its complete relevant sections:
 definitions, mechanism, equations and figures. Read caveats and the applicable
-version or population so that no claim is overstated, but carry one into the
-entry only when a claim the entry makes depends on it. Read surrounding
+version or population so that no claim is overstated. Read surrounding
 context when a selected passage cannot stand alone. Search snippets,
 inaccessible previews and generated summaries are discovery aids, not
-evidence. Seek an accessible alternative when needed; do not bypass access
-controls or invent missing content.
+evidence; in a cleaned clipping, take evidence only from the captured body
+under the builder's [read-and-classify rule](../../wiki-build/references/source-intake.md#read-and-classify).
+Seek an accessible alternative when needed; do not bypass access controls or
+invent missing content.
 
 Track which source and section/page supports each claim, and keep each claim's
 units, conditions, stated uncertainty and attribution. The entry explains the
@@ -38,47 +39,56 @@ is omitted. Do not add unrelated claims to justify another source or image.
 
 ### Find local sources first
 
-Search the vault's durable sources before any web research. Take the complete
-PDF inventory:
+Before web research, search the vault's durable sources for the requested
+title, its aliases and acronym, and qualified forms:
 
-```bash
-python3 '<plugin>/shared/scripts/vault_artifacts.py' pdfs --vault '<vault>'
-```
-
-Then search for the requested title, its aliases and acronym, and qualified
-forms in:
-
-- the text of each inventoried PDF, extracted once per run into `<scratch>`
-  with `pdftotext -layout`, or with PyMuPDF once `check_parsers.py` passes;
+- each PDF under `Sources/PDFs/` in the complete
+  `vault_artifacts.py pdfs --vault '<vault>'` inventory, with
+  `python3 '<plugin>/skills/paper-summarize/scripts/paper_text.py' '<pdf>' --find '<term>'`
+  (repeatable; it matches words broken across lines and exits 1 when a term
+  is absent), or with `pdftotext -layout` while the parser check fails;
 - the notes in `Articles/`;
 - the `sources:` of existing Wiki entries that mention the topic.
 
-Skip `Inbox/` files, which are intake material, not sources, and
-[feed-owned attachments](../../../shared/CONVENTIONS.md#1-vault-folder-layout).
-Take a split book through its chapter PDFs under the builder's
-[books-and-chapters rule](../../wiki-build/references/source-intake.md#books-and-chapters):
-cite the chapters, never the whole-book file.
+Skip [feed-owned attachments](../../../shared/CONVENTIONS.md#1-vault-folder-layout),
+and search a split book through its chapter PDFs, never its whole-book file,
+under the builder's [books-and-chapters rule](../../wiki-build/references/source-intake.md#books-and-chapters).
+`Inbox/` files are intake material, not sources: never cite one. When some
+sources cannot be searched (a failed parser check without `pdftotext`, or an
+unreadable file), report the unsearched paths and continue.
 
-Read the passage around each hit. Reuse a local source read-only when it
-substantively explains the topic under the builder's
-[step-2 gates](../../wiki-build/SKILL.md#2-extract-entities). Acquire web
-evidence only when no local source supports a conforming entry, or for a
-specific claim the entry needs that no local source supports. An incomplete or
-unreadable inventory does not prove there is no local source; report it.
-Report the search terms, the hits, and whether each was reused or rejected.
-
-Before citing a local PDF or `Articles/` note, check its prior coverage with
-the builder's [coverage query](../../wiki-build/references/source-intake.md#check-prior-coverage)
-(an absent Wiki cites nothing):
+Read the passage around each hit, then run the builder's
+[coverage query](../../wiki-build/references/source-intake.md#check-prior-coverage)
+on each candidate (an absent Wiki cites nothing):
 
 ```bash
 python3 '<plugin>/skills/wiki-build/scripts/vault_index.py' '<vault>/Wiki' \
     --vault '<vault>' --source '<source path>' -o '<scratch>/coverage-<n>.json'
 ```
 
-If no Wiki entry cites the source yet, name it in the report as not yet built:
-once this entry cites it, wiki-build treats it as previously processed, so
-extracting its other topics needs an explicit re-process request.
+A local source is reusable only when a Wiki entry already cites it: an
+`identity_confirmed: true` match with complete inventories for the file or,
+for a chapter, for its whole book (query each). It is the main evidence only
+when it substantively explains the topic under the builder's
+[step-2 gates](../../wiki-build/SKILL.md#2-extract-entities) and fits the
+preferences above; otherwise it may still support a specific claim. Reuse it
+read-only. Use web evidence when no reusable local source supports a
+conforming entry, or for a claim none supports.
+
+A source no entry cites is unbuilt. Never cite it: wiki-build's prior-coverage
+check would then skip the whole source by default. Report
+`<source> also covers <topic>: run wiki-build on it`, and continue with
+already-cited local sources or web evidence, never another copy of that
+document; when neither suffices, leave the topic pending with that route.
+A note carrying this workflow's [research-extract marker](#new-webpage-research-extracts)
+is exempt. Cite another unbuilt source only when the user's request names it
+or this run filed it under [New PDFs](#new-pdfs), and report it as
+`<source> is cited by <entry> but not yet built: extracting its other topics
+needs an explicit wiki-build re-process request`. An incomplete coverage
+result proves nothing: report it and do not cite that source.
+
+Report the search terms, the hits, and whether each was reused, rejected or
+unbuilt.
 
 ### Check ownership of a candidate source
 
@@ -92,14 +102,22 @@ python3 '<plugin>/skills/clipping-clean/scripts/dedup_index.py' \
 
 If `Articles/` is confirmed absent, substitute a private empty directory for
 this planning check, then repeat against the real directory before publication.
-An unreadable path or a non-directory occupant is not an empty inventory.
+An unreadable path or a non-directory occupant is not an empty inventory. When
+`<vault>/Inbox` exists, add `--raw '<vault>/Inbox'`: a URL row
+`duplicate-of-earlier-input` means the user's capture of that page is in
+`Inbox/`, so write no extract for it; use other evidence or leave the topic
+pending. Read that capture and name it in the report with its route: clean
+it with clipping-clean, then run wiki-build on it; or, when it is empty,
+near-empty or lacks a usable title (a capture clipping-clean skips and
+keeps), re-clip or remove it.
 
 Read the full result. A unique existing URL-origin note may be reused only
-after reading it and verifying it contains the evidence needed by the entry.
-Its filename or URL match is not enough. Leave its exact bytes and images
-unchanged; do not reprocess it, add excerpts or refresh metadata. If it lacks
-necessary evidence, find another adequate source or leave the topic pending.
-Ambiguous or incomplete ownership does not authorize a duplicate source note.
+under the [local-source rules](#find-local-sources-first), after reading it and
+verifying it contains the evidence needed by the entry; its filename or URL
+match is not enough. Leave its exact bytes and images unchanged; do not
+reprocess it, add excerpts or refresh metadata. If it lacks necessary
+evidence, find another adequate source or leave the topic pending. Ambiguous
+or incomplete ownership does not authorize a duplicate source note.
 
 For PDFs, resolve PDF/reading-note identity from decoded `sources:`
 provenance, not shared stems. A reading note only leads to its PDF: the
@@ -151,7 +169,8 @@ Use the clipping producer's [source filename rules and slug helper](../../clippi
 Before images or publication, follow its [source-stem ownership checks](../../clipping-clean/SKILL.md#2-verify-metadata-and-settle-the-final-name):
 `dedup_index.py --url ... --slug ...` and `fetch_images.py preflight` inspect
 the Articles namespace, recursive PDF stems and image prefixes. Recheck the URL
-as well as the name; a new matching owner returns to reuse, never overwrite.
+as well as the name; a new matching owner falls under the
+[local-source rules](#find-local-sources-first), never overwrite.
 Choose a free permitted suffix for a different source, leaving every existing
 owner untouched.
 
@@ -180,8 +199,8 @@ python3 '<plugin>/shared/scripts/naming.py' canonical '<Name>.pdf'
 Do not run pdf-organize on the download: this workflow files the new document
 in `Sources/PDFs/` itself. Never start an inbox-wide organize run or a
 rename/repair plan that changes any pre-existing PDF, source note, Wiki entry
-or figure. If a canonical name would require such a refactor, reuse a proven
-existing source, select a different source, or defer.
+or figure. If a canonical name would require such a refactor, reuse an
+already-cited source, select a different source, or defer.
 
 Immediately before publishing, prove that the basename and stem are free:
 
@@ -202,9 +221,11 @@ several) or `complete: false`. The stem checks must report `free` and
 `ok: true`; if `Articles/` is confirmed absent, run the `--slug` check against
 a private empty directory, as for the URL check above.
 
-If an occupant is the same document, return to reuse. Otherwise give the new
-PDF a distinguishing abbreviated title under pdf-organize's
-[collision rule](../../pdf-organize/SKILL.md#3-check-references-and-prepare-the-complete-rename-plan),
+If an occupant is the same document, never file a second copy: apply the
+local-source rules above, treating one under `Inbox/` as unbuilt with the
+route: file that copy with pdf-organize, then run wiki-build on it.
+Otherwise give the new PDF a distinguishing abbreviated title under
+pdf-organize's [collision rule](../../pdf-organize/SKILL.md#3-check-references-and-prepare-the-complete-rename-plan),
 using `_2`, `_3` only when no natural distinction exists and never for a book
 (choose other evidence or defer a book without one). Confirm the new name with
 `naming.py canonical` and repeat all three checks. Then publish with exclusive
@@ -213,11 +234,12 @@ creation through the [shared safe-write API](../../../shared/SAFE_WRITES.md#call
 
 Before citing any PDF, reused or newly filed, pass the builder's
 [PDF intake gate](../../wiki-build/references/source-intake.md#verify-a-resolved-pdf)
-on its vault path: `naming.py canonical` accepts the name, and
-`vault_artifacts.py pdfs --vault ... --selected ...` reports `unique: true`
-with a complete readable inventory. Cite the actual filename with a positive
-physical `#page=N` introduction locator. A web extract or reused clipping
-instead uses its actual Markdown filename without an anchor. Follow [conventions §7](../../../shared/CONVENTIONS.md#7-source-references):
+on its vault path, which is outside `Inbox/`: `naming.py canonical` accepts
+the name, and `vault_artifacts.py pdfs --vault ... --selected ...` reports
+`unique: true` with a complete readable inventory. Cite the actual filename
+with a positive physical `#page=N` introduction locator. A web extract or
+reused clipping instead uses its actual Markdown filename without an anchor.
+Follow [conventions §7](../../../shared/CONVENTIONS.md#7-source-references):
 Wiki `sources:` never contains a bare web URL or a fabricated local filename.
 
 ## Optional images and publication order
@@ -229,6 +251,8 @@ reuse is permitted; retain required attribution/license information in its
 source record. Unknown rights, unavailable assets or an unsafe inventory are
 reasons to omit/report the optional image, not invent an exhibit or broaden the
 topic. Existing source images may be reused read-only under those same rules.
+The builder's [missing PDF figures](../../wiki-build/references/media.md#missing-pdf-figures)
+step never runs on a reused PDF: report a figure it lacks as unavailable.
 
 For a new webpage extract, use the clipping producer's
 [stage/place image helper](../../clipping-clean/references/images.md#download-and-publish),
@@ -241,8 +265,8 @@ verify the attachments before publishing a dependent Wiki entry. A placement
 failure after source publication is partial state to reconcile/report, never
 successful completion of an unresolved embed.
 
-For a newly acquired PDF, use [figure-extract](../../figure-extract/SKILL.md)
-only on that scoped source when a useful figure is selected. Its canonical
+For a newly acquired PDF, once a useful figure is selected, run the missing
+PDF figures step on that PDF alone. [figure-extract](../../figure-extract/SKILL.md)'s canonical
 source, collision and guarded-write requirements still apply; never replace a
 pre-existing figure or trigger repairs of existing artifacts. A figure that
 cannot be acquired safely stays omitted with a reason. Complete verified

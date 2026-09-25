@@ -60,7 +60,9 @@ that compactly. Apply the body equation guide's explanatory-value test first.
 A simple verbal rule does not become a mathematical learning objective merely
 because an earlier note formalized it; hard voting needs no equation in either
 place. Under an authorized simplification, remove unhelpful card math with its
-body equation while preserving the tested concept and all scheduling state.
+body equation while preserving the tested concept and all scheduling state;
+otherwise shorten an existing card's long formula only to a compact
+equivalent, never to words.
 Review every card, including disabled and legacy extra cards, against its own
 tested claim; a different facet of the entry is not a reason to change that
 claim.
@@ -70,14 +72,14 @@ block, a separate equation line, or the answer line. Write the relationship a
 learner should recall, such as $\text{TP}/(\text{TP}+\text{FP})$ or
 $\sqrt{\operatorname{Var}(X)}$, in the body's notation or a demonstrably
 equivalent compact form, and name its symbols in words in the same sentence.
-Keep every defining operation (an Lp norm still needs its p-th root), and keep
-a condition only when it changes which quantity is defined or whether the
-relationship holds, such as population versus sample or the loss a special
-case assumes. Omit well-definedness conditions
-([equation guide](equations.md#1-coverage--explanatory-value-before-notation)),
-parameter ranges, bias-augmentation or storage conventions, and
-summation-index machinery. A lone symbol does not
-substitute for the relationship being tested.
+Keep every defining operation (an Lp norm still needs its p-th root) and
+every condition, range, or excluded term the relationship needs, such as
+population versus sample or $0\le\lambda\le1$ in the convexity inequality.
+Omit only the well-definedness boilerplate the
+[equation guide](equations.md#1-coverage--explanatory-value-before-notation)
+lists, the $x_0=1$ augmentation device, index bounds that merely run over
+every term, and bindings for symbols the relationship does not use. A lone
+symbol does not substitute for the relationship being tested.
 
 Keep the equation leak-free: remove an answer-name left-hand side such as
 `\text{precision} =`, retaining the right-hand expression and a verbal cue;
