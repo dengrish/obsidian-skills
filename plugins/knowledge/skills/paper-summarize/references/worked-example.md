@@ -9,21 +9,25 @@ Read when the assembled output is unclear. The paper is fictional; it is not an
 external source or a completed live-vault run. [Note format](note-format.md),
 [summary standards](summary-standards.md) and [figures](figures.md) own the rules.
 This randomized trial uses empirical body mode; its section meanings are not a
-template for an argument, book, standard or notice. The note fence below is
-lintable as a scratch fixture; re-lint it after editing.
+template for an argument, book, standard or notice.
 
 ## The input
 
-A fictional paper, realistic in every detail that matters. `Sources/PDFs/Doe_GutMicrobiome_2025.pdf`, 8 physical pages, four figures already sitting in `Sources/Images/` under this PDF's stem as `Doe_GutMicrobiome_2025_fig_1.png` through `_fig_4.png`. The handful of facts the note below is built from:
+A fictional paper, realistic in every detail that matters. `Sources/PDFs/Doe_GutMicrobiome_2025.pdf`, 8 physical pages, four figures already sitting in `Sources/Images/` under this PDF's stem as `Doe_GutMicrobiome_2025_fig_1.png` through `_fig_4.png`. The facts the note below is built from, with physical pages:
 
 - **Title:** *Encapsulated faecal microbiota transplant for recurrent Clostridioides difficile infection: a randomised, double-blind, placebo-controlled trial*
 - **Authors:** Priya N. Doe, Marcus A. Feldman, Ingrid S. Halvorsen and eight others (eleven in total). **Year:** the title page prints `2025` and no month or day. **DOI:** printed on page 1 as `10.1016/S2468-1253(25)00114-6`.
-- **Design:** randomised, double-blind, placebo-controlled trial at 14 hospitals in Denmark and the Netherlands. 219 adults with at least two laboratory-confirmed prior recurrences, all having finished a 10-day vancomycin course, randomised 1:1 to four encapsulated transplant capsules over two days (110) or identical placebo capsules (109). Powered at 90% for a 20-percentage-point absolute difference; 219 of a planned 220 enrolled. Registered at ClinicalTrials.gov `NCT05712398` before the first patient. Page 3.
-- **Primary outcome:** recurrence within 8 weeks — 8.2% (9 of 110) on transplant against 45.0% (49 of 109) on placebo; absolute reduction 36.8 percentage points (95% CI 25.9 to 47.7), risk ratio 0.18 (95% CI 0.09 to 0.36). Page 5.
-- **One harm:** abdominal cramping in the first 48 hours, 27 of 110 against 11 of 109; one *Escherichia coli* bacteraemia in the transplant arm within 7 days, adjudicated possibly related. Page 6.
-- **One null secondary:** gastrointestinal quality of life at 8 weeks (GIQLI, 144 points) — mean difference 2.6 points, 95% CI −3.1 to +8.3. Page 6.
+- **Background,** page 2: after a second recurrence, 40–60% of patients relapse again after another vancomycin course. Colonoscopic transplant had been tested against placebo; earlier oral-capsule studies were open-label single-arm series.
+- **Design,** page 3: randomised, double-blind, placebo-controlled trial at 14 hospitals in Denmark and the Netherlands. 219 adults with at least two laboratory-confirmed prior recurrences, all having finished a 10-day vancomycin course, randomised 1:1 to four transplant capsules over two days (110) or identical placebo capsules (109). Powered at 90% for a 20-percentage-point absolute difference; 219 of a planned 220 enrolled. Registered at ClinicalTrials.gov `NCT05712398` before the first patient. Capsules came from two stool banks; children were not eligible.
+- **Procedures,** page 3: patients, treating clinicians and outcome assessors were masked. Recurrence (diarrhoea plus a positive stool toxin assay) was adjudicated by a committee blind to allocation. The paper does not say who generated the allocation sequence or how it was concealed, and does not report losses to follow-up between week 4 and week 8.
+- **Primary outcome,** page 5: recurrence within 8 weeks — 8.2% (9 of 110) on transplant against 45.0% (49 of 109) on placebo; absolute reduction 36.8 percentage points (95% CI 25.9 to 47.7), risk ratio 0.18 (95% CI 0.09 to 0.36).
+- **Harms,** page 6: abdominal cramping in the first 48 hours, 27 of 110 against 11 of 109; one *Escherichia coli* bacteraemia in the transplant arm within 7 days, adjudicated possibly related; no deaths in either arm within 8 weeks.
+- **One null secondary,** page 6: gastrointestinal quality of life at 8 weeks (GIQLI, 144 points) — mean difference 2.6 points, 95% CI −3.1 to +8.3.
+- **Exploratory engraftment,** page 7: 96 week-8 stool samples; donor strains detectable in 71 of 78 recurrence-free patients and in 4 of 18 who recurred.
+- **The authors' conclusions,** page 8: offer encapsulated transplant after a second recurrence in adults who completed vancomycin; the capsule route avoids colonoscopy without losing the effect size.
 - **The authors' own limitations,** page 8: follow-up ends at 8 weeks; everyone enrolled had already relapsed at least twice; one donor supplied 38% of the capsules given.
 - **Availability,** page 8: de-identified participant data 12 months after publication under a data-access agreement; no analysis code offered.
+- **Figures:** 1 participant flow, 2 Kaplan–Meier recurrence curves, 3 subgroup forest plot, 4 donor-strain detection by recurrence status.
 
 ## The output note
 
@@ -50,54 +54,51 @@ tags:
 read: false
 ---
 > [!Summary]
-> - Oral **encapsulated faecal microbiota transplant** cut recurrence of **Clostridioides difficile** infection within 8 weeks in adults with at least two prior recurrences. Recurrence fell from 45.0% (49 of 109) on placebo to 8.2% (9 of 110) — an absolute reduction of 36.8 percentage points. The risk ratio was 0.18 (95% CI 0.09 to 0.36), in a randomised, double-blind, placebo-controlled trial.
-> - Abdominal cramping in the first 48 hours was more common on transplant than on placebo (27 of 110 against 11 of 109). One patient in the transplant arm had **Escherichia coli** bacteraemia within 7 days, adjudicated by the safety committee as possibly treatment-related.
-> - The trial did not detect a difference in gastrointestinal quality of life at 8 weeks against placebo. The mean difference was 2.6 points on the 144-point **GIQLI** (95% CI −3.1 to +8.3). A benefit as large as 8.3 points is not ruled out.
-> - Detectable donor strains at week 8 were associated with staying recurrence-free. Nobody was randomised to engraft, so this does not establish engraftment as the mechanism.
-> - Follow-up ended at 8 weeks in both arms, so the trial supports no claim, at any strength, about durability past two months.
+> - **Encapsulated faecal microbiota transplant** cut 8-week recurrence of ***Clostridioides difficile*** infection from 45.0% on placebo to 8.2% in adults with at least two prior recurrences. The 219-patient trial was randomised and double-blind.
+> - Abdominal cramping in the first 48 hours was more common on transplant than on placebo (27 of 110 against 11 of 109). One transplant patient had *Escherichia coli* bacteraemia within 7 days, adjudicated as possibly treatment-related.
+> - Gastrointestinal quality of life at 8 weeks showed no detectable difference from placebo (mean difference 2.6 of 144 **GIQLI** points, 95% CI −3.1 to +8.3). A benefit as large as 8.3 points is not ruled out.
+> - Persisting donor strains at week 8 were associated with staying recurrence-free, in an exploratory comparison outside the randomisation.
+> - Follow-up ended at 8 weeks, so durability is untested.
 
 ___
 
 ## Recurrent C. difficile relapses again after vancomycin
 
-After a second recurrence of *C. difficile* infection, another vancomycin course leaves a large minority of patients relapsing again. The paper puts that figure at 40–60%. Faecal microbiota transplant delivered by colonoscopy has been tested against placebo before. The encapsulated oral form — the one an ordinary outpatient service could actually deliver — had mostly been tested in open-label single-arm series. A single-arm series has no placebo arm to read a recurrence rate against. The question here is narrow: given after a standard vancomycin course, do transplant capsules prevent recurrence at 8 weeks against identical placebo capsules?
+After a second recurrence of *C. difficile* infection, 40–60% of patients relapse again after another vancomycin course.<sup>[[Doe_GutMicrobiome_2025.pdf#page=2|2]]</sup> Faecal microbiota transplant by colonoscopy had been tested against placebo, but the oral capsule form mostly in open-label single-arm series. The question was whether transplant capsules, given after vancomycin, prevent recurrence within 8 weeks better than identical placebo capsules.
 
 ## A 219-patient double-blind trial of transplant capsules
 
-A randomised, double-blind, placebo-controlled trial at 14 hospitals in Denmark and the Netherlands, registered at ClinicalTrials.gov as NCT05712398 before the first patient was enrolled. The trial was powered at 90% to detect a 20-percentage-point absolute difference and enrolled 219 of a planned 220.<sup>[[Doe_GutMicrobiome_2025.pdf#page=3|3]]</sup> Donor material came from two stool banks, and one donor supplied 38% of the capsules given.
+The trial was randomised, double-blind and placebo-controlled, at 14 hospitals in Denmark and the Netherlands. It was registered at ClinicalTrials.gov as NCT05712398 before the first patient was enrolled. Powered at 90% to detect a 20-percentage-point absolute difference, it enrolled 219 of a planned 220.<sup>[[Doe_GutMicrobiome_2025.pdf#page=3|3]]</sup> Capsules came from two stool banks.
 
 1. 219 adults with at least two laboratory-confirmed prior recurrences completed a 10-day vancomycin course.
-2. They were randomised 1:1 — 110 to transplant capsules, 109 to identical placebo capsules.
-3. The transplant arm took four encapsulated capsules over two consecutive days.
-4. Patients, treating clinicians and outcome assessors were all masked.
-5. Recurrence within 8 weeks (diarrhoea plus a positive stool toxin assay) was adjudicated by a committee blind to allocation.
+2. Investigators randomised them 1:1 — 110 to transplant capsules, 109 to identical placebo capsules.
+3. The transplant arm took four transplant capsules over two consecutive days.
+4. The trial masked patients, treating clinicians and outcome assessors.
+5. A committee blind to allocation adjudicated recurrence within 8 weeks (diarrhoea plus a positive stool toxin assay).
 
 ## Recurrence fell from 45% to 8% within eight weeks
 
 **The primary outcome.** Recurrence within 8 weeks occurred in 8.2% of the transplant arm (9 of 110) against 45.0% on placebo (49 of 109). That is an absolute reduction of 36.8 percentage points (95% CI 25.9 to 47.7). The risk ratio was 0.18 (95% CI 0.09 to 0.36).<sup>[[Doe_GutMicrobiome_2025.pdf#page=5|5]]</sup> In adults with at least two prior recurrences who have finished vancomycin, encapsulated transplant reduces recurrence against placebo.
 
 ![[Doe_GutMicrobiome_2025_fig_2.png]]
-*The two arms separated inside the first fortnight and stayed apart to week 8. Kaplan–Meier curves for time to first recurrence, transplant against placebo, with the number of patients still at risk printed below each week.*
+*The two arms separated within a fortnight and stayed apart to week 8. Curves show time to first recurrence in 219 previously treated adults, transplant versus placebo, with numbers still at risk below each week.*
 
-**Harms.** Abdominal cramping in the first 48 hours was reported by 27 of 110 on transplant and 11 of 109 on placebo. One patient in the transplant arm developed *Escherichia coli* bacteraemia within 7 days, which the independent safety committee adjudicated as possibly treatment-related. There were no deaths in either arm within 8 weeks.<sup>[[Doe_GutMicrobiome_2025.pdf#page=6|6]]</sup>
+**Harms.** Abdominal cramping in the first 48 hours was reported by 27 of 110 on transplant and 11 of 109 on placebo. One patient in the transplant arm developed *Escherichia coli* bacteraemia within 7 days, adjudicated as possibly treatment-related. There were no deaths in either arm within 8 weeks.<sup>[[Doe_GutMicrobiome_2025.pdf#page=6|6]]</sup>
 
-**A secondary outcome that did not move.** On gastrointestinal quality of life at 8 weeks the trial did not detect a difference between the arms. The mean difference was 2.6 points on the 144-point GIQLI, 95% CI −3.1 to +8.3.<sup>[[Doe_GutMicrobiome_2025.pdf#page=6|6]]</sup> A benefit of up to 8.3 points is not ruled out by this result, and neither is a 3.1-point deficit.
+**A secondary outcome with no detected difference.** On gastrointestinal quality of life at 8 weeks the trial did not detect a difference between the arms. The mean difference was 2.6 points on the 144-point GIQLI, 95% CI −3.1 to +8.3.<sup>[[Doe_GutMicrobiome_2025.pdf#page=6|6]]</sup> The interval leaves room for a benefit of up to 8.3 points or a deficit of up to 3.1.
 
-**Engraftment, exploratory.** 96 patients gave a stool sample at week 8. Donor strains were still detectable in 71 of 78 who had stayed recurrence-free, and in 4 of 18 who had recurred.<sup>[[Doe_GutMicrobiome_2025.pdf#page=7|7]]</sup> This comparison is observational inside a randomised trial: patients were randomised to capsules, not to engraftment. So detectable donor strains are associated with staying well, rather than shown to be how the treatment works.
+**Engraftment, exploratory.** In week-8 samples, donor strains persisted in 71 of 78 who stayed well and 4 of 18 who recurred, an association outside the randomisation.<sup>[[Doe_GutMicrobiome_2025.pdf#page=7|7]]</sup>
 
-![[Doe_GutMicrobiome_2025_fig_4.png]]
-*Donor strains were still present at week 8 in most patients who stayed well and in few of those who recurred. Genus-level composition for each sampled patient at baseline, week 1 and week 8, split by recurrence status; one column is one patient.*
+## Authors recommend capsules after a second recurrence in adults
 
-## Worth offering after a second recurrence in adults
-
-The authors conclude that encapsulated transplant should be offered after a second recurrence, in adults who have completed vancomycin. They also conclude that the capsule route removes the need for colonoscopy, without giving up the effect size that route has shown.<sup>[[Doe_GutMicrobiome_2025.pdf#page=8|8]]</sup> They are explicit that this says nothing about a first recurrence: everyone enrolled had already relapsed at least twice. It says nothing about children either, who were not eligible. The authors do not put it this way, but the harms line is what makes the 8-week horizon bite in practice. A one-off treatment with cramping in a quarter of patients and one bloodstream infection in 110 needs a durability figure this trial lacks.
+The authors conclude that encapsulated transplant should be offered after a second recurrence, in adults who have completed vancomycin. They also conclude that the capsule route removes the need for colonoscopy without giving up the effect size.<sup>[[Doe_GutMicrobiome_2025.pdf#page=8|8]]</sup>
 
 ## Eight weeks of follow-up, and one donor supplied 38%
 
-- **What the design cannot show.** Randomisation and masking let the trial attribute the difference in recurrence to the capsules. They do not separate the effect of transplant in general from the effect of *this donor material*. One donor supplied 38% of the capsules given.
-- **Who it was in.** 219 adults at 14 hospitals in two northern European countries, all with at least two prior recurrences and all having completed vancomycin. It is not about a first recurrence, not about children, and not about patients who cannot swallow capsules.
-- **Follow-up ends at 8 weeks**, the authors' own first limitation and the one that constrains this note most.<sup>[[Doe_GutMicrobiome_2025.pdf#page=8|8]]</sup> No durability claim is available here, at any strength. And this is a one-off treatment whose harms are already on the record.
-- **What is missing, methodologically.** The paper states the 1:1 ratio and the masking, but never says who generated the allocation sequence or how it was concealed. It also reports no losses to follow-up between week 4 and week 8. CONSORT asks for both; their absence cannot be seen from the results.
+- **Follow-up ends at 8 weeks**, the authors' own first limitation, so durability is untested.<sup>[[Doe_GutMicrobiome_2025.pdf#page=8|8]]</sup>
+- **One donor dominated.** One donor supplied 38% of the capsules given, so the trial cannot separate transplant in general from this donor's material.<sup>[[Doe_GutMicrobiome_2025.pdf#page=8|8]]</sup>
+- **Who it covers.** Adults at 14 hospitals in Denmark and the Netherlands, all with at least two prior recurrences and a completed vancomycin course. It is not about a first recurrence or about children.<sup>[[Doe_GutMicrobiome_2025.pdf#page=3|3]]</sup>
+- **Unreported methods.** The paper does not say who generated the allocation sequence or how it was concealed. It does not report losses to follow-up between weeks 4 and 8 either; CONSORT asks for both.
 
 ## Participant data on request, no analysis code
 
@@ -108,14 +109,19 @@ The authors conclude that encapsulated transplant should be offered after a seco
 ## Why these choices matter
 
 - The primary recurrence comparison uses the randomized trial's confidence,
-  while the exploratory engraftment claim is explicitly observational. One
+  while the exploratory engraftment claim is worded as an association. One
   paper can contain claims with different confidence.
 - Absolute recurrence rates sit beside the risk ratio. Harms and the uncertain
   quality-of-life result remain visible beside the benefit; a null is not
   written as equivalence.
-- Two of four figures are selected. The participant-flow and underpowered
-  subgroup figures do not earn space. The primary comparison fits in prose,
-  so this note does not repeat it in a table.
+- One of four figures is selected. The participant-flow, subgroup and
+  engraftment figures do not earn space, and the secondary engraftment finding
+  gets one sentence. The primary comparison fits in prose, so this note does
+  not repeat it in a table.
+- The eight-week horizon is explained once, in Limitations, and stated in one
+  short callout bullet. Other sections word their claims within 8 weeks
+  instead of repeating the caveat, and Interpretation reports only the
+  authors' conclusions.
 - The title page supplies only `2025`, so the note pads month/day to `01` and
   the report records that choice. The DOI is included because the fictional
   document prints it; neither date nor URL requires outside lookup.
@@ -123,7 +129,6 @@ The authors conclude that encapsulated transplant should be offered after a seco
   remains methodological information, while funding, conflicts and review
   status are outside this note's scope.
 - Availability names restricted data access and missing code separately.
-  The main limitation is the eight-week horizon, not generic research filler.
 
 ## Illustrative verification and lint
 
@@ -151,12 +156,10 @@ python3 '<skill>/scripts/note_lint.py' '<scratch>/Doe_GutMicrobiome_2025.md' \
     --mode empirical --images '<vault>/Sources/Images'
 ```
 
-The repository's conformance harness checks this fictional fixture's textual
-format through the lint API. The publication CLI also requires the real image
-inventory whenever a note has embeds; omitting `--images` is a violation, not a
-text-only verification mode. Do not create placeholder images to make the
-example pass. Lint cannot verify the fictional science or the page citations,
-and every selected real image still needs visual inspection.
+Lint cannot verify the science or the page citations, and every selected real
+image still needs visual inspection. The repository's tests lint this fictional
+fixture's textual format through the lint API without an image inventory; do
+not create placeholder images to make it pass the command above.
 
 A real run reports source-check counts/corrections and lint separately, then
 publishes only after both gates pass. It does not copy this example's facts or

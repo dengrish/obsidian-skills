@@ -66,9 +66,10 @@ not an unguarded network fetch.
    refuses an occupant left by another run. Inspect the output: a blank-image
    detector cannot prove every label is correct.
 3. Keep the verified GIF at its scratch path and put its planned
-   `<slug>_fig_<N>.gif` embed in the reviewed draft. After step 6 has safely
-   published that note, publish the GIF through the shared occupied-slot and
-   ownership guards, using the same number:
+   `<slug>_fig_<N>.gif` embed in the reviewed draft. After
+   [publication](../SKILL.md#6-publish-safely) has safely published that note,
+   publish the GIF through the shared occupied-slot and ownership guards, using
+   the same number:
 
    ```bash
    python3 '<skill>/scripts/fetch_images.py' place --attachments '<vault>/Sources/Images' \
@@ -268,8 +269,8 @@ def main(src, out):
     # The scratch file goes in the system temp directory, NOT next to `out`.
     # It used to be written as out + ".tmp.gif", and `out` was a path inside
     # Sources/Images -- a half-written, wrongly-named file in the vault for the
-    # length of the render, which is the one thing references/images.md item 4
-    # says must never happen.
+    # length of the render, which CONVENTIONS §8b forbids: "Nothing unfinished
+    # is ever written into the folder".
     fd, tmp = tempfile.mkstemp(prefix="lottie_render.", suffix=".gif")
     os.close(fd)
     pal[0].save(tmp, save_all=True, append_images=pal[1:],
@@ -298,7 +299,7 @@ destination outside the vault:
 python3 '<figure-scratch>/lottie_to_gif.py' '<lottie_src .json/.lottie path>' '<figure-scratch>/lottie_render.gif'
 ```
 
-Paths are untrusted data too: use argument lists or the [shared quoting rules](../../../shared/CONVENTIONS.md#1b-filenames-titles-and-urls-are-untrusted-text).
+Paths are untrusted data too: use argument lists or the [shared quoting rules](../../../shared/INPUT_SAFETY.md#filenames-titles-and-urls-are-untrusted-text).
 The renderer detects JSON versus dotLottie ZIP, bounds expanded JSON, renders on
 white, caps the longest side at 960px and frames at about 150, and rejects a
 blank middle frame or GIF over 8 MB. For dotLottie v1/v2 it loads the manifest's

@@ -41,11 +41,13 @@ read: false
   A formal abstract resolves an otherwise ambiguous Paper/Report choice;
   a heading-search miss does not prove there is no abstract.
 - **Sources:** first the double-quoted bare PDF wikilink. A second double-quoted
-  URL is optional, only from a DOI/arXiv identifier printed in this document,
-  normalized to `https://doi.org/...` or `https://arxiv.org/abs/...`. Never on
-  `Book`, never blank, never inferred from a title or ISBN. Basename conflicts
-  must be resolved upstream; a path-qualified link does not fix note/image
-  namespace collisions.
+  URL is optional, only from this document's own DOI/arXiv identifier as printed
+  on its title page, header or footer, normalized to `https://doi.org/...` or
+  `https://arxiv.org/abs/...`. Never use a reference-list DOI or, for a notice,
+  the affected article's DOI (name that in the body). Never on `Book`, never
+  blank, never inferred from a title or ISBN. Basename conflicts must be
+  resolved upstream; a path-qualified link does not fix note/image namespace
+  collisions.
 - **Author:** block-form list in the printed order, without wikilink wrappers.
   For more than about eight authors, list the first three and a final `et al.`
   item. Preserve a collective byline rather than mining individuals from a
@@ -57,7 +59,7 @@ read: false
   more precise date elsewhere. If the year is absent, the organized PDF must
   already carry its canonical `_nd` segment; write the explicit YAML null
   `published: null` and report it. Under intake's deliberate noncanonical-name
-  exception, such as a named collector attachment, retain that filename and use
+  exception, such as a named feed-owned attachment, retain that filename and use
   `published: null` when the source is undated; carry `--allow-unorganized` to
   lint rather than inventing a year or forcing an `_nd` rename.
   For canonical filenames, a dated value paired with `_nd`, or a null
@@ -72,7 +74,8 @@ read: false
   compress the full scope clause to fit; the callout must state it in full.
 - **Tags:** the subject's canonical discipline(s) from
   [CONVENTIONS §3](../../../shared/CONVENTIONS.md#3-the-discipline-tag-enum),
-  as a block list of double-quoted `#` values, or blank when none applies.
+  as a block list of double-quoted `#` values, or `tags: []` when none applies.
+  `"#misc"` is the Wiki-only fallback, never a source-note tag.
 - **Read:** bare `false` on creation; preserve the existing value on an approved
   rewrite, including an absent/unknown state. Report the latter; do not create
   `false` or force a boolean on an existing note to satisfy lint. A resulting
@@ -121,9 +124,10 @@ with no trailing full stop or all-capitals styling. Preserve technical casing
 such as `p53` or `mRNA`. A heading must say something about this document and
 obey the claim rules; a cautious paragraph cannot repair an overstated heading.
 
-The prose in this guide and `figures.md` explains the limits. This block is the
-same contract in a machine-readable form so the conformance harness can stop a
-documentation or linter edit from changing only one side:
+`note_lint.py` checks these numeric limits. Exceeding
+`MAX_CALLOUT_BULLET_WORDS`, `MAX_SENTENCE_WORDS`, `MAX_STEP_WORDS` or
+`MAX_METHODS_CHARS`, or falling below `PREFERRED_MIN_EMPIRICAL_LIMITATIONS`, is
+an advisory; the other limits are violations:
 
 <!-- canonical:summary-note:limits -->
 ```text
@@ -133,11 +137,13 @@ MAX_HEADING=90
 MIN_HEADING_WORDS=3
 MIN_BULLETS=3
 MAX_BULLETS=7
+MAX_CALLOUT_BULLET_WORDS=45
 MAX_SENTENCE_WORDS=25
 MAX_STEP_WORDS=20
 MAX_PARAGRAPH_SENTENCES=6
 MIN_STEPS=3
 MAX_STEPS=8
+MAX_METHODS_CHARS=1200
 MAX_RESULTS_CHARS=2400
 MIN_LIMITATIONS=1
 PREFERRED_MIN_EMPIRICAL_LIMITATIONS=2
@@ -175,7 +181,7 @@ the other material as support. Do not create a hybrid with extra sections.
 | 1 — Question | Research question and why it remained open | Problem, thesis or organizing question | Affected work and the issue that prompted the notice |
 | 2 — Methods | Design, population/system and procedure | Stated scope, evidence base, premises and reasoning or selection approach | Issuer, stated grounds, evidence and process behind the action |
 | 3 — Results | Main findings, including harms and nulls | Main argument, framework, conclusions, requirements or recommendations | Exact correction, withdrawal, warning or other change to the record |
-| 4 — Interpretation | Implications licensed by the design | What follows from the argument and how its contribution can be used | Consequences for the affected claims, versions or uses |
+| 4 — Interpretation | Implications licensed by the design | What follows from the argument and how the document says its contribution can be used | Consequences for the affected claims, versions or uses |
 | 5 — Limitations | Design and reporting constraints | Evidence gaps, assumptions, counterarguments and applicability bounds | What the notice does not decide, change or supply evidence about |
 | 6 — Availability | Data, code and relevant materials | Supplied sources, code or supporting materials that matter to the argument | Affected record, supporting evidence or accompanying material named by the notice |
 
@@ -192,15 +198,19 @@ to reconstruct.
   analysis differ, name that and carry the methodological consequence into
   Limitations. In the other modes, establish the thesis/problem or the affected
   work/issue without retelling the whole document.
-- **Methods / basis position:** empirical mode uses a short design paragraph,
-  then 3–8 numbered procedure steps in simple past, active voice, one action
-  each, targeting at most 20 words. Put each step's numbers inside it. In the
-  other modes, explain only the scope, premises, evidence selection, derivation,
-  development process or grounds the document actually gives. Use numbered
-  steps only for a real reported procedure, keep them contiguous and at 1–8
-  steps, and use prose when a theory, narrative review, book or notice has no
-  such procedure. The empirical 3-step minimum does not apply outside empirical
-  mode. Include methodological preregistration where the document has it.
+- **Methods / basis position:** keep the prose to about 1,200 characters,
+  excluding numbered steps. Empirical mode uses a short design paragraph with
+  only the design, population/system, comparator and procedure detail needed
+  to read the results, not infrastructure, hardware or incidental training
+  detail. When the document reports a procedure, it adds 3–8 numbered steps in
+  simple past, active voice, one action each, targeting at most 20 words. Put
+  each step's numbers inside it. In the other modes, explain only the scope,
+  premises, evidence selection, derivation, development process or grounds the
+  document actually gives. Use numbered steps only for a real reported
+  procedure, keep them contiguous and at 1–8 steps, and use prose when a
+  theory, narrative review, book or notice has no such procedure. The empirical
+  3-step minimum does not apply outside empirical mode. Include methodological
+  preregistration where the document has it.
 - **Results / contribution position:** develop the main finding, argument,
   recommendation or notice action for a scientist from another field. Empirical
   notes include harms and negative findings beside benefits. Argument/synthesis
@@ -210,19 +220,23 @@ to reconstruct.
   findings. A secondary contribution earns at most a sentence when it changes
   the main contribution's reading. Put every exhibit here, beneath its supporting
   claim; cite load-bearing numbers. The cap is **2,400 characters of prose**,
-  excluding embeds, captions and tables.
-- **Interpretation / consequence position:** state implications only as far as
-  the design, reasoning or notice reaches. Every sentence is the authors' or
-  issuer's conclusion, or explicitly marked as another reading.
+  excluding embeds, captions, tables and citation markup.
+- **Interpretation / consequence position:** state the authors' or issuer's own
+  conclusions and the implications they draw, attributed and only as far as
+  the design, reasoning or notice reaches. Add another reading only when the
+  source supports a materially different interpretation, and mark it. Do not
+  add the note's own practical inferences or restate limitations; those belong
+  in the fifth position.
 - **Limitations / boundaries position:** use 1–4 bullets that would change how
   the reader acts on or cites the document. Empirical notes normally need 2–4;
   keep one only when a second material limitation would be filler, and explain
   that advisory exception in the run report. A compact argument or notice may
   have one without an exception. Use the [mode-appropriate limitations
-  sweep](summary-standards.md#the-limitations-taxonomy-by-mode-and-design) to select them;
-  do not repeat a local caveat or add generic research filler. Keep each bullet
-  at or below 420 characters. Put detail that qualifies one claim beside that
-  claim instead of turning the section into a second discussion.
+  sweep](summary-standards.md#the-limitations-taxonomy-by-mode-and-design) to select them.
+  State each document-level limitation once, here; the callout may carry the
+  chief one in a short bullet. Keep a caveat about one claim beside that claim,
+  not here, and add no generic research filler. Keep each bullet at or below
+  420 characters, not counting citation markup.
 - **Availability:** use 1–3 bullets with only relevant labels. Empirical notes
   name Data and add Code or Materials when relevant. Argument/synthesis notes
   use Sources, Materials, Data or Code only for supporting artifacts the
@@ -251,13 +265,19 @@ meaning, scope or qualification less clear. Use the shortest clear version and
 explain the exception in the run report, not in the note. A word-count advisory
 calls for this judgment; it is not permission to retain avoidable detail.
 
-The Summary callout holds 3–7 `> - ` bullets, one line per bullet. Lead with the
-main contribution. For empirical mode, include its scope, absolute comparison
-and confidence limit, then the supporting mechanism, effect size and chief
-caveat. For argument/synthesis, give the thesis, decisive support and material
-boundary; for notice mode, give the action, stated grounds and consequence.
-Each bullet stands alone, states the claim directly and preserves exact technical
-terms. Bold only wiki-worthy entities. Do not put URLs or page citations in the
+The Summary callout holds 3–7 `> - ` bullets, one line per bullet. Each bullet
+makes one claim in one or two sentences, at most about 45 words, and leaves
+procedure detail and secondary numbers to the body. Bullet 1 gives the main
+contribution with its scope; in empirical mode it adds the absolute comparison
+where one applies and any design limit its rung requires. Later bullets cover,
+as applicable, harms or nulls, one supporting result or mechanism, and the
+single chief caveat. For argument/synthesis, give the thesis, decisive support
+and material boundary; for notice mode, give the action, stated grounds and
+consequence. Each bullet stands alone with its own scope and comparator, states
+the claim directly and preserves exact technical terms. Bold only terms that
+could stand as their own wiki entry, such as a named model, method, dataset,
+organization, person or defined concept; never generic words, ordinary
+technical vocabulary or whole phrases. Do not put URLs or page citations in the
 callout.
 
 ## Citations

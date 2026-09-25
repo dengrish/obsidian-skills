@@ -24,19 +24,19 @@ raises.  See CONVENTIONS.md §1a and §8b.
                                                         THAT order
 
 `Year` is a real four-digit year from `0001` through `9999`, or the literal
-`nd`. `NN` is a zero-padded two-digit
-chapter number.  The tail is optional on either form: `_src` is the user's own
-marker for a source file that has a same-stemmed note beside it, and `_2`, `_3`
-… disambiguate two documents that would otherwise share a name. A numeric
-disambiguator is an integer of 2 or greater with no leading zero: `_0`, `_1`
-and `_02` are not names this plugin writes.
+`nd`. `NN` is a zero-padded two-digit chapter number.  The tail is optional on
+either form: `_src` is the user's own marker for the same document in another
+representation (no skill adds or removes it), and `_2`, `_3` … disambiguate
+two documents that would otherwise share a name. A numeric disambiguator is an
+integer of 2 or greater with no leading zero: `_0`, `_1` and `_02` are not
+names this plugin writes.
 
 **The tail always comes last, after the chapter segment.**  That is the single
 fact the two consumers used to disagree about.  A chapter of a book whose own
 stem carries a tail does *not* inherit it — `Prince_UDL_2026_src.pdf` splits
-into `Prince_UDL_2026_01_Intro.pdf`, and that chapter grows its own `_src` only
-when it, too, has a note beside it.  Comparison between a book and its chapters
-is therefore done on the *core* stem — the identity with `_src` removed —
+into `Prince_UDL_2026_01_Intro.pdf`, and that chapter carries `_src` only when
+the user marks it too.  Comparison between a book and its chapters is
+therefore done on the *core* stem — the identity with `_src` removed —
 which is what `core_stem()` returns and what `chapter_parts()` reports as the
 book.  **A `_2`/`_3` disambiguator is NOT removed:** it marks a different
 document, so a disambiguated book matches no chapter, and `split_book` refuses
@@ -56,6 +56,7 @@ As a CLI:
 
     python3 naming.py canonical 'Prince_UDL_2026_01_Intro_src.pdf'
     python3 naming.py chapter   'Prince_UDL_2026_01_Intro_src'
+    python3 naming.py feed      'rss-04dbe4d2aaf17884aaf0f2878cca8178.pdf'
     python3 naming.py --test
 """
 import argparse
@@ -68,12 +69,13 @@ __all__ = [
     "SAFE_NAME", "CANONICAL", "DISAMBIGUATOR", "TAIL", "STANDALONE_CORE", "CHAPTER_CORE",
     "ChapterName", "looks_canonical", "core_stem", "split_tail",
     "chapter_parts", "chapter_book_stem", "stem_of",
+    "FEED_ATTACHMENT", "is_feed_attachment",
 ]
 
 #: What a name this plugin *writes* may contain: ASCII, no quotes, no shell or
 #: glob metacharacter, and a leading alphanumeric so a written name can never
 #: be a dotfile.  Input names are unconstrained — cleaning those up is
-#: pdf-organize's whole job.  CONVENTIONS.md §1b is why this is narrow: a
+#: pdf-organize's whole job.  INPUT_SAFETY.md is why this is narrow: a
 #: filename is untrusted text and reaches tools this plugin does not control.
 SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 
@@ -129,6 +131,15 @@ _CHAPTER_RE = re.compile(r"\A(?P<book>%s)(?P<mid>(?:_src)?)"
                          r"(?P<tail>%s)\Z"
                          % (STANDALONE_CORE, TAIL))
 
+#: A collector-owned feed attachment stem (CONVENTIONS.md §1, feed route):
+#: X attachments are `x-<post-id>-<24 hex>` and RSS/Atom attachments are
+#: `rss-<32 hex>`. The investments collector writes these deterministic names
+#: into flat `Sources/PDFs/` and `Sources/Images/` and keeps their receipts in
+#: its durable state, so knowledge sweeps skip them instead of reporting them
+#: as unorganized PDFs to rename. Match the STEM; `is_feed_attachment()`
+#: strips the directory and extension.
+FEED_ATTACHMENT = re.compile(r"(?:x-[0-9]{1,25}-[a-f0-9]{24}|rss-[a-f0-9]{32})\Z")
+
 #: What `chapter_parts()` returns.  `book` is the *core* book stem — no tail —
 #: because a book and its chapters carry their tails independently.
 ChapterName = collections.namedtuple("ChapterName",
@@ -154,8 +165,8 @@ def split_tail(stem):
     **`_src` and `_N` are not one tail, and only `_src` comes off here.** They
     mean opposite things:
 
-    * `_src` marks the SAME document in another representation — a source PDF
-      sitting beside a same-stemmed note. Two files, one document.
+    * `_src` marks the SAME document in another representation — a marker the
+      user added; no skill adds or removes it. Two files, one document.
     * `_2`, `_3`, … mark a DIFFERENT document that would otherwise collide
       (§1a(1): appended "when a target name is already taken"). Two documents.
 
@@ -234,6 +245,16 @@ def chapter_book_stem(name, *, is_stem=False):
     return parts.book if parts else None
 
 
+def is_feed_attachment(name, *, is_stem=False):
+    """True when `name` is a collector-owned feed attachment (X or RSS/Atom).
+
+    Such a file keeps its collector name: routine knowledge sweeps skip it,
+    and an explicit request to use one never authorizes renaming it.
+    Pass ``is_stem=True`` for an already extracted stem.
+    """
+    return bool(FEED_ATTACHMENT.match(_stem(name, is_stem)))
+
+
 # ---------------------------------------------------------------------------
 # self-test
 # ---------------------------------------------------------------------------
@@ -305,6 +326,24 @@ UNSAFE_NAMES = [
     "It's a draft.pdf", "O'Reilly Media.pdf", "Prince_UDL_2026.pdf (1)",
     "Prince_UDL_2026.pdf; rm -rf x", "Müller_X_2020.pdf", ".hidden_X_2020.pdf",
     "Prince UDL 2026.pdf", "Prince_UDL_2026.pdf‽",
+]
+
+
+#: (name, feed-owned?). Both collector shapes, plus near misses that must stay
+#: ordinary PDFs: a wrong hash length, uppercase hex, a word that merely starts
+#: with `x-` or `rss-`, and a canonical knowledge stem.
+FEED_CASES = [
+    ("x-1234567890-0123456789abcdef01234567.pdf", True),
+    ("x-1-0123456789abcdef01234567.png", True),
+    ("Sources/PDFs/rss-04dbe4d2aaf17884aaf0f2878cca8178.pdf", True),
+    ("rss-04dbe4d2aaf17884aaf0f2878cca8178.webp", True),
+    ("x-1234567890-abcdef012345.pdf", False),
+    ("x-1234567890-0123456789ABCDEF01234567.pdf", False),
+    ("rss-04dbe4d2aaf17884aaf0f2878cca817.pdf", False),
+    ("rss-short.pdf", False),
+    ("x-ray_Imaging_2020.pdf", False),
+    ("Doe_Study_2025.pdf", False),
+    ("rss-04dbe4d2aaf17884aaf0f2878cca8178_2.pdf", False),
 ]
 
 
@@ -388,12 +427,27 @@ def run_self_test():
     # Every canonical name must also be a name this plugin can WRITE.  A
     # leading hyphen passed `looks_canonical` while `SAFE_NAME` refused it, so
     # `-x_y_2020.pdf` read as already-organized and was never refused — and a
-    # leading-hyphen filename is the argv-injection shape §1b exists for.
+    # leading-hyphen filename is the argv-injection shape INPUT_SAFETY.md
+    # exists for.
     for stem in ("-Foo_Bar_2020", "-Foo_Bar_2020_01_Intro", "-a_b_nd"):
         total += 1
         if looks_canonical(stem):
             failures.append("looks_canonical(%r) is True but SAFE_NAME rejects it"
                             % stem)
+
+    for name, feed in FEED_CASES:
+        total += 2
+        if is_feed_attachment(name) != feed:
+            failures.append("is_feed_attachment(%r) -> %r, expected %r"
+                            % (name, not feed, feed))
+        if is_feed_attachment(stem_of(name), is_stem=True) != feed:
+            failures.append("is_feed_attachment(stem of %r, is_stem=True) "
+                            "disagrees with the filename" % name)
+        # A feed attachment is never mistaken for a canonical knowledge name.
+        if feed:
+            total += 1
+            if looks_canonical(name):
+                failures.append("feed attachment %r looks canonical" % name)
 
     for name in UNSAFE_NAMES:
         total += 1
@@ -428,6 +482,8 @@ def _build_parser():
     c.add_argument("names", nargs="+", metavar="NAME")
     h = sub.add_parser("chapter", help="report the book each NAME is a chapter of")
     h.add_argument("names", nargs="+", metavar="NAME")
+    f = sub.add_parser("feed", help="is each NAME a collector-owned feed attachment?")
+    f.add_argument("names", nargs="+", metavar="NAME")
     return p
 
 
@@ -454,6 +510,12 @@ def main(argv=None):
             bad += not ok
             print("%-44s %s" % (name, "canonical" if ok else "NOT canonical"))
         return 1 if bad else 0
+
+    if args.cmd == "feed":
+        for name in args.names:
+            print("%-44s %s" % (name, "feed-owned" if is_feed_attachment(name)
+                                else "not feed-owned"))
+        return 0
 
     if args.cmd == "chapter":
         for name in args.names:

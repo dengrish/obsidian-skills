@@ -108,8 +108,9 @@ NON_HUMAN = re.compile(
     r"anonymous|anon|staff|staff\s+writer|newsletter\s+team|team|guest\s+author|"
     r"contributor|the\s+editors)$", re.IGNORECASE)
 
-# references/filename-slug.md:22 lists "a publication account" alongside those
-# markers, and the regex above matches none of them: "Quanta Magazine" slugged to
+# references/filename-slug.md's "No clean human author" rule lists "a
+# publication account" alongside those markers, and the regex above matches
+# none of them: "Quanta Magazine" slugged to
 # the surname `Magazine`, "The Atlantic" to `Atlantic`, "Works in Progress" to
 # `Progress` — an invented author, emitted with no note at all. That is worth
 # catching because the slug is both the note stem and the figure prefix
@@ -299,12 +300,43 @@ def _reads_as_credential(token, rest):
     return any(c.islower() for t in rest for c in t)
 
 
+#: A Vancouver/PubMed byline puts capital initials after the surname:
+#: `Smith J`, `Smith JK`, `Smith J.K.`.
+_INITIALS_RE = re.compile(r"[A-Z](?:\.?[A-Z]){0,2}\.?")
+
+#: Real surnames with no A/E/I/O/U, often printed in capitals (`Kelvin NG`).
+_VOWELLESS_SURNAMES = {"NG", "LY"}
+
+
+def _initials_reading(prev, token):
+    """How a short all-capitals token after the word ``prev`` reads.
+
+    ``"initials"`` when it can only be initials (one letter, a dot, or no vowel:
+    `J`, `J.K.`, `JK`); ``"maybe"`` when it is also a plausible surname (`LEE`,
+    `LI`, or a known vowel-less surname such as `NG`); otherwise ``None``. ``prev`` must be a word of two or more letters
+    with a lowercase letter: an all-capitals byline (`ANDREW NG`) carries no
+    such signal.
+    """
+    if not _INITIALS_RE.fullmatch(token):
+        return None
+    letters = [c for c in prev if c.isalpha()]
+    if len(letters) < 2 or not any(c.islower() for c in letters):
+        return None
+    bare = token.replace(".", "")
+    if bare in _VOWELLESS_SURNAMES and "." not in token:
+        return "maybe"
+    if len(bare) == 1 or "." in token or not any(c in "AEIOU" for c in bare):
+        return "initials"
+    return "maybe"
+
+
 def first_author(names):
     """Pick the first author out of a list, or out of one mashed-together string.
 
     A comma flips surname-first order ("Smith, John" -> "John Smith") only when
     it genuinely marks that: not when it separates different people, and not
-    when what follows it is a generational or credential suffix.
+    when what follows it is a generational or credential suffix. A comma after
+    a Vancouver-style name (`Smith J, Jones K`) separates people.
     """
     notes = []
     if isinstance(names, str):
@@ -335,6 +367,9 @@ def first_author(names):
                              "is what read it as a suffix here; drop the comma "
                              "if it is the name")
             return before, notes
+        head = before.split()
+        if len(head) >= 2 and _initials_reading(head[-2], head[-1]) == "initials":
+            return before, notes + ["multi-author string: took the portion before the first separator"]
         if before and after:
             notes.append("surname-first name: flipped to natural order")
             return f"{after} {before}", notes
@@ -424,6 +459,19 @@ def surname(name, notes=None):
                     "as a suffix — re-run with it removed from --author if it "
                     "is one")
         break
+    # Vancouver order: `Smith J` would otherwise file every figure under `J`.
+    # An ambiguous suffix (`Sid V`) was already kept and reported above.
+    if len(toks) >= 2 and _suffix_kind(toks[-1]) is None:
+        reading = _initials_reading(toks[-2], toks[-1])
+        if reading == "initials":
+            if notes is not None:
+                notes.append(f"read {' '.join(toks[-2:])!r} as surname + "
+                             "initials (Vancouver order); check the author "
+                             "segment")
+            toks = toks[:-1]
+        elif reading == "maybe" and notes is not None:
+            notes.append(f"kept {toks[-1]!r} as the author segment, but it may "
+                         f"be initials after the surname {toks[-2]!r}; check it")
     # a name that is NOTHING but a clear suffix names nobody: better an empty
     # author segment (which `build_slug` reports) than a note called `Jr_…`.
     if len(toks) == 1 and _suffix_kind(toks[0]) == "clear":
@@ -733,9 +781,43 @@ def run_self_test():
             ("`&` list: the first author only", "Smith & Jones", "Smith"),
             ("`;` list: the first author only", "Smith; Jones", "Smith"),
             ("surname-first with particles flips too",
-             "van der Berg, Jürgen", "Berg")):
+             "van der Berg, Jürgen", "Berg"),
+            ("Vancouver surname + initial", "Smith J", "Smith"),
+            ("Vancouver surname + initials", "Smith JK", "Smith")):
         picked, _why = first_author(given)
         check("author %s (%r)" % (label, given), surname(picked), want)
+    # Vancouver/PubMed bylines put capital initials after the surname. The
+    # segment is also the figure prefix, so `J` would misfile every image.
+    for given in ("Smith J", "Smith J.K.", "Kim JH"):
+        initials_notes = []
+        check("surname + initials is read and reported (%r)" % given,
+              (surname(given, initials_notes),
+               any("surname + initials" in n for n in initials_notes)),
+              (given.split()[0], True))
+    check("a Vancouver list is not a surname-first name",
+          first_author("Smith J, Jones K"),
+          ("Smith J", ["multi-author string: took the portion before the "
+                       "first separator"]))
+    for given, want in (("Jun LEE", "LEE"), ("Kelvin NG", "NG"),
+                        ("Thanh LY", "LY")):
+        maybe_notes = []
+        check("a capitalised token that may be a surname is kept and "
+              "reported (%r)" % given,
+              (surname(given, maybe_notes),
+               any("may be initials" in n for n in maybe_notes)), (want, True))
+    for given in ("Kim YS", "Wang YJ"):
+        initials_notes = []
+        check("Y is not a vowel: %r still reads as surname + initials" % given,
+              (surname(given, initials_notes),
+               any("surname + initials" in n for n in initials_notes)),
+              (given.split()[0], True))
+    plain_notes = []
+    check("an ordinary or all-capitals name has no initials reading",
+          (surname("John Smith", plain_notes), surname("ANDREW NG", plain_notes),
+           plain_notes), ("Smith", "NG", []))
+    check("...end to end, a Vancouver byline slugs by surname",
+          slug_of(author=["Smith J", "Jones K"], topic="Cell Signals", year=2026),
+          "Smith_Cell_Signals_2026")
     # authors normally arrive as a YAML list: the first entry is the first author
     check("author list: the first entry wins",
           surname(first_author(["Ruxandra Teslo", "John Smith"])[0]), "Teslo")

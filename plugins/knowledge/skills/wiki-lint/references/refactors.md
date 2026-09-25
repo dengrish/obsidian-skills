@@ -5,8 +5,14 @@ deletion, or redistribution of existing wiki content. An ordinary lint run
 reports these candidates and stops; a long note, duplicate wording, or scanner
 similarity never activates this mode by itself. Authorization already present
 in the request is sufficient. This protocol requires no separate human review.
+An explicitly authorized pure retitle uses the
+[entry-retitle protocol](../../../shared/CONVENTIONS.md#retitling-an-existing-wiki-entry),
+and a semantic-invalid alias removal uses the
+[alias-removal protocol](../../../shared/CONVENTIONS.md#4b-aliases-use-the-same-slug-rule).
+Do not disguise either as a split or merge to avoid its authorization and
+complete-reference-rewrite gate.
 
-A correction confined to one named entry and supported only by sources it
+A correction confined to one existing entry and supported only by sources it
 already cites uses [source-backed correction](source-backed-corrections.md), not
 this structural protocol. Evidence from a source new to the target belongs to
 `wiki-build` unless the authorized operation necessarily redistributes
@@ -44,12 +50,6 @@ affected entry and supported by its durable source.
    remain outside this repair scope, including through linked-folder aliases.
    If one references an identity being retired, preserve that record and retain
    the referenced old entry; report the unresolved dependency.
-
-Pure retitles use the dedicated
-[entry-retitle protocol](../../../shared/CONVENTIONS.md#retitling-an-existing-wiki-entry),
-and semantic-invalid alias removals use the preceding alias-removal protocol.
-Do not disguise either as a split or merge to avoid its authorization and
-complete-reference-rewrite gate.
 
 ## Build the refactored entries
 

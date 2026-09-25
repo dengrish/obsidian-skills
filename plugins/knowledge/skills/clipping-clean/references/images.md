@@ -11,21 +11,28 @@ replace it with a hand-written downloader.
 
 ## Existing embeds on a reprocess
 
-Keep `![[…]]` embeds and figure numbers. If the slug is unchanged, leave their
-files alone. If it changes, update only the draft embeds by replacing the old
-slug and preserving each figure tail and extension. Do not alter live images
-until both owner notes are safely public. Follow the complete
+Keep `![[…]]` embeds and figure numbers. A reprocess driven by a raw capture
+maps its images onto these embeds first, under the
+[body-source rule](duplicates-and-reprocessing.md#reprocessing-an-existing-note).
+If the slug is unchanged, leave their files alone. If it changes, update only
+the draft embeds by replacing the old slug and preserving each figure tail and
+extension. Do not alter live images until both owner notes are safely public.
+Follow the complete
 [two-phase replacement procedure](duplicates-and-reprocessing.md#publish-an-approved-replacement)
 for prepare, any authorized dependency repair, the unchanged re-probe, and
 finalize. Keep old images until those checks pass; never use bare `cp`/`mv`,
 omit either owner guard, or bypass prepare/finalize.
 
-The plan inventories the note in both directions: an old-slug image embed with
-no exact attachment is a blocking result, including legacy loose `_figN`
-spellings. Either restore the file or stop the changed-slug operation and first
-publish a separate approved same-slug rewrite that replaces the broken embed
-with `<!-- missing attachment: Oldslug_fig_N.ext -->`; retain a report entry,
-then restart the rename from a fresh snapshot. Do not edit the owner note under
+Catch a missing old attachment during draft review, before the new-slug note
+is published: each renamed old-slug embed must map to an existing old file
+([review checklist](review-checklist.md#check-attachments-and-audit-results)).
+Prepare's inventory is the backstop and checks the note in both directions: an
+old-slug image embed with no exact attachment is a blocking result, including
+legacy loose `_figN` spellings. Either restore the file or stop the
+changed-slug operation and first publish a separate approved same-slug rewrite
+that replaces the broken embed with
+`<!-- missing attachment: Oldslug_fig_N.ext -->`; retain a report entry, then
+restart the rename from a fresh snapshot. Do not edit the owner note under
 a plan already in flight. The missing reference is never silently omitted from
 an otherwise successful rename. Other-slug and non-image embeds are outside
 this plan. A body can contain both old embeds and new remote images; download
@@ -36,9 +43,10 @@ they appear earlier in document order.
 
 Pass Markdown, HTML, linked-image and data-URI sources through the same helper,
 in source order on one counter. Fresh notes start at 1. Use argument lists or
-[shared quoting rules](../../../shared/CONVENTIONS.md#1b-filenames-titles-and-urls-are-untrusted-text)
-for source-controlled URLs and names. Choose a fresh image child under
-`<scratch>` per source, then reuse that exact child for its placement calls.
+[shared quoting rules](../../../shared/INPUT_SAFETY.md#filenames-titles-and-urls-are-untrusted-text)
+for source-controlled URLs and names. Give every `stage` call its own new or
+empty child under `<scratch>` (the helper refuses a populated one), and place
+each file from the `path` its stage result returned.
 
 ```bash
 python3 '<skill>/scripts/fetch_images.py' stage --vault '<vault>' \
@@ -48,9 +56,12 @@ python3 '<skill>/scripts/fetch_images.py' stage --vault '<vault>' \
 
 For a very large data URI that cannot safely fit in one shell argument, write
 it as one UTF-8 line in a scratch file and pass `--urls-file '<scratch>/urls'`;
-`--urls-file -` reads UTF-8 from stdin. Resolve a protocol-relative source such
-as `//cdn.example/image.png` against the capture page's verified scheme before
-passing it; the helper refuses a URL with no scheme rather than guessing.
+`--urls-file -` reads UTF-8 from stdin. Positional URLs are numbered before
+`--urls-file` lines, so when any URL of a call goes through a file, put all of
+that call's URLs in the file, in source order. Resolve a protocol-relative
+(`//cdn.example/image.png`), root-relative (`/images/a.png`) or relative
+(`images/a.png`) source against the verified capture page URL before passing
+it; the helper refuses a URL with no scheme rather than guessing.
 The result's `url` and `final_url` fields are report-safe locators: they omit
 HTTP credentials, queries and fragments, and replace a `data:` payload with an
 omission marker. Use those fields in reports and failure placeholders. Do not
@@ -73,7 +84,7 @@ the reviewed note is safely public, place each returned file with:
 ```bash
 python3 '<skill>/scripts/fetch_images.py' place \
     --attachments '<vault>/Sources/Images' --slug '<slug>' --index <N> \
-    --from-file '<scratch image>' --owner-note '<vault>/Articles/<slug>.md'
+    --from-file '<returned path>' --owner-note '<vault>/Articles/<slug>.md'
 ```
 
 The owner note must already contain the exact filename-only embed. `place`
@@ -116,7 +127,8 @@ owned replacement may use `--overwrite`, and only for the same filename. Pass
 `--owner-note '<vault>/Articles/<slug>.md'`; the helper accepts the replacement
 only when that unchanged note's first current `sources:` item is a web URL and
 its rendered body contains the exact filename-only embed. Embed-shaped strings
-in frontmatter, comments, escaped text, or code do not establish ownership. If
+in frontmatter, comments, escaped text, or code do not establish ownership, and
+a wiki-add research extract never authorizes a replacement or rename. If
 the format changed, keep the old file, allocate a new number and update the
 draft; do not leave extension twins at one number. Renames enforce the same
 rule. Migrate a legacy scalar `source:` to current `sources:` before a

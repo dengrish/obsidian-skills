@@ -15,6 +15,8 @@ author:
 published: 2022-09-05
 created: 2026-05-25
 ---
+#### A death sentence, until recently
+
 For most of the last half-century, a diagnosis of metastatic pancreatic cancer was a death sentence...
 [body with embedded ![](https://...) image references and trailing caption paragraphs]
 ```
@@ -33,7 +35,7 @@ author:
   - Ruxandra Teslo
 published: 2026-05-12
 created: 2026-05-25
-description: Daraxonrasib, a KRAS molecular glue, doubles survival in metastatic pancreatic cancer.
+description: Daraxonrasib, a KRAS molecular glue, roughly doubled metastatic pancreatic cancer survival in early trials.
 tags:
   - "#medicine"
 read: false
@@ -61,9 +63,9 @@ For most of the last half-century, a diagnosis of metastatic pancreatic cancer w
 
 - **Filename slug:** `Teslo_Pancreatic_Cancer_2026.md` — first author's lastname, two Title-Cased content words from the title (dropping "just met its match"), corrected published year.
 - **No blank line between the YAML closing `---` and the `> [!Summary]` callout** — the summary opens flush on the next line.
-- **First summary bullet is the central finding** (the trial result), not the lead anecdote — leading with the article's main claim, as [draft assembly](../SKILL.md#4-assemble-the-complete-draft) requires. The Ben Sasse case the piece opens with is demoted to the second bullet, demonstrating "one bullet covers the lead anecdote."
-- **Headings normalized to `##` / `###`** — the body's top-level section is `##`, the sub-section is `###`, regardless of what level Web Clipper used.
-- **Description is 86 characters** — well under the 110-char cap, leading with the drug name and main finding.
+- **First summary bullet is the central finding** (the trial result), not the lead anecdote — leading with the article's main claim, as [draft assembly](../SKILL.md#4-assemble-the-complete-draft) requires. The Ben Sasse anecdote is demoted to a supporting second bullet.
+- **Headings normalized to `##` / `###`** — the raw's `####` top-level section becomes `##` and its sub-section `###`, regardless of what level Web Clipper used.
+- **Description is 107 characters** — under the 110-char cap, leading with the drug name and keeping the finding's hedge and trial scope.
 - **`read: false`, bare and last** — the user's review checkbox, written once here and never again: they tick it to `true` when they've read the note, and a later reprocess of this file leaves whatever value it finds. The quotes are absent on purpose (`read: "false"` is a string, which Obsidian's checkbox renders as permanently checked).
 - **Captions are rendered as a single italic line directly below the plain embed** (`![[file]]` on one line, `*caption.*` on the next); the original caption paragraphs are gone from the body and any internal `**bold**` / nested italics in them have been flattened.
 - **`published` was corrected** from the raw's `2022-09-05` to `2026-05-12` — the raw date was scraped wrong, source verification found the correct article date. The corrected year `2026` flows into the filename slug. The report flags the correction:

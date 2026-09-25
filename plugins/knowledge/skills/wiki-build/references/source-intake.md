@@ -7,6 +7,7 @@ prior-coverage decisions, and classification.
 - [Require a durable source](#require-a-durable-source)
 - [Resolve a Markdown source](#resolve-a-markdown-source)
 - [Verify a resolved PDF](#verify-a-resolved-pdf)
+- [Books and chapters](#books-and-chapters)
 - [Check prior coverage](#check-prior-coverage)
 - [Read and classify](#read-and-classify)
 
@@ -15,15 +16,29 @@ prior-coverage decisions, and classification.
 A source must be a durable file in the selected vault. For a bare URL, request
 its Web Clipper capture and route that capture through `clipping-clean` first.
 For pasted text, use an existing user-named vault file or obtain the exact
-destination before saving it. Never invent a persistent source filename or
-publish entries with unresolvable citations. Markdown sources keep their
-literal on-disk names.
+destination before saving it. A topic named without a source document belongs
+to [wiki-add](../../wiki-add/SKILL.md). Never invent a persistent source
+filename or publish entries with unresolvable citations. Markdown sources keep
+their literal on-disk names.
+
+Files under `Inbox/` are intake material, not sources. Route a raw `.md`
+capture through `clipping-clean` and an Inbox PDF through `pdf-organize`, then
+process the resulting `Articles/` note or `Sources/PDFs/` file; when
+clipping-clean reports the capture as a duplicate, process the existing note it
+names. Never cite the raw capture, which stays in `Inbox/`.
+
+A folder run never selects an `Inbox/` file or a
+[feed-owned attachment](../../../shared/CONVENTIONS.md#1-vault-folder-layout),
+and it takes a split book through its [chapters](#books-and-chapters).
 
 The separate [wiki-add research workflow](../../wiki-add/references/research.md)
-may acquire durable sources for requested topics. Its marked research extracts
-are attributed evidence selections, not full captured webpages. Consume that
-distinction without importing its acquisition authority into an ordinary
-builder run or treating a search result as a source.
+may acquire durable sources for requested topics. A marked research extract is
+a URL-origin source, but a deliberately selective, agent-written extract rather
+than a full capture. Cite its Markdown filename without an anchor, never its
+URL. Use only claims its own text supports; never supplement, refresh, or
+extend it from the live page, and read a topic's absence from the extract as
+saying nothing about the original page. An ordinary builder run never creates
+an extract, and a search result is never a source.
 
 ## Resolve a Markdown source
 
@@ -62,10 +77,54 @@ python3 '<skill>/../../shared/scripts/vault_artifacts.py' pdfs \
     --vault '<vault>' --selected '<resolved pdf path>'
 ```
 
-Read the inventory JSON even on a nonzero exit. A non-canonical filename,
-incomplete inventory, or zero/multiple owners blocks PDF processing. Route
-naming or ownership repairs through `pdf-organize`, then restart intake with
-the final name and rerun both checks; there is no naming override.
+Read the inventory JSON even on a nonzero exit. A non-canonical filename, an
+incomplete inventory, or a selection that is not `unique` blocks PDF
+processing:
+
+- A non-canonical vault PDF: route it through `pdf-organize`, then restart
+  intake with the final name and rerun both checks.
+- No vault owner (a PDF outside the vault): ask before copying it into
+  `Inbox/` for `pdf-organize` to file, unless the user already asked to
+  import it; without that approval, stop and report. Leave the external
+  original in place, then restart intake from the filed `Sources/PDFs/` path
+  and rerun both checks.
+- Several owners: another vault file shares this PDF basename; pdf-organize
+  refuses both copies, so ask the user to remove the redundant copy or to
+  rename or move one out of the vault, then retry.
+- Anything else, such as an incomplete inventory: report the blocker.
+
+The only naming exception is an explicitly named
+[feed-owned attachment](../../../shared/CONVENTIONS.md#1-vault-folder-layout)
+(`python3 '<skill>/../../shared/scripts/naming.py' feed '<name>'` reports
+`feed-owned`). One reached through the `sources:` substitution of a note the
+user named also counts as explicitly named; a folder run skips such a note and
+reports it. Once the `--selected` inventory proves one owner, the attachment
+keeps its collector name as its identity; never rename it or route it to
+`pdf-organize`. Report the exception and carry `figure-extract`'s
+`--allow-unorganized` route into any extraction for it.
+
+## Books and chapters
+
+A whole-book PDF whose chapter PDFs exist (pdf-organize's
+`Sources/PDFs/<Work>/` split) is a split book. Pair them over the complete
+`vault_artifacts.py pdfs --vault '<vault>'` inventory with
+`python3 '<skill>/../../shared/scripts/naming.py' chapter '<stem>'`, which
+names the book each chapter stem belongs to. A book and its chapters are one
+document:
+
+- A folder run that reaches both processes the chapters and skips the whole
+  book, and reports the skip.
+- A request naming a split book is processed through its chapters, as
+  separate sources in chapter order; report the substitution. Process the
+  whole-book file only when the user explicitly asks for that file despite
+  its chapters.
+- Prior coverage stays a per-file query, plus a query for the paired
+  representation: a confirmed citation of the whole book covers its chapters,
+  and a chapter citation covers that chapter. Without rerun intent, skip the
+  covered parts and process the rest. Never cite both book and chapter pages
+  for the same claim.
+
+An unsplit book is an ordinary source.
 
 ## Check prior coverage
 
@@ -119,7 +178,7 @@ behind that link cannot prove prior coverage. Preserve the occupant and resolve
 the filesystem issue separately rather than treating the empty record as a
 free slug or reading the link target as a vault-owned entry.
 
-**Any confirmed source match means the default action is to SKIP** — don't read it, don't extract, don't modify entries. Re-runs churn body prose, reset `updated:`, and — because churned prose is body content — clear `read:` on entries the user had already read, for no gain. **Proceed only on explicit re-run or resume intent in the user's request or existing authorization for this run** ("re-process", "re-run", "resume the interrupted run", "finish the incomplete run", "apply the new rules to existing entries", or equivalent). A plain "process Foo.pdf" does not qualify, even about a known-processed source. Ambiguous intent after a confirmed match → skip; unresolved source identity or malformed metadata → report and resolve, not an automatic previously-processed verdict. Ordinary intent is run-level: if the prompt signals it, all previously-processed sources in the batch proceed. The one narrow exception is an explicit candidate-specific synthesis request, which reopens only its named candidate and source set under [the synthesis protocol](multi-source-synthesis.md).
+**Any confirmed source match means the default action is to SKIP** — don't read it, don't extract, don't modify entries. Re-runs churn body prose, reset `updated:`, and — because churned prose is body content — clear `read:` on entries the user had already read, for no gain. **Proceed only on explicit re-run or resume intent in the user's request or existing authorization for this run** ("re-process", "re-run", "resume the interrupted run", "finish the incomplete run", "apply the new rules to existing entries", or equivalent). A plain "process Foo.pdf" does not qualify, even about a known-processed source. Ambiguous intent after a confirmed match → skip; unresolved source identity or malformed metadata → report and resolve, not an automatic previously-processed verdict. Ordinary intent is run-level: if the prompt signals it, all previously-processed sources in the batch proceed. The one narrow exception is an explicit candidate-specific request, which reopens only its named candidate and sources under [the candidate-specific protocol](multi-source-synthesis.md).
 
 **Resume belongs to wiki-build.** A prior match proves that some entry cites the source; it does not prove that an interrupted run completed extraction, every merge, interlinking, or the three audits. Under explicit resume intent, re-read the complete source and run the normal workflow over it. Existing coverage goes through the same collision and source-no-op-merge checks, while missing entities and source-dependent repairs go through their ordinary gates. This is deliberately a safe re-run rather than an attempt to infer an interruption point from partial files. wiki-lint may clean source-independent residue before or after this run, but it cannot recover omitted source claims, entries, page anchors, or figure choices and is never the owner of completing the source run.
 
@@ -133,6 +192,12 @@ and the **physical PDF page introducing each entity**. Use available PDF tools,
 `pdftotext -layout`, or PyMuPDF and inspect rendered pages when useful.
 Renderings support comprehension only; embedded figures follow the separate
 [media rules](media.md). Read Markdown directly.
+
+In a cleaned clipping, the leading `> [!Summary]` callout, the `description`,
+captions marked `(synthesized from context)` or as animation conversions or
+static frames, and `<!-- … -->` placeholders are clipping-clean's annotations.
+Use them only to orient; take every claim, number, qualifier, and attribution
+from the captured body after the first `___` separator.
 
 **Classify the source.** *Primary* = teaching durable knowledge is its main purpose (papers, chapters, reviews, substantive explainers, lecture notes) → the substance test alone gates extraction. *Secondary* = primarily transient signal (news, earnings, announcements, opinion posts) → the durability test applies **in addition**.
 

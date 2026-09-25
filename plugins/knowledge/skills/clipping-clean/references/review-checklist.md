@@ -22,9 +22,9 @@ f='<path to the completed scratch .md>'
 echo "[1  H1 in body — expect NONE]";                          grep -nE '^# ' "$f"
 echo "[2  Summary callouts — expect exactly 1]";               grep -cE '^> \[!Summary\]' "$f"
 echo "[3  leftover raw image refs ![](…) — NONE]";             grep -nE '!\[[^]]*\]\(' "$f"
-echo "[4  stray HTML tags — NONE outside code/kept tables]";   grep -noE '<(br|span|div|sup|sub|font|small|hr)[ />]' "$f"
-echo "[5  clipping chrome — NONE]";                            grep -niE 'subscribe|read more|continue reading|sign in|share this|^comments|loading comments|write a comment' "$f"
-echo "[6  backlink/nav panel header — NONE]";                  grep -niE '^[[:space:]>#*]*(backlinks?|what links here|mentioned in|citations of this page)([^A-Za-z0-9]|$)' "$f"
+echo "[4  stray HTML — NONE outside code, kept tables, pipe-cell <br>, reported sup/sub]"; grep -noE '<(br|span|div|sup|sub|font|small|hr)[ />]' "$f"
+echo "[5  clipping-chrome candidates — inspect in context]";   grep -niE 'subscribe|read more|continue reading|sign in|share this|^comments|loading comments|write a comment' "$f"
+echo "[6  backlink/nav-header candidates — inspect in context]"; grep -niE '^[[:space:]>#*]*(backlinks?|what links here|mentioned in|citations of this page)([^A-Za-z0-9]|$)' "$f"
 echo "[7  malformed emphasis: odd *-run count — see body ckl]";awk 'gsub(/\*+/,"&")%2==1 {print FNR": "$0}' "$f"
 echo "[8  stacked list markers: source-check candidates]";        grep -nE '^(>[[:space:]]?)*[[:space:]]*([-*]|[0-9]+\.)([[:space:]]+([-*]|[0-9]+\.))+[[:space:]]' "$f"
 echo "[9  currency \$-then-digit: each must be \\\$ or math]";  grep -nE '\$[0-9]' "$f"
@@ -56,8 +56,10 @@ Read the results as follows:
 - Currency-rate and inflation matches require comparison with the source.
   Fractions/dates are expected false positives. After literal currency dollars
   are escaped, check math-delimiter pairing; an even count alone is not proof.
-- Stray-HTML matches may be intentional complex tables or non-math sup/sub.
-  Preserve those cases according to body cleaning.
+- Stray-HTML matches may be intentional complex tables, a `<br>` in a pipe-table
+  cell, or a retained sup/sub with no plain equivalent. Chrome and
+  backlink-header matches are candidates: remove only confirmed chrome under
+  body cleaning, and keep article prose that uses those words.
 - Do not use a bare MathJax-delimiter grep as a verdict: escaped Wikipedia URL
   parentheses and literal brackets are legitimate. Inspect actual formulas.
 
@@ -118,9 +120,11 @@ suggested detector; do not edit an installed plugin during clipping processing.
   by `published: null` plus the `nd` filename segment; a capture missing its
   title was retained raw and skipped rather than receiving an invented identity.
   Meaningful Unicode remains.
-- [ ] Description is factual and at most 110 characters; format follows content
-  (`Article`, `Post`, or `Video` for a substantive transcript), and tags follow
-  the shared enum rather than invented synonyms.
+- [ ] Description is factual and at most 110 characters, and attributes an
+  argued thesis, forecast or recommendation to its named author; format follows
+  content (`Article`, `Post`, or `Video` for a substantive transcript), and tags
+  follow the shared enum rather than invented synonyms (`tags: []` when none
+  fits).
 - [ ] A new note uses bare `read: false`. A rewrite preserves the review state,
   including absent/unknown values, and reports those states rather than forcing
   a boolean. If a required schema check rejects that state, the draft stays
@@ -135,13 +139,20 @@ suggested detector; do not edit an installed plugin during clipping processing.
 ## Check the summary and cleaned body
 
 - [ ] The first bullet is a standalone thesis. Every bullet names its own
-  subject, states a complete claim and retains scope, confidence, terms and
-  numbers. No contextless “It/This/They”, meta-framing or links.
-- [ ] Bold emphasizes wiki-worthy entities without spreading to ordinary
-  technical words; bullet count is appropriate to the article's length.
+  subject, makes one claim in one or two sentences (usually 30 words or
+  fewer) and retains scope, confidence, terms and numbers. Long enumerations
+  are condensed to their size and key members, and background asides stay in
+  the body. Opinions, forecasts and recommendations are attributed to a named
+  author; reported facts are stated directly. No contextless “It/This/They”,
+  unnamed meta-framing (“the article says”) or links.
+- [ ] Bold marks only terms that could stand as their own wiki entry, never
+  generic words or whole clauses; bullet count is appropriate to the article's
+  length.
 - [ ] The captured prose is preserved without paraphrase or truncation. Chrome,
   auto-generated backlink panels and run-on navigation are gone; curated
-  further-reading links and intentional source content remain.
+  further-reading links and intentional source content remain. Any removed
+  hidden AI-directed passage is backed by source-markup evidence and reported;
+  visible author text addressing AI readers was kept.
 - [ ] Images are local embeds or reported failure placeholders. A confirmed
   caption is one italic line below the embed; ambiguous ledes remain prose.
   Caption/credit orphans are removed only with evidence, not when they could

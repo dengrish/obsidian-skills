@@ -60,6 +60,7 @@ import os
 import re
 import shlex
 import sys
+import unicodedata
 
 try:
     import pymupdf as fitz
@@ -619,21 +620,23 @@ MARKER_TO_PREFIX = {
 
 
 def normalize_label(label):
-    """A figure label reduced to its ASCII spelling: en dash → hyphen.
+    """A figure label reduced to its ASCII spelling.
 
     `LABEL_SEP` lets a label be matched as the source typeset it, and a book
-    that prints `Figure 1–14` is matched with the EN DASH still in it. The
-    label does not stay that way: it becomes a filename
-    (`<stem>_fig_1-14.png`), and `CONVENTIONS.md` §1b requires every name this
-    plugin writes to be ASCII — a non-ASCII byte in a filename is stored in
-    one Unicode normalization form on disk and cited in another in a note, and
-    the two silently do not match.
+    that prints `Figure 1–14` is matched with the EN DASH still in it, and
+    the digit class also matches fullwidth or other-script digits. The label
+    does not stay that way: it becomes a filename (`<stem>_fig_1-14.png`), and
+    figure labels are written with ASCII digits and hyphens (CONVENTIONS.md
+    §8b; figure-extract's caption-label table). A non-ASCII character in a
+    filename can be stored in one Unicode form on disk and cited in another
+    in a note, and the two silently do not match.
 
     Applied to the LABEL only, never to `raw_label`: the raw form is what the
     collision report shows the user, and it has to keep the source's own
     spelling to be worth showing.
     """
-    return label.replace("–", "-").replace("−", "-")
+    label = label.replace("–", "-").replace("−", "-")
+    return re.sub(r"\d", lambda m: str(unicodedata.decimal(m.group())), label)
 
 
 def _normalize_marker(marker):
@@ -2664,10 +2667,10 @@ def run_self_test():
     # two halves are tested in the file that owns each.
     #
     # The en dash does NOT survive into the label, because the label becomes a
-    # filename and CONVENTIONS.md §1b requires those to be ASCII. This is the
-    # assertion that keeps `_fig_1–14.png` off disk, where its two Unicode
-    # normalization forms would compare unequal between the file and the note
-    # citing it, silently.
+    # filename and figure labels are written in ASCII (CONVENTIONS.md §8b).
+    # This is the assertion that keeps `_fig_1–14.png` off disk, where its two
+    # Unicode normalization forms would compare unequal between the file and
+    # the note citing it, silently.
     #
     # Asserted on the composition `find_caption_blocks` performs
     # (`normalize_label(m.group(2))`) rather than through `label_of`, because
@@ -2688,6 +2691,16 @@ def run_self_test():
           normalize_label("1-14"), "1-14")
     check("normalize_label leaves a dotted label alone",
           normalize_label("10.5"), "10.5")
+    # `\d` is deliberately Unicode-aware, so a fullwidth or Arabic-Indic
+    # caption number is still found; the label folds it to ASCII digits.
+    _wide = CAP_RE.search("Figure \uff11. Fullwidth title")
+    check("a fullwidth caption digit becomes an ASCII label",
+          normalize_label(_wide.group(2)) if _wide else None, "1")
+    check("Arabic-Indic digits and an en dash fold together",
+          normalize_label("\u0661\u2013\u0662"), "1-2")
+    _ascii = CAP_RE.search("Figure 1. Title")
+    check("an ASCII caption still matches after the fold",
+          normalize_label(_ascii.group(2)) if _ascii else None, "1")
     state["n"] += 1
     if any(ord(c) > 127 for c in normalize_label("1–14")):
         state["bad"] += 1

@@ -23,10 +23,36 @@ or the cleaned Markdown note's stem for a clipping.
 
 **Where images come from depends on the source type:**
 
-- **PDF source.** Figures are pre-extracted by the `figure-extract` skill into the vault's `Sources/Images/` folder. Naming pattern: `[pdf_stem]_fig_<N>.png`, where `<N>` is the figure number exactly as it appears in the source — which may be a simple integer (`1`), a chapter-and-figure pair (`1-2` for "Figure 1.2"), or a deeper hierarchy (`1-2-4` for "Figure 1.2.4"); supplementary figures use an `S` prefix on the number (`S1`, `S2-3`). Examples: `Burges_LearningToRank_2010_fig_1.png`, `Geron_HandsOnML_2025_03_Classification_fig_3-2.png` (chapter 3, figure 2), `Prince_UDL_2026_12_Transformers_fig_1-2-4.png`, `Doe_GutMicrobiome_2025_fig_S1.png` (supplementary figure 1) — all canonical stems, which is what `pdf-organize` produces and what `figure-extract` refuses to key a figure to otherwise (`CONVENTIONS.md` §1a). **Match on `[stem]_fig`, not on `[stem]_fig_`, and accept any image extension.** Everything written into `Sources/Images/` today uses the `[pdf_stem]_fig_<N>.png` shape, so a fresh vault is uniform. **The loose match stays anyway**, and the reason is on the user's disk rather than in this plugin: figures extracted before the naming converged are still sitting in `Sources/Images/` under an older spelling that ran the number straight on after `fig`, and nothing has deleted them. Tightening the match does not clean those up — it stops seeing them. Matching only the stricter pattern means a PDF whose figures are *already sitting in `Sources/Images/`* yields entries with no images at all, and the unused-figure diagnostic stays silent about it because it uses the same wrong prefix — a total, invisible loss. Extensions vary too: PDFs give `.png`, clippings give `.jpg`, `.webp`, `.gif`, `.svg`. **A source figure with no extracted file stays in the inventory as unavailable.** Do not fabricate it or silently claim that the source has no figures. Report an unavailable figure that would materially help the entry; figure extraction remains `figure-extract`'s job. **Tables are not pre-extracted** — when the source has a table worth recreating in the entry, identify it while reading the PDF and recreate it in Markdown per the Body Structure tables rule.
-- **Markdown source.** Image links are embedded in the source `.md` itself — Obsidian embeds `![[…]]` for images already in the vault's `Sources/Images/` folder, and standard markdown `![alt](https://…)` for anything still remote. **A note produced by `clipping-clean` names its downloaded images `[source_stem]_fig_<N>.<ext>` — the note's own filename stem, same string and same casing — precisely so this skill can find them**, so the unused-figure diagnostic below does apply to those. It cannot see the *remote* ones, which have no file in `Sources/Images/` at all; for those the check is instead that every image reference *in the source* is either placed in an entry or has a recorded skip reason. Extract the relevant image references directly from the source's markdown and reuse them in the entry — a remote `![alt](https://…)` stays in markdown form and is never rewritten as a wikilink, which would resolve to nothing and lose the URL.
+- **PDF source.** Figures come from the `figure-extract` skill in the vault's `Sources/Images/` folder. Naming pattern: `[pdf_stem]_fig_<N>.png`, where `<N>` is the figure number exactly as it appears in the source — which may be a simple integer (`1`), a chapter-and-figure pair (`1-2` for "Figure 1.2"), or a deeper hierarchy (`1-2-4` for "Figure 1.2.4"); supplementary figures use an `S` prefix on the number (`S1`, `S2-3`). Examples: `Burges_LearningToRank_2010_fig_1.png`, `Geron_HandsOnML_2025_03_Classification_fig_3-2.png` (chapter 3, figure 2), `Prince_UDL_2026_12_Transformers_fig_1-2-4.png`, `Doe_GutMicrobiome_2025_fig_S1.png` (supplementary figure 1) — all canonical stems, which is what `pdf-organize` produces and what `figure-extract` refuses to key a figure to otherwise (`CONVENTIONS.md` §1a). The step-4 inventory also matches older naming forms and any extension, so never replace it with a narrower glob ([CONVENTIONS §8](../../../shared/CONVENTIONS.md#8-figure-naming-and-sourcesimages)). **A source figure with no extracted file stays in the inventory as unavailable.** Do not fabricate it or silently claim that the source has no figures; when the inventory is empty, first [prepare missing PDF figures](#missing-pdf-figures). Report an unavailable figure that would materially help the entry. **Tables are not pre-extracted** — when the source has a table worth recreating in the entry, identify it while reading the PDF and recreate it in Markdown per the Body Structure tables rule.
+- **Markdown source.** Image references live in the source `.md` itself. **A note produced by `clipping-clean` names its downloaded images `[source_stem]_fig_<N>.<ext>` — the note's own filename stem, same string and same casing** — so the step-4 inventory and the unused-figure diagnostic below find them. Where a download failed, clipping-clean leaves `<!-- image download failed: … -->` at the image's position and keeps any former caption as an ordinary paragraph. Inventory each placeholder as an unavailable source figure with that skip reason; never copy the comment or its orphaned caption into an entry. Older or hand-made Markdown sources may still contain remote `![alt](https://…)` images, which have no file in `Sources/Images/`: inventory them from the source text, and reuse a selected one in Markdown form. Never rewrite it as a wikilink, which would resolve to nothing and lose the URL.
 
 **A figure and its panels are one exhibit, and the composite is the default when selected.** A file whose label ends in a lowercase letter — `Burges_LearningToRank_2010_fig_3a.png` beside `Burges_LearningToRank_2010_fig_3.png` — is one panel of that figure (`CONVENTIONS.md` §8b). It appears as a raw file in the inventory's `candidates` array because it answers the `_fig` match, but it is not a separate exhibit for selection or reporting. Prefer the whole figure; use an available panel when the entry's subject is that panel's alone. Never place a figure and a panel of it in the same entry. For selection and reporting, an exhibit is the composite: an unplaced panel needs no separate skip reason, placing the composite discharges every panel under it, and placing any panel discharges the composite. Preserve existing filenames and panel identity.
+
+### Missing PDF figures
+
+When a PDF source's complete, safe step-4 inventory has no `candidates` and
+the source shows or refers to figures, an apply run whose setup parser check
+passed extracts them once before selecting exhibits, from that PDF alone:
+
+```bash
+python3 '<plugin>/skills/figure-extract/scripts/batch_extract.py' \
+    --src '<resolved pdf path>' --out '<images-folder>'
+```
+
+Carry an intake exception such as `--allow-unorganized`, and any non-default
+option that an earlier extraction report or the extractor's printed rerun
+command names, into this command and any repair command. Use `--ed-prefix ED`
+for a PDF with both Supplementary and Extended Data figures. Respect the
+extractor's naming, collision and ownership refusals, and read its
+diagnostics. For a crop it flags, follow
+[figure-extract](../../figure-extract/SKILL.md)'s review-and-explicit-crop
+workflow, and only for crops this run produced. Then re-run the inventory.
+Never overwrite, adopt or repair a pre-existing image. After that the image
+folder is read-only, except that a crop this run produced that proves
+defective at selection returns here for its explicit-crop repair and a fresh
+inventory. A preview/no-apply run writes nothing and reports the gap. An unsafe
+or partial inventory, or an extraction that cannot supply a figure, leaves that
+figure unavailable and reported under *Unused source figures*.
 
 ## Selection
 
@@ -35,6 +61,8 @@ or the cleaned Markdown note's stem for a clipping.
 **Default to zero or one figure per focused entry.** An additional figure must explain an essential, nonredundant aspect of the same entity that the retained figure and concise prose cannot explain as clearly. Record that concrete benefit in one line in the run report. Different aspects are not automatically essential: a mechanism diagram does not create a need for an applications gallery. For an existing entry, use the [merge preservation rule](merge.md#frontmatter-and-related-footer); this preference never authorizes silently removing its current images.
 
 **Pair each selected figure with the most specific eligible entry it directly explains.** A gradient-scaling diagram belongs in `lambdarank.md`, not the broader `learning-to-rank.md`. When no entry has the right scope, skip the figure instead of stretching the nearest entry to fit it. A figure can inform the substance judgment, but it does not bypass step 2's eligibility rules.
+
+**Open each newly selected local image before embedding it.** A valid filename does not prove the contents. Confirm that the image is the intended whole figure or panel, is readable, and contains no caption text or neighboring chart; then write its caption from what it shows, checked against the source. Skip a defective crop as an unusable asset and report it; a crop this run's own extraction produced may instead return to [missing PDF figures](#missing-pdf-figures) for figure-extract's explicit-crop repair. If the host cannot display images, report that limit and embed no unviewed crop. Preserved existing embeds and remote images need no new check.
 
 **Record a specific reason for every unused exhibit.** Valid reasons include:
 
@@ -46,7 +74,7 @@ or the cleaned Markdown note's stem for a clipping.
 
 The reason must describe this figure's contribution, not merely say that the note has reached its image limit.
 
-**Diagnostic for forgotten figures.** Reconcile the complete inventory against embeds and recorded skip reasons (Quality Checklist item 12). An unused exhibit with no reason needs a selection decision, not automatic placement. Many unused figures are acceptable when their reasons hold; the check measures whether every figure was considered, not the proportion included. Report remote references and unavailable source figures as well as local `[source_stem]_fig*` files, with panels grouped under their composite. For Markdown sources, include every rendered image reference even when an older local filename has a different source prefix. Resolve those references directly; the filename mismatch neither makes a resolving image unavailable nor authorizes renaming it.
+**Diagnostic for forgotten figures.** Reconcile the complete inventory against embeds and recorded skip reasons (Quality Checklist item 12). An unused exhibit with no reason needs a selection decision, not automatic placement. Many unused figures are acceptable when their reasons hold; the check measures whether every figure was considered, not the proportion included. Report remote references, failure placeholders, and other unavailable source figures as well as local `[source_stem]_fig*` files, with panels grouped under their composite. For Markdown sources, include every rendered image reference even when an older local filename has a different source prefix. Resolve those references directly; the filename mismatch neither makes a resolving image unavailable nor authorizes renaming it.
 
 ## Placement and embed syntax
 
@@ -66,19 +94,19 @@ Example of correct inline placement:
 ```markdown
 **LambdaRank** is a [[learning-to-rank|learning to rank]] method that sidesteps the non-differentiability of ranking metrics by defining gradients directly, scaled by the change in the target metric from swapping a pair of items.
 
-It starts from [[ranknet|RankNet]]'s pairwise cross-entropy loss and modifies the gradient with a multiplicative $|\Delta\text{NDCG}|$ term — the change in [[ndcg|NDCG]] that would result from swapping the two items in the current ranking.
+It starts from [[ranknet|RankNet]]'s pairwise cross-entropy loss and scales each pair's gradient by the absolute change in [[ndcg|normalized discounted cumulative gain]] (NDCG) from swapping the two items in the current ranking.
 
 ![[Burges_LearningToRank_2010_fig_3.png]]
 *The gradient is scaled by the NDCG change from swapping a pair of items.*
 
-This makes the optimizer push harder on pairs whose swap would change the top of the ranking, where NDCG is most sensitive, and ignore pairs deep in the list where the metric is flat.
+Swaps involving top positions, where NDCG is most sensitive, change the metric more, so those pairs receive larger updates than pairs deep in the list.
 
 **Related:** [[ranknet|RankNet]] · [[ndcg|NDCG]] · ...
 ```
 
 The image sits between the paragraph that introduces the gradient-scaling mechanism and the paragraph that explains its consequence — right where the diagram clarifies the surrounding text.
 
-**Images and tables do not appear in the YAML frontmatter, in the description, in aliases, or in the Related footer** — only in the body prose. Their space and captions still count toward the note's overall brevity under [Body structure](writing.md#body-structure).
+**Images and tables do not appear in the YAML frontmatter, in the description, in aliases, or in the Related footer** — only in the body prose, where they must serve this entity under [Body structure](writing.md#body-structure).
 
 ## Captions
 

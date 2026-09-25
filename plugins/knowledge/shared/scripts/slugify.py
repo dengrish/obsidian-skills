@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 """slugify.py -- wiki-build's canonical title -> filename slug algorithm.
 
-Implements SKILL.md "Filenames and Wikilinks" (preprocessing pass + main
-pipeline) exactly, including the three special-character rules spelled out
-below.
+Implements the canonical Wiki slug algorithm (knowledge CONVENTIONS.md §4a);
+this docstring and the code are its only statement, including the three
+special-character rules spelled out below.
 
 PREPROCESSING (order is load-bearing; special-character substitutions run
 before NFKD because NFKD canonicalises distinct codepoints to the same
@@ -32,9 +32,8 @@ than writing a file literally named ".md".
 --------------------------------------------------------------------------
 THE THREE SPECIAL-CHARACTER RULES
 --------------------------------------------------------------------------
-FIX-A and FIX-B are rules the script and the slug pipeline it implements BOTH state
-(the ASCII "+"/"#"/"*" mapping and the plain-text charge normalisation) --
-they agree, and changing either means changing both.  FIX-C is a
+FIX-A and FIX-B are load-bearing rules of this algorithm (the ASCII
+"+"/"#"/"*" mapping and the plain-text charge normalisation).  FIX-C is a
 belt-and-braces extension with no effect on output.
 
 FIX-B  "+", "#", "*" are mapped to "-plus", "-sharp", "-star" BEFORE the
@@ -43,13 +42,13 @@ FIX-B  "+", "#", "*" are mapped to "-plus", "-sharp", "-star" BEFORE the
        "C", "C++", "C#" and "C*" ALL collide on "c.md".  With the fix they
        become c.md / c-plus-plus.md / c-sharp.md / c-star.md.  The mapping
        carries a leading hyphen so the token reads as a separate slug word,
-       matching the skill's own treatment of the superscript charges.
+       matching the treatment of the superscript charges (step 6).
 
 FIX-A  ASCII charge notation is normalised so that a plain-text source and
-       a typeset source produce the SAME slug for the same ion.  The skill
-       only handles the typeset form: "Ca2+" -> "Ca2-plus" (falls out of
-       FIX-B) matches "Ca<sup>2+</sup>" -> "ca2-plus", and "Cl-" is
-       rewritten to "Cl-minus" so it matches "Cl<sup>-</sup>" -> "cl-minus".
+       a typeset source produce the SAME slug for the same ion: "Ca2+" ->
+       "Ca2-plus" (falls out of FIX-B) matches "Ca<sup>2+</sup>" ->
+       "ca2-plus", and "Cl-" is rewritten to "Cl-minus" so it matches
+       "Cl<sup>-</sup>" -> "cl-minus".
        The minus rewrite is deliberately narrow -- it only fires on an
        ion-shaped token (1-2 letter element symbol + optional digits)
        whose trailing "-" is not followed by another word character -- so
@@ -75,12 +74,12 @@ CLI (JSON to stdout unless --stem; --help everywhere):
     slugify.py "---"            -> {..., "ok": false, "error": ...}, exit 1
                                    (unsluggable -- ask the user to retitle
                                    rather than writing a file named ".md")
-    slugify.py --test           -> inline self-test over the skill's worked
+    slugify.py --test           -> inline self-test over the worked
                                    examples plus the three special-character
-                                   rules, Greek capitals, the final sigma and
-                                   the CJK/empty-slug family. The case count is
-                                   reported, never asserted on the nose --
-                                   pinning it is what blocked adding coverage:
+                                   rules, Greek capitals, the final sigma, the
+                                   CJK/empty-slug family and the base-term
+                                   rule. The case count is reported, never
+                                   pinned:
                                    {"total","passed","failed","failures","ok"}
     slugify.py "C++" --stem     -> c-plus-plus   (plain text, not JSON)
     A title that starts with "-" needs the separator: slugify.py -- "---".
@@ -190,14 +189,16 @@ _ASCII_ANION_RE = re.compile(r"(?<![A-Za-z0-9-])([A-Z][a-z]?[0-9]*)-(?![A-Za-z0-
 
 _NON_SLUG_RE = re.compile(r"[^a-z0-9]")
 _HYPHEN_RUN_RE = re.compile(r"-{2,}")
-_TRAILING_PAREN_RE = re.compile(r"^(?P<base>.*?)\s*\([^()]*\)\s*$")
+# A disambiguator is a space-separated trailing parenthetical; an unspaced
+# one is notation that belongs to the name (SU(2), Iron(III), f(x)).
+_TRAILING_PAREN_RE = re.compile(r"^(?P<base>.*?\S)\s+\([^()]*\)\s*$")
 
 # --------------------------------------------------------------------------
 # algorithm
 # --------------------------------------------------------------------------
 
 def preprocess(title: str) -> str:
-    """Run the skill's preprocessing pass (plus FIX-A/B/C) over ``title``."""
+    """Run the preprocessing pass (plus FIX-A/B/C) over ``title``."""
     # Canonically equivalent text must name the same entry. NFD exposes the
     # Greek base letter in accented forms before the table runs; NFKD here
     # would incorrectly merge microsign with Greek mu before their mapping.
@@ -284,18 +285,18 @@ def slugify(title: str) -> str:
 def base_term(title: str) -> str:
     """Title minus a trailing parenthetical disambiguator.
 
-    ``"Feature (machine learning)"`` -> ``"Feature"``.  Titles without a
-    trailing parenthetical come back unchanged.  Used by the body-opener,
-    description-subject and flashcard checks (SKILL.md "Base-term rule for
-    parenthetical titles").  Note the SLUG still derives from the full title.
+    ``"Feature (machine learning)"`` -> ``"Feature"``.  A disambiguator is
+    separated from the base by whitespace; an unspaced parenthetical is part
+    of the name, so ``"SU(2)"`` and ``"Iron(III)"`` come back unchanged, like
+    a title without a trailing parenthetical.  Used by the body-opener,
+    description-subject and flashcard checks (wiki-build
+    ``references/writing.md``, "Base-term and mathematical plain-form
+    rules").  The SLUG still derives from the full title.
     """
     if not title:
         return title
     m = _TRAILING_PAREN_RE.match(title.strip())
-    if not m:
-        return title.strip()
-    base = m.group("base").strip()
-    return base or title.strip()
+    return m.group("base") if m else title.strip()
 
 
 def has_parenthetical(title: str) -> bool:
@@ -325,41 +326,41 @@ def mu_variants(title: str) -> list:
 # (title, expected filename or None when the algorithm must stop, note)
 
 TEST_CASES = [
-    # --- the worked examples block, SKILL.md lines 417-431 -------------------
-    ("LambdaRank", "lambdarank.md", "L417"),
-    ("ROC curve", "roc-curve.md", "L418"),
-    ("F1 score", "f1-score.md", "L419"),
-    ("Cross-validation", "cross-validation.md", "L420 existing hyphen preserved"),
-    ("Aurélien Géron", "aurelien-geron.md", "L421 NFKD diacritics"),
-    ("Schrödinger equation", "schrodinger-equation.md", "L422"),
-    ("k-fold cross-validation", "k-fold-cross-validation.md", "L423"),
-    ("α-helix", "alpha-helix.md", "L424 Greek letter transliterated"),
-    ("γδ T cell", "gamma-delta-t-cell.md", "L425 adjacent Greek letters"),
-    ("µm", "um.md", "L426 microsign"),
-    ("μm", "mu-m.md", "L426 Greek mu contrast"),
-    ("Smith–Waterman", "smith-waterman.md", "L427 en-dash"),
-    ("DALL·E", "dall-e.md", "L428 middle dot"),
-    ("[Ca²⁺]", "ca2-plus.md", "L429 superscript digit + charge"),
-    ("5'-UTR", "5-utr.md", "L430 apostrophe dropped"),
-    ("", None, "L431 empty title -> stop"),
-    ("---", None, "L431 all-separator title -> stop"),
+    # --- worked examples ----------------------------------------------------
+    ("LambdaRank", "lambdarank.md", "CamelCase folds to lowercase"),
+    ("ROC curve", "roc-curve.md", "space becomes hyphen"),
+    ("F1 score", "f1-score.md", "digits kept"),
+    ("Cross-validation", "cross-validation.md", "existing hyphen preserved"),
+    ("Aurélien Géron", "aurelien-geron.md", "NFKD diacritics"),
+    ("Schrödinger equation", "schrodinger-equation.md", "umlaut folded"),
+    ("k-fold cross-validation", "k-fold-cross-validation.md", "lowercase lead letter"),
+    ("α-helix", "alpha-helix.md", "Greek letter transliterated"),
+    ("γδ T cell", "gamma-delta-t-cell.md", "adjacent Greek letters"),
+    ("µm", "um.md", "microsign"),
+    ("μm", "mu-m.md", "Greek mu contrast"),
+    ("Smith–Waterman", "smith-waterman.md", "en-dash"),
+    ("DALL·E", "dall-e.md", "middle dot"),
+    ("[Ca²⁺]", "ca2-plus.md", "superscript digit + charge"),
+    ("5'-UTR", "5-utr.md", "apostrophe dropped"),
+    ("", None, "empty title -> stop"),
+    ("---", None, "all-separator title -> stop"),
 
     # Short acronym titles follow the ordinary lowercase pipeline.
     ("CON", "con.md", "short acronym title"),
     ("LPT1", "lpt1.md", "alphanumeric title"),
 
-    # --- worked examples stated elsewhere in the slug section ----------------
-    ("Cl⁻", "cl-minus.md", "L396 superscript minus charge"),
+    # --- further worked examples ---------------------------------------------
+    ("Cl⁻", "cl-minus.md", "superscript minus charge"),
     ("Feature (machine learning)", "feature-machine-learning.md",
-     "L475 slug derives from the FULL title, parenthetical included"),
-    ("Information entropy", "information-entropy.md", "L473 qualified compound"),
+     "slug derives from the FULL title, parenthetical included"),
+    ("Information entropy", "information-entropy.md", "qualified compound"),
     ("Weight tying (language model embedding sharing)",
-     "weight-tying-language-model-embedding-sharing.md", "L485 qualified title"),
+     "weight-tying-language-model-embedding-sharing.md", "qualified title"),
     ("Kullback–Leibler divergence", "kullback-leibler-divergence.md",
-     "L195 en-dash in a proper name"),
+     "en-dash in a proper name"),
     ("Ångström", "angstrom.md", "NFKD fold, ring + umlaut"),
-    ("Straße", "strasse.md", "L399 non-decomposing eszett"),
-    ("Søren Kierkegaard", "soren-kierkegaard.md", "L399 non-decomposing o-slash"),
+    ("Straße", "strasse.md", "non-decomposing eszett"),
+    ("Søren Kierkegaard", "soren-kierkegaard.md", "non-decomposing o-slash"),
     ("Marie Skłodowska Curie", "marie-sklodowska-curie.md",
      "non-decomposing l-stroke remains visible"),
     ("Đorđe", "dorde.md", "non-decomposing d-stroke remains visible"),
@@ -440,7 +441,8 @@ TEST_CASES = [
 
 
 def run_self_test():
-    """Run :data:`TEST_CASES`; return the result dict (no printing)."""
+    """Run :data:`TEST_CASES` and the CLI-guard and base-term cases; return
+    the result dict (no printing)."""
     failures = []
     for title, expected, note in TEST_CASES:
         try:
@@ -471,7 +473,26 @@ def run_self_test():
                 "expected": expected,
                 "got": got,
             })
-    total = len(TEST_CASES) + len(guard_cases)
+    # (title, base_term, has_parenthetical): only a space-separated trailing
+    # parenthetical is a disambiguator; unspaced notation is part of the name.
+    base_term_cases = [
+        ("Feature (machine learning)", "Feature", True),
+        ("  Feature (machine learning)  ", "Feature", True),
+        ("SU(2)", "SU(2)", False),
+        ("Iron(III)", "Iron(III)", False),
+        ("Lie group SO(3)", "Lie group SO(3)", False),
+        ("(machine learning)", "(machine learning)", False),
+    ]
+    for title, want_base, want_paren in base_term_cases:
+        got = (base_term(title), has_parenthetical(title))
+        if got != (want_base, want_paren):
+            failures.append({
+                "title": title,
+                "note": "base-term rule",
+                "expected": [want_base, want_paren],
+                "got": list(got),
+            })
+    total = len(TEST_CASES) + len(guard_cases) + len(base_term_cases)
     return {
         "total": total,
         "passed": total - len(failures),
@@ -493,7 +514,7 @@ def _build_parser():
     )
     p.add_argument("title", nargs="?", help="entity title to slug")
     p.add_argument("--test", action="store_true",
-                   help="run the inline self-test over the skill's worked examples")
+                   help="run the inline self-test over the worked examples")
     p.add_argument("--stem", action="store_true",
                    help="print only the bare slug (no .md) as plain text")
     return p
@@ -503,7 +524,7 @@ _KNOWN_FLAGS = {"-h", "--help", "--test", "--stem", "--"}
 
 
 def _guard_argv(argv):
-    """Let a title that looks like a flag through (the skill's "---" example).
+    """Let a title that looks like a flag through (the "---" example).
 
     ``slugify.py "---"`` must reach the algorithm and report that the title
     is unsluggable, not die in argparse.  A ``--`` is inserted before the

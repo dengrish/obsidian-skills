@@ -21,7 +21,8 @@ CLI
     --slug          a proposed clipping-note stem to check against the portable
                     direct-child Articles/ namespace; repeatable
     --exclude       a note to leave out of the index — use it when reprocessing a
-                    file that itself lives in Articles/, so it can't match itself
+                    file that itself lives in Articles/, so it can't match itself;
+                    a wiki-add research extract is refused
     --dump-index    include the whole {normalized_url: path} map in the output
     --test          run the built-in cases (no arguments, writes nothing
                     outside a temp dir)
@@ -29,6 +30,8 @@ CLI
 Importable
     normalize_url(url) -> str
     read_source(path)  -> str | None
+    is_research_extract(path) -> bool
+    is_research_extract_text(text) -> bool
     build_index(cleaned_dir, exclude=()) -> (index, unindexable, non_url)
     check(entries, index) -> list[dict]
     article_name_index(cleaned_dir) -> {portable_name: [paths]}
@@ -36,7 +39,9 @@ Importable
     run_self_test() -> int
 
 Output: one JSON object on stdout. Exit status is 0 whenever the scan ran.
-Stdlib only.
+Each `checked` row lists, in `research_extracts`, the matching Articles notes
+that are wiki-add research extracts. Dot-prefixed subfolders (private stages,
+hidden folders) are not scanned. Stdlib only.
 """
 
 import argparse
@@ -103,7 +108,7 @@ from yaml_scalars import parse_source_fields
 # article the user clipped is silently never processed and the report says the
 # run was clean. The other direction is cheap and caught downstream — an
 # unstripped tracking parameter yields a `new` verdict on a re-clip, which is
-# exactly what guard 2 (step 3's filename check) exists to catch. Strip what is
+# exactly what the naming gate (SKILL.md step 2) exists to catch. Strip what is
 # provably noise, and no further.
 TRACKING_PARAMS = {
     "fbclid", "gclid", "mc_cid", "mc_eid",
@@ -117,7 +122,7 @@ X_TRACKING_PARAMS = {"s", "t"}
 #: article on `app.example.com/#/posts/<n>` normalized to `app.example.com`, so
 #: the first one clipped made every later one a `duplicate` and the whole site
 #: became un-clippable after one article. An `#anchor-id` still goes: that is a
-#: position within one page, which is what step 1's rule means by a fragment.
+#: position within one page, not part of the page's identity.
 ROUTING_FRAGMENT = ("/", "!")
 
 
@@ -218,6 +223,60 @@ def _frontmatter_fence(line):
     return line.rstrip(" \t") == "---"
 
 
+#: wiki-add's research guide (skills/wiki-add/references/research.md) owns this
+#: marker and places it on the first body line after the frontmatter. A marked
+#: note is an agent-written extract: it stays in the URL index as an owner, but
+#: clipping-clean never overwrites, reprocesses or renames it.
+RESEARCH_EXTRACT_MARKER = "<!-- obsidian:wiki-add-research-source -->"
+
+
+def _read_regular_text(path):
+    """Decode one regular file strictly as UTF-8 (BOM allowed), else None.
+
+    Follow an explicitly selected read-only alias, but open nonblocking and
+    classify the handle before reading. A `.md` path swapped to a FIFO between
+    a path-stat and ordinary `open()` could otherwise block the whole batch
+    indefinitely while waiting for a writer.
+    """
+    descriptor = None
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            return None
+        with os.fdopen(descriptor, "r", encoding="utf-8-sig",
+                       errors="strict") as fh:
+            descriptor = None                 # fdopen now owns the descriptor
+            return fh.read()
+    except (OSError, UnicodeError, ValueError):
+        return None
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+def is_research_extract_text(text):
+    """Whether the body after a closed leading frontmatter opens with the marker."""
+    lines = text.splitlines()
+    opening = next((i for i, line in enumerate(lines) if line.strip()), None)
+    if opening is None or not _frontmatter_fence(lines[opening]):
+        return False
+    closing = next((i for i in range(opening + 1, len(lines))
+                    if _frontmatter_fence(lines[i])), None)
+    if closing is None:
+        return False
+    first = next((line.strip() for line in lines[closing + 1:] if line.strip()), "")
+    return first == RESEARCH_EXTRACT_MARKER
+
+
+def is_research_extract(path):
+    """Whether a readable regular note is a wiki-add research extract."""
+    text = _read_regular_text(path)
+    return text is not None and is_research_extract_text(text)
+
+
 def read_source(path):
     """Return a note's origin from its YAML frontmatter, or None.
 
@@ -246,31 +305,22 @@ def read_source(path):
     indexed under the wrong URL is invisible to its own duplicate check *and*
     answers somebody else's.
     """
-    descriptor = None
+    # Decode the whole note before trusting its frontmatter. Reading only
+    # through the closing fence lets invalid bytes in the body hide behind a
+    # valid-looking origin and claim a publication identity.
+    text = _read_regular_text(path)
+    if text is None:
+        return None
+    lines = iter(text.splitlines())
+    for first in lines:                        # skip leading blank lines
+        if first.strip():
+            break
+    else:
+        return None
+    if not _frontmatter_fence(first):
+        return None
+    frontmatter = []
     try:
-        # Follow an explicitly selected read-only alias, but open nonblocking
-        # and classify the handle before reading. A `.md` path swapped to a
-        # FIFO between a path-stat and ordinary `open()` could otherwise block
-        # the whole batch indefinitely while waiting for a writer.
-        flags = os.O_RDONLY | os.O_NONBLOCK
-        descriptor = os.open(path, flags)
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            return None
-        # Decode the whole note before trusting its frontmatter. Reading only
-        # through the closing fence lets invalid bytes in the body hide behind
-        # a valid-looking origin and claim a publication identity.
-        with os.fdopen(descriptor, "r", encoding="utf-8-sig",
-                       errors="strict") as fh:
-            descriptor = None                 # fdopen now owns the descriptor
-            lines = iter(fh.read().splitlines())
-        for first in lines:                    # skip leading blank lines
-            if first.strip():
-                break
-        else:
-            return None
-        if not _frontmatter_fence(first):
-            return None
-        frontmatter = []
         for raw in lines:
             if _frontmatter_fence(raw):
                 found = parse_source_fields(frontmatter)
@@ -278,16 +328,8 @@ def read_source(path):
                     return (found["sources"] or [None])[0]
                 return found.get("source") or None
             frontmatter.append(raw)
-    except UnicodeError:
+    except (UnicodeError, ValueError):
         return None
-    except (OSError, ValueError):
-        return None
-    finally:
-        if descriptor is not None:
-            try:
-                os.close(descriptor)
-            except OSError:
-                pass
     return None
 
 
@@ -310,8 +352,11 @@ def _md_files(folder):
                              "directory symlink cycle" % root)
         # Track ancestors, not every visited directory: separate logical aliases
         # must remain visible, while a link back into its own ancestry cannot
-        # yield a complete inventory.
-        dirs.sort()
+        # yield a complete inventory. Dot-prefixed folders hold private
+        # publication stages and hidden content Obsidian does not show; they
+        # are neither owners nor captures. An explicitly passed root is still
+        # scanned.
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
         for name in dirs:
             ancestors[os.path.normpath(os.path.join(root, name))] = (
                 lineage | {identity})
@@ -326,7 +371,8 @@ def _validated_exclusions(cleaned_dir, exclude):
 
     A typo must never make a duplicate check look clean. Exclusions therefore
     have to identify one existing, regular direct child of the Articles folder
-    under the plugin's portable filename identity.
+    under the plugin's portable filename identity. A wiki-add research extract
+    is never excluded: it stays a visible URL and name owner.
     """
     try:
         names = os.listdir(cleaned_dir)
@@ -359,6 +405,10 @@ def _validated_exclusions(cleaned_dir, exclude):
         except OSError as exc:
             raise ValueError("cannot inspect --exclude %r: %s" %
                              (requested, exc)) from exc
+        if is_research_extract(candidate):
+            raise ValueError("--exclude %r is a wiki-add research extract; "
+                             "clipping-clean never reprocesses or overwrites "
+                             "it" % requested)
         resolved.append(os.path.abspath(candidate))
     return resolved
 
@@ -1051,6 +1101,59 @@ def run_self_test():
              (code, [(row["slug"], row["status"]) for row in public_slugs]),
              (0, [("Held", "occupied"), ("Free", "free")]))
 
+        # A wiki-add research extract remains a URL owner. The scan names it so
+        # the workflow reports it rather than offering a clipping overwrite.
+        extract_url = "https://example.com/researched"
+        extract = article("Researched.md",
+                          '---\nsources:\n  - "%s"\n---\n%s\nResearch extract\n'
+                          % (extract_url, RESEARCH_EXTRACT_MARKER))
+        plain_url = "https://example.com/plain"
+        plain = article("Plain_Capture.md",
+                        '---\nsources:\n  - "%s"\n---\nProse, then %s\n'
+                        % (plain_url, RESEARCH_EXTRACT_MARKER))
+        code, result = scan([vault, "--url", extract_url, "--url", plain_url])
+        case("the scan flags a matching research extract without reshaping matches",
+             (code, [(row["status"], row["matches"], row["research_extracts"])
+                     for row in result.get("checked", [])]),
+             (0, [("duplicate", [extract], [extract]),
+                  ("duplicate", [plain], [])]))
+        refused, refusal = scan([vault, "--url", extract_url, "--slug",
+                                 "Researched", "--exclude", extract])
+        code, result = scan([vault, "--url", extract_url, "--slug", "Researched"])
+        case("an exclusion cannot hide a research extract or free its slug",
+             (refused, "research extract" in refusal.get("error", ""),
+              "checked" in refusal, code,
+              [(row["status"], row["research_extracts"])
+               for row in result.get("checked", [])],
+              [row["status"] for row in result.get("slug_checks", [])]),
+             (1, True, False, 0, [("duplicate", [extract])], ["occupied"]))
+        case("only the first body line after closed frontmatter is the marker",
+             (is_research_extract_text(
+                 "---\ntitle: x\n---\n\n%s\n" % RESEARCH_EXTRACT_MARKER),
+              is_research_extract_text(RESEARCH_EXTRACT_MARKER + "\n"),
+              is_research_extract_text(
+                  "---\ntitle: x\n%s\n" % RESEARCH_EXTRACT_MARKER)),
+             (True, False, False))
+
+        # Dot-prefixed folders are private stages or hidden content: a staged
+        # copy inside Articles/ is not a second owner, and a hidden Inbox
+        # subfolder is not a capture.
+        os.makedirs(os.path.join(vault, ".organize-stage-x"))
+        article(os.path.join(".organize-stage-x", "Researched.md"),
+                '---\nsources:\n  - "%s"\n---\nstaged copy\n' % extract_url)
+        code, result = scan([vault, "--url", extract_url])
+        case("a private stage inside Articles is not a second URL owner",
+             (code, [row["matches"] for row in result.get("checked", [])],
+              normalize_url(extract_url) in result.get("collisions", {})),
+             (0, [[extract]], False))
+        os.makedirs(os.path.join(tmp, "hidden-inbox", ".hidden"))
+        note(os.path.join("hidden-inbox", ".hidden", "Raw.md"),
+             "---\nsource: https://example.com/hidden\n---\n")
+        visible_raw = note(os.path.join("hidden-inbox", "Visible.md"),
+                           "---\nsource: https://example.com/visible\n---\n")
+        case("a hidden Inbox subfolder is not scanned for captures",
+             _md_files(os.path.join(tmp, "hidden-inbox")), [visible_raw])
+
         # Naming must precede image writes, and a late collision must return
         # to that decision. Check the linked action gates without requiring
         # historical step numbers or several copies of the repair procedure.
@@ -1166,6 +1269,12 @@ def main(argv=None):
         entries.append({"id": u, "source": u})
 
     results = check(entries, index)
+    # Only a published Articles owner can be a research extract; a pending
+    # earlier input in this batch cannot.
+    owners = {path for paths in index.values() for path in paths}
+    for r in results:
+        r["research_extracts"] = [path for path in r["matches"]
+                                  if path in owners and is_research_extract(path)]
     counts = {}
     for r in results:
         counts[r["status"]] = counts.get(r["status"], 0) + 1

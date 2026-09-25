@@ -3,10 +3,10 @@
 - [Locate the claims](#locate-the-claims)
 - [Check meaning and balance](#check-meaning-and-balance)
 - [Check provenance and exhibits](#check-provenance-and-exhibits)
-- [Run lint after source verification](#run-lint-after-source-verification)
 - [Report separate outcomes](#report-separate-outcomes)
 
-Read for every complete draft before lint and publication. Check against the
+Read for every complete draft before [workflow step 5's lint](../SKILL.md#5-lint-the-complete-draft)
+and publication; do not repeat lint's machine checks by eye. Check against the
 source pages, not only against internally consistent prose. [Summary standards](summary-standards.md)
 own the claim rules; [note format](note-format.md) owns the mechanical shape.
 This checklist verifies their application without repeating their procedures.
@@ -23,7 +23,7 @@ python3 '<skill>/scripts/paper_text.py' '<pdf path>' \
     --find 'previously treated' --find 'C57BL/6'
 ```
 
-Use argument lists or [shared quoting rules](../../../shared/CONVENTIONS.md#1b-filenames-titles-and-urls-are-untrusted-text)
+Use argument lists or [shared quoting rules](../../../shared/INPUT_SAFETY.md#filenames-titles-and-urls-are-untrusted-text)
 for every path and needle. The finder exits 1 if any needle is unfound.
 By default, `--find` uses a normalized, case-insensitive substring search.
 `--exact` keeps the same normalization but makes matching case-sensitive. A `loose` result comes
@@ -87,20 +87,26 @@ Walk the callout, headings, body and captions with their supporting pages open:
   any longer sentence retained for clarity has a reason in the run report.
 - [ ] Empirical benefits retain harms, failed secondary outcomes and negative
   results. Arguments retain material contrary evidence, exceptions and
-  conditions the document discusses. Notices separate what changed from what remains unresolved. The
-  fourth section attributes the authors' or issuer's conclusions and labels
-  another reading as such; it adds no unsupported practical inference.
+  conditions the document discusses. Notices separate what changed from what
+  remains unresolved. The fourth section attributes the authors' or issuer's
+  conclusions, keeps any needed limit beside them, and adds neither the note's
+  own practical inference nor a repeat of the Limitations section.
 - [ ] The limitations sweep used the selected mode's relevant categories and
   kept only material document-level constraints. Local caveats remain beside
   their claims, related limitations are merged, and verified missing evidence or
   methodological disclosures are stated plainly without inventing empirical
   shortcomings for a non-empirical source.
+- [ ] Qualifications are checked in both directions. No needed scope or design
+  limit was lost, and none was added without support. Each document-level
+  caveat is explained once in Limitations, with at most one short callout
+  bullet; Interpretation, captions and other bullets do not restate it.
 
 ## Check provenance and exhibits
 
 - [ ] The title, author order, format and date components come from this PDF.
   Only unstated month/day components are padded. Any second `sources:` URL is
-  grounded in a printed DOI/arXiv identifier, not inferred; Book has none. An
+  this document's own printed DOI/arXiv identifier (title page, header or
+  footer), not a cited or affected work's, and not inferred; Book has none. An
   undated PDF uses `published: null` with its canonical `_nd` stem, or the
   deliberately preserved noncanonical name recorded at intake.
 - [ ] The first `sources:` PDF exists with the selected unique stem, and the
@@ -116,30 +122,21 @@ Walk the callout, headings, body and captions with their supporting pages open:
 - [ ] Funding, conflicts, review status and ethics approval are absent from the
   note. Methodological preregistration remains eligible in the second/fifth
   positions.
-- [ ] Availability uses the selected mode's relevant labels. Empirical notes
-  name Data and add Code or Materials when relevant; argument/synthesis notes use Sources,
-  Materials, Data or Code as applicable; notices use Record, Evidence or
-  Materials. “Not stated” means a relevant category could apply but lacks a
-  disclosure. Inapplicable labels are omitted rather than filled with boilerplate.
+- [ ] Availability uses only the labels relevant to the selected mode
+  ([note format](note-format.md#body-content)). “Not stated” marks a relevant
+  category with no disclosure; inapplicable labels are omitted, not filled with
+  boilerplate.
 - [ ] Every embed is an inventoried file under this PDF's stem and has been
   opened to confirm identity and readability. A valid filename is not proof of
-  the image contents. No duplicate composite/panel illustrates the same claim.
+  the image contents; a wrong crop returns to [intake's figure
+  preparation](../SKILL.md#prepare-the-figure-inventory). No duplicate
+  composite/panel illustrates the same claim.
 - [ ] Tables retain printed digits, units and orientation. Every retained value
   was checked on its source page; captioned trims do not hide contrary rows.
-- [ ] Captions lead with the message, stand alone, state scope/comparator and
-  identify error bars or the paper's failure to define them. Each exhibit sits
-  under its supporting claim; nothing points at an unavailable figure, table,
-  appendix or supplement.
-
-## Run lint after source verification
-
-After completing the source checks above, return to
-[workflow step 5](../SKILL.md#5-lint-the-complete-draft) for the lint pass.
-That step owns the command, flags, violation fixes, advisory review and
-publication blockers. Do not run a second pass merely because this checklist
-and the workflow both mention lint, or repeat every machine check by eye.
-Clean lint does not establish factual accuracy; publication still requires the
-independent source verification above.
+- [ ] Captions lead with the message, stand alone and state scope/comparator.
+  Where error bars or intervals are drawn, they identify them or the paper's
+  failure to define them. Each exhibit sits under its supporting claim; nothing
+  points at an unavailable figure, table, appendix or supplement.
 
 ## Report separate outcomes
 

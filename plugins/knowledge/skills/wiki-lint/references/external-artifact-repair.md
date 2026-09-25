@@ -4,7 +4,7 @@ Read this only when a plugin producer has completed a non-destructive prepare
 phase outside `Wiki/`, kept both old and new artifacts available, and supplied
 an exact old → new mapping plus its complete dependency report and re-probe
 command. This mode repairs resolving references in Wiki entries, recognized
-MOCs in `MOCs/`, and recognized legacy root MOCs. It is not Task 2, an entry
+MOCs in `MOCs/`, and recognized legacy vault-root MOCs. It is not Task 2, an entry
 retitle, or permission to rename, finalize or remove the artifacts.
 
 ## Validate the handoff
@@ -22,13 +22,14 @@ retitle, or permission to rename, finalize or remove the artifacts.
   basename, unreadable blocker, or incomplete dependency inventory blocks the
   affected rewrite.
 - Work only on blocker paths named by the producer that are Wiki entries or
-  recognized MOCs in `MOCs/` or legacy root MOCs. Markdown elsewhere remains
+  recognized MOCs in `MOCs/` or legacy vault-root MOCs. Markdown elsewhere remains
   the producer's blocker and is reported unchanged.
 
 ## Rewrite only resolving references
 
-Read and snapshot each blocker. Replace only a parsed reference that resolves
-to an exact mapped artifact:
+Read and snapshot each blocker, and keep its Step 0 scan findings as the
+pre-repair baseline. Replace only a parsed reference that resolves to an exact
+mapped artifact:
 
 - a `sources:` wikilink, body/Related link, note transclusion, or MOC link to
   the old `Articles/` note receives the mapped note destination while retaining
@@ -45,8 +46,8 @@ reference. This mode changes dependency spelling only: it does not change
 Stage every completed blocker outside scanned vault folders and publish each
 against its exact snapshot through the shared safe-write protocol. If a later
 edit wins, preserve it and rebuild that repair. Re-scan changed Wiki entries;
-an unavailable scanner, crash, malformed output, or new fixable finding blocks
-completion.
+an unavailable scanner, crash, malformed output, or a fixable finding absent
+from that baseline blocks completion. Report pre-existing findings unchanged.
 
 Finally run the producer's supplied dependency re-probe unchanged. An `ok: true`
 result completes this repair and returns the unchanged mapping and probe output

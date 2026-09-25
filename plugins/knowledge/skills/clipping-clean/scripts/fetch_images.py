@@ -66,9 +66,11 @@ of this inventory. Label spelling alone cannot distinguish a PDF's plain-numbere
 figures from a clipping's, so a rename never runs without the inventory.
 
 URLs are processed in the order given, which must be the body's source order:
-the figure counter is shared and sequential. `--start` continues the counter
-when the note already has embeds (a recovered figure from the step-12 audit
-takes the next free number, not a number matching its position).
+the figure counter is shared and sequential. Positional URLs are numbered
+before `--urls-file` lines. `--start` continues the counter when the note
+already has embeds (a figure recovered by the completeness audit, SKILL.md
+step 5, takes the next free number, not a number matching its position).
+`stage` needs a new or empty `--out-dir` for every call.
 
 Guards, because this is the only script in the skill that writes into the vault:
 
@@ -88,6 +90,9 @@ Guards, because this is the only script in the skill that writes into the vault:
   destroyed figures with no way back. Pass `--overwrite` for the documented
   reprocess-in-place case, together with `--owner-note` naming the unchanged
   clipping note whose rendered embed exactly names the file being replaced.
+  A wiki-add research extract (body opening with
+  `<!-- obsidian:wiki-add-research-source -->`) may own a new placement but
+  never authorizes `--overwrite` or either rename phase.
 * **A changed clipping stem has no hidden dependants.** For a canonical vault,
   `rename` inventories every other Markdown note for inbound old-note links and
   old-image references before and during the operation. `prepare` reports those
@@ -212,7 +217,7 @@ if _here != _shared:
 from atomic_move import (LinkUnavailable, PublicationConflict, file_identity,
                          link_noreplace, move_noreplace, remove_expected,
                          replace_expected, publish_new, set_private_mode)
-from dedup_index import normalize_url, read_source
+from dedup_index import is_research_extract_text, normalize_url, read_source
 from figure_state import MANIFEST_FILE, read_manifest
 from yaml_scalars import parse_source_fields
 from entry_structure import mask_body_comments
@@ -1528,7 +1533,20 @@ def _load_clipping_owner(owner_note, slug, attachments, *, require_vault=False):
             "vault-wide dependency scan cannot be bypassed")
     return {"path": path, "slug": slug, "attachments": attachments,
             "snapshot": snapshot, "embeds": embeds, "vault": vault,
-            "origin": normalize_url(origin)}
+            "origin": normalize_url(origin),
+            "research_extract": is_research_extract_text(note_text)}
+
+
+def _refuse_research_extract(owner, action):
+    """A wiki-add research extract may own new placements, never replacements.
+
+    Its images belong to that extract. Only the destructive paths call this:
+    an ordinary non-overwrite `place` for wiki-add keeps working.
+    """
+    if owner is not None and owner.get("research_extract"):
+        raise ValueError("%s is a wiki-add research extract; clipping-clean "
+                         "leaves it and its images unchanged (%s refused)"
+                         % (owner["path"], action))
 
 
 def _validate_clipping_owner(owner):
@@ -2508,6 +2526,8 @@ def download_one(url, attachments, slug, index, timeout=45,
         owner = (_load_clipping_owner(owner_note, slug, attachments,
                                       require_vault=require_vault)
                  if (overwrite or require_vault) else None)
+        if overwrite:
+            _refuse_research_extract(owner, "--overwrite")
         # Before the fetch: no reason to spend a download on a slot we are
         # going to refuse to write. Re-checked after, against the real path.
         _refuse_existing(attachments, slug, index, overwrite, owner=owner)
@@ -2646,8 +2666,8 @@ def place_file(src, attachments, slug, index, overwrite=False, owner_note=None,
 
     The source is MOVED, not copied: it is a temp render, and a copy leaves the
     twin behind. A source already inside the attachments folder is refused —
-    a half-written render must never sit in the vault (references/images.md
-    item 4).
+    a half-written render must never sit in the vault (CONVENTIONS §8b:
+    "Nothing unfinished is ever written into the folder").
     """
     result = {"index": index, "source": src, "ok": False, "path": None,
               "filename": None, "ext": None, "bytes": 0, "error": None}
@@ -2657,6 +2677,8 @@ def place_file(src, attachments, slug, index, overwrite=False, owner_note=None,
         owner = (_load_clipping_owner(owner_note, slug, attachments,
                                       require_vault=require_vault)
                  if (overwrite or require_vault) else None)
+        if overwrite:
+            _refuse_research_extract(owner, "--overwrite")
         if not os.path.isfile(src):
             raise ValueError(f"--from-file {src!r} is not a file")
         if _inside_existing_directory(src, attachments):
@@ -2888,6 +2910,7 @@ def _plan_slug_rename(attachments, old_slug, new_slug, *, sources,
                           % (new_slug, sources)}]
     owner = _load_clipping_owner(owner_note, old_slug, attachments,
                                  require_vault=require_vault)
+    _refuse_research_extract(owner, "rename")
     owned = {_manifest_name_key(name)
              for name in read_manifest(os.path.join(attachments, MANIFEST_FILE))}
     # --- plan: every member is judged before any of them is touched ---------
@@ -3038,6 +3061,7 @@ def _handoff_plan(attachments, sources, owner_note, new_owner_note,
         owner_note, old_slug, attachments, require_vault=True)
     new_owner = _load_clipping_owner(
         new_owner_note, new_slug, attachments, require_vault=True)
+    _refuse_research_extract(new_owner, "rename")   # old: _plan_slug_rename
     if old_owner["origin"] != new_owner["origin"]:
         raise ValueError("old and new owner notes do not have the same normalized "
                          "web origin")
@@ -3451,8 +3475,8 @@ def run_self_test():
             # --- the LYING `image/*` header ---------------------------------
             # A mapped image/* Content-Type used to win outright, so every one
             # of these was written into Sources/Images as a .png and reported
-            # `"ok": true, "failed": 0` — the exact thing SKILL.md's "never
-            # writes a non-image into the vault" promises cannot happen.
+            # `"ok": true, "failed": 0` — the exact thing the image guards
+            # promise cannot happen.
             ("a JSON body served as image/png", b'{"error": "not found"}',
              "image/png", "http://x/a.png", None),
             ("plain text served as image/png", b"nope, not an image",
@@ -5075,6 +5099,45 @@ continues here`
                          overwrite=True,
                          owner_note=current_owner(
                              att, "Teslo_Cancer_2026"))["ok"], True)
+        # A wiki-add research extract can own the images it places, but it
+        # never authorizes clipping-clean to replace them.
+        extract_marker = ("<!-- obsidian:wiki-add-research-source -->\n"
+                          "Research extract\n")
+        extract_embeds = [os.path.basename(path) for path in
+                          _glob_slug(att, "Teslo_Cancer_2026", _FIG_GLOB)]
+        extract_owner = clipping_note(
+            "Teslo_Cancer_2026",
+            extract_embeds + ["Teslo_Cancer_2026_fig_40.png"],
+            body_prefix=extract_marker)
+        extract_gif = os.path.join(att, "Teslo_Cancer_2026_fig_20.gif")
+        extract_before = open(extract_gif, "rb").read()
+        extract_render = touch(os.path.join(tmp, "extract-render.gif"),
+                               b"GIF89a\x03\x00,")
+        refused_extract = place_file(extract_render, att, "Teslo_Cancer_2026", 20,
+                                     overwrite=True, owner_note=extract_owner,
+                                     require_vault=True)
+        refused_download = download_one(data_url, att, "Teslo_Cancer_2026", 20,
+                                        overwrite=True, owner_note=extract_owner,
+                                        require_vault=True)
+        check("--overwrite refuses a wiki-add research extract as owner",
+              (refused_extract["ok"], refused_download["ok"],
+               "research extract" in (refused_extract["error"] or ""),
+               "research extract" in (refused_download["error"] or ""),
+               open(extract_gif, "rb").read(), os.path.exists(extract_render)),
+              (False, False, True, True, extract_before, True))
+        # The CLI's vault binding requires scratch outside the vault (tmp).
+        extract_scratch = tempfile.mkdtemp(prefix="fetch_images_extract.",
+                                           dir=os.path.dirname(tmp))
+        try:
+            extract_new = touch(os.path.join(extract_scratch, "new.png"), _PNG)
+            placed_for_extract = place_file(
+                extract_new, att, "Teslo_Cancer_2026", 40,
+                owner_note=extract_owner, require_vault=True)
+        finally:
+            shutil.rmtree(extract_scratch, ignore_errors=True)
+        check("...while a new placement for that extract still works",
+              (placed_for_extract["ok"], placed_for_extract["filename"]),
+              (True, "Teslo_Cancer_2026_fig_40.png"))
         replacement = touch(os.path.join(tmp, "replacement.gif"), gif)
         keep_gif = os.path.join(att, "Teslo_Cancer_2026_fig_20.gif")
         prior_gif = open(keep_gif, "rb").read()
@@ -5123,7 +5186,7 @@ continues here`
               place_file(render, att, "  ", 23)["ok"], False)
         check("...and the render is still there, not consumed by a refusal",
               os.path.exists(render), True)
-        # references/images.md item 4: nothing half-written may sit in the vault
+        # CONVENTIONS §8b: nothing unfinished is ever written into the folder
         inside = touch(os.path.join(att, "scratch.gif"), gif)
         res = place_file(inside, att, "Teslo_Cancer_2026", 24)
         check("place refuses a source inside the attachments folder",
@@ -5405,6 +5468,23 @@ continues here`
         def current_bytes(paths):
             return [open(path, "rb").read() if os.path.isfile(path) else None
                     for path in paths]
+
+        # Neither rename phase may move a wiki-add research extract's images,
+        # whichever side of the handoff carries the marker.
+        for side in ("owner_note", "new_owner_note"):
+            _vault, extract_args, extract_old, extract_new_paths = handoff_case(
+                "extract-" + side)
+            with open(extract_args[side], encoding="utf-8") as fh:
+                marked = fh.read().replace(
+                    "---\n![[", "---\n<!-- obsidian:wiki-add-research-source -->\n"
+                    "Research extract\n![[", 1)
+            with open(extract_args[side], "w", encoding="utf-8") as fh:
+                fh.write(marked)
+            error = failure(lambda: prepare_slug_rename(**extract_args))
+            check("prepare refuses a research extract as the %s" % side,
+                  ("research extract" in error, current_bytes(extract_old),
+                   [os.path.lexists(path) for path in extract_new_paths]),
+                  (True, [_PNG, _PNG], [False, False]))
 
         real_publish = publish_new
         _vault, handoff_args, old_paths, new_paths = handoff_case("changed-owner")

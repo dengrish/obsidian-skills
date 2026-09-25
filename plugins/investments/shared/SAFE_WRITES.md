@@ -29,8 +29,8 @@ image, or sidecar. Preserve the existing file's permissions when replacing it.
 Ordinary scratch follows [RUNTIME.md](RUNTIME.md#one-owned-scratch-directory-per-run);
 this hidden same-filesystem final stage is a separate publication requirement
 and may sit inside the vault outside scanned folders. Keep existing helper
-staging/recovery names and guards; do not move them to another filesystem
-just to collect all temporary files under `<scratch>`.
+staging/recovery names and guards; do not relocate them, or this final stage,
+into `<scratch>`.
 
 Resolve the destination directory before choosing that private stage parent.
 Follow the active workflow's directory-ownership rules first: this protocol
@@ -57,7 +57,9 @@ cross-device move, because each would remove the no-clobber guarantee.
 ## Replace only the snapshotted occupant
 
 An `unchanged` check immediately followed by `os.replace` still has a race
-between the two operations. Use this guarded displacement sequence instead:
+between the two operations. Use this guarded displacement sequence instead;
+Python writers get it from `replace_expected` and `remove_expected`
+([the shared API](#call-the-shared-python-api)) and do not reimplement it:
 
 1. Hard-link the current public regular file into private staging and verify
    that link against the expected identity and bytes.
@@ -133,11 +135,21 @@ Here `stage_parent` is outside the resolved public output directory and
 it for another replacement or removal, including rollback: the helper keeps
 observation/recovery entries there even after success. `published` is the exact public
 snapshot returned after readback. Keep `stage_dir` and report its path on **any**
-exception, including `LinkUnavailable`; clean it only after success. For an
-authorized old-path cleanup, pass the original token and the same callback to
-`remove_expected(target, expected, snapshot, stage_dir,
-stage_parent=stage_parent)`. For a move, pass the source identity captured at
-planning to `move_noreplace`. Never replace either expected value with a fresh
+exception, including `LinkUnavailable`; clean it only after success.
+
+For an authorized old-path cleanup, create another fresh `stage_dir` first,
+for example with `tempfile.mkdtemp(prefix=".atomic-remove-", dir=stage_parent)`
+(the helper refuses a missing directory). Then pass the original token and the
+same callback to `remove_expected(target, expected, snapshot, stage_dir,
+stage_parent=stage_parent)`.
+
+For a move, pass only the source's directory-entry identity captured at
+planning: `move_noreplace(src, dst, expected=identity,
+stage_parent=stage_parent)`, where `identity` is `atomic_move.file_identity(src)`
+or a retained snapshot token's `.identity`. A whole snapshot token never
+matches and is refused as `SourceChanged`. The move checks identity, not bytes;
+when the bytes decided the move, first confirm that `snapshot(src)` still
+equals the retained token. Never replace any expected value with a fresh
 snapshot at commit time.
 
 ## Remove or move an old pathname conditionally
@@ -145,12 +157,17 @@ snapshot at commit time.
 Do not check an old path and then call `remove` or `unlink`: a later occupant
 can arrive in the gap. Displace the entry into private staging, verify the
 displaced identity and bytes against the expected snapshot, and delete only
-the verified version. Restore or preserve any mismatch by the same rule above.
+the verified version; `remove_expected` performs the displacement and check.
+Restore or preserve any mismatch by the same rule above.
 
-Exclusive destination moves must also verify the moved source identity. A
-hard-link-then-unlink fallback can leave both names when unlinking the source
-fails; callers must record and recover that partial state rather than claiming
-that no move occurred.
+Exclusive destination moves must also verify the moved source identity, as
+`move_noreplace` does. It stages the source in a private `.atomic-move-*`
+directory, beside the source or under `stage_parent` for a regular file. When
+a race or failure leaves a partial state, it raises `MoveIncomplete`: preserve
+and report every existing entry at both public paths and each of its
+`recovery_paths` rather than claiming that no move occurred. An
+`.atomic-move-*` directory left by that error or by an interrupted process is
+recovery state, not disposable cache.
 
 ## Multi-file operations
 

@@ -57,9 +57,10 @@ procedure applies.
 Follow the shared source-note schema rather than copying a second schema here.
 The clipping-specific choices are:
 
-- `title`: the evidence-backed full title, using the shared schema's YAML quoting rule
-  (plain unless YAML syntax requires quotes); abbreviate only the filename,
-  never the title.
+- `title`: the evidence-backed full title, using the shared schema's YAML
+  quoting rule (plain unless YAML syntax requires quotes or the plain value
+  would resolve as a non-string, as `1984`, `Yes` or `null` would); abbreviate
+  only the filename, never the title.
 - `format`: `Article` for editorial/institutional articles, `Post` for personal
   posts/newsletters, or `Video` for a substantive transcript. Content wins over
   the host: a transcript on a blog is `Video`, and editorial work on Substack
@@ -72,12 +73,15 @@ The clipping-specific choices are:
 - `published` and `created`: the dates determined above; do not confuse them.
   `published` is a full evidence-backed date or the explicit null for an undated
   page; `created` is never its substitute.
-- `description`: one factual, informative sentence of at most 110 characters.
-  Count characters before publication; retain essential scope when shortening.
+- `description`: one factual, informative sentence of at most 110 characters,
+  quoted by the same rule as `title`. Attribute an argued thesis, forecast or
+  recommendation to its named author ('Aschenbrenner argues…'). Count
+  characters before publication; retain essential scope when shortening.
 - `tags`: choose one or more subjects from the shared
   [discipline enum](../../../shared/CONVENTIONS.md#3-the-discipline-tag-enum).
   Judge the article's substance, not an incidental mention or the publication's
-  brand. Leave empty if none fits; do not invent synonyms.
+  brand. If none fits, write `tags: []`; do not invent synonyms or use
+  `"#misc"`, which is for Wiki entries only.
 - `read`: `false` on creation; preserve an existing value or absent/unknown
   state on reprocessing and report the latter. Never manufacture a boolean.
   If a required format check cannot accept that state, retain the original and

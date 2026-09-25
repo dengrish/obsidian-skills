@@ -34,7 +34,7 @@ hyphen removed, which is what recovers a word the PDF broke across a line —
 and a hit found only that way is reported as ``loose``, never as a clean one.
 
     python3 '<skill>/scripts/paper_text.py' '<vault>/Sources/PDFs/Doe_Foo_2025.pdf' --sections
-    python3 '<skill>/scripts/paper_text.py' '<document>.pdf' --find '13.2 months' --find 'hazard ratio 0.62'
+    python3 '<skill>/scripts/paper_text.py' '<document>.pdf' --find '13.2 months' --find '0.62'
 
 The paths are the user's and the needles come from the document, so both are
 single-quoted (`CONVENTIONS.md` §1b).
@@ -57,6 +57,17 @@ class _Encrypted(RuntimeError):
 
 class _NoBackend(RuntimeError):
     """Neither PDF library is installed -- a different failure from a bad file."""
+
+
+#: One message for both backends. The decrypted copy goes to scratch, never
+#: beside the organized source, which stays unchanged (references/edge-cases.md).
+_ENCRYPTED_MESSAGE = (
+    "%s is encrypted and password-protected, so no text can be read from it. "
+    "This is not corruption and not a scan; re-downloading it changes nothing. "
+    "Decrypt it first: using a password or decrypted copy the user supplies, "
+    "write the decrypted copy into a unique scratch directory outside the "
+    "vault under the same basename, leave the original unchanged, and run "
+    "this script on that copy.")
 
 #: Characters a PDF's text layer uses that a typed needle will not.
 _TRANSLATE = {
@@ -96,6 +107,17 @@ _FIG_MORE = re.compile(
     r"[a-z]?\b", re.I)
 
 _MAX_FIG_RANGE = 20
+
+#: A caption-shaped line and its label.  As in the extractor's
+#: `_uses_hyphen_labels`, one caption whose label carries a hyphen
+#: (`Figure 4-2.`) makes a plain `4-6` in this document's prose a
+#: chapter-style label, not a range.  A dotted caption (`Figure 1.2.`,
+#: `Figure A.1.`) does not.  Like the extractor's CAP_RE, a title may follow
+#: a dash (`Figure 4-2—Title`); `_TRANSLATE` has folded that dash to `-`.
+_CAPTION_LABEL = re.compile(
+    r"^\s*(?:(?i:supplementary|supplemental|suppl?\.|extended\s+data)\s+)?"
+    r"(?i:figure|fig\.?)\s+(?P<label>(?:SI|ED|S|[A-Z])?[.-]?\d+(?:[.-]\d+)*)"
+    r"(?![.-]?\d)(?=\.\s|\s+[^\sa-z]|\s*$|\s*:|\s*-)", re.M)
 
 #: The marker set is exactly `figure-extract`'s, and deliberately so:
 #: a marker this counts but the extractor cannot match scores a figure under a
@@ -174,12 +196,7 @@ def read_pages(path):
             # re-downloading yields the same encrypted file; decrypting fixes
             # it.  batch_extract and organize special-case this the same way.
             if getattr(doc, "needs_pass", False):
-                raise _Encrypted(
-                    "%s is encrypted and password-protected, so no text can "
-                    "be read from it. This is not corruption and not a scan; "
-                    "re-downloading it changes nothing. Decrypt it first "
-                    "(`qpdf --decrypt --password='<pw>' 'in.pdf' 'out.pdf'`) "
-                    "and run this script on the result." % path)
+                raise _Encrypted(_ENCRYPTED_MESSAGE % path)
             if len(doc) == 0:
                 return []
             return [page.get_text() or "" for page in doc]
@@ -202,12 +219,7 @@ def read_pages(path):
         except Exception:
             _ok = 0
         if not _ok:
-            raise _Encrypted(
-                "%s is encrypted and password-protected, so no text can be "
-                "read from it. This is not corruption and not a scan; "
-                "re-downloading it changes nothing. Decrypt it first "
-                "(`qpdf --decrypt --password='<pw>' 'in.pdf' 'out.pdf'`) "
-                "and run this script on the result." % path)
+            raise _Encrypted(_ENCRYPTED_MESSAGE % path)
     return [(p.extract_text() or "") for p in reader.pages]
 
 
@@ -230,14 +242,18 @@ def find(pages, needle, fold_case=True):
     return {"needle": needle, "pages": hits, "loose_pages": loose}
 
 
-def _range_labels(label, plural):
+def _range_labels(label, plural, hyphenated=False):
     """Expand an unambiguous plural range, otherwise return ``[label]``.
 
     ``Figures 1-3`` and ``Figures 1.2-1.4`` are ranges. A singular
     ``Figure 1-3`` remains one chapter-style label, and a descending or very
-    wide span remains literal because books use the same spelling.
+    wide span remains literal because books use the same spelling. In a
+    `hyphenated` document (a caption uses a separated label), a plain ``A-B``
+    integer pair is a label too, as the extractor reads it.
     """
     if not plural or label.count("-") != 1:
+        return [label]
+    if hyphenated and re.fullmatch(r"\d+-\d+", label):
         return [label]
     low, high = label.split("-", 1)
     endpoint = re.compile(
@@ -276,21 +292,33 @@ def cites(pages, ed_prefix="S"):
     if ed_prefix not in ("S", "ED"):
         raise ValueError("ed_prefix must be 'S' or 'ED'")
     counts = {}
+    # Captions are line-shaped, so look for them before whitespace collapses.
+    hyphenated = any(
+        "-" in m.group("label")
+        for raw in pages
+        for m in _CAPTION_LABEL.finditer(
+            unicodedata.normalize("NFKC", raw).translate(_TRANSLATE)))
     for raw in pages:
         text = normalize(raw, fold_case=False)
         for m in _FIG_REF.finditer(text):
             marker = m.group("marker")
-            labels = _range_labels(m.group("label"), bool(m.group("plural")))
+            labels = _range_labels(m.group("label"), bool(m.group("plural")),
+                                   hyphenated)
             pos = m.end()
             if m.group("plural"):
                 while True:
                     more = _FIG_MORE.match(text, pos)
                     if not more:
                         break
-                    labels.extend(_range_labels(more.group("label"), True))
+                    labels.extend(_range_labels(more.group("label"), True,
+                                                hyphenated))
                     pos = more.end()
             for label in labels:
                 label = label.replace(".", "-")
+                # Filenames carry ASCII digits (CONVENTIONS §8b); NFKC folds
+                # fullwidth ones but not, say, Arabic-Indic digits.
+                label = re.sub(r"\d", lambda d: str(unicodedata.decimal(d.group())),
+                               label)
                 label = re.sub(r"\A(si|ed|[a-z])", lambda x: x.group(1).upper(),
                                label, flags=re.I)
                 if marker and not label[0].isalpha():
@@ -540,6 +568,35 @@ def run_self_test():
     case("dotted appendix ranges keep their normalized label spelling",
          cites(["Figures B.1-B.3 show the controls."]),
          {"B-1": 1, "B-2": 1, "B-3": 1})
+    # The extractor keeps `1-4` literal once any caption uses a separated
+    # label; counting it as 1..4 ranked labels no file on disk carries.
+    case("a hyphen-labelled document keeps plural dashed labels literal",
+         cites(["Figure 1-4. Caption.\nAs in Figures 1-4 and 1-5, the loss falls."]),
+         {"1-4": 2, "1-5": 1})
+    case("a dash-joined caption title marks hyphen labels",
+         [cites(["Figure 4-2%sLayers\nAs Figures 4-6 show." % dash])
+          for dash in ("—", "–")],
+         [{"4-2": 1, "4-6": 1}] * 2)
+    case("a dash title after a plain label does not mark hyphen labels",
+         [cites(["Figure 1%sOverview\nSee Figures 1-3." % dash])
+          for dash in ("—", "-")],
+         [{"1": 2, "2": 1, "3": 1}] * 2)
+    case("an em-dash title opening with a digit does not mark hyphen labels",
+         [label in cites(["Figure 1—2D convolution.\nSee Figures 4-6."])
+          for label in ("4-6", "4", "5", "6")],
+         [False, True, True, True])
+    case("a dotted caption does not mark hyphen labels",
+         cites(["Figure 1.2. Caption.\nSee Figures 1-3."]),
+         {"1-2": 1, "1": 1, "2": 1, "3": 1})
+    case("a dotted appendix caption leaves plain ranges expanding",
+         cites(["Figure 1. Main result.\nAs Figures 2-4 show, the loss falls.\n"
+                "Figure A.1. Appendix robustness check."]),
+         {"1": 1, "2": 1, "3": 1, "4": 1, "A-1": 1})
+    case("a caption-shaped prose line does not mark the document",
+         cites(["Figure 1-2 shows the traces.\nSee Figures 1-3."]),
+         {"1-2": 1, "1": 1, "2": 1, "3": 1})
+    case("non-ASCII decimal digits fold to the on-disk ASCII label",
+         cites(["See Figure \u0663 for the trace."]), {"3": 1})
     case("multi-level dashed labels are not truncated",
          cites(["Figure 1-2-3 shows the hierarchy. Figure C-2-1 is the control."]),
          {"1-2-3": 1, "C-2-1": 1})
@@ -655,8 +712,10 @@ def main(argv=None):
         return 5
     if not any(p.strip() for p in pages):
         print("%s has %d page(s) and no extractable text at all -- it is a "
-              "scan. OCR it first (`ocrmypdf`) or read it with the pdf skill; "
-              "nothing below can verify a claim against it."
+              "scan. Read the page images directly, or OCR a copy into a "
+              "unique scratch directory outside the vault (never beside the "
+              "source) and check its digits against the page images; nothing "
+              "below can verify a claim against this file."
               % (args.pdf, len(pages)), file=sys.stderr)
         return 4
 

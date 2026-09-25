@@ -43,15 +43,22 @@ CLI:
     find_collisions.py --wiki '<vault>/Wiki' --titles titles.json
         (indexes on the fly)
       [--no-stem]      probe (f) off
-      [--no-superset]  probe (g), the token-superset extension, off
+      [--no-superset]  probe (g) off
       [--no-peers]     skip the candidate-vs-candidate pass
       [--compact]      compact JSON
 
 Output: per candidate {candidate, slug, matches:[{probe, matched_slug,
-matched_via, alias?, entry_slug, implies}], verdict}, plus the top-level
-``candidate_collisions[]``, ``index_problems[]`` and ``summary``. An index with
-``ok: false`` is incomplete even if its producer's problem list was lost; every
-otherwise-new candidate then requires adjudication.
+matched_via, alias?, entry_slug, implies}], verdict, naming?}, plus the top-level
+``candidate_collisions[]``, ``index_problems[]`` and ``summary``.
+``naming: ["bare-common-noun"]`` marks a candidate whose slug is a bare term
+from writing.md's cross-domain corpus: qualify the title and probe again. It
+never changes the verdict; ``lint_entry.py`` reports the same slug as
+``5-bare-common-noun``. Every index
+problem is reported. Only those that can hide slug, title or alias ownership
+turn an otherwise-new candidate into ``adjudicate``: ``ok: false`` (even when
+the problem list was lost), an entry whose ``identity_complete`` is false (or
+missing, with errors), and any problem that is neither an entry error nor a
+duplicate-slug report.
 
 For source-derived or otherwise untrusted titles, always use ``--titles``;
 never interpolate title text into a shell command. ``--title`` remains a
@@ -66,11 +73,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import unicodedata
 import sys
 
 _OBSIDIAN_SHARED_MODULES = (
-    'entry_structure', 'markdown_tables', 'plurals', 'portable_names', 'slugify', 'vault_artifacts', 'yaml_scalars',
+    'code_typography', 'entry_checks', 'entry_structure', 'markdown_tables',
+    'organism_names', 'plurals', 'portable_names', 'slugify',
+    'vault_artifacts', 'yaml_scalars',
 )
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/RUNTIME.md) ---
@@ -111,6 +119,8 @@ if _here != _shared:
 # --- end bootstrap ---
 
 from slugify import SlugError, mu_variants, slug_stem  # noqa: E402
+from portable_names import portable_identity  # noqa: E402
+from entry_checks import bare_common_noun_slug  # noqa: E402
 # NO SINGULARISER LIVES HERE.  Probes (c) and (e) both turn on which two word
 # forms are the same word, and wiki-lint's whole-vault sweep turns on the
 # same fact -- CONVENTIONS.md §9 gives that sweep to wiki-lint alone, so a
@@ -141,8 +151,8 @@ PROBES = {
     "c-singular-plural": "adjudicate",
     "d-hyphenation-collapse": "adjudicate",
     "e-word-order-permutation": "adjudicate",
-    "f-stem-morphology": "adjudicate",   # extension, not one of the five
-    "g-token-superset": "adjudicate",    # extension, not one of the five
+    "f-stem-morphology": "adjudicate",   # adjudicate only; may fire on distinct entries
+    "g-token-superset": "adjudicate",    # adjudicate only; may fire on distinct entries
 }
 
 VERDICT_RANK = {"create": 0, "adjudicate": 1, "merge": 2}
@@ -159,13 +169,12 @@ SUPERSET_MAX_EXTRA = 2
 def _implies(probe):
     """The verdict a probe implies.
 
-    Probes (f) and (g) are extensions, not among the skill's five, and both
-    deliberately fire on pairs the schema may want kept SEPARATE -- (f) on
-    process / tool / unit triples (tokenization / tokenizer / token), (g) on
-    a qualified title beside its base term.  They can therefore only ever
-    ``adjudicate``; a merge verdict from either would silently fuse distinct
-    entries.  Hard-coded here rather than only in ``PROBES`` so the invariant
-    survives an edit to that table.
+    Probes (f) and (g) both deliberately fire on pairs the schema may want
+    kept SEPARATE -- (f) on process / tool / unit triples (tokenization /
+    tokenizer / token), (g) on a qualified title beside its base term.  They
+    can therefore only ever ``adjudicate``; a merge verdict from either would
+    silently fuse distinct entries.  Hard-coded here rather than only in
+    ``PROBES`` so the invariant survives an edit to that table.
     """
     if probe in (STEM_PROBE, SUPERSET_PROBE):
         return "adjudicate"
@@ -236,21 +245,59 @@ def _validate_index(index):
             raise ValueError("index entry %d aliases must be a list of strings" % i)
         if not isinstance(rec.get("errors", []), list):
             raise ValueError("index entry %d errors must be a list" % i)
+        if not isinstance(rec.get("identity_complete", False), bool):
+            raise ValueError("index entry %d identity_complete must be a boolean" % i)
+
+
+_INCOMPLETE_INVENTORY = "index reports an incomplete recursive inventory (ok is false)"
+
+
+def _entry_problem(rec, error):
+    return "%s: %s" % (rec.get("relpath") or rec["slug"], error)
 
 
 def _index_problems(index):
     """Keep index omissions visible even when a caller supplied a bare list."""
     problems = [str(p) for p in index.get("problems", [])]
-    if index.get("ok") is False:
-        incomplete = "index reports an incomplete recursive inventory (ok is false)"
-        if incomplete not in problems:
-            problems.append(incomplete)
+    if index.get("ok") is False and _INCOMPLETE_INVENTORY not in problems:
+        problems.append(_INCOMPLETE_INVENTORY)
     for rec in index["entries"]:
         for error in rec.get("errors", []):
-            message = "%s: %s" % (rec.get("relpath") or rec["slug"], error)
+            message = _entry_problem(rec, error)
             if message not in problems:
                 problems.append(message)
     return problems
+
+
+def _creation_blockers(index):
+    """Index problems that can hide slug, title or alias ownership.
+
+    A malformed date or source cannot conceal an owner, so it stays a reported
+    problem without blocking every new entry. An incomplete walk, an entry
+    whose identity metadata was not fully read, or an unrecognized problem
+    still does. A record without ``identity_complete`` (an older index) counts
+    as incomplete whenever it carries errors.
+    """
+    blockers = []
+    if index.get("ok") is False:
+        blockers.append(_INCOMPLETE_INVENTORY)
+    known = set()
+    for rec in index["entries"]:
+        errors = rec.get("errors") or []
+        known.update(_entry_problem(rec, error) for error in errors)
+        complete = rec.get("identity_complete")
+        if complete is False or (complete is None and errors):
+            blockers.extend(_entry_problem(rec, error) for error in errors
+                            or ["identity metadata is incomplete"])
+    duplicates = index.get("duplicate_slugs")
+    if isinstance(duplicates, dict):
+        known.update(_vault_index.duplicate_slug_problem(slug, paths)
+                     for slug, paths in duplicates.items()
+                     if isinstance(paths, list)
+                     and all(isinstance(path, str) for path in paths))
+    blockers.extend(problem for problem in map(str, index.get("problems", []))
+                    if problem not in known and problem not in blockers)
+    return blockers
 
 
 def build_targets(index):
@@ -345,7 +392,7 @@ def _candidate_slugs(title, use_stem=True, use_superset=True):
 
 def _fold(s):
     """Case- and Unicode-folded slug, matching scan_vault.fold_name."""
-    return unicodedata.normalize("NFC", (s or "").strip()).casefold()
+    return portable_identity((s or "").strip())
 
 
 def _probe_pair(keys, other_slug, use_stem=True, use_superset=True):
@@ -393,10 +440,8 @@ def _probe_pair(keys, other_slug, use_stem=True, use_superset=True):
 
     if use_stem and keys["stem"] and stem_key(other_slug) == keys["stem"]:
         # Only when nothing else fired.  Probe (f)'s stemmer collapses plurals
-        # too, so before probe (c) was symmetric a plain plural pair
-        # (roc-curve / roc-curves) came back labelled "f-stem-morphology" --
-        # naming an extension as the cause of a finding that is really a
-        # probe-(c) hit, and misdirecting whoever read the report.
+        # too, so a plain plural pair (roc-curve / roc-curves) must be
+        # reported as the probe-(c) hit it is, not as "f-stem-morphology".
         if not fired:
             fired.append("f-stem-morphology")
 
@@ -417,12 +462,13 @@ def _probe_pair(keys, other_slug, use_stem=True, use_superset=True):
 
 
 def check_candidate(title, index, use_stem=True, use_superset=True, peers=None,
-                    targets=None, index_problems=None):
+                    targets=None, creation_blockers=None):
     """Probe one candidate title against the vault index (and optional peers).
 
     ``peers`` is a list of ``(title, slug)`` for the other candidates in the
-    same run.  ``targets`` is a prebuilt ``build_targets(index)`` — pass it
-    when probing many candidates: rebuilding it per candidate re-slugs every
+    same run.  ``targets`` is a prebuilt ``build_targets(index)`` and
+    ``creation_blockers`` a prebuilt ``_creation_blockers(index)`` — pass them
+    when probing many candidates: rebuilding them per candidate re-slugs every
     alias in the vault each time, which turns a run over a large vault into
     candidates × aliases slug computations for no new information.  Returns
     the per-candidate result dict.
@@ -434,6 +480,9 @@ def check_candidate(title, index, use_stem=True, use_superset=True, peers=None,
         result["error"] = err
         result["verdict"] = "adjudicate"
         return result
+    if bare_common_noun_slug(slug):
+        # Advisory only: a naming defect, not an ownership collision.
+        result["naming"] = ["bare-common-noun"]
 
     for target in (build_targets(index) if targets is None else targets):
         other = target["slug"]
@@ -507,12 +556,14 @@ def check_candidate(title, index, use_stem=True, use_superset=True, peers=None,
         if VERDICT_RANK[match["implies"]] > VERDICT_RANK[verdict]:
             verdict = match["implies"]
     result["verdict"] = verdict
-    problems = _index_problems(index) if index_problems is None else index_problems
-    if problems and verdict == "create":
+    blockers = (_creation_blockers(index) if creation_blockers is None
+                else creation_blockers)
+    if blockers and verdict == "create":
         result["verdict"] = "adjudicate"
-        result["error"] = ("the index reports %d problem(s); unreadable or malformed "
-                           "entries may hide aliases, so creation is not established"
-                           % len(problems))
+        result["error"] = ("the index reports %d problem(s) that can hide slug, "
+                           "title or alias ownership (an incomplete walk, or an "
+                           "unread, unparsed or malformed title/aliases entry), "
+                           "so creation is not established" % len(blockers))
     return result
 
 
@@ -531,10 +582,10 @@ def check_candidates(titles, index, use_stem=True, use_superset=True,
     peers = [(t, s) for t, s in prepared if s] if include_peers else []
 
     targets = build_targets(index)          # once, not once per candidate
-    index_problems = _index_problems(index)
+    blockers = _creation_blockers(index)
     results = [check_candidate(t, index, use_stem=use_stem,
                                use_superset=use_superset, peers=peers,
-                               targets=targets, index_problems=index_problems)
+                               targets=targets, creation_blockers=blockers)
                for t in titles]
 
     seen_pairs, pairwise = set(), []
@@ -556,7 +607,7 @@ def check_candidates(titles, index, use_stem=True, use_superset=True,
     return {
         "wiki_folder": index.get("wiki_folder"),
         "indexed_entries": len(index.get("entries", [])),
-        "index_problems": index_problems,
+        "index_problems": _index_problems(index),
         "stem_probe_enabled": use_stem,
         "superset_probe_enabled": use_superset,
         "candidate_count": len(results),
@@ -674,6 +725,38 @@ def run_self_test():
             check("incomplete index cannot authorize an unmatched create",
                   (rep["results"][0]["verdict"], bool(rep["index_problems"])),
                   ("adjudicate", True))
+
+        # Only problems that can hide slug, title or alias ownership block a
+        # create; every problem is still reported.
+        existing = _st_entry_text("Existing entry", aliases=["existing-alias"])
+        for label, files, want in (
+                ("a malformed date",
+                 {"existing-entry.md": existing.replace(
+                     "updated: 2026-01-02", "updated: 2026-1-2")}, "create"),
+                ("a stale filename", {"stale-name.md": existing}, "create"),
+                ("a slug duplicated across folders",
+                 {"existing-entry.md": existing,
+                  "sub/existing-entry.md": existing}, "create"),
+                ("a scalar aliases field",
+                 {"existing-entry.md": existing.replace(
+                     'aliases:\n  - "existing-alias"',
+                     'aliases: "existing-alias"')}, "adjudicate"),
+                ("an indented-key parse error",
+                 {"existing-entry.md": existing.replace(
+                     "type: Concept", "type: Concept\n  nested: x")},
+                 "adjudicate")):
+            metadata_wiki = os.path.join(tmp, "metadata-" + label.replace(" ", "-"))
+            for rel, text in files.items():
+                dest = os.path.join(metadata_wiki, rel)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with open(dest, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+            rep = check_candidates(["A new unmatched term"],
+                                   _vault_index.build_index(metadata_wiki))
+            check("%s is reported and %s an unmatched create"
+                  % (label, "allows" if want == "create" else "blocks"),
+                  (rep["results"][0]["verdict"], bool(rep["index_problems"])),
+                  (want, True))
         malformed_index = os.path.join(tmp, "malformed-index.json")
         for payload in ({"entries": ["bad"]},
                         {"entries": [{"slug": "x", "aliases": 0}]},
@@ -770,6 +853,14 @@ def run_self_test():
         check("probe (f) is suppressed when another probe already fired "
               "(a stem hit must not be reported as the cause of a plural pair)",
               _st_fired(probe("ROC curves"), "ROC-curve"), ["c-singular-plural"])
+
+        check("a bare cross-domain common-noun slug is flagged for "
+              "qualification without changing the verdict",
+              [(r.get("naming"), r["verdict"]) for r in (
+                  probe("Entropy"), probe("Entropies"),
+                  probe("Entropy (information theory)"))],
+              [(["bare-common-noun"], "create"), (None, "create"),
+               (None, "create")])
 
         # -- verdict arithmetic ---------------------------------------------
         check("a merge match outranks an adjudicate match on the same candidate",
@@ -971,12 +1062,12 @@ def _build_parser():
     p.add_argument("--test", action="store_true",
                    help="run the built-in self-test and exit")
     p.add_argument("--no-stem", action="store_true",
-                   help="disable probe (f), the non-skill stem-morphology "
-                        "extension, for strict five-probe behaviour")
+                   help="disable probe (f), stem morphology (on by default; "
+                        "adjudicate only)")
     p.add_argument("--no-superset", action="store_true",
-                   help="disable probe (g), the non-skill token-superset "
-                        "extension (a candidate extending an existing slug "
-                        "by <=2 stemmed tokens, adjudicate only)")
+                   help="disable probe (g), token superset: a candidate "
+                        "extending an existing slug by <=2 stemmed tokens "
+                        "(on by default; adjudicate only)")
     p.add_argument("--no-peers", action="store_true",
                    help="disable candidate-vs-candidate probing")
     p.add_argument("--compact", action="store_true", help="compact JSON output")

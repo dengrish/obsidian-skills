@@ -40,15 +40,17 @@ Usage:
     # checks are reported as not-run rather than silently skipped.
     python3 organize.py rename '<input-dir>/download(1).pdf' --to Smith_X_1776.pdf
 
-    # Already in canonical form?  (Exit 0 = yes, 1 = no.)
+    # Already in canonical form?  (Exit 0 = yes, 1 = no.)  A collector-owned
+    # feed attachment prints "feed-owned, skipped" and does not count as no.
     python3 organize.py canonical Prince_UDL_2026_02_SupLearn_src.pdf
 
-    # Split a book.  chapters.json is a list of the chapter dicts described
-    # in `references/book-splitting.md`; <run-temp> is unique to this run.
+    # Plan a book split (writes nothing), then repeat with --apply.
+    # chapters.json is a list of the chapter dicts described in
+    # `references/book-splitting.md`; <run-temp> is unique to this run.
     python3 organize.py split --vault '<vault>' \\
         '<vault>/Sources/PDFs/Kuhn_StructSciRev_2012.pdf' \\
         --chapters '<run-temp>/chapters.json' \\
-        --out '<vault>/Sources/PDFs/Kuhn_StructSciRev_2012'
+        --out '<vault>/Sources/PDFs/Kuhn_StructSciRev_2012' [--apply]
 
     # The adversarial fixtures this module is held to.
     python3 organize.py selftest
@@ -127,6 +129,7 @@ from naming import (                       # noqa: E402  (after the bootstrap)
     chapter_book_stem,
     chapter_parts,
     core_stem,
+    is_feed_attachment,
     looks_canonical,
     split_tail,
 )
@@ -442,8 +445,13 @@ def _quoted_source_spans(text):
         position += len(line)
 
 
+# A bare CommonMark destination may contain backslash escapes and one level of
+# balanced parentheses: browser downloads such as `download (1).pdf` are linked
+# as `download%20(1).pdf` or `download%20\(1\).pdf`.
 _MARKDOWN_DESTINATION = re.compile(
-    r"\]\([ \t]*(?:<(?P<angle>[^<>\r\n]+)>|(?P<bare>[^\s()<>]+))")
+    r"\]\([ \t]*(?:<(?P<angle>[^<>\r\n]+)>"
+    r"|(?P<bare>(?:[^\s()<>\\]|\\.|\((?:[^\s()<>\\]|\\.)*\))+))")
+_MARKDOWN_ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
 
 
 def _decoded_markdown_parts(text):
@@ -462,7 +470,7 @@ def _decoded_markdown_parts(text):
             continue
         path = re.split(r"[?#]", target, maxsplit=1)[0]
         try:
-            decoded = unquote(path, errors="strict")
+            decoded = unquote(_MARKDOWN_ESCAPE.sub(r"\1", path), errors="strict")
         except UnicodeError:
             continue
         if decoded == path and group == "bare":
@@ -1517,6 +1525,21 @@ def _inside(vault, path):
         return False
 
 
+def _feed_attachment_blocker(path):
+    """Why a collector-owned feed attachment is never a rename source, or None.
+
+    CONVENTIONS.md §1: its name is recorded in the feed collector's durable
+    state, which no knowledge helper can update, so renaming or filing it
+    orphans the collector's receipt even when the user named the file.
+    """
+    if not is_feed_attachment(os.path.basename(path)):
+        return None
+    return ("%s is a collector-owned feed attachment. Its name is recorded in "
+            "the feed collector's durable state, which this helper cannot "
+            "update, so it keeps its name and location even when named "
+            "explicitly. Use it as it is." % path)
+
+
 def _source_problem(path):
     """Why `path` cannot be a rename source, or None for a regular file/link.
 
@@ -1603,6 +1626,52 @@ def _image_ownership_blockers(vault, source, keyed):
     except (OSError, UnicodeError, ValueError) as exc:
         return ["Cannot establish PDF ownership of derived images (%s). "
                 "Repair the figure records before renaming." % exc]
+
+
+def _shared_basename_blockers(path, existing):
+    """Refuse a source whose basename another vault file already has.
+
+    `existing` is the `vault_names` map. Figures, a summary note, a chapter
+    folder and bare references are keyed to the basename, so with two copies
+    none of them can be attributed to the selected one: an Inbox re-download
+    of a filed paper would otherwise take over its whole derived family.
+    """
+    real = os.path.realpath(path)
+
+    def same(other):
+        other_real = os.path.realpath(other)
+        if other_real == real:
+            return True
+        try:                        # the same file typed in another case
+            return (_nfc_low(other_real) == _nfc_low(real)
+                    and os.path.samefile(other_real, real))
+        except OSError:
+            return False
+
+    others = [p for p in existing.get(_nfc_low(os.path.basename(path)), [])
+              if not same(p)]
+    if not others:
+        return []
+    return ["%s shares its basename with %s. Figures, notes, chapter folders "
+            "and bare references keyed to this name cannot be attributed to "
+            "one copy, so pdf-organize cannot rename or file either copy. Ask "
+            "the user to remove the redundant copy or to rename or move one "
+            "out of the vault, then retry; never delete or move either copy "
+            "yourself." % (path, ", ".join(sorted(others)))]
+
+
+def _family_basename_blockers(path, keyed, existing):
+    """`_shared_basename_blockers` for every other PDF in `path`'s family.
+
+    A chapter whose basename another vault file shares would otherwise take
+    over that copy's bare citations and figures when its book is renamed.
+    """
+    out = []
+    for member, name in sorted(keyed.items()):
+        if (member != path and _nfc_low(name).endswith(".pdf")
+                and not os.path.isdir(member)):
+            out.extend(_shared_basename_blockers(member, existing))
+    return out
 
 
 def _target_stem_blockers(vault, stem, mine):
@@ -1787,7 +1856,7 @@ def plan_rename(vault, path, new_basename, dest=None):
     old_stem, old_ext = os.path.splitext(src_basename)
     new_stem, new_ext = os.path.splitext(new_basename)
     have_vault = bool(vault) and os.path.isdir(vault)
-    source_problem = _source_problem(path)
+    source_problem = _source_problem(path) or _feed_attachment_blocker(path)
     if source_problem:
         return [], Edits(), [source_problem]
     if have_vault and not _inside(vault, path):
@@ -1832,23 +1901,22 @@ def plan_rename(vault, path, new_basename, dest=None):
             "it is, and name it in the report rather than dropping it "
             "silently." % (src_basename, old_ext)]
 
-    # THIS SKILL RENAMES THE STEM AND NEVER THE EXTENSION (SKILL.md's filename rules: "always preserves the original extension; only the base
-    # name changes").  A caller passing a different one believes it is
-    # renaming some other file, so that is a blocker rather than a silent
-    # preference — this used to be resolved by quietly discarding whatever the
-    # caller asked for, which turned `download` + `Smith_X_1776.pdf` into an
-    # extensionless `Smith_X_1776` with no blocker, breaking every downstream
-    # `![[Smith_X_1776.pdf]]` embed and every `*.pdf` sweep.
+    # THIS SKILL RENAMES THE STEM AND NEVER THE EXTENSION (SKILL.md step 1:
+    # organize.py blocks an extension change).  A caller passing a different
+    # one believes it is renaming some other file, so that is a blocker
+    # rather than a silent preference — this used to be resolved by quietly
+    # discarding whatever the caller asked for, which turned `download` +
+    # `Smith_X_1776.pdf` into an extensionless `Smith_X_1776` with no
+    # blocker, breaking every downstream `![[Smith_X_1776.pdf]]` embed and
+    # every `*.pdf` sweep.
     #
     # ABOVE the "name we write ends in .pdf" guard, and that ordering is the
     # whole of the check.  Below it, the only way here was `old_ext` and
     # `new_ext` both in {"", ".pdf"} — under which they never differ — so the
     # branch was unreachable and the mismatch a caller actually makes
     # (`.pdf` -> `.epub`) was answered by the generic PDFs-only refusal.
-    # SKILL.md promises this message twice ("the message names the basename to
-    # pass instead") and `--to`'s help text a third time; no reachable message
-    # named one, and a promise the code cannot keep is read by the next caller
-    # as a bug in their own invocation.
+    # The mismatch blocker names the basename to pass, so the caller can
+    # correct the invocation.
     if old_ext and new_ext and old_ext.lower() != new_ext.lower():
         return [], Edits(), [
             "refusing to rename %r to %r: that changes the extension from %s "
@@ -1899,6 +1967,16 @@ def plan_rename(vault, path, new_basename, dest=None):
                 "its first 1024 bytes; refusing to add .pdf by name alone."
                 % src_basename]
 
+    existing, existing_error = {}, None
+    if have_vault:
+        try:
+            existing = vault_names(vault)
+        except InventoryFailed as exc:
+            existing_error = exc
+    duplicate = _shared_basename_blockers(path, existing)
+    if duplicate:
+        return [], Edits(), duplicate
+
     try:
         keyed = keyed_files(vault, path) if have_vault \
             else {path: src_basename}
@@ -1906,6 +1984,9 @@ def plan_rename(vault, path, new_basename, dest=None):
         return [], Edits(), [
             "%s The owned source family cannot be established, so nothing "
             "may be renamed." % exc]
+    duplicate = _family_basename_blockers(path, keyed, existing)
+    if duplicate:
+        return [], Edits(), duplicate
     ren = {b: _derive(old_stem, b, new_stem) for b in keyed.values()}
     directory_ren = {b: ren[b] for p, b in keyed.items()
                      if os.path.isdir(p) and not os.path.islink(p)}
@@ -1979,9 +2060,9 @@ def plan_rename(vault, path, new_basename, dest=None):
                 "one there is nothing to be inside, and nothing to rewrite."
                 % (dest, vault or "not given"))
         elif not _inside(vault, path):
-            # SKILL.md: "A file outside the vault is never imported." Deciding
-            # that a download belongs in the vault is the user's call, not a
-            # side effect of asking for a better filename.
+            # SKILL.md scope: an external source is not imported merely
+            # because a better name was requested. Deciding that a download
+            # belongs in the vault is the user's call.
             blockers.append(
                 "%s is outside the vault %s, so it is renamed where it sits "
                 "and no destination applies. Move it into the vault yourself "
@@ -2025,12 +2106,9 @@ def plan_rename(vault, path, new_basename, dest=None):
                             "limit. Abbreviate the title further."
                             % (old, new, len(os.fsencode(new)), MAX_NAME_BYTES))
 
-    try:
-        existing = vault_names(vault) if have_vault else {}
-    except InventoryFailed as exc:
+    if existing_error is not None:
         blockers.append("%s Vault-wide basename uniqueness could not be "
-                        "checked." % exc)
-        existing = {}
+                        "checked." % existing_error)
     # Every colliding path, not just one: two files already sharing a
     # lowercased basename are two separate obstacles, and naming one of them
     # sends the user back around the same refusal after they have moved it.
@@ -2537,10 +2615,38 @@ def _reader(pdf_path):
     return reader
 
 
+def _contents_pages(chapters, text):
+    """Pages that list two or more planned chapter headings: a table of contents.
+
+    Such a page never carries a chapter start, and it does not count towards a
+    heading's running-header limit. A heading contained in another heading on
+    the same page (`chapter 1` in `chapter 10 ...`) is not counted twice.
+    """
+    needles = {_norm(ch["heading_text"]) for ch in chapters
+               if isinstance(ch, dict) and isinstance(ch.get("heading_text"), str)}
+    needles = {needle for needle in needles if len(needle) >= 3}
+    pages = set()
+    for index, page in enumerate(text):
+        found = [needle for needle in needles if needle in page]
+        distinct = [needle for needle in found
+                    if not any(needle != other and needle in other
+                               for other in found)]
+        if len(distinct) >= 2:
+            pages.add(index)
+    return pages
+
+
 def _resolve(chapters, text, n_pages, out_dir, taken, book_stem=None):
     """(plan, problems, notes) — pass 1 of `split_book`.  Writes nothing."""
     plan, problems, notes, seen = [], [], [], {}
+    requested_starts = []
     last_chapter_number = None
+    contents = _contents_pages(chapters, text)
+
+    def carries(index, needle):
+        return (0 <= index < n_pages and index not in contents
+                and needle in text[index])
+
     for position, ch in enumerate(chapters, 1):
         if not isinstance(ch, dict):
             problems.append("chapter item %d: expected a JSON object, got %s"
@@ -2616,46 +2722,67 @@ def _resolve(chapters, text, n_pages, out_dir, taken, book_stem=None):
                             "page indices, got %r and %r"
                             % (name, start, end))
             continue
-        heading_pages = [index for index, page in enumerate(text)
-                         if needle in page]
+        heading_pages = [index for index in range(n_pages)
+                         if carries(index, needle)]
         if len(heading_pages) > 2:
             problems.append(
-                "%s: heading_text %r appears on %d pages, so it may be a "
-                "running header and cannot verify the start page. Use a "
-                "longer heading or subtitle unique to the chapter opening."
+                "%s: heading_text %r appears on %d pages besides the contents, "
+                "so it may be a running header and cannot verify the start "
+                "page. Include the printed chapter label, or use a longer "
+                "heading unique to the chapter opening."
                 % (name, ch["heading_text"], len(heading_pages)))
             continue
 
         # Verify the mapped start page really carries the heading; TOC mappings
-        # are commonly off by a page or two. Don't guess beyond +/-2.
-        #
-        # Both corrections are reported, and that is not decoration: a start
-        # this function moved is the evidence that the caller's page mapping is
-        # off — the 0-based/1-based slip `references/book-splitting.md` calls
-        # the one pitfall the code cannot fix — and one chapter corrected by
-        # one page means the whole TOC is, including every chapter that
-        # happened to land on a page carrying its heading anyway.  That file
-        # promises the correction is "corrected and reported rather than
-        # shipped" and the workflow's step 6 tells the reader to repeat the
-        # `note:` lines; `notes` was appended to for the end trim alone, so a
-        # caller doing `notes = split_book(...)` got [] and reported a clean
-        # split of a book whose starts had all been moved under them.
-        if not (0 <= start < n_pages) or needle not in text[start]:
-            for cand in (start - 1, start + 1, start - 2, start + 2):
-                if 0 <= cand < n_pages and needle in text[cand]:
-                    notes.append("%s: start corrected from page %d to %d — the "
-                                 "heading is not on the page the mapping gave"
-                                 % (name, start + 1, cand + 1))
-                    start = cand
+        # are commonly off by a page or two. Take the nearest page that does,
+        # never a contents page, and refuse a tie rather than guess. Each
+        # correction is reported: one moved start is evidence that the whole
+        # page mapping may be off.
+        if not carries(start, needle):
+            found = []
+            for distance in (1, 2):
+                found = [cand for cand in (start - distance, start + distance)
+                         if carries(cand, needle)]
+                if found:
                     break
-            else:
-                problems.append("%s: heading %r not found within +/-2 pages "
-                                "of %s" % (name, ch["heading_text"],
-                                           ch["start_idx"]))
+            if len(found) > 1:
+                problems.append("%s: heading %r is on pages %d and %d, equally "
+                                "near the mapped page %d; re-derive this start "
+                                "from the table of contents"
+                                % (name, ch["heading_text"], found[0] + 1,
+                                   found[1] + 1, start + 1))
                 continue
+            if not found:
+                # A page naming two planned headings counts as contents, so
+                # a chapter opening that mentions another chapter's bare label
+                # hides its own heading. Say so rather than blame the mapping.
+                listed = [cand + 1 for cand in range(start - 2, start + 3)
+                          if 0 <= cand < n_pages and cand in contents
+                          and needle in text[cand]]
+                if listed:
+                    problems.append(
+                        "%s: heading %r not found within +/-2 pages of "
+                        "physical page %d outside contents pages; physical "
+                        "page(s) %s carry it but also list other planned "
+                        "headings, so they were treated as contents. If one "
+                        "is this chapter's opening, give heading_text unique "
+                        "to it (printed label plus title); otherwise "
+                        "re-derive this start from the table of contents"
+                        % (name, ch["heading_text"], start + 1,
+                           ", ".join(map(str, listed))))
+                else:
+                    problems.append("%s: heading %r not found within +/-2 "
+                                    "pages of %s" % (name, ch["heading_text"],
+                                                     ch["start_idx"]))
+                continue
+            notes.append("%s: start corrected from page %d to %d — the "
+                         "heading is not on the page the mapping gave"
+                         % (name, start + 1, found[0] + 1))
+            start = found[0]
 
         # Pull in a standalone chapter title page immediately before.
-        if start > 0 and len(text[start - 1]) < 200 and needle in text[start - 1]:
+        if (start > 0 and len(text[start - 1]) < 200
+                and carries(start - 1, needle)):
             notes.append("%s: start moved from page %d to %d to take in the "
                          "chapter title page before it" % (name, start + 1, start))
             start -= 1
@@ -2690,11 +2817,14 @@ def _resolve(chapters, text, n_pages, out_dir, taken, book_stem=None):
             continue
         seen[name.lower()] = ch["heading_text"]
         plan.append([start, end, target, name])
+        requested_starts.append(ch["start_idx"])
 
     # Ranges: chapters run in book order and must not overlap. A start that
     # goes backwards means the page mapping is wrong, not that a chapter is
-    # long — refuse. An end that runs into the next chapter or past EOF is
-    # trimmed, and the trim is reported: it is evidence the TOC was misread.
+    # long — refuse. An end the caller set to the next chapter's requested
+    # start follows that start's correction; an end that still runs into the
+    # next chapter or past EOF is trimmed. Both are reported, as are pages
+    # between chapters that no chapter covers.
     for i in range(1, len(plan)):
         if plan[i][0] <= plan[i - 1][0]:
             problems.append("%s: starts at page %d, at or before %s (%d) — the "
@@ -2704,12 +2834,24 @@ def _resolve(chapters, text, n_pages, out_dir, taken, book_stem=None):
     if not problems:
         for i, (start, end, _target, name) in enumerate(plan):
             nxt = plan[i + 1][0] if i + 1 < len(plan) else n_pages
+            if (i + 1 < len(plan) and end == requested_starts[i + 1]
+                    and end != nxt):
+                notes.append("%s: end moved from %d to %d with the next "
+                             "chapter's corrected start" % (name, end, nxt))
+                plan[i][1] = end = nxt
             if end > nxt:
                 notes.append("%s: end trimmed from %d to %d" % (name, end, nxt))
                 plan[i][1] = end = nxt
             if end <= start:
                 problems.append("%s: empty page range after resolving the "
                                 "start page (%d..%d)" % (name, start, end))
+        for previous, following in zip(plan, plan[1:]):
+            if following[0] > previous[1]:
+                pages = ("page %d" % following[0]
+                         if following[0] == previous[1] + 1 else
+                         "pages %d-%d" % (previous[1] + 1, following[0]))
+                notes.append("%s, between %s and %s, belongs to no chapter"
+                             % (pages, previous[3], following[3]))
     return plan, problems, notes
 
 
@@ -2798,14 +2940,18 @@ def _split_failure_message(pdf_path, written_count, plan_count, exc,
     return lead + " Rolled back — nothing from this split is on disk."
 
 
-def split_book(pdf_path, chapters, out_dir, taken=None, verbose=True):
-    """Split `pdf_path` into one PDF per chapter, under `out_dir`.
+def split_book(pdf_path, chapters, out_dir, taken=None, verbose=True,
+               apply=False):
+    """Plan, or with `apply=True` write, one PDF per chapter under `out_dir`.
 
     `chapters` is a list of dicts in book order, each with `heading_text`,
     `filename`, `start_idx` and `end_idx` (0-based; `end_idx` exclusive) —
     see `references/book-splitting.md`.  `taken` is `vault_names(vault)`:
     every basename already in the vault, so a chapter cannot collide with a
-    file in another folder.  Returns the list of `note:` strings.
+    file in another folder.  Returns the list of `note:` strings.  Without
+    `apply` it resolves and reports the final ranges and notes, writes
+    nothing and creates no folder, so corrections are reviewed before any
+    chapter becomes authoritative.
 
     **Two passes: resolve everything, then write.** The original is preserved;
     no chapter reaches disk until every chapter has a verified start page,
@@ -2906,9 +3052,10 @@ def split_book(pdf_path, chapters, out_dir, taken=None, verbose=True):
         except Exception:
             text.append("")                  # a damaged page is not a crash
     if not any(text):
-        raise SplitRefused("%s: no extractable text (a scan?). Chapter "
-                           "boundaries can't be found — OCR it first, then "
-                           "re-run." % pdf_path)
+        raise SplitRefused("%s: no extractable text layer (a scan?), so "
+                           "chapter headings cannot be verified. Nothing was "
+                           "written. Report it; do not OCR or replace the "
+                           "original in place." % pdf_path)
     try:
         plan, problems, notes = _resolve(chapters, text, n_pages, out_dir, taken,
                                          core_stem(pdf_path))
@@ -2920,6 +3067,15 @@ def split_book(pdf_path, chapters, out_dir, taken=None, verbose=True):
         raise SplitRefused("Not splitting %s. Fix these first:\n  - "
                            % os.path.basename(pdf_path)
                            + "\n  - ".join(problems))
+    if not apply:
+        if verbose:
+            for start, end, _target, name in plan:
+                print("%s  pages %d-%d" % (name, start + 1, end))
+            for n in notes:
+                print("note:", n)
+            print("Plan only — nothing was written. Review every note, then "
+                  "re-run with --apply.")
+        return notes
 
     # --- Pass 2: write. Every target is in range and proved free. A failure
     # part-way attempts to remove what this run just created — half a split is
@@ -3039,6 +3195,10 @@ def _cmd_check(args):
     if problem:
         print(problem, file=sys.stderr)
         return 1
+    feed = _feed_attachment_blocker(path)
+    if feed:
+        print("BLOCKED — %s" % feed)
+        return 1
     if not vault:
         print("No vault to scan (--vault not given). The vault-wide reference check "
               "did NOT run; say so in the report rather than reporting the "
@@ -3050,9 +3210,16 @@ def _cmd_check(args):
               "the vault's notes or images.", file=sys.stderr)
         return 1
     try:
-        keyed = keyed_files(vault, path)
+        names = vault_names(vault)
+        duplicate = _shared_basename_blockers(path, names)
+        keyed = {} if duplicate else keyed_files(vault, path)
+        duplicate = duplicate or _family_basename_blockers(path, keyed, names)
     except InventoryFailed as exc:
         print("Reference check incomplete: %s" % exc, file=sys.stderr)
+        return 1
+    if duplicate:
+        for problem in duplicate:
+            print("BLOCKED — %s" % problem)
         return 1
     print("Names keyed to %s (%d):" % (os.path.basename(path), len(keyed)))
     for p, b in sorted(keyed.items()):
@@ -3185,7 +3352,7 @@ def _cmd_split(args):
               file=sys.stderr)
         return 1
     try:
-        split_book(pdf, chapters, out, taken)
+        split_book(pdf, chapters, out, taken, apply=args.apply)
     except SplitRefused as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -3195,6 +3362,10 @@ def _cmd_split(args):
 def _cmd_canonical(args):
     bad = 0
     for name in args.names:
+        if is_feed_attachment(name):
+            # Not a refusal: a sweep leaves the collector's file as it is.
+            print("%-52s %s" % (name, "feed-owned, skipped"))
+            continue
         ok = looks_canonical(name)
         bad += not ok
         print("%-52s %s" % (name, "canonical" if ok else "NOT canonical"))
@@ -4075,7 +4246,7 @@ def _selftest():
     _v = _vault("Store", "Sources/PDFs")
     _put(_v, "Store/real.pdf")
     _source_link = os.path.join(_v, "Sources/PDFs/real.pdf")
-    os.symlink("../Store/real.pdf", _source_link)
+    os.symlink("../../Store/real.pdf", _source_link)
     _m, _e, _b = rename_all(_v, _source_link, "Smith_X_1776.pdf")
     check("a symlinked source is refused",
           any("is a symlink to" in b for b in _b), True)
@@ -4338,8 +4509,8 @@ def _selftest():
 
     # 7. The extension-mismatch blocker sat BELOW the two PDFs-only guards,
     #    which left it reachable only when both extensions were in
-    #    {"", ".pdf"} -- where they never differ.  SKILL.md promises its
-    #    message twice and `--to`'s help text a third time.
+    #    {"", ".pdf"} -- where they never differ.  The message names the
+    #    basename to pass instead.
     _v = _vault("Inbox")
     _put(_v, "Inbox/paper.pdf"); _put(_v, "Inbox/notes.txt")
     _put(_v, "Inbox/download")
@@ -4347,8 +4518,7 @@ def _selftest():
                             "Smith_X_1776.epub")
     check("renaming a .pdf to .epub is refused as an extension mismatch",
           any("changes the extension" in _bl for _bl in _xb), True)
-    check("...and the message names the basename to pass instead, as "
-          "SKILL.md says it does",
+    check("...and the message names the basename to pass instead",
           any("Pass 'Smith_X_1776.pdf'" in _bl for _bl in _xb), True)
     _, _, _tb = plan_rename(_v, os.path.join(_v, "Inbox/notes.txt"),
                             "Smith_X_1776.pdf")
@@ -4362,12 +4532,11 @@ def _selftest():
           "to the .pdf output rule instead",
           any("ends in .pdf" in _bl for _bl in _nb), True)
 
-    # 8. `references/book-splitting.md` promises the +/-2 start correction is
-    #    "corrected and reported rather than shipped", and the workflow's step
-    #    6 tells the reader to repeat the `note:` lines.  `notes` was appended
-    #    to for the end trim alone, so `notes = split_book(...)` came back []
-    #    and the run reported a clean split of a book whose starts had all
-    #    been moved under it.
+    # 8. book-splitting.md asks callers to review every reported adjustment
+    #    and to report adjusted start/end pages.  `notes` was appended to for
+    #    the end trim alone, so `notes = split_book(...)` came back [] and the
+    #    run reported a clean split of a book whose starts had all been moved
+    #    under it.
     _ch = [{"heading_text": "Chapter 1 Intro", "filename":
             "Kuhn_S_2012_01_Intro.pdf", "start_idx": 0, "end_idx": 3}]
     _txt = [_norm(_p) for _p in ("front matter, no heading here",
@@ -4391,6 +4560,85 @@ def _selftest():
     _txt = [_norm(_p) for _p in ("Chapter 1 Intro " + "body " * 60, "more body")]
     _plan, _probs, _notes = _resolve(_ch, _txt, 2, "/tmp/x", {}, "Kuhn_S_2012")
     check("a start that needed no correction reports nothing", _notes, [])
+
+    # A uniform off-by-one mapping moves every start; each end the caller set
+    # to the next requested start follows it instead of dropping a page.
+    _ch = [{"heading_text": "Chapter %d %s" % (_i, _t),
+            "filename": "Doe_Book_2025_%02d_%s.pdf" % (_i, _t),
+            "start_idx": _s, "end_idx": _e}
+           for _i, _t, _s, _e in ((1, "Alpha", 1, 4), (2, "Beta", 4, 7),
+                                  (3, "Gamma", 7, 10))]
+    _txt = [_norm(_p) for _p in (
+        "front", "front two", "Chapter 1 Alpha body", "alpha middle",
+        "alpha last", "Chapter 2 Beta body", "beta middle", "beta last",
+        "Chapter 3 Gamma body", "gamma last")]
+    _plan, _probs, _notes = _resolve(_ch, _txt, 10, "/tmp/x", {}, "Doe_Book_2025")
+    check("ends follow uniformly corrected starts, so no page is dropped",
+          ([(_p[0], _p[1]) for _p in _plan], _probs,
+           sum("end moved" in _n for _n in _notes)),
+          ([(2, 5), (5, 8), (8, 10)], [], 2))
+    # A contents page lists every heading; it is never a chapter start or a
+    # title page, and does not count as a running header.
+    _ch = [{"heading_text": "Chapter 1 Alpha",
+            "filename": "Doe_Book_2025_01_Alpha.pdf", "start_idx": 2, "end_idx": 5},
+           {"heading_text": "Chapter 2 Beta",
+            "filename": "Doe_Book_2025_02_Beta.pdf", "start_idx": 5, "end_idx": 7}]
+    for _label, _mapped_start, _pages in (
+            ("a mapped start one page early", 2,
+             ("title", "contents chapter 1 alpha 3 chapter 2 beta 5", "preface",
+              "Chapter 1 Alpha " + "body " * 60, "alpha more",
+              "Chapter 2 Beta " + "body " * 60, "beta more")),
+            ("a correct start after a short contents page", 2,
+             ("title", "contents chapter 1 alpha chapter 2 beta",
+              "Chapter 1 Alpha " + "body " * 60, "alpha more", "alpha last",
+              "Chapter 2 Beta " + "body " * 60, "beta more"))):
+        _ch[0]["start_idx"] = _mapped_start
+        _plan, _probs, _ = _resolve(_ch, [_norm(_p) for _p in _pages], 7,
+                                    "/tmp/x", {}, "Doe_Book_2025")
+        check("a contents page is never the chapter start (%s)" % _label,
+              (_probs, _plan[0][0] if _plan else None),
+              ([], 3 if "early" in _label else 2))
+    # A chapter opening that mentions the next chapter's bare label counts as
+    # contents; the refusal names that page instead of blaming the mapping.
+    _ch = [{"heading_text": "Chapter 1",
+            "filename": "Doe_Book_2020_01_Intro.pdf", "start_idx": 2, "end_idx": 4},
+           {"heading_text": "Chapter 2",
+            "filename": "Doe_Book_2020_02_Method.pdf", "start_idx": 4, "end_idx": 6}]
+    _txt = [_norm(_p) for _p in (
+        "title", "preface", "Chapter 1 Introduction. This book is organized "
+        "as follows. Chapter 2 examines X.", "intro more",
+        "Chapter 2 Method " + "body " * 60, "method more")]
+    _plan, _probs, _ = _resolve(_ch, _txt, 6, "/tmp/x", {}, "Doe_Book_2020")
+    check("a refused opening page read as contents is named as such",
+          [("treated as contents" in _p, "physical page(s) 3 carry" in _p)
+           for _p in _probs], [(True, True)])
+    _ch = [{"heading_text": "Chapter 1 Alpha",
+            "filename": "Doe_Book_2025_01_Alpha.pdf", "start_idx": 2, "end_idx": 5}]
+    _plan, _probs, _ = _resolve(
+        _ch, [_norm(_p) for _p in ("a", "b", "c", "d", "e")], 5, "/tmp/x", {},
+        "Doe_Book_2025")
+    check("a heading on no nearby page keeps the plain refusal",
+          _probs, ["Doe_Book_2025_01_Alpha.pdf: heading 'Chapter 1 Alpha' not "
+                   "found within +/-2 pages of 2"])
+    _ch = [{"heading_text": "Chapter 1 Alpha",
+            "filename": "Doe_Book_2025_01_Alpha.pdf", "start_idx": 2, "end_idx": 5}]
+    _txt = [_norm(_p) for _p in ("x", "Chapter 1 Alpha " + "body " * 60,
+                                 "mapped page", "Chapter 1 Alpha " + "body " * 60,
+                                 "more")]
+    _plan, _probs, _ = _resolve(_ch, _txt, 5, "/tmp/x", {}, "Doe_Book_2025")
+    check("a heading equally near on both sides is refused, not guessed",
+          any("equally near" in _p for _p in _probs), True)
+    _ch = [{"heading_text": "Chapter 1 Alpha",
+            "filename": "Doe_Book_2025_01_Alpha.pdf", "start_idx": 0, "end_idx": 2},
+           {"heading_text": "Chapter 2 Beta",
+            "filename": "Doe_Book_2025_02_Beta.pdf", "start_idx": 3, "end_idx": 5}]
+    _txt = [_norm(_p) for _p in ("Chapter 1 Alpha body", "alpha", "interlude",
+                                 "Chapter 2 Beta body", "beta")]
+    _plan, _probs, _notes = _resolve(_ch, _txt, 5, "/tmp/x", {}, "Doe_Book_2025")
+    check("pages between chapters that no chapter covers are reported",
+          (_probs, _notes),
+          ([], ["page 3, between Doe_Book_2025_01_Alpha.pdf and "
+                "Doe_Book_2025_02_Beta.pdf, belongs to no chapter"]))
 
     # The extracted PNG follows a rename, so its ownership and review records
     # must follow too. Otherwise the next batch refuses this plugin's own file.
@@ -5005,7 +5253,7 @@ def _selftest():
                     [{"heading_text": "Chapter 1 Introduction",
                       "filename": "Kuhn_S_2012_01_Intro.pdf",
                       "start_idx": 0, "end_idx": 1}],
-                    _out, verbose=False)
+                    _out, verbose=False, apply=True)
                 _split_stage_error = None
             except SplitRefused as _exc:
                 _split_stage_error = _exc
@@ -5093,12 +5341,43 @@ def _selftest():
             _notes = split_book(
                 _book, [{"heading_text": "Chapter 1 Introduction",
                          "filename": "Kuhn_S_2012_01_Intro.pdf",
-                         "start_idx": 0, "end_idx": 1}], _out, verbose=False)
+                         "start_idx": 0, "end_idx": 1}], _out, verbose=False,
+                apply=True)
         check("a chapter-shaped note is not an existing PDF chapter set",
               (_notes, len(_TestPdfReader(os.path.join(
                   _out, "Kuhn_S_2012_01_Intro.pdf")).pages),
                Path(_note).read_text(encoding="utf-8"), os.path.isfile(_book)),
               ([], 1, "existing chapter notes\n", True))
+
+    # split plans by default: the final ranges and every correction note are
+    # shown before any chapter exists, and only --apply writes.
+    with _tf.TemporaryDirectory(prefix="org-split-plan-test-") as _v:
+        _book = _put(_v, "Sources/PDFs/Kuhn_S_2012.pdf", b"")
+        _source_writer = _TestPdfWriter()
+        for _ in range(3):
+            _source_writer.add_blank_page(width=100, height=100)
+        with open(_book, "wb") as _fh:
+            _source_writer.write(_fh)
+        _reader_object = _TestPdfReader(_book)
+        for _page, _text in zip(_reader_object.pages, (
+                "front", "Chapter 1 Introduction " + "body " * 60, "more")):
+            _page.extract_text = (lambda _t=_text: _t)
+        _out = os.path.join(_v, "Sources/PDFs/Kuhn_S_2012")
+        _chapters = _put(_v, "chapters.json", json.dumps([
+            {"heading_text": "Chapter 1 Introduction",
+             "filename": "Kuhn_S_2012_01_Intro.pdf",
+             "start_idx": 0, "end_idx": 3}]))
+        _split_args = ["split", _book, "--chapters", _chapters,
+                       "--out", _out, "--vault", _v]
+        with patch.dict(globals(), _reader=lambda _path: _reader_object):
+            _code, _stdout, _ = _run_cli(_split_args)
+            check("split without --apply shows the corrected plan and writes nothing",
+                  (_code, "start corrected" in _stdout, "Plan only" in _stdout,
+                   os.path.lexists(_out)), (0, True, True, False))
+            _code, _stdout, _ = _run_cli(_split_args + ["--apply"])
+        check("split --apply writes the reviewed plan",
+              (_code, sorted(os.listdir(_out)) if os.path.isdir(_out) else None),
+              (0, ["Kuhn_S_2012_01_Intro.pdf"]))
 
     # Markdown percent-encoding and angle wrappers must not turn a relative
     # path into an Obsidian shortest-suffix wikilink. Otherwise the same path
@@ -5153,12 +5432,13 @@ def _selftest():
 
     # Obsidian encodes local Markdown destinations. Repair those alongside
     # wikilinks, but decode only once and leave other documents/URLs alone.
+    # The foreign link names a same-basename path in another folder; a real
+    # file there would block the rename (see the shared-basename cases).
     for _old in ("download (1).pdf", "download%20(1).pdf"):
         for _filing in (False, True):
             with _tf.TemporaryDirectory(prefix="org-url-link-test-") as _v:
                 _home = "Inbox/Research Drafts" if _filing else "Sources/PDFs/Research Drafts"
                 _pdf = _put(_v, _home + "/" + _old, b"original PDF bytes")
-                _other = _put(_v, "Archive/" + _old, b"a different PDF")
                 _url = "../" + quote(_home + "/" + _old)
                 _foreign_url = "../Archive/" + quote(_old)
                 _distinct = "download%20(1).pdf" if " " in _old else "download (1).pdf"
@@ -5186,9 +5466,133 @@ def _selftest():
                 _new_home = "Sources/PDFs" if _filing else _home
                 with open(os.path.join(_v, _new_home, "Doe_Method_2025.pdf"), "rb") as _fh:
                     check("encoded-link repair preserves the source PDF", _fh.read(), b"original PDF bytes")
-                with open(_other, "rb") as _fh:
-                    check("encoded-link repair leaves same-basename foreign PDFs intact",
-                          _fh.read(), b"a different PDF")
+
+    # An incoming copy with a filed PDF's basename must not take over that
+    # PDF's summary note, figures, chapters or citations. Either copy is
+    # refused by check and rename, and nothing moves.
+    def _tree(root):
+        out = {}
+        for _dir, _dirs, _files in os.walk(root):
+            for _name in _files:
+                _p = os.path.join(_dir, _name)
+                with open(_p, "rb") as _fh:
+                    out[os.path.relpath(_p, root)] = _fh.read()
+        return out
+
+    for _split in (False, True):
+        with _tf.TemporaryDirectory(prefix="org-shared-basename-test-") as _v:
+            _stem = "Doe_Paper_2020"
+            _filed = _put(_v, "Sources/PDFs/%s.pdf" % _stem, b"filed PDF")
+            _incoming = _put(_v, "Inbox/%s.pdf" % _stem, b"incoming PDF")
+            if _split:
+                _put(_v, "Sources/PDFs/%s/%s_01_Intro.pdf" % (_stem, _stem))
+            else:
+                _put(_v, "Articles/%s.md" % _stem,
+                     '---\nsources:\n  - "[[%s.pdf]]"\n---\n' % _stem)
+                _fig = _put(_v, "Sources/Images/%s_fig_1.png" % _stem, b"png")
+                _put(_v, "Sources/Images/" + MANIFEST_FILE,
+                     "%s_fig_1.png\t%s\n" % (_stem, file_digest(_fig)))
+            _put(_v, "Wiki/topic.md", "[[%s.pdf]]\n" % _stem)
+            _before = _tree(_v)
+            _kind = " (split book)" if _split else " (paper)"
+            for _source in (_incoming, _filed):
+                _code, _stdout, _ = _run_cli(["check", _source, "--vault", _v])
+                check("check refuses a PDF whose basename another vault file has" + _kind,
+                      (_code, "shares its basename with" in _stdout,
+                       "Names keyed to" in _stdout), (1, True, False))
+            _code, _stdout, _ = _run_cli([
+                "rename", _incoming, "--vault", _v, "--to", _stem + "_2.pdf",
+                "--dest", os.path.join(_v, "Sources/PDFs"), "--apply"])
+            check("rename refuses a shared basename and writes nothing" + _kind,
+                  (_code, "shares its basename with" in _stdout, _tree(_v) == _before),
+                  (1, True, True))
+
+    # The same holds for a chapter in the family: renaming its book must not
+    # hand a same-named Inbox copy's bare citation to the filed chapter.
+    with _tf.TemporaryDirectory(prefix="org-shared-chapter-test-") as _v:
+        _book = _put(_v, "Sources/PDFs/Kuhn_X_2012.pdf", b"book PDF")
+        _chapter = "Kuhn_X_2012_01_Intro.pdf"
+        _put(_v, "Sources/PDFs/Kuhn_X_2012/" + _chapter, b"chapter PDF")
+        _put(_v, "Inbox/" + _chapter, b"another PDF")
+        _put(_v, "Wiki/n.md", "[[%s]]\n" % _chapter)
+        _before = _tree(_v)
+        _code, _stdout, _ = _run_cli(["check", _book, "--vault", _v])
+        check("check refuses a book whose chapter shares a basename",
+              (_code, os.path.join("Inbox", _chapter) in _stdout,
+               "Names keyed to" in _stdout),
+              (1, True, False))
+        _code, _stdout, _ = _run_cli([
+            "rename", _book, "--vault", _v, "--to", "Kuhn_Y_2012.pdf", "--apply"])
+        check("rename refuses a book whose chapter shares a basename",
+              (_code, "shares its basename with" in _stdout,
+               _tree(_v) == _before), (1, True, True))
+
+    # Collector-owned feed attachments keep their names (CONVENTIONS.md §1):
+    # `canonical` reports them as skipped without failing a sweep, and check
+    # and rename refuse one even when it is named explicitly.
+    _feeds = {"X": "x-1234567890-" + "a" * 24 + ".pdf",
+              "RSS": "rss-" + "0" * 32 + ".pdf"}
+    _code, _stdout, _ = _run_cli(["canonical", *_feeds.values(),
+                                  "Doe_Paper_2020.pdf"])
+    check("canonical reports feed attachments as skipped without failing",
+          (_code, _stdout.count("feed-owned, skipped")), (0, 2))
+    _code, _, _ = _run_cli(["canonical", _feeds["RSS"], "download.pdf"])
+    check("canonical still fails a non-canonical name beside a feed attachment",
+          _code, 1)
+    for _kind, _feed_name in sorted(_feeds.items()):
+        with _tf.TemporaryDirectory(prefix="org-feed-attachment-test-") as _v:
+            _feed_pdf = _put(_v, "Sources/PDFs/" + _feed_name, b"collector PDF")
+            _code, _stdout, _ = _run_cli(["check", _feed_pdf, "--vault", _v])
+            check("check refuses a named %s feed attachment" % _kind,
+                  (_code, "feed attachment" in _stdout), (1, True))
+            _code, _stdout, _ = _run_cli([
+                "rename", _feed_pdf, "--vault", _v,
+                "--to", "Doe_Paper_2020.pdf", "--apply"])
+            check("rename refuses a named %s feed attachment and writes nothing" % _kind,
+                  (_code, "feed attachment" in _stdout,
+                   os.listdir(os.path.join(_v, "Sources/PDFs"))),
+                  (1, True, [_feed_name]))
+
+    # The documented API check (references/rename-repair.md) passes the
+    # chapter folder's name as `directory_names`, as the CLI does: a folder is
+    # a container, not a cited file, so a dangling bare stem is no reference.
+    with _tf.TemporaryDirectory(prefix="org-api-folder-test-") as _v:
+        _pdf = _put(_v, "Sources/PDFs/Kuhn_X_2012.pdf")
+        _put(_v, "Sources/PDFs/Kuhn_X_2012/Kuhn_X_2012_01_Intro.pdf")
+        _put(_v, "Wiki/note.md", "[[Kuhn_X_2012]]\n")
+        _keyed = keyed_files(_v, _pdf)
+        _old_dirs = keyed_dirs(_v, _keyed)
+        _old_folders = {_name for _p, _name in _keyed.items()
+                        if os.path.isdir(_p) and not os.path.islink(_p)}
+        _before = references(_v, set(_keyed.values()), dirs=_old_dirs,
+                             directory_names=_old_folders)
+        _moves, _, _blockers = rename_all(_v, _pdf, "Kuhn_Y_2012.pdf", apply=True)
+        _after = references(_v, obsolete_names(_moves), dirs=_old_dirs,
+                            directory_names=_old_folders)
+        check("the documented API check agrees with the CLI for a split book",
+              (_before, _blockers, _after), ({}, [], {}))
+
+    # A bare destination may keep a download's parentheses literal or
+    # backslash-escaped. The check, the rewrite and the post-apply
+    # verification must all see it; the old matcher stopped at '(' and
+    # reported "Verified" over dangling links.
+    for _link in ("download%20(1).pdf", "download%20\\(1\\).pdf"):
+        with _tf.TemporaryDirectory(prefix="org-paren-link-test-") as _v:
+            _pdf = _put(_v, "Inbox/download (1).pdf", b"original PDF bytes")
+            _note = _put(_v, "Wiki/topic.md",
+                         "[rel](../Inbox/" + _link + "#page=2)\n"
+                         "[bare](" + _link + ")\n")
+            _code, _, _ = _run_cli(["check", _pdf, "--vault", _v])
+            check("check sees a parenthesized Markdown destination " + _link,
+                  _code, 1)
+            _code, _stdout, _ = _run_cli([
+                "rename", _pdf, "--vault", _v, "--to", "Doe_Method_2025.pdf",
+                "--dest", os.path.join(_v, "Sources/PDFs"), "--apply"])
+            check("rename repairs and verifies a parenthesized destination " + _link,
+                  (_code, "Verified" in _stdout,
+                   Path(_note).read_text(encoding="utf-8")),
+                  (0, True, "[rel](Doe_Method_2025.pdf#page=2)\n"
+                            "[bare](Doe_Method_2025.pdf)\n"))
 
     # A pathname can become a FIFO after lstat but before open. Nonblocking
     # open lets the descriptor's regular-file guard reject it without waiting
@@ -5885,9 +6289,13 @@ def main(argv=None):
                    help="JSON list of chapter dicts")
     s.add_argument("--out", required=True, help="chapter output folder")
     s.add_argument("--vault", default=None)
+    s.add_argument("--apply", action="store_true",
+                   help="write the chapters. Without this, only the resolved "
+                        "ranges and notes are printed.")
     s.set_defaults(fn=_cmd_split)
 
-    k = sub.add_parser("canonical", help="is a name already in output form?")
+    k = sub.add_parser("canonical", help="is a name already in output form? "
+                       "Feed-owned attachments are reported and skipped.")
     k.add_argument("names", nargs="+")
     k.set_defaults(fn=_cmd_canonical)
 

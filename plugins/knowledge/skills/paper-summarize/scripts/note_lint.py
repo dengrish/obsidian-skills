@@ -26,7 +26,6 @@ import os
 import re
 import stat
 import sys
-import unicodedata
 
 _OBSIDIAN_SHARED_MODULES = ('naming', 'note_provenance', 'portable_names', 'vault_artifacts', 'yaml_scalars')
 
@@ -69,6 +68,7 @@ if _here != _shared:
 
 from naming import core_stem, looks_canonical
 from note_provenance import split_provenance
+from portable_names import portable_identity
 from vault_artifacts import inventory_source_figures
 from yaml_scalars import parse_scalar, strip_comment
 
@@ -191,6 +191,11 @@ _STEP = re.compile(r"\A(\d+)\.\s+(.*)\Z")
 #: figure and its caption are how a result gets shorter, not longer.
 MAX_RESULTS_CHARS = 2400
 
+#: Advisory target for the second (Methods/basis) section: its prose outside
+#: numbered steps, counted like Results. Longer prose usually carries
+#: infrastructure or incidental detail the results do not need.
+MAX_METHODS_CHARS = 1200
+
 #: Tokens that end in a period without ending a sentence.  Compared
 #: case-folded, after trailing markup is stripped.
 _ABBREVIATIONS = frozenset({
@@ -204,6 +209,9 @@ MAX_DESCRIPTION = 110
 MAX_FIGURES = 4
 MAX_TABLES = 4
 MIN_BULLETS, MAX_BULLETS = 3, 7
+#: Advisory target for one callout bullet: one key message in one or two
+#: sentences, not a second summary.
+MAX_CALLOUT_BULLET_WORDS = 45
 
 # Self-test sentinel: this case must produce no findings at all.
 CLEAN = object()
@@ -492,7 +500,10 @@ def _check_front_matter(note, keys, kv, allow_unorganized=False):
         if val is None:
             continue
         if key == "published" and val == "null":
-            if not source_is_undated and not allow_unorganized:
+            # The override covers a preserved noncanonical name that cannot
+            # carry a year; a canonical dated stem keeps its year pairing.
+            if not source_is_undated and (source_is_canonical
+                                          or not allow_unorganized):
                 note.fail(2, "`published: null` is reserved for a source PDF "
                              "whose canonical stem carries the `nd` year segment")
             continue
@@ -552,12 +563,15 @@ def _check_front_matter(note, keys, kv, allow_unorganized=False):
                     note.fail(2, "`author` entries must be non-empty YAML strings")
 
     if "tags" in kv:
-        if kv["tags"][0]:
-            note.fail(2, "`tags` must be a block-form list, not inline")
+        inline = kv["tags"][0]
         items = [l.strip() for l in kv["tags"][1] if l.strip()]
-        # A present-but-blank `tags:` is the documented no-discipline case.
-        # The schema check still requires the key; populated values must keep
-        # their block-list shape, quoting and enum membership below.
+        # `tags: []` is the documented no-discipline spelling, matching
+        # `author: []`; a bare `tags:` is tolerated as the legacy form. The
+        # schema check still requires the key; populated values keep their
+        # block-list shape, quoting and enum membership below.
+        if inline and (inline != "[]" or items):
+            note.fail(2, "`tags` must be a block-form list when populated, "
+                         "or exactly `tags: []` when no discipline applies")
         for it in items:
             if not it.startswith("- "):
                 note.fail(2, "`tags` entry is not a block-list item: %r" % it)
@@ -570,6 +584,9 @@ def _check_front_matter(note, keys, kv, allow_unorganized=False):
                 continue
             if not inner.startswith("#"):
                 note.fail(2, "tag %s must be #-prefixed" % val)
+            elif inner == "#misc":
+                note.fail(2, "`#misc` is the Wiki-only fallback; a source note "
+                             "with no discipline writes `tags: []`")
             elif inner[1:] not in TAG_ENUM:
                 note.fail(2, "tag %s is not in the CONVENTIONS.md 3 enum" % val)
 
@@ -610,6 +627,14 @@ def _check_callout(note, body_start, fenced):
             bullets += 1
             if not stripped[4:].strip():
                 note.fail(i + 1, "empty callout bullet")
+            words = len(_CITATION.sub("", stripped[4:]).split())
+            if words > MAX_CALLOUT_BULLET_WORDS:
+                note.advise(i + 1, "a callout bullet runs %d words, over the "
+                                   "%d-word target -- state one key message in "
+                                   "one or two sentences and leave procedure "
+                                   "detail and secondary numbers to the body "
+                                   "(references/note-format.md)"
+                            % (words, MAX_CALLOUT_BULLET_WORDS))
             if _URLS.search(stripped[4:]):
                 note.fail(i + 1, "the Summary callout contains a URL; keep "
                                  "source links in frontmatter or Availability")
@@ -792,12 +817,14 @@ def _check_structure(note, body_start, fenced, mode):
                     if not b[2:].strip():
                         note.fail(start + 1, "a Limitations bullet has no content")
                         break
-                    if len(b) > MAX_LIMITATION_CHARS:
+                    # Citation markup is not counted, as for the Results cap.
+                    visible = len(_CITATION.sub("", b))
+                    if visible > MAX_LIMITATION_CHARS:
                         note.fail(start + 1, "a Limitations bullet is %d characters, "
                                              "over %d -- state the caveat, or move "
                                              "the detail beside the number it "
                                              "qualifies in Results"
-                                  % (len(b), MAX_LIMITATION_CHARS))
+                                  % (visible, MAX_LIMITATION_CHARS))
                         break
             # Every line, not just one: a trailing paragraph after the last
             # bullet is how a reference list gets back into a note that is
@@ -893,7 +920,7 @@ def _prose_lines(note, start, end, captions, fenced):
 
 
 def _check_prose(note, bounds, captions, fenced, body_start, mode):
-    """Flag sentence-length targets; enforce paragraph, procedure and Results caps.
+    """Flag length targets; enforce paragraph, procedure and Results caps.
 
     Counts cannot decide whether a longer sentence is needed for clarity.
     Keep those advisories separate from the required structural limits.
@@ -943,6 +970,17 @@ def _check_prose(note, bounds, captions, fenced, body_start, mode):
             note.fail(span[0] + 1, "the procedure steps are numbered %s; they "
                                    "must run 1..%d in their reported order"
                       % (", ".join(str(x) for x in numbers), len(numbers)))
+        in_steps = _step_lines(note, span[0], span[1], fenced)
+        chars = sum(len(t) for n, t in
+                    _prose_lines(note, span[0], span[1], captions, fenced)
+                    if n not in in_steps)
+        if chars > MAX_METHODS_CHARS:
+            note.advise(span[0] + 1, "the Methods/basis section holds %d "
+                                     "characters of prose outside numbered "
+                                     "steps, over the %d-character target -- "
+                                     "keep only the detail needed to read the "
+                                     "results (references/note-format.md)"
+                        % (chars, MAX_METHODS_CHARS))
 
     span = next(((s, e) for name, s, e in bounds if name == "Results"), None)
     if span is None:
@@ -956,6 +994,26 @@ def _check_prose(note, bounds, captions, fenced, body_start, mode):
                                "sentence each (references/note-format.md). Exhibits and "
                                "their captions are not counted."
                   % (chars, MAX_RESULTS_CHARS))
+
+
+def _step_lines(note, start, end, fenced):
+    """Line indexes of numbered steps in [start, end), wrapped lines included.
+
+    A line directly after a step continues it, as Markdown renders it; a
+    blank line, heading, bullet, exhibit or fence ends the step.
+    """
+    out, in_step = set(), False
+    for n in range(start, end):
+        s = note.raw_lines[n].strip()
+        if (n in fenced or not s or s.startswith("## ") or s.startswith("- ")
+                or _EMBED.match(s) or _TABLE_ROW.match(s)):
+            in_step = False
+            continue
+        if _STEP.match(s):
+            in_step = True
+        if in_step:
+            out.add(n)
+    return out
 
 
 def _prose_blocks(note, body_start, captions, fenced):
@@ -1267,7 +1325,7 @@ def _check_citations(note, body_start, captions, fenced, source=None):
 
 
 def _name_key(name):
-    return unicodedata.normalize("NFC", name).casefold()
+    return portable_identity(name)
 
 
 def lint(text, path="<note>", images=None, *, mode,
@@ -1543,15 +1601,23 @@ def _cases():
         ("publication year matches the canonical source year",
          _mutate("published: 2025-01-03", "published: 2024-01-03"),
          "published` year 2024 conflicts"),
-        ("blank tags when no discipline applies",
+        ("an empty tags list when no discipline applies",
+         _mutate('tags:\n  - "#medicine"', 'tags: []'), CLEAN),
+        ("a commented empty tags list keeps the no-discipline meaning",
+         _mutate('tags:\n  - "#medicine"', 'tags: [] # no discipline applies'), CLEAN),
+        ("legacy bare tags are tolerated",
          _mutate('tags:\n  - "#medicine"', 'tags:'), CLEAN),
-        ("commented blank tags retain the no-discipline meaning",
+        ("commented legacy bare tags are tolerated",
          _mutate('tags:\n  - "#medicine"',
                  'tags: # no discipline applies\n# intentionally unclassified'), CLEAN),
         ("the tags key is still required",
          _mutate('tags:\n  - "#medicine"\n', ''), "missing: tags"),
-        ("an inline empty list is not the documented blank tags form",
-         _mutate('tags:\n  - "#medicine"', 'tags: []'), "block-form list, not inline"),
+        ("a populated inline tags list is not block form",
+         _mutate('tags:\n  - "#medicine"', 'tags: ["#medicine"]'), "block-form list when populated"),
+        ("an empty inline list cannot also carry block items",
+         _mutate('tags:\n  - "#medicine"', 'tags: []\n  - "#medicine"'), "exactly `tags: []`"),
+        ("the Wiki-only misc fallback is not a source-note tag",
+         _mutate('  - "#medicine"', '  - "#misc"'), "Wiki-only fallback"),
         ("a populated tag still requires a list marker",
          _mutate('  - "#medicine"', '  "#medicine"'), "not a block-list item"),
         ("an empty string is not a discipline tag",
@@ -2012,16 +2078,49 @@ def _cases():
         ("Results carrying the whole paper",
          _mutate("More prose.", ("Prose. " * 500).strip()),
          "Results holds"),
-        ("NEAR MISS: the same bulk in Methods is not a Results violation",
+        ("NEAR MISS: the same bulk in Methods is not a Results violation, "
+         "only the Methods advisory",
          _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
                  "## A 219-patient double-blind trial of transplant capsules\n\n"
                  + "\n\n".join(["Prose."] * 500)),
-         CLEAN),
+         "__ADVISORY__Methods/basis section holds 3000"),
         ("NEAR MISS: prose exactly at the Results cap is clean, and the "
          "exhibits and captions beside it are not counted",
          _mutate("More prose.",
                  "\n\n".join(["P" * 200] * (MAX_RESULTS_CHARS // 202))),
          CLEAN),
+
+        # --- callout bullet and Methods length targets ---------------------
+        ("a callout bullet over the word target is advisory only",
+         _mutate("> - Two.",
+                 "> - " + " ".join(["Message"] * 23) + ". "
+                 + " ".join(["Message"] * (MAX_CALLOUT_BULLET_WORDS - 22)) + "."),
+         "__ADVISORY__a callout bullet runs %d words" % (MAX_CALLOUT_BULLET_WORDS + 1)),
+        ("NEAR MISS: a callout bullet exactly at the word target is clean",
+         _mutate("> - Two.",
+                 "> - " + " ".join(["Message"] * 23) + ". "
+                 + " ".join(["Message"] * (MAX_CALLOUT_BULLET_WORDS - 23)) + "."),
+         CLEAN),
+        ("Methods prose over the character target is advisory only",
+         _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
+                 "## A 219-patient double-blind trial of transplant capsules\n\n"
+                 + "\n\n".join(["P" * 200] * (MAX_METHODS_CHARS // 200 + 1))),
+         "__ADVISORY__over the %d-character target" % MAX_METHODS_CHARS),
+        ("NEAR MISS: Methods prose at the target is clean, and wrapped "
+         "numbered steps are not counted",
+         _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
+                 "## A 219-patient double-blind trial of transplant capsules\n\n"
+                 + "\n\n".join(["P" * 200] * (MAX_METHODS_CHARS // 200))
+                 + "\n\n" + "\n".join(
+                     "%d. The team measured every sample twice\n"
+                     "   across two sites and three calibrated machines." % i
+                     for i in range(1, MIN_STEPS + 1))),
+         CLEAN),
+        ("the Methods target applies to a non-empirical basis section too",
+         _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
+                 "## A 219-patient double-blind trial of transplant capsules\n\n"
+                 + "\n\n".join(["P" * 200] * (MAX_METHODS_CHARS // 200 + 1))),
+         "__ADVISORY__Methods/basis section holds", "argument"),
 
         # --- numbered steps in Methods --------------------------------------
         ("Methods steps run past the cap",
@@ -2145,6 +2244,35 @@ def _selftest():
     else:
         fail += 1
         print("FAIL  the unorganized-source override rejected an explicit null date")
+    # The override is for a preserved noncanonical name. A canonical,
+    # year-bearing stem keeps its null/year pairing even when the batch flag
+    # is passed for every note.
+    canonical_undated = GOOD.replace("published: 2025-01-03", "published: null")
+    if any("reserved for a source PDF" in message for _line, message in
+           lint(canonical_undated, mode="empirical", allow_unorganized=True)):
+        ok += 1
+    else:
+        fail += 1
+        print("FAIL  --allow-unorganized waived the null date on a canonical dated source")
+    # The Limitations cap counts what the reader sees; a required citation
+    # must not shrink the allowance.
+    cited = "- **One.** " + "x" * (MAX_LIMITATION_CHARS - 12) + "." \
+        + "<sup>[[Doe_X_2025.pdf#page=6|6]]</sup>"
+    uncapped = GOOD.replace("- **One.** Prose.", cited, 1)
+    if not any("Limitations bullet is" in message
+               for _line, message in lint(uncapped, mode="empirical")):
+        ok += 1
+    else:
+        fail += 1
+        print("FAIL  citation markup counted against the Limitations cap")
+    over = GOOD.replace("- **One.** Prose.",
+                        "- **One.** " + "x" * MAX_LIMITATION_CHARS + ".", 1)
+    if any("Limitations bullet is" in message
+           for _line, message in lint(over, mode="empirical")):
+        ok += 1
+    else:
+        fail += 1
+        print("FAIL  an over-long Limitations bullet passed")
     with tempfile.TemporaryDirectory() as scratch:
         fifo_note = os.path.join(scratch, "changed-note.md")
         os.mkfifo(fifo_note)
