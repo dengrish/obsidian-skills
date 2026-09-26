@@ -1076,13 +1076,15 @@ name and typography evidence shared by both Wiki skills), `entry_structure.py`
 meaning-preserving mathematical-title plain-text conversion),
 `markdown_tables.py` (Markdown-table
 spans and caption checks shared by both Wiki skills), `equation_coverage.py`
-(the conservative missing-display candidate shared by both Wiki skills),
+(the conservative missing-display and well-definedness-boilerplate candidates
+shared by both Wiki skills),
 `code_typography.py` (bracket special tokens and literal file extensions that
 need backticks in prose), `introduced_aliases.py` (alternate names that body
 prose introduces for the entry's subject), `entry_checks.py` (the per-entry
 Wiki floors both Wiki linters apply: the cross-domain common-noun slug, non-`Software`
-API surface, merge scars, source-meta phrasing, emphasis, display labels and
-the primary flashcard among several),
+API surface, merge scars, source-meta phrasing, emphasis, display labels
+(including a label that drops its target title's head word) and the primary
+flashcard among several),
 `check_parsers.py` (installed-version floors for the PDF and image parsers,
 knowledge only), `figure_state.py` (§8b),
 `portable_names.py` (NFC + case-fold filename identity used for case and
@@ -1156,16 +1158,23 @@ Rules that hold everywhere:
 - **`tags:` values are never wikilinks** (§3) and `sources:` points at documents,
   not entries (§7); neither participates in link audits.
 
-**Three carve-outs that must not be "fixed":** the cross-domain bare-term label
+**Four carve-outs that must not be "fixed":** the cross-domain bare-term label
 (`[[information-entropy|entropy]]`, deliberately *not* an alias of that entry),
-a natural plural or verb inflection (`features` for `feature`), and an
+a natural plural or verb inflection (`features` for `feature`), a derived
+adjective or agent-noun form of the title's head word that keeps its other
+words (`[[eukaryote|eukaryotic]]`, `[[evolution|evolutionary]]`,
+`[[binary-classification|binary classifier]]`), and an
 organism's ordinary common name when the target's description or opening
 sentence explicitly binds it to that Organism's canonical title (`[[mus-musculus|mouse]]`
 where the target says “Mus musculus is the mouse”). The last form may be unsafe
 as a global alias because the same common word can name something in another
 domain. The carve-out covers the complete bound phrase and its natural
 inflection; it does not strip a qualifier (`fruit fly` does not establish
-`fly`). Otherwise a display label must be a surface form the target's
+`fly`). None of the four lets a label keep only a title's modifiers and drop
+its head word: `[[greedy-algorithm|greedy]]` and
+`[[bias-variance-trade-off|bias/variance]]` name something other than their
+targets, unless the target itself defines that word as a term (Ensemble
+learning's *ensemble*). Otherwise a display label must be a surface form the target's
 `title:`/`aliases:` actually claims — reword, or add a genuine alias, but never
 invent a label. A label that exactly names another existing entry's title or
 unambiguous alias is stronger evidence of a target conflict than token overlap
