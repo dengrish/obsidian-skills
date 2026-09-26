@@ -169,11 +169,11 @@ caveat: accuracy misleads on skewed classes, precision is reported with recall,
 sampling noise differs from sampling bias. Do not append well-definedness
 boilerplate ([equations §1](equations.md#1-coverage--explanatory-value-before-notation)),
 implementation edge cases or failure handling, defensive terminology
-distinctions, background clarifications absent from the source, rare failure
-modes, or troubleshooting tails about neighboring concepts. Source support is
-necessary but does not by itself make a detail useful. Keep essential
-assumptions and uncertainty; the test is explanatory value, not maximal
-completeness.
+distinctions, rare failure modes, or troubleshooting tails about neighboring
+concepts. Source support alone does not make a detail useful, and its absence
+does not make a clarifying one unwelcome ([principle 5(h)](#prose-principles)).
+Keep essential assumptions and uncertainty; the test is explanatory value, not
+maximal completeness.
 
 **Operating principle: brief, clear, and atomic.** Give readers fast, accurate orientation to one durable subject. Each sentence should define it, explain how it works, distinguish it, or supply a necessary condition, qualification, or consequence. Keep the shortest wording that preserves understanding; extra words can be necessary to make a relationship or limitation clear. Brevity is not a word-count target or a reason to delete a substantive distinction. A neighboring subject that needs its own explanation belongs in a linked note under the atomicity and refactor rules.
 
@@ -191,18 +191,12 @@ Use a neutral encyclopedic register: direct, precise, and free of conversational
 
    Preserve evidence-bearing uncertainty with the same care. *May*, *can*, *is associated with*, *is estimated to*, and confidence or range qualifiers cannot become *does*, *causes*, or a point claim. State the narrowest clear qualified claim the evidence supports. Remove only rhetorical padding such as "it might seem at first glance," not epistemic limits on the result.
 
-   **Check the scope of new claims before making them canonical.** A textbook's worked case or informal explanation is not automatically a universal property of the entry's subject. Check words such as *always*, *only*, *guaranteed*, and *requires* against the surrounding assumptions, definitions, and equations. If a new claim remains inconsistent or unsupported, retain only what the source establishes; otherwise defer that clause and report the conflict with its page. Do not copy a suspect guarantee into the description or flashcard, or silently replace it with background knowledge. For a conflict with existing entry content, follow `references/merge.md`'s conflict-handling rule. Source fidelity does not settle factual accuracy.
+   **Check the scope of new claims before making them canonical.** A textbook's worked case or informal explanation is not automatically a universal property of the entry's subject. Check words such as *always*, *only*, *guaranteed*, and *requires* against the surrounding assumptions, definitions, and equations. If a source's claim is over-broad or inconsistent, state its accurate scope, using the source's own assumptions or well-established background (principle 5(h)), and never copy a suspect guarantee into the description or flashcard. Report a conflict you cannot resolve, with its page. For a conflict with existing entry content, follow `references/merge.md`'s conflict-handling rule. Source fidelity does not settle factual accuracy.
 
-   Treat priority and superlative wording the same way. Claims such as *first*,
-   *only*, *best*, *largest*, and *leading* need independent support from a second
-   reliable source or narrow attribution to the active source or named report.
-   If independent support changes the published note, it must be a durable vault
-   source listed in `sources:`; process an existing capture through
-   `clipping-clean`, or acquire it through `wiki-add`'s research-source
-   workflow when the request is in its scope. A transient check may
-   justify omitting a ranking, but never adding or
-   broadening one. Without support, omit the ranking while preserving the
-   source-backed descriptive claim. Scope software behavior to the version or time period the
+   Treat priority and superlative wording the same way. Keep *first*, *only*,
+   *best*, *largest*, or *leading* only when the ranking is well established, as
+   for a widely documented first, or when it is attributed to its source;
+   otherwise describe the subject without the ranking. Scope software behavior to the version or time period the
    source establishes, and replace reader-relative words such as *currently*,
    *recently*, and *today* with that durable version or date.
 
@@ -210,9 +204,9 @@ Use a neutral encyclopedic register: direct, precise, and free of conversational
    effect, condition, or quantity across the paragraph and the full note. If one
    sentence says a method reduces both bias and variance while the next says it
    preserves similar bias and reduces variance, the prose has not expressed a
-   coherent qualified claim. Reconcile the scope or conditions from the source;
-   when the source does not resolve the conflict, report it rather than choosing
-   the more convenient sentence.
+   coherent qualified claim. Reconcile the scope or conditions from the source or
+   well-established background; when neither resolves the conflict, report it
+   rather than choosing the more convenient sentence.
 
 **4. Coherent prose, with one local purpose per paragraph.** The body reads as a unified explanation, not a stack of relevant but disconnected facts. Each paragraph answers one discernible reader question or develops one controlling idea. Its sentences may define, explain, support, qualify, contrast, exemplify, or draw a consequence from that idea; sharing the entry's subject is not enough. A causal chain can therefore remain one paragraph even when it moves from mechanism to condition to immediate consequence.
 
@@ -237,6 +231,8 @@ Use a neutral encyclopedic register: direct, precise, and free of conversational
   **(f) Acronym-titled entries invert the (e) pattern.** When the entry's canonical title is itself an acronym, open with `**ACRONYM** (Full Expansion) is...` so the bolded title still comes first and the expansion follows as annotation. Examples: `**DBSCAN** (Density-Based Spatial Clustering of Applications with Noise) is a clustering algorithm...`; `**t-SNE** (t-distributed stochastic neighbor embedding) is a dimensionality-reduction method...`; `**MLOps** (machine learning operations) is the practice of deploying, monitoring, and maintaining machine learning systems...`. For a `Person` or `Event`, the mandatory date occupies the first parenthetical slot and the expansion follows it: `**ILSVRC** (2010–2017) (ImageNet Large Scale Visual Recognition Challenge) was an annual competition.` The choice between (e) and (f) is determined by the title field — whichever form the canonical title takes is the form bolded first in the body; the other form is the parenthetical annotation.
 
   **(g) Contested-topic exemption.** Entries on genuinely contested topics (philosophical positions, historical interpretations, religious doctrines) may present competing views as parallel positions with light attribution like "the materialist reading argues …" — see the *Contested-topic exemption* under [conflict handling](merge.md#conflict-handling) for when this applies. The (a)–(d) prohibitions otherwise apply.
+
+  **(h) Background beyond the source is welcome when it helps.** Add accurate information the source does not state whenever it makes the entry easier to understand: a definition or expansion the source assumes, a standard formula or its common variant, a well-known fact or date, or the context that connects the idea to its field. Keep it at the level of standard references and leave out anything speculative, disputed or uncertain; when unsure, omit it. Background needs no citation and does not change `sources:`. What the entry takes from its source (claims, conditions, numbers and scope) must still match it, and an accurate claim is never removed merely because a cited source does not state it. This invites explanation, not caveats: the edge cases and defensive qualifications excluded above stay out.
 
 **6. Remove padding without compressing away meaning.** Cut empty lead-ins, reader commentary, rhetorical hedging, and repetition that adds no distinction. Prefer a direct statement to praise or an elaborate metaphor. Keep useful signposting, technical terms, and evidence-bearing qualifiers; two sentences about the same subject may express different conditions or claims. Shorter is better only when equally clear and precise.
 

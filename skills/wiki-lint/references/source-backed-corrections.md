@@ -1,8 +1,11 @@
 # Source-backed corrections to an existing entry
 
-Read this when the user asks to correct or simplify existing entries. The
-evidence is limited to the sources each entry already cites; the request need
-not name them. A request covering a class of defects or the whole Wiki
+Read this when the user asks to correct or simplify existing entries. A
+correction rests on the sources each entry already cites; the request need not
+name them. The corrected entry may also add accurate background that makes it
+easier to understand, under the builder's
+[prose principle 5(h)](../../wiki-build/references/writing.md#prose-principles);
+background needs no citation. A request covering a class of defects or the whole Wiki
 applies to every matching entry in that scope, not just named examples. A generic lint request does not
 activate this mode. A source not already cited by the target is a new
 contribution and belongs to `wiki-build`; a split, merge, retitle, deletion,
@@ -14,8 +17,8 @@ or cross-entry redistribution uses [source-backed refactors](refactors.md).
    as the baseline, then decode its complete current
    `sources:` list. Resolve every source needed for the requested correction as
    a durable vault file; for a PDF/summary pair, verify against the PDF. A live
-   page, memory, or a source cited only by another entry is not evidence for
-   this mode.
+   page, recollection, or a source cited only by another entry cannot overturn
+   what a cited source says.
 2. Locate the exact supporting and conflicting passages and, for PDFs, their
    physical pages. If the cited files do not settle the correction, preserve
    the note and report what evidence is missing. Do not turn a request to
@@ -31,7 +34,8 @@ or cross-entry redistribution uses [source-backed refactors](refactors.md).
 
 Apply the current builder rules for fields, prose, equations, media, links, and
 flashcards. Correct the erroneous claim or remove the unnecessary caveat, preserving
-essential assumptions and the ordinary mechanism. Change only the same-entry surfaces needed
+essential assumptions and the ordinary mechanism. Never remove an accurate claim
+merely because the cited source does not state it. Change only the same-entry surfaces needed
 to keep it coherent: for example its description, opener, equation, or primary
 card. Preserve unrelated prose, existing source membership, `created:`,
 `parents:`, user-owned fields, and protected card attachments.

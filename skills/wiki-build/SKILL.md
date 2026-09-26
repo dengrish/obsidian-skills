@@ -183,9 +183,11 @@ date. The [run report](references/review.md#run-report) says where each goes.
 
 Re-read every active-source passage behind a new or changed claim and compare
 the draft's conditions, population or version, time frame, causal direction,
-units and numbers, and uncertainty with it. Correct or narrow what the source
-does not support, and handle priority and superlative wording under
-[prose principle 3](references/writing.md#prose-principles).
+units and numbers, and uncertainty with it. Correct or narrow a claim that
+misstates the source, and handle priority and superlative wording under
+[prose principle 3](references/writing.md#prose-principles). Background added
+for clarity must be accurate but needs no citation
+([prose principle 5(h)](references/writing.md#prose-principles)).
 This verification is autonomous and requires no separate sign-off. Then apply
 the [editorial reread](references/writing.md#editorial-reread) and re-check
 atomic scope and the protected-content rules; word count does not establish

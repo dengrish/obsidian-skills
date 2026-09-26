@@ -26,8 +26,9 @@ affected entry and supported by its durable source.
 1. Run the normal Step 0 scan over the whole wiki. Snapshot every affected
    entry and resolve its cited source files. For a PDF/summary pair, verify
    claims against the original PDF. A missing, unreadable, or ambiguous source
-   blocks only the factual movement it was needed to justify; preserve and
-   report that content instead of filling gaps from memory.
+   blocks only a movement that depends on it, such as a disputed or
+   source-specific claim; accurate, well-established content may move to its
+   owner without it. Never fill a gap with uncertain recollection.
 2. Prove the proposed boundary. A split needs two or more independently
    definable subjects, each with source-supported substance. A merge needs one
    entity under alternate names, not merely related concepts. Inherent
@@ -87,7 +88,7 @@ filesystem transaction, so order prevents a disappearing target:
    connected hierarchy closure so `parents:` and MOCs come from one tree.
 3. Re-scan and independently refresh the complete live-reference inventory.
    Verify that every changed link or transclusion resolves with its retained
-   anchor, every moved claim keeps a valid source, and no obsolete destination
+   anchor, every moved source-specific claim keeps its source, and no obsolete destination
    remains referenced; the Wiki scan alone cannot establish this postcondition.
 4. Only then conditionally remove an obsolete entry. Every substantive claim,
    equation, exhibit, card (including its scheduling attachments and block ID),
