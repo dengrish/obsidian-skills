@@ -14,7 +14,7 @@ description: >
 
 Maintain the existing wiki through three tasks: source-independent QC, retrospective link hygiene, and a consistent hierarchy rendered as `parents:` plus MOCs. Default to all three in order; honor requests for a narrower task or entry set.
 
-**Setup:** read [shared/RUNTIME.md](../../shared/RUNTIME.md) once for vault selection, paths, Python, and host tools. Apply the relevant [shared conventions](../../shared/CONVENTIONS.md) at each action below. Before a special mode or a missing-root search reads a PDF, set up the environment and run `python3 '<plugin>/shared/scripts/check_parsers.py'` with its interpreter under the [parser-check rule](../../shared/RUNTIME.md#only-for-pdf-and-image-workflows); while it fails, read the PDF pages directly.
+**Setup:** read [shared/RUNTIME.md](../../shared/RUNTIME.md) once for vault selection, paths, Python, and host tools. Apply the relevant [shared conventions](../../shared/CONVENTIONS.md) at each action below.
 
 ## Scope and ownership
 
@@ -66,7 +66,11 @@ Read the
 before planning or writing. A source not already cited by the target is a new
 contribution and routes to `wiki-build`; identity changes and cross-entry
 content movement route to refactor mode. Generic maintenance requests do not
-activate this mode.
+activate this mode. Before this mode, refactor mode, or a missing-root search
+reads a PDF, set up the environment and run
+`python3 '<plugin>/shared/scripts/check_parsers.py'` with its interpreter under
+the [parser-check rule](../../shared/RUNTIME.md#only-for-pdf-and-image-workflows);
+while it fails, read the PDF pages directly.
 
 ### Explicit source-backed refactor mode
 
@@ -81,12 +85,11 @@ affected inbound-reference and hierarchy surface, publishes replacements
 before conditionally removing obsolete files, and finishes with the ordinary
 three-task lint. It does not extract unrelated new entities from the source.
 
-An explicitly authorized pure retitle or semantic-invalid alias removal is
-executed on the same authorization, but through the
+An explicitly authorized pure retitle or semantic-invalid alias removal runs
+on that authorization through the
 [entry-retitle protocol](../../shared/CONVENTIONS.md#retitling-an-existing-wiki-entry)
 or the [alias-removal protocol](../../shared/CONVENTIONS.md#4b-aliases-use-the-same-slug-rule)
-instead of the source-backed refactor protocol above. Each protocol states its
-own reference-rewrite, hierarchy, and rescan postconditions.
+instead.
 
 ### Producer-mapped dependency repair mode
 

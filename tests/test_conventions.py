@@ -5964,21 +5964,24 @@ SELFTEST_TALLY = re.compile(
 #: fails.  Lowering a number here is a deliberate, reviewable statement that
 #: cases went away; a script with no line is checked for a clean tally only.
 SELFTEST_MIN_CASES = {
+    # Lowered deliberately on 2026-09-26: a verified bloat audit removed
+    # redundant cases (each duplicated one that stays) and the Extended Data
+    # skip/refuse path in batch_extract.py.
     # Updated after the full review of 2026-09-25. Raising after growth is the
     # mirror duty of the "lowering is a deliberate, reviewable statement" rule
     # below: new regression cases must not disappear with the harness green.
     "shared/scripts/atomic_move.py": 32,
-    "shared/scripts/check_parsers.py": 26,
+    "shared/scripts/check_parsers.py": 22,
     "shared/scripts/code_typography.py": 20,
-    "shared/scripts/entry_checks.py": 52,
+    "shared/scripts/entry_checks.py": 46,
     "shared/scripts/equation_coverage.py": 160,
     "shared/scripts/figure_state.py": 13,
     "shared/scripts/introduced_aliases.py": 23,
     "shared/scripts/markdown_tables.py": 42,
     "shared/scripts/naming.py": 228,
     "shared/scripts/note_provenance.py": 12,
-    "shared/scripts/organism_names.py": 33,
-    "shared/scripts/entry_structure.py": 156,
+    "shared/scripts/organism_names.py": 31,
+    "shared/scripts/entry_structure.py": 155,
     "shared/scripts/plugin_paths.py": 110,
     "shared/scripts/portable_names.py": 5,
     "shared/scripts/plurals.py": 251,
@@ -6019,16 +6022,16 @@ SELFTEST_MIN_CASES = {
     "skills/stock-research/scripts/market_public.py": 140,
     "skills/stock-research/scripts/market_screen.py": 25,
     "skills/paper-summarize/scripts/note_lint.py": 240,
-    "skills/paper-summarize/scripts/paper_scan.py": 174,
+    "skills/paper-summarize/scripts/paper_scan.py": 173,
     "skills/paper-summarize/scripts/paper_text.py": 63,
     "skills/figure-extract/scripts/auto_fig_bbox.py": 349,
-    "skills/figure-extract/scripts/batch_extract.py": 416,
-    "skills/figure-extract/scripts/extract_figures.py": 197,
+    "skills/figure-extract/scripts/batch_extract.py": 399,
+    "skills/figure-extract/scripts/extract_figures.py": 194,
     "skills/figure-extract/scripts/render_page.py": 67,
     "skills/pdf-organize/scripts/organize.py": 373,
     "skills/wiki-add/scripts/backlog.py": 48,
     "skills/wiki-build/scripts/find_collisions.py": 73,
-    "skills/wiki-build/scripts/lint_entry.py": 365,
+    "skills/wiki-build/scripts/lint_entry.py": 364,
     "skills/wiki-build/scripts/vault_index.py": 84,
     "skills/wiki-lint/scripts/scan_vault.py": 498,
 }

@@ -86,17 +86,17 @@ Read the first two or three pages for author, title, and year. Use
 `AuthorLastName_AbbreviatedTitle_Year.pdf`:
 
 - Use the first author's surname with normal capitalization, or an
-  organization's recognizable short name. Transliterate diacritics.
+  organization's recognizable short name. Transliterate diacritics. If no
+  author can be established, use the issuing organization or `Unknown`.
 - Shorten the title in CamelCase, retaining enough to distinguish the work.
   Use established field acronyms or familiar truncations, not invented or
   ambiguous acronyms. A recognized work nickname such as `CLRS` is suitable.
+  Prefer a meaningful heading to a generic invented title, and report
+  uncertainty.
 - Use the publication year printed in the document (for a book, the specific
   edition's year). A periodic report uses its release year; put the covered
   period in the abbreviated title. Do not take the year from outside the
   document; if none is printed, use `nd`.
-  If no author can be established, use the issuing organization or
-  `Unknown`. Prefer a meaningful heading to a generic invented title, and
-  report uncertainty.
 - For non-English sources, use an English title provided by the document;
   otherwise transliterate the original rather than inventing a translation.
 
@@ -163,12 +163,9 @@ edition, bytes):
   different document gets a distinguishing abbreviated title, or `_2`, `_3`
   as a last resort (never for a book); then re-plan.
 - **Own basename shared.** When another vault file shares the basename of
-  the selected PDF or of a chapter in its family, `split` blocks it, and so
-  do `check` and `rename` unless its name is non-canonical, it owns no
-  derived files, and no note cites it. Report both paths and relay the
-  helper's remedy
-  ([conventions §1a](../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first));
-  until then the other PDF skills also refuse that basename.
+  the selected PDF or of a chapter in its family, the helper blocks the plan
+  unless [conventions §1a](../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first)
+  exempts that copy. Report both paths and relay the helper's remedy.
 
 Never delete or move either copy yourself. Other blockers need their actual
 cause resolved. If the file is referenced and approval is absent, present the

@@ -672,6 +672,11 @@ def render(result):
                  % (sum(c.values()), c["new"], c["done"], c["book"],
                     c["chapter"], c["feed"], c["unorganized"],
                     c["collision"], c["legacy"]))
+    if c["feed"]:
+        lines.append("  feed-owned, skipped: the collector's receipts record "
+                     "these names (CONVENTIONS.md §1), so never rename them. "
+                     "Only when the user names one, rescan that file alone "
+                     "with --allow-unorganized")
     for row in result["pdfs"]:
         figs = row["figures"]
         # Whole figures, panels, and derived variants share one logical count,
@@ -700,12 +705,7 @@ def render(result):
             shown += ", …"
         lines.append("  [%-11s] %s" % (row["status"], shown_text(row["stem"])))
         if row["status"] == "feed":
-            # Not a unit of work: its image slots were never inspected.
-            lines.append("      feed-owned, skipped: the collector's receipts "
-                         "record this name (CONVENTIONS.md §1), so never "
-                         "rename it. Only when the user names it, rescan this "
-                         "file alone with --allow-unorganized")
-            continue
+            continue   # explained once above; its image slots were never read
         lines.append("      figures: %d%s%s"
                      % (len(logical), ("  (" + shown + ")") if logical else "",
                         ("  + %d panel(s) of them, in %d file(s)"
@@ -1535,14 +1535,10 @@ def run_self_test():
     # the other.
     n += 1
     if ("ask the user to remove the redundant copy" not in render(conflicted)
-            or "pdf-organize gives" in render(conflicted)):
+            or "rename the newcomer" not in render(conflicted)):
         bad += 1
-        print("FAIL a duplicate basename was not handed to the user to resolve")
-    n += 1
-    if ("rename the newcomer" not in render(conflicted)
-            or "rename or move one" in render(conflicted)):
-        bad += 1
-        print("FAIL the duplicate-basename remedy did not name the newcomer")
+        print("FAIL the duplicate-basename remedy did not go to the user or "
+              "name the newcomer")
     single_conflicted = scan(
         os.path.join(_v, "Sources", "PDFs", "first", "Dup_Study_2025.pdf"),
         os.path.join(_v, "Articles"), os.path.join(_v, "Sources", "Images"))
@@ -1717,7 +1713,7 @@ def run_self_test():
         n += 1
         if (code != 0 or "2 feed-owned attachment(s) skipped" not in _sweep
                 or "0 refused as unorganized" not in _sweep
-                or _sweep.count("feed-owned, skipped") != 2
+                or _sweep.count("feed-owned, skipped") != 1
                 or "pdf-organize" in _sweep):
             bad += 1
             print("FAIL a folder sweep did not skip feed attachments cleanly "

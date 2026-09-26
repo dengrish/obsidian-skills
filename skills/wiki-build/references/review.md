@@ -16,7 +16,7 @@ Run them at the end of step 7 in this order: **missed-entity, overlap/ownership,
 
 ### Missed-entity audit (source coverage)
 
-This audit catches what the orphan sweep cannot see: **substantive terms in the source that should be entries, aren't, and aren't wikilinked from anywhere either.** For each source processed this run, re-walk it applying the same step-2 filters — (b) for any source, and (c) additionally for secondary ones. In a [candidate-specific](multi-source-synthesis.md) run, the audit covers only the named candidate: confirm that each retained source's selected contribution is integrated, and do not re-walk the sources for other entities.
+This audit catches what the orphan sweep cannot see: **substantive terms in the source that should be entries, aren't, and aren't wikilinked from anywhere either.** For each source processed this run, re-walk it applying the same step-2 filters — (b) for any source, and (c) additionally for secondary ones. A [candidate-specific](multi-source-synthesis.md) run audits only its named candidate, confirming that each retained source's contribution is integrated.
 
 **Enumerated lists get a verdict per item, not per list.** When the source runs through candidates in a list — an applications catalog, a "techniques include" paragraph, a bulleted survey — record an explicit entry/defer/reject-with-reason for *each item*, because wholesale judgment is where siblings diverge silently: a skipped term with no node and no report line is invisible to every later audit.
 

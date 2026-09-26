@@ -27,30 +27,23 @@ is there.
 - Route a raw `.md` capture through `clipping-clean` and an Inbox PDF through
   `pdf-organize`, then process the resulting `Articles/` note or
   `Sources/PDFs/` file.
-- When clipping-clean reports the capture as a duplicate, process the existing
-  note it names. If that note is a wiki-add research extract (listed in
-  `research_extracts`), do not substitute it: report that the capture stays
-  uncleaned behind the extract, and ask whether to use the extract instead.
-- A user's own note, with no capture URL in its origin field or text, is local
-  input that clipping-clean leaves alone. Ask the user to move it to a durable
-  folder outside `Inbox/`, or to approve a named destination, then process it
-  there as an unpaired Markdown source.
-- In a preview or no-apply run, use the producer only in its own preview mode.
-  Extract from the raw file, and label the producer's proposed path, or the
-  note its duplicate verdict names, as a provisional citation.
+- When clipping-clean reports a duplicate, process the note it names, unless
+  it is a wiki-add research extract (`research_extracts`): then ask whether to
+  use the extract instead.
+- A user's own note with no capture URL is not a clipping: ask the user to
+  move it out of `Inbox/`, or approve a destination, and process it there.
+- A preview run uses the producer only in its preview mode, extracts from the
+  raw file, and cites the proposed path provisionally.
 
 A folder run never selects an `Inbox/` file or a
 [feed-owned attachment](../../../shared/CONVENTIONS.md#1-vault-folder-layout),
 and it takes a split book through its [chapters](#books-and-chapters).
 
-The separate [wiki-add research workflow](../../wiki-add/references/research.md)
-may acquire durable sources for requested topics. A marked research extract is
-a URL-origin source, but a deliberately selective, agent-written extract rather
-than a full capture. Cite its Markdown filename without an anchor, never its
-URL. Use only claims its own text supports; never supplement, refresh, or
-extend it from the live page, and read a topic's absence from the extract as
-saying nothing about the original page. An ordinary builder run never creates
-an extract, and a search result is never a source.
+A marked [wiki-add research extract](../../wiki-add/references/research.md) is
+a selective, agent-written extract of a URL, not a full capture. Cite its
+Markdown filename, never its URL; use only claims its own text supports, never
+extend it from the live page, and read nothing into what it omits. An ordinary
+builder run never creates an extract, and a search result is never a source.
 
 ## Resolve a Markdown source
 
@@ -93,54 +86,41 @@ Read the inventory JSON even on a nonzero exit. A non-canonical filename, an
 incomplete inventory, or a selection that is not `unique` blocks PDF
 processing:
 
-- A non-canonical vault PDF: route it through `pdf-organize`, then restart
-  intake with the final name and rerun both checks.
-- No vault owner (a PDF outside the vault): ask before copying it into
-  `Inbox/` for `pdf-organize` to file, unless the user already asked to
-  import it; without that approval, stop and report. Leave the external
-  original in place, then restart intake from the filed `Sources/PDFs/` path
-  and rerun both checks.
-- Several owners: another vault file shares this PDF basename. Report both
-  paths, follow the
-  [duplicate-basename remedy](../../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first),
-  and retry once it is resolved.
+- A non-canonical vault PDF: route it through `pdf-organize`.
+- No vault owner (a PDF outside the vault): unless the user asked to import
+  it, ask before copying it into `Inbox/` for `pdf-organize`; without
+  approval, stop and report. Leave the external original in place.
+- Several owners: report both paths and follow the
+  [duplicate-basename remedy](../../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first).
 - Anything else, such as an incomplete inventory: report the blocker.
+
+After a fix, restart intake from the final path and rerun both checks.
 
 The only naming exception is an explicitly named
 [feed-owned attachment](../../../shared/CONVENTIONS.md#1-vault-folder-layout)
-(`python3 '<skill>/../../shared/scripts/naming.py' feed '<name>'` reports
-`feed-owned`). One reached through the `sources:` substitution of a note the
-user named also counts as explicitly named; a folder run skips such a note and
-reports it. Once the `--selected` inventory proves one owner, the attachment
-keeps its collector name as its identity; never rename it or route it to
-`pdf-organize`. Report the exception and carry `figure-extract`'s
-`--allow-unorganized` route into any extraction for it.
+(`naming.py feed '<name>'` reports `feed-owned`), including one a named note's
+`sources:` points to; a folder run skips such a note and reports it. Once
+`--selected` proves one owner, the attachment keeps its collector name: never
+rename it or route it to `pdf-organize`, report the exception, and pass
+`--allow-unorganized` to any figure extraction for it.
 
 ## Books and chapters
 
 A whole-book PDF whose chapter PDFs exist (pdf-organize's
-`Sources/PDFs/<Work>/` split) is a split book. Pair them over the complete
+`Sources/PDFs/<Work>/` split) is a split book; pair them over the complete
 `vault_artifacts.py pdfs --vault '<vault>'` inventory with
-`python3 '<skill>/../../shared/scripts/naming.py' chapter '<stem>'`, which
-names the book each chapter stem belongs to. A book and its chapters are one
-document:
+`python3 '<skill>/../../shared/scripts/naming.py' chapter '<stem>'`. A book and
+its chapters are one document:
 
-- A folder run that reaches both processes the chapters and skips the whole
-  book, and reports the skip.
-- A request naming a split book is processed through its chapters, as
-  separate sources in chapter order; report the substitution. Process the
-  whole-book file only when the user explicitly asks for that file despite
-  its chapters.
-- Chapter files omit what the split excluded, such as unlabeled introductions,
-  appendices and glossaries. Whenever chapters stand in for the book, check
-  its table of contents and report each substantive section no chapter covers
-  as not processed; processing it takes an explicit request for the whole-book
-  file.
-- Prior coverage stays a per-file query, plus a query for the paired
-  representation: a confirmed citation of the whole book covers its chapters,
-  and a chapter citation covers that chapter. Without rerun intent, skip the
-  covered parts and process the rest. Never cite both book and chapter pages
-  for the same claim.
+- A folder run that reaches both, or a request naming the split book,
+  processes its chapters in order as separate sources and skips the
+  whole-book file, reporting the substitution, unless the user explicitly asks
+  for that file. Report each substantive table-of-contents section no chapter
+  covers (often introductions, appendices, glossaries) as not processed.
+- Query prior coverage for both representations: a confirmed citation of the
+  whole book covers its chapters, and a chapter citation covers that chapter;
+  without rerun intent, skip covered parts. Never cite both book and chapter
+  pages for the same claim.
 
 An unsplit book is an ordinary source.
 

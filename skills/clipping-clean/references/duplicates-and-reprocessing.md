@@ -11,11 +11,10 @@ scan and its verdicts are in [Select the captures](../SKILL.md#1-select-the-capt
 ## Reprocessing an existing note
 
 An eligible clipping's first current `sources:` item is a web URL, and the note
-does not carry the `<!-- obsidian:wiki-add-research-source -->` marker.
-Marked research extracts remain distinct even when their URL matches a raw
-capture; leave them unchanged. Read legacy `source:` only when `sources:` is
-absent; malformed or ambiguous current metadata cannot establish ownership
-through a stale value. A PDF origin belongs to `paper-summarize`.
+is not a marked [research extract](../SKILL.md#clipping-clean). Read legacy
+`source:` only when `sources:` is absent; malformed or ambiguous current
+metadata cannot establish ownership through a stale value. A PDF origin belongs
+to `paper-summarize`.
 
 Naming a file already in `Articles/` for reprocessing authorizes that owned
 rewrite. Naming a raw capture that matches another note requires an explicit
@@ -25,13 +24,11 @@ matching notes this skill owns: re-read each raw and run the complete workflow
 from its current files rather than continuing an old scratch draft. Ordinary
 batch mode never overwrites a duplicate or selects polished notes on its own.
 
-**Resume.** Raws accumulate in `Inbox/`, so resuming an interrupted clipping
-run is narrower. Process captures that are still `new`. For a matching owned
-note whose embeds lack their attachments, restore those attachments from the
-raw's staged images as under *Body source* below, without rewriting the note.
-Finish a pending changed-slug handoff by
-[its procedure](#finish-a-pending-changed-slug-handoff). Leave every other
-matching note as a `duplicate` skip.
+**Resume.** Resuming an interrupted run processes captures still `new`,
+restores missing attachments of a matching owned note from its raw (as under
+*Body source* below) without rewriting the note, and finishes a pending
+changed-slug handoff by [its procedure](#finish-a-pending-changed-slug-handoff).
+Every other match stays a `duplicate` skip.
 
 Record the original bytes, file identity, permissions and metadata before
 preparing the replacement: `expected = atomic_move.regular_file_snapshot(<note>)`,
@@ -42,30 +39,17 @@ own dedup scan.
 callout and following `___` separator to get the article body. Keep existing
 body prose, embeds and still-valid audit placeholders. Do not summarize the old
 summary as if it were source prose. For an authorized overwrite from a raw
-capture, clean the raw afresh and stage its images and any audit recoveries to
-scratch. Match each staged image to an attachment the existing note already
-embeds, by identical bytes or else by caption, alt text and position as in the
-[completeness audit](completeness-audit.md#inventory-and-match-media). Use the
-matching embed name (only its slug changes for a changed slug). Discard the
-staged copy only when that embed's attachment exists. If it is missing, as
-after an interrupted placement, restore it under the existing note's name
-before drafting or running prepare:
-
-```bash
-python3 '<skill>/scripts/fetch_images.py' place \
-    --attachments '<vault>/Sources/Images' --slug '<existing slug>' \
-    --index '<N>' --from-file '<staged path>' --owner-note '<existing note>'
-```
-
-Report a refused restore, such as an extension mismatch; a rewrite replaces
-that embed with the `<!-- missing attachment: … -->` placeholder from
-[image handling](images.md#existing-embeds-on-a-reprocess). Only unmatched
-images take new numbers. Keep an equivalent existing converted-GIF embed or
-placeholder. Carry every unmatched existing embed into the draft at its old
-position with its caption, under its mapped name for a changed slug; never
-delete an attachment. Prepare requires every old-slug attachment in the new
-note, so if an old embed cannot be placed, stop and ask whether to keep the
-old slug.
+capture, clean the raw afresh and stage its images to scratch. A staged image
+that matches an attachment the note already embeds (identical bytes, else
+caption, alt text and position, as in the
+[completeness audit](completeness-audit.md#inventory-and-match-media)) keeps
+that embed's name: discard the staged copy, first restoring the attachment with
+`fetch_images.py place` (existing slug and `--owner-note`) if it is missing.
+Only unmatched images take new numbers. Carry every other existing embed,
+converted GIF or placeholder into the draft at its old position with its
+caption, and never delete an attachment. A missing attachment that cannot be
+restored becomes a reported `<!-- missing attachment: … -->` placeholder;
+[image handling](images.md#existing-embeds-on-a-reprocess) covers a changed slug.
 
 Apply the [frontmatter rules](metadata-verification.md#frontmatter-for-the-polished-note)
 to decide which fields regenerate and which preserve user state. In particular,
@@ -80,10 +64,8 @@ note uses.
 ## Settle a slug before writing images
 
 Different bodies at the same origin are still duplicates: keep the user's
-processed version unless they authorize a rewrite. URL variants the normalizer
-keeps apart (scheme, an `m.` or AMP host, retained query fields) can pass the
-URL check. This slug check treats such a variant as the same article (skip or
-ask), never as license to merge silently or to create a `_2` copy.
+processed version unless they authorize a rewrite. A URL variant that passed
+the URL check is still the same article (first table row), never a `_2` copy.
 
 Check `Articles/<slug>.md` with `dedup_index.py --slug '<slug>'`; check
 PDF stems throughout recursive
@@ -97,7 +79,7 @@ free name.
 
 | Existing owner | Action |
 |---|---|
-| The same article: a note with the same normalized web origin, or one whose origin differs only by scheme, an `m.`/AMP host or path alias, or query fields the normalizer keeps, and whose title and author/date match this capture's verified metadata | Batch: skip, keep the raw, and report a dedup escape with the existing path and both URLs. Named capture: use the explicit overwrite-or-skip decision, not filename similarity as authorization. If sameness is uncertain, treat it as this row, not the next. A marked research extract is skipped and reported, never offered for overwrite. |
+| The same article: a note with the same normalized web origin, or one whose origin differs only by scheme, an `m.`/AMP host or path alias, or query fields the normalizer keeps, and whose title and author/date match this capture's verified metadata | Batch: skip, keep the raw, and report a dedup escape with the existing path and both URLs. Named capture: use the explicit overwrite-or-skip decision, not filename similarity as authorization. If sameness is uncertain, treat it as this row, not the next. Never offer a marked research extract for overwrite. |
 | A different source (URL and title/identity differ), PDF summary, PDF or loose figure set | Choose `<slug>_2`, then `_3`, … until the note and image stem are free. Use the suffix for both. Report the collision. |
 | Current note being explicitly reprocessed | Keep its stem if still correct, or plan its own note/image rename below. |
 

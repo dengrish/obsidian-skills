@@ -112,7 +112,7 @@ with or ignore, earlier work. For an absent Wiki, use a unique empty scratch
 directory. Do not create the public folder during collision planning,
 especially in a preview/no-apply run.
 
-**A decisive exact/µ match permits a merge only when it has one existing owner.** Multiple owners and all broader probe matches require adjudication; never choose an owner by index order. A malformed/unreadable index keeps “no match” uncertain. Resolve that uncertainty before creating a file. On any match, read [collision decisions and merging](references/merge.md#collision-decisions); similar names can denote different entities. An empty wiki still requires candidate-to-candidate checks. A result marked `naming: ["bare-common-noun"]` has a bare cross-domain slug. Qualify a new entry's title under the [cross-domain tests](references/writing.md#cross-domain-term-disambiguation) and probe again before drafting. When it matches an existing bare-slug entry of the same sense, merge into it and propose the qualified rename; for a different sense, qualify the candidate and probe again.
+**A decisive exact/µ match permits a merge only when it has one existing owner.** Multiple owners and all broader probe matches require adjudication; never choose an owner by index order. A malformed/unreadable index keeps “no match” uncertain. Resolve that uncertainty before creating a file. On any match, read [collision decisions and merging](references/merge.md#collision-decisions); similar names can denote different entities. An empty wiki still requires candidate-to-candidate checks. A `naming: ["bare-common-noun"]` result needs a [qualified title](references/writing.md#cross-domain-term-disambiguation) and a new probe; an existing bare-slug entry of the same sense instead takes the merge and a qualified-rename proposal.
 
 A leaf `.md` symlink is an occupied slug, not merge input: the index keeps it
 in collision ownership, reports it, and suppresses its target's metadata. Do
@@ -136,7 +136,7 @@ Read [equations](references/equations.md) before typesetting when the source sta
 
 ### 5. Merge into existing entries
 
-Follow [merge logic](references/merge.md#merge-logic): integrate substantive new information into one coherent staged entry, preserving earlier contributions rather than stacking paragraphs. Snapshot the existing note's exact bytes, identity, and permissions when reading it; keep that original snapshot as the final publication precondition. If a later source in this run touches the same entry, merge into the staged draft without replacing that original precondition. If the public file changes at any point, preserve the newer file, re-read it, and rebuild/re-review the complete merge instead of applying the stale draft. Existing images/tables, populated `parents:`, legacy `importance:`, user-disabled cards and scheduling metadata have preservation rules; they are not fields to regenerate from a blank template. Keep keys outside the schema, including Obsidian-owned properties, exactly and report them ([merge rule 8](references/merge.md#frontmatter-and-related-footer)). Read the [hand-edit case](references/edge-cases.md) when the user has edited an entry; there is no protected-region mechanism.
+Follow [merge logic](references/merge.md#merge-logic): integrate substantive new information into one coherent staged entry, preserving earlier contributions rather than stacking paragraphs. Snapshot the existing note's exact bytes, identity, and permissions when reading it; keep that original snapshot as the final publication precondition. If a later source in this run touches the same entry, merge into the staged draft without replacing that original precondition. If the public file changes at any point, preserve the newer file, re-read it, and rebuild/re-review the complete merge instead of applying the stale draft. Existing images/tables, populated `parents:`, legacy `importance:`, keys outside the schema, user-disabled cards and scheduling metadata have preservation rules; they are not fields to regenerate from a blank template. Read the [hand-edit case](references/edge-cases.md) when the user has edited an entry; there is no protected-region mechanism.
 
 Cite the source only when it passes step 2's filters for this entity, with decoded source identity and confirmed PDF/summary pairing; a thin mention never earns a citation. For `Software`, using the artifact to teach another concept, enumerating its classes, or listing parameters and defaults is not a contribution about the artifact; another object that merely instantiates an interface convention the entry already explains is covered content. A [source-no-op merge](references/merge.md#source-no-op-merges) appends its missing citation and skips source-driven body rewriting; step 7 still applies targeted independent QC. Update `updated:` whenever anything actually changes; preserve the old date only when the final entry is byte-unchanged.
 
@@ -172,24 +172,14 @@ If any lint cannot run or its result is malformed or incomplete, leave all
 dependent drafts unpublished and report the blocker; a prose-only review is not
 a clean lint.
 
-Leave a baseline finding on an unmodified copy to wiki-lint: unedited,
-unreported and non-blocking.
-
-**Report, without repairing, what this run may not change.** None of these
-blocks publication or completion:
-
-- an overlay finding on an unmodified copy whose existing link or Related
-  label now resolves to or names a new entry (such as `11-related-display` or
-  `18-label-target`), under *Notes for the user* for wiki-lint;
-- inherited state on a merged entry that the
-  [merge rules](references/merge.md#frontmatter-and-related-footer) preserve.
-  An alias shared with an untouched entry, a filename to rename, or a legacy
-  extra card a cited source supports as a split gets its proposal at closeout.
-  A key outside the schema, missing or unknown `read:` state and other
-  `report_only: true` user state go only under *Notes for the user*, never as
-  a repair proposal;
-- a merged entry's missing `Person`/`Event` date under the
-  [rare-types report rule](references/rare-types.md#dates-in-the-opener-person-and-event).
+Leave a baseline finding on an unmodified copy to wiki-lint, unreported.
+**Report, without repairing or blocking on, what this run may not change:** an
+unmodified copy's existing link or Related label that now resolves to or names
+a new entry (such as `11-related-display` or `18-label-target`), a merged
+entry's inherited state that the
+[merge rules](references/merge.md#frontmatter-and-related-footer) preserve
+(including `report_only: true` user state), and its missing `Person`/`Event`
+date. The [run report](references/review.md#run-report) says where each goes.
 
 Re-read every active-source passage behind a new or changed claim and compare
 the draft's conditions, population or version, time frame, causal direction,
@@ -254,9 +244,7 @@ Report actual creates/regular merges/source-no-op merges, skipped/deferred entit
 At closeout, read the [shared suggestion-log rules](../../shared/SUGGESTIONS.md)
 and apply them to `Reviews/wiki-build-suggestions.md` and to the logs of
 producers whose outputs this run consumed. Record this run's unresolved
-note-content proposals, such as overlap refactors, renames, semantic-invalid
-aliases, split candidates, and contradictions between existing entries, in
-`Reviews/wiki-notes-suggestions.md`.
+note-content proposals in `Reviews/wiki-notes-suggestions.md`.
 
 ## The entry
 
@@ -320,9 +308,7 @@ not fixes.
    connected prose without scaffolding, repetition, or navigation-only link
    cues. Active-source claims keep their scope, conditions, numbers, causal
    direction, and uncertainty; priority or superlative claims are narrowed or
-   supported; and the draft adds no qualification the
-   [prose principles](references/writing.md#prose-principles) exclude.
-   `Person`/`Event` openers use
+   supported. `Person`/`Event` openers use
    the exact [date forms](references/rare-types.md#dates-in-the-opener-person-and-event).
    See [body and prose](references/writing.md#2-the-body).
 10. **Wikilinks** — the first eligible body occurrence of each resolved entry

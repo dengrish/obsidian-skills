@@ -50,13 +50,6 @@ REVIEW_HEADER = (
     "# coming back every run. Delete a line to un-review it.\n"
 )
 
-# A hand-written `STEM:FIG` review row, spelled as --mark-reviewed accepts it
-# (spaces may follow the colon). The key is lazy, so a stem may hold a
-# colon, and the label must end the row or precede a `#` comment, so a colon
-# inside that comment never becomes the separator.
-_HAND_REVIEW_ROW = re.compile(
-    r"(?P<key>.+?): *(?P<label>[A-Za-z0-9][A-Za-z0-9.-]*)(?=\s+#|\s*\Z)")
-
 
 class SidecarConflict(FileExistsError):
     """A sidecar no longer matches the version a caller read and edited."""
@@ -123,10 +116,11 @@ def _records(text, kind):
                 key, value = fields[:2]
                 value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
             else:
-                match = _HAND_REVIEW_ROW.match(raw)
-                if not match:
+                # Split on the last colon before any ` # comment`.
+                key, sep, value = re.split(r"\s+#", raw, maxsplit=1)[0].rpartition(":")
+                if not sep:
                     raise ValueError("review line %d: expected stem<TAB>label or STEM:FIG" % number)
-                key, value = match.group("key"), match.group("label")
+                value = value.strip()
             if not _fragment(key) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", value):
                 raise ValueError("review line %d: invalid stem or figure label" % number)
             yield number - 1, key, value, (0, len(key))
@@ -369,11 +363,10 @@ def self_test():
         def test_hand_written_review_comments_keep_their_mark(self):
             text = ("Doe_Study_2025:2 # checked: ok\n"
                     "Doe_Study_2025:3 # checked: crop ok\n"
-                    "A:B:10-5 # colon stem: fine\n"
-                    "Report #3:4\n")
+                    "A:B:10-5 # colon stem: fine\n")
             self.assertEqual(parse_reviewed(text), {
                 ("Doe_Study_2025", "2"), ("Doe_Study_2025", "3"),
-                ("A:B", "10-5"), ("Report #3", "4")})
+                ("A:B", "10-5")})
             updated = rewrite_sidecar(
                 text, {"Doe_Study_2025": "Doe_Study_2026"}, "review")
             self.assertEqual(

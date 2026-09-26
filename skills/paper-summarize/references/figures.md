@@ -86,7 +86,7 @@ The shape, exactly:
 - **Fails:** *Figure 2 — The two arms separated inside the first fortnight…* (right message, but the number is banned — see below)
 - **Holds:** the example above leads with the difference and then identifies population, comparator and display.
 
-**The caption must stand alone.** A reader who scrolls the note reading only figures and captions should come away with the document's argument. That means the caption carries its own scope clause and key numbers, even where the paragraph above already has them. It does not restate document-level limitations; those live in Limitations.
+**The caption must stand alone.** A reader who scrolls the note reading only figures and captions should come away with the document's argument. That means the caption carries its own scope clause and key numbers, even where the paragraph above already has them.
 
 **The four claim rules apply inside a caption too** ([summary standards](summary-standards.md#the-four-claim-rules-in-full)). A caption is where a hedge most often goes missing, because captions are written last and read as neutral description. "Treatment worked" under a figure is the same overstatement it would be in a sentence.
 

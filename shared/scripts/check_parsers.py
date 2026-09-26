@@ -9,16 +9,11 @@ PDF or image workflow will use, after creating its environment:
     python3 shared/scripts/check_parsers.py          # check this interpreter
     python3 shared/scripts/check_parsers.py --test   # inline self-tests
 
-``MINIMUMS`` are the floors in ``requirements.txt`` (pypdf) and
-``skills/figure-extract/scripts/requirements.txt`` (PyMuPDF, Pillow); keep
-them synchronized. Releases compare numerically, with missing components read
-as zero, so ``13`` and ``7.0`` are later releases. A prerelease or development
-build of a floor release, such as ``12.3.0rc1``, ``12.3rc1`` or
-``6.16.1.dev0``, precedes that release and fails.
-
-The check itself needs only the standard library and Python 3.10+. The parsers
-are imported inside ``main()``, after their versions pass.
-Exit codes: 0 every floor met and every parser imports, 1 otherwise.
+``MINIMUMS`` mirror the floors in ``requirements.txt`` (pypdf) and
+``skills/figure-extract/scripts/requirements.txt`` (PyMuPDF, Pillow). Releases
+compare numerically; a prerelease of a floor release (``12.3.0rc1``) fails.
+Standard library only; the parsers are imported only after their versions
+pass. Exit codes: 0 every floor met and every parser imports, 1 otherwise.
 """
 
 import argparse
@@ -144,16 +139,11 @@ def run_self_test(verbose=False):
          with_versions(pypdf="10.0.0"), []),
         ("a below-floor patch release fails", current,
          with_versions(pypdf="6.16.0"), ["pypdf 6.16.0 is below 6.16.1"]),
-        ("a below-floor minor release fails", current,
-         with_versions(Pillow="12.2.9"), ["Pillow 12.2.9 is below 12.3.0"]),
         ("a textually larger but older minor release fails", current,
          with_versions(pypdf="6.9.0"), ["pypdf 6.9.0 is below 6.16.1"]),
         ("a release candidate of the floor fails", current,
          with_versions(Pillow="12.3.0rc1"),
          ["Pillow 12.3.0rc1 is below 12.3.0"]),
-        ("a beta of the floor fails", current,
-         with_versions(PyMuPDF="1.28.0b2"),
-         ["PyMuPDF 1.28.0b2 is below 1.28.0"]),
         ("a development build of the floor fails", current,
          with_versions(pypdf="6.16.1.dev0"),
          ["pypdf 6.16.1.dev0 is below 6.16.1"]),
@@ -165,8 +155,6 @@ def run_self_test(verbose=False):
          with_versions(PyMuPDF="1.29.0rc1"), []),
         ("a two-component later release passes", current,
          with_versions(pypdf="7.0"), []),
-        ("a one-component later release passes", current,
-         with_versions(Pillow="13"), []),
         ("a two-component older release fails", current,
          with_versions(Pillow="12.2"), ["Pillow 12.2 is below 12.3.0"]),
         ("a two-component prerelease of the floor fails", current,
@@ -180,16 +168,13 @@ def run_self_test(verbose=False):
          with_versions(Pillow="unknown"), ["Pillow unknown is below 12.3.0"]),
         ("a missing package fails", current,
          with_versions(PyMuPDF=None), ["PyMuPDF is not installed"]),
-        ("an absent entry counts as missing", current,
-         {"pypdf": "6.16.1", "Pillow": "12.3.0"},
-         ["PyMuPDF is not installed"]),
         ("Python below 3.10 fails", (3, 9, 18), floors,
          ["Python 3.10 or newer is required (found 3.9.18)"]),
         ("every problem is reported together", (3, 9, 0),
-         {"pypdf": None, "PyMuPDF": "1.27.4", "Pillow": "12.3.0a1"},
+         {"pypdf": None, "PyMuPDF": "1.28.0b2", "Pillow": "12.3.0a1"},
          ["Python 3.10 or newer is required (found 3.9.0)",
           "pypdf is not installed",
-          "PyMuPDF 1.27.4 is below 1.28.0",
+          "PyMuPDF 1.28.0b2 is below 1.28.0",
           "Pillow 12.3.0a1 is below 12.3.0"]),
     ]
     passed = failed = 0

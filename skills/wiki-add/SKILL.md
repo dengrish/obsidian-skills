@@ -14,11 +14,10 @@ description: >
 Process the requested topics in the vault-root `add-to-wiki.md`, a backlog
 file the user selects, or topics the user names directly without a source
 document. Create complete entries only for missing topics. A positively
-identified existing entry is a successful no-edit outcome: do not merge,
-lint-fix, add aliases or sources, change cards or dates, or repair its links.
-Every pre-existing Wiki entry, source, image and MOC remains byte-for-byte
-unchanged. Every new Wiki entry has exactly one quoted discipline tag
-(`"#misc"` alone when none fits) and `parents: []`, the handoff to wiki-lint.
+identified existing entry is a successful no-edit outcome. Every pre-existing
+Wiki entry, source, image and MOC remains byte-for-byte unchanged. Every new
+Wiki entry has exactly one quoted discipline tag (`"#misc"` alone when none
+fits) and `parents: []`, the handoff to wiki-lint.
 
 Read [runtime setup](../../shared/RUNTIME.md) once per task. Before reading or
 acquiring a PDF, run `python3 '<plugin>/shared/scripts/check_parsers.py'`
@@ -49,14 +48,14 @@ python3 '<skill>/scripts/backlog.py' scan '<backlog.md>' \
     --out '<scratch>/backlog-snapshot-<n>.json'
 ```
 
-Read the complete result and retain the snapshot. Requests are top-level
-bullet or numbered items with `[ ]` or no checkbox; nested lines are context
-for resolving their parent, never extra requests. Report each `report_only`
-line with its line and reason. An `unclosed frontmatter, fence or comment`
-report is a valid result: process the returned items, but report the queue as
-incompletely scanned, never as empty or fully processed. A missing, crashing
-or malformed helper result blocks dependent writes; never replace the parser
-or guarded completion with a text-search checkbox edit.
+Read the complete result and retain the snapshot. Nested lines are context
+for resolving their parent item, never extra requests. Report each
+`report_only` line with its line and reason. An
+`unclosed frontmatter, fence or comment` report is a valid result: process the
+returned items, but report the queue as incompletely scanned, never as empty
+or fully processed. A missing, crashing or malformed helper result blocks
+dependent writes; never replace the parser or guarded completion with a
+text-search checkbox edit.
 
 **Order.** Take pending items one at a time, in file or request order, through
 steps 2–5 and their §6 completion; report and close out at the end. An entry
@@ -107,17 +106,13 @@ to free a slug.
 
 ## 3. Research only missing requested topics
 
-Follow [research and durable sources](references/research.md): search the
-vault's sources first, cite only those a Wiki entry already cites, the user
-names or this run files, route unbuilt ones to wiki-build, and use web
-research when the cited ones cannot support a conforming entry under its
-evidence preferences. Neither the sources' neighboring concepts nor nested
-backlog context become extra entries.
+Follow [research and durable sources](references/research.md), which
+searches the vault's sources before the web and routes unbuilt ones to
+wiki-build. The sources' neighboring concepts never become extra entries.
 
 Apply the builder's [substance, durability and atomicity gates](../wiki-build/SKILL.md#2-extract-entities)
 to the requested topic. Insufficient evidence, unresolved ambiguity or a topic
-that cannot form a conforming entry stays pending. Useful images are optional
-under the research reference; a purely textual entry is a valid result.
+that cannot form a conforming entry stays pending.
 
 ## 4. Draft and review the new entry
 
@@ -128,9 +123,8 @@ and [entry shape](../wiki-build/SKILL.md#the-entry), plus its
 [API surface](../wiki-build/references/api-surface.md),
 [rare types](../wiki-build/references/rare-types.md) and
 [tag calibration](../wiki-build/references/calibration.md) references when
-they apply. Count each description before writing. Draft complete bytes
-privately under the canonical title's reported slug, with today's
-creation/update dates, `parents: []` and `read: false`.
+they apply. Draft complete bytes privately under the canonical title's
+reported slug, with today's creation/update dates and `read: false`.
 
 Cite only verified durable vault artifacts under [the source-reference contract](../../shared/CONVENTIONS.md#7-source-references).
 Link under [conventions §9](../../shared/CONVENTIONS.md#wiki-add--inside-new-requested-entries-only)
@@ -138,22 +132,15 @@ and the builder's relevance and display rules: only to existing entries,
 including ones this run already published; a requested entry published later
 stays plain text. Never backfill existing notes or create prerequisite topics.
 
-Apply the builder's [Quality Checklist](../wiki-build/SKILL.md#quality-checklist)
-to each draft and, from builder [step 7](../wiki-build/SKILL.md#7-review-and-report),
-only: the private combined review tree with its baseline, lint loop and
-lint-failure blocker; the source-fidelity and editorial rereads; the
-review-only candidate rule; and the
-[overlap/ownership and orphan-link audits](../wiki-build/references/review.md),
-repairing only the new draft and skipping the orphan audit's create-the-entry
-branch. Skip missed-entity recovery, merges and the builder's run report.
-Existing notes are read-only context: an overlap with the new entry, or a
-contradiction the research exposed, becomes a note-content proposal for
-closeout; their pre-existing lint findings belong to wiki-lint. An overlay
-finding where an existing note's link or Related label now names the new
-entry is reported for wiki-lint and blocks neither publication nor
-completion. Resolve ownership uncertainty and every other finding affecting
-the new entry before publishing; a clean script result does not establish
-source accuracy.
+Review each draft under the builder's [Quality Checklist](../wiki-build/SKILL.md#quality-checklist)
+and [step 7](../wiki-build/SKILL.md#7-review-and-report) up to publication,
+repairing only the new draft. Skip missed-entity recovery, merges, the orphan
+audit's create-the-entry branch and the builder's run report. Existing notes
+are read-only context: an overlap with the new entry, or a contradiction the
+research exposed, becomes a note-content proposal for closeout, and step 7's
+report-only overlay findings block neither publication nor completion. Resolve
+ownership uncertainty and every other finding affecting the new entry before
+publishing.
 
 ## 5. Publish and verify
 
@@ -190,24 +177,21 @@ python3 '<skill>/scripts/backlog.py' complete \
 
 The helper checks the in-Wiki evidence file and the exact snapshot, then
 changes only the completion marker; it does **not** adjudicate identity or
-entry quality, so decide those first. Preserve every other backlog byte.
-Check off a multi-topic line only when every part was created or exists (pass
-one as `--entry`, name the others). After each successful completion, rescan
-to the next numbered snapshot and take from it the next pending item not yet
-attempted. After a stale-snapshot rejection, reread and match the
-still-pending request; never replay an old ID against changed queue text. If
-an entry was published but checkpointing failed, retain it and report that
-state.
+entry quality, so decide those first. Check off a multi-topic line only when
+every part was created or exists (pass one as `--entry`, name the others).
+After each successful completion, rescan to the next numbered snapshot and
+take from it the next pending item not yet attempted. After a stale-snapshot
+rejection, reread and match the still-pending request; never replay an old ID
+against changed queue text. If an entry was published but checkpointing
+failed, retain it and report that state.
 
-Report created and existing entries, checkmarks, named-topic outcomes, pending
-items with reasons, `report_only` lines, an incompletely scanned queue, the
-local-source search, sources reused, acquired (naming any not yet built) or
-routed to wiki-build, image decisions, plain-text mentions of entries
-published later, validation with review-only lint dispositions and overlay
-findings for wiki-lint, and any partial/recovery state. Do not describe
-a preview as applied. Resolve routine research and identity choices
-autonomously; ask only when an item cannot be resolved safely from the request
-and inspected evidence.
+Report each item's outcome (created, existing, checked off, or pending with a
+reason), its sources and image decisions, plain-text mentions of later
+entries, validation with review-only lint dispositions, and whatever the steps
+above and the research reference say to report. Do not describe a preview as
+applied. Resolve routine research and identity choices autonomously; ask only
+when an item cannot be resolved safely from the request and inspected
+evidence.
 
 Close every report with one standing line: *New entries keep `parents: []`
 and stay out of the MOCs until `wiki-lint` places them and links them from

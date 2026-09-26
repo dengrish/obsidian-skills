@@ -14,13 +14,9 @@ The leak scan — item 19's mechanical floor, spelled out in `references/qc-item
 Check any math a card carries against the canonical
 [line-1 equation rule](../../wiki-build/references/flashcards-and-emphasis.md#line-1-equation-coverage),
 even when the scanner reports nothing. Bringing existing math into that rule
-is a targeted current-rule repair when the tested claim is unchanged: trim only
-what it omits, never a condition, range, or excluded term the relationship
-needs; shorten a formula too long to recall only to a compact equivalent,
-never to words; and restore a defining operation it requires, such as an Lp
-norm's p-th root. The repair applies to pre-existing cards with known or
-unknown history; it does not authorize a cosmetic rewrite, a different tested
-claim, or invented body math.
+is a targeted current-rule repair when the tested claim is unchanged, for
+pre-existing cards with known or unknown history; it does not authorize a
+cosmetic rewrite, a different tested claim, or invented body math.
 Adding math to an accurate verbal card is an ordinary wording change under the
 bars below. Preserve the cue, answer-line bytes, and all scheduling/block-ID
 attachments exactly. Ordinary lint also preserves `created:`, `updated:`, and

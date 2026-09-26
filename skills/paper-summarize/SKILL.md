@@ -38,22 +38,20 @@ and figures depend on this [canonical source identity](../../shared/CONVENTIONS.
 Honor explicit no-rename/no-import instructions; report and carry a deliberate
 `--allow-unorganized` exception when a preserved name is noncanonical.
 
-A selected PDF outside the vault is usable only as a readable copy, such as a
-decrypted scratch copy, of the one vault PDF sharing its basename. The scan
-checks only the name: confirm the same document (identical bytes, matching page
-count and first-page text, or the user's word), or stop and report both paths.
-If no vault PDF shares its basename, ask before copying it into `Inbox/` for
-`pdf-organize` to file, unless the user already asked to import it, then
-inventory the filed path; otherwise stop and report. Leave the external
-original in place.
+A PDF outside the vault is usable only as a readable copy (such as a decrypted
+scratch copy) of the one vault PDF with its basename; the scan checks only the
+name, so confirm the same document (identical bytes, matching page count and
+first-page text, or the user's word) or stop and report both paths. If no vault
+PDF has its basename, ask before copying it into `Inbox/` for `pdf-organize` to
+file (unless the user asked to import it), then inventory the filed path.
+Leave the external original in place.
 
 Confirm that the resolved vault anchor and current selected inputs exist.
 Create `Articles/` and `Sources/Images/` if absent, but never an empty
 `Sources/PDFs/` to make a missing input look valid. A preview, plan-only or
-no-apply run creates no vault folder: pass an empty `<scratch>` directory for an
-absent `Articles/` or `Sources/Images/`. A private `--images` substitute drops
-the scan's vault-wide checks, so report such a preview as partial and never
-present its `new` rows as ready to publish.
+no-apply run creates no vault folder: it scans an empty `<scratch>` in place of
+an absent `Articles/` or `Sources/Images/` and reports the result as partial,
+not ready to publish.
 
 The read-only inventory is wider than the **processing scope** above: scan the
 whole `Sources/PDFs/` tree when present so books and chapters stay visible:
@@ -96,9 +94,7 @@ named unsafe image occupant and rescan before reading its figure count. The
 helper then exits non-zero, but its other rows remain valid.
 
 Non-zero scan failures and unreadable directories are not empty inventories or
-zero figure counts. If the scan helper is unavailable, only the
-[manual inventory fallback](references/edge-cases.md#manual-inventory-fallback)
-may replace it; otherwise stop.
+zero figure counts. If the scan helper cannot run, stop and report it.
 
 ### Prepare the figure inventory
 
@@ -141,12 +137,9 @@ otherwise the image folder is read-only, and
 [missing exhibits](references/figures.md#when-the-figure-you-need-is-not-there)
 governs a needed figure that is still absent or badly cropped.
 
-Whether or not extraction ran, rescan that PDF alone with `--json`, the same
-`--notes`/`--images` and any naming exception, and use it only for its figure
-list; the PDF's status stays the one intake settled. Embed only a file named in
-its `figures[].file` ([exhibit selection](references/figures.md#what-is-eligible)
-reads `panel_of`, `variant_of` and `duplicate_label`); never rebuild a filename
-from a label.
+Whether or not extraction ran, rescan that PDF alone with `--json` (same
+`--notes`/`--images` and any naming exception) for its figure list only. Embed
+only a file named in its `figures[].file`, never a filename rebuilt from a label.
 
 ## 2. Read the PDF and record the claims
 
@@ -214,8 +207,8 @@ python3 '<skill>/scripts/note_lint.py' '<draft note>' \
 ```
 
 Use the body mode chosen in step 3 and the same `--images` folder the scan
-used, which in a preview may be step 1's private substitute. Fix violations and
-rerun; review every advisory, including sentence/step length against the
+used. Fix violations and rerun; review every advisory, including sentence/step
+length against the
 [brevity targets](references/note-format.md#prose-and-key-messages) and a
 one-item empirical Limitations section against the anti-filler exception.
 Repeat intake's deliberate `--allow-unorganized` exception here, and only then;

@@ -104,38 +104,6 @@ finder is unavailable but the pages are readable, record direct page
 verification explicitly. Lint remains a separate required gate; its absence is
 not waived by a readable PDF or an available checklist.
 
-## Manual inventory fallback
-
-Use this only when `paper_scan.py` cannot run. A read-only inventory must then
-establish everything the scan proves, or the run stops:
-
-- **Source scope.** Walk the configured `Sources/PDFs/` tree and every selected
-  file outside it. Directory symlinks keep their logical paths; an unreadable
-  subtree, a directory that changes during the walk or an ancestor cycle makes
-  the inventory incomplete. With canonical `Sources/Images/` output, compare
-  PDF basenames across the whole vault, including `Inbox/`, under NFC
-  normalization and case folding.
-- **Status.** Give each PDF the status the scan would, as the
-  [SKILL table](../SKILL.md#1-select-and-inventory-the-work) defines it: in a
-  sweep, skip [feed-owned attachments](../../../shared/CONVENTIONS.md#1-vault-folder-layout),
-  split books and chapters, and route any other noncanonical name to
-  `pdf-organize`.
-- **Note origin.** `Articles/` is one flat namespace compared the same way.
-  The first current `sources:` item establishes origin: a quoted PDF wikilink
-  identifies this skill's note; a URL identifies a web-origin note (a clipping
-  or research extract). Read a legacy `source:` only when `sources:` is absent.
-  Empty, malformed or duplicate current keys, including quoted or escaped
-  duplicates, establish no ownership. A readable single-line flow list is
-  accepted for an existing note; new notes use the block form.
-- **Qualified origins.** A path-qualified PDF origin also needs folder
-  components matching the selected PDF's actual vault-relative or note-relative
-  path, or a unique suffix of it. The same basename at a different or missing
-  path is not ownership. Without a vault anchor, a qualified origin stays
-  unproved and blocks replacement.
-- **Figures.** List the image folder's `[stem]_fig*` files at any extension,
-  and treat an unreadable folder or an unsafe occupant as a blocked inventory,
-  not zero figures.
-
 ## Byline and duplicate-document cases
 
 For a long or collective byline use [frontmatter](note-format.md#frontmatter).

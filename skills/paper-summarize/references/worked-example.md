@@ -157,9 +157,8 @@ python3 '<skill>/scripts/note_lint.py' '<scratch>/Doe_GutMicrobiome_2025.md' \
 ```
 
 Lint cannot verify the science or the page citations, and every selected real
-image still needs visual inspection. The repository's tests lint this fictional
-fixture's textual format through the lint API without an image inventory; do
-not create placeholder images to make it pass the command above.
+image still needs visual inspection. Do not create placeholder images to make
+this fictional example pass the command above.
 
 A real run reports source-check counts/corrections and lint separately, then
 publishes only after both gates pass. It does not copy this example's facts or

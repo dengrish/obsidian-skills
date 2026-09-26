@@ -5,11 +5,9 @@ deletion, or redistribution of existing wiki content. An ordinary lint run
 reports these candidates and stops; a long note, duplicate wording, or scanner
 similarity never activates this mode by itself. Authorization already present
 in the request is sufficient. This protocol requires no separate human review.
-An explicitly authorized pure retitle uses the
-[entry-retitle protocol](../../../shared/CONVENTIONS.md#retitling-an-existing-wiki-entry),
-and a semantic-invalid alias removal uses the
-[alias-removal protocol](../../../shared/CONVENTIONS.md#4b-aliases-use-the-same-slug-rule).
-Do not disguise either as a split or merge to avoid its authorization and
+A pure retitle or semantic-invalid alias removal keeps its own
+[protocol](../SKILL.md#explicit-source-backed-refactor-mode); never disguise
+either as a split or merge to avoid its authorization and
 complete-reference-rewrite gate.
 
 A correction confined to one existing entry and supported only by sources it

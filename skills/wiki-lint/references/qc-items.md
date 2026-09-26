@@ -226,9 +226,7 @@ over-qualification. Routine lint removes empty rhetoric and repetition under
 the local repairs below and well-definedness boilerplate under item 12, but
 preserves substantive claims. Record the remaining over-qualified passages as
 [Over-qualification](backlogs.md#proposing-note-improvements) proposals in
-`Reviews/wiki-notes-suggestions.md`; a pattern that a producer's rules keep
-generating also goes to that producer's log under
-[proposal scope](backlogs.md#proposal-scope). An explicit request to simplify
+`Reviews/wiki-notes-suggestions.md`. An explicit request to simplify
 such content activates source-backed correction across the requested scope,
 including similar cases beyond named examples. Verify the affected
 passages against each entry's cited sources and retain essential conditions.
@@ -491,13 +489,10 @@ preserved under item 2.
   cites; a new source routes to builder. Cross-entry splits, merges, deletion,
   and redistribution use
   [explicit refactor mode](../SKILL.md#explicit-source-backed-refactor-mode).
-- A retitle or re-slug is a rename. Propose it during routine lint, with inbound
-  count and collision risk. Apply only when the request explicitly authorizes
-  it, using the full
-  [entry-retitle protocol](../../../shared/CONVENTIONS.md#retitling-an-existing-wiki-entry).
-- Semantic-invalid alias removal is the same kind of approved refactor,
-  through the [alias-removal protocol](../../../shared/CONVENTIONS.md#4b-aliases-use-the-same-slug-rule).
-  Text matches in sources, embeds, and logs are not entry links.
+- A retitle or re-slug is a rename. Like a semantic-invalid alias removal,
+  propose it during routine lint with the evidence its
+  [finding action](#finding-actions) names, and apply it only under an
+  explicit request through the protocol linked there.
 
 ## Coding content in non-Software entries (item 6)
 

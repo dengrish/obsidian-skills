@@ -131,13 +131,9 @@ _CHAPTER_RE = re.compile(r"\A(?P<book>%s)(?P<mid>(?:_src)?)"
                          r"(?P<tail>%s)\Z"
                          % (STANDALONE_CORE, TAIL))
 
-#: A collector-owned feed attachment stem (CONVENTIONS.md §1, feed route):
-#: X attachments are `x-<post-id>-<24 hex>` and RSS/Atom attachments are
-#: `rss-<32 hex>`. The investments collector writes these deterministic names
-#: into flat `Sources/PDFs/` and `Sources/Images/` and keeps their receipts in
-#: its durable state, so knowledge sweeps skip them instead of reporting them
-#: as unorganized PDFs to rename. Match the STEM; `is_feed_attachment()`
-#: strips the directory and extension.
+#: A collector-owned feed attachment STEM (CONVENTIONS.md §1): X
+#: `x-<post-id>-<24 hex>` or RSS/Atom `rss-<32 hex>`. Its receipts record the
+#: name, so knowledge sweeps skip it rather than route it to a rename.
 FEED_ATTACHMENT = re.compile(r"(?:x-[0-9]{1,25}-[a-f0-9]{24}|rss-[a-f0-9]{32})\Z")
 
 #: What `chapter_parts()` returns.  `book` is the *core* book stem — no tail —
