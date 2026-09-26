@@ -194,9 +194,9 @@ judgment. A prose/script disagreement is reported and resolved using the
 governing rule.
 
 **Review-only candidates do not require edits to silence them.** A supported
-decision to retain prose, such as hard voting without an equation, resolves
-that candidate even if it remains in the lint output and `summary.clean` is
-false. Record the finding and its rule-based disposition, then carry that
+decision to retain prose, such as hard voting without an equation or a
+listed range the definition needs, resolves that candidate even if it remains
+in the lint output and `summary.clean` is false. Record the finding and its rule-based disposition, then carry that
 decision into the final check. Do not add notation or rewrite clear prose to
 force a zero-finding report. This does not waive errors, incomplete checks,
 unresolved candidates, or new findings in the published bytes.

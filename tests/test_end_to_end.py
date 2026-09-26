@@ -1839,14 +1839,14 @@ sources:
   - "[[Example_Averages_nd.md]]"
 created: 2026-09-05
 updated: 2026-09-05
-description: "The arithmetic mean is the sum of a nonempty collection of numbers divided by its size."
+description: "The arithmetic mean is the sum of a collection of numbers divided by its size."
 tags:
   - "#mathematics"
 parents: []
 read: false
 ---
-The **arithmetic mean** of a nonempty collection is its sum divided by its size.
-For $n\ge1$ observations $x_i$:
+The **arithmetic mean** of a collection is its sum divided by its size.
+For $n$ observations $x_i$:
 
 $$
 \bar{x}=\frac{1}{n}\sum_{i=1}^{n}x_i
@@ -1858,7 +1858,7 @@ $$
 
 ## Flashcards
 
-The sum divided by the count, $n^{-1}\sum_{i=1}^{n}x_i$, for $n\ge1$ observations $x_i$.
+The sum divided by the count, $n^{-1}\sum_i x_i$, for $n$ observations $x_i$.
 ??
 Arithmetic mean
 ''', encoding="utf-8")

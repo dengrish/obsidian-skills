@@ -51,6 +51,7 @@ __all__ = [
     "bold_parts",
     "display_label_links",
     "emphasis_span_findings",
+    "label_drops_head",
     "label_shares_surface",
     "merge_scar_findings",
     "organism_common_name_bound",
@@ -585,6 +586,60 @@ def label_shares_surface(display, surfaces):
     return False
 
 
+def _head_word(term):
+    """The head word of a title's base term.
+
+    The last word, or the word before a standalone "of" ("Law of large
+    numbers" -> "Law"); a hyphenated compound such as "Out-of-bag evaluation"
+    keeps its final word as the head.
+    """
+    words = [word for word in re.split(r"[\s/]+", term.strip()) if word]
+    lowered = [word.lower() for word in words]
+    if "of" in lowered[1:]:
+        return words[lowered.index("of", 1) - 1]
+    return words[-1] if words else ""
+
+
+_ITALIC_TERM_RE = re.compile(r"(?<![*\w])\*(?!\*)([^*\n]+?)(?<!\s)\*(?![*\w])")
+
+
+def label_drops_head(display, title, aliases=(), target_prose=""):
+    """The title's head word when a label keeps only its modifiers, else "".
+
+    :func:`label_shares_surface` must accept any token subset of a title so
+    that cross-domain bare terms (``[[information-entropy|entropy]]``) pass,
+    which also lets through a label built only from the title's modifiers:
+    ``[[greedy-algorithm|greedy]]``, ``[[bias-variance-trade-off|bias/variance]]``
+    or ``[[model-organism|model]]``. Such a label names something other than
+    its target. It is reported when every label token belongs to the title's
+    base term and none matches the head word. Inflected and derived forms of
+    the head count as the head (``eukaryotic`` for Eukaryote, ``binary
+    classifier`` for Binary classification). A label that is one of the
+    target's aliases, or a term the target's ``target_prose`` defines in
+    italics (Ensemble learning's *ensemble*), is never reported.
+    """
+    label = _label_tokens(display)
+    term = base_term(title) if has_parenthetical(title) else (title or "")
+    form = _label_tokens(term)
+    if not label or len(form) < 2:
+        return ""
+    if not all(any(_tokens_match(d, t) for t in form) for d in label):
+        return ""
+    head = _head_word(term)
+    head_tokens = _label_tokens(head)
+    if any(_tokens_match(d, h) for d in label for h in head_tokens):
+        return ""
+    defined = [match.group(1) for match in
+               _ITALIC_TERM_RE.finditer(target_prose or "")]
+    for alias in list(aliases or ()) + defined:
+        alias_tokens = _label_tokens(alias)
+        if (alias_tokens and len(alias_tokens) == len(label)
+                and all(any(_tokens_match(d, a) for a in alias_tokens)
+                        for d in label)):
+            return ""
+    return head
+
+
 def plural_surface(title):
     """The plural surface of a title: only the head (last) token inflects.
 
@@ -679,9 +734,10 @@ def primary_line3_faults(card_count, rows, term, counterpart):
 
 #: Body paragraphs that both linters must flag, inserted after a clean
 #: entry's opener: ``(name, paragraph, scan_vault key, lint_entry id,
-#: lint_entry needs a folder)``. ``{self}`` is the entry's own slug and
-#: ``precision`` a second entry titled "Precision". Both self-tests run every
-#: row, so a shared rule cannot silently drop out of one tool.
+#: lint_entry needs a folder)``. ``{self}`` is the entry's own slug,
+#: ``precision`` a second entry titled "Precision" and ``decision-threshold``
+#: a third titled "Decision threshold". Both self-tests run every row, so a
+#: shared rule cannot silently drop out of one tool.
 SHARED_MUTATIONS = (
     ("item6 library framing", "In PyTorch the rate is a tensor.",
      "item6", "6-api-surface", False),
@@ -707,6 +763,12 @@ SHARED_MUTATIONS = (
      "item18", "18-display-label", False),
     ("item18 label shares no surface", "The rate follows [[precision|zebra]].",
      "item18", "18-label-target", True),
+    ("item18 label drops the title's head word",
+     "The rate follows the [[decision-threshold|decision]] rule.",
+     "item18/partial-label", "18-partial-label", True),
+    ("item12 well-definedness boilerplate",
+     "For a nonempty dataset of $m \\ge 1$ instances, the rate is averaged.",
+     "item12/boilerplate-candidate", "12-boilerplate-candidate", False),
     ("item10 self-link", "The rate links [[{self}|itself]].",
      "item10/self", "10-self-link", False),
 )
@@ -714,8 +776,8 @@ SHARED_MUTATIONS = (
 #: Body paragraphs that neither linter may flag under the named keys:
 #: ``(name, paragraph, scan_vault key, lint_entry id)``, checked in folder
 #: mode. Both self-tests add an Organism ``mus-musculus`` whose description
-#: and opener say "Mus musculus is the mouse" and an entry ``l-2-norm``
-#: titled "$L^2$ norm".
+#: and opener say "Mus musculus is the mouse", an entry ``l-2-norm``
+#: titled "$L^2$ norm", and ``decision-threshold`` titled "Decision threshold".
 SHARED_QUIET = (
     ("item6 compound file extension", "The rate ships as a `.tar.gz` bundle.",
      "item6", "6-api-surface"),
@@ -736,6 +798,15 @@ SHARED_QUIET = (
     ("item18 plain form of a math title",
      "The rate uses the [[l-2-norm|L-squared norm]].",
      "item18", "18-label-target"),
+    ("item18 label keeping the title's head word",
+     "The rate crosses the [[decision-threshold|threshold]].",
+     "item18/partial-label", "18-partial-label"),
+    ("item18 derived form of the head word",
+     "The rate controls [[decision-threshold|thresholding]].",
+     "item18/partial-label", "18-partial-label"),
+    ("item12 ranges a definition needs",
+     "For $p \\ge 1$ the rate is a norm, with $0 \\le \\lambda \\le 1$.",
+     "item12/boilerplate-candidate", "12-boilerplate-candidate"),
 )
 
 
@@ -969,6 +1040,36 @@ def run_self_test(verbose=False):
               ("chi-squared", ["$\\chi^2$ test"]),
               ("zebra", ["$\\chi^2$ test"]))],
           [True, True, True, False])
+    check("a label keeping only the title's modifiers drops its head",
+          [label_drops_head(label, title) for label, title in (
+              ("greedy", "Greedy algorithm"),
+              ("bias/variance", "Bias/variance trade-off"),
+              ("model", "Model organism"),
+              ("features", "Feature engineering"),
+              ("machine learning", "Machine learning model"),
+              ("large numbers", "Law of large numbers"),
+              ("out-of-bag", "Out-of-bag evaluation"))],
+          ["algorithm", "trade-off", "organism", "engineering", "model",
+           "Law", "evaluation"])
+    check("the head, its inflections and derived forms, bare terms and "
+          "aliases keep a label",
+          [label_drops_head(label, title, aliases) for label, title, aliases in (
+              ("binary classifier", "Binary classification", ()),
+              ("eukaryotic", "Eukaryote", ()),
+              ("cells", "Biological cell", ()),
+              ("entropy", "Information entropy", ()),
+              ("decision boundaries", "Decision boundary", ()),
+              ("labels", "Label (machine learning)", ()),
+              ("law of large numbers", "Law of large numbers", ()),
+              ("oob", "Out-of-bag evaluation", ("oob",)),
+              ("zebra", "Decision threshold", ()))],
+          [""] * 9)
+    check("a term the target defines in italics keeps a modifier label",
+          [label_drops_head("ensemble", "Ensemble learning", (),
+                            "A group of predictors is called an *ensemble*."),
+           label_drops_head("ensemble", "Ensemble learning", (),
+                            "Ensemble learning combines predictors.")],
+          ["", "learning"])
     mouse = ("Organism", "Mus musculus",
              "Mus musculus is the mouse, a small rodent.",
              "***Mus musculus*** is the mouse, a small rodent.\n\nMore.")

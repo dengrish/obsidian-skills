@@ -159,6 +159,7 @@ from organism_names import (  # noqa: E402
 )
 from code_typography import find_bare_code_shapes  # noqa: E402
 from equation_coverage import (  # noqa: E402
+    find_boilerplate_candidates,
     find_missing_display_equation_candidates,
     find_noncanonical_display_equation_candidates,
 )
@@ -204,6 +205,7 @@ from entry_checks import (  # noqa: E402
     bold_parts as _bold_parts,
     display_label_links,
     emphasis_span_findings,
+    label_drops_head,
     label_shares_surface,
     merge_scar_findings,
     organism_common_name_bound as _organism_common_name_bound,
@@ -1071,7 +1073,14 @@ def _boundary_ok(low, start, end):
 
 
 def _scan_surfaces(text, by_tokens, maxwords):
-    """Yield ``(surface, matched_text)`` for every verbatim surface hit in `text`.
+    """Yield ``(surface, matched_text)`` for every verbatim surface hit in `text`."""
+    for _start, _end, surface, matched in _scan_surface_spans(
+            text, by_tokens, maxwords):
+        yield surface, matched
+
+
+def _scan_surface_spans(text, by_tokens, maxwords):
+    """Yield ``(start, end, surface, matched_text)`` for every surface hit.
 
     Replaces a single regex alternation over EVERY surface form, which was
     re-run against every entry: that is O(entries x surfaces), measured at 84s
@@ -1104,11 +1113,65 @@ def _scan_surfaces(text, by_tokens, maxwords):
     for start, _neg, surface, end in sorted(hits):   # leftmost, then longest
         if start < last_end: continue                # non-overlapping, as re.finditer is
         last_end = end
-        yield surface, text[start:end]
+        yield start, end, surface, text[start:end]
 
 
-def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=None):
-    """Task 2 worklist: bare-text mentions of another entry's surface forms."""
+#: Words that introduce a field name without forming a compound with it:
+#: "in machine learning", "the biology of", "and statistics".
+_NON_MODIFIER_WORDS = frozenset("""
+    a an the of in on for to with by from as at into onto over under about
+    across between within without and or nor but than then so its it their our
+    your his her this that these those which who whose what where when while
+    if whether is are was were be been being each every any all some no not
+    both either neither such other another same via per like unlike
+""".split())
+
+
+def _compound_modifier_before(text, start):
+    """Whether the word right before ``start`` forms a compound with it.
+
+    A discipline-root title directly after a modifier ("cell biology",
+    "summary statistics", "molecular biology's") names a subfield or a
+    different sense, so it fails surface identity with the root itself.
+    """
+    match = re.search(r"([A-Za-z][A-Za-z-]*)[ \t]*\n?[ \t]*$", text[:start])
+    if not match or match.end() != start:
+        return False
+    return match.group(1).lower() not in _NON_MODIFIER_WORDS
+
+
+def _late_link_index(displays):
+    """Token index for first-link display surfaces (common nouns included).
+
+    Unlike the backfill index, a common-noun display such as ``model`` stays:
+    the entry itself has already bound that word to the linked target.
+    """
+    by_tokens, maxwords = {}, 0
+    for surface in displays:
+        m = list(WORD.finditer(surface))
+        if not m or len(surface) < 3:
+            continue
+        key = " ".join(t.group(0) for t in m)
+        by_tokens.setdefault(key, []).append((surface, m[0].start()))
+        maxwords = max(maxwords, len(m))
+    for cands in by_tokens.values():
+        cands.sort(key=lambda sc: -len(sc[0]))
+    return by_tokens, maxwords
+
+
+def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=None,
+                   root_targets=frozenset(), late_links=None,
+                   quiet_surfaces=frozenset()):
+    """Task 2 worklist: bare-text mentions of another entry's surface forms.
+
+    ``root_targets`` are discipline-root slugs: a root surface directly after a
+    modifier word ("cell biology") is a compound, so it is neither proposed nor
+    counted as an earlier mention. When ``late_links`` is a list, it receives
+    ``(slug, target, matched, surface)`` for each linked target whose first
+    body link follows an earlier plain mention of the target's title, alias or
+    first-link display label; ``quiet_surfaces`` (alias-only bare nouns) never
+    count as such a mention.
+    """
     by_tokens, maxwords = _index_surfaces(surf_map)
     backfill = []
     if not by_tokens:
@@ -1127,26 +1190,29 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
         prose = mask_line_spans(
             strip_code(e["prose"]), e.get("table_spans", ()))
         linked = set()
+        first_link = {}                   # owner -> (offset, display) of its first link
         for link in WIKILINK.finditer(prose):
             target = link.group(1).split("#", 1)[0].split("^", 1)[0].strip()
+            owner = None
             if resolve_target is not None:
                 owner = resolve_target(target, e)
-                if owner is not None:
-                    linked.add(owner)
-                continue
-            path_key = entry_link_path_key(target)
-            if (path_key.startswith("mocs/")
-                    or ("/" not in path_key and path_key in non_entry_bare_targets)):
-                continue
-            target = target.replace("\\", "/").rsplit("/", 1)[-1]
-            if target.lower().endswith(".md"):
-                target = target[:-3]
-            key = fold_name(target)
-            owner = files.get(key)
-            if owner is None and len(alias_owners.get(key, ())) == 1:
-                owner = next(iter(alias_owners[key]))
+            else:
+                path_key = entry_link_path_key(target)
+                if (path_key.startswith("mocs/")
+                        or ("/" not in path_key
+                            and path_key in non_entry_bare_targets)):
+                    continue
+                target = target.replace("\\", "/").rsplit("/", 1)[-1]
+                if target.lower().endswith(".md"):
+                    target = target[:-3]
+                key = fold_name(target)
+                owner = files.get(key)
+                if owner is None and len(alias_owners.get(key, ())) == 1:
+                    owner = next(iter(alias_owners[key]))
             if owner is not None:
                 linked.add(owner)
+                first_link.setdefault(
+                    owner, (link.start(), (link.group(2) or "").strip()))
         masked = ANYLINK.sub(lambda m: " "*len(m.group(0)), prose)
         # A target name used as an image's alt text or as an existing
         # Markdown-link label is already presentation/navigation syntax. A
@@ -1175,6 +1241,8 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
         #   * Setext heading text — the underline is itself an item-9 defect;
         #   * fenced code blocks — a listing is shown, not asserted, and a link
         #     written inside one renders as literal `[[...]]` text.
+        # Blanked lines keep their length so offsets still line up with
+        # `prose`, where the first-link positions below were taken.
         masked_lines = masked.split("\n")
         for line_i, line in enumerate(masked_lines):
             if (re.match(r"^\s*\*(?!\*).*\*\s*$", line)
@@ -1183,19 +1251,78 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
                     # label is not writable body prose, so it must not become
                     # an un-actionable backfill target.
                     or line_i in reference_definition_lines):
-                masked_lines[line_i] = ""
+                masked_lines[line_i] = " " * len(line)
             if (line_i > 0 and masked_lines[line_i - 1].strip()
                     and re.fullmatch(r" {0,3}(?:=+|-+)[ \t]*", line)):
-                masked_lines[line_i - 1] = ""
-                masked_lines[line_i] = ""
+                masked_lines[line_i - 1] = " " * len(masked_lines[line_i - 1])
+                masked_lines[line_i] = " " * len(line)
         masked = "\n".join(masked_lines)
         proposed = set()
-        for surface, matched in _scan_surfaces(masked, by_tokens, maxwords):
+        late = set()
+        global_hits = []
+
+        def _earlier_mention(owner, start, end, surface):
+            """A plain mention before the first link that could carry it.
+
+            Alias-only bare nouns (`predictor`), a word inside a hyphenated
+            compound (`batch GD` in `mini-batch GD`), a discipline root inside
+            a compound (`cell biology`), and a descriptor immediately followed
+            by the link itself (`fission yeast
+            [[schizosaccharomyces-pombe|…]]`) are not separate first mentions.
+            """
+            link_start = first_link[owner][0]
+            if start >= link_start or surface in quiet_surfaces:
+                return False
+            if ((start > 0 and masked[start - 1] == "-")
+                    or (end < len(masked) and masked[end] == "-")):
+                return False
+            if owner in root_targets and _compound_modifier_before(masked, start):
+                return False
+            return link_start - end > 3
+
+        for start, end, surface, matched in _scan_surface_spans(
+                masked, by_tokens, maxwords):
+            global_hits.append((start, end))
             tgt = surf_map.get(surface)
-            if not tgt or tgt == sl or tgt in proposed: continue
-            if tgt in linked: continue
+            if not tgt or tgt == sl: continue
+            if tgt in linked:
+                # A linked target mentioned in plain text before its first
+                # link: item 10 wants the link on the first eligible mention.
+                if (late_links is not None and tgt not in late
+                        and _earlier_mention(tgt, start, end, surface)):
+                    late.add(tgt)
+                    late_links.append((sl, tgt, matched, surface))
+                continue
+            if tgt in proposed: continue
+            if tgt in root_targets and _compound_modifier_before(masked, start):
+                continue
             proposed.add(tgt)
             backfill.append((sl, tgt, matched, surface))
+        if late_links is None:
+            continue
+        # The first link's own label can be a word the surface index leaves
+        # out (a common noun such as `model`, or an inflection): look for that
+        # label, too, unless the hit sits inside a longer indexed surface.
+        displays = {}
+        for owner, (offset, display) in first_link.items():
+            if owner in late or owner == sl or not display:
+                continue
+            for form in {display.lower(), plural_surface(display).lower()}:
+                displays.setdefault(form, owner)
+        if not displays:
+            continue
+        display_tokens, display_words = _late_link_index(displays)
+        for start, end, surface, matched in _scan_surface_spans(
+                masked, display_tokens, display_words):
+            owner = displays[surface]
+            if owner in late or not _earlier_mention(owner, start, end, surface):
+                continue
+            if any(g_start <= start and end <= g_end
+                   and (g_end - g_start) > (end - start)
+                   for g_start, g_end in global_hits):
+                continue
+            late.add(owner)
+            late_links.append((sl, owner, matched, surface))
     return backfill
 
 
@@ -2869,6 +2996,22 @@ def scan(wiki, images=None, vault=None):
                 "display math has content on the same line as its `$$` "
                 f"delimiters (prose line(s) {_lines}) — keep the existing "
                 "equation and put each delimiter on its own line"))
+        # Well-definedness boilerplate is removed by ordinary lint (QC item
+        # 12), but only the agent pass found it: a corpus run removed about 60
+        # guards such as "for a nonempty dataset", `$m \ge 1$` and
+        # `$\alpha \ge 0$` from entries this scan reported clean.
+        _boilerplate = find_boilerplate_candidates(
+            _equation_prose, _equation_tables)
+        if _boilerplate:
+            problems.append((
+                sl, "item12/boilerplate-candidate",
+                "possible well-definedness boilerplate in body prose — "
+                + "; ".join(f'line {candidate["line"]}: {candidate["kind"]} '
+                            f'"{candidate["phrase"][:60]}"'
+                            for candidate in _boilerplate)
+                + " — executing agent: remove a condition the formula "
+                "already presupposes, keep a range the definition needs "
+                "(wiki-build/references/equations.md §1)"))
         # Remote ![](http…) embeds are REPORT-ONLY, not a violation. wiki-build MANDATES this exact
         # form for an external URL coming from a markdown source's clipping ("use standard markdown
         # image syntax ![alt](https://...) since wikilinks don't handle remote URLs" —
@@ -3121,6 +3264,19 @@ def scan(wiki, images=None, vault=None):
                         '`sr|card-metadata` callout, so other content '
                         'after the term is malformed'))
                 line1, line2, line3 = cl[0], cl[1].strip(), cl[2]
+                _card_boilerplate = find_boilerplate_candidates(
+                    strip_code(line1), card_line=True)
+                if _card_boilerplate:
+                    problems.append((
+                        sl, "item12/boilerplate-candidate",
+                        f"possible well-definedness boilerplate in {tag} "
+                        "line 1 — "
+                        + "; ".join(f'{candidate["kind"]} '
+                                    f'"{candidate["phrase"][:60]}"'
+                                    for candidate in _card_boilerplate)
+                        + " — shorten the math to its compact equivalent "
+                        "only when the tested claim is unchanged; keep the "
+                        "cue, answer line and every attachment (flashcards.md)"))
                 if re.search(r"ℓ(?:[0-9₀-₉])", line1):
                     problems.append((
                         sl, "item12/equation-typography",
@@ -3646,6 +3802,7 @@ def scan(wiki, images=None, vault=None):
                 f'wikilink [[{_target}|{_target}]] in body prose has a '
                 f'display label identical to its slug — use [[{_target}]]'))
         _display_label_text = _display_label_prose + "\n" + strip_code(e["rel"])
+        _display_label_prose_lines = _display_label_prose.count("\n") + 1
         # Label markup and the label/target surface floor are shared with
         # lint_entry (its folder mode resolves targets for the surface test).
         for _link in display_label_links(_display_label_text):
@@ -3716,6 +3873,24 @@ def scan(wiki, images=None, vault=None):
                     target_title = target_record.get("title") or target_slug
                     location = _target_path or target_slug
                     problems.append((sl,"item18",f'wikilink [[{tgt}|{disp}]] — "{disp}" shares no surface form with the canonical target "{target_title}" at "{location}" (its title/aliases), and no explicit Organism common-name binding applies; likely wrong target or invented label'))
+                    continue
+                # The loose floor above also passes a label built only from
+                # the title's modifiers (`greedy` for Greedy algorithm). The
+                # Related footer is item 11's canonical-title check instead.
+                _head = ("" if _link["line"] > _display_label_prose_lines
+                         else label_drops_head(disp, target_record["title"],
+                                               target_record["aliases"],
+                                               target_record.get("prose", "")))
+                if _head and not organism_common_name_bound(target_record, disp):
+                    target_title = target_record.get("title") or target_slug
+                    problems.append((
+                        sl, "item18/partial-label",
+                        f'wikilink [[{tgt}|{disp}]] — "{disp}" keeps only '
+                        f'modifiers of the target title "{target_title}" and '
+                        f'omits its head word "{_head}"; reword so the label '
+                        "names the target (its title, an alias, an inflection "
+                        "or a derived form), or review whether the label names "
+                        "a different entity; do not auto-retarget"))
 
     problems.current_path = ""
 
@@ -3844,8 +4019,27 @@ def scan(wiki, images=None, vault=None):
             return alias_of[key][0]
         return None
 
-    backfill = (build_backfill(entries, surf_map, _moc_basename_owners, _backfill_owner)
+    # Discipline roots: backfill tags their candidates `discipline_root` for
+    # batch review and drops compound mentions ("cell biology").
+    _root_slugs = {s for s, r in entries.items()
+                   if s in VALID_TAGS and r.get("tags_valid_single")
+                   and r.get("tag_slugs") == [s]}
+    _late_links = []
+    backfill = (build_backfill(entries, surf_map, _moc_basename_owners, _backfill_owner,
+                               root_targets=_root_slugs, late_links=_late_links,
+                               quiet_surfaces=bare_noun_alias)
                 if alias_inventory_complete else [])
+    for _sl, _target, _matched, _surface in sorted(_late_links):
+        _target_title = entries[_target].get("title") or _target
+        problems.current_path = (entries[_sl]["path_key"]
+                                 if fold_name(_sl) in ambiguous_files else "")
+        problems.append((
+            _sl, "item10/late-link",
+            f'the first body link to "{_target_title}" follows an earlier '
+            f'plain mention "{_matched}" — move the link there when that '
+            "mention names the same entity; a different sense, or a "
+            "discipline root named only as a setting, stays plain"))
+    problems.current_path = ""
 
     # Exact normalized sentence overlap is a cross-entry ownership candidate,
     # not an automatic deletion. It caught a full optimization sentence copied
@@ -4455,12 +4649,16 @@ def scan(wiki, images=None, vault=None):
         # closeness judgment itself stays with the executing agent (see build_backfill).
         # A target is a writable link destination, so a real MOC basename
         # owner requires the same Wiki qualification as an entry parent.
+        # `discipline_root`: the target is a Wiki discipline root, which the
+        # closeness bar accepts only where the passage discusses the field
+        # itself — batch-review these like `bare_noun_alias`.
         "backfill_candidates": [{"slug": s,
                                  "target": _entry_parent_target(entries[t]),
                                  "surface": f,
                                  "bare_noun_alias": key in bare_noun_alias,
                                  "organism_common_name":
-                                     key in _organism_common_surf}
+                                     key in _organism_common_surf,
+                                 "discipline_root": t in _root_slugs}
                                 for s,t,f,key in sorted(backfill)],
         # Folder-level, report-only findings.  These are deliberately outside
         # `problems`: they are not entry checklist violations and must not
@@ -8583,12 +8781,115 @@ def run_self_test():
                ("separator-spacing", "heading-spacing")],
               [True, True])
 
+        # A linked target's earlier plain mention (item10/late-link), with
+        # the hyphen-compound, apposition and alias-only-noun exclusions.
+        v = os.path.join(tmp, "late-links")
+        _st_write(v, "training-set.md", _st_entry(
+            "Training set", "A **training set** is a worked example."))
+        _st_write(v, "schizosaccharomyces-pombe.md", _st_entry(
+            "Schizosaccharomyces pombe",
+            "***Schizosaccharomyces pombe*** is a worked example.",
+            aliases=('"fission-yeast"',)))
+        _st_write(v, "model-organism.md", _st_entry(
+            "Model organism", "A **model organism** is a worked example."))
+        _st_write(v, "feature-x.md", _st_entry(
+            "Feature (machine learning)", "A **feature** is a worked example.",
+            aliases=('"predictor"',)))
+        for slug_, prose in (
+                ("late", "**Late** fits a model on a training set first. It "
+                         "then reuses the [[training-set|training set]]."),
+                ("early", "**Early** uses the [[training-set|training set]]. "
+                          "A training set is then reused."),
+                ("hyphen", "**Hyphen** runs a pre-training set pass before "
+                           "the [[training-set|training set]] is used."),
+                ("apposition", "**Apposition** was studied in fission yeast "
+                               "[[schizosaccharomyces-pombe|Schizosaccharomyces "
+                               "pombe]]."),
+                ("display", "**Display** is a model in genetics. Later work "
+                            "made it a useful [[model-organism|model]]."),
+                ("quiet-alias", "**Quiet alias** trains each predictor on a "
+                                "sample of [[feature-x|features]].")):
+            _st_write(v, slug_ + ".md", _st_entry(slug_.replace("-", " ").capitalize(), prose))
+        res = scan(v)
+        check("a plain mention before the first link is a late link; a later "
+              "mention, a hyphen compound, an apposition, and an alias-only "
+              "bare noun are not",
+              ["item10/late-link" in _st_keys(res, slug_) for slug_ in
+               ("late", "early", "hyphen", "apposition", "display",
+                "quiet-alias")],
+              [True, False, False, False, True, False])
+        # Discipline-root backfill: tagged for batch review; a field name
+        # inside a compound ("cell biology") is not the root at all.
+        v = os.path.join(tmp, "root-backfill")
+        _st_write(v, "biology.md", _st_entry(
+            "Biology", "**Biology** is the study of life.",
+            tags=('"#biology"',)))
+        _st_write(v, "setting.md", _st_entry(
+            "Setting", "**Setting** is a topic in biology and elsewhere.",
+            tags=('"#biology"',)))
+        _st_write(v, "compound.md", _st_entry(
+            "Compound", "**Compound** is studied in cell biology.",
+            tags=('"#biology"',)))
+        _st_write(v, "compound-late.md", _st_entry(
+            "Compound late", "**Compound late** is studied in cell biology, "
+            "which images single cells. [[biology|Biology]] studies life "
+            "more broadly.",
+            tags=('"#biology"',)))
+        _st_write(v, "root-late.md", _st_entry(
+            "Root late", "**Root late** is a topic in biology, and it changed "
+            "how [[biology]] is taught.", tags=('"#biology"',)))
+        res = scan(v)
+        check("a root candidate carries discipline_root; a compound is dropped",
+              sorted((row["slug"], row["target"].rsplit("/", 1)[-1],
+                      row["discipline_root"])
+                     for row in res["backfill_candidates"]),
+              [("setting", "biology", True)])
+        check("a root compound is not an earlier mention of a later root link",
+              ["item10/late-link" in _st_keys(res, slug_)
+               for slug_ in ("compound-late", "root-late")],
+              [False, True])
+        # A label that keeps only the title's modifiers (item18/partial-label),
+        # unless the target defines that word as a term.
+        v = os.path.join(tmp, "partial-labels")
+        _st_write(v, "greedy-algorithm.md", _st_entry(
+            "Greedy algorithm", "A **greedy algorithm** is a worked example."))
+        _st_write(v, "ensemble-learning.md", _st_entry(
+            "Ensemble learning", "**Ensemble learning** combines a group of "
+            "predictors, called an *ensemble*."))
+        _st_write(v, "partial.md", _st_entry(
+            "Partial", "**Partial** makes [[greedy-algorithm|greedy]] choices."))
+        _st_write(v, "defined.md", _st_entry(
+            "Defined", "**Defined** builds an [[ensemble-learning|ensemble]]."))
+        _st_write(v, "full.md", _st_entry(
+            "Full", "**Full** is a [[greedy-algorithm|greedy algorithm]]."))
+        res = scan(v)
+        check("a modifier-only label is a partial label; a defined term and "
+              "the full title are not",
+              ["item18/partial-label" in _st_keys(res, slug_)
+               for slug_ in ("partial", "defined", "full")],
+              [True, False, False])
+        # Well-definedness boilerplate on a card's line 1.
+        v = os.path.join(tmp, "card-boilerplate")
+        _st_write(v, "card-guard.md", _st_entry(
+            "Card guard",
+            "**Card guard** is a worked example.\n\n**Related:**\n\n---\n\n"
+            "## Flashcards\n\nThe mean $m^{-1}\\sum_{i=1}^{m} x_i$ over "
+            "$m\\ge1$ values.\n??\nCard guard", card=False))
+        res = scan(v)
+        check("card line 1 lists a count guard and full-range bounds",
+              [p["message"].count('"') >= 4 for p in res["problems"]
+               if p["slug"] == "card-guard"
+               and p["item"] == "item12/boilerplate-candidate"],
+              [True])
+
         # The per-entry checks shared with wiki-build's lint_entry.py: its
         # self-test runs the same rows, so each moved mutation is flagged by
         # both tools.
         v = os.path.join(tmp, "shared-checks")
         _st_write(v, "precision.md", _st_entry(
             "Precision", "**Precision** is a worked example."))
+        _st_write(v, "decision-threshold.md", _st_entry(
+            "Decision threshold", "A **decision threshold** is a worked example."))
         for number, row in enumerate(SHARED_MUTATIONS, 1):
             slug_ = "mutation-%d" % number
             _st_write(v, slug_ + ".md", _st_entry(
@@ -8611,6 +8912,8 @@ def run_self_test():
             description="Mus musculus is the mouse, a small rodent."))
         _st_write(v, "l-2-norm.md", _st_entry(
             "$L^2$ norm", "The **$L^2$ norm** measures a vector's length."))
+        _st_write(v, "decision-threshold.md", _st_entry(
+            "Decision threshold", "A **decision threshold** is a worked example."))
         for number, row in enumerate(SHARED_QUIET, 1):
             _st_write(v, "quiet-%d.md" % number, _st_entry(
                 "Quiet %d" % number,

@@ -7058,15 +7058,28 @@ def check_equation_policy(rep, conv):
         (scanner_ref_path, scanner_ref,
          r"`item12/equation-coverage-candidate`",
          "scanner.md no longer documents the equation-coverage candidate key"),
+        (qc_path, qc, r"`item12/boilerplate-candidate`",
+         "qc-items.md no longer dispatches the scanner's well-definedness "
+         "boilerplate candidate"),
+        (scanner_ref_path, scanner_ref, r"`item12/boilerplate-candidate`",
+         "scanner.md no longer documents the boilerplate candidate key"),
         (builder_lint_path, builder_lint,
-         r"from equation_coverage import[^\n]*\n\s*"
-         r"find_missing_display_equation_candidates",
+         r"from equation_coverage import \([^)]*"
+         r"\bfind_missing_display_equation_candidates\b",
          "wiki-build lint no longer imports the shared equation-coverage "
          "candidate detector"),
         (scanner_path, scanner,
-         r"from equation_coverage import[^\n]*\n\s*"
-         r"find_missing_display_equation_candidates",
+         r"from equation_coverage import \([^)]*"
+         r"\bfind_missing_display_equation_candidates\b",
          "wiki-lint scanner no longer imports the shared equation-coverage "
+         "candidate detector"),
+        (builder_lint_path, builder_lint,
+         r"from equation_coverage import \([^)]*\bfind_boilerplate_candidates\b",
+         "wiki-build lint no longer imports the shared boilerplate "
+         "candidate detector"),
+        (scanner_path, scanner,
+         r"from equation_coverage import \([^)]*\bfind_boilerplate_candidates\b",
+         "wiki-lint scanner no longer imports the shared boilerplate "
          "candidate detector"),
     ]
     n = 0

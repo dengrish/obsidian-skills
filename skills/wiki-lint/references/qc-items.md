@@ -47,16 +47,18 @@ ownership.
 | `item10/ambiguous` | Preserve the whole link and report its competing owners. |
 | `item10/unparsed` | Preserve the link; the target file's `item0` or `item1` governs repair. |
 | `item10/moc` | Preserve the original bare or explicit destination for an unknown MOC target, and preserve missing/unsafe explicit `MOCs/` targets. Report and route resolution to authorized Task 3 work; never automatically qualify an unknown owner, unlink it as an entry dangler, or redirect it to a Wiki alias. |
-| `item10/dangling`, `item10/dup` | Use Task 2's [link protocol](link-hygiene.md), not an ordinary Task 1 repair. |
+| `item10/dangling`, `item10/dup`, `item10/late-link` | Use Task 2's [link protocol](link-hygiene.md), not an ordinary Task 1 repair. |
 | `item10/table` | Replace only the table-cell link markup with its visible plain-text label. |
 | `item10/redundant-pipe` | In Task 1, collapse exact `[[slug|slug]]` body-prose links to `[[slug]]`. Never apply this to the Related footer. |
 | `item12/equation-typography` | In descriptions, replace raw ℓ-norm notation with plain `ell-one`/`ell-two` and retain Unicode `μm`. In prose and card prompts, replace raw ℓ-norm and `μm`/`µm` notation with canonical inline LaTeX. |
 | `item12/equation-coverage-candidate` | Inspect the local prose or inline formula. Apply the explanatory-value test; add math only when it clarifies the concept and the note supplies the relationship. Clear prose may be the correct outcome. |
 | `item12/equation-format` | Preserve the existing equation and put its opening and closing `$$` delimiters on separate lines. Do not add a duplicate display. |
+| `item12/boilerplate-candidate` | Remove each listed condition the formula already presupposes, under item 12's well-definedness rule, and report the removal. Keep a range the definition needs. On card line 1, shorten the math to its compact equivalent only when the tested claim is unchanged, preserving the cue, answer line, and attachments. |
 | `item12/panel-composite` | Preserve both embeds and report the duplicated exhibit until source-backed review chooses either the default composite or the subject-specific panel. |
 | `item12/remote-image`, `item12/missing-image` | Report and preserve the embed and caption; repair requires work outside this entry. |
 | `image_folder_findings` | Report and preserve nested, staging, unreadable, or portable-name-collision paths. Collision records retain all owner paths; an unreadable inventory also suppresses missing-image claims. |
 | `item17/alias-candidate` | Apply the same-entity, collision, cross-domain, and Organism-common-name gates before adding anything. |
+| `item18/partial-label` | Reword a label that keeps only the target title's modifiers so it names the target, preserving the claim; report a label that names a different entity. See [item 18](#18-alias-form-collisions-and-display-labels). |
 | `item19` | Apply the format floor only after reading [flashcard maintenance](flashcards.md). |
 | `rename_candidates` | Propose with inbound count and collision warning; apply only under an explicit rename request, through the [entry-retitle protocol](../../../shared/CONVENTIONS.md#retitling-an-existing-wiki-entry). |
 | `collision_candidates` | Report; routine lint never merges existing entries. |
@@ -351,7 +353,11 @@ request, verify and remove unhelpful equations, notation-only prose, correspondi
 ordinary lint does not silently remove substantive conditions. The
 well-definedness boilerplate that guide lists for body prose is not a
 substantive condition: ordinary lint removes it, including from symbol
-bindings, and reports the removal.
+bindings, and reports the removal. The scanner's
+`item12/boilerplate-candidate` lists the common shapes (nonempty and count
+guards, sign ranges on named strengths or rates, probabilities summing to one,
+and card sums over every term); the agent still reads every binding, since the
+floor is conservative and a listed range can be one the definition needs.
 Flashcard line 1 follows [flashcard maintenance](flashcards.md).
 
 **Equation form and notation.** Promote a defining inline equation to its own
@@ -431,10 +437,19 @@ Apply builder [item 18](../../wiki-build/SKILL.md#quality-checklist) and the
 and [§6's carve-outs](../../../shared/CONVENTIONS.md#6-wikilink-forms).
 Normalize determinate alias form and duplicates; report cross-entry ownership
 conflicts. Never auto-retarget a display whose exact surface belongs to another
-entry. Preserve the three deliberate display-label carve-outs: a
+entry. Preserve the four deliberate display-label carve-outs: a
 context-resolved cross-domain bare term, a natural plural or verb inflection,
-and an explicitly bound Organism common name. Do not create an ambiguous alias
+a derived adjective or agent-noun form of the title's head word, and an
+explicitly bound Organism common name. Do not create an ambiguous alias
 merely to silence a display-label finding.
+
+An `item18/partial-label` keeps only the target title's modifiers
+(`[[greedy-algorithm|greedy]]`). When the sentence already refers to the
+target, reword it so the label is the title, an alias, an inflection, or a
+derived form, preserving the claim (`CART's greedy choices` → `CART is a
+greedy algorithm: its choices`). When the label names a different entity
+(`[[feature-engineering|features]]` for input features), leave the link and
+report the target question under the notes log; never retarget it.
 
 ### 19. Flashcards
 

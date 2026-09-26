@@ -87,6 +87,11 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               lacks canonical nearby display form; agent reviews
       12-equation-format       an existing display has content on the same line
                               as its `$$` delimiters
+      12-boilerplate-candidate
+                              well-definedness boilerplate in body prose or card
+                              line 1 (nonempty and count guards, sign ranges on
+                              named strengths or rates, probabilities summing
+                              to one, card sums over every term); agent reviews
       12-equation-typography  raw ell-norm or micrometre symbols in body/card
                               surfaces that require inline LaTeX
       12-literal-dollar       unescaped literal `$` in body prose; escape it
@@ -141,6 +146,10 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               resolved target's title/aliases (a math title's
                               plain form counts) and is not an Organism
                               target's bound common name (warning)
+  18  18-partial-label        folder mode, body prose: a label keeps only the
+                              target title's modifiers and omits its head word;
+                              an inflected or derived head, an alias, or a term
+                              the target defines in italics passes (warning)
 
 Items 5, 6, 13, 14, 16 and 18, and item 19's choice of the primary card,
 share their per-entry rules with wiki-lint's scanner through
@@ -283,6 +292,7 @@ from organism_names import (  # noqa: E402
 )
 from code_typography import find_bare_code_shapes  # noqa: E402
 from equation_coverage import (  # noqa: E402
+    find_boilerplate_candidates,
     find_missing_display_equation_candidates,
     find_noncanonical_display_equation_candidates,
 )
@@ -325,6 +335,7 @@ from entry_checks import (  # noqa: E402
     bold_parts as _bold_parts,
     display_label_links,
     emphasis_span_findings,
+    label_drops_head,
     label_shares_surface,
     merge_scar_findings,
     organism_common_name_bound,
@@ -1392,6 +1403,25 @@ def _check_equation_coverage_candidates(fm, sections, findings):
             "display math has content on the same line as its `$$` delimiters; "
             "keep the existing equation and put each delimiter on its own line",
             {"matches": form_candidates}))
+    boilerplate = find_boilerplate_candidates(masked, table_spans)
+    for candidate in boilerplate:
+        candidate["line"] += fm.body_start_line - 1
+    for card_no, card in enumerate(
+            parse_flashcards(sections["flashcard_lines"]), 1):
+        for candidate in find_boilerplate_candidates(
+                strip_code(card[0] if card else ""), card_line=True):
+            candidate.pop("line", None)
+            candidate["card"] = card_no
+            boilerplate.append(candidate)
+    if boilerplate:
+        findings.append(_f(
+            "12-boilerplate-candidate", "warning",
+            "possible well-definedness boilerplate: a condition the formula "
+            "already presupposes (a nonempty set, a count guard, a sign range "
+            "on a named strength or rate, probabilities summing to one) or, "
+            "on card line 1, index bounds that run over every term. Remove "
+            "it unless the definition needs the range",
+            {"matches": boilerplate, "agent_review": True}))
 
 
 def _literal_dollar_count(text):
@@ -2599,6 +2629,18 @@ def _check_folder_link_targets(results, root, snapshot_text):
         fields = organism_fields[owner]
         return bool(fields) and organism_common_name_bound(*fields, display)
 
+    target_prose = {}
+
+    def prose_of(owner):
+        """The target's explanatory prose, for terms it defines in italics."""
+        if owner not in target_prose:
+            target_fm = parse_frontmatter(
+                snapshot_text.get(owners[owner]["file"]) or "")
+            target_prose[owner] = (
+                _shared_prose(target_fm, split_sections(target_fm.body))[0]
+                if target_fm.found else "")
+        return target_prose[owner]
+
     for result in results:
         text = snapshot_text.get(result["file"])
         if text is None:
@@ -2647,6 +2689,21 @@ def _check_folder_link_targets(results, root, snapshot_text):
                     "no such Organism common name -- likely a wrong target or "
                     "an invented label"
                     % (link["target"], display, target["title"]), evidence))
+            else:
+                head = label_drops_head(
+                    display, target["title"], list(target.get("aliases", [])),
+                    prose_of(owner))
+                if head and not binds_common_name(owner, display):
+                    findings.append(_f(
+                        "18-partial-label", "warning",
+                        "wikilink [[%s|%s]]: the label keeps only modifiers of "
+                        "the target's title %r and omits its head word %r -- "
+                        "reword so the label names the target (its title, an "
+                        "alias, an inflection or a derived form), or review "
+                        "whether it names a different entity; do not "
+                        "auto-retarget"
+                        % (link["target"], display, target["title"], head),
+                        dict(evidence, head=head)))
         result["findings"] = findings
 
 
@@ -2774,6 +2831,30 @@ def _st_precision():
         '**Precision** is the share of predicted positives that are correct.\n'
         '\n**Related:**\n\n---\n\n## Flashcards\n\n'
         'The share of predicted positive cases that are correct.\n??\nPrecision\n')
+
+
+def _st_decision_threshold():
+    """A two-word entry for the head-word display-label check."""
+    return (
+        '---\n'
+        'title: "Decision threshold"\n'
+        'type: Concept\n'
+        'sources:\n'
+        '  - "[[Doe_X_2025.pdf#page=3]]"\n'
+        'created: 2026-01-01\n'
+        'updated: 2026-01-02\n'
+        'description: "A decision threshold is the score cutoff that separates '
+        'predicted classes."\n'
+        'tags:\n'
+        '  - "#statistics"\n'
+        'parents: []\n'
+        'read: false\n'
+        '---\n'
+        'A **decision threshold** is the score cutoff that separates predicted '
+        'classes.\n'
+        '\n**Related:**\n\n---\n\n## Flashcards\n\n'
+        'The score cutoff that separates predicted classes.\n??\n'
+        'Decision threshold\n')
 
 
 def _st_items(result):
@@ -4280,6 +4361,9 @@ def run_self_test():
         with open(os.path.join(shared_tmp, "precision.md"), "w",
                   encoding="utf-8") as fh:
             fh.write(precision)
+        with open(os.path.join(shared_tmp, "decision-threshold.md"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(_st_decision_threshold())
         # The same rows run through scan_vault's self-test: each moved
         # mutation must be flagged by both tools.
         for name, paragraph, _scan_key, lint_id, needs_folder in SHARED_MUTATIONS:

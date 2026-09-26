@@ -13,7 +13,8 @@ The leak scan — item 19's mechanical floor, spelled out in `references/qc-item
 **Line-1 math follows the compact equation rule.** Line-1 math is optional.
 Check any math a card carries against the canonical
 [line-1 equation rule](../../wiki-build/references/flashcards-and-emphasis.md#line-1-equation-coverage),
-even when the scanner reports nothing. Bringing existing math into that rule
+even when the scanner reports nothing; its line-1 `item12/boilerplate-candidate`
+lists only common boilerplate shapes and full-range sums. Bringing existing math into that rule
 is a targeted current-rule repair when the tested claim is unchanged, for
 pre-existing cards with known or unknown history; it does not authorize a
 cosmetic rewrite, a different tested claim, or invented body math.

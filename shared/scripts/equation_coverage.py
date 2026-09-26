@@ -17,6 +17,15 @@ indented, and inline code. Frontmatter, Related footers, and Flashcards
 remain outside this detector. Parsed table spans may be supplied
 to exclude table cells; whole-line italic captions are excluded here.
 
+A second, equally conservative floor lists well-definedness boilerplate:
+conditions a formula already presupposes, such as "for a nonempty dataset",
+count guards like ``m \\ge 1``, a sign range on a named strength or rate, and
+probabilities that "sum to 1". The same finder reads one flashcard line 1 at a
+time, where sums whose index bounds merely run over every term are listed too.
+Ranges a definition needs (``p \\ge 1`` for an Lp norm, ``0 \\le \\lambda \\le
+1``, ``r \\in [0,1]``) are outside its patterns, and every result remains an
+agent-review candidate rather than an edit.
+
 Stdlib only, Python 3.10+ (the plugin runtime floor).
 """
 
@@ -24,6 +33,7 @@ import argparse
 import re
 
 __all__ = [
+    "find_boilerplate_candidates",
     "find_missing_display_equation_candidates",
     "find_noncanonical_display_equation_candidates",
 ]
@@ -983,6 +993,154 @@ def find_missing_display_equation_candidates(masked_prose,
     return candidates
 
 
+# ---------------------------------------------------------------------------
+# Well-definedness boilerplate (equations.md §1)
+# ---------------------------------------------------------------------------
+
+_GUARD_OPERATOR = r"(?:\\geq?|\\gt|≥|>)"
+_SUBSCRIPT = r"(?:_\{(?:\\(?:text|mathrm)\{[^{}$]*\}|[^{}$]*)\}|_[A-Za-z0-9])"
+#: A count guard on an instance, feature, class or token count:
+#: ``m \ge 1``, ``N \ge 2``, ``m_{\text{node}} > 0``, ``m_a, m_b > 0``.
+_COUNT_GUARD_RE = re.compile(
+    r"(?<![\w\\])[mnNKT]" + _SUBSCRIPT + r"?"
+    r"(?:\s*,\s*[mnNKT]" + _SUBSCRIPT + r"?)*"
+    r"\s*" + _GUARD_OPERATOR + r"\s*[012](?![\d.])")
+#: A one-sided sign range on a named strength, rate, tolerance or scale.
+#: Two-sided ranges such as ``0 \le \lambda \le 1`` are never this shape.
+_PARAMETER_SIGN_RE = re.compile(
+    r"(?<![\w\\])\\(?:alpha|beta|gamma|delta|epsilon|varepsilon|eta|kappa|"
+    r"lambda|mu|nu|rho|sigma|tau|omega)" + _SUBSCRIPT + r"?"
+    r"\s*" + _GUARD_OPERATOR + r"\s*0(?![\d.])")
+#: Nonnegative probabilities or a nonnegative variance.
+_NONNEGATIVE_QUANTITY_RE = re.compile(
+    r"(?:(?<![\w\\])p" + _SUBSCRIPT + r"?|\\operatorname\{Var\}\([^()$]*\))"
+    r"\s*(?:\\geq?|≥)\s*0(?![\d.])")
+#: A probability confined to the open unit interval so a log stays finite.
+_OPEN_PROBABILITY_RE = re.compile(
+    r"(?<![\d.])0\s*(?:<|\\lt)\s*(?:\\hat\{p\}|p)"
+    r"(?:\^\{\([a-z]\)\}|" + _SUBSCRIPT + r")?"
+    r"\s*(?:<|\\lt)\s*1(?![\d.])")
+#: A sum stated equal to one inside a binding. It is matched after
+#: ``_SCRIPT_GROUP_RE`` blanks sub/superscript groups, so the index bounds of
+#: ``\sum_{i=1}^{m}`` never read as "= 1".
+_SUM_TO_ONE_MATH_RE = re.compile(r"\\sum[^=$]*=\s*1(?![\d.])")
+_SCRIPT_GROUP_RE = re.compile(r"[_^]\{[^{}]*\}|[_^][A-Za-z0-9]")
+#: Card line 1: an index running over every term (``\sum_{i=1}^{m}``) or a
+#: restricted sum that only skips undefined terms (``\sum_{k:p_k>0}``).
+_FULL_RANGE_SUM_RE = re.compile(
+    r"\\sum_\{?\s*([a-z])\s*=\s*1\s*\}?\^\{?\s*[A-Za-z]\s*\}?")
+_RESTRICTED_SUM_RE = re.compile(r"\\sum_\{\s*[a-z]\s*:[^{}]*[<>][^{}]*\}")
+#: Prose phrasings of the same guards, matched case-insensitively on the
+#: link-label view of the text.
+_BOILERPLATE_PHRASES = [
+    ("nonempty-guard", re.compile(r"\bnon-?empty\b", re.IGNORECASE)),
+    ("presence-guard", re.compile(
+        r"\b(?:requires?|when)\s+at\s+least\s+one\b|"
+        r"\bwhen\s+(?:actual\s+)?positives?\s+(?:is|are)\s+"
+        r"(?:present|predicted)\b|\bmust\s+contain\s+both\b|"
+        r"\bdefined\s+only\s+(?:when|if)\b", re.IGNORECASE)),
+    ("nonzero-guard", re.compile(
+        r"\bnon-?zero\s+(?:variation|variance|denominators?|"
+        r"sums?\s+of\s+squared|feature[- ]weights?|weights?|"
+        r"(?:sample|target)\s+variation)\b|"
+        r"\b(?:weight\s+vector|weights?)\s+(?:is|are)\s+non-?zero\b|"
+        r"\bnon-?constant\b", re.IGNORECASE)),
+    ("finite-guard", re.compile(
+        r"\b(?:has\s+)?finite[- ]variance\b|\bfinite\s+real\s+inputs?\b|"
+        r"\bfinite\s+inputs\b|\bfinite\s+(?:outcome\s+)?probabilities\b",
+        re.IGNORECASE)),
+    ("parameter-sign", re.compile(
+        r"\b(?:positive|non-?negative)\s+(?:integer\b|(?:learning\s+rate|"
+        r"regularization\s+strength|standard\s+deviation|hyperparameter|"
+        r"tolerance|step\s+size|penalty\s+strength)\b)|"
+        r"\bnon-?negative\s+principal\b", re.IGNORECASE)),
+    ("sum-to-one", re.compile(
+        r"(?:\bnon-?negative\b|\\geq?\s*0|≥\s*0)[^.;:\n]{0,60}?"
+        r"\bsum(?:s|ming)?\s+to\s+(?:1|one)\b", re.IGNORECASE)),
+]
+_MATH_GUARDS = [
+    ("count-guard", _COUNT_GUARD_RE),
+    ("parameter-sign", _PARAMETER_SIGN_RE),
+    ("nonnegative-quantity", _NONNEGATIVE_QUANTITY_RE),
+    ("open-probability", _OPEN_PROBABILITY_RE),
+    ("sum-to-one", _SUM_TO_ONE_MATH_RE),
+]
+_PARAMETER_SUMMAND_RE = re.compile(r"\\(?:boldsymbol\{\\)?theta|\bw_")
+
+
+def _visible_prose_lines(prose, excluded_line_spans=()):
+    """Prose with display blocks, captions and excluded lines blanked."""
+    excluded = {
+        line
+        for start, end in (excluded_line_spans or ())
+        for line in range(max(0, start), max(0, end) + 1)
+    }
+    spans = _display_line_spans(
+        prose, require_content=False, require_blank_adjacency=False)
+    lines = []
+    for index, line in enumerate(prose.split("\n")):
+        if (index in excluded or _CAPTION_RE.match(line)
+                or any(start <= index <= end for start, end in spans)):
+            lines.append("\0" * len(line))
+        else:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def find_boilerplate_candidates(masked_prose, excluded_line_spans=(),
+                                card_line=False):
+    """Return well-definedness boilerplate candidates.
+
+    ``masked_prose`` is code-masked body prose, or with ``card_line`` one
+    flashcard line 1. Each result has ``kind``, ``phrase`` and one-based
+    ``line``. Display blocks, captions and ``excluded_line_spans`` (parsed
+    tables) are skipped: a condition inside a displayed equation belongs to
+    the equation itself. On a card line, sums whose bounds only run over every
+    term and restricted sums that skip undefined terms are listed as well,
+    except a sum over parameters, whose start index can exclude a bias. The
+    executing agent keeps any range the definition needs.
+    """
+    visible = _visible_prose_lines(masked_prose or "", excluded_line_spans)
+    plain = _plain_wikilinks(visible)
+    candidates = []
+    for math_match in _INLINE_MATH_RE.finditer(visible):
+        formula = math_match.group(1)
+        line = _line_number(visible, math_match.start())
+        for kind, pattern in _MATH_GUARDS:
+            subject = (_SCRIPT_GROUP_RE.sub(" ", formula)
+                       if pattern is _SUM_TO_ONE_MATH_RE else formula)
+            for match in pattern.finditer(subject):
+                candidates.append({"kind": kind,
+                                   "phrase": " ".join(match.group(0).split()),
+                                   "line": line})
+        if not card_line:
+            continue
+        for match in _FULL_RANGE_SUM_RE.finditer(formula):
+            summand = formula[match.end():match.end() + 60]
+            summand = re.split(r"\\sum", summand, maxsplit=1)[0]
+            if _PARAMETER_SUMMAND_RE.search(summand):
+                continue
+            candidates.append({"kind": "full-range-bounds",
+                               "phrase": " ".join(match.group(0).split()),
+                               "line": line})
+        for match in _RESTRICTED_SUM_RE.finditer(formula):
+            candidates.append({"kind": "restricted-sum",
+                               "phrase": " ".join(match.group(0).split()),
+                               "line": line})
+    for kind, pattern in _BOILERPLATE_PHRASES:
+        for match in pattern.finditer(plain):
+            candidates.append({"kind": kind,
+                               "phrase": " ".join(match.group(0).split()),
+                               "line": _line_number(plain, match.start())})
+    unique = {}
+    for candidate in candidates:
+        key = (candidate["line"], candidate["kind"],
+               candidate["phrase"].lower())
+        unique.setdefault(key, candidate)
+    return sorted(unique.values(),
+                  key=lambda item: (item["line"], item["kind"], item["phrase"]))
+
+
 def run_self_test(verbose=False):
     cases = [
         ("pronoun definition",
@@ -1419,6 +1577,64 @@ def run_self_test(verbose=False):
     total += len(format_cases)
     for name, prose, expected, spans in format_cases:
         got = len(find_noncanonical_display_equation_candidates(prose, spans))
+        ok = got == expected
+        if verbose or not ok:
+            print(("PASS" if ok else "FAIL") + ": " + name)
+        if not ok:
+            print("  expected %r, got %r" % (expected, got))
+            failed += 1
+    # Well-definedness boilerplate: (name, text, card_line, sorted kinds).
+    boilerplate_cases = [
+        ("a nonempty dataset with a count guard",
+         "For a nonempty dataset of $m \\ge 1$ instances, the error averages.",
+         False, ["count-guard", "nonempty-guard"]),
+        ("a standalone denominator guard sentence",
+         "The ratio requires at least one predicted positive.",
+         False, ["presence-guard"]),
+        ("a nonzero-weight guard and a nonconstant feature",
+         "For a model with nonzero feature weights, this is a straight "
+         "line. A nonconstant training feature spans 0 to 1.",
+         False, ["nonzero-guard", "nonzero-guard"]),
+        ("a named strength range and a positive rate",
+         "With regularization strength $\\alpha \\ge 0$ and a positive "
+         "[[learning-rate|learning rate]] $\\eta$, it converges.",
+         False, ["parameter-sign", "parameter-sign"]),
+        ("nonnegative proportions that sum to one in a binding",
+         "Let $p_{i,k} \\ge 0$ be the proportion, with "
+         "$\\sum_{k=1}^{K} p_{i,k}=1$:",
+         False, ["nonnegative-quantity", "sum-to-one"]),
+        ("an open probability interval and a prose sum-to-one guard",
+         "For $0 < p < 1$ both vectors have nonnegative components that "
+         "sum to 1.",
+         False, ["open-probability", "sum-to-one"]),
+        ("definition-needed ranges and plain properties stay quiet",
+         "For $p \\ge 1$ it is a norm, the mix ratio is $r \\in [0,1]$, "
+         "convexity uses $0 \\le \\lambda \\le 1$, softmax probabilities "
+         "are positive and sum to 1, and singular values are nonnegative.",
+         False, []),
+        ("body index bounds and displayed guards stay quiet",
+         "The average $\\sum_{i=1}^{m} e_i$ is taken.\n\n$$\nm \\ge 1\n$$\n\n"
+         "*A caption with $m \\ge 1$.*",
+         False, []),
+        ("a card lists full-range bounds and a count guard",
+         "The average $m^{-1}\\sum_{i=1}^{m}(\\hat{y}^{(i)}-y^{(i)})^2$ over "
+         "$m\\ge1$ instances.",
+         True, ["count-guard", "full-range-bounds"]),
+        ("a card's parameter sum keeps its bias-excluding bounds",
+         "The penalty $\\alpha\\sum_{i=1}^{n}|\\theta_i|$ leaves the bias "
+         "unpenalized.",
+         True, []),
+        ("a card's restricted sum skipping undefined terms",
+         "The entropy $-\\sum_{k:p_k>0}p_k\\log_2 p_k$ of a distribution.",
+         True, ["restricted-sum"]),
+        ("full-range bounds are a card-only finding",
+         "The average $m^{-1}\\sum_{i=1}^{m} e_i$ is taken.",
+         False, []),
+    ]
+    total += len(boilerplate_cases)
+    for name, text, card_line, expected in boilerplate_cases:
+        got = sorted(candidate["kind"] for candidate in
+                     find_boilerplate_candidates(text, card_line=card_line))
         ok = got == expected
         if verbose or not ok:
             print(("PASS" if ok else "FAIL") + ": " + name)
