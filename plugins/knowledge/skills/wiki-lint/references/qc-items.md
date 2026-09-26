@@ -426,7 +426,10 @@ creating a recurring finding.
 Use the canonical [alias rule](../../wiki-build/references/writing.md#aliases).
 The note body itself can establish a missing alternate name for its subject;
 add its slug only after the same-entity, own-slug, cross-domain, Organism
-common-name, and whole-vault collision gates. A semantic-invalid existing alias
+common-name, and whole-vault collision gates. A word from the builder's
+[cross-domain corpus](../../wiki-build/references/writing.md#cross-domain-term-disambiguation)
+never becomes an alias, so the scanner does not propose one; its italic
+introduction stays in the body. A semantic-invalid existing alias
 is not list cleanup: preserve it during routine lint and propose the canonical
 owner plus complete inbound rewrite.
 
@@ -438,10 +441,15 @@ and [§6's carve-outs](../../../shared/CONVENTIONS.md#6-wikilink-forms).
 Normalize determinate alias form and duplicates; report cross-entry ownership
 conflicts. Never auto-retarget a display whose exact surface belongs to another
 entry. Preserve the four deliberate display-label carve-outs: a
-context-resolved cross-domain bare term, a natural plural or verb inflection,
-a derived adjective or agent-noun form of the title's head word, and an
-explicitly bound Organism common name. Do not create an ambiguous alias
-merely to silence a display-label finding.
+context-resolved cross-domain bare term (a bare word of the title, or a
+cross-domain synonym the target introduces in italics), a natural plural or
+verb inflection, a derived adjective or agent-noun form of the title's head
+word, and an explicitly bound Organism common name. Do not create an ambiguous
+alias merely to silence a display-label finding. When an `item18` label is a
+cross-domain synonym its target does not introduce, reword the label to a
+claimed form or report the missing introduction under the notes log. A
+recurring finding on a cross-domain word outside the corpus is a
+[proposal](backlogs.md#proposal-scope) to extend the corpus.
 
 An `item18/partial-label` keeps only the target title's modifiers
 (`[[greedy-algorithm|greedy]]`). When the sentence already refers to the
