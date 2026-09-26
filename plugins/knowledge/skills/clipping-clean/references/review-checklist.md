@@ -138,22 +138,15 @@ suggested detector; do not edit an installed plugin during clipping processing.
 
 ## Check the summary and cleaned body
 
-- [ ] The first bullet is a standalone thesis. Every bullet names its own
-  subject, makes one claim in one or two sentences (usually 30 words or
-  fewer) and retains scope, confidence, terms and numbers. Long enumerations
-  are condensed to their size and key members, and background asides stay in
-  the body. Opinions, forecasts and recommendations are attributed to a named
-  author (or the publication or issuing body when `author: []`); reported
-  facts are stated directly. No contextless “It/This/They”, unnamed
-  meta-framing (“the article says”) or links.
-- [ ] Bold marks only terms that could stand as their own wiki entry, never
-  generic words or whole clauses; bullet count is appropriate to the article's
-  length.
+- [ ] The summary meets [draft assembly](../SKILL.md#4-assemble-the-complete-draft):
+  a standalone thesis first; one claim per bullet, naming its own subject and
+  keeping scope, confidence, terms and numbers; opinions attributed and facts
+  stated directly; no contextless “It/This/They”, meta-framing or links;
+  entry-worthy bold only; a bullet count that fits the article's length.
 - [ ] The captured prose is preserved without paraphrase or truncation. Chrome,
   auto-generated backlink panels and run-on navigation are gone; curated
-  further-reading links and intentional source content remain. Any removed
-  hidden AI-directed passage is backed by source-markup evidence and reported;
-  visible author text addressing AI readers was kept.
+  further-reading links and intentional source content remain. Hidden
+  AI-directed text was removed only on markup evidence, and reported.
 - [ ] Images are local embeds or reported failure placeholders. A confirmed
   caption is one italic line below the embed; ambiguous ledes remain prose.
   Caption/credit orphans are removed only with evidence, not when they could

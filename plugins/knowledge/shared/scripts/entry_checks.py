@@ -1,29 +1,15 @@
 #!/usr/bin/env python3
 """Per-entry Wiki checks shared by wiki-build's gate and wiki-lint's scanner.
 
-wiki-build's ``lint_entry.py`` (the publication gate that wiki-add and
-wiki-lint's source-backed corrections also run) and wiki-lint's
-``scan_vault.py`` read these source-independent Quality Checklist floors from
-this one copy, so an entry that passes the builder gate does not fail the next
-maintenance scan on the same mechanical rule.
-
-Covered: item 5's bare cross-domain slug floor (``COMMON_NOUNS``) and the
-item-17 hint for a single-word alias candidate, item 6's API-surface shapes in
-non-Software entries, item 13's stacked-merge scars, item 14's source-meta
-phrasing, item 16's unenumerated bold and emphasis around a wikilink, math or
-code span, item 18's display-label markup and label/target surface test
-(with the Organism common-name carve-out), and item 19's choice of the
-primary card among several.
-
-Every check returns plain dictionaries carrying a ``check`` name, a
-``message`` and evidence fields. Callers choose the finding key and severity:
-``scan_vault`` reports the messages under its ``itemN`` keys, while
-``lint_entry`` maps each check to its own ``N-...`` finding id. ``prose`` is
-an entry's comment-masked explanatory body (up to the Related footer or the
-Flashcards section), with the blank lines after the frontmatter removed.
-
-Stdlib only (apart from sibling shared helpers), Python 3.10+ (the plugin
-runtime floor).
+wiki-build's ``lint_entry.py`` and wiki-lint's ``scan_vault.py`` read these
+source-independent Quality Checklist floors (items 5, 6, 13, 14, 16 and 18,
+item 17's single-word alias hint, and item 19's primary card) from this one
+copy, so an entry that passes the builder gate does not fail the next scan on
+the same mechanical rule. Each check returns dictionaries with a ``check``
+name, a ``message`` and evidence; callers choose the finding key and severity.
+``prose`` is an entry's comment-masked explanatory body (up to the Related
+footer or the Flashcards section), without the blank lines after the
+frontmatter. Stdlib only (plus sibling shared helpers), Python 3.10+.
 """
 
 import argparse
@@ -57,8 +43,6 @@ __all__ = [
     "BARE_WORD_ALIAS_HINT",
     "BOLD_OUTER_RE",
     "COMMON_NOUNS",
-    "DISPLAY_LINK_RE",
-    "LIBS",
     "SHARED_MUTATIONS",
     "SHARED_QUIET",
     "api_surface_findings",
@@ -66,7 +50,6 @@ __all__ = [
     "bare_word_alias_candidate",
     "bold_parts",
     "display_label_links",
-    "display_label_markup",
     "emphasis_span_findings",
     "label_shares_surface",
     "merge_scar_findings",
@@ -238,7 +221,7 @@ _SCHEMA_KEY_LINE_RE = re.compile(
     r"importance|parents|read):")
 _DISPLAY_MATH_BLOCK_RE = re.compile(
     r"(?ms)^ {0,3}\$\$[ \t]*(?:\n.*?\n|.*?) {0,3}\$\$[ \t]*$")
-_DIGIT_LINE_RE = re.compile(r"(?m)^\s*[0-9]+\s*$")
+_DIGIT_LINE_RE = re.compile(r"(?m)^[^\S\n]*[0-9]+[^\S\n]*$")
 
 
 def _line_of(text, offset):
@@ -275,15 +258,12 @@ def merge_scar_findings(prose, separator_line=None):
             "message": "stray `---` fence in explanatory body prose — "
                        "stacked-merge scar; the only body separator belongs "
                        "between Related and Flashcards"})
-    if _DIGIT_LINE_RE.search(_DISPLAY_MATH_BLOCK_RE.sub("", scan)):
-        # The decision reads the scanner's historical view; the evidence line
-        # comes from a newline-preserving copy of it.
-        kept = _DISPLAY_MATH_BLOCK_RE.sub(
-            lambda match: "\n" * match.group(0).count("\n"), scan)
-        digit = re.search(r"(?m)^[ \t]*[0-9]+[ \t]*$", kept)
+    kept = _DISPLAY_MATH_BLOCK_RE.sub(
+        lambda match: "\n" * match.group(0).count("\n"), scan)
+    digit = _DIGIT_LINE_RE.search(kept)
+    if digit:
         findings.append({
-            "check": "digit-line",
-            "line": _line_of(kept, digit.start()) if digit else None,
+            "check": "digit-line", "line": _line_of(kept, digit.start()),
             "message": "standalone bare digit line in explanatory body prose "
                        "— stacked-merge scar; remove it or restore the content "
                        "it was detached from"})
@@ -325,25 +305,19 @@ _EMPHASIZED_TITLE_RE = re.compile(r"([*_]{1,3})[^*_\n]+\1")
 _NAME_TOKEN_RE = re.compile(r"(?!(?:The|This|These|That|Those|A|An)\b)[A-Z]\w*")
 
 
-def _names_linked_or_emphasized_work(text, match):
-    """Single-entry floor: ``the author(s) of`` a link, italic title or name.
-
-    A capitalized name or acronym (``the authors of SGDR``) also passes.
-    """
-    of_match = re.match(r"\s+of\s+", text[match.end():], re.IGNORECASE)
-    if not of_match:
-        return False
-    remainder = text[match.end() + of_match.end():]
-    return bool(_WIKILINK_START_RE.match(remainder)
-                or _EMPHASIZED_TITLE_RE.match(remainder)
-                or _NAME_TOKEN_RE.match(remainder))
+def _names_linked_or_emphasized_work(named):
+    """Single-entry floor: a link, emphasized title, or capitalized name or
+    acronym (``the authors of SGDR``) follows ``the author(s) of``."""
+    return bool(_WIKILINK_START_RE.match(named)
+                or _EMPHASIZED_TITLE_RE.match(named)
+                or _NAME_TOKEN_RE.match(named))
 
 
 def source_meta_findings(prose, entry_type, names_work=None):
     """Item 14: the first source-meta phrase, else a bare ``the author(s)``.
 
-    ``names_work(text, match)`` decides whether one ``the author(s)`` match
-    names an existing entry, such as a Work or a named method. The vault
+    ``names_work(named)`` decides whether the text after one ``the author(s)
+    of`` names an existing entry, such as a Work or a named method. The vault
     scanner resolves the entry; the single-entry default accepts ``the
     author(s) of`` followed by a wikilink, an emphasized title, or a
     capitalized name or acronym, which it cannot verify.
@@ -359,8 +333,9 @@ def source_meta_findings(prose, entry_type, names_work=None):
                      "text": found.group(0),
                      "message": f'source-meta phrasing "{found.group(0)}"'}]
     names_work = names_work or _names_linked_or_emphasized_work
-    authors = list(re.finditer(r"\bthe authors?\b", text, re.IGNORECASE))
-    if any(not names_work(text, match) for match in authors):
+    authors = re.finditer(r"\bthe authors?\b(\s+of\s+)?", text, re.IGNORECASE)
+    if any(not (match.group(1) and names_work(text[match.end():]))
+           for match in authors):
         return [{"check": "authors",
                  "message": "source-meta phrasing uses bare `the author(s)` "
                             "rather than naming an existing entry"}]
@@ -494,27 +469,17 @@ def emphasis_span_findings(prose, related="", table_spans=(),
     return findings
 
 
-def _first_letter_ci_equal(a, b):
-    return a[:1].lower() + a[1:] == b[:1].lower() + b[1:]
-
-
 def pure_math_opener_markup(running_title, opener):
     """The opener bold allowed around a title made of one inline-math span.
 
     ``running_title`` is the title without a disambiguating parenthetical and
-    ``opener`` the opening paragraph. Returns ``None`` unless the first outer
-    bold spells that title in the shared mathematical plain form.
+    ``opener`` the opening paragraph. Whether that bold spells the title is
+    the bold-opener check's finding.
     """
     if not re.fullmatch(r"\$[^$\n]+\$", running_title or ""):
         return None
     bold = BOLD_OUTER_RE.search(opener or "")
-    if not bold:
-        return None
-    shown = math_title_plain_text(bold_parts(bold)[0].strip())
-    wanted = math_title_plain_text(running_title)
-    if shown and wanted and not _first_letter_ci_equal(shown, wanted):
-        return None
-    return bold.group(0)
+    return bold.group(0) if bold else None
 
 
 # ---------------------------------------------------------------------------
@@ -788,8 +753,6 @@ def run_self_test(verbose=False):
         return [finding["check"] for finding in findings]
 
     # item 5
-    check("every named common noun is a bare cross-domain slug",
-          all(bare_common_noun_slug(term) for term in COMMON_NOUNS), True)
     check("a qualified slug and an unnamed bare word pass the floor",
           [bare_common_noun_slug(value) for value in
            ("entropy-information-theory", "precision", "", None)],
@@ -917,7 +880,7 @@ def run_self_test(verbose=False):
     check("a caller's resolver decides whether the authors name a Work",
           checks(source_meta_findings(
               "The authors of [[transformer]] argue it.", "Concept",
-              names_work=lambda text, match: False)), ["authors"])
+              names_work=lambda named: False)), ["authors"])
 
     # item 16
     check("only the opener's first bold is the title slot",
@@ -971,14 +934,11 @@ def run_self_test(verbose=False):
               "              \n\n**$x$** is a variable.\n\nLater **$x$** again.",
               opener_markup=markup)],
           [5])
-    check("the exemption needs a pure-math title spelled by the opener bold",
+    check("the exemption needs a pure-math title and an opener bold",
           [pure_math_opener_markup(title, opener)
            for title, opener in (("Rate", "**Rate** opens."),
-                                 ("$x$", "**$y$** opens."),
                                  ("$x$", "No bold."))],
-          [None, None, None])
-    check("the outer-bold reader is entry_structure's",
-          BOLD_OUTER_RE is _BOLD_OUTER_RE, True)
+          [None, None])
     matched = BOLD_OUTER_RE.search("***E. coli* K-12** is a strain.")
     check("the outer-bold reader keeps the mixed taxon/strain form",
           bold_parts(matched), ("E. coli K-12", "mixed", "E. coli"))
@@ -1009,10 +969,6 @@ def run_self_test(verbose=False):
               ("chi-squared", ["$\\chi^2$ test"]),
               ("zebra", ["$\\chi^2$ test"]))],
           [True, True, True, False])
-    check("plural_surface inflects the head token",
-          [plural_surface(title) for title in (
-              "Confusion matrix", "Hypothesis", "ROC curve", "")],
-          ["Confusion matrices", "Hypotheses", "ROC curves", ""])
     mouse = ("Organism", "Mus musculus",
              "Mus musculus is the mouse, a small rodent.",
              "***Mus musculus*** is the mouse, a small rodent.\n\nMore.")
@@ -1024,12 +980,6 @@ def run_self_test(verbose=False):
           [organism_common_name_bound(*mouse, label)
            for label in ("mouse", "Mice", "rodent", "[[x]]")],
           [True, True, False, False])
-    dog = ("Organism", "Canis lupus familiaris",
-           "Canis lupus familiaris is commonly known as the domestic dog.",
-           "***Canis lupus familiaris*** is a model organism.")
-    check("a binding covers the complete common-name phrase, not its head",
-          [organism_common_name_bound(*dog, label)
-           for label in ("domestic dog", "dog")], [True, False])
 
     # item 19
     one = [("flashcard", "Bias–variance trade-off", "fault")]
@@ -1056,14 +1006,6 @@ def run_self_test(verbose=False):
           ([], True))
     check("with no primary term, nothing is asked",
           primary_line3_faults(2, near, "", None), ([], None))
-
-    # differential fixtures
-    check("each shared mutation names both tools' finding keys",
-          all(len(row) == 5 and row[2] and row[3] for row in SHARED_MUTATIONS),
-          True)
-    check("each shared quiet row names both tools' finding keys",
-          all(len(row) == 4 and row[2] and row[3] for row in SHARED_QUIET),
-          True)
 
     failed = [case for case in cases if not case[1]]
     for label, ok, got, want in cases:

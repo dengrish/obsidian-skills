@@ -178,7 +178,6 @@ from entry_structure import (  # noqa: E402
     flashcard_line1_faults,
     math_title_plain_text,
     mask_body_comments,
-    mask_escaped_wikilinks,
     normalized_answer_surface,
     opening_paragraph,
     opener_subject_date_status,
@@ -192,10 +191,7 @@ from markdown_tables import (  # noqa: E402
     markdown_table_spans,
     mask_line_spans,
 )
-# The per-entry, source-independent checks wiki-build's lint_entry.py also
-# runs (items 5, 6, 13, 14, 16, 18 and 19's primary card). One copy keeps a
-# published entry from failing this scan on a rule the builder gate already
-# applied.
+# Per-entry checks shared with wiki-build's lint_entry.py (one copy).
 from entry_checks import (  # noqa: E402
     BARE_WORD_ALIAS_HINT,
     BOLD_OUTER_RE as _BOLD_OUTER_RE,
@@ -2255,13 +2251,8 @@ def scan(wiki, images=None, vault=None):
     _named_surfaces = sorted(_named_surfaces,
                              key=lambda value: (-len(value), value))
 
-    def _authors_phrase_names_entry(text, match, note_path=None):
-        """Whether ``the author(s) of ...`` names an existing entry."""
-        after = text[match.end():]
-        of_match = re.match(r"\s+of\s+", after, re.IGNORECASE)
-        if not of_match:
-            return False
-        remainder = after[of_match.end():]
+    def _authors_phrase_names_entry(remainder, note_path=None):
+        """Whether the text after ``the author(s) of`` names an entry."""
         linked = WIKILINK.match(remainder)
         if linked is not None and linked.start() == 0:
             target = linked.group(1)
@@ -2653,9 +2644,7 @@ def scan(wiki, images=None, vault=None):
                              f'whether it summarizes that PDF. A URL-origin clipping can be '
                              f'independent. Preserve both sources until their identity is confirmed'))
         # ---- item 6: type / API surface (non-Software entries) ----
-        # Shared with lint_entry: the code-identifier title, the first API
-        # failure string, fenced code (read unmasked by listings: here the
-        # fence IS the finding) and the zero backticked-identifier cap.
+        # Shared with lint_entry (entry_checks.api_surface_findings).
         for _api_finding in api_surface_findings(
                 e["type"], title, e["prose"], e["body"]):
             problems.append((sl, "item6", _api_finding["message"]))
@@ -3047,10 +3036,9 @@ def scan(wiki, images=None, vault=None):
                 'bare %(kind)s %(token)r on prose line %(line)d — wrap the '
                 'literal shape in backticks' % occurrence))
         # ---- item 13: stray frontmatter key, `---` or digit line mid-body (stacked-merge scars) ----
-        # Shared with lint_entry, which masks listings first. If Related is
-        # missing, regions() reaches the legitimate separator before
-        # Flashcards. Item 11 should report the missing footer without
-        # cascading into an item-13 "stray separator" false positive.
+        # Shared with lint_entry; listings are masked (shown, not asserted).
+        # If Related is missing, regions() reaches the legitimate separator
+        # before Flashcards: item 11's finding, not an item-13 scar.
         _structural_separator_i = None
         if e.get("flashcard_indexes"):
             _flash_i = e["flashcard_indexes"][0]
@@ -3301,8 +3289,8 @@ def scan(wiki, images=None, vault=None):
         # it names an existing entry, which this scan can resolve.
         for _meta_finding in source_meta_findings(
                 e["prose"], e.get("type"),
-                names_work=lambda text, match: _authors_phrase_names_entry(
-                    text, match, _entry_vault_target(e))):
+                names_work=lambda named: _authors_phrase_names_entry(
+                    named, _entry_vault_target(e))):
             problems.append((sl, "item14", _meta_finding["message"]))
         # ---- item 17: names introduced for this subject but absent in aliases ----
         # The shared detector is exactly the one wiki-build runs on a new or

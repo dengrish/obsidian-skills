@@ -503,11 +503,9 @@ When present, keep its value unchanged between `tags:` and `parents:`; it is
 optional and is not a lint finding.
 
 **Keys outside this schema are preserved.** Obsidian-owned appearance and
-publish properties (`cssclasses`, `cssclass`, `publish`, `permalink`, `cover`,
-`image`, `banner`, `icon`) are user configuration, and any other unexpected
-key is user metadata. Keep each value exactly and in place, and report it; a
+publish properties (the validators' `OBSIDIAN_KEYS`) and any other unexpected
+key are user metadata. Keep each value exactly and in place, and report it; a
 schema mismatch alone never authorizes deleting, reordering or repurposing it.
-The validators' `OBSIDIAN_KEYS` constants carry the same list.
 
 **Body math has a canonical home too.** The vault-wide equation policy —
 explanatory value, evidence, display form, notation, normalization —

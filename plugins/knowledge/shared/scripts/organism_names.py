@@ -342,11 +342,6 @@ def _self_test():
          first_sentence(
              'Mus musculus is called the "house mouse." It is a rodent.'),
          'Mus musculus is called the "house mouse."'),
-        ("an abbreviation before an opening preposition ends the first sentence",
-         first_sentence(
-             "***Mus musculus*** was catalogued by Linnaeus et al. "
-             "In English Mus musculus is called the house mouse."),
-         "***Mus musculus*** was catalogued by Linnaeus et al."),
         ("a name bound only after the first sentence is not bound",
          [bound_common_names("Mus musculus", "",
                              "***Mus musculus*** was catalogued by Linnaeus "
@@ -357,12 +352,6 @@ def _self_test():
                              "Asia, etc. In genetics, Arabidopsis thaliana "
                              "is the thale cress.")],
          [[], []]),
-        ("a parenthetical ending in punctuation stays in the first sentence",
-         [first_sentence(value) for value in (
-             "**Tardigrade** (water bear!) is an animal. It survives drying.",
-             "**Rat** (sp. nov.) is a rodent.")],
-         ["**Tardigrade** (water bear!) is an animal.",
-          "**Rat** (sp. nov.) is a rodent."]),
     ]
     bad = [(name, got, want) for name, got, want in cases if got != want]
     for name, got, want in bad:

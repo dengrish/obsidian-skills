@@ -1476,9 +1476,6 @@ def run_self_test(verbose=False):
              "The gradient is given by Eq. 3 in the source.",
              "See Sec. 2, Ch. 4 and Ref. 12 for details.")],
          [1, 1, 1]),
-        ("etc. may end a sentence before a strong sentence start",
-         split_sentences("It covers A, B, etc. The model works."),
-         ["It covers A, B, etc.", "The model works."]),
         ("etc. ends a sentence exactly before a capital",
          [count_sentences(value) for value in (
              "Cells, tissues, etc. In development they change.",

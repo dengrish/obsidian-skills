@@ -48,12 +48,10 @@ This exception creates only the roots needed by the authorized closure and
 does not alter the user's topic queue or extract unrelated entities.
 
 A discipline root is a short explanation of the field, not a duplicate MOC.
-The misc root is `Wiki/misc` with the fixed title `Misc`: a brief
-source-backed definition of a miscellany (assorted items with no shared
-category), sourced like any root, for example from a dictionary extract for
-"miscellaneous". It makes no claim about this vault's contents; `MOCs/misc.md`
-carries the membership. Use the ordinary entry schema, one matching tag, a
-primary-definition card, and `parents: []`.
+The misc root is `Wiki/misc`, titled `Misc`: a brief source-backed
+definition of a miscellany (for example from a dictionary extract) that makes
+no claim about this vault's contents. Use the ordinary entry schema, one
+matching tag, a primary-definition card, and `parents: []`.
 New roots use today's `created:` and `updated:` dates and `read: false`;
 the ordinary maintenance freeze applies to existing notes, not this authorized
 new-entry case. Newly acquired source extracts retain the research-source
@@ -99,14 +97,11 @@ already coherent structure stable rather than reorganizing for variety.
 - Place every entry once in its single discipline by default. A second
   placement needs a distinct, useful broader relationship; it must not conceal
   uncertainty over where the entry belongs.
-- Check each member's discipline home while comparing the tree. When the
-  [item 8](qc-items.md#8-tags) tag rule and calibration clearly place a
-  member elsewhere (for example a decision-tree component tagged
-  `#computer-science`), re-home it under item 8 if Task 1 is authorized for
-  that entry, keep its old-group evidence, rescan, and re-derive the closure.
-  If the new group falls outside the authorized closure or Task 1 is out of
-  scope, report the required change instead. Report close calls rather than
-  retagging.
+- Check each member's discipline home. When the [item 8](qc-items.md#8-tags)
+  tag rule and calibration clearly place it in another discipline, re-home it
+  under item 8 if Task 1 and the new group are in scope, keep its old-group
+  evidence, rescan, and re-derive the closure; otherwise, and for close calls,
+  report it.
 - For misc, use its root followed by one level of member links sorted by
   case/Unicode-normalized canonical title, with vault-relative paths as ties.
   Do not invent conceptual subdivisions for this fallback bucket.
@@ -238,14 +233,11 @@ actions.
   separately owned region.
 - `self_parented` and `parent_cycles` identify edges to recompute from the
   derived hierarchy. Their absence alone does not prove complete placement.
-- Entry-link `item10/moc` findings appear in `problems`, not in
-  `hierarchy_diagnostic`, and Task 3 never rewrites those links. Publishing a
-  missing canonical MOC for an active discipline in the closure lets an
-  explicit `[[MOCs/<discipline>]]` link resolve on the rescan; a noncanonical
-  spelling then remains an ordinary `item10/case` repair under Task 1's rules.
-  Links to unknown MOC names, missing MOCs of inactive disciplines, or
-  unreadable or unsafe MOC paths stay preserved and reported; never retarget
-  them to another MOC or a same-named Wiki entry.
+- Task 3 never rewrites entry links with `item10/moc` findings (in
+  `problems`). Publishing a missing canonical MOC for an active in-closure
+  discipline lets an explicit `[[MOCs/<discipline>]]` link resolve on the
+  rescan; every other such link stays preserved and reported, never
+  retargeted to another MOC or a same-named Wiki entry.
 
 After a completed closure, every included entry with valid membership has no placement gap,
 unresolved/invalid parent, self-parent, or cycle. Every active included MOC is

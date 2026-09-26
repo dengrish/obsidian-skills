@@ -11,10 +11,7 @@ must preserve, not a separate way to rename files.
 `keyed_files` collects the candidate family: the PDF, its same-stem
 `Sources/Images/<stem>_fig*` images, an `Articles/` note whose origin
 identifies this PDF, and any split-book folder with its chapters. Each
-chapter has its own family. A basename shared with another vault file blocks
-the plan as
-[SKILL step 3](../SKILL.md#3-check-references-and-prepare-the-complete-rename-plan)
-describes. The rename plan moves only proven members and
+chapter has its own family. The rename plan moves only proven members and
 repairs Markdown references vault-wide; it never independently renames
 unrelated notes or images. Resolve each blocker at its cause, then re-plan:
 
@@ -35,9 +32,7 @@ unrelated notes or images. Resolve each blocker at its cause, then re-plan:
   list never fall back to `source:`. Publisher URLs remain external sources.
   The only metadata-free exception is a legacy note whose entire body is an
   embed of this PDF. An unquoted source wikilink naming this PDF is a
-  blocker: quote the complete wikilink scalar and re-plan. The helper reads
-  quoted or escaped keys and values, flow and indentless lists, and comments,
-  but producers still write the documented block-list form.
+  blocker: quote the complete wikilink scalar and re-plan.
 - **Figures.** A `_fig*` candidate moves only when the figure manifest
   records its exact current digest; any other candidate blocks the rename. A
   same-stem clipping, a deleted note, or no visible rival does not prove
@@ -56,15 +51,12 @@ unrelated notes or images. Resolve each blocker at its cause, then re-plan:
   replace it with a regular in-scope note.
 - **Link repair is the helper's job.** It resolves folder-qualified links
   against the keyed file's actual location and handles extensionless links,
-  case and Unicode variants, and symlinked directories. It decodes local
-  Markdown URL escapes once; a literal percent sequence in a wikilink stays
-  literal. Code, escaped wikilinks, and closed HTML/Obsidian comments are
-  literal evidence, and their bytes are preserved; an unclosed comment opener
-  does not hide a dependency. Frontmatter is read separately, so a comment
-  delimiter in metadata hides neither the origin nor body links. This applies
-  vault-wide, including `Reviews/` logs: an authorized rename repairs their
-  navigation links without changing issue claims. Never replace it with
-  whole-body substring matching.
+  case and Unicode variants, and symlinked directories. Code, escaped
+  wikilinks, and closed HTML/Obsidian comments are literal evidence, and their
+  bytes are preserved; an unclosed comment opener does not hide a dependency.
+  This applies vault-wide, including `Reviews/` logs: an authorized rename
+  repairs their navigation links without changing issue claims. Never replace
+  it with whole-body substring matching.
 
 The canonical contracts are
 [source identity (§1a)](../../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first),
@@ -93,10 +85,8 @@ malformed or conflicting sidecars. Do not force a partial family through.
   is a blocker.
 - `edits.sidecars` tracks only the default figure ownership and review files
   in `Sources/Images/`; their changes are planned, applied, and rolled back
-  with the rename. The organizer never reads or updates a custom review
-  ledger selected with figure-extract's `--review-file`: its marks keep the
-  old stems and no longer match renamed figures. Do not hand-edit it as part
-  of the rename; name any known custom ledger in the report as still holding
+  with the rename. A custom figure-extract `--review-file` ledger is never
+  updated and must not be hand-edited: report any known one as still holding
   old-stem marks.
 - `edits.published_updates` records `(old, new)` publication-date scalars for
   owned paper-summary notes when the canonical source year changes. The note's
@@ -131,12 +121,10 @@ moves, edits, blockers = rename_all(
 ```
 
 Pass `dirs` and `directory_names` to both reference checks, exactly as the
-CLI does. Without `dirs` the permissive API may count a link to a different
-folder's same-named note as a reference to this family; without
-`directory_names` a chapter folder's name, which is a container rather than a
-cited file, counts as a reference. Compute both **before** the move,
-including when filing changes the PDF's directory; recomputed afterwards, a
-correct rename reads as incomplete. Do not pass a prebuilt `vault_names` map
+CLI does, and compute both **before** any move or filing. Without them the
+checks count links to same-named notes in other folders, or to the chapter
+folder itself, as references; recomputed afterwards, they make a correct
+rename read as incomplete. Do not pass a prebuilt `vault_names` map
 to the rename API; it scans afresh on each plan. Only the splitting API
 accepts that map.
 

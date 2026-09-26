@@ -59,16 +59,13 @@ sum to one. Use the source's ordinary case. Do not
 append exhaustive domain checks, positive-count reminders, tie-breaking rules,
 zero-denominator recovery, clipping tolerances, or implementation alternatives
 unless that detail is central to this entry and supported by the source. A
-formula presupposes its ordinary domain, so omit well-definedness boilerplate:
-write “the mean of the points assigned to the cluster,” not “for a nonempty
-cluster,” and leave out $m \ge 1$, nonzero denominators or variance, input
-probabilities that sum to one, and conventional parameter ranges such as
-$\alpha \ge 0$. A range is conventional when the parameter's name already
-implies it: a regularization strength is nonnegative, and a mix ratio or
-probability cutoff lies in $[0,1]$. Keep a range on a quantified variable or
-family index the definition needs, such as $\lambda$ and $p$ above. Never
-invent an operational convention to make an illustrative formula specify a
-complete implementation.
+formula presupposes its ordinary domain, so omit well-definedness boilerplate
+such as “for a nonempty cluster,” $m \ge 1$, nonzero denominators or variance,
+input probabilities that sum to one, and ranges a parameter's name already
+implies (a nonnegative regularization strength). Keep a range on a quantified
+variable or family index the definition needs, such as $\lambda$ and $p$ above.
+Never invent an operational convention to make an illustrative formula specify
+a complete implementation.
 Keep an exact definition distinct from numerical approximations when the
 source makes that distinction relevant; do not silently add clipping or tolerances.
 
@@ -127,9 +124,9 @@ This is the notation the vault's equation-bearing entries already use — Géron
 - **Vectors bold lowercase, matrices bold uppercase** — `\mathbf{v}`, `\mathbf{X}`; scalars in default math italic. (Making math bold *inside a bolded prose span* needs `\boldsymbol{}`/`\mathbf{}` — that is writing.md §2's *Inline formatting* rule about markdown, not this one.)
 - **Multi-letter names upright** via `\text{…}`: $\text{RMSE}(\mathbf{X}, \mathbf{y}, h)$, $\text{MAE}$, $\text{precision}$. Single-letter quantities stay italic. Standard operators use their macros — `\min`, `\max`, `\log`, `\exp` — and as subscripts, $x_{\min}$, $x_{\max}$.
 - **Variance uses the form the relationship needs.** Write $\operatorname{Var}(X)$ when applying the variance operator to a bound quantity $X$; write $\sigma^2$ for the scalar variance paired with an already established standard deviation $\sigma$. These are consistent forms of the same quantity, not competing notation to normalize away.
-- **Named norms** as $\ell_1$, $\ell_2$, $\ell_\infty$ (`\ell`); the general form $\|\cdot\|_p$. Never write raw `ℓ1` or `ℓ₁` in body prose or flashcard line 1.
-- **Unit symbols containing Greek letters use inline LaTeX, with the unit upright.** Write `10 $\mu\mathrm{m}$`, not raw `10 μm` or `10 µm`. The ordinary measured number remains plain under writing.md's numbers-in-prose rule; only the symbol-bearing unit needs math markup. Descriptions remain plain text: they may keep Unicode `μm`, but spell ℓ-norms in words (`ell-one`, `ell-two`).
-- **Every symbol is bound in nearby prose.** Each symbol a display equation uses is introduced in the sentences around it — "For a dataset of $m$ instances with feature vectors $\mathbf{x}^{(i)}$ and labels $y^{(i)}$, and a prediction function $h$…" is the worked pattern (the vault's `RMSE` entry). Bind symbols by role in the display's lead-in or a following *where* clause, not in the opening sentence. A binding keeps a range or coding the relationship needs, such as $\lambda \in [0,1]$ or $y \in \{0,1\}$, and omits the boilerplate §1 lists. The table standardizes *which* symbol to pick; it does not excuse the entry from saying what the symbol means, because entries are self-contained (prose principle 5) and the table is not in front of the reader.
+- **Named norms** as $\ell_1$, $\ell_2$, $\ell_\infty$ (`\ell`); the general form $\|\cdot\|_p$.
+- **Unit symbols containing Greek letters use inline LaTeX, with the unit upright.** Write `10 $\mu\mathrm{m}$`, not raw `10 μm` or `10 µm`. The ordinary measured number remains plain under writing.md's numbers-in-prose rule; only the symbol-bearing unit needs math markup. Descriptions follow their own plain-text [field rule](writing.md#description).
+- **Every symbol is bound in nearby prose.** Each symbol a display equation uses is introduced in the sentences around it — "For a dataset of $m$ instances with feature vectors $\mathbf{x}^{(i)}$ and labels $y^{(i)}$, and a prediction function $h$…" is the worked pattern (the vault's `RMSE` entry). Bind symbols by role in the display's lead-in or a following *where* clause, not in the opening sentence; a binding keeps the ranges and codings §1 requires and omits its boilerplate. The table standardizes *which* symbol to pick; it does not excuse the entry from saying what the symbol means, because entries are self-contained (prose principle 5) and the table is not in front of the reader.
 
 ## 4. Normalization — the source's symbols do not survive contact
 

@@ -34,7 +34,7 @@ That plugin is a *community plugin installed in the vault* — it lives at `.obs
 
   **What "leak-free" means, exactly.** The definition must not contain the title's own string or any alias's string. The mechanical comparison normalizes Unicode and case and treats punctuation — including slash and dash variants — plus whitespace as word separators (Quality Checklist item 19). So a `Key-value cache` entry's definition may not contain "key-value cache" or "key value cache," and `Bias/variance trade-off` cannot be hidden as "bias – variance trade off." **Component words of a compound title are permitted:** that same definition may freely say "keys and values," because neither word is the title. Evading the component words produces contorted, less identifying definitions — the opposite of what the rule is for. Only whole title and whole alias surfaces are mechanically off-limits. The semantic review also rejects a definition that reconstructs the answer by merely expanding an acronym or reordering all of its components: "machine learning operations practice" still gives away `MLOps`, and "messenger RNA vaccine" still gives away `mRNA vaccine`, even when neither literal string matches.
 
-  Math on line 1 follows the [line-1 equation-coverage rule](#line-1-equation-coverage). **No Markdown or HTML other than inline LaTeX** — no Obsidian or Markdown links/images, bold, italic (asterisk or underscore form), strikethrough, backticks, or HTML tags. Those forms either render literally in the Spaced Repetition reviewer or turn the answer-key sentence into styled content. LaTeX is the only inline markup line 1 accepts; set ℓ-norms and Greek-letter units in it (`$\ell_1$`, `$\mu\mathrm{m}$`), never as raw `ℓ1` or `μm`.
+  Math on line 1 follows the [line-1 equation-coverage rule](#line-1-equation-coverage). **No Markdown or HTML other than inline LaTeX** — no Obsidian or Markdown links/images, bold, italic (asterisk or underscore form), strikethrough, backticks, or HTML tags. Those forms either render literally in the Spaced Repetition reviewer or turn the answer-key sentence into styled content. LaTeX is the only inline markup line 1 accepts.
 
 - **Line 2 — `??` (active card) or `!!` (user-disabled card).** The literal two-character cue marking the boundary between prompt and answer. No surrounding whitespace, no other content on the line. **`??` is the Spaced Repetition plugin's *multi-line reversed* card separator, and the doubling is load-bearing** — a single `?` is that plugin's one-directional multi-line card. Reversed means the card is drilled both ways, definition→term and term→definition, which is why its scheduling state can carry one schedule per side and why wiki-lint reviews line 1 for clarity in *both* directions (`wiki-lint/references/flashcards.md`). "Simplifying" `??` to `?` silently halves every card in the vault and strands the second schedule. **Wiki-build always writes `??` verbatim on every card it creates and never writes `!!`.** The user may hand-edit a card's `??` to `!!` to temporarily remove the card from the Spaced Repetition plugin's queue without deleting it; `!!` only ever appears via that manual edit. Both values are valid, both are preserved verbatim on subsequent merges, and both pass the Quality Checklist's line-2 format check. The user re-enables a disabled card by changing `!!` back to `??` themselves; wiki-build takes no action on either form.
 
@@ -73,13 +73,12 @@ learner should recall, such as $\text{TP}/(\text{TP}+\text{FP})$ or
 $\sqrt{\operatorname{Var}(X)}$, in the body's notation or a demonstrably
 equivalent compact form, and name its symbols in words in the same sentence.
 Keep every defining operation (an Lp norm still needs its p-th root) and
-every condition, range, or excluded term the relationship needs, such as
-population versus sample or $0\le\lambda\le1$ in the convexity inequality.
-Omit only the well-definedness boilerplate the
+every condition, range, or excluded term the
 [equation guide](equations.md#1-coverage--explanatory-value-before-notation)
-lists, the $x_0=1$ augmentation device, index bounds that merely run over
-every term, and bindings for symbols the relationship does not use. A lone
-symbol does not substitute for the relationship being tested.
+requires. Omit only its well-definedness boilerplate, the $x_0=1$ augmentation
+device, index bounds that merely run over every term, and bindings for symbols
+the relationship does not use. A lone symbol does not substitute for the
+relationship being tested.
 
 Keep the equation leak-free: remove an answer-name left-hand side such as
 `\text{precision} =`, retaining the right-hand expression and a verbal cue;

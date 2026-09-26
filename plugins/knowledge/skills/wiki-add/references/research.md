@@ -29,11 +29,9 @@ invent missing content.
 
 Track which source and section/page supports each claim, and keep each claim's
 units, conditions, stated uncertainty and attribution. The entry explains the
-topic under the builder's [prose principles](../../wiki-build/references/writing.md#prose-principles):
-a caveat, limitation or implementation option is not included merely because a
-source states it, and a priority or superlative claim such as “first” or
-“best” needs independent reliable support or narrow attribution, otherwise it
-is omitted. Do not add unrelated claims to justify another source or image.
+topic under the builder's [prose principles](../../wiki-build/references/writing.md#prose-principles),
+including their caveat and priority-claim rules. Do not add unrelated claims
+to justify another source or image.
 
 ## Reuse before acquiring
 
@@ -75,17 +73,17 @@ preferences above; otherwise it may still support a specific claim. Reuse it
 read-only. Use web evidence when no reusable local source supports a
 conforming entry, or for a claim none supports.
 
-A source no entry cites is unbuilt. Never cite it: wiki-build's prior-coverage
-check would then skip the whole source by default. Report
-`<source> also covers <topic>: run wiki-build on it`, and continue with
-already-cited local sources or web evidence, never another copy of that
-document; when neither suffices, leave the topic pending with that route.
-A note carrying this workflow's [research-extract marker](#new-webpage-research-extracts)
-is exempt. Cite another unbuilt source only when the user's request names it
-or this run filed it under [New PDFs](#new-pdfs), and report it as
-`<source> is cited by <entry> but not yet built: extracting its other topics
-needs an explicit wiki-build re-process request`. An incomplete coverage
-result proves nothing: report it and do not cite that source.
+A source no entry cites is unbuilt, and citing it would make wiki-build's
+prior-coverage check skip the whole source. Cite one only when it carries this
+workflow's [research-extract marker](#new-webpage-research-extracts), the
+user's request names it, or this run filed it under [New PDFs](#new-pdfs);
+report the last two as `<source> is cited by <entry> but not yet built:
+extracting its other topics needs an explicit wiki-build re-process request`.
+Otherwise report `<source> also covers <topic>: run wiki-build on it` and
+continue with already-cited sources or web evidence, never another copy of
+that document; when neither suffices, leave the topic pending with that route.
+An incomplete coverage result proves nothing: report it and do not cite that
+source.
 
 Report the search terms, the hits, and whether each was reused, rejected or
 unbuilt.
@@ -104,20 +102,17 @@ If `Articles/` is confirmed absent, substitute a private empty directory for
 this planning check, then repeat against the real directory before publication.
 An unreadable path or a non-directory occupant is not an empty inventory. When
 `<vault>/Inbox` exists, add `--raw '<vault>/Inbox'`: a URL row
-`duplicate-of-earlier-input` means the user's capture of that page is in
-`Inbox/`, so write no extract for it; use other evidence or leave the topic
-pending. Read that capture and name it in the report with its route: clean
-it with clipping-clean, then run wiki-build on it; or, when it is empty,
-near-empty or lacks a usable title (a capture clipping-clean skips and
-keeps), re-clip or remove it.
+`duplicate-of-earlier-input` means the user's own capture of that page awaits
+clipping-clean, so write no extract for it; use other evidence or leave the
+topic pending, and report the capture with its route (clipping-clean, then
+wiki-build).
 
 Read the full result. A unique existing URL-origin note may be reused only
 under the [local-source rules](#find-local-sources-first), after reading it and
 verifying it contains the evidence needed by the entry; its filename or URL
-match is not enough. Leave its exact bytes and images unchanged; do not
-reprocess it, add excerpts or refresh metadata. If it lacks necessary
-evidence, find another adequate source or leave the topic pending. Ambiguous
-or incomplete ownership does not authorize a duplicate source note.
+match is not enough. Leave its exact bytes and images unchanged. If it lacks
+necessary evidence, find another adequate source or leave the topic pending.
+Ambiguous or incomplete ownership does not authorize a duplicate source note.
 
 For PDFs, resolve PDF/reading-note identity from decoded `sources:`
 provenance, not shared stems. A reading note only leads to its PDF: the
@@ -138,14 +133,12 @@ immediately after frontmatter, followed by the visible label `Research extract`:
 <!-- obsidian:wiki-add-research-source -->
 ```
 
-This reference owns the marker. It distinguishes these extracts from cleaned
-captures for source consumers and reprocessing. In the body identify the
-original page with a Markdown link, the access date, and the fact that the text
-is an agent-written extract/summary. Give specific source heading/section
-locators beside the supported material; where headings are absent, identify
-the relevant passage or labeled exhibit precisely. Never combine different
-pages into one URL-origin note. Separate source records may support one Wiki
-entry.
+This reference owns the marker. In the body identify the original page with a
+Markdown link, the access date, and the fact that the text is an agent-written
+extract/summary. Give specific source heading/section locators beside the
+supported material; where headings are absent, identify the relevant passage
+or labeled exhibit precisely. Never combine different pages into one
+URL-origin note. Separate source records may support one Wiki entry.
 
 Preserve full source text only when legally reusable. Otherwise write concise,
 faithful paraphrases and, when useful, short attributed excerpts within
@@ -224,11 +217,10 @@ a private empty directory, as for the URL check above.
 If an occupant is the same document, never file a second copy: apply the
 local-source rules above, treating one under `Inbox/` as unbuilt with the
 route: file that copy with pdf-organize, then run wiki-build on it.
-Otherwise give the new PDF a distinguishing abbreviated title under
-pdf-organize's [collision rule](../../pdf-organize/SKILL.md#3-check-references-and-prepare-the-complete-rename-plan),
-using `_2`, `_3` only when no natural distinction exists and never for a book
-(choose other evidence or defer a book without one). Confirm the new name with
-`naming.py canonical` and repeat all three checks. Then publish with exclusive
+Otherwise choose a distinguishing name under pdf-organize's
+[collision rule](../../pdf-organize/SKILL.md#3-check-references-and-prepare-the-complete-rename-plan)
+(never `_2` for a book: choose other evidence or defer), confirm it with
+`naming.py canonical`, and repeat all three checks. Then publish with exclusive
 creation through the [shared safe-write API](../../../shared/SAFE_WRITES.md#call-the-shared-python-api)
 (`atomic_move.publish_new`).
 

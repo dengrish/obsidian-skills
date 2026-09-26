@@ -39,24 +39,19 @@ python3 '<plugin>/skills/figure-extract/scripts/batch_extract.py' \
     --src '<resolved pdf path>' --out '<images-folder>'
 ```
 
-Carry an intake exception such as `--allow-unorganized`, and any non-default
-option that an earlier extraction report or the extractor's printed rerun
-command names, into this command and any repair command. Pass
-`--ed-prefix ED` when `<stem>_fig_ED*` files exist or the captions number
-Extended Data figures alongside the main figures. Respect the extractor's
-naming, collision and ownership refusals, and read its diagnostics.
+Carry any non-default option that intake or an earlier extraction report
+names, such as `--allow-unorganized`, into this and every repair command. Pass
+`--ed-prefix ED` when the captions number Extended Data figures alongside the
+main figures. Respect the extractor's refusals and read its diagnostics.
 
 Then complete figure-extract's
 [visual review](../../figure-extract/SKILL.md#3-inspect-the-summary-and-verify-crops)
-of the crops this run wrote: view each one, or at least every flagged and
-multi-column crop. Repair only crops this run produced, through
-figure-extract's explicit-crop workflow: one the review flags, or one that
-proves defective at [selection](#selection). Re-run the inventory after the
-extraction and after each repair. Never overwrite, adopt or repair a
-pre-existing image; the image folder is otherwise read-only. A preview/no-apply
-run writes nothing and reports the gap. An unsafe or partial inventory, or an
-extraction that cannot supply a figure, leaves that figure unavailable and
-reported under *Unused source figures*.
+of the crops this run wrote. Repair only those crops, through its explicit-crop
+workflow, and re-run the inventory after the extraction and after each repair.
+Never overwrite, adopt or repair a pre-existing image; the image folder is
+otherwise read-only. A preview/no-apply run writes nothing and reports the gap;
+a figure the extraction cannot supply stays unavailable and is reported under
+*Unused source figures*.
 
 ## Selection
 
@@ -66,7 +61,7 @@ reported under *Unused source figures*.
 
 **Pair each selected figure with the most specific eligible entry it directly explains.** A gradient-scaling diagram belongs in `lambdarank.md`, not the broader `learning-to-rank.md`. When no entry has the right scope, skip the figure instead of stretching the nearest entry to fit it. A figure can inform the substance judgment, but it does not bypass step 2's eligibility rules.
 
-**Open each newly selected local image before embedding it.** A valid filename does not prove the contents. Confirm that the image is the intended whole figure or panel, is readable, and contains no caption text or neighboring chart; then write its caption from what it shows, checked against the source. Skip a defective crop as an unusable asset and report it; a crop this run's own extraction produced may instead return to [missing PDF figures](#missing-pdf-figures) for figure-extract's explicit-crop repair. If the host cannot display images, report that limit and embed no unviewed crop. Preserved existing embeds and remote images need no new check.
+**Open each newly selected local image before embedding it.** A valid filename does not prove the contents. Confirm that the image is the intended whole figure or panel, is readable, and contains no caption text or neighboring chart; then write its caption from what it shows, checked against the source. Skip and report a defective crop, or repair one this run extracted under [missing PDF figures](#missing-pdf-figures). If the host cannot display images, report that limit and embed no unviewed crop. Preserved existing embeds and remote images need no new check.
 
 **Record a specific reason for every unused exhibit.** Valid reasons include:
 

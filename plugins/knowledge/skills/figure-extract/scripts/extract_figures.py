@@ -119,7 +119,7 @@ from figure_state import (MANIFEST_FILE, file_digest, read_manifest,
                           read_manifest_snapshot, read_sidecar, write_manifest,
                           manifest_key, figure_identity, check_manifest_writable)
 import atomic_move
-from naming import is_feed_attachment, looks_canonical
+from naming import looks_canonical
 from render_page import MAX_RENDER_PIXELS, checked_render_dimensions
 from vault_artifacts import (inventory_source_figures, output_vault_root,
                              verify_selected_pdf)
@@ -2025,25 +2025,6 @@ def run_self_test():
         check("the unorganized vault crop publishes nothing",
               os.listdir(repair_images), [])
 
-        # A feed-owned attachment keeps its collector name: pdf-organize
-        # refuses it, so the refusal names only --allow-unorganized.
-        feed_stem = "rss-" + "0123456789abcdef" * 2
-        feed_pdf = os.path.join(repair_pdfs, feed_stem + ".pdf")
-        shutil.copyfile(pdf, feed_pdf)
-        code, so, se = run([
-            feed_pdf, "--out", repair_images,
-            "--crop", "1:1:100,150,500,350", "--dpi", "72", "--no-trim",
-        ])
-        ok("a vault crop of a feed-owned attachment is refused by default",
-           code != 0 and "feed-owned attachment" in str(code)
-           and "--allow-unorganized" in str(code))
-        ok("...and is not routed to pdf-organize",
-           "Organize it first" not in str(code)
-           and "pdf-organize" not in str(code))
-        check("the feed-owned refusal publishes nothing",
-              os.listdir(repair_images), [])
-        os.unlink(feed_pdf)
-
         # A readable external scratch representation is allowed when one vault
         # source uniquely owns its basename (the encrypted-PDF recovery route).
         scratch_pdf = os.path.join(tmp, "scratch", "Doe_Figs_2025.pdf")
@@ -2296,14 +2277,6 @@ def main(argv=None):
     # external output remains an explicit one-off target.
     vault_root = output_vault_root(out_dir)
     if vault_root is not None:
-        if (is_feed_attachment(pdf_stem, is_stem=True)
-                and not args.allow_unorganized):
-            sys.exit(
-                "Refusing explicit crops into the vault's canonical "
-                "Sources/Images folder: %r is a feed-owned attachment. The "
-                "collector's durable state records this name; keep it. To "
-                "crop under it deliberately, re-run with "
-                "--allow-unorganized." % pdf_stem)
         if not looks_canonical(pdf_stem, is_stem=True) and not args.allow_unorganized:
             sys.exit(
                 "Refusing explicit crops into the vault's canonical "

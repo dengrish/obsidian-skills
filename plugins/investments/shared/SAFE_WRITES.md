@@ -143,14 +143,12 @@ for example with `tempfile.mkdtemp(prefix=".atomic-remove-", dir=stage_parent)`
 same callback to `remove_expected(target, expected, snapshot, stage_dir,
 stage_parent=stage_parent)`.
 
-For a move, pass only the source's directory-entry identity captured at
-planning: `move_noreplace(src, dst, expected=identity,
-stage_parent=stage_parent)`, where `identity` is `atomic_move.file_identity(src)`
-or a retained snapshot token's `.identity`. A whole snapshot token never
-matches and is refused as `SourceChanged`. The move checks identity, not bytes;
-when the bytes decided the move, first confirm that `snapshot(src)` still
-equals the retained token. Never replace any expected value with a fresh
-snapshot at commit time.
+For a move, `move_noreplace(src, dst, expected=identity,
+stage_parent=stage_parent)` takes only the source identity captured at
+planning, a retained token's `.identity` or `atomic_move.file_identity(src)`,
+never the whole token. It checks identity, not bytes: when the bytes decided
+the move, first confirm that `snapshot(src)` still equals the retained token.
+Never replace any expected value with a fresh snapshot at commit time.
 
 ## Remove or move an old pathname conditionally
 
@@ -161,12 +159,9 @@ the verified version; `remove_expected` performs the displacement and check.
 Restore or preserve any mismatch by the same rule above.
 
 Exclusive destination moves must also verify the moved source identity, as
-`move_noreplace` does. It stages the source in a private `.atomic-move-*`
-directory, beside the source or under `stage_parent` for a regular file. When
-a race or failure leaves a partial state, it raises `MoveIncomplete`: preserve
-and report every existing entry at both public paths and each of its
-`recovery_paths` rather than claiming that no move occurred. An
-`.atomic-move-*` directory left by that error or by an interrupted process is
+`move_noreplace` does. Its `MoveIncomplete` error means partial state:
+preserve and report both public paths and its `recovery_paths` rather than
+claiming that no move occurred. A leftover `.atomic-move-*` directory is
 recovery state, not disposable cache.
 
 ## Multi-file operations

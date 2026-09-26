@@ -6,8 +6,7 @@ description: >
   PDF. Use for requests such as "extract figures from my PDFs" or "rip the
   figures out of this paper", including populating Sources/Images/ from
   Sources/PDFs/. A reading note uses paper-summarize and wiki entries use
-  wiki-build; both run this extractor for a PDF whose figures are missing.
-  Renaming, filing or chapter splitting uses pdf-organize.
+  wiki-build; renaming, filing or chapter splitting uses pdf-organize.
 ---
 
 # Figure Extract
@@ -62,14 +61,11 @@ whole vault, even for a single named file, and nothing is written if the vault
 cannot be inventoried completely. An external PDF therefore has no owner there
 and is refused: use an external `--out` for a one-off, or, when the user wants
 it in the vault, copy it into `Inbox/` with their approval for `pdf-organize`
-to file, then extract from the filed path. A
-[readable scratch copy](references/review-and-repair.md#readable-working-copies)
-of a vault PDF keeps that PDF's exact basename. A refused PDF writes and
-adopts nothing, even with `--overwrite`; other PDFs continue and the run exits
+to file, then extract from the filed path. A refused PDF writes and adopts
+nothing, even with `--overwrite`; other PDFs continue and the run exits
 nonzero. When another vault file shares a PDF basename, report both paths and
 give the user the
 [shared-basename remedy](../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first).
-An arbitrary external `--out` checks collisions only within `--src`.
 
 **In a recursive run containing both a book and its chapters, extract the
 chapters and skip the whole book.** The skip is scoped to this run, not a
@@ -104,9 +100,8 @@ freshness), follow
 
 Extract a PDF alone with `--ed-prefix ED` when its captions number Extended
 Data figures alongside its main figures, or when `<stem>_fig_ED*` files exist;
-the default folds Extended Data into `S` (`SI` stays distinct). For a PDF
-skipped or refused for its ED namespace, or a switch after a default run,
-follow [Extended Data and Supplementary figures](references/review-and-repair.md#extended-data-and-supplementary-figures).
+the default folds Extended Data into `S` (`SI` stays distinct). For a switch
+after a default run, follow [Extended Data and Supplementary figures](references/review-and-repair.md#extended-data-and-supplementary-figures).
 Use `--keep-frame` to keep a publisher's surrounding frame, which is otherwise
 cropped away.
 
@@ -156,14 +151,12 @@ Preserve every recovery path named by a failed write.
 ### 4. Report completed and unresolved work
 
 Give the source scope, output folder, figures written, verified skips, and any
-legacy adoptions. Name any non-default option that later repairs or consumers
-must repeat: `--ed-prefix`, `--keep-frame`, `--dpi`, `--allow-unorganized`, or
-a custom `--review-file`. Name skipped whole books, feed-owned attachments and
-ED-namespace PDFs, refused sources, conflicting occupants, failed PDFs,
-remaining warnings, and explicit crop repairs. State what visual review was
-completed and any review marks recorded. After a nonzero run, report the PDFs
-that succeeded without calling the whole request complete. Preserve originals,
-legacy panels, and all unrelated images.
+legacy adoptions. Name skipped whole books and feed-owned attachments,
+refused sources, conflicting occupants, failed PDFs, remaining warnings, and
+explicit crop repairs. State what visual review was completed and any review
+marks recorded. After a nonzero run, report the PDFs that succeeded without
+calling the whole request complete. Preserve originals, legacy panels, and all
+unrelated images.
 
 At closeout, read the [shared suggestion-log rules](../../shared/SUGGESTIONS.md)
 and apply them to `Reviews/figure-extract-suggestions.md` and to the logs of

@@ -50,17 +50,11 @@ CLI:
 Output: per candidate {candidate, slug, matches:[{probe, matched_slug,
 matched_via, alias?, entry_slug, implies}], verdict, naming?}, plus the top-level
 ``candidate_collisions[]``, ``index_problems[]`` and ``summary``.
-``naming: ["bare-common-noun"]`` marks a candidate whose slug is a bare term
-from writing.md's cross-domain corpus: qualify a new entry's title and probe
-again. A merge into an existing same-sense bare-slug entry keeps its filename
-and reports the rename as a proposal. The mark never changes the verdict;
-``lint_entry.py`` reports the same slug as report-only
-``5-bare-common-noun``. Every index
-problem is reported. Only those that can hide slug, title or alias ownership
-turn an otherwise-new candidate into ``adjudicate``: ``ok: false`` (even when
-the problem list was lost), an entry whose ``identity_complete`` is false (or
-missing, with errors), and any problem that is neither an entry error nor a
-duplicate-slug report.
+``naming: ["bare-common-noun"]`` marks a slug from writing.md's cross-domain
+corpus; it never changes the verdict (SKILL.md says how to act on it). Every
+index problem is reported, but only one that can hide slug, title or alias
+ownership (``_creation_blockers``) turns an otherwise-new candidate into
+``adjudicate``.
 
 For source-derived or otherwise untrusted titles, always use ``--titles``;
 never interpolate title text into a shell command. ``--title`` remains a

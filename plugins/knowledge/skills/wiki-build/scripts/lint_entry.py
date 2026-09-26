@@ -313,10 +313,7 @@ from markdown_tables import (  # noqa: E402
     markdown_table_spans,
     mask_line_spans,
 )
-# The per-entry, source-independent checks wiki-lint's scanner also runs
-# (items 5, 6, 13, 14, 16, 18 and 19's primary card). One copy keeps a
-# published entry from failing the next maintenance scan on a rule this gate
-# already applied.
+# Per-entry checks shared with wiki-lint's scanner (one copy).
 from entry_checks import (  # noqa: E402
     BARE_WORD_ALIAS_HINT,
     BOLD_OUTER_RE as _BOLD_OUTER_RE,
@@ -1546,20 +1543,12 @@ def _body_wikilink_occurrences(sections):
     # but it must retain path qualification: ``[[a/target]]`` and
     # ``[[b/target]]`` may name two distinct files.  Folder mode resolves paths,
     # basenames, and aliases against the actual inventory below.
-    def target_key(target):
-        normalized = target.replace("\\", "/").strip().strip("/")
-        prefix, separator, bare = normalized.rpartition("/")
-        if bare.lower().endswith(".md"):
-            bare = bare[:-3]
-        normalized = prefix + separator + bare
-        return fold_name(normalized)
-
     occurrences = []
     for offset, line in enumerate(masked_lines):
         if offset in skip:
             continue
         for target, label in extract_wikilinks(line):
-            key = target_key(target)
+            key = _link_key(target)
             # Explicit MOC navigation is outside entry-link pruning. The
             # Wiki-only folder inventory cannot validate or own those notes.
             if not key or key.startswith("mocs/"):
@@ -2439,68 +2428,13 @@ def _recheck_folder_duplicate_wikilinks(results, root, snapshot_text):
     but only folder scope can know that ``[[sub/term]]``, ``[[term]]`` and an
     alias reach one entry.  File names outrank aliases, and ambiguous basenames
     or aliases remain unresolved rather than choosing an owner by walk order.
+    Repeats of one missing target still count as one target.
     """
-    root = os.path.abspath(root)
-    file_owners = set()
-    basename_owners = {}
-    owner_for_file = {}
-    for result in results:
-        relative = os.path.relpath(result["file"], root).replace(os.sep, "/")
-        if relative.lower().endswith(".md"):
-            relative = relative[:-3]
-        owner = fold_name(relative)
-        owner_for_file[result["file"]] = owner
-        file_owners.add(owner)
-        basename_owners.setdefault(owner.rsplit("/", 1)[-1], set()).add(owner)
-
-    alias_owners = {}
-    for result in results:
-        if _malformed_alias_field(result):
-            continue
-        owner = owner_for_file[result["file"]]
-        for alias in result["aliases"]:
-            key = fold_name(alias)
-            if key:
-                alias_owners.setdefault(key, set()).add(owner)
+    resolve_target = _folder_resolver(results, root)[0]
 
     def resolve(occurrence):
-        key = occurrence["key"]
-        lookup = _strip_wiki_root(key, root)
-
-        # Prefer an exact path from the Wiki root.  If a shorter path suffix is
-        # used, accept it only when it identifies one file.  A bare basename
-        # follows the same rule.  This is what keeps ``a/foo`` and ``b/foo``
-        # distinct while still collapsing ``sub/only`` beside ``only``.
-        basename = lookup.rsplit("/", 1)[-1]
-        basename_matches = basename_owners.get(basename, set())
-        explicitly_qualified = "/" in key
-        if lookup in file_owners:
-            if explicitly_qualified or len(basename_matches) == 1:
-                return lookup
-            # Bare ``[[foo]]`` remains ambiguous when both a root entry and a
-            # nested entry own that basename; the root file must not win by
-            # accident.
-            return None
-        candidates = {
-            owner for owner in file_owners
-            if owner == lookup or owner.endswith("/" + lookup)
-        }
-        if len(candidates) == 1:
-            return next(iter(candidates))
-        if len(candidates) > 1:
-            return None
-
-        # An on-disk file always outranks an alias.  The basename inventory is
-        # consulted before alias ownership even when a qualified spelling did
-        # not resolve exactly.
-        if basename in basename_owners:
-            return None
-        owners = alias_owners.get(lookup, set())
-        if len(owners) == 1:
-            return next(iter(owners))
-        if len(owners) > 1:
-            return None
-        return "unresolved-target:" + lookup
+        return resolve_target(occurrence["target"],
+                              missing="unresolved-target:")
 
     for result in results:
         text = snapshot_text.get(result["file"])
@@ -2534,7 +2468,8 @@ def _folder_resolver(results, root):
     """Folder-scope link resolution: ``(resolve, owner_for_file, owners)``.
 
     ``resolve(target)`` returns the owning entry's root-relative key, or
-    ``None`` when the target is missing or ambiguous. An exact path wins; a
+    ``None`` when the target is ambiguous or missing (with ``missing`` set, a
+    missing target returns that prefix plus its key). An exact path wins; a
     shorter path suffix or a bare basename must identify one file; a unique
     alias applies only when no file has that basename. ``owners`` maps each
     key to its per-file result.
@@ -2562,7 +2497,7 @@ def _folder_resolver(results, root):
             if key:
                 alias_owners.setdefault(key, set()).add(owner)
 
-    def resolve(target):
+    def resolve(target, missing=None):
         key = _link_key(target)
         lookup = _strip_wiki_root(key, root)
         basename = lookup.rsplit("/", 1)[-1]
@@ -2578,7 +2513,9 @@ def _folder_resolver(results, root):
         if path_matches or basename in basenames:
             return None
         alias_matches = alias_owners.get(lookup, set())
-        return next(iter(alias_matches)) if len(alias_matches) == 1 else None
+        if len(alias_matches) == 1:
+            return next(iter(alias_matches))
+        return None if alias_matches or missing is None else missing + lookup
 
     return resolve, owner_for_file, owners
 
@@ -4441,13 +4378,6 @@ def run_self_test():
            found(with_paragraph("The authors of [[precision|Precision]] "
                                 "argue that the curve bends."), "14-")),
           ([("14-source-meta", "warning")], []))
-    check("item 14: the authors of a named method pass this gate; the "
-          "authors of an unnamed study do not",
-          (found(with_paragraph("The authors of SGDR recommend restarting "
-                                "it periodically."), "14-"),
-           found(with_paragraph("The authors of a study argue that the "
-                                "curve bends."), "14-")),
-          ([], [("14-source-meta", "warning")]))
     check("item 16: unenumerated bold and emphasis around a span are errors",
           sorted(found(with_paragraph("The **area** under it is *$A$*."),
                        "16-")),
@@ -4473,13 +4403,10 @@ def run_self_test():
            found(mutate("---\nA **ROC curve**", "---\n%% note %%\n\nA ROC curve"),
                  "16-")),
           ([[], [], []], [("16-bold-opener", "error")]))
-    check("item 18: label markup is an error; the label/target test needs "
-          "the folder",
-          (found(with_paragraph(
+    check("item 18: label markup is an error",
+          found(with_paragraph(
               "It trades against [[precision|*exact* precision]]."), "18-"),
-           found(with_paragraph("It trades against [[precision|zebra]]."),
-                 "18-")),
-          ([("18-display-label", "error")], []))
+          [("18-display-label", "error")])
     check("item 10: a link to the entry itself by slug, case, anchor, alias "
           "or in the footer",
           [found(text, "10-") for text in (

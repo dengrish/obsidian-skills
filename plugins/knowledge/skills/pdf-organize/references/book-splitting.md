@@ -52,25 +52,18 @@ These are not printed folio numbers or the one-based page numbers used by the
 figure-cropping tools. For example, physical pages 43–78 use `start_idx=42`
 and `end_idx=78`.
 
-`heading_text` must be text from the chapter's opening page as pypdf's
-`extract_text()` returns it; matching ignores case and collapses whitespace.
-Outside contents pages it may appear on at most two pages (the opening and a
-title page just before it). Running headers often repeat the title, with or
-without its label; then extend the heading with the line the opening page
-prints after the title, such as its first section heading. Add the chapter
-label only where the opening page prints it with the title.
+`heading_text` is text from the chapter's opening page as pypdf extracts it
+(case and whitespace are ignored) and may appear on at most two pages outside
+the contents. If running headers repeat the title, extend it with the line
+the opening page prints after the title; include the chapter label only where
+that page prints it with the title, and never use a bare label (`Chapter 2`).
 
-`split_book` checks each start against its `heading_text`. When the mapped
-page lacks it, the nearest page within ±2 that carries it becomes the start;
-a tie, a larger offset, or an unmatched heading is refused. A page listing
-two or more planned headings is a contents page and never starts a chapter.
-A chapter opening that mentions another chapter's bare label (`Chapter 2`)
-counts as one, so give the label plus the title. A standalone title page
-immediately before the start is taken in. An end set to the next chapter's
-requested start follows that start's correction, an end past the next start
-is trimmed, and pages between chapters or after the last one that no chapter
-covers are reported.
-These adjustments do not replace checking the TOC-to-page mapping.
+`split_book` moves a start whose page lacks the heading to the nearest page
+within ±2 that carries it, never a contents page (any page listing two or more
+planned headings); a tie, a larger offset, or an unmatched heading is
+refused. It also takes in a standalone title page just before the start. The
+plan reports every correction, trimmed end and page left to no chapter. These
+adjustments do not replace checking the TOC-to-page mapping.
 
 ## 3. Choose chapter names once
 
@@ -137,8 +130,7 @@ python3 '<skill>/scripts/organize.py' split '<book PDF path>' \
 ```
 
 Plan lines and notes give one-based physical pages: `pages A-B` means
-`start_idx = A - 1` and `end_idx = B`, and a start corrected to page A means
-`start_idx = A - 1`.
+`start_idx = A - 1` and `end_idx = B`.
 
 A corrected start or a trimmed end means the page mapping may be off:
 re-check every start and end against the TOC mapping, put the verified values
@@ -196,18 +188,13 @@ checking. This skill does not extract or delete figures.
 - **No detectable chapters or uncertain page mapping:** report what could
   not be established. Do not create an empty folder or invent boundaries.
   Ask for manual ranges only after completing any independent work.
-- **Scanned or garbled text:** `split_book` verifies each heading against the
-  book's own text layer, so a book without a usable one cannot be split. Page
-  renders, or OCR of a scratch copy under runtime guidance, may inform the
-  report and any proposed ranges only; do not split the scratch copy, and do
-  not OCR or replace the original. Report that the split needs a
-  text-bearing source; do not claim verified boundaries.
+- **Scanned or garbled text:** `split_book` verifies headings against the
+  book's own text layer, so it cannot split a book without a usable one.
+  Renders or OCR of a scratch copy may inform proposed, unverified ranges in
+  the report; never split the copy, and never OCR or replace the original.
 - **Corrupt download, HTML saved as PDF, or zero-byte input:** report the
   open error. This needs a valid source, not OCR.
 - **Encrypted input that cannot be unlocked:** report and stop that file.
-- **Another vault file shares the book's basename:** `split` refuses either
-  copy; resolve it as [SKILL step 3](../SKILL.md#3-check-references-and-prepare-the-complete-rename-plan)
-  describes.
 - **Already a single chapter or an existing split:** leave the chapter set
   intact; a chapter may be renamed through the normal guard, not split again.
 - **Parser check fails (including missing or outdated `pypdf`):** follow

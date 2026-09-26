@@ -96,10 +96,9 @@ Walk the callout, headings, body and captions with their supporting pages open:
   their claims, related limitations are merged, and verified missing evidence or
   methodological disclosures are stated plainly without inventing empirical
   shortcomings for a non-empirical source.
-- [ ] Qualifications are checked in both directions. No needed scope or design
-  limit was lost, and none was added without support. Each document-level
-  caveat is explained once in Limitations, with at most one short callout
-  bullet; Interpretation, captions and other bullets do not restate it.
+- [ ] No needed scope or design limit was lost and none was added without
+  support; each document-level caveat appears in Limitations and at most one
+  short callout bullet, nowhere else.
 
 ## Check provenance and exhibits
 
