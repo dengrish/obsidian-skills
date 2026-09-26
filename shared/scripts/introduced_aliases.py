@@ -23,6 +23,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
+from entry_checks import cross_domain_word
 from entry_structure import math_title_plain_text, sentence_prefix
 from plurals import singular_keys
 from slugify import SlugError, base_term, has_parenthetical, slug_stem
@@ -205,9 +206,11 @@ def missing_introduced_aliases(prose_lines, title, aliases, canonical_slug):
     """Return introduced names not covered by the canonical slug or aliases.
 
     Each result is ``(candidate, evidence_kind, expected_alias_slug)``.  The
-    helper applies only mechanical equivalence and inflection exclusions; a
-    caller must still judge whether the candidate names the same entity and
-    whether a cross-domain alias is safe.
+    helper applies only mechanical exclusions: equivalence, inflection, and a
+    word from the designated cross-domain set (``entry_checks.COMMON_NOUNS``),
+    which never becomes an alias. A caller must still judge whether the
+    candidate names the same entity and whether another cross-domain alias is
+    safe.
     """
     aliases = list(aliases or ())
     title = title or ""
@@ -232,7 +235,8 @@ def missing_introduced_aliases(prose_lines, title, aliases, canonical_slug):
             candidate_slug = slug_stem(candidate)
         except SlugError:
             continue
-        if singular_keys(_fold_name(candidate_slug)) & inflections:
+        if (singular_keys(_fold_name(candidate_slug)) & inflections
+                or cross_domain_word(candidate)):
             continue
         missing.append((candidate, where, candidate_slug))
     return missing
@@ -359,6 +363,20 @@ def run_self_test(verbose=False):
             ["A **feature** is an input. Features are also called *predictors*."],
             "Feature", ["predictor"], "feature"),
         [])
+    add("a designated cross-domain word is never a missing alias",
+        [missing_introduced_aliases([prose], title, [], slug)
+         for prose, title, slug in (
+             ("A **feature** is an input. Features are also called "
+              "*predictors*.", "Feature (machine learning)",
+              "feature-machine-learning"),
+             ("**Recall**, also called *sensitivity*, finds positives.",
+              "Recall (machine learning)", "recall-machine-learning"))],
+        [[], []])
+    add("a multiword name around a designated word is still a candidate",
+        missing_introduced_aliases(
+            ["A **label**, also called the *target variable*, is an answer."],
+            "Label (machine learning)", [], "label-machine-learning"),
+        [("target variable", "italicized synonym", "target-variable")])
     add("irregular singular of a canonical plural is not a missing alias",
         missing_introduced_aliases(
             ["**Archaea** (singular, *archaeon*) are prokaryotes."],

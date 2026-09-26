@@ -203,6 +203,7 @@ from entry_checks import (  # noqa: E402
     bare_common_noun_slug,
     bare_word_alias_candidate,
     bold_parts as _bold_parts,
+    cross_domain_synonym_label,
     display_label_links,
     emphasis_span_findings,
     label_drops_head,
@@ -1189,7 +1190,8 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
     ``(slug, target, matched, surface)`` for each linked target whose first
     body link follows an earlier plain mention of the target's title, alias or
     first-link display label; ``quiet_surfaces`` (alias-only bare nouns) never
-    count as such a mention.
+    count as such a mention, and neither does the word of a first-link label
+    that is a cross-domain synonym its target introduces.
     """
     by_tokens, maxwords = _index_surfaces(surf_map)
     backfill = []
@@ -1283,7 +1285,7 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
         def _earlier_mention(owner, start, end, surface):
             """A plain mention before the first link that could carry it.
 
-            Alias-only bare nouns (`predictor`), a word inside a hyphenated
+            Alias-only bare nouns (`regressor`), a word inside a hyphenated
             compound (`batch GD` in `mini-batch GD`), a discipline root inside
             a compound (`cell biology`), and a descriptor immediately followed
             by the link itself (`fission yeast
@@ -1325,6 +1327,14 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
         displays = {}
         for owner, (offset, display) in first_link.items():
             if owner in late or owner == sl or not display:
+                continue
+            # A cross-domain synonym label resolves its sense only at the link,
+            # so, like an alias-only bare noun, its word is not a mention.
+            record = entries.get(owner) or {}
+            if cross_domain_synonym_label(
+                    display,
+                    [record.get("title") or ""] + list(record.get("aliases", [])),
+                    record.get("prose", "")):
                 continue
             for form in {display.lower(), plural_surface(display).lower()}:
                 displays.setdefault(form, owner)
@@ -3931,9 +3941,16 @@ def scan(wiki, images=None, vault=None):
                         f'rather than the chosen target "{chosen_title}" — review '
                         f'the target or label; do not auto-retarget'))
                     continue
-                ok = label_shares_surface(
-                    disp, [target_record["title"]] + target_record["aliases"])
+                _surfaces = [target_record["title"]] + target_record["aliases"]
+                ok = label_shares_surface(disp, _surfaces)
                 if not ok and organism_common_name_bound(target_record, disp):
+                    ok = True
+                # A body label may be a cross-domain synonym the target itself
+                # introduces in italics (CONVENTIONS §6's first carve-out); the
+                # Related footer keeps item 11's canonical title.
+                if (not ok and _link["line"] <= _display_label_prose_lines
+                        and cross_domain_synonym_label(
+                            disp, _surfaces, target_record.get("prose", ""))):
                     ok = True
                 if not ok:
                     target_title = target_record.get("title") or target_slug
@@ -4065,7 +4082,8 @@ def scan(wiki, images=None, vault=None):
                 if len(owners) == 1
                 and fold_name(next(iter(owners))) not in ambiguous_files}
     # Alias-mediated bare-noun surfaces: a single all-lowercase word reached
-    # only through an alias ("attribute", "target", "predictor").  These match
+    # only through an alias ("covariate", "regressor"); a COMMON_NOUNS word
+    # never becomes a surface at all (_index_surfaces).  These match
     # everywhere, nearly always fail the closeness bar, and — candidates
     # carrying no memory — resurfaced for identical re-judgment every run.
     # The candidate is still emitted (the closeness call stays with the executing agent;
@@ -7504,11 +7522,11 @@ def run_self_test():
         _st_write(v, "feature-machine-learning.md", _st_entry(
             "Feature (machine learning)",
             "**Feature (machine learning)** is a worked example.",
-            aliases=('"attribute"',)))
+            aliases=('"covariate"',)))
         _st_write(v, "gradient-descent.md", _st_entry(
             "Gradient descent", "**Gradient descent** is a worked example."))
         _st_write(v, "user.md", _st_entry(
-            "User", "**User** is a worked example. Each attribute feeds the "
+            "User", "**User** is a worked example. Each covariate feeds the "
                     "model, and gradient descent fits it."))
         res = scan(v)
         _bf = {(b["target"], b["bare_noun_alias"]) for b in res["backfill_candidates"]
@@ -8744,7 +8762,10 @@ def run_self_test():
             "call *alternate name* — is a worked example."))
         _st_write(v, "feature-machine-learning.md", _st_entry(
             "Feature (machine learning)", "**Feature** — which many people "
-            "call *predictor* — is a measurable input to a model."))
+            "call *covariate* — is a measurable input to a model."))
+        _st_write(v, "label-machine-learning.md", _st_entry(
+            "Label (machine learning)", "**Label** — which many people call "
+            "*target* — is the answer a model learns to predict."))
         _st_write(v, "component-name.md", _st_entry(
             "Component name", "**Component name** has a part. The part, also "
             "called the *auxiliary unit*, is not the entry subject."))
@@ -8854,6 +8875,9 @@ def run_self_test():
               (True, False))
         check("a component's synonym is not promoted to the entry's alias",
               "item17/alias-candidate" in _st_keys(res, "component-name"), False)
+        check("a designated cross-domain synonym is never an alias candidate",
+              "item17/alias-candidate" in _st_keys(res, "label-machine-learning"),
+              False)
         check("empty and own-slug aliases are item18 findings",
               ["item18" in _st_keys(res, slug_) for slug_ in
                ("empty-alias", "own-alias")], [True, True])
@@ -8902,7 +8926,10 @@ def run_self_test():
             "Model organism", "A **model organism** is a worked example."))
         _st_write(v, "feature-x.md", _st_entry(
             "Feature (machine learning)", "A **feature** is a worked example.",
-            aliases=('"predictor"',)))
+            aliases=('"regressor"',)))
+        _st_write(v, "label-x.md", _st_entry(
+            "Label (machine learning)", "A **label** is the answer a model "
+            "learns. The word *target* is a near-synonym."))
         for slug_, prose in (
                 ("late", "**Late** fits a model on a training set first. It "
                          "then reuses the [[training-set|training set]]."),
@@ -8915,17 +8942,20 @@ def run_self_test():
                                "pombe]]."),
                 ("display", "**Display** is a model in genetics. Later work "
                             "made it a useful [[model-organism|model]]."),
-                ("quiet-alias", "**Quiet alias** trains each predictor on a "
-                                "sample of [[feature-x|features]].")):
+                ("quiet-alias", "**Quiet alias** trains each regressor on a "
+                                "sample of [[feature-x|features]]."),
+                ("synonym", "**Synonym** fits the noise-free target first. "
+                            "It then scores each observed "
+                            "[[label-x|target]].")):
             _st_write(v, slug_ + ".md", _st_entry(slug_.replace("-", " ").capitalize(), prose))
         res = scan(v)
         check("a plain mention before the first link is a late link; a later "
-              "mention, a hyphen compound, an apposition, and an alias-only "
-              "bare noun are not",
+              "mention, a hyphen compound, an apposition, an alias-only bare "
+              "noun, and a cross-domain synonym label's word are not",
               ["item10/late-link" in _st_keys(res, slug_) for slug_ in
                ("late", "early", "hyphen", "apposition", "display",
-                "quiet-alias")],
-              [True, False, False, False, True, False])
+                "quiet-alias", "synonym")],
+              [True, False, False, False, True, False, False])
         # Discipline-root backfill: tagged for batch review; a field name
         # inside a compound ("cell biology") is not the root at all.
         v = os.path.join(tmp, "root-backfill")
@@ -9022,6 +9052,9 @@ def run_self_test():
             "$L^2$ norm", "The **$L^2$ norm** measures a vector's length."))
         _st_write(v, "decision-threshold.md", _st_entry(
             "Decision threshold", "A **decision threshold** is a worked example."))
+        _st_write(v, "label-machine-learning.md", _st_entry(
+            "Label (machine learning)", "A **label** is the answer a model "
+            "learns to predict. The word *target* is a near-synonym."))
         for number, row in enumerate(SHARED_QUIET, 1):
             _st_write(v, "quiet-%d.md" % number, _st_entry(
                 "Quiet %d" % number,
@@ -9088,17 +9121,19 @@ def run_self_test():
         v = os.path.join(tmp, "alias-hint")
         _st_write(v, "recall-machine-learning.md", _st_entry(
             "Recall (machine learning)",
-            "**Recall** (**TPR**), also called *sensitivity*, is the share "
-            "of actual positives that a classifier finds.",
+            "**Recall** (**TPR**), also called *completeness*, is the share "
+            "of actual positives that a classifier finds. It is also called "
+            "*sensitivity*.",
             aliases=('"true-positive-rate"',), card="Recall"))
         res = scan(v)
-        check("the cross-domain alias hint skips an acronym candidate",
+        check("the cross-domain alias hint skips an acronym candidate, and a "
+              "designated cross-domain word is no candidate at all",
               sorted((p["message"].split('"')[1],
                       BARE_WORD_ALIAS_HINT in p["message"])
                      for p in res["problems"]
                      if p["slug"] == "recall-machine-learning"
                      and p["item"] == "item17/alias-candidate"),
-              [("TPR", False), ("sensitivity", True)])
+              [("TPR", False), ("completeness", True)])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

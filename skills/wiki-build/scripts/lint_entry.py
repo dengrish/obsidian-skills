@@ -144,8 +144,10 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
   18  18-label-target         folder mode, body prose: a label exactly names a
                               different entry, or shares no surface with the
                               resolved target's title/aliases (a math title's
-                              plain form counts) and is not an Organism
-                              target's bound common name (warning)
+                              plain form counts) and is neither an Organism
+                              target's bound common name nor a cross-domain
+                              set word the target introduces in italics
+                              (warning)
   18  18-partial-label        folder mode, body prose: a label keeps only the
                               target title's modifiers and omits its head word;
                               an inflected or derived head, an alias, or a term
@@ -333,6 +335,7 @@ from entry_checks import (  # noqa: E402
     bare_common_noun_slug,
     bare_word_alias_candidate,
     bold_parts as _bold_parts,
+    cross_domain_synonym_label,
     display_label_links,
     emphasis_span_findings,
     label_drops_head,
@@ -1260,8 +1263,9 @@ def _check_alias_completeness(fm, sections, findings, filename):
     Warning, never error: the same-entity test ("*dummy attributes* names the
     produced attributes, not the encoding") and the cross-domain bare-term
     carve-out are judgment, so the finding hands the executing agent a candidate, not a
-    verdict.  The two mechanical exclusions ARE applied: a form that slugs
-    identically to the filename, and a singular/plural form already covered by the filename or ``aliases:``.
+    verdict.  The three mechanical exclusions ARE applied: a form that slugs
+    identically to the filename, a singular/plural form already covered by the filename or ``aliases:``,
+    and a word from the designated cross-domain set, which never becomes an alias.
     """
     title = fm.scalar("title") or ""
     aliases = fm.values("aliases")
@@ -2609,8 +2613,9 @@ def _check_folder_link_targets(results, root, snapshot_text):
     with no markup is compared with the resolved target's title and aliases
     (warning): it must not exactly name a different entry, and it must share a
     surface with the target unless an Organism target binds it as a common
-    name. Related-footer labels are held to the stricter canonical title by
-    ``11-related-display``.
+    name or the target's prose introduces it in italics as a designated
+    cross-domain synonym. Related-footer labels are held to the stricter
+    canonical title by ``11-related-display``.
     """
     resolve, owner_for_file, owners = _folder_resolver(results, root)
     organism_fields = {}
@@ -2669,6 +2674,7 @@ def _check_folder_link_targets(results, root, snapshot_text):
                 display_owner = None
             evidence = {"target": link["target"], "display": display,
                         "target_title": target["title"]}
+            surfaces = [target["title"]] + list(target.get("aliases", []))
             if display_owner is not None and display_owner != owner:
                 findings.append(_f(
                     "18-label-target", "warning",
@@ -2679,9 +2685,10 @@ def _check_folder_link_targets(results, root, snapshot_text):
                        owners[display_owner].get("title") or display_owner,
                        target["title"]),
                     dict(evidence, display_owner=display_owner)))
-            elif not (label_shares_surface(
-                    display, [target["title"]] + list(target.get("aliases", [])))
-                      or binds_common_name(owner, display)):
+            elif not (label_shares_surface(display, surfaces)
+                      or binds_common_name(owner, display)
+                      or cross_domain_synonym_label(
+                          display, surfaces, prose_of(owner))):
                 findings.append(_f(
                     "18-label-target", "warning",
                     "wikilink [[%s|%s]]: the label shares no surface form with "
@@ -2855,6 +2862,29 @@ def _st_decision_threshold():
         '\n**Related:**\n\n---\n\n## Flashcards\n\n'
         'The score cutoff that separates predicted classes.\n??\n'
         'Decision threshold\n')
+
+
+def _st_label():
+    """An entry introducing a cross-domain synonym for the label check."""
+    return (
+        '---\n'
+        'title: "Label (machine learning)"\n'
+        'type: Concept\n'
+        'sources:\n'
+        '  - "[[Doe_X_2025.pdf#page=4]]"\n'
+        'created: 2026-01-01\n'
+        'updated: 2026-01-02\n'
+        'description: "A label is the answer a supervised model learns to '
+        'predict."\n'
+        'tags:\n'
+        '  - "#statistics"\n'
+        'parents: []\n'
+        'read: false\n'
+        '---\n'
+        'A **label** is the answer a supervised model learns to predict. The '
+        'word *target* is a near-synonym.\n'
+        '\n**Related:**\n\n---\n\n## Flashcards\n\n'
+        'The answer a supervised model learns to predict.\n??\nLabel\n')
 
 
 def _st_items(result):
@@ -3083,13 +3113,13 @@ def run_self_test():
               [f for f in lint_text(example, 'roc-curve.md')['findings']
                if f['item'] in ('10-duplicate-wikilink', '19-flashcards')], [])
 
-    for alias, surface in (("attribute", "attributes"), ("hypothesis", "hypotheses")):
+    for alias, surface in (("covariate", "covariates"), ("hypothesis", "hypotheses")):
         alias_text = mutate('"auroc"', json.dumps(alias)).replace(
             "\n**Related:**", "\nIt is also called *%s*.\n\n**Related:**" % surface)
         check("a plural of an existing alias is not a missing alias: %s" % surface,
               items(alias_text), [])
     check("a genuinely different introduced name is still flagged",
-          items(good.replace("\n**Related:**", "\nIt is also called *sensitivity*.\n\n**Related:**")),
+          items(good.replace("\n**Related:**", "\nIt is also called *operating curve*.\n\n**Related:**")),
           ["17-alias-completeness"])
 
     # Invalid provenance and review state used to pass the creation gate.
@@ -4398,7 +4428,8 @@ def run_self_test():
                     "$L^2$ norm", "l2-norm",
                     "The L-squared norm measures a vector's length.",
                     "The **$L^2$ norm** measures a vector's length.",
-                    "L-squared norm"))):
+                    "L-squared norm")),
+                ("label-machine-learning.md", _st_label())):
             with open(os.path.join(shared_tmp, name), "w",
                       encoding="utf-8") as fh:
                 fh.write(text)
@@ -4511,8 +4542,14 @@ def run_self_test():
     recall = retitled(
         "Recall (machine learning)", "true-positive-rate",
         "Recall is the share of actual positives that a classifier finds.",
-        "**Recall**, also called *sensitivity*, is the share of actual "
+        "**Recall**, also called *completeness*, is the share of actual "
         "positives that a classifier finds.", "Recall")
+    check("a designated cross-domain synonym is never an alias candidate",
+          [f["item"] for f in lint_text(
+              recall.replace("*completeness*", "*sensitivity*"),
+              "recall-machine-learning.md")["findings"]
+           if f["item"] == "17-alias-completeness"],
+          [])
     check("a single-word synonym of a qualified subject carries the scanner's "
           "cross-domain hint; an ordinary candidate does not",
           ([BARE_WORD_ALIAS_HINT in f["message"] for f in lint_text(
@@ -4526,7 +4563,7 @@ def run_self_test():
           ([True], [False]))
     check("an acronym alias candidate carries no cross-domain hint",
           [BARE_WORD_ALIAS_HINT in f["message"] for f in lint_text(
-              recall.replace("**Recall**, also called *sensitivity*,",
+              recall.replace("**Recall**, also called *completeness*,",
                              "**Recall** (**TPR**)"),
               "recall-machine-learning.md")["findings"]
            if f["item"] == "17-alias-completeness"],

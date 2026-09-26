@@ -35,7 +35,7 @@ from entry_structure import (  # noqa: E402
 )
 from markdown_tables import markdown_block_start, mask_line_spans  # noqa: E402
 from organism_names import bound_common_names, first_sentence  # noqa: E402
-from plurals import pluralize  # noqa: E402
+from plurals import pluralize, singular_forms  # noqa: E402
 from slugify import base_term, has_parenthetical  # noqa: E402
 
 
@@ -49,6 +49,8 @@ __all__ = [
     "bare_common_noun_slug",
     "bare_word_alias_candidate",
     "bold_parts",
+    "cross_domain_synonym_label",
+    "cross_domain_word",
     "display_label_links",
     "emphasis_span_findings",
     "label_drops_head",
@@ -72,13 +74,15 @@ __all__ = [
 #: Cross-domain term disambiguation, test (c).  The prose rule remains broader
 #: (dictionary and drafting tests catch terms outside a finite set); every term
 #: it names explicitly must at least be guarded, both from a bare filename and
-#: from becoming an automatic backfill destination.
+#: from becoming an automatic backfill destination. No such word is proposed as
+#: an alias; a target that introduces one in italics accepts it as a label.
 COMMON_NOUNS = frozenset({
-    "activation", "agent", "attention", "bias", "cell", "classification",
-    "clustering", "domain", "ensemble", "entropy", "feature", "field",
-    "filter", "function", "gradient", "inertia", "kernel", "label", "model",
-    "normalization", "policy", "regression", "return", "shrinkage",
-    "temperature", "tensor", "transformer", "vector",
+    "activation", "agent", "attention", "attribute", "bias", "cell",
+    "classification", "clustering", "domain", "ensemble", "entropy",
+    "feature", "field", "filter", "function", "gradient", "inertia", "kernel",
+    "label", "model", "normalization", "policy", "predictor", "regression",
+    "return", "sensitivity", "shrinkage", "target", "temperature", "tensor",
+    "transformer", "vector",
 })
 
 #: Appended to an item-17 alias-candidate message for a single-word candidate
@@ -105,6 +109,21 @@ def bare_word_alias_candidate(candidate_slug, title, surface=""):
     return ("-" not in (candidate_slug or "")
             and (has_parenthetical(title or "")
                  or candidate_slug in COMMON_NOUNS))
+
+
+def cross_domain_word(text):
+    """The :data:`COMMON_NOUNS` word a one-word surface folds to, else "".
+
+    Case and a regular plural fold (``Targets`` -> ``target``). A multiword
+    or hyphenated surface, or a word outside the set, folds to "". Such a
+    word never becomes an alias; a link may still use it as a
+    context-resolved label (:func:`cross_domain_synonym_label`).
+    """
+    tokens = _label_tokens(text)
+    if len(tokens) != 1:
+        return ""
+    words = singular_forms(tokens[0]) & COMMON_NOUNS
+    return min(words) if words else ""
 
 
 # ---------------------------------------------------------------------------
@@ -640,6 +659,26 @@ def label_drops_head(display, title, aliases=(), target_prose=""):
     return head
 
 
+def cross_domain_synonym_label(display, surfaces, target_prose=""):
+    """Whether a label is a cross-domain synonym that its target introduces.
+
+    CONVENTIONS §6's first carve-out keeps a bare cross-domain word as a
+    context-resolved label, never an alias. A bare word of the title
+    (``[[information-entropy|entropy]]``) already passes
+    :func:`label_shares_surface`; this covers the other form, a one-word
+    synonym from :data:`COMMON_NOUNS` that the target's own ``target_prose``
+    sets in italics: ``[[label-machine-learning|targets]]`` where Label
+    (machine learning) says "The word *target* is a near-synonym". A label
+    sharing a surface with the title or an alias in ``surfaces`` is not this
+    form, and a set word the target does not introduce stays a finding.
+    """
+    word = cross_domain_word(display)
+    if not word or label_shares_surface(display, surfaces):
+        return False
+    return any(cross_domain_word(match.group(1)) == word
+               for match in _ITALIC_TERM_RE.finditer(target_prose or ""))
+
+
 def plural_surface(title):
     """The plural surface of a title: only the head (last) token inflects.
 
@@ -763,6 +802,9 @@ SHARED_MUTATIONS = (
      "item18", "18-display-label", False),
     ("item18 label shares no surface", "The rate follows [[precision|zebra]].",
      "item18", "18-label-target", True),
+    ("item18 cross-domain word its target does not introduce",
+     "The rate follows each [[precision|target]].",
+     "item18", "18-label-target", True),
     ("item18 label drops the title's head word",
      "The rate follows the [[decision-threshold|decision]] rule.",
      "item18/partial-label", "18-partial-label", True),
@@ -777,7 +819,9 @@ SHARED_MUTATIONS = (
 #: ``(name, paragraph, scan_vault key, lint_entry id)``, checked in folder
 #: mode. Both self-tests add an Organism ``mus-musculus`` whose description
 #: and opener say "Mus musculus is the mouse", an entry ``l-2-norm``
-#: titled "$L^2$ norm", and ``decision-threshold`` titled "Decision threshold".
+#: titled "$L^2$ norm", ``decision-threshold`` titled "Decision threshold",
+#: and ``label-machine-learning`` titled "Label (machine learning)", whose
+#: prose says "The word *target* is a near-synonym".
 SHARED_QUIET = (
     ("item6 compound file extension", "The rate ships as a `.tar.gz` bundle.",
      "item6", "6-api-surface"),
@@ -797,6 +841,9 @@ SHARED_QUIET = (
      "item18", "18-label-target"),
     ("item18 plain form of a math title",
      "The rate uses the [[l-2-norm|L-squared norm]].",
+     "item18", "18-label-target"),
+    ("item18 cross-domain synonym its target introduces",
+     "The rate is scored against each [[label-machine-learning|target]].",
      "item18", "18-label-target"),
     ("item18 label keeping the title's head word",
      "The rate crosses the [[decision-threshold|threshold]].",
@@ -1070,6 +1117,27 @@ def run_self_test(verbose=False):
            label_drops_head("ensemble", "Ensemble learning", (),
                             "Ensemble learning combines predictors.")],
           ["", "learning"])
+    check("a one-word surface folds to its cross-domain set word",
+          [cross_domain_word(text) for text in (
+              "target", "Targets", "attributes", "sensitivities",
+              "target variable", "self-attention", "precision", "")],
+          ["target", "target", "attribute", "sensitivity", "", "", "", ""])
+    label_prose = "A label is an answer. The word *target* is a near-synonym."
+    check("a cross-domain synonym passes only where its target introduces it",
+          [cross_domain_synonym_label(label, surfaces, prose)
+           for label, surfaces, prose in (
+               ("targets", ["Label (machine learning)"], label_prose),
+               ("attribute", ["Feature (machine learning)"],
+                "Features are also called *predictors* or *attributes*."),
+               ("target", ["Label (machine learning)"],
+                "The target is the answer."),
+               ("attribute", ["Label (machine learning)"], label_prose),
+               ("response", ["Label (machine learning)"],
+                "It is also called the *response*."),
+               ("target values", ["Label (machine learning)"], label_prose),
+               ("entropy", ["Information entropy"],
+                "The *entropy* of a source."))],
+          [True, True, False, False, False, False, False])
     mouse = ("Organism", "Mus musculus",
              "Mus musculus is the mouse, a small rodent.",
              "***Mus musculus*** is the mouse, a small rodent.\n\nMore.")

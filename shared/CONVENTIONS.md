@@ -1161,19 +1161,24 @@ Rules that hold everywhere:
 - **`tags:` values are never wikilinks** (§3) and `sources:` points at documents,
   not entries (§7); neither participates in link audits.
 
-**Four carve-outs that must not be "fixed":** the cross-domain bare-term label
-(`[[information-entropy|entropy]]`, deliberately *not* an alias of that entry),
-a natural plural or verb inflection (`features` for `feature`), a derived
-adjective or agent-noun form of the title's head word that keeps its other
-words (`[[eukaryote|eukaryotic]]`, `[[evolution|evolutionary]]`,
-`[[binary-classification|binary classifier]]`), and an
+**Four carve-outs that must not be "fixed":** (1) the cross-domain bare-term
+label, deliberately *not* an alias of its target: a bare word of the title
+(`[[information-entropy|entropy]]`), or a cross-domain synonym that the
+target's own prose introduces in italics (`[[label-machine-learning|target]]`,
+where Label says “the word *target* is a near-synonym”); (2) a natural plural
+or verb inflection (`features` for `feature`); (3) a derived adjective or
+agent-noun form of the title's head word that keeps its other words
+(`[[eukaryote|eukaryotic]]`, `[[evolution|evolutionary]]`,
+`[[binary-classification|binary classifier]]`); and (4) an
 organism's ordinary common name when the target's description or opening
 sentence explicitly binds it to that Organism's canonical title (`[[mus-musculus|mouse]]`
-where the target says “Mus musculus is the mouse”). The last form may be unsafe
-as a global alias because the same common word can name something in another
-domain. The carve-out covers the complete bound phrase and its natural
-inflection; it does not strip a qualifier (`fruit fly` does not establish
-`fly`). None of the four lets a label keep only a title's modifiers and drop
+where the target says “Mus musculus is the mouse”). The checkers recognize
+the synonym form for words in wiki-build's
+[cross-domain corpus](../skills/wiki-build/references/writing.md#cross-domain-term-disambiguation).
+The Organism form may be unsafe as a global alias because the same common
+word can name something in another domain. It covers the complete bound
+phrase and its natural inflection; it does not strip a qualifier (`fruit fly`
+does not establish `fly`). None of the four lets a label keep only a title's modifiers and drop
 its head word: `[[greedy-algorithm|greedy]]` and
 `[[bias-variance-trade-off|bias/variance]]` name something other than their
 targets, unless the target itself defines that word as a term (Ensemble
