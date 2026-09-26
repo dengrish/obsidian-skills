@@ -162,7 +162,7 @@ class CompatibilityTests(unittest.TestCase):
                 report = conventions.Report()
                 with patch.object(conventions, "walk_skill_files", return_value=[
                         ("wiki-lint", path, text),
-                        ("wiki-lint", "valid.md", "MOCs/<discipline>.md")]):
+                        ("wiki-lint", "valid.md", "MOCs/<discipline>-moc.md")]):
                     conventions.check_moc_placement(report, conv)
                 self.assertEqual(bool(report.by_status("FAIL")), should_fail)
 

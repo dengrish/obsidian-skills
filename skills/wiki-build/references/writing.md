@@ -284,9 +284,10 @@ Do not rewrite a clear passage merely to make the wording different.
 
 In body prose, use `[[slug|Display text]]` when the displayed form differs from the target slug (case, spacing, alias, or other rendering). Use `[[slug]]` only when the strings are identical. The [Related footer](#the-related-footer) always uses a pipe, including identical forms.
 
-Use the actual extensionless vault-relative Wiki path when the bare filename
-has another real owner, including a MOC: `[[Wiki/statistics|Statistics]]` links
-the entry while `[[MOCs/statistics]]` navigates to its MOC. Apply folder
+Use the actual extensionless vault-relative Wiki path only when the bare
+filename has another real owner. A discipline root takes its bare slug,
+`[[statistics|Statistics]]`, because its MOC is `MOCs/statistics-moc`; a
+previous-layout `MOCs/statistics.md` still requires `[[Wiki/statistics|Statistics]]`. Apply folder
 overrides and intended public paths, not scratch-tree paths. Inspect real MOC
 ownership separately from the Wiki-only index, and preserve required path
 qualification when canonicalizing an existing link. A bare Wiki/MOC collision

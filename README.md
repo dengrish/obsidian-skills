@@ -272,8 +272,8 @@ it and any per-run path overrides through [RUNTIME.md](shared/RUNTIME.md).
 │   │   └── .rss-collect/     durable RSS identities, revisions and receipts
 │   └── Snapshots/            research evidence
 ├── MOCs/                     generated navigation outlines
-│   ├── <discipline>.md       e.g. machine-learning.md (no -moc suffix)
-│   └── misc.md               Wiki entries tagged #misc
+│   ├── <discipline>-moc.md   e.g. machine-learning-moc.md
+│   └── misc-moc.md           Wiki entries tagged #misc
 ├── add-to-wiki.md            wiki-add's requested-topic queue
 └── Reviews/                  open suggestion logs
     ├── <current-skill>-suggestions.md  one per skill
@@ -291,8 +291,8 @@ queue stay outside `Wiki/` so they are not treated as entries.
 
 Each Wiki entry has exactly one discipline tag, or `"#misc"` alone when none
 fits. Each active tag has a `Wiki/<discipline>.md` root with empty parents and
-a generated outline in `MOCs/<discipline>.md`; `parents:` name Wiki entries
-only. New entries from wiki-build and wiki-add start with `parents: []` and
+a generated outline in `MOCs/<discipline>-moc.md`; `parents:` name Wiki entries
+only, a root by its bare slug such as `[[biology]]`. New entries from wiki-build and wiki-add start with `parents: []` and
 stay out of the MOCs until wiki-lint places them. wiki-lint reviews every tree
 and parent for conceptual coherence, without a fixed depth limit. The
 [tag and hierarchy rules](shared/CONVENTIONS.md#3-the-discipline-tag-enum) and

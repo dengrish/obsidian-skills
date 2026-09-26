@@ -57,7 +57,7 @@ staging follows [SAFE_WRITES.md](SAFE_WRITES.md).
 | `Wiki/` | wiki entries, one `.md` per entity (walked **recursively**) | wiki-build, wiki-add (missing requested entries only), wiki-lint; pdf-organize repairs source references during an authorized PDF rename | wiki-build, wiki-add, wiki-lint |
 | `Investments/` | dated stock analyses at the top level, plus maintained stock notes, research evidence and source collections in dedicated subfolders; each investments skill governs its own format | stock-research (immutable dated records/evidence and maintained Stocks/ notes), feed-collect (maintained source collections); the user maintains `x-accounts.md` | the investments skills within their own scope |
 | `add-to-wiki.md` at the *vault root* | requested-topic queue | the user; wiki-add checks off successful or already-existing items only | wiki-add |
-| `MOCs/` | **flat**; fully generated `<discipline>.md` nested outlines plus `misc.md` for Wiki entries tagged `#misc`; no `-moc` suffix, marker comments, H1, or frontmatter | wiki-lint | wiki-lint (navigation/hierarchy diagnostics only; reads each before an in-place update) |
+| `MOCs/` | **flat**; fully generated `<discipline>-moc.md` nested outlines plus `misc-moc.md` for Wiki entries tagged `#misc`; no marker comments, H1, or frontmatter | wiki-lint | wiki-lint (navigation/hierarchy diagnostics only; reads each before an in-place update) |
 | `Reviews/` | `<current-skill>-suggestions.md` for installed skills, plus `Reviews/wiki-notes-suggestions.md` for Wiki note-content improvements; open issues only | skills under the attribution and setup rules in [SUGGESTIONS.md](SUGGESTIONS.md); pdf-organize repairs a log's navigation links during an authorized PDF rename, never its issue claims | skills consuming the relevant outputs or verifying a fix |
 
 Suggestion logs use current skill names under `Reviews/`. The shared
@@ -66,7 +66,9 @@ resolution cleanup, safe publication, and explicitly requested migration;
 do not duplicate those rules in skill-specific references.
 Unexpected root `<discipline>-moc.md` notes are preserved and reported; do not
 create a duplicate MOC or reinterpret their links as missing Wiki entries.
-Task 3 owns each recognized discipline MOC and `MOCs/misc.md` as a whole
+A previous-layout `MOCs/<discipline>.md` MOC follows the
+[migration rule](../skills/wiki-lint/references/hierarchy.md#migrate-the-previous-moc-layout).
+Task 3 owns each recognized discipline MOC and `MOCs/misc-moc.md` as a whole
 generated note and replaces obsolete comments or prose with the derived outline
 in its authorized active closure. This ownership does not extend to
 unknown files, unrelated notes, or suggestion logs.
@@ -767,7 +769,8 @@ tags:
 
 - **Tags are not wikilinks.** Each active tag has a corresponding Wiki root
   entry, maintained by wiki-lint's hierarchy workflow. The tag itself remains
-  a quoted `#` value; links to that entry use `[[Wiki/<discipline-slug>]]`.
+  a quoted `#` value; links to that entry use its bare slug, such as
+  `[[machine-learning]]`.
 - **The quotes are mandatory.** An unquoted `- #machine-learning` parses as a
   YAML comment and the discipline is silently lost.
 - **Wiki cardinality: exactly one.** Choose the best home for the concept as
@@ -783,13 +786,14 @@ tags:
   boundary cases, its
   [tag calibration](../skills/wiki-build/references/calibration.md).
 - **Derived artifact:** the MOC filename is the tag value with the `#` stripped
-  plus `.md`, in **`MOCs/`** (`#machine-learning` →
-  `MOCs/machine-learning.md`). MOC navigation links use
-  `[[MOCs/machine-learning]]`; **no MOC may be a `parents:` target**.
-  The hierarchy root is the separate entry `[[Wiki/machine-learning]]`, whose
+  plus `-moc.md`, in **`MOCs/`** (`#machine-learning` →
+  `MOCs/machine-learning-moc.md`). The suffix keeps the MOC's basename apart
+  from its Wiki root's. MOC navigation links use
+  `[[MOCs/machine-learning-moc]]`; **no MOC may be a `parents:` target**.
+  The hierarchy root is the separate entry `[[machine-learning]]`, whose
   own parents are `[]`. MOC tree links and parent forms are in §6.
 - **Misc Wiki entries:** an entry whose sole tag is `"#misc"` has
-  `[[Wiki/misc]]` as its sole parent and appears in `MOCs/misc.md`. The
+  `[[misc]]` as its sole parent and appears in `MOCs/misc-moc.md`. The
   `Wiki/misc` root, titled `Misc`, is a brief source-backed definition of a
   miscellany with `parents: []`; the MOC carries the membership. Existing
   genuinely blank or empty tags are a QC repair worklist: inspect the note and
@@ -1112,12 +1116,11 @@ does not change the canonical output forms in §2.
 | Form | Use |
 |---|---|
 | `[[slug]]` | body link whose display label would equal the slug |
-| `[[MOCs/<discipline-slug>]]` | discipline MOC navigation link only; never a `parents:` value |
-| `[[Wiki/<discipline-slug>]]` | discipline root parent, including `Wiki/misc`; the root entry itself has `parents: []` |
-| `[[slug]]` in `parents:` | parent that is a broader non-root Wiki entry; use `[[Wiki/<entry-path>]]` only when another Wiki file, a `MOCs/` file or a legacy MOC shares the basename |
+| `[[MOCs/<discipline-slug>-moc]]` | discipline MOC navigation link only; never a `parents:` value |
+| `[[slug]]` in `parents:` | parent that is a broader Wiki entry, including a discipline root (`[[machine-learning]]`, `[[misc]]`); use `[[Wiki/<entry-path>]]` only when another Wiki file, a `MOCs/` file or a legacy MOC shares the basename. A discipline root itself has `parents: []` |
 | `[[Wiki/<relative-entry-path>\|Label]]` | every generated MOC tree entry link; use the actual vault-relative Wiki folder prefix and no `.md`. Labels follow [hierarchy](../skills/wiki-lint/references/hierarchy.md#build-or-maintain-the-moc-files) |
 | `[[slug\|Display Label]]` | body link whose label differs by case, spacing or alias |
-| `[[Wiki/<entry-path>\|Label]]` | body or Related link to an entry whose bare basename has another real vault owner, typically a discipline root that shares its name with its MOC (`[[Wiki/statistics\|statistics]]`); never guess an ambiguous owner |
+| `[[Wiki/<entry-path>\|Label]]` | body or Related link to an entry whose bare basename has another real vault owner, such as a discipline root beside a previous-layout MOC (`[[Wiki/statistics\|statistics]]`); never guess an ambiguous owner |
 | `[[slug\|Canonical Title]]` | **every** `**Related:**` footer link, path-qualified as above when the basename is shared — always piped, even when slug-equal |
 | `![[file.png]]` | image embed from `Sources/Images/` (Obsidian resolves the basename vault-wide) |
 | `![alt](https://…)` | remote image in a URL-origin source or derived entry — **the mandated form; never rewrite it to `![[…]]`**, which resolves to nothing and loses the URL |

@@ -207,7 +207,7 @@ class SourceCoverageTests(unittest.TestCase):
         self.note("neighbor", "[[Explanation.md]]")
         mocs = self.vault / "MOCs"
         mocs.mkdir()
-        (mocs / "engineering.md").write_text("- [[../Wiki/neighbor|Neighbor]]\n", encoding="utf-8")
+        (mocs / "engineering-moc.md").write_text("- [[../Wiki/neighbor|Neighbor]]\n", encoding="utf-8")
         result = self.scan()
         findings = result["hierarchy_diagnostic"]["moc_consistency_findings"]
         self.assertFalse(any(item["kind"] == "unresolved-link" for item in findings))
@@ -231,7 +231,7 @@ class VaultRootScanTests(unittest.TestCase):
         mocs = self.vault / "MOCs"
         mocs.mkdir()
         for slug in ("misc", "alpha", "beta"):
-            parents = [] if slug == "misc" else [f"[[{wiki_relative}/misc]]"]
+            parents = [] if slug == "misc" else ["[[misc]]"]
             body = f"**{slug.title()}** is a fixture entry."
             if slug == "alpha":
                 body += f" Its mechanism uses [[{wiki_relative}/beta|Beta]]."
@@ -243,7 +243,7 @@ class VaultRootScanTests(unittest.TestCase):
                 "description: A fixture verifies vault path resolution.",
                 "---", "", body, "",
             ]), encoding="utf-8")
-        (mocs / "misc.md").write_text(
+        (mocs / "misc-moc.md").write_text(
             f"- [[{wiki_relative}/misc|Misc]]\n"
             f"  - [[{wiki_relative}/alpha|Alpha]]\n"
             f"  - [[{wiki_relative}/beta|Beta]]\n", encoding="utf-8")
@@ -267,7 +267,7 @@ class VaultRootScanTests(unittest.TestCase):
         self.assertEqual(hierarchy["moc_consistency_findings"], [])
         self.assertEqual([(row["path"], row["state"])
                           for row in hierarchy["moc_file_states"]],
-                         [(str(self.vault / "MOCs/misc.md"), "readable")])
+                         [(str(self.vault / "MOCs/misc-moc.md"), "readable")])
 
     def test_explicit_vault_keeps_no_image_preview_links_and_hierarchy_resolved(self):
         self.fixture()

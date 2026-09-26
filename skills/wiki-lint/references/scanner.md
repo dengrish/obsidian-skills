@@ -45,7 +45,7 @@ One JSON object with these keys.
 | `problem_tally` | array | per item: `{"item", "entries", "pct_of_entries", "issues"}`, ranked by entries affected. `entries` counts affected files, including unreadable `item0` files; `pct_of_entries` is the one-decimal percentage of parsed entries touched, the recurrence evidence a wiki-build proposal cites. |
 | `collision_candidates` | array | `{"a", "b", "probe", "detail"}` — two slugs the item-5 probes matched. `probe` ∈ `exact`, `plural`, `hyphenation`, `word-order`, `word-order-singular`, `µ-variant`, `stem-morphology`; `detail` is the two colliding identifiers. `word-order-singular` sorts the tokens *after* singularising each one, which is what catches `weight-tying` against `tying-weights` — a pair a raw token sort misses on `weights` ≠ `weight`. It has to be here because wiki-build runs the same two-key probe on every candidate (probe (e) in wiki-build's [collision decisions](../../wiki-build/references/merge.md#collision-decisions)) and CONVENTIONS §9 makes whole-vault dedup detection this skill's alone: a pair already sitting in the vault is seen by nothing else. `stem-morphology` is create-time probe (f), using the shared light-stem key, and is emitted only when an earlier, more specific probe has not already covered the pair. Unordered pairs are de-duplicated per probe. **Review only — never merged.** wiki-build's create-time probe (g), token-superset, is deliberately **not** mirrored in this vault-wide sweep — qualified-vs-base pairs (`feature-machine-learning` beside `machine-learning`) are exactly what the disambiguation rules produce on purpose, so a whole-vault pass would flood on legitimate pairs; its absence from this probe list is by design. |
 | `rename_candidates` | array | `{"slug", "new_slug", "inbound_links", "target_exists"}` — entries whose filename ≠ `slug(title)`. `inbound_links` is how many actual prose/Related wikilinks a rename would have to rewrite. It uses the same path-aware resolver as item 10, so path-qualified, anchored, case/normalization-variant, and explicit-`.md` spellings count against the file they open; a bare target with several same-basename owners is conservatively omitted instead of assigned by walk order. `target_exists: true` means the destination is already taken — an existing file **(whether or not it parsed as an entry: a file with no frontmatter is absent from `inventory` and still occupies its name, and a rename into it would clobber that occupant)**, another entry's alias (the renamed file would outrank that alias and capture its links), **or a second candidate in this same list proposing the same `new_slug`** — so this is a likely duplicate/disambiguation and must **not** be renamed into (applying both of a colliding pair in sequence would have the second silently overwrite the first). `new_slug` is never empty: a title that reduces to the empty slug (CJK, all-symbol) is reported as an `item5` problem instead, because renaming to it would produce a file literally called `.md`. **Propose for approval — never auto-applied.** |
-| `backfill_candidates` | array | `{"slug", "target", "surface", "bare_noun_alias", "organism_common_name", "discipline_root"}` — a bare-text mention of `target`'s title/alias (or its plural), or an explicitly bound Organism common-name surface, found in `slug`'s prose. `target` is the supplied safe entry destination: an ordinary unambiguous slug, or the full extensionless vault-relative path when qualification is required, such as `Wiki/misc` or `Wiki/statistics`. Preserve that target in body and Related links. Existing links, embeds, ambiguous title/alias surfaces, duplicate Wiki-basename destinations, targets already linked in that entry, and designated common-noun surfaces/destinations are excluded. `organism_common_name: true` means the target's description or opening sentence directly equates its canonical Organism title with that complete surface (or its natural inflection); a bound `fruit fly` never donates the broader head `fly`. It is a locally valid display label, never an instruction to add a global alias, and still needs the ordinary identity/closeness judgment. Other single lowercase aliases of qualified destinations remain candidates and carry `bare_noun_alias: true`; batch-review them under the closeness bar rather than treating the flag as an automatic decision. `discipline_root: true` marks a target that is a Wiki discipline root; the closeness bar accepts one only where the passage discusses the field itself, so batch-review these the same way. A root title directly after a modifier word ("cell biology", "summary statistics") names a subfield or a different sense and is not emitted. Unwritable presentation surfaces are masked so they cannot hide a later eligible occurrence: whole-line italic captions, parsed Markdown-table rows, ATX and Setext headings, fenced/indented/inline code, Markdown link-reference definitions, inline Markdown image syntax including alt text, inline/full/collapsed/shortcut Markdown-link labels resolved by those definitions, bare URLs/autolinks, and Obsidian links/embeds. The plural form inflects the title's head token, so irregular forms such as `Confusion matrices` and `Hypotheses` are matched. |
+| `backfill_candidates` | array | `{"slug", "target", "surface", "bare_noun_alias", "organism_common_name", "discipline_root"}` — a bare-text mention of `target`'s title/alias (or its plural), or an explicitly bound Organism common-name surface, found in `slug`'s prose. `target` is the supplied safe entry destination: an ordinary unambiguous slug, or the full extensionless vault-relative path when another file shares the basename, such as `Wiki/statistics` beside a previous-layout `MOCs/statistics.md`. Preserve that target in body and Related links. Existing links, embeds, ambiguous title/alias surfaces, duplicate Wiki-basename destinations, targets already linked in that entry, and designated common-noun surfaces/destinations are excluded. `organism_common_name: true` means the target's description or opening sentence directly equates its canonical Organism title with that complete surface (or its natural inflection); a bound `fruit fly` never donates the broader head `fly`. It is a locally valid display label, never an instruction to add a global alias, and still needs the ordinary identity/closeness judgment. Other single lowercase aliases of qualified destinations remain candidates and carry `bare_noun_alias: true`; batch-review them under the closeness bar rather than treating the flag as an automatic decision. `discipline_root: true` marks a target that is a Wiki discipline root; the closeness bar accepts one only where the passage discusses the field itself, so batch-review these the same way. A root title directly after a modifier word ("cell biology", "summary statistics") names a subfield or a different sense and is not emitted. Unwritable presentation surfaces are masked so they cannot hide a later eligible occurrence: whole-line italic captions, parsed Markdown-table rows, ATX and Setext headings, fenced/indented/inline code, Markdown link-reference definitions, inline Markdown image syntax including alt text, inline/full/collapsed/shortcut Markdown-link labels resolved by those definitions, bare URLs/autolinks, and Obsidian links/embeds. The plural form inflects the title's head token, so irregular forms such as `Confusion matrices` and `Hypotheses` are matched. |
 | `image_folder_findings` | array | `{"path", "kind", "message"}` for a nested directory/file, recognizable temporary/staging artifact, unreadable path, or portable basename collision under the supplied `--images` directory. The `kind` is `nested-directory`, `nested-file`, `temporary-artifact`, `unreadable`, `unusable-file`, or `portable-name-collision`; a collision also carries `paths` with every case/NFC-equivalent owner. The flat-folder and publish-only-finished-files rules come from `CONVENTIONS.md` §8. These are folder-level, report-only observations kept outside `problems`, so they do not inflate entry tallies or authorize moving/renaming/deleting user files. A colliding name remains present for embed-existence checks. An `unreadable` finding suppresses all `item12/missing-image` results for that run because a partial inventory cannot establish absence. The two PDF sidecars and `.DS_Store` are omitted. Empty when `--images` is not supplied or the folder conforms. |
 | `hierarchy_diagnostic` | object | Report-only state of entry parents, canonical MOCs, and legacy vault-root MOCs, detailed below. Findings are evidence for an authorized Task 3 closure, never write authorization. |
 
@@ -61,7 +61,7 @@ QC findings do not exclude an otherwise valid misc tag.
   missing discipline or misc coverage. `unresolved_parents` records `missing`, `ambiguous`,
   `unparsed`, `unreadable`, `legacy-moc`, or `noncanonical-moc` targets.
   `noncanonical-moc` identifies a real `MOCs/<unknown>.md` file outside the
-  discipline enum that cannot serve as a recognized discipline MOC. No MOC, canonical or legacy, can supply a conceptual parent. `parent_state_findings`
+  canonical names that cannot serve as a recognized discipline MOC. No MOC, canonical or legacy, can supply a conceptual parent. `parent_state_findings`
   reports `moc-parent` for forbidden MOC ancestors, `missing-discipline-root`
   for active groups without a valid Wiki root, `root-parent-mismatch` for roots
   with populated parents, and `misc-parent-mismatch` for misc members not
@@ -70,7 +70,7 @@ QC findings do not exclude an otherwise valid misc tag.
   MOCs, including existing zero-member discipline MOCs and misc when present
   or needed. Each record includes
   `discipline` (the discipline slug or `misc`), `path`, `target`
-  (`MOCs/<group>`), `entries`, and
+  (`MOCs/<group>-moc`), `entries`, and
   `state`: `missing`, `empty`, `readable`, or `unreadable`. Unreadable records
   carry `error`; unsafe directory or leaf ownership must not be mistaken for
   a missing file ready for creation. The state describes the file, not an
@@ -79,15 +79,19 @@ QC findings do not exclude an otherwise valid misc tag.
   `empty`, so a footer-only misc note remains an empty navigation list.
 - `legacy_moc_states` inventories recognized legacy vault-root MOCs
   (`<vault>/<discipline>-moc.md` for a specific discipline, never
-  `misc-moc.md`), with the same file-state information plus `canonical_path`.
-  It is an ownership safeguard, not a migration worklist or generated-file
-  ownership.
+  `misc-moc.md`) and previous-layout `MOCs/<discipline>.md` files, with the
+  same file-state information plus `canonical_path`. It is an ownership
+  safeguard, not generated-file ownership; only a previous-layout file has a
+  [migration](hierarchy.md#migrate-the-previous-moc-layout). A legacy name
+  keeps a bare link to it ambiguous, and so does any vault-root note named
+  like a canonical MOC.
 - `moc_inventory_findings` contains records with `kind`, `path`, and `message`,
   plus the relevant `discipline`, `paths`, or `canonical_path`. Kinds include
   `unsafe-directory`, `ambiguous-directory`, `noncanonical-directory`,
   `ambiguous-moc`, `noncanonical-moc`, `unexpected-moc`, `legacy-location`,
-  and `stale-moc`. `unexpected-moc` names a direct `MOCs/*.md` file whose
-  stem is outside the discipline enum.
+  `previous-layout`, and `stale-moc`. An `unexpected-moc` record is a direct
+  `MOCs/*.md` file whose name is neither canonical (`<discipline>-moc.md`) nor
+  the previous layout (`<discipline>.md`).
   The flat `MOCs/` inventory rejects directory/leaf symlinks, non-regular or
   unreadable occupants, changed directory state, and portable-equivalent
   ownership conflicts. A missing directory is valid initialization state.
@@ -109,10 +113,10 @@ QC findings do not exclude an otherwise valid misc tag.
   outline and never adds or carries forward a footer
   ([hierarchy](hierarchy.md#build-or-maintain-the-moc-files)).
 - Every generated entry target uses its full extensionless vault-relative
-  path, such as `Wiki/methods/k-means`; root parents use `Wiki/<discipline>`
-  (including `Wiki/misc`), with the actual Wiki folder prefix. The roots themselves have `[]`.
-  Other entry parents use the bare slug and keep qualification only when a
-  basename is shared. File-state
+  path, such as `Wiki/methods/k-means`. Parents, including a discipline root
+  (`[[machine-learning]]`, `[[misc]]`), use the bare slug and keep the actual
+  Wiki path only when a basename is shared, as it is beside a previous-layout
+  MOC. The roots themselves have `[]`. File-state
   inspection and tree parsing use the same guarded snapshot.
 - Exact union comparison requires every required group MOC to be readable/empty and
   structurally parseable, with a usable entry placement in each. An unsafe
@@ -125,7 +129,7 @@ The actions for these fields and the completion postcondition are in
 
 A real MOC filename owner outranks a Wiki alias with that spelling. Only a
 recognized, readable canonical MOC (discipline or misc) receives `item10/case` to
-qualify a bare target as `MOCs/<discipline>` or `MOCs/misc`, preserving its anchor and label.
+qualify a bare target as `MOCs/<discipline>-moc` or `MOCs/misc-moc`, preserving its anchor and label.
 An unknown MOC name receives `item10/moc` on bare and explicit navigation
 links; preserve it without automatic qualification. When a real Wiki file
 and MOC share the basename, including an unknown MOC name,
@@ -163,7 +167,7 @@ and label checks.
 | `item9/duplicate-sentence` | A long sentence has the same normalized word sequence in more than one entry after link and presentation syntax are normalized. Listings, display equations, tables, captions, images, Related footers, and flashcards are excluded; inline code and inline math retain their identifiers and operators in the comparison key. Short/common sentences stay below the floor. This is an ownership candidate rather than proof that either copy is wrong. |
 | `item10/self` | A body or Related target resolves to the current entry through its canonical/path/`.md`/case spelling or an own alias. |
 | `item10/dangling` | An actual entry-link target is absent after resolution checks against a complete alias inventory. Suppressed while alias ownership is incomplete. |
-| `item10/case` | An existing target needs case/Unicode normalization or unambiguous path qualification, including a bare target whose sole owner is a recognized, readable canonical MOC (discipline or misc) and must become `MOCs/<discipline>` or `MOCs/misc`. |
+| `item10/case` | An existing target needs case/Unicode normalization or unambiguous path qualification, including a bare target whose sole owner is a recognized, readable canonical MOC (discipline or misc) and must become `MOCs/<discipline>-moc` or `MOCs/misc-moc`. |
 | `item10/alias` | A target resolves to another entry's unambiguous alias; a filename match takes precedence. |
 | `item10/ambiguous` | Multiple files own the basename, multiple entries claim the alias, or an alias belongs to an entry with multiple physical filename owners. An exact or unique-suffix qualified path resolves one file; a qualified path matching none stays ambiguous while several basename owners remain, because the scanner cannot safely choose whether Obsidian intended one of them or a missing path. |
 | `item10/unparsed` | The target file exists but did not parse as an entry; its own finding is `item0` or `item1`. |

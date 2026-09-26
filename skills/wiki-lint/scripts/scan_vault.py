@@ -995,6 +995,25 @@ TAG_ALIASES = {"ml":"machine-learning","ai":"machine-learning","artificial-intel
  "investing":"finance","trading":"finance",
  "startup":"entrepreneurship","startups":"entrepreneurship"}  # safe auto-expansions
 
+#: A generated MOC is `MOCs/<discipline>-moc.md`. The suffix keeps its basename
+#: apart from the discipline's Wiki root (`Wiki/biology.md`), so a link to the
+#: root is an ordinary bare `[[biology]]`. Before knowledge 1.4.0 the MOC was
+#: `MOCs/<discipline>.md`; that previous layout is inventoried as legacy.
+MOC_SUFFIX = "-moc"
+
+
+def moc_stem(discipline):
+    """Basename, without `.md`, of a discipline's generated MOC."""
+    return discipline + MOC_SUFFIX
+
+
+def moc_discipline(stem):
+    """The discipline a canonical MOC basename names, else None."""
+    folded = fold_name(stem)
+    if folded.endswith(MOC_SUFFIX) and folded[:-len(MOC_SUFFIX)] in VALID_TAGS:
+        return folded[:-len(MOC_SUFFIX)]
+    return None
+
 #: Frontmatter keys that are Obsidian's own, not this schema's. They are NOT
 #: `item2` "unexpected key" findings: item 2 is a class-1 fix-in-place, and the
 #: only determinate reading of "fix an unexpected key in place" is to delete it
@@ -1579,9 +1598,11 @@ def moc_file_state(path, *, _directory_fd=None, _texts=None):
 def inventory_mocs(vault_root, entry_counts):
     """Inventory known MOC names, preserving ambiguous and legacy ownership.
 
-    Only the flat canonical MOCs/ directory and known old root names are in
-    scope. Missing directories permit later initialization; occupied, aliased
-    or unreadable directories never masquerade as an empty inventory.
+    Only the flat canonical MOCs/ directory and known old names are in scope:
+    vault-root `<discipline>-moc.md` notes and the previous
+    `MOCs/<discipline>.md` layout. Missing directories permit later
+    initialization; occupied, aliased or unreadable directories never
+    masquerade as an empty inventory.
     """
     directory = os.path.join(vault_root, "MOCs")
     states, legacy, findings, texts = [], [], [], {}
@@ -1616,40 +1637,60 @@ def inventory_mocs(vault_root, entry_counts):
             names = sorted(os.listdir(descriptor))
             for name in names:
                 if (name.lower().endswith(".md")
+                        and moc_discipline(name[:-3]) is None
                         and fold_name(name[:-3]) not in VALID_TAGS):
                     finding("unexpected-moc", os.path.join(directory, name),
-                            "MOC filename is not a canonical discipline name; preserve it for explicit review")
+                            "MOC filename is not a canonical discipline MOC name; preserve it for explicit review")
     except OSError as exc:
         folder_error = "%s: %s" % (type(exc).__name__, exc)
         finding("unsafe-directory", directory, folder_error)
 
     try:
         for discipline in sorted(VALID_TAGS):
-            path = os.path.join(directory, discipline + ".md")
+            canonical_name = moc_stem(discipline) + ".md"
+            path = os.path.join(directory, canonical_name)
             owners = [name for name in names
-                      if fold_name(name) == discipline + ".md"]
+                      if fold_name(name) == canonical_name]
             old_names = [name for name in root_names
                          if discipline != "misc"
                          and fold_name(name) == discipline + "-moc.md"]
+            previous_names = [name for name in names
+                              if fold_name(name) == discipline + ".md"]
             for old_name in old_names:
                 old_path = os.path.join(vault_root, old_name)
                 old_state = moc_file_state(old_path)
                 old_state.update(discipline=discipline,
-                                 target="MOCs/" + discipline,
+                                 target="MOCs/" + moc_stem(discipline),
                                  canonical_path=os.path.abspath(path),
                                  entries=entry_counts.get(discipline, 0))
                 legacy.append(old_state)
                 finding("legacy-location", old_path,
                         "unexpected old root MOC is outside generated ownership; preserve it and resolve ownership before creating a canonical MOC",
                         discipline=discipline, canonical_path=os.path.abspath(path))
-            if not (entry_counts.get(discipline) or owners or old_names):
+            for previous_name in previous_names:
+                previous_path = os.path.join(directory, previous_name)
+                previous_state = (
+                    moc_file_state(previous_path, _directory_fd=descriptor)
+                    if descriptor is not None and not folder_error else
+                    dict(path=os.path.abspath(previous_path),
+                         state="unreadable", error=folder_error))
+                previous_state.update(discipline=discipline,
+                                      target="MOCs/" + moc_stem(discipline),
+                                      canonical_path=os.path.abspath(path),
+                                      entries=entry_counts.get(discipline, 0))
+                legacy.append(previous_state)
+                finding("previous-layout", previous_path,
+                        "MOC has the previous name, which its Wiki root shares; migrate it to the canonical name before regenerating it",
+                        discipline=discipline, canonical_path=os.path.abspath(path))
+            if not (entry_counts.get(discipline) or owners or old_names
+                    or previous_names):
                 continue
             error = folder_error
             if len(owners) > 1:
                 error = "discipline MOC has multiple portable pathname owners"
                 finding("ambiguous-moc", path, error, discipline=discipline,
                         paths=[os.path.join(directory, name) for name in owners])
-            elif owners and owners[0] != discipline + ".md":
+            elif owners and owners[0] != canonical_name:
                 error = "discipline MOC exists with noncanonical filename spelling"
                 finding("noncanonical-moc", path, error, discipline=discipline,
                         paths=[os.path.join(directory, owners[0])])
@@ -1661,7 +1702,8 @@ def inventory_mocs(vault_root, entry_counts):
                                          _texts=texts)
             else:
                 state = dict(path=os.path.abspath(path), state="missing")
-            state.update(discipline=discipline, target="MOCs/" + discipline,
+            state.update(discipline=discipline,
+                         target="MOCs/" + moc_stem(discipline),
                          entries=entry_counts.get(discipline, 0))
             states.append(state)
             if owners and not entry_counts.get(discipline) and discipline != "misc":
@@ -2148,7 +2190,7 @@ def scan(wiki, images=None, vault=None):
     moc_states, legacy_moc_states, moc_inventory_findings, _moc_texts = \
         inventory_mocs(vault_root, _moc_entry_counts)
     _moc_state_by_discipline = {row["discipline"]: row for row in moc_states}
-    _moc_canonical_by_fold = {fold_name("MOCs/" + d): "MOCs/" + d
+    _moc_canonical_by_fold = {fold_name("MOCs/" + moc_stem(d)): "MOCs/" + moc_stem(d)
                               for d in VALID_TAGS}
     # Non-enum Markdown notes are outside discipline-root ownership, but their
     # real filenames still outrank aliases and collide with Wiki basenames.
@@ -2156,10 +2198,21 @@ def scan(wiki, images=None, vault=None):
         fold_name(os.path.basename(row["path"])[:-3])
         for row in moc_inventory_findings if row["kind"] == "unexpected-moc"}
     _moc_basename_owners = {
-        row["discipline"] for row in moc_states if row["state"] != "missing"
+        moc_stem(row["discipline"]) for row in moc_states
+        if row["state"] != "missing"
     } | _moc_unknown_basenames
+    # Legacy names include a previous-layout `MOCs/<discipline>.md`: while it
+    # exists, a bare link to the same-named Wiki root stays ambiguous.
     _legacy_moc_names = {fold_name(os.path.basename(row["path"])[:-3])
                          for row in legacy_moc_states}
+    # Any vault-root note named like a canonical MOC (`misc-moc.md` included,
+    # though misc has no legacy root MOC) makes a bare `[[<name>]]` ambiguous.
+    try:
+        _root_moc_basenames = {
+            fold_name(name[:-3]) for name in os.listdir(vault_root)
+            if name.lower().endswith(".md") and moc_discipline(name[:-3])}
+    except OSError:
+        _root_moc_basenames = set()
 
     def _origin_target_key(raw_target, note_path=None):
         target = entry_link_path_key(raw_target)
@@ -2242,9 +2295,12 @@ def scan(wiki, images=None, vault=None):
         return os.path.relpath(path, vault_root).replace("\\", "/")[:-3]
 
     def _entry_parent_target(record):
-        if ((record["slug"] in VALID_TAGS and record["tags_valid_single"]
-             and record["tag_slugs"] == [record["slug"]])
-                or fold_name(record["slug"]) in _moc_basename_owners
+        """Bare slug, or the Wiki path when another file shares the basename.
+
+        A discipline root is no exception: its MOC is `<discipline>-moc`, so
+        only a previous-layout MOC or another same-named file qualifies it.
+        """
+        if (fold_name(record["slug"]) in _moc_basename_owners
                 or fold_name(record["slug"]) in _legacy_moc_names
                 or fold_name(record["slug"]) in ambiguous_files):
             return _entry_vault_target(record)
@@ -2256,9 +2312,12 @@ def scan(wiki, images=None, vault=None):
         if key is None:
             return None, "missing"
         if key.startswith("mocs/"):
-            discipline = key[len("mocs/"):]
-            if discipline not in VALID_TAGS:
-                return None, ("noncanonical-moc" if discipline in _moc_unknown_basenames
+            stem = key[len("mocs/"):]
+            discipline = moc_discipline(stem)
+            if discipline is None:
+                if stem in _legacy_moc_names:
+                    return None, "legacy-moc"
+                return None, ("noncanonical-moc" if stem in _moc_unknown_basenames
                               else "missing")
             state = _moc_state_by_discipline.get(discipline, {})
             if state.get("state", "missing") in {"missing", "unreadable"}:
@@ -2268,12 +2327,17 @@ def scan(wiki, images=None, vault=None):
         if "/" not in key and key in _moc_basename_owners:
             if status not in {"missing", "moc"}:
                 return None, "ambiguous"
+            if key in _root_moc_basenames:
+                # A vault-root `<discipline>-moc.md` shares the canonical
+                # MOC's basename, so the bare target has two owners.
+                return None, "ambiguous"
             if key in _moc_unknown_basenames:
                 return None, "noncanonical-moc"
-            state = _moc_state_by_discipline[key]
+            discipline = moc_discipline(key)
+            state = _moc_state_by_discipline[discipline]
             if state["state"] == "unreadable":
                 return None, "unreadable"
-            return "@moc:" + key, None
+            return "@moc:" + discipline, None
         if "/" not in key and key in _legacy_moc_names:
             return None, ("legacy-moc" if status in {"missing", "moc"}
                           else "ambiguous")
@@ -2577,7 +2641,8 @@ def scan(wiki, images=None, vault=None):
                     _parent_target, _entry_vault_target(e))
                 if _parent_owner is not None:
                     if _parent_owner.startswith("@moc:"):
-                        _parent_canonical = "MOCs/" + _parent_owner[len("@moc:"):]
+                        _parent_canonical = "MOCs/" + moc_stem(
+                            _parent_owner[len("@moc:"):])
                     else:
                         _parent_canonical = _entry_parent_target(entries[_parent_owner])
                 elif _parent_key in _moc_canonical_by_fold:
@@ -3521,7 +3586,7 @@ def scan(wiki, images=None, vault=None):
                                      "preserve its MOCs/ destination and resolve it through "
                                      "Task 3, never redirect it to a same-named Wiki entry"))
                 else:
-                    _canonical_moc = "MOCs/" + _moc_owner[len("@moc:"):]
+                    _canonical_moc = "MOCs/" + moc_stem(_moc_owner[len("@moc:"):])
                     if tgt != _canonical_moc:
                         problems.append((sl, "item10/case",
                                          f'MOC navigation target "{tgt}" resolves to '
@@ -3795,7 +3860,8 @@ def scan(wiki, images=None, vault=None):
             strip_code(e["prose"]), e.get("table_spans", ()))
         for _match in REDUNDANT_PIPE.finditer(_display_label_prose):
             _target = _match.group("target")
-            if fold_name(_target) in _moc_basename_owners:
+            if (fold_name(_target) in _moc_basename_owners
+                    or fold_name(_target) in _legacy_moc_names):
                 continue
             problems.append((
                 sl, "item10/redundant-pipe",
@@ -4509,14 +4575,15 @@ def scan(wiki, images=None, vault=None):
         if not _entry.get("parents"):
             continue
         _misc_root = entries.get("misc")
-        _misc_parent = _entry_vault_target(_misc_root) if _misc_root else None
+        _misc_parent = _entry_parent_target(_misc_root) if _misc_root else None
         if (_entry["tags_valid_misc"] and not _is_root
                 and _parent_targets(_entry) != [_misc_parent]):
             parent_state_findings.append({
                 "slug": _entry_slug,
                 "kind": "misc-parent-mismatch",
                 "parents": list(_entry["parents"]),
-                "message": "a misc member must have only [[Wiki/misc]] as its parent",
+                "message": "a misc member must have only [[%s]] as its parent"
+                           % (_misc_parent or "misc"),
             })
     selfp = sorted(
         sl for sl, e in entries.items()
@@ -5800,7 +5867,7 @@ def run_self_test():
             "Machine learning", "**Machine learning** is a field.",
             tags=('"#machine-learning"',)))
         _tree_lines = ["- [[Wiki/machine-learning|Machine learning]]"]
-        _previous = "Wiki/machine-learning"
+        _previous = "machine-learning"
         for _depth, _name in enumerate(("Models", "Trees", "Decision tree", "Leaf node"), 1):
             _child = slug(_name)
             _st_write(v, _child + ".md", _st_entry(
@@ -5809,7 +5876,7 @@ def run_self_test():
                 parents=(json.dumps("[[%s]]" % _previous),)))
             _tree_lines.append("  " * _depth + "- [[Wiki/%s|%s]]" % (_child, _name))
             _previous = _child
-        _st_write(vr, "MOCs/machine-learning.md", "\n".join(_tree_lines) + "\n")
+        _st_write(vr, "MOCs/machine-learning-moc.md", "\n".join(_tree_lines) + "\n")
         _root_report = scan(v)
         check("a five-level Wiki-rooted tree has no hierarchy defects",
               {key: value for key, value in _root_report["hierarchy_diagnostic"].items()
@@ -5820,7 +5887,7 @@ def run_self_test():
         _st_write(v, "leaf-node.md", _st_entry(
             "Leaf node", "**Leaf node** is a concept.",
             tags=('"#machine-learning"', '"#computer-science"'),
-            parents=('"[[MOCs/machine-learning]]"',)))
+            parents=('"[[MOCs/machine-learning-moc]]"',)))
         _root_report = scan(v)
         check("multiple valid specific tags still violate one-home classification",
               "exactly one discipline home" in _st_msg(_root_report, "leaf-node", "item8"), True)
@@ -5849,18 +5916,18 @@ def run_self_test():
         _st_write(v, "rooted.md", _st_entry(
             "Rooted", "**Rooted** is a worked example.",
             tags=('"#machine-learning"',),
-            parents=('"[[MOCs/machine-learning]]"',)))
+            parents=('"[[MOCs/machine-learning-moc]]"',)))
         _st_write(v, "exact-file-child.md", _st_entry(
             "Exact file child", "**Exact file child** is a worked example.",
             tags=('"#machine-learning"',), parents=('"[[rooted]]"',)))
         _st_write(v, "ml-parent.md", _st_entry(
             "ML parent", "**ML parent** is a worked example.",
             tags=('"#machine-learning"',),
-            parents=('"[[MOCs/machine-learning]]"',)))
+            parents=('"[[MOCs/machine-learning-moc]]"',)))
         _st_write(v, "partial-multitag.md", _st_entry(
             "Partial multitag", "**Partial multitag** is a worked example.",
             tags=('"#machine-learning"', '"#statistics"'),
-            parents=('"[[MOCs/machine-learning]]"',)))
+            parents=('"[[MOCs/machine-learning-moc]]"',)))
         _st_write(v, "partial-via-entry.md", _st_entry(
             "Partial via entry", "**Partial via entry** is a worked example.",
             tags=('"#machine-learning"', '"#statistics"'),
@@ -5868,11 +5935,11 @@ def run_self_test():
         _st_write(v, "complete-multitag.md", _st_entry(
             "Complete multitag", "**Complete multitag** is a worked example.",
             tags=('"#machine-learning"', '"#statistics"'),
-            parents=('"[[ml-parent]]"', '"[[MOCs/statistics]]"')))
+            parents=('"[[ml-parent]]"', '"[[MOCs/statistics-moc]]"')))
         _st_write(v, "wrong-discipline-root.md", _st_entry(
             "Wrong discipline root",
             "**Wrong discipline root** is a worked example.",
-            tags=('"#biology"',), parents=('"[[MOCs/machine-learning]]"',)))
+            tags=('"#biology"',), parents=('"[[MOCs/machine-learning-moc]]"',)))
         _st_write(v, "missing-entry-parent.md", _st_entry(
             "Missing entry parent", "**Missing entry parent** is a worked example.",
             tags=('"#machine-learning"',),
@@ -5880,26 +5947,26 @@ def run_self_test():
         _st_write(v, "alias-owner-a.md", _st_entry(
             "Alias owner A", "**Alias owner A** is a worked example.",
             tags=('"#machine-learning"',), aliases=('"rooted"',),
-            parents=('"[[MOCs/machine-learning]]"',)))
+            parents=('"[[MOCs/machine-learning-moc]]"',)))
         _st_write(v, "alias-owner-b.md", _st_entry(
             "Alias owner B", "**Alias owner B** is a worked example.",
             tags=('"#machine-learning"',), aliases=('"rooted"',),
-            parents=('"[[MOCs/machine-learning]]"',)))
+            parents=('"[[MOCs/machine-learning-moc]]"',)))
         for _discipline in ("statistics", "mathematics", "biology", "physics"):
             _title = _discipline.title() + " rooted"
             _st_write(v, _discipline + "-rooted.md", _st_entry(
                 _title, "**%s** is a worked example." % _title,
                 tags=(json.dumps("#" + _discipline),),
-                parents=(json.dumps("[[MOCs/%s]]" % _discipline),)))
+                parents=(json.dumps("[[MOCs/%s-moc]]" % _discipline),)))
         _st_write(v, "chemistry-rooted.md", _st_entry(
             "Chemistry rooted", "**Chemistry rooted** is a worked example.",
-            tags=('"#chemistry"',), parents=('"[[MOCs/chemistry]]"',)))
-        _st_write(vr, "MOCs/machine-learning.md", "- [[Wiki/rooted|Rooted]]\n")
-        _st_write(vr, "MOCs/statistics.md", "- [[Wiki/statistics-rooted|Statistics rooted]]\n")
-        _st_write(vr, "MOCs/mathematics.md", "")
-        _st_write(vr, "MOCs/biology.md",
+            tags=('"#chemistry"',), parents=('"[[MOCs/chemistry-moc]]"',)))
+        _st_write(vr, "MOCs/machine-learning-moc.md", "- [[Wiki/rooted|Rooted]]\n")
+        _st_write(vr, "MOCs/statistics-moc.md", "- [[Wiki/statistics-rooted|Statistics rooted]]\n")
+        _st_write(vr, "MOCs/mathematics-moc.md", "")
+        _st_write(vr, "MOCs/biology-moc.md",
                   "  <!-- annotation -->\n- [[Wiki/biology-rooted|Biology rooted]]\n")
-        _st_write(vr, "MOCs/chemistry.md", b"\xff\xfe")
+        _st_write(vr, "MOCs/chemistry-moc.md", b"\xff\xfe")
         res = scan(v)
         h = res["hierarchy_diagnostic"]
         check("the vault root is derived from the scanned Wiki directory",
@@ -5924,9 +5991,9 @@ def run_self_test():
         check("missing entry and root-MOC parents are reported, while an existing root MOC resolves",
               [(x["slug"], x["target"], x["reason"])
                for x in h["unresolved_parents"]],
-              [("chemistry-rooted", "MOCs/chemistry", "unreadable"),
+              [("chemistry-rooted", "MOCs/chemistry-moc", "unreadable"),
                ("missing-entry-parent", "definitely-missing-parent", "missing"),
-               ("physics-rooted", "MOCs/physics", "missing")])
+               ("physics-rooted", "MOCs/physics-moc", "missing")])
         check("an exact parent file wins over entries that ambiguously claim the same alias",
               any(x["slug"] == "exact-file-child" for x in h["unresolved_parents"]), False)
         check("every discipline MOC has an explicit safe-file state",
@@ -6005,11 +6072,11 @@ def run_self_test():
         _st_write(v, "broad.md", _st_entry(
             "Broad", "**Broad** is a worked example.",
             tags=('"#machine-learning"',),
-            parents=('"[[MOCs/machine-learning]]"',)))
+            parents=('"[[MOCs/machine-learning-moc]]"',)))
         _st_write(v, "machine-learning.md", _st_entry(
             "Machine learning", "**Machine learning** is a worked example.",
             tags=('"#machine-learning"',),
-            parents=('"[[MOCs/machine-learning]]"',)))
+            parents=('"[[MOCs/machine-learning-moc]]"',)))
         for _name in ("Leaf", "Duplicate", "Deep"):
             _st_write(v, slug(_name) + ".md", _st_entry(
                 _name, "**%s** is a worked example." % _name,
@@ -6018,11 +6085,11 @@ def run_self_test():
             "Qualified (machine learning)",
             "**Qualified (machine learning)** is a worked example.",
             tags=('"#machine-learning"',), aliases=('"qualified-handle"',),
-            parents=('"[[MOCs/machine-learning]]"',)))
+            parents=('"[[MOCs/machine-learning-moc]]"',)))
         _st_write(v, "mismatch.md", _st_entry(
             "Mismatch", "**Mismatch** is a worked example.",
             tags=('"#machine-learning"',),
-            parents=('"[[MOCs/machine-learning]]"',)))
+            parents=('"[[MOCs/machine-learning-moc]]"',)))
         _st_write(v, "absent.md", _st_entry(
             "Absent", "**Absent** is a worked example.",
             tags=('"#machine-learning"',), parents=('"[[broad]]"',)))
@@ -6036,15 +6103,15 @@ def run_self_test():
         _st_write(v, "multi-group-union.md", _st_entry(
             "Multi-group union", "**Multi-group union** is a worked example.",
             tags=('"#machine-learning"', '"#physics"'),
-            parents=('"[[MOCs/machine-learning]]"',)))
+            parents=('"[[MOCs/machine-learning-moc]]"',)))
         _st_write(v, "suppressed.md", _st_entry(
             "Suppressed", "**Suppressed** is a worked example.",
             tags=('"#statistics"',), parents=('"[[wrong-parent]]"',)))
         _st_write(v, "biology-only.md", _st_entry(
             "Biology only", "**Biology only** is a worked example.",
-            tags=('"#biology"',), parents=('"[[MOCs/biology]]"',)))
+            tags=('"#biology"',), parents=('"[[MOCs/biology-moc]]"',)))
         _st_write(
-            vr, "MOCs/machine-learning.md",
+            vr, "MOCs/machine-learning-moc.md",
             "- [[Wiki/broad|Broad]]\n"
             "  - [[Wiki/leaf|Leaf]]\n"
             "  - [[Wiki/duplicate|Duplicate]]\n"
@@ -6062,12 +6129,12 @@ def run_self_test():
             "  - [[Wiki/partially-blocked|Partially blocked]]\n"
 )
         _st_write(
-            vr, "MOCs/statistics.md",
+            vr, "MOCs/statistics-moc.md",
             "  - [[Wiki/suppressed|Suppressed]]\n"
             "not a bullet\n"
             "- [[Wiki/suppressed|Suppressed]]\n"
 )
-        _st_write(vr, "MOCs/physics.md", "- [[Wiki/multi-group-union|Multi-group union]]\n")
+        _st_write(vr, "MOCs/physics-moc.md", "- [[Wiki/multi-group-union|Multi-group union]]\n")
         res = scan(v)
         findings = res["hierarchy_diagnostic"]["moc_consistency_findings"]
         check("whole-file MOC consistency reports every deterministic issue class",
@@ -6109,10 +6176,10 @@ def run_self_test():
         check("the exact parent union is derived from the nearest linked ancestor",
               [(x["slug"], x["expected_parents"], x["actual_parents"])
                for x in findings if x["kind"] == "parent-union-mismatch"],
-              [("broad", [], ["MOCs/machine-learning"]),
-               ("mismatch", ["broad"], ["MOCs/machine-learning"]),
-               ("multi-group-union", [], ["MOCs/machine-learning"]),
-               ("qualified-machine-learning", [], ["MOCs/machine-learning"])])
+              [("broad", [], ["MOCs/machine-learning-moc"]),
+               ("mismatch", ["broad"], ["MOCs/machine-learning-moc"]),
+               ("multi-group-union", [], ["MOCs/machine-learning-moc"]),
+               ("qualified-machine-learning", [], ["MOCs/machine-learning-moc"])])
         check("malformed and missing-placement MOCs suppress union comparison",
               any(x["kind"] == "parent-union-mismatch"
                   and x.get("slug") in {"suppressed", "absent",
@@ -6134,8 +6201,9 @@ def run_self_test():
               [x["slug"] for x in findings if x["kind"] == "parent-union-mismatch"
                and "physics" in x.get("disciplines", [])], ["multi-group-union"])
 
-        # Canonical MOCs live outside Wiki, and their eponymous concepts remain
-        # distinct even when both names appear in the same entry or tree.
+        # Canonical MOCs live outside Wiki under `<discipline>-moc` names, so
+        # their eponymous roots take ordinary bare links; the two destinations
+        # stay distinct even when both appear in the same entry or tree.
         v = os.path.join(tmp, "v6d", "Wiki")
         vr = os.path.dirname(v)
         _st_write(v, "statistics.md", _st_entry(
@@ -6143,19 +6211,19 @@ def run_self_test():
             aliases=('"physics"',)))
         _st_write(v, "leaf.md", _st_entry(
             "Leaf", "**Leaf** is a worked example.",
-            parents=('"[[Wiki/statistics]]"',)))
+            parents=('"[[statistics]]"',)))
         _st_write(v, "navigation.md", _st_entry(
             "Navigation", "**Navigation** is a worked example. "
-            "[[MOCs/statistics|Field index]] and [[Wiki/statistics|Statistics]] "
-            "are distinct destinations. [[MOCs/physics|A different index]] "
+            "[[MOCs/statistics-moc|Field index]] and [[statistics|Statistics]] "
+            "are distinct destinations. [[MOCs/physics-moc|A different index]] "
             "is not an alias for the concept.", tags=('"#misc"',),
-            parents=('"[[Wiki/misc]]"',),
-            related="[[MOCs/statistics|Field index]]"))
+            parents=('"[[misc]]"',),
+            related="[[MOCs/statistics-moc|Field index]]"))
         _canonical_tree = ("- [[Wiki/statistics|Statistics]]\n"
                            "  - [[Wiki/leaf|Leaf]]\n")
-        _st_write(vr, "MOCs/statistics.md", _canonical_tree)
+        _st_write(vr, "MOCs/statistics-moc.md", _canonical_tree)
         _st_write(v, "misc.md", _st_entry("Misc", "**Misc** is a category.", tags=('"#misc"',)))
-        _st_write(vr, "MOCs/misc.md", "- [[Wiki/misc|Misc]]\n  - [[Wiki/navigation|Navigation]]\n")
+        _st_write(vr, "MOCs/misc-moc.md", "- [[Wiki/misc|Misc]]\n  - [[Wiki/navigation|Navigation]]\n")
         res = scan(v)
         h = res["hierarchy_diagnostic"]
         check("canonical MOC and same-named Wiki entry form a complete consistent tree",
@@ -6163,47 +6231,69 @@ def run_self_test():
                                   "self_parented", "parent_cycles",
                                   "moc_consistency_findings", "moc_inventory_findings")],
               [[]] * 6)
-        check("eponymous entry parents retain their necessary Wiki path",
+        check("eponymous root parents are bare once the MOC has its own name",
               "item2/parents-form" in _st_keys(res, "leaf"), False)
         check("MOC navigation is neither an entry duplicate nor a wrong entry title",
               [key for key in _st_keys(res, "navigation")
                if key in {"item10/dup", "item10/dangling", "item10/alias",
                           "item11", "item18"}], [])
         check("a missing explicit MOC cannot resolve through a same-named Wiki alias",
-              "MOCs/physics" in _st_msg(res, "navigation", "item10/moc"), True)
+              "MOCs/physics-moc" in _st_msg(res, "navigation", "item10/moc"), True)
         check("only active or existing discipline MOCs are inventoried",
               [(row["target"], row["entries"]) for row in h["moc_file_states"]],
-              [("MOCs/misc", 2), ("MOCs/statistics", 2)])
+              [("MOCs/misc-moc", 2), ("MOCs/statistics-moc", 2)])
         check("an unchanged canonical hierarchy scan is deterministic and read-only",
               (scan(v) == res,
-               open(os.path.join(vr, "MOCs/statistics.md"), encoding="utf-8").read()),
+               open(os.path.join(vr, "MOCs/statistics-moc.md"), encoding="utf-8").read()),
               (True, _canonical_tree))
         _st_write(v, "alias-navigation.md", _st_entry(
             "Alias navigation", "**Alias navigation** is a worked example. "
             "[[physics|Field concept]] is an entry alias.", tags=()))
         _st_write(v, "moc-only-navigation.md", _st_entry(
             "MOC only navigation", "**MOC only navigation** is a worked example. "
-            "[[MOCs/statistics|Index]] and [[MOCs/statistics|Index]] are navigation. "
+            "[[MOCs/statistics-moc|Index]] and [[MOCs/statistics-moc|Index]] are navigation. "
             "Statistics also names the distinct concept.", tags=()))
         res = scan(v)
-        check("entry alias repair preserves qualification when a MOC shares its basename",
-              "[[Wiki/statistics|Field concept]]" in
+        check("entry alias repair uses the bare root slug once the MOC has its own name",
+              "[[statistics|Field concept]]" in
               _st_msg(res, "alias-navigation", "item10/alias"), True)
         check("MOC links do not suppress a real entry backfill or become entry duplicates",
-              (any(row["slug"] == "moc-only-navigation" and row["target"] == "Wiki/statistics"
+              (any(row["slug"] == "moc-only-navigation" and row["target"] == "statistics"
                    for row in res["backfill_candidates"]),
                "item10/dup" in _st_keys(res, "moc-only-navigation")),
               (True, False))
+        _st_write(v, "leaf.md", _st_entry(
+            "Leaf", "**Leaf** is a worked example.",
+            parents=('"[[Wiki/statistics]]"',)))
+        res = scan(v)
+        check("a qualified root parent is respelled bare once the MOC has its own name",
+              'resolves to "statistics"' in _st_msg(res, "leaf", "item2/parents-form"),
+              True)
+
+        # Before knowledge 1.4.0 the MOC was `MOCs/<discipline>.md`. While that
+        # previous-layout file exists it is a legacy owner of the root's
+        # basename: a qualified root link stays canonical and a bare one is
+        # ambiguous rather than resolved to either file.
+        _st_write(vr, "MOCs/statistics.md", _canonical_tree)
         _st_write(v, "ambiguous-child.md", _st_entry(
             "Ambiguous child", "**Ambiguous child** is a worked example. "
             "[[statistics|statistics]] has an unresolved destination.",
             parents=('"[[statistics]]"',)))
-        _st_write(vr, "MOCs/statistics.md",
+        _st_write(vr, "MOCs/statistics-moc.md",
                   _canonical_tree.replace("[[Wiki/statistics|", "[[statistics|"))
         res = scan(v)
+        h = res["hierarchy_diagnostic"]
+        check("a previous-layout MOC is a legacy owner reported for migration",
+              ([(row["kind"], row.get("discipline"))
+                for row in h["moc_inventory_findings"]],
+               [(os.path.basename(row["path"]), row["state"], row["target"])
+                for row in h["legacy_moc_states"]]),
+              ([("previous-layout", "statistics")],
+               [("statistics.md", "readable", "MOCs/statistics-moc")]))
+        check("while it exists, a qualified root parent stays canonical",
+              "item2/parents-form" in _st_keys(res, "leaf"), False)
         check("a bare eponymous parent is ambiguous instead of selecting entry or MOC",
-              [(row["slug"], row["reason"])
-               for row in res["hierarchy_diagnostic"]["unresolved_parents"]],
+              [(row["slug"], row["reason"]) for row in h["unresolved_parents"]],
               [("ambiguous-child", "ambiguous")])
         check("ambiguous bare navigation is preserved without a redundant-pipe rewrite",
               ("item10/ambiguous" in _st_keys(res, "ambiguous-child"),
@@ -6211,9 +6301,15 @@ def run_self_test():
               (True, False))
         check("a bare eponymous MOC bullet cannot become a self-link or inferred entry",
               [(row["target"], row["reason"])
-               for row in res["hierarchy_diagnostic"]["moc_consistency_findings"]
+               for row in h["moc_consistency_findings"]
                if row["kind"] == "unresolved-link"],
               [("statistics", "ambiguous")])
+        check("backfill qualifies the root while its previous-layout MOC exists",
+              [row["target"] for row in res["backfill_candidates"]
+               if row["slug"] == "moc-only-navigation"
+               and row["target"].endswith("statistics")],
+              ["Wiki/statistics"])
+        os.unlink(os.path.join(vr, "MOCs/statistics.md"))
 
         v = os.path.join(tmp, "v6d-backfill", "Wiki")
         vr = os.path.dirname(v)
@@ -6221,16 +6317,16 @@ def run_self_test():
                               ("leaf", "Leaf")):
             _st_write(v, _slug + ".md", _st_entry(
                 _title, "**%s** is a worked example." % _title))
-        _st_write(vr, "MOCs/misc.md", "")
-        _st_write(vr, "MOCs/statistics.md", "")
+        _st_write(vr, "MOCs/misc-moc.md", "")
+        _st_write(vr, "MOCs/statistics-moc.md", "")
         _reader_body = "**Reader** uses Misc, Statistics, and Leaf for worked examples."
         _st_write(v, "reader.md", _st_entry("Reader", _reader_body))
         res = scan(v)
         _backfill_rows = [row for row in res["backfill_candidates"]
                           if row["slug"] == "reader"]
-        check("backfill destinations qualify both misc and discipline basename clashes while retaining unique bare slugs",
+        check("backfill destinations to misc and discipline roots are bare beside their -moc MOCs",
               sorted(row["target"] for row in _backfill_rows),
-              ["Wiki/misc", "Wiki/statistics", "leaf"])
+              ["leaf", "misc", "statistics"])
         for _row in _backfill_rows:
             _reader_body = _reader_body.replace(
                 _row["surface"], "[[%s|%s]]" % (_row["target"], _row["surface"]), 1)
@@ -6247,19 +6343,19 @@ def run_self_test():
         vr = os.path.dirname(v)
         _st_write(v, "leaf.md", _st_entry(
             "Leaf", "**Leaf** is a worked example.",
-            tags=('"#biology"',), parents=('"[[biology]]"',)))
-        _st_write(vr, "MOCs/biology.md",
+            tags=('"#biology"',), parents=('"[[biology-moc]]"',)))
+        _st_write(vr, "MOCs/biology-moc.md",
                   "- [[Wiki/leaf|Leaf]]\n")
         _st_write(v, "reader.md", _st_entry(
-            "Reader", "**Reader** is a worked example. [[biology|Biology index]] "
-            "and [[MOCs/biology|Biology index]] are navigation. "
+            "Reader", "**Reader** is a worked example. [[biology-moc|Biology index]] "
+            "and [[MOCs/biology-moc|Biology index]] are navigation. "
             "Alias owner is a separate concept.", tags=('"#misc"',),
-            parents=('"[[MOCs/misc]]"',),
-            related="[[biology|Biology index]]"))
-        _st_write(vr, "MOCs/misc.md", "- [[Wiki/reader|Reader]]\n")
+            parents=('"[[MOCs/misc-moc]]"',),
+            related="[[biology-moc|Biology index]]"))
+        _st_write(vr, "MOCs/misc-moc.md", "- [[Wiki/reader|Reader]]\n")
         res = scan(v)
         check("a unique bare MOC target is normalized as navigation, never dangling",
-              ("MOCs/biology" in _st_msg(res, "reader", "item10/case"),
+              ("MOCs/biology-moc" in _st_msg(res, "reader", "item10/case"),
                [key for key in _st_keys(res, "reader")
                 if key in {"item10/dangling", "item10/alias", "item10/dup", "item11"}]),
               (True, []))
@@ -6267,7 +6363,7 @@ def run_self_test():
               (res["hierarchy_diagnostic"]["unresolved_parents"],
                [row["slug"] for row in res["hierarchy_diagnostic"]["parent_state_findings"]
                 if row["kind"] == "moc-parent"],
-               "MOCs/biology" in _st_msg(res, "leaf", "item2/parents-form")),
+               "MOCs/biology-moc" in _st_msg(res, "leaf", "item2/parents-form")),
               ([], ["leaf", "reader"], True))
         check("a MOC-resolving parent is report-only, never respelled to its MOC",
               ("use this canonical target" in _st_msg(res, "leaf", "item2/parents-form"),
@@ -6276,7 +6372,7 @@ def run_self_test():
               (False, True, False))
         _st_write(v, "alias-owner.md", _st_entry(
             "Alias owner", "**Alias owner** is a worked example.",
-            tags=(), aliases=('"biology"',)))
+            tags=(), aliases=('"biology-moc"',)))
         _st_write(v, "qualified-reader.md", _st_entry(
             "Qualified reader", "**Qualified reader** is a worked example. "
             "[[Wiki/alias-owner|Alias owner]] is the actual concept. "
@@ -6288,12 +6384,12 @@ def run_self_test():
         check("bare MOC navigation cannot suppress backfill to a same-named entry alias owner",
               [row["slug"] for row in res["backfill_candidates"]
                if row["target"] == "alias-owner"], ["reader"])
-        _st_write(v, "biology.md", _st_entry(
-            "Biology", "**Biology** is a worked example.",
-            tags=('"#biology"',), parents=('"[[MOCs/biology]]"',)))
+        _st_write(v, "biology-moc.md", _st_entry(
+            "Biology moc", "**Biology moc** is a worked example.",
+            tags=('"#biology"',)))
         _st_write(v, "qualified-reader.md", _st_entry(
             "Qualified reader", "**Qualified reader** is a worked example. "
-            "[[Wiki/biology|Biology]] is distinct from [[MOCs/biology|Biology index]].",
+            "[[Wiki/biology-moc|Biology moc]] is distinct from [[MOCs/biology-moc|Biology index]].",
             tags=()))
         res = scan(v)
         check("adding a real Wiki basename makes bare links ambiguous while qualified links stay distinct",
@@ -6306,8 +6402,8 @@ def run_self_test():
         vr = os.path.dirname(v)
         _st_write(v, "leaf.md", _st_entry(
             "Leaf", "**Leaf** is a worked example. [[leaf|Leaf map]] is navigation.",
-            parents=('"[[MOCs/statistics]]"',)))
-        _st_write(vr, "MOCs/statistics.md",
+            parents=('"[[MOCs/statistics-moc]]"',)))
+        _st_write(vr, "MOCs/statistics-moc.md",
                   "- [[Wiki/leaf|Leaf]]\n")
         for _map in ("leaf", "other-map", "orphan-map"):
             _st_write(vr, "MOCs/" + _map + ".md", "A user-owned non-enum map.\n")
@@ -6349,8 +6445,8 @@ def run_self_test():
             "Statistics", "**Statistics** is a worked example."))
         _st_write(v, "leaf.md", _st_entry(
             "Leaf", "**Leaf** is a worked example.",
-            parents=('"[[Knowledge/Concepts/statistics]]"',)))
-        _st_write(vr, "MOCs/statistics.md",
+            parents=('"[[statistics]]"',)))
+        _st_write(vr, "MOCs/statistics-moc.md",
                   _canonical_tree.replace("Wiki/", "Knowledge/Concepts/"))
         res = scan(v)
         check("MOC and parent links honor the full path of a nested Wiki override",
@@ -6366,25 +6462,25 @@ def run_self_test():
             parents=('"[[statistics-moc]]"',)))
         _st_write(v, "new-rooted.md", _st_entry(
             "New rooted", "**New rooted** is a worked example.",
-            parents=('"[[MOCs/statistics]]"',)))
+            parents=('"[[MOCs/statistics-moc]]"',)))
         _st_write(vr, "statistics-moc.md", _canonical_tree)
         res = scan(v)
         h = res["hierarchy_diagnostic"]
         check("a legacy root MOC never supplies a missing canonical root",
               ([(row["target"], row["state"]) for row in h["moc_file_states"]],
                [(row["slug"], row["reason"]) for row in h["unresolved_parents"]]),
-              ([("MOCs/statistics", "missing")],
+              ([("MOCs/statistics-moc", "missing")],
                [("legacy-rooted", "legacy-moc"), ("new-rooted", "missing")]))
         check("unexpected old root bytes retain their safe-file state and conflicting canonical path",
               [(row["discipline"], row["state"], row["canonical_path"])
                for row in h["legacy_moc_states"]],
-              [("statistics", "readable", os.path.join(vr, "MOCs/statistics.md"))])
+              [("statistics", "readable", os.path.join(vr, "MOCs/statistics-moc.md"))])
         _empty_tree = ""
-        _st_write(vr, "MOCs/statistics.md", _empty_tree)
-        _st_write(vr, "MOCs/physics.md", _empty_tree)
+        _st_write(vr, "MOCs/statistics-moc.md", _empty_tree)
+        _st_write(vr, "MOCs/physics-moc.md", _empty_tree)
         _st_write(vr, "economics-moc.md", "Personal legacy note.\n")
-        _st_write(vr, "MOCs/physics-moc.md", "Unexpected old spelling.\n")
-        _st_write(vr, "MOCs/biology.md", _empty_tree)
+        _st_write(vr, "MOCs/physics-map.md", "Unexpected spelling.\n")
+        _st_write(vr, "MOCs/biology-moc.md", _empty_tree)
         res = scan(v)
         h = res["hierarchy_diagnostic"]
         check("inactive disciplines remain visible without creating every enum MOC",
@@ -6431,12 +6527,12 @@ def run_self_test():
         for _name in ("First", "Middle", "Last"):
             _st_write(v, _name.lower() + ".md", _st_entry(
                 _name, "**%s** is a worked example." % _name,
-                parents=('"[[Wiki/statistics]]"',)))
+                parents=('"[[statistics]]"',)))
         _plain_tree = ("- [[Wiki/statistics|Statistics]]\n"
                        "  - [[Wiki/first|First]]\n"
                        "  - [[Wiki/middle|Middle]]\n"
                        "  - [[Wiki/last|Last]]\n")
-        _st_write(vr, "MOCs/statistics.md", "Personal introduction.\n" + _plain_tree
+        _st_write(vr, "MOCs/statistics-moc.md", "Personal introduction.\n" + _plain_tree
                   + "Personal conclusion.\n")
         res = scan(v)
         check("prose before and after the outline is malformed generated content",
@@ -6447,18 +6543,18 @@ def run_self_test():
                 ("fenced", "```markdown\n" + _plain_tree + "```\n"),
                 ("frontmatter", "---\ntitle: A map\n---\n" + _plain_tree),
                 ("commented", "<!-- annotation\n" + _plain_tree + "-->\n")):
-            _st_write(vr, "MOCs/statistics.md", _wrapped)
+            _st_write(vr, "MOCs/statistics-moc.md", _wrapped)
             res = scan(v)
             _findings = res["hierarchy_diagnostic"]["moc_consistency_findings"]
             check("%s wrappers are validated as malformed whole-file content" % _name,
                   (res["hierarchy_diagnostic"]["moc_file_states"][0]["state"],
                    {x["kind"] for x in _findings}),
                   ("readable", {"malformed-line"}))
-        _st_write(vr, "MOCs/statistics.md", _plain_tree)
+        _st_write(vr, "MOCs/statistics-moc.md", _plain_tree)
         res = scan(v)
         check("a complete generated MOC is clean and repeated scans leave its bytes unchanged",
               (res["hierarchy_diagnostic"]["moc_consistency_findings"], scan(v) == res,
-               open(os.path.join(vr, "MOCs/statistics.md"), encoding="utf-8").read()),
+               open(os.path.join(vr, "MOCs/statistics-moc.md"), encoding="utf-8").read()),
               ([], True, _plain_tree))
 
         for _name, _opening, _closing in (
@@ -6470,13 +6566,13 @@ def run_self_test():
                             + "".join("  " + line + "\n"
                                       for line in _plain_tree.splitlines())
                             + "- " + _closing + "\n")
-            _st_write(vr, "MOCs/statistics.md", _hidden_tree)
+            _st_write(vr, "MOCs/statistics-moc.md", _hidden_tree)
             res = scan(v)
             check("a %s inside category bullets cannot appear to be a clean MOC" % _name,
                   [(x["kind"], x.get("line"))
                    for x in res["hierarchy_diagnostic"]["moc_consistency_findings"]],
                   [("malformed-line", 1), ("malformed-line", 6)])
-        _st_write(vr, "MOCs/statistics.md", "- [[Wiki/statistics|Statistics]]\n  - Visible category\n"
+        _st_write(vr, "MOCs/statistics-moc.md", "- [[Wiki/statistics|Statistics]]\n  - Visible category\n"
                   + "".join("  " + line + "\n" for line in _plain_tree.splitlines()[1:]))
         check("ordinary unlinked categories still support complete MOC placement",
               scan(v)["hierarchy_diagnostic"]["moc_consistency_findings"], [])
@@ -6509,10 +6605,10 @@ def run_self_test():
             check("portable MOCs folder ownership: " + _expected_kind,
                   (_states[0]["state"], [row["kind"] for row in _issues]),
                   ("unreadable", [_expected_kind]))
-        _st_write(vr, "MOCs/statistics.md", _empty_tree)
+        _st_write(vr, "MOCs/statistics-moc.md", _empty_tree)
         _real_listdir = os.listdir
-        for _leaf_names, _expected_kind in ((["Statistics.md"], "noncanonical-moc"),
-                                           (["statistics.md", "Statistics.md"], "ambiguous-moc")):
+        for _leaf_names, _expected_kind in ((["Statistics-moc.md"], "noncanonical-moc"),
+                                           (["statistics-moc.md", "Statistics-MOC.md"], "ambiguous-moc")):
             def _collision_listing(path):
                 return _leaf_names if isinstance(path, int) else _real_listdir(path)
             with mock.patch.object(os, "listdir", side_effect=_collision_listing):
@@ -6542,16 +6638,16 @@ def run_self_test():
         for _slug, _title in (("alpha", "Alpha"), ("misc", "Misc"),
                               ("zeta-misc", "Zeta (misc)")):
             _text = _st_entry(_title, "**%s** is a worked example." % _title,
-                              tags=('"#misc"',), parents=(() if _slug == "misc" else ('"[[Wiki/misc]]"',)))
+                              tags=('"#misc"',), parents=(() if _slug == "misc" else ('"[[misc]]"',)))
             _st_write(v, _slug + ".md", _text)
         _st_write(v, "topic.md", _st_entry(
             "Topic", "**Topic** is a worked example.",
-            parents=('"[[Wiki/statistics]]"',)))
+            parents=('"[[statistics]]"',)))
         _st_write(v, "statistics.md", _st_entry("Statistics", "**Statistics** is a field."))
         _misc_tree = ("- [[Wiki/misc|Misc]]\n  - [[Wiki/alpha|Alpha]]\n"
                       "  - [[Wiki/zeta-misc|Zeta (misc)]]\n")
-        _st_write(vr, "MOCs/misc.md", _misc_tree)
-        _st_write(vr, "MOCs/statistics.md", "- [[Wiki/statistics|Statistics]]\n  - [[Wiki/topic|Topic]]\n")
+        _st_write(vr, "MOCs/misc-moc.md", _misc_tree)
+        _st_write(vr, "MOCs/statistics-moc.md", "- [[Wiki/statistics|Statistics]]\n  - [[Wiki/topic|Topic]]\n")
         res = scan(v)
         h = res["hierarchy_diagnostic"]
         check("all parsed entries use one inventory and discipline counts include explicit misc",
@@ -6565,36 +6661,36 @@ def run_self_test():
         check("misc has ordinary file-state entry counts and belongs to the tag enum",
               ([(row["target"], row["entries"]) for row in h["moc_file_states"]],
                "misc" in VALID_TAGS),
-              ([("MOCs/misc", 3), ("MOCs/statistics", 2)], True))
-        _st_write(vr, "MOCs/misc.md", "")
+              ([("MOCs/misc-moc", 3), ("MOCs/statistics-moc", 2)], True))
+        _st_write(vr, "MOCs/misc-moc.md", "")
         res = scan(v)
         check("an empty active misc reports all missing members without an inactive-discipline finding",
               ([row["slug"] for row in res["hierarchy_diagnostic"]["moc_consistency_findings"]
                 if row["kind"] == "missing-entry" and row.get("discipline") == "misc"],
                res["hierarchy_diagnostic"]["moc_inventory_findings"]),
               (["alpha", "misc", "zeta-misc"], []))
-        os.unlink(os.path.join(vr, "MOCs/misc.md"))
+        os.unlink(os.path.join(vr, "MOCs/misc-moc.md"))
         res = scan(v)
         check("a missing misc MOC does not invalidate real Wiki parent links",
               [(row["slug"], row["target"], row["reason"])
                for row in res["hierarchy_diagnostic"]["unresolved_parents"]],
               [])
-        _st_write(vr, "MOCs/misc.md", _misc_tree.splitlines()[0] + "\n" + "\n".join(reversed(_misc_tree.splitlines()[1:])) + "\n")
+        _st_write(vr, "MOCs/misc-moc.md", _misc_tree.splitlines()[0] + "\n" + "\n".join(reversed(_misc_tree.splitlines()[1:])) + "\n")
         res = scan(v)
         check("misc order is deterministic by canonical title rather than prior insertion order",
               [row["kind"] for row in res["hierarchy_diagnostic"]["moc_consistency_findings"]],
               ["misc-order"])
-        _st_write(vr, "MOCs/misc.md", "- [[Wiki/misc|Misc]]\n  - Group\n    - [[Wiki/alpha|Alpha]]\n"
+        _st_write(vr, "MOCs/misc-moc.md", "- [[Wiki/misc|Misc]]\n  - Group\n    - [[Wiki/alpha|Alpha]]\n"
                   "  - [[Wiki/zeta-misc|Zeta (misc)]]\n")
         res = scan(v)
         check("misc categories and nested members are rejected as non-flat generated content",
               [(row["kind"], row.get("line"))
                for row in res["hierarchy_diagnostic"]["moc_consistency_findings"]],
               [("misc-format", 2), ("misc-format", 3)])
-        _st_write(vr, "MOCs/misc.md", _misc_tree)
+        _st_write(vr, "MOCs/misc-moc.md", _misc_tree)
         _st_write(v, "alpha.md", _st_entry(
             "Alpha", "**Alpha** is a worked example.", tags=('"#misc"',),
-            parents=('"[[Wiki/misc]]"',)))
+            parents=('"[[misc]]"',)))
         res = scan(v)
         check("a misc member points to its Wiki root without a placement gap",
               ([(row["slug"], row["kind"])
@@ -6603,15 +6699,27 @@ def run_self_test():
               ([], []))
         _st_write(v, "alpha.md", _st_entry(
             "Alpha", "**Alpha** is a worked example.", tags=('"#misc"',),
+            parents=('"[[Wiki/misc]]"',)))
+        res = scan(v)
+        check("a qualified misc parent is respelled bare once the MOC name differs",
+              ('resolves to "misc"' in _st_msg(res, "alpha", "item2/parents-form"),
+               [row["kind"] for row in res["hierarchy_diagnostic"]["parent_state_findings"]
+                if row["slug"] == "alpha"]),
+              (True, ["misc-parent-mismatch"]))
+        _st_write(vr, "MOCs/misc.md", _misc_tree)
+        _st_write(v, "alpha.md", _st_entry(
+            "Alpha", "**Alpha** is a worked example.", tags=('"#misc"',),
             parents=('"[[misc]]"',)))
         res = scan(v)
-        check("bare misc remains ambiguous when the generated MOC and Wiki entry both exist",
+        check("a previous-layout misc MOC keeps a bare misc parent ambiguous",
               [(row["slug"], row["reason"])
-               for row in res["hierarchy_diagnostic"]["unresolved_parents"]],
+               for row in res["hierarchy_diagnostic"]["unresolved_parents"]
+               if row["slug"] == "alpha"],
               [("alpha", "ambiguous")])
+        os.unlink(os.path.join(vr, "MOCs/misc.md"))
         _st_write(v, "alpha.md", _st_entry(
             "Alpha", "**Alpha** is a worked example.",
-            parents=('"[[MOCs/misc]]"',)))
+            parents=('"[[MOCs/misc-moc]]"',)))
         res = scan(v)
         _findings = res["hierarchy_diagnostic"]["moc_consistency_findings"]
         check("retagging out of misc exposes both its stale misc listing and absent discipline listing",
@@ -6622,7 +6730,7 @@ def run_self_test():
                [{"slug": "alpha", "missing_disciplines": ["statistics"], "represented_disciplines": []}]))
         _st_write(v, "topic.md", _st_entry(
             "Topic", "**Topic** is a worked example.", tags=('"#misc"',),
-            parents=('"[[MOCs/statistics]]"',)))
+            parents=('"[[MOCs/statistics-moc]]"',)))
         res = scan(v)
         check("retagging into misc exposes missing misc membership and the stale discipline placement",
               [(row["kind"], row["discipline"])
@@ -6651,8 +6759,8 @@ def run_self_test():
             _title = _name.replace("-", " ").title()
             _st_write(v, _name + ".md", _st_entry(
                 _title, "**%s** is a worked example." % _title, tags=(),
-                parents=('"[[MOCs/misc]]"',)).replace("tags: []\n", _tags))
-        _st_write(vr, "MOCs/misc.md", "".join(
+                parents=('"[[MOCs/misc-moc]]"',)).replace("tags: []\n", _tags))
+        _st_write(vr, "MOCs/misc-moc.md", "".join(
             "- [[Wiki/%s|%s]]\n" % (name, name.replace("-", " ").title())
             for name in sorted(_bad_tags)))
         res = scan(v)
@@ -6669,17 +6777,17 @@ def run_self_test():
                 {"item1", "item8"}.issubset(_st_keys(res, name)))
                for name in sorted(_ambiguous_tag_keys)],
               [(name, False, True) for name in sorted(_ambiguous_tag_keys)])
-        _st_write(vr, "MOCs/misc.md", "")
+        _st_write(vr, "MOCs/misc-moc.md", "")
         res = scan(v)
         check("an authorized zero-member misc refresh leaves a clean empty file without deleting its identity",
               ([(row["target"], row["entries"], row["state"])
                 for row in res["hierarchy_diagnostic"]["moc_file_states"]],
                res["hierarchy_diagnostic"]["moc_consistency_findings"],
                res["hierarchy_diagnostic"]["moc_inventory_findings"]),
-              ([("MOCs/misc", 0, "empty")], [], []))
+              ([("MOCs/misc-moc", 0, "empty")], [], []))
         _st_write(v, "field-qc.md", _st_entry(
             "Field QC", "**Field QC** is a worked example.", tags=(),
-            parents=('"[[MOCs/misc]]"',), sources=('"invalid-source"',)).replace(
+            parents=('"[[MOCs/misc-moc]]"',), sources=('"invalid-source"',)).replace(
                 "type: Concept\n", "type: Invalid\n"))
         res = scan(v)
         check("ordinary field-value QC does not erase the proven empty-tag repair worklist",
@@ -6708,8 +6816,8 @@ def run_self_test():
             _title = _name.replace("-", " ").title()
             _st_write(v, _name + ".md", _st_entry(
                 _title, "**%s** is a worked example." % _title, tags=(),
-                parents=('"[[MOCs/misc]]"',)).replace("tags: []\n", _tags))
-        _st_write(vr, "MOCs/misc.md", "".join(
+                parents=('"[[MOCs/misc-moc]]"',)).replace("tags: []\n", _tags))
+        _st_write(vr, "MOCs/misc-moc.md", "".join(
             "- [[Wiki/%s|%s]]\n" % (name, name.replace("-", " ").title())
             for name in sorted(_tag_forms)))
         res = scan(v)
@@ -6741,7 +6849,7 @@ def run_self_test():
               (False, True, False))
         _st_write(v, "blank-block.md", _st_entry(
             "Blank Block", "**Blank Block** is a worked example.",
-            tags=('"#misc"',), parents=('"[[MOCs/misc]]"',)))
+            tags=('"#misc"',), parents=('"[[MOCs/misc-moc]]"',)))
         res = scan(v)
         check("repairing blank tags to explicit misc establishes membership and removes the stale-listing diagnostic",
               (res["untagged_entries"],
@@ -6755,12 +6863,12 @@ def run_self_test():
             "Valid Block", "**Valid Block** is a worked example.",
             tags=('"#misc"',), parents=('"[[misc-moc]]"',)))
         res = scan(v)
-        check("adding misc to the enum does not invent ownership of root misc-moc.md",
+        check("a root note named like the misc MOC is not legacy, and a bare link to that name is ambiguous",
               (res["hierarchy_diagnostic"]["legacy_moc_states"],
                [(row["target"], row["reason"])
                 for row in res["hierarchy_diagnostic"]["unresolved_parents"]
                 if row["slug"] == "valid-block"]),
-              ([], [("misc-moc", "unparsed")]))
+              ([], [("misc-moc", "ambiguous")]))
 
         # ------------------------------------------------------------------
         # 7. rename candidates -- `target_exists` is the ONLY thing standing

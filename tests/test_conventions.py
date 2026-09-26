@@ -7109,24 +7109,24 @@ def check_equation_policy(rep, conv):
 def check_moc_placement(rep, conv):
     """§3's MOC location and naming, restated only in agreeing forms.
 
-    §3: the MOC file is `MOCs/<discipline-slug>.md`. A
+    §3: the MOC file is `MOCs/<discipline-slug>-moc.md`. A
     restatement that files it under `Wiki/` sends Task 3's writes into the
     entry folder, where the scanner reads each MOC as a malformed entry on
     every later run.
     """
     check = "moc-placement"
-    if not re.search(r"MOCs/(?:<discipline(?:-slug)?>|machine-learning)\.md", conv) \
-            or "[[MOCs/machine-learning]]" not in conv:
+    if not re.search(r"MOCs/(?:<discipline(?:-slug)?>|machine-learning)-moc\.md", conv) \
+            or "[[MOCs/machine-learning-moc]]" not in conv:
         rep.fail(check, "CONVENTIONS.md §3 no longer states the MOC file "
-                        "shape (`MOCs/<discipline>.md`) and qualified navigation link -- "
+                        "shape (`MOCs/<discipline>-moc.md`) and qualified navigation link -- "
                         "the location every restatement is held to",
                  rel(CONVENTIONS))
     else:
-        rep.ok(check, "§3 states `MOCs/<discipline>.md` and qualified navigation links",
+        rep.ok(check, "§3 states `MOCs/<discipline>-moc.md` and qualified navigation links",
                rel(CONVENTIONS))
     stated = 0
     for skill, path, text in walk_skill_files():
-        if re.search(r"MOCs/(?:<discipline(?:-slug)?>|machine-learning)\.md", text):
+        if re.search(r"MOCs/(?:<discipline(?:-slug)?>|machine-learning)-moc\.md", text):
             stated += 1
         # Self-tests deliberately contain malformed placements and ordinary
         # Wiki entries whose names collide with old navigation files. Their

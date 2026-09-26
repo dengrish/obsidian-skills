@@ -71,7 +71,7 @@ class NoteFormatTests(unittest.TestCase):
     def add_entry(self):
         entry = scanner._st_entry(
             "First", "**First** is a worked example.",
-            tags=('"#statistics"',), parents=('"[[MOCs/statistics]]"',))
+            tags=('"#statistics"',), parents=('"[[MOCs/statistics-moc]]"',))
         (self.vault / "Wiki/first.md").write_text(entry, encoding="utf-8")
         return entry
 
@@ -100,13 +100,13 @@ class NoteFormatTests(unittest.TestCase):
         self.assertEqual(summary.lint(stamped, mode="empirical"), before)
 
     def test_stamped_moc_retains_complete_entry_placement(self):
-        entry = self.add_entry().replace("[[MOCs/statistics]]", "[[Wiki/statistics]]")
+        entry = self.add_entry().replace("[[MOCs/statistics-moc]]", "[[statistics]]")
         root = scanner._st_entry("Statistics", "**Statistics** is a field.")
         (self.vault / "Wiki/statistics.md").write_text(
             legacy_footer(root, record("knowledge:wiki-lint")), encoding="utf-8")
         (self.vault / "Wiki/first.md").write_text(
             legacy_footer(entry, record("knowledge:wiki-add")), encoding="utf-8")
-        (self.vault / "MOCs/statistics.md").write_text(
+        (self.vault / "MOCs/statistics-moc.md").write_text(
             legacy_footer("- [[Wiki/statistics|Statistics]]\n  - [[Wiki/first|First]]\n",
                                   record("knowledge:wiki-lint")),
             encoding="utf-8")
@@ -119,7 +119,7 @@ class NoteFormatTests(unittest.TestCase):
         self.assertEqual(scanner._st_keys(result, "first"), [])
 
     def test_footer_only_misc_is_an_empty_generated_outline(self):
-        (self.vault / "MOCs/misc.md").write_text(
+        (self.vault / "MOCs/misc-moc.md").write_text(
             legacy_footer("", record("knowledge:wiki-lint")), encoding="utf-8")
         hierarchy = self.scan()["hierarchy_diagnostic"]
         self.assertEqual(hierarchy["moc_consistency_findings"], [])
@@ -145,7 +145,7 @@ class NoteFormatTests(unittest.TestCase):
                                         summary.GOOD.rstrip("\n") + tail, mode="empirical")))
                 entry = self.add_entry().rstrip("\n") + tail
                 (self.vault / "Wiki/first.md").write_text(entry, encoding="utf-8")
-                (self.vault / "MOCs/statistics.md").write_text(
+                (self.vault / "MOCs/statistics-moc.md").write_text(
                     "- [[Wiki/first|First]]" + tail, encoding="utf-8")
                 result = self.scan()
                 self.assertIn("item2/provenance", scanner._st_keys(result, "first"))

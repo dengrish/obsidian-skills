@@ -1367,7 +1367,7 @@ raise SystemExit(main(fixture['args'], client))
             f'[[{old}|the clipping]]\n![[Sources/Images/{old}_fig_1.png]]\n'
             '\nThe closer is `-->`.\n',
             encoding="utf-8")
-        moc_dependency = self.vault / "MOCs/biology.md"
+        moc_dependency = self.vault / "MOCs/biology-moc.md"
         moc_dependency.parent.mkdir()
         moc_dependency.write_text(
             f'# Supporting sources\n[[{old}|the clipping]]\n'
@@ -1571,7 +1571,7 @@ description: "A control sample provides a baseline for comparing the effect of a
 tags:
   - "#biology"
 parents:
-  - "[[Wiki/biology]]"
+  - "[[biology]]"
 read: false
 ---
 A **control sample** provides a baseline for comparing an experimental treatment with an otherwise matched condition. The treatment is withheld while the preparation and measurement procedure remain the same. A difference between the treated and untreated groups can then be interpreted within the limits of that comparison.
@@ -1589,7 +1589,7 @@ Control sample
         self.write_discipline_root("biology")
         # A complete generated MOC is an ordinary nested bullet list.
         (self.vault / "MOCs").mkdir()
-        (self.vault / "MOCs/biology.md").write_text(
+        (self.vault / "MOCs/biology-moc.md").write_text(
             "- [[Wiki/biology|Biology]]\n  - [[Wiki/control-sample|Control sample]]\n", encoding="utf-8")
         index = self.vault / "index.json"
         self.run_script("skills/wiki-build/scripts/vault_index.py", wiki, "-o", index)
@@ -1621,7 +1621,7 @@ Control sample
 
         # Content outside the outline is also generated content, not an
         # unchecked region that silently passes the hierarchy audit.
-        (self.vault / "MOCs/biology.md").write_text(
+        (self.vault / "MOCs/biology-moc.md").write_text(
             "Introductory prose left by an older generation.\n"
             "- [[Wiki/biology|Biology]]\n  - [[Wiki/control-sample|Control sample]]\n", encoding="utf-8")
         self.run_script("skills/wiki-lint/scripts/scan_vault.py", wiki,
@@ -1687,11 +1687,11 @@ Reference label
         self.assertEqual(assigned["hierarchy_diagnostic"]["placement_gaps"][0]["missing_disciplines"], ["misc"])
         mocs = self.vault / "MOCs"
         mocs.mkdir()
-        misc = mocs / "misc.md"
+        misc = mocs / "misc-moc.md"
         self.write_discipline_root("misc")
         tree = "- [[Wiki/misc|Misc]]\n  - [[Wiki/reference-label|Reference label]]\n"
         misc.write_text(tree, encoding="utf-8")
-        entry.write_text(fallback.replace("parents: []", 'parents:\n  - "[[Wiki/misc]]"'), encoding="utf-8")
+        entry.write_text(fallback.replace("parents: []", 'parents:\n  - "[[misc]]"'), encoding="utf-8")
         placed = scan()
         self.assertEqual(placed["hierarchy_diagnostic"]["placement_gaps"], [])
         self.assertEqual(placed["hierarchy_diagnostic"]["moc_consistency_findings"], [])
@@ -1709,8 +1709,8 @@ Reference label
         # A specific tag places the note in its discipline MOC. Leaving its old
         # Misc listing behind must remain visible even if parents are correct.
         entry.write_text(original.replace("tags:\n", 'tags:\n  - "#computer-science"\n')
-                         .replace("parents: []", 'parents:\n  - "[[Wiki/computer-science]]"'), encoding="utf-8")
-        discipline = mocs / "computer-science.md"
+                         .replace("parents: []", 'parents:\n  - "[[computer-science]]"'), encoding="utf-8")
+        discipline = mocs / "computer-science-moc.md"
         self.write_discipline_root("computer-science")
         discipline.write_text(tree.replace("[[Wiki/misc|Misc]]", "[[Wiki/computer-science|Computer science]]"), encoding="utf-8")
         stale = scan()
@@ -1726,10 +1726,10 @@ Reference label
 
         # Replacing a specific tag with #misc requires a Misc placement again, even when the old
         # discipline MOC and its matching parent still exist.
-        entry.write_text(fallback.replace("parents: []", 'parents:\n  - "[[Wiki/computer-science]]"'), encoding="utf-8")
+        entry.write_text(fallback.replace("parents: []", 'parents:\n  - "[[computer-science]]"'), encoding="utf-8")
         returning = scan()
         self.assertEqual(returning["hierarchy_diagnostic"]["placement_gaps"][0]["missing_disciplines"], ["misc"])
-        entry.write_text(fallback.replace("parents: []", 'parents:\n  - "[[Wiki/misc]]"'), encoding="utf-8")
+        entry.write_text(fallback.replace("parents: []", 'parents:\n  - "[[misc]]"'), encoding="utf-8")
         misc.write_text(tree, encoding="utf-8")
         returned = scan()
         self.assertEqual(returned["hierarchy_diagnostic"]["placement_gaps"], [])
