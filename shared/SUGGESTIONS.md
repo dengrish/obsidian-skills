@@ -1,9 +1,10 @@
 # Shared suggestion logs
 
 Read this at the close of every skill run and before changing a suggestion
-log. All logs live in `<vault>/Reviews/` and contain **open issues only**.
-They are shared issue records, not fully generated notes: preserve existing
-open items and unrelated content rather than rebuilding a log from a scan.
+log. All logs live in `<vault>/Reviews/`: **open issues first, then a short
+record of fixed ones** that stays until the user removes it. They are shared
+issue records, not fully generated notes: preserve existing items and
+unrelated content rather than rebuilding a log from a scan.
 Routine skill runs improve their authorized vault outputs, not skill source
 files; record evidence-backed changes to skill behavior here.
 
@@ -52,7 +53,7 @@ underlying problem. A clean run may have nothing to add. An all-skipped run
 may close out from evidence already obtained; closeout does not authorize new
 audits or expand the run's scope.
 
-## Open-issue format and maintenance
+## Log format and maintenance
 
 Read the existing log first. Reuse one stable ID per problem within each log;
 match the underlying issue before allocating a new ID. Preserve unrelated and
@@ -71,31 +72,59 @@ A skill log has this form; substitute its actual skill name and issue data:
 ```markdown
 # <current-skill> suggestions
 
-Open issues only; remove an item once its resolution is verified.
+Open issues come first. A fixed issue moves to Fixed and stays until the user removes it.
 
-## [stable-id] Short actionable title
+## Open
+
+### [stable-id] Short actionable title
 
 - **Issue:** Concrete behavior that needs correction.
 - **Evidence:** Inspected artifact and the observed defect.
 - **Suggested change:** Specific improvement and its intended result.
 - **Reported by:** <observing-skill>
 - **Seen:** ×1 · first YYYY-MM-DD HH:MM · latest YYYY-MM-DD HH:MM
+
+## Fixed
+
+### [stable-id] Short actionable title
+
+- **Issue:** Concrete behavior that needed correction.
+- **Fixed in:** <plugin> <version> (<source commit>), YYYY-MM-DD
+- **Verified:** YYYY-MM-DD HH:MM — the check that confirmed the fix.
 ```
 
-The note-content log uses `# Wiki notes suggestions` with the same intro and
-item format. An empty log keeps its heading and intro, followed by a blank line
-and `No open suggestions.` Remove that empty-state sentence when adding an
-item. Do not add dated sections, resolved-history sections, or filler.
+The note-content log uses `# Wiki notes suggestions` with the same intro,
+sections, and item format; its **Fixed in** names the run that changed the
+notes, such as `wiki-lint run, YYYY-MM-DD HH:MM`. An empty section keeps its
+heading, followed by a blank line and `No open suggestions.` or
+`No fixed suggestions.`; remove that sentence when adding an item. Do not add
+dated sections or filler.
 
-Remove an item automatically once its specific resolution is verified; no
-additional confirmation is required. A planned change, a reported fix, a
-missing artifact, version bump, nonrecurrence alone, or a finding absent from
-an incomplete scan is not verified resolution. Check the affected behavior or content and relevant validation,
-then remove only that verified issue block, never clear a whole log merely
-because the current run looks clean. Keep unresolved portions as an open item.
-Report what was added, updated, or removed and the verification used; do not
-archive resolved entries in another generated report. Unchanged logs need no
-write, and empty canonical logs are kept rather than deleted.
+**Fixing.** Move an item to Fixed when a released plugin version or a
+completed run fixes it. Keep its heading and **Issue** line, drop the other
+lines, and add **Fixed in**. A skill-source fix counts once the version that
+contains it is released; a planned or unreleased change leaves the item open.
+Keep an unresolved portion as its own open item.
+
+**Verifying.** A run that checks a fixed item's behavior or content, with the
+relevant validation, adds **Verified**; no confirmation is required. A version
+bump, nonrecurrence alone, or a finding absent from an incomplete scan is not
+verification. A run that verifies an open item's fix moves it with both lines,
+naming the installed version when the fixing release is unknown. When the
+check fails, or a fixed issue recurs, move it back to Open under the same ID in
+the full form, with **Evidence** that names the earlier fix and a fresh
+**Seen** line.
+
+**Removing.** Skills never delete fixed items: the user removes them after
+review, or an explicitly requested cleanup does. Never clear a section because
+the current run looks clean. Report what was added, updated, moved, or
+verified and the check used; do not archive fixed items in another generated
+report. Unchanged logs need no write, and empty canonical logs are kept rather
+than deleted.
+
+**Older logs.** A log without `## Open` and `## Fixed` predates this format.
+The next run that writes it puts the existing items under `## Open`, one
+heading level lower, and adds an empty `## Fixed`.
 
 ## Publication and setup
 
@@ -135,5 +164,6 @@ substitute suggestions for authorized source fixes. Routine skill runs never
 edit skill sources. Do not create dated `obsidian-plugin-review-*` or
 `wiki-review-*` reports by default; the run response reports changes and checks.
 Leave existing reports untouched unless the user explicitly requests their
-migration or removal. Remove a corresponding open suggestion only after its
-specific fix is verified.
+migration or removal. When the fixing version is released, move each
+corresponding open suggestion to Fixed; add **Verified** only after its
+specific fix is checked.

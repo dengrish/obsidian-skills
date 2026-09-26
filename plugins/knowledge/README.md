@@ -27,8 +27,8 @@ Install this whole package so its relative skill and helper paths stay intact.
 Use the vault already selected for the task. Sources and reading notes retain
 their `Inbox/`, `Articles/` and `Sources/` routes; entries remain in `Wiki/`
 and generated navigation stays in `MOCs/`. This plugin leaves `Investments/`
-records outside its intake and repair scope. Open suggestions remain in
-`Reviews/<skill>-suggestions.md` under the [shared protocol](shared/SUGGESTIONS.md).
+records outside its intake and repair scope. Open and fixed suggestions are
+kept in `Reviews/<skill>-suggestions.md` under the [shared protocol](shared/SUGGESTIONS.md).
 
 ## Developing and packaging
 

@@ -275,7 +275,7 @@ it and any per-run path overrides through [RUNTIME.md](shared/RUNTIME.md).
 │   ├── <discipline>-moc.md   e.g. machine-learning-moc.md
 │   └── misc-moc.md           Wiki entries tagged #misc
 ├── add-to-wiki.md            wiki-add's requested-topic queue
-└── Reviews/                  open suggestion logs
+└── Reviews/                  suggestion logs: open issues, then fixed ones
     ├── <current-skill>-suggestions.md  one per skill
     └── wiki-notes-suggestions.md      note-content backlog
 ```
@@ -333,7 +333,7 @@ The full path/ownership table is in
 | [shared/CONVENTIONS.md](shared/CONVENTIONS.md) | Shared layout, schemas, enums, naming, links and ownership |
 | [shared/SAFE_WRITES.md](shared/SAFE_WRITES.md) | Exclusive creation, conditional replacement, cleanup and rollback safety |
 | [shared/PROVENANCE.md](shared/PROVENANCE.md) | Internal build identity and legacy note compatibility |
-| [shared/SUGGESTIONS.md](shared/SUGGESTIONS.md) | Reviews/ log attribution, open-issue lifecycle, format and publication |
+| [shared/SUGGESTIONS.md](shared/SUGGESTIONS.md) | Reviews/ log attribution, open-to-fixed lifecycle, format and publication |
 | `skills/<name>/scripts/` | Executable helpers and their embedded self-tests |
 | `shared/scripts/` | Canonical implementations used by several skills |
 | [AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md) | Repository contribution instructions, with one authored copy |
