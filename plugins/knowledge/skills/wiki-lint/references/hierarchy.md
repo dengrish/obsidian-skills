@@ -2,8 +2,8 @@
 
 Read this before creating or updating MOCs, recomputing `parents:`, or acting
 on `hierarchy_diagnostic`. A MOC is a **fully generated navigation note**: discipline trees live at
-`MOCs/<discipline-slug>.md`, and entries tagged only `#misc` have a root and title-sorted member list in
-`MOCs/misc.md`. Its complete content is a bullet outline derived from the
+`MOCs/<discipline-slug>-moc.md`, and entries tagged only `#misc` have a root and title-sorted member list in
+`MOCs/misc-moc.md`. Its complete content is a bullet outline derived from the
 current Wiki entries. It contains no ownership
 comments, H1, frontmatter, or separate prose sections.
 
@@ -114,9 +114,9 @@ do not create a dated review note in the vault.
 
 Render parents from the same final tree: each entry receives its nearest
 linked Wiki ancestor, skipping unlinked categories. A top-level branch below
-the root receives `[[Wiki/<discipline-slug>]]`. The root itself is the sole
+the root receives `[[<discipline-slug>]]`. The root itself is the sole
 completed-placement exception with `parents: []`; nothing self-parents.
-Misc members receive `[[Wiki/misc]]`, and its root keeps `[]`.
+Misc members receive `[[misc]]`, and its root keeps `[]`.
 
 Write populated parents as a block list of double-quoted wikilinks. Preserve
 unknown relationships until their QC or scope blocker is resolved. Recompute
@@ -124,16 +124,13 @@ stale, self-linked, or cyclic edges within the complete authorized closure.
 For genuine multiple placements, take the nearest-ancestor union. Never infer
 a parent from a discipline the entry's tags do not name.
 
-**Use unambiguous paths.** Root parents and generated MOC links use the actual
-extensionless vault-relative Wiki path, e.g. `[[Wiki/machine-learning]]`; every
-other parent uses the [§6 parent form](../../../shared/CONVENTIONS.md#6-wikilink-forms),
-and `item2/parents-form` reports any other spelling. MOC navigation links
-remain `[[MOCs/<discipline-slug>]]` and can never supply a parent.
-
-Before creating a same-named Wiki root, inventory bare links to the existing
-MOC across the vault. Preserve their proven navigation owner by qualifying
-them within the authorized scope; do not redirect them to the new entry.
-Existing ambiguous links need evidence, not a global string replacement.
+**Use unambiguous paths.** Every parent, a discipline root included, uses the
+[§6 parent form](../../../shared/CONVENTIONS.md#6-wikilink-forms): the bare
+slug, or the extensionless vault-relative Wiki path only when another file
+shares the basename. `item2/parents-form` reports any other spelling.
+Generated MOC links always use the Wiki path, e.g.
+`[[Wiki/machine-learning|Machine learning]]`. MOC navigation links are
+`[[MOCs/<discipline-slug>-moc]]` and can never supply a parent.
 
 ## Build or maintain the MOC files
 
@@ -170,10 +167,12 @@ slug.
 selected vault; create it only when absent. Reject a non-directory occupant,
 directory or leaf symlink, unreadable path, case/NFC-equivalent folder or file
 collision, and duplicate canonical/legacy MOC ownership. Inventory existing
-canonical paths and recognized legacy vault-root MOCs
-(`<vault>/<discipline>-moc.md`) before initializing a missing file. Preserve an
-unexpected legacy MOC and report its ownership conflict; never silently create
-a second MOC or move the legacy note during routine lint.
+canonical paths, recognized legacy vault-root MOCs
+(`<vault>/<discipline>-moc.md`), and previous-layout MOCs before initializing
+a missing file. Preserve an unexpected vault-root MOC and report its ownership
+conflict; never silently create a second MOC or move that note during routine
+lint. It shares the canonical basename, so bare links to that name stay
+ambiguous.
 Preserve the entire connected closure when ownership or readability is unsafe.
 
 Before introducing a new MOC basename, inspect links to any Wiki entry sharing
@@ -201,6 +200,26 @@ clear an existing misc file to an empty outline.
 An explicit request can create empty misc; never apply the inactive-discipline
 preservation rule to retain stale misc members.
 
+### Migrate the previous MOC layout
+
+Before knowledge 1.4.0 a discipline MOC was `MOCs/<discipline-slug>.md`,
+sharing its basename with the Wiki root, so root links carried `Wiki/`. The
+scanner reports each such file as a `previous-layout` inventory finding and
+in `legacy_moc_states`; while it exists, root parents stay qualified and bare
+root links stay ambiguous. Task 3 migrates it instead of initializing a
+second MOC, within an authorized closure for that discipline:
+
+1. When the old file is readable and uniquely owned and the canonical path is
+   free, move it there with `move_noreplace` under the shared
+   [safe-write protocol](../../../shared/SAFE_WRITES.md#remove-or-move-an-old-pathname-conditionally).
+2. Rewrite links that resolved to the old file, `[[MOCs/<discipline-slug>…]]`,
+   to the new name, preserving anchors and labels. A bare
+   `[[<discipline-slug>]]` could have meant either file; preserve and report it.
+3. Rescan, then respell the root's `Wiki/` parents that `item2/parents-form`
+   now reports. Give body and Related links to the root the bare target too,
+   preserving anchors and labels, unless another vault file shares its name.
+4. Regenerate the MOC as usual and report the migration.
+
 ## Read diagnostics and verify completion
 
 `hierarchy_diagnostic` describes current files; it never grants write scope.
@@ -211,20 +230,21 @@ actions.
 - `placement_gaps`: recompute included entries' complete unions; preserve
   out-of-scope findings.
 - `unresolved_parents`: a real Wiki file outranks an alias even when unparsed.
-  A legacy vault-root MOC (`legacy-moc`) is never a parent and cannot stand in
-  for a missing discipline root, and a `noncanonical-moc` is not a recognized
-  discipline MOC. Preserve uncertain targets; fix relationships only inside
+  A legacy vault-root or previous-layout MOC (`legacy-moc`) is never a parent
+  and cannot stand in for a missing discipline root, and a `noncanonical-moc`
+  is not a recognized discipline MOC. Preserve uncertain targets; fix relationships only inside
   the authorized closure.
 - `parent_state_findings`: roots have empty parents, misc members point only
-  to `Wiki/misc`, and a `moc-parent` is replaced by the discipline root or the
+  to `[[misc]]`, and a `moc-parent` is replaced by the discipline root or the
   nearest Wiki ancestor. Missing roots require the source-backed prerequisite
   above, never a fabricated hierarchy edge.
 - `moc_inventory_findings` and `legacy_moc_states` establish path ownership.
   Preserve and report unsafe or noncanonical paths, duplicates, legacy MOCs,
   unknown MOC files, and inactive canonical MOCs; they stay outside generated
   ownership and never authorize a move, deletion, competing MOC, or scope
-  expansion. Whole-note ownership applies only after a recognized discipline
-  or misc pathname has a unique safe owner.
+  expansion. The one move is the previous-layout migration above. Whole-note
+  ownership applies only after a recognized discipline or misc pathname has a
+  unique safe owner.
 - `moc_file_states`: missing or empty active files can be initialized, and
   readable recognized files can be regenerated completely. `unreadable`,
   including unsafe filesystem ownership, blocks the connected closure.
@@ -235,7 +255,7 @@ actions.
   derived hierarchy. Their absence alone does not prove complete placement.
 - Task 3 never rewrites entry links with `item10/moc` findings (in
   `problems`). Publishing a missing canonical MOC for an active in-closure
-  discipline lets an explicit `[[MOCs/<discipline>]]` link resolve on the
+  discipline lets an explicit `[[MOCs/<discipline>-moc]]` link resolve on the
   rescan; every other such link stays preserved and reported, never
   retargeted to another MOC or a same-named Wiki entry.
 

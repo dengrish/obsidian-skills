@@ -104,7 +104,7 @@ Do not reinterpret it as ordinary link hygiene or a text replacement.
 ## Files
 
 - Scan `<vault>/Wiki`, **not the vault root**, with `--vault '<vault>'` and, on every apply-capable run, `--images '<vault>/Sources/Images'` ([scanner CLI](references/scanner.md#cli)). Apply user folder overrides for this run without editing installed skills. Image-folder findings never authorize moving, renaming, or deleting anything.
-- Task 3 owns the generated MOCs `<vault>/MOCs/<discipline-slug>.md` and `MOCs/misc.md` ([hierarchy](references/hierarchy.md)). MOCs remain outside `Wiki/` so they are not scanned as entries. Unknown `MOCs/` files, legacy vault-root MOCs, and suggestion logs stay outside that ownership.
+- Task 3 owns the generated MOCs `<vault>/MOCs/<discipline-slug>-moc.md` and `MOCs/misc-moc.md` ([hierarchy](references/hierarchy.md)). MOCs remain outside `Wiki/` so they are not scanned as entries. Unknown `MOCs/` files, legacy vault-root MOCs, and suggestion logs stay outside that ownership.
 
 ## Scope and order of a run
 
