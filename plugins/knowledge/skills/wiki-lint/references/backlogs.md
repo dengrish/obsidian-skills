@@ -1,6 +1,6 @@
 # Run report and suggestion backlogs
 
-Read this when closing a maintenance run. This file owns the lint-specific report and proposal routing; [shared suggestion rules](../../../shared/SUGGESTIONS.md) own log paths, formatting, updates, and verified issue removal. A report-only/no-apply request does not authorize log writes.
+Read this when closing a maintenance run. This file owns the lint-specific report and proposal routing; [shared suggestion rules](../../../shared/SUGGESTIONS.md) own log paths, formatting, updates, and moving fixed issues. A report-only/no-apply request does not authorize log writes.
 
 - [Run report](#run-report)
 - [Proposal scope](#proposal-scope)
@@ -25,7 +25,7 @@ End every run with a single consolidated response in the conversation, not a dat
 - **Missing-entry candidates** — dangling-link targets that were dropped but look like real gaps (a concept several entries lean on, a heavily-referenced name), surfaced here and in `Reviews/wiki-notes-suggestions.md` with both [missing-entry routes](../../../shared/CONVENTIONS.md#9-ownership-split-for-linking). For the wiki-build route, name any local source known to cover the candidate, and for a source some entry already cites, suggest a [candidate-specific request](../../wiki-build/references/multi-source-synthesis.md) naming the candidate and that source rather than a whole-source re-run. Every new entity still needs sufficient source coverage; missing category slots use unlinked terms.
 - **Entries untouched** — count (the churn-avoidance signal: most of a steady-state vault).
 - **Notes for the user** — optional, nonblocking follow-ups only: authorization-gated retitles, alias removals, splits, merges, and other vault-wide refactors; unresolved disciplinary evidence; Related footers with more than roughly 12 links (the merge-growth bound in the builder's [Related footer rule](../../wiki-build/references/writing.md#the-related-footer)); `item3/report-only` date ordering; remote images; Obsidian-owned keys; missing, null, or unknown `read:` state; unreadable files; missing embedded-image files; and dates or equations inserted into `read: true` entries. These are traceability and user-owned-state notices, not a required review queue; the lint run completes without a response.
-- **Suggestions** — summarize new or updated issues by destination skill or note-content log, and name items removed after verifying their resolution. Distinguish an output repair from a fix to the skill that produced the defect. Say when no new issues surfaced; do not invent proposals or require follow-up before completing the run.
+- **Suggestions** — summarize new or updated issues by destination skill or note-content log, and name items moved to Fixed or verified there. Distinguish an output repair from a fix to the skill that produced the defect. Say when no new issues surfaced; do not invent proposals or require follow-up before completing the run.
 
 ## Proposal scope
 
@@ -66,7 +66,7 @@ verified under the shared rules. Preserve unresolved items and unknown content.
 
 ## Proposing note improvements
 
-Use `Reviews/wiki-notes-suggestions.md` for worthwhile improvements to specific notes that remain after the permitted local repairs because they need more source evidence, a user-owned state decision, or separately scoped work. Apply the shared format, deduplication, and verified-resolution rules. This content backlog is separate from the per-skill tooling logs.
+Use `Reviews/wiki-notes-suggestions.md` for worthwhile improvements to specific notes that remain after the permitted local repairs because they need more source evidence, a user-owned state decision, or separately scoped work. Apply the shared format, deduplication, and open-to-fixed rules. This content backlog is separate from the per-skill tooling logs.
 
 **What belongs here — broadly, anything that makes the notes better as a body of knowledge:**
 

@@ -58,11 +58,11 @@ staging follows [SAFE_WRITES.md](SAFE_WRITES.md).
 | `Investments/` | dated stock analyses at the top level, plus maintained stock notes, research evidence and source collections in dedicated subfolders; each investments skill governs its own format | stock-research (immutable dated records/evidence and maintained Stocks/ notes), feed-collect (maintained source collections); the user maintains `x-accounts.md` | the investments skills within their own scope |
 | `add-to-wiki.md` at the *vault root* | requested-topic queue | the user; wiki-add checks off successful or already-existing items only | wiki-add |
 | `MOCs/` | **flat**; fully generated `<discipline>-moc.md` nested outlines plus `misc-moc.md` for Wiki entries tagged `#misc`; no marker comments, H1, or frontmatter | wiki-lint | wiki-lint (navigation/hierarchy diagnostics only; reads each before an in-place update) |
-| `Reviews/` | `<current-skill>-suggestions.md` for installed skills, plus `Reviews/wiki-notes-suggestions.md` for Wiki note-content improvements; open issues only | skills under the attribution and setup rules in [SUGGESTIONS.md](SUGGESTIONS.md); pdf-organize repairs a log's navigation links during an authorized PDF rename, never its issue claims | skills consuming the relevant outputs or verifying a fix |
+| `Reviews/` | `<current-skill>-suggestions.md` for installed skills, plus `Reviews/wiki-notes-suggestions.md` for Wiki note-content improvements; open issues, then fixed ones | skills under the attribution and setup rules in [SUGGESTIONS.md](SUGGESTIONS.md); pdf-organize repairs a log's navigation links during an authorized PDF rename, never its issue claims | skills consuming the relevant outputs or verifying a fix |
 
 Suggestion logs use current skill names under `Reviews/`. The shared
-[SUGGESTIONS.md](SUGGESTIONS.md) owns attribution, open-item format, verified
-resolution cleanup, safe publication, and explicitly requested migration;
+[SUGGESTIONS.md](SUGGESTIONS.md) owns attribution, the log format, moving
+items from Open to Fixed, safe publication, and explicitly requested migration;
 do not duplicate those rules in skill-specific references.
 Unexpected root `<discipline>-moc.md` notes are preserved and reported; do not
 create a duplicate MOC or reinterpret their links as missing Wiki entries.
