@@ -189,12 +189,12 @@ LIST_FIELDS = {"aliases", "sources", "tags", "parents"}
 #: A key's colon must be followed by whitespace or the end of the line, as
 #: YAML requires; ``title:"x"`` is one plain scalar, not a key.
 _KEY_RE = re.compile(
-    r"^(?P<key>[A-Za-z_][A-Za-z0-9_-]*)\s*:(?=\s|$)(?P<rest>.*)$")
+    r"^(?P<key>[^\W\d][\w -]*?)\s*:(?=\s|$)(?P<rest>.*)$")
 #: The same key shape, INDENTED -- i.e. nested under another key, which the
 #: schema has no form for.  Reported by name rather than as an unparseable
 #: line, and never adopted as a field of this entry.
 _INDENTED_KEY_RE = re.compile(
-    r"^\s+(?P<key>[A-Za-z_][A-Za-z0-9_-]*)\s*:(?=\s|$)")
+    r"^\s+(?P<key>[^\W\d][\w -]*?)\s*:(?=\s|$)")
 _ITEM_RE = re.compile(r"^(?P<indent>\s*)-(?:\s+(?P<val>.*)|\s*)$")
 # [[target]] / [[target|label]] -- the leading (?<!!) rejects ![[embeds]]
 _WIKILINK_RE = re.compile(r"(?<!\!)\[\[([^\[\]]+?)\]\]")
@@ -1219,6 +1219,9 @@ def run_self_test():
               (fm.get("title"), fm.get("type"),
                sum("unparseable frontmatter line" in e for e in fm.errors)),
               (None, None, 2))
+        fm = parse_frontmatter('---\ntitle: "A"\ndate modified: 2026-01-05\n---\n')
+        check("a YAML key containing a space is a preserved field, not an error",
+              (fm.scalar("date modified"), fm.errors), ("2026-01-05", []))
 
         # -- sections ---------------------------------------------------------
         sec = split_sections("Prose one.\n\n**Related:** [[a|A]]\n\n---\n\n"

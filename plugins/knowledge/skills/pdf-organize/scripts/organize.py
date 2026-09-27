@@ -267,10 +267,12 @@ def _walk(root):
 
 
 def md_files(vault):
-    """Every `.md` under `vault`, symlinked folders included."""
-    for dirpath, _dirnames, filenames in _walk(vault):
+    """Every `.md` under `vault`, symlinked folders included; hidden ones
+    skipped, as in `vault_names`."""
+    for dirpath, dirnames, filenames in _walk(vault):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
         for f in filenames:
-            if f.lower().endswith(".md"):
+            if f.lower().endswith(".md") and not f.startswith("."):
                 yield os.path.join(dirpath, f)
 
 
@@ -1039,7 +1041,16 @@ def _reference_re(names):
     for stem, name in stems.items():
         for v in _name_variants(stem):
             slut[v] = name
-    parts = [r"(?<!%s)(?P<name>%s)(?!%s)" % (BOUNDARY, _alternation(lut), BOUNDARY)]
+    # An extensionless name (a browser's `download`) is also an ordinary word,
+    # so it matches only where a link target ends; `_qualifies_at` checks
+    # that a link opens before it.
+    words = {v for v, n in lut.items() if not os.path.splitext(n)[1]}
+    alternatives = [_alternation(set(lut) - words)] if len(words) < len(lut) else []
+    if words:
+        alternatives.append(r"(?:%s)(?=[ \t]*[\]\\|#)>]|[ \t]+[\"'(]|\?)"
+                            % _alternation(words))
+    parts = [r"(?<!%s)(?P<name>%s)(?!%s)"
+             % (BOUNDARY, "|".join(alternatives), BOUNDARY)]
     if stems:
         # The `open` group swallows an optional folder qualification, and the
         # rewrite puts it back verbatim — only the stem is replaced.
@@ -1090,10 +1101,16 @@ _QUAL_BEFORE = re.compile(
     r"(?:!?\[\[|\]\()(?!\w+:)([^\[\]()<>\n|#]*/)\Z"
     r"|\]\(<(?!\w+:)([^<>\r\n]*/)\Z")
 
+#: An unqualified link opener immediately before a matched basename.
+_OPEN_BEFORE = re.compile(r"(?:\[\[[ \t]*|\]\(<?)\Z")
+
 
 def _qualifies_at(body, start, name, dirs, note_dir):
     """Check the qualification and syntax abutting a basename match."""
     m = _QUAL_BEFORE.search(body, max(0, start - 400), start)
+    if not (m or os.path.splitext(name)[1]
+            or _OPEN_BEFORE.search(body, max(0, start - 400), start)):
+        return False                     # an extensionless word outside a link
     return _qualifies_qual((m.group(1) or m.group(2)) if m else None, name, dirs, note_dir,
                            allow_suffix=bool(m and m.group(0).lstrip("!").startswith("[[")))
 
@@ -1238,7 +1255,7 @@ def _debase_res(name):
     uri_guard = r"(?![A-Za-z][A-Za-z0-9+.-]*:|//)"
     return (re.compile(r"(!?\[\[)(%s[^\[\]\n|#]*/)(%s)(?=[ \t]*[\]\\|#])"
                        % (uri_guard, esc), re.I),
-            re.compile(r"(\]\()(%s[^()\s\n]*/)(%s)(?=[)?#])"
+            re.compile(r"(\]\()(%s[^()\s\n]*/)(%s)(?=[)?#]|[ \t]+[\"'(])"
                        % (uri_guard, esc), re.I),
             re.compile(r"(\]\(<)(%s[^<>\r\n]*/)(%s)(?=[>#])"
                        % (uri_guard, esc), re.I))
@@ -2005,6 +2022,15 @@ def plan_rename(vault, path, new_basename, dest=None):
             "may be renamed." % exc]
     if duplicate:
         return [], Edits(), duplicate
+    # A bare [[download]] means download.md when that note exists, so its
+    # links cannot be told apart from links to the extensionless source.
+    if not old_ext and _nfc_low(src_basename + ".md") in existing:
+        return [], Edits(), [
+            "extensionless source %r shares its name with the note %s, whose "
+            "bare [[%s]] links would be repointed at the PDF; give the source "
+            "a distinct name first." % (
+                src_basename, existing[_nfc_low(src_basename + ".md")][0],
+                src_basename)]
     ren = {b: _derive(old_stem, b, new_stem) for b in keyed.values()}
     directory_ren = {b: ren[b] for p, b in keyed.items()
                      if os.path.isdir(p) and not os.path.islink(p)}
@@ -3467,8 +3493,8 @@ def _selftest():
 
     # 3. Chapter-folder key is a prefix of every chapter filename.
     check("folder key does not eat chapter names",
-          rewrite_text("Sources/PDFs/UDL_2026/UDL_2026_01_Intro.pdf", ren, {}),
-          "Sources/PDFs/Prince_UDL_2026/Prince_UDL_2026_01_Intro.pdf")
+          rewrite_text("[[UDL_2026_01_Intro.pdf]] [[UDL_2026]]", ren, {}),
+          "[[Prince_UDL_2026_01_Intro.pdf]] [[Prince_UDL_2026]]")
 
     # 4. Old and new differ only in case.
     check("case-only rename",
@@ -3582,16 +3608,25 @@ def _selftest():
         _pdf.parent.mkdir()
         _pdf.write_bytes(b"%PDF-1.4\n")
         _note = Path(_v, "Citation.md")
-        _note.write_text("[[Inbox/download]]\n[read](Inbox/download)\n",
+        _note.write_text("[[Inbox/download]]\n[read](Inbox/download)\n"
+                         '[t](Inbox/download "Title")\n'
+                         "Then download it; see [[download manager]].\n",
                          encoding="utf-8")
         _dest = os.path.join(_v, "Sources", "PDFs")
         _moves, _edits, _blockers = rename_all(
             _v, str(_pdf), "Doe_Study_2025.pdf", apply=True, dest=_dest)
-        check("an extensionless PDF filing carries complete source links",
+        check("an extensionless PDF filing carries only its source links",
               (_blockers, _note.read_text(encoding="utf-8"),
                Path(_dest, "Doe_Study_2025.pdf").read_bytes(), _pdf.exists()),
-              ([], "[[Doe_Study_2025.pdf]]\n[read](Doe_Study_2025.pdf)\n",
+              ([], "[[Doe_Study_2025.pdf]]\n[read](Doe_Study_2025.pdf)\n"
+                   '[t](Doe_Study_2025.pdf "Title")\n'
+                   "Then download it; see [[download manager]].\n",
                b"%PDF-1.4\n", False))
+        Path(_v, "Inbox", "paper").write_bytes(b"%PDF-1.4\n")
+        Path(_v, "paper.md").write_text("A note.\n", encoding="utf-8")
+        check("an extensionless source named like a note is refused",
+              bool(plan_rename(_v, os.path.join(_v, "Inbox", "paper"),
+                               "Doe_Other_2025.pdf", dest=_dest)[2]), True)
 
     for _alias_kind, _source_name in (("directory", "Doe_Old_2025.pdf"),
                                      ("leaf", "Doe_Old_2025.pdf"),
@@ -5642,12 +5677,14 @@ def _selftest():
                    Path(_note).read_text(encoding="utf-8")),
                   (1, 1, True, True, b"unrelated PDF", _link) if _blocked else
                   (0, 0, False, False, b"unrelated PDF", _link))
-    # Hidden folders (a sync archive) are outside every vault inventory, so a
-    # copy there blocks neither the check nor filing under the same name.
+    # Hidden folders (a sync archive, a recovery copy) are outside every vault
+    # inventory, so a copy there blocks neither the check nor filing under the
+    # same name.
     with _tf.TemporaryDirectory(prefix="org-shared-hidden-test-") as _v:
         _stem = "Doe_Paper_2020"
         _incoming = _put(_v, "Inbox/%s.pdf" % _stem, b"incoming PDF")
         _archived = _put(_v, ".sync/Archive/Inbox/%s.pdf" % _stem, b"archived")
+        _put(_v, "Wiki/.organize-recovery-x/n.md", "[[%s.pdf]]\n" % _stem)
         _check_code, _, _ = _run_cli(["check", _incoming, "--vault", _v])
         _code, _stdout, _ = _run_cli([
             "rename", _incoming, "--vault", _v, "--to", _stem + ".pdf",

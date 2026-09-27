@@ -2131,17 +2131,14 @@ def find_figure_references(doc, page_idxs=None, caption_labels=None):
                 and base in caption_set):
             lab = base
             label = base
-        out[lab] = out.get(lab, 0) + 1
-        # The literal is recorded above whatever happens next, so a document
-        # that really does label figures `4-6` still matches its own caption.
-        #
-        # An en-dash span now reaches here as a whole label too (`LABEL_SEP`),
-        # where it used to arrive as its low endpoint with `REF_MORE_RE`
-        # expanding the rest. That is why the two spellings had to be given
-        # ONE answer rather than each keeping its own: they are now the same
-        # code path, and the ASCII one is the answer that leaves every
-        # document without an en-dash label reporting exactly as before.
-        for member in hyphen_range_members(label, hyphenated):
+        # A range records its members only; the literal is recorded when it is
+        # a label, so a document that labels figures `4-6` still matches its
+        # own caption. An en-dash span reaches here as a whole label too
+        # (`LABEL_SEP`), so both spellings share this one code path.
+        members = hyphen_range_members(label, hyphenated)
+        if not members:
+            out[lab] = out.get(lab, 0) + 1
+        for member in members:
             mlab = _normalize_ref(marker, member)
             out[mlab] = out.get(mlab, 0) + 1
 
@@ -2187,15 +2184,7 @@ def caption_coverage(doc, found_labels, page_idxs=None):
     found = set(found_labels)
     referenced = find_figure_references(doc, page_idxs,
                                        caption_labels=found_labels)
-    hyphenated = _uses_hyphen_labels(found)
-    missing = []
-    for k in sorted(referenced):
-        if k in found:
-            continue
-        members = hyphen_range_members(k, hyphenated)
-        if members and all(x in found for x in members):
-            continue      # "4-6" cited, captions 4, 5 and 6 all present
-        missing.append(k)
+    missing = [k for k in sorted(referenced) if k not in found]
     return referenced, missing
 
 
@@ -3898,18 +3887,9 @@ def run_self_test():
     # literal exact without requiring PyMuPDF's newer `Page.insert_htmlbox`
     # merely to construct a self-test fixture.
     edoc = _TextDoc("See Figures 1–3 and Figs. 5, 6 & 7.")
-    # The literal span `1-3` is recorded alongside its members, exactly as the
-    # ASCII-hyphen case below records `4-6` alongside 4, 5 and 6. It did not
-    # used to be: `REF_RE` stopped at `1` and `REF_MORE_RE` consumed the rest,
-    # so there was no whole-span label to record. `LABEL_SEP` admitted the en
-    # dash into the label (a book numbering `Figure 1–14` is otherwise
-    # undetectable), which puts both spellings on ONE code path — and a single
-    # path cannot record the literal for one spelling and drop it for the
-    # other. Unified on the ASCII answer, which is what every document without
-    # an en-dash label was already getting.
     check("an en-dash range expands to every figure inside it",
           sorted(find_figure_references(edoc, caption_labels=[])),
-          ["1", "1-3", "2", "3", "5", "6", "7"])
+          ["1", "2", "3", "5", "6", "7"])
     edoc = fitz.open()
     epage = edoc.new_page(width=612, height=792)
     epage.insert_text((72, 120), "See Figure 16-8.11 for the mechanism.",
@@ -3946,7 +3926,9 @@ def run_self_test():
                                                        "5", "6"])
     for want in ("4", "5", "6"):
         check("a hyphen range cites %s" % want, want in refs, True)
-    check("...and the literal form is recorded too", "4-6" in refs, True)
+    check("a prefixed range is not PARTIAL when every member has a caption",
+          caption_coverage(_TextDoc("Extended Data Figs. 2–4."),
+                           ["1", "S2", "S3", "S4"])[1], [])
     _, missing = caption_coverage(edoc, ["1", "2", "3", "4", "5", "6"])
     check("a complete paper citing 'Figures 4-6' is not PARTIAL", missing, [])
     _, missing = caption_coverage(edoc, ["1", "2", "3", "4", "6"])

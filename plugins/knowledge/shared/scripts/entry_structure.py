@@ -991,10 +991,11 @@ def opener_subject_date_status(opener, entry_type):
     The function does not decide whether the dates themselves are factually
     correct.
     """
-    bold = _BOLD_OUTER_RE.search(opener or "")
+    opener = " ".join(line.strip() for line in (opener or "").splitlines())
+    bold = _BOLD_OUTER_RE.search(opener)
     if not bold:
         return "missing"
-    tail = (opener or "")[bold.end():]
+    tail = opener[bold.end():]
     parenthetical = re.match(r"(\s*)\(([^)\n]*)\)", tail)
     if not parenthetical:
         return "missing"
@@ -1290,6 +1291,8 @@ def run_self_test(verbose=False):
     cases = [
         ("ordinary Person range", "Person",
          "**Isaac Newton** (1643–1727) was a physicist.", "valid"),
+        ("bold subject hard-wrapped across lines", "Event",
+         "The **Asilomar Conference on\nRecombinant DNA** (1975) met.", "valid"),
         ("living Person marker", "Person",
          "**Researcher** (b. 1947) works here.", "valid"),
         ("circa Person range", "Person",

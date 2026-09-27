@@ -300,9 +300,9 @@ def build_targets(index):
     """Flatten an index into probe targets.
 
     Returns a list of dicts:
-    ``{slug, via, alias, entry_slug, path}`` -- one for each filename stem
-    one for its canonical title when that derives to a different slug, and one
-    for each alias on each entry.
+    ``{slug, via, alias, entry_slug, path}`` -- one for each filename stem,
+    one for its slug form and one for its canonical title when each derives to
+    a different slug, and one for each alias on each entry.
     """
     _validate_index(index)
     targets = []
@@ -315,6 +315,7 @@ def build_targets(index):
                 "entry_errors": list(rec.get("errors") or ()),
             })
         title = rec.get("title")
+        title_slug = None
         if isinstance(title, str) and title.strip():
             try:
                 title_slug = slug_stem(title)
@@ -327,6 +328,20 @@ def build_targets(index):
                     "path": rec.get("relpath") or rec.get("path"),
                     "entry_errors": list(rec.get("errors") or ()),
                 })
+        # A hand-named stem such as "ROC curve" is also probed in slug form;
+        # that name is not canonical, so an exact match adjudicates.
+        try:
+            stem_slug = slug_stem(slug) if slug else None
+        except SlugError:
+            stem_slug = None
+        if stem_slug and stem_slug != title_slug and _fold(stem_slug) != _fold(slug):
+            targets.append({
+                "slug": stem_slug, "via": "filename", "alias": None,
+                "entry_slug": slug,
+                "path": rec.get("relpath") or rec.get("path"),
+                "entry_errors": list(rec.get("errors") or ())
+                + ["filename stem %r is not a canonical slug" % slug],
+            })
         for alias in rec.get("aliases") or []:
             alias = (alias or "").strip()
             if not alias:
@@ -944,6 +959,13 @@ def run_self_test():
                    for match in hand_result["matches"]),
                bool(hand_result.get("error"))),
               ("adjudicate", True, True))
+        with open(os.path.join(hand_named, "Weight tying.md"), "w",
+                  encoding="utf-8") as fh:
+            fh.write('---\ntags:\n  - "#statistics"\n---\nA body.\n')
+        check("a title-less hand-named file is probed in slug form",
+              check_candidate("Weight tying",
+                              _vault_index.build_index(hand_named))["verdict"],
+              "adjudicate")
 
         if hasattr(os, "symlink"):
             linked_wiki = os.path.join(tmp, "leaf-link")

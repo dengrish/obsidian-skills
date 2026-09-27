@@ -81,7 +81,7 @@ metadata, or a portable-equivalent (NFC, case-folded) duplicate basename as a
 | Scan result | Action |
 |---|---|
 | `new` | Continue. |
-| `done` | Batch: skip. Named file: obtain overwrite-or-skip authorization before replacing it, honoring authorization already given. |
+| `done` | Skip unless the request already authorizes replacing existing summaries; for a named file without that authorization, ask whether to overwrite or skip. |
 | `legacy` | Leave the older embed note untouched; report that its occupied path must be resolved. |
 | `collision` | Write nothing; report the existing origin, `source_conflicts`, `note_conflicts` or `source_gate_error`. Resolve `source_conflicts` by the [duplicate-basename remedy](../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first). A `source_gate_error` alone, such as an incomplete inventory or an external file with no vault owner, is a scope problem to fix before rescanning. Portable-equivalent article names need ownership cleanup. Never append `_2` to the summary, hand-rename another producer's note or pick either copy by directory order. |
 | `unorganized` | Stop for that PDF and route naming to `pdf-organize`. After it files the PDF, re-run the inventory and continue from the new path; the old path is no longer the source identity. |

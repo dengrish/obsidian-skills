@@ -179,7 +179,8 @@ a new entry (such as `11-related-display` or `18-label-target`), a merged
 entry's inherited state that the
 [merge rules](references/merge.md#frontmatter-and-related-footer) preserve
 (including `report_only: true` user state), and its missing `Person`/`Event`
-date. The [run report](references/review.md#run-report) says where each goes.
+date under the [rare-types report rule](references/rare-types.md#dates-in-the-opener-person-and-event).
+The [run report](references/review.md#run-report) says where each goes.
 
 Re-read every active-source passage behind a new or changed claim and compare
 the draft's conditions, population or version, time frame, causal direction,

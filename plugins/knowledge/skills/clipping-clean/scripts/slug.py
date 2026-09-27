@@ -139,7 +139,7 @@ PUBLICATION_TAIL = {
 # is handed to the operator in `notes`.
 AMBIGUOUS_TAIL = {"post", "press"}
 
-LEADING_ARTICLES = {"the", "a", "an"}
+LEADING_ARTICLES = {"the"}
 PUBLICATION_LEADS = {
     "journal", "works", "institute", "university", "college", "school",
     "department", "centre", "center", "academy", "society", "association",
@@ -400,6 +400,9 @@ def author_kind(name):
         return "publication", "ends in %r, a publication word" % toks[-1]
     if len(toks) > 1 and toks[0].lower() in LEADING_ARTICLES:
         return "publication", "starts with an article, which a personal name does not"
+    if len(toks) > 1 and toks[0].lower() in ("a", "an"):
+        return "unsure", ("starts with %r, which may be an article or a given "
+                          "name" % toks[0])
     # A lowercase word inside an otherwise capitalised name makes it a phrase
     # rather than a name ("Works in Progress"). Particles are the exception, which
     # is why "Ludwig van Beethoven", "van der Waals" and "Gerard 't Hooft" stay
@@ -924,6 +927,11 @@ def run_self_test():
            any("not a simple personal name" in note
                for note in uncertain_person["notes"])),
           ("York", True))
+    check("a leading 'An' may be a given name, so it is kept and flagged",
+          [(row["author_segment"], len(row["notes"])) for row in
+           (build_slug(author="An Wang", topic="Deep Dive", year=2025),
+            build_slug(author="The Atlantic", topic="Deep Dive", year=2025))],
+          [("Wang", 1), ("", 1)])
     for given in ("@asklivermore", "J", "J.", "Citrini Research",
                   "Google DeepMind"):
         check("an account/organization is not invented into a surname (%r)" % given,

@@ -31,20 +31,17 @@ $$
 **A useful standard equation may be added even when the source supplies none.**
 It must express this concept at this entry's scope, materially clarify it, and
 be a verified conventional relationship rather than a formalism invented for
-the note. Check a reliable primary or reference source and retain durable
-support in `sources:` under the normal source workflow when the original
-source does not establish it. Do not infer a population/sample denominator,
-loss function, or other substantive assumption from a vague mention. For
-example, the relationship below is useful when explaining standard deviation,
-but it does not select a sample or population variance formula:
+the note. As background under [prose principle 5(h)](writing.md#prose-principles),
+it needs no citation. Do not infer a population/sample denominator, loss
+function, or other substantive assumption from a vague mention. For example,
+the relationship below is useful when explaining standard deviation, but it
+does not select a sample or population variance formula:
 
 $$
 \sigma = \sqrt{\operatorname{Var}(X)}
 $$
 
-Bind $X$ and $\operatorname{Var}(X)$ in nearby prose. If the source's words
-already specify every operand and operation, they can supply the support;
-they still do not override the explanatory-value test.
+Bind $X$ and $\operatorname{Var}(X)$ in nearby prose.
 
 **A special-case equation keeps its conditions attached.** A source may explain a general concept through one loss function, distribution, or other restricted case. State that condition in the sentence introducing the display and keep the description, opener, and flashcard at the concept's actual scope. For example, squared-error gradient boosting fits residuals because those residuals are the negative loss gradient in that case; residual fitting must not become the unqualified definition of gradient boosting. If the source supplies only the special case, present it explicitly as an example or qualified case rather than silently generalizing it.
 

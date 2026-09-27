@@ -61,8 +61,7 @@ Use evidence already obtained within the requested maintenance scope. Logging
 an issue does not authorize an unrelated audit, new-source research, an entry
 refactor, or editing a skill's source. Ordinary runs propose tooling changes;
 an explicit plugin-development review can implement them under repository
-instructions. Remove a logged item only when its specific resolution has been
-verified under the shared rules. Preserve unresolved items and unknown content.
+instructions. Preserve unresolved items and unknown content.
 
 ## Proposing note improvements
 

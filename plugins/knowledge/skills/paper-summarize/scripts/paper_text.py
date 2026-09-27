@@ -74,6 +74,7 @@ _TRANSLATE = {
     0x00AD: None,        # soft hyphen
     0x2010: "-", 0x2011: "-", 0x2012: "-", 0x2013: "-", 0x2014: "-",
     0x2212: "-",         # minus sign, the classic false negative in a p-value
+    0x00B7: ".",         # middle dot, the Lancet-style decimal point
     0x2018: "'", 0x2019: "'", 0x201C: '"', 0x201D: '"',
     0x00A0: " ", 0x2007: " ", 0x2009: " ", 0x202F: " ",
 }
@@ -365,7 +366,7 @@ def sections(pages):
                 if cand.endswith((".", ";")) or cand[-1:].isdigit():
                     continue                  # a sentence, or a wrapped line
                 for part in re.split(r"[,/&]| and (?=\w)", cand):
-                    part = part.strip(" .:-")
+                    part = re.sub(r" statements?$", "", part.strip(" .:-"))
                     if not part or len(part.split()) > 4:
                         continue
                     for name, starts in _SECTIONS:
@@ -463,6 +464,7 @@ def run_self_test():
     case("soft-hyphen word",
          find(_PAGES, "versus chemotherapy alone")["pages"], [2])
     case("plain number", find(_PAGES, "13.2 months")["pages"], [2])
+    case("middle-dot decimal", find(["Recurrence 8\u00b72%"], "8.2%")["pages"], [1])
     case("case folded", find(_PAGES, "MEDIAN OVERALL SURVIVAL")["pages"], [2])
     case("case exact",
          find(_PAGES, "MEDIAN OVERALL SURVIVAL", fold_case=False)["pages"], [])
@@ -519,6 +521,8 @@ def run_self_test():
     case("roman-numbered heading", sections(["IV. Results"]).get("results"), [1])
     case("multi-word section name",
          sections(["Materials and Methods"]).get("methods"), [1])
+    case("a trailing Statement word",
+         sections(["Data Availability Statement"]).get("data"), [1])
     case("inline statements do not hide their short heading",
          sections(["Funding: This research was supported by the Example Research "
                    "Council through its investigator grant programme."]),

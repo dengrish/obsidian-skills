@@ -489,13 +489,15 @@ def _figure_slot_conflict(out_dir, stem, fig_suffix, out_path):
         )
 
     slot = figure_identity("%s_fig_%s" % (stem, fig_suffix))
+    # The legacy separator-less `<stem>_fig<label>` spelling holds it too.
+    compact = figure_identity("%s_fig%s" % (stem, fig_suffix))
     exact = os.path.abspath(os.fspath(out_path))
     direct = set(inventory.candidates)
     conflicts = []
     for candidate in inventory.candidates + inventory.blocked_matches:
         basename = os.path.basename(candidate)
         candidate_stem, _extension = os.path.splitext(basename)
-        if figure_identity(candidate_stem) != slot:
+        if figure_identity(candidate_stem) not in (slot, compact):
             continue
         candidate_abs = os.path.abspath(os.fspath(candidate))
         if candidate in direct:
@@ -1658,6 +1660,13 @@ def run_self_test():
         else:
             ok("a distinct NFD pathname remains a portable-slot twin",
                conflict is not None)
+        compact_dir = os.path.join(tmp, "CompactSlot")
+        os.makedirs(compact_dir)
+        with open(os.path.join(compact_dir, "Doe_Figs_2025_fig3.png"), "wb") as fh:
+            fh.write(b"a pre-convergence crop")
+        ok("a legacy separator-less name holds its figure slot",
+           _figure_slot_conflict(compact_dir, "Doe_Figs_2025", "3", os.path.join(
+               compact_dir, "Doe_Figs_2025_fig_3.png")) is not None)
 
         # Skip-existing is the default, and it is what keeps a hand-set crop
         # from being undone by the next batch run.

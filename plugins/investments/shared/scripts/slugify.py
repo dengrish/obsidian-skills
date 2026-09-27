@@ -207,9 +207,9 @@ def preprocess(title: str) -> str:
     # 1. microsign before anything that could NFKD it into Greek mu
     s = s.replace(MICRO_SIGN, "u")
 
-    # 2. Greek letters -> english name + separator hyphen
-    if any(ch in GREEK for ch in s):
-        s = "".join(GREEK.get(ch, ch) for ch in s)
+    # 2. Greek letters, including compatibility forms such as ϵ and 𝛼,
+    #    -> english name + separator hyphen
+    s = "".join(GREEK.get(unicodedata.normalize("NFKC", ch), ch) for ch in s)
 
     # 3/4. dashes and arrows
     s = "".join("-" if ch in DASHES or ch in ARROWS else ch for ch in s)
@@ -412,6 +412,7 @@ TEST_CASES = [
     ("ΐ notation", "iota-notation.md", "composed Greek with two accents"),
     ("ι\u0308\u0301 notation", "iota-notation.md", "same iota in decomposed form"),
     ("Ω law", "omega-law.md", "ohm sign is canonically equivalent to omega"),
+    ("ϵ-greedy", "epsilon-greedy.md", "compatibility-form epsilon U+03F5"),
 
     # --- FIX-C: final sigma folds exactly like medial sigma ------------------
     ("σ", "sigma.md", "medial sigma U+03C3"),

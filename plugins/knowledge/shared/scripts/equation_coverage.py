@@ -406,7 +406,7 @@ def _probability_fraction_operands_are_named(compact, context):
     return (any(marker in rhs for marker in
                 ("count", "freq", r"\sum", r"\mathbf{1}",
                  r"\mathbb{1}", r"\mathbbm{1}", "|c"))
-            or bool(re.search(r"(?:^|[^a-z\\])n(?:[_({]|(?=$|[^a-z]))",
+            or bool(re.search(r"(?:^|[^a-z\\])[nm](?:[_({]|(?=$|[^a-z]))",
                               rhs)))
 
 
@@ -1458,7 +1458,7 @@ def run_self_test(verbose=False):
          "- Then it divides by the standard deviation.", 0, ()),
         ("an adjacent display satisfies a prose calculation cue",
          "The class probability is the fraction of class-k instances in a "
-         "leaf.\n\n$$\np_k = n_k / n\n$$", 0, ()),
+         "leaf.\n\n$$\np_k = m_k / m\n$$", 0, ()),
         ("an adjacent unrelated display does not satisfy the prose cue",
          "The class probability is the fraction of class-k instances in a "
          "leaf.\n\n$$\nx = 1\n$$", 1, ()),
