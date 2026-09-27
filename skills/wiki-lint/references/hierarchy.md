@@ -253,11 +253,12 @@ actions.
   separately owned region.
 - `self_parented` and `parent_cycles` identify edges to recompute from the
   derived hierarchy. Their absence alone does not prove complete placement.
-- Task 3 never rewrites entry links with `item10/moc` findings (in
-  `problems`). Publishing a missing canonical MOC for an active in-closure
-  discipline lets an explicit `[[MOCs/<discipline>-moc]]` link resolve on the
-  rescan; every other such link stays preserved and reported, never
-  retargeted to another MOC or a same-named Wiki entry.
+- Outside the previous-layout migration above, Task 3 never rewrites entry
+  links with `item10/moc` findings (in `problems`). Publishing a missing
+  canonical MOC for an active in-closure discipline lets an explicit
+  `[[MOCs/<discipline>-moc]]` link resolve on the rescan; every other such
+  link stays preserved and reported, never retargeted to another MOC or a
+  same-named Wiki entry.
 
 After a completed closure, every included entry with valid membership has no placement gap,
 unresolved/invalid parent, self-parent, or cycle. Every active included MOC is

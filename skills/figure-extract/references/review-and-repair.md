@@ -58,10 +58,10 @@ mislabelled and delete it only with authorization. Later runs keep
 
 For an encrypted PDF, or a scan that needs OCR, make a readable copy under
 the exact vault basename in a fresh child of the run's `<scratch>`, never
-inside the vault, where it would duplicate the basename and block both. Run
-the batch and any explicit repairs with `--src` set to that copy and the
-canonical `--out`, leave the original unchanged, and remove the copy once its
-crops are verified.
+inside the vault, where it would duplicate the basename and block both. Point
+the batch (`--src`) and any explicit repair (its PDF argument) at that copy,
+with the canonical `--out`, leave the original unchanged, and remove the copy
+once its crops are verified.
 
 ## Ownership, legacy adoption, and review records
 

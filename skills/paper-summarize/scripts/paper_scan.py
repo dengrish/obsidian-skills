@@ -229,7 +229,7 @@ def label_sort_key(label):
     return (rank, nums or (_BIG,), panel, variant, label)
 
 
-_FIG_SEP = re.compile(r"_fig(?:ure)?s?[._-]?", re.I)
+_FIG_SEP = re.compile(r"_fig(?:ure)?(?:s(?=[._-]))?[._-]?", re.I)
 
 
 def figures_for(attachments, stem):
@@ -1297,6 +1297,13 @@ def run_self_test():
     if [f["label"] for f in figures_for(_img, "Straße_Trial_2025")] != ["2"]:
         bad += 1
         print("FAIL casefold expansion shifted the figure label")
+    # §8c: a legacy compact supplementary name keeps its S namespace.
+    for name in ("Doe_Legacy_2025_fig1.png", "Doe_Legacy_2025_figS1.png"):
+        open(os.path.join(_img, name), "w", encoding="utf-8").close()
+    n += 1
+    if [f["label"] for f in figures_for(_img, "Doe_Legacy_2025")] != ["1", "S1"]:
+        bad += 1
+        print("FAIL a compact legacy supplementary name lost its S prefix")
     variant_dir = os.path.join(_d, "images-variant")
     os.makedirs(variant_dir)
     for name in ("Doe_Variant_2025_fig_1-38.png",

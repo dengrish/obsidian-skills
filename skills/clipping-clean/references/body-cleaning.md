@@ -86,7 +86,7 @@ def collapse_stacked_markers(ln):
     prefix, body = (mq.group(1), mq.group(2)) if mq else ('', ln)
     m = re.match(r'^(\s*)((?:[-*]\s+|\d+\.\s+){2,})(.*)$', body)
     if m:
-        body = f"{m.group(1)}- {m.group(3)}"
+        body = f"{m.group(1)}{m.group(2).split()[-1]} {m.group(3)}"
     return prefix + body
 
 def collapse_overindent(ln):

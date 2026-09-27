@@ -760,11 +760,12 @@ def split_frontmatter(text, bad=None):
     return text[4:m.start()].strip("\n"), body, blank_after
 
 # Key regex shared by parse_fm, the key_order scan and the item-2 quoting scan, so
-# all three see the same keys.  It admits digits and hyphens ("f1-score:"); the old
+# all three see the same keys, as vault_index's _KEY_RE does.  It admits digits,
+# hyphens, spaces and non-ASCII letters ("f1-score:", "date modified:"); the old
 # ^([A-Za-z_]+): silently dropped such keys, so an off-schema key with a digit in it
 # was never reported and never counted as a duplicate.  As YAML requires, the
 # colon must be followed by whitespace or end of line: `title:"x"` is not a key.
-FM_KEY = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*:(?=\s|$)(.*)$")
+FM_KEY = re.compile(r"^([^\W\d][\w -]*?)\s*:(?=\s|$)(.*)$")
 FM_ITEM = re.compile(r"^\s*-(?:\s+(.*)|\s*)$")
 
 def unquote(raw):
@@ -1248,6 +1249,16 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
         masked = mask_character_spans(
             masked, markdown_shortcut_reference_spans(masked, reference_labels))
         masked = mask_character_spans(masked, markdown_url_spans(masked))
+        # A wikilink cannot be written inside LaTeX math, display or inline,
+        # but a surface that holds a whole math span (a LaTeX title) can be.
+        math_spans = [m.span() for m in re.finditer(r"\$\$.*?\$\$", masked, re.S)]
+        math_spans += [m.span() for m in _DUPLICATE_INLINE_MATH_RE.finditer(
+            mask_character_spans(masked, math_spans))]
+
+        def _in_math(start, end):
+            return any(ms < end and start < me and not (start <= ms and me <= end)
+                       for ms, me in math_spans)
+
         reference_definition_lines = {
             line_i for line_i, line in enumerate(prose.split("\n"))
             if _MARKDOWN_REFERENCE_DEFINITION_LINE_RE.match(line)
@@ -1303,6 +1314,8 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
 
         for start, end, surface, matched in _scan_surface_spans(
                 masked, by_tokens, maxwords):
+            if _in_math(start, end):
+                continue
             global_hits.append((start, end))
             tgt = surf_map.get(surface)
             if not tgt or tgt == sl: continue
@@ -1344,7 +1357,8 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
         for start, end, surface, matched in _scan_surface_spans(
                 masked, display_tokens, display_words):
             owner = displays[surface]
-            if owner in late or not _earlier_mention(owner, start, end, surface):
+            if (owner in late or _in_math(start, end)
+                    or not _earlier_mention(owner, start, end, surface)):
                 continue
             if any(g_start <= start and end <= g_end
                    and (g_end - g_start) > (end - start)
@@ -3169,7 +3183,8 @@ def scan(wiki, images=None, vault=None):
         # ---- item 16: opener title text plus type-specific emphasis ----------
         # A masked leading comment is blank; the opener starts at visible text.
         opener = opening_paragraph(e["prose"].lstrip())
-        mo = _BOLD_OUTER_RE.search(opener)
+        mo = _BOLD_OUTER_RE.search(
+            " ".join(line.strip() for line in opener.splitlines()))
         # The PRESENCE half: an opener with no bold span at all used to be
         # silent (the coherence check below is gated on a bold to compare),
         # so the one entry that skipped the bold entirely was the one
@@ -3281,16 +3296,18 @@ def scan(wiki, images=None, vault=None):
                                              f'the canonical heading is exactly "## Flashcards"; fix the '
                                              f'heading in place, do NOT add a second section'))
             # the ## Flashcards heading must sit under a '---' separator line on its own
-            pre = e["body"][:e["flash_off"]].rstrip()
+            _visible = mask_body_comments(e["body"])
+            pre = _visible[:e["flash_off"]].rstrip()
             pre_nb = [l for l in pre.split("\n") if l.strip()]
             if not pre_nb or pre_nb[-1].strip() != "---":
                 problems.append((sl,"item19","## Flashcards not preceded by a '---' separator line on its own (Body Structure → Flashcards)"))
             else:
                 _flash_i = e["flashcard_indexes"][0]
                 _lines = e["body_lines"]
+                _visible_lines = _visible.split("\n")
                 _separator_i = next(
                     (i for i in range(_flash_i - 1, -1, -1)
-                     if _lines[i].strip()), None)
+                     if _visible_lines[i].strip()), None)
                 if (_separator_i is not None
                         and (_separator_i + 1 >= len(_lines)
                              or _lines[_separator_i + 1].strip())):
@@ -3416,7 +3433,7 @@ def scan(wiki, images=None, vault=None):
                 if "**" in line3: l3.append("bold")
                 elif re.search(r"\*\w[^*]*\*", line3): l3.append("italic")
                 if l3:
-                    problems.append((sl,"item19",f'{tag} line 3 (term) has {", ".join(l3)} — the term is the plain-text primary answer derived from the title (no markup, including LaTeX)'))
+                    problems.append((sl,"item19",f'{tag} line 3 (term) has {", ".join(l3)} — line 3 must be plain text (no markup, including LaTeX); remove only the markup'))
                 _line3_faults.append((tag, line3, flashcard_line3_fault(
                     line3, title, e["aliases"], opener, e["type"])))
             # The line-3 term contract binds the primary card only. A legacy
@@ -4082,7 +4099,7 @@ def scan(wiki, images=None, vault=None):
                 if len(owners) == 1
                 and fold_name(next(iter(owners))) not in ambiguous_files}
     # Alias-mediated bare-noun surfaces: a single all-lowercase word reached
-    # only through an alias ("covariate", "regressor"); a COMMON_NOUNS word
+    # only through a qualified entry's alias ("covariate"); a COMMON_NOUNS word
     # never becomes a surface at all (_index_surfaces).  These match
     # everywhere, nearly always fail the closeness bar, and — candidates
     # carrying no memory — resurfaced for identical re-judgment every run.
@@ -4091,12 +4108,16 @@ def scan(wiki, images=None, vault=None):
     # TAGGED `bare_noun_alias` so the report can batch them.  The same
     # single-word shape reached through a TITLE is already suppressed or
     # surfaced by COMMON_NOUNS and item 5's bare-slug check.
+    _qualified = {e["slug"] for e in diagnostic_records
+                  if has_parenthetical(e["title"])}
     bare_noun_alias = {s for s in _alias_surf - _title_surf
-                       if re.fullmatch(r"[a-z]+", s)}
+                       if re.fullmatch(r"[a-z]+", s)
+                       and surface_owners[s] <= _qualified}
     def _backfill_owner(target, entry):
         record, status, _path = _resolve_entry_file(target, _entry_vault_target(entry))
         if record is not None and status == "parsed":
-            return record["slug"]
+            return (None if fold_name(record["slug"]) in ambiguous_files
+                    else record["slug"])
         key = entry_link_path_key(target)
         if (status == "missing" and "/" not in key
                 and key not in ambiguous_aliases and key in alias_of):
@@ -4418,6 +4439,9 @@ def scan(wiki, images=None, vault=None):
                     elif _alias_key in alias_of:
                         _record = entries[alias_of[_alias_key][0]]
                         _status = "parsed"
+                if (_status == "parsed" and _record is not None
+                        and fold_name(_record["slug"]) in ambiguous_files):
+                    _status = "ambiguous"
                 if _status != "parsed" or _record is None:
                     # This line is visibly a link, not a plain category term,
                     # but its hierarchy identity is unknown. Descendants may
@@ -4489,7 +4513,10 @@ def scan(wiki, images=None, vault=None):
             _stack.append({"linked_slug": _linked_slug, "safe": _node_safe})
             _previous_level = _level
 
-        _required = {sl for sl, e in entries.items() if _discipline in _entry_moc_roots(e)}
+        # A duplicated basename is item5's finding; its MOC link stays unresolved.
+        _required = {sl for sl, e in entries.items()
+                     if _discipline in _entry_moc_roots(e)
+                     and fold_name(sl) not in ambiguous_files}
         for _missing_slug in sorted(_required - _tree["present"]):
             _moc_add(
                 _moc_state, "missing-entry",
@@ -4892,7 +4919,9 @@ def run_self_test():
                     "Linked explains a mechanism. Visible supplies a contrast.\n"
                     r"Literal \[[ghost]] and live \![[escaped]] syntax." + "\n")
             _st_write(comments_vault, "probe-" + kind + ".md",
-                      _st_entry("Probe " + kind, body))
+                      _st_entry("Probe " + kind, body).replace(
+                          "\n---\n\n## Flashcards",
+                          "\n---\n\n" + opening + " note " + closing + "\n\n## Flashcards"))
         result = scan(comments_vault)
         check("commented templates and escaped syntax create no repair findings",
               [p for p in result["problems"] if p["slug"].startswith("probe-")], [])
@@ -5277,6 +5306,22 @@ def run_self_test():
               [key for key in _st_keys(alias_path_res, "qualified-reader")
                if key.startswith("item10/") or key in ("item11", "item18")],
               ["item10/alias"])
+        # A qualified link or MOC bullet can open the second file of a
+        # case-variant pair, whose slug is not the kept inventory key.
+        v_case_root = os.path.join(tmp, "v2-case-variant-path")
+        v_case = os.path.join(v_case_root, "Wiki")
+        for rel in ("Kernel-density.md", "methods/kernel-density.md"):
+            _st_write(v_case, rel, _st_entry(
+                "Kernel density", "**Kernel density** smooths a histogram."))
+        _st_write(v_case, "histogram.md", _st_entry(
+            "Histogram", "**Histogram** bins data; a density estimate is "
+            "smoother, as a [[methods/kernel-density|density estimate]] shows."))
+        _st_write(v_case_root, "MOCs/statistics-moc.md",
+                  "- [[Wiki/methods/kernel-density|Kernel density]]\n"
+                  "  - [[Wiki/histogram|Histogram]]\n")
+        check("a qualified link or MOC bullet to a case-variant duplicate "
+              "stays ambiguous instead of aborting the scan",
+              "item5" in _st_keys(scan(v_case), "kernel-density"), True)
 
         # A case-sensitive filesystem can hold two entries whose only pathname
         # difference is the Markdown extension's case. Link identity correctly
@@ -7176,6 +7221,9 @@ def run_self_test():
             "Later, **Principal component analysis** (PCA) appears as an "
             "abbreviation example.",
             aliases=('"pca"',), card="Principal component analysis"))
+        _st_write(v, "wrapped-meeting.md", _st_entry(
+            "Wrapped meeting", "The **Wrapped\nmeeting** (1975) was a worked example.",
+            type_="Event"))
         _st_write(v, "whole.md", _clean)
         res = scan(v)
         check("a missing title: key is an item2 — without it item 5, item 16 "
@@ -7194,6 +7242,8 @@ def run_self_test():
         check("a whitespace-only blank line ends the opener for item 16",
               "no bold span" in _st_msg(
                   res, "unbolded-whitespace", "item16"), True)
+        check("a bold title hard-wrapped inside the opener is found with its date",
+              _st_keys(res, "wrapped-meeting"), [])
         check("a later paragraph cannot establish the flashcard counterpart",
               "item19" in _st_keys(res, "counterpart-whitespace"), False)
         check("a missing type: key is an item2 too",
@@ -7525,17 +7575,22 @@ def run_self_test():
             aliases=('"covariate"',)))
         _st_write(v, "gradient-descent.md", _st_entry(
             "Gradient descent", "**Gradient descent** is a worked example."))
+        _st_write(v, "principal-component-analysis.md", _st_entry(
+            "Principal component analysis",
+            "**Principal component analysis** is a worked example.",
+            aliases=('"pca"',)))
         _st_write(v, "user.md", _st_entry(
             "User", "**User** is a worked example. Each covariate feeds the "
-                    "model, and gradient descent fits it."))
+                    "model, and gradient descent fits it after PCA."))
         res = scan(v)
         _bf = {(b["target"], b["bare_noun_alias"]) for b in res["backfill_candidates"]
                if b["slug"] == "user"}
-        check("an alias-mediated bare-noun surface is tagged bare_noun_alias "
-              "and a title surface is not",
+        check("an alias-mediated bare-noun surface of a qualified entry is "
+              "tagged bare_noun_alias; a title or unqualified alias is not",
               (("feature-machine-learning", True) in _bf,
-               ("gradient-descent", False) in _bf),
-              (True, True))
+               ("gradient-descent", False) in _bf,
+               ("principal-component-analysis", False) in _bf),
+              (True, True, True))
 
         v = os.path.join(tmp, "v13-validation")
         for i, source in enumerate(("[[Doe_X_2025.pdf]]", "[[Doe_X_2025.pdf#page=0]]",
@@ -8930,6 +8985,9 @@ def run_self_test():
         _st_write(v, "label-x.md", _st_entry(
             "Label (machine learning)", "A **label** is the answer a model "
             "learns. The word *target* is a near-synonym."))
+        _st_write(v, "k-nearest-neighbors.md", _st_entry(
+            "$k$-nearest neighbors",
+            "**$\\boldsymbol{k}$-nearest neighbors** is a worked example."))
         for slug_, prose in (
                 ("late", "**Late** fits a model on a training set first. It "
                          "then reuses the [[training-set|training set]]."),
@@ -8946,7 +9004,12 @@ def run_self_test():
                                 "sample of [[feature-x|features]]."),
                 ("synonym", "**Synonym** fits the noise-free target first. "
                             "It then scores each observed "
-                            "[[label-x|target]].")):
+                            "[[label-x|target]]."),
+                ("math", "**Math** fits $f(\\text{training set})$ and\n\n$$\n"
+                         "\\text{training set} = D\n$$\n\nreuses the "
+                         "[[training-set|training set]]."),
+                ("math-only", "**Math only** minimizes $L(\\text{training set})$."),
+                ("latex-title", "**Latex title** votes with $k$-nearest neighbors.")):
             _st_write(v, slug_ + ".md", _st_entry(slug_.replace("-", " ").capitalize(), prose))
         res = scan(v)
         check("a plain mention before the first link is a late link; a later "
@@ -8956,6 +9019,12 @@ def run_self_test():
                ("late", "early", "hyphen", "apposition", "display",
                 "quiet-alias", "synonym")],
               [True, False, False, False, True, False, False])
+        check("LaTeX math is neither an earlier mention nor a backfill surface, "
+              "but a LaTeX title's own surface is",
+              ("item10/late-link" in _st_keys(res, "math"),
+               [(row["slug"], row["target"]) for row in res["backfill_candidates"]
+                if row["slug"].startswith(("math", "latex"))]),
+              (False, [("latex-title", "k-nearest-neighbors")]))
         # Discipline-root backfill: tagged for batch review; a field name
         # inside a compound ("cell biology") is not the root at all.
         v = os.path.join(tmp, "root-backfill")

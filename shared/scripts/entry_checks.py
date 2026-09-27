@@ -724,7 +724,7 @@ def organism_common_name_bound(entry_type, title, description, opener,
     """
     label = " ".join((display or "").split())
     if (entry_type != "Organism"
-            or not re.fullmatch(r"[A-Za-z][A-Za-z'’ -]{0,49}", label)):
+            or not re.fullmatch(r"[^\W\d_](?:[^\W\d_]|['’ -]){0,49}", label)):
         return False
     valid = set()
     for surface in organism_common_name_surfaces(
@@ -1149,6 +1149,11 @@ def run_self_test(verbose=False):
           [organism_common_name_bound(*mouse, label)
            for label in ("mouse", "Mice", "rodent", "[[x]]")],
           [True, True, False, False])
+    check("an accented bound common name is a valid label",
+          organism_common_name_bound(
+              "Organism", "Euterpe oleracea",
+              "Euterpe oleracea is the açaí palm, a palm tree.", "",
+              "açaí palm"), True)
 
     # item 19
     one = [("flashcard", "Bias–variance trade-off", "fault")]

@@ -123,8 +123,9 @@ report. Unchanged logs need no write, and empty canonical logs are kept rather
 than deleted.
 
 **Older logs.** A log without `## Open` and `## Fixed` predates this format.
-The next run that writes it puts the existing items under `## Open`, one
-heading level lower, and adds an empty `## Fixed`.
+The next run that writes it replaces the old intro with the current one, puts
+the existing items under `## Open`, one heading level lower, and adds an empty
+`## Fixed`.
 
 ## Publication and setup
 

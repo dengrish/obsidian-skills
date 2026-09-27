@@ -875,13 +875,15 @@ and wiki-lint owns vault-wide discovery; both record the proposal in
 [SUGGESTIONS.md](SUGGESTIONS.md#destination-and-attribution). Neither removes
 it during ordinary generation or lint. An approved removal first identifies the
 canonical owner. It then inventories and rewrites every real reference that
-resolves through the alias under the rules of
+resolves through the alias, and every link to this entry whose alias label
+names a different entity, under the rules of
 [retitle step 3](#retitling-an-existing-wiki-entry) below, including its
 surfaces outside `Wiki/`, its exclusions for text that merely matches, and its
-immutable-record and write-scope blockers. A blocked dependency retains the
-alias until it can be repaired. Verify that no ambiguous owner or inbound
-alias-target link remains, and only then delete the alias. A duplicate
-spelling inside one entry is a format defect, not this semantic-removal case.
+investment-note and write-scope blockers. A blocked dependency retains the
+alias until it can be repaired. Verify that no ambiguous owner, inbound
+alias-target link, or such mislabelled link remains, and only then delete the
+alias. A duplicate spelling inside one entry is a format defect, not
+this semantic-removal case.
 
 #### Retitling an existing Wiki entry
 
@@ -898,7 +900,7 @@ human review.
    destination; never pick one owner by directory order.
 2. Rebuild the entry coherently under the new canonical title. Preserve its
    `created:`, sources, review state, scheduling metadata, appearance/publish
-   properties, and source-supported content. A retitle alone does not reset
+   properties, and substantive content. A retitle alone does not reset
    `read:`. Keep the old slug as an alias only when it is still a valid
    same-entity name; a proven wrong or misleading name is not retained merely
    to make old links resolve.
@@ -907,24 +909,26 @@ human review.
    relative Markdown links, `parents:`, and every affected MOC. Include owners
    outside `Wiki/`; a clean Wiki scan does not cover all these surfaces.
    Rewrite only references that resolve to this exact owner, preserving
-   display labels, headings, block anchors, and surrounding bytes. Do not
+   display labels, headings, block anchors, and surrounding bytes; a
+   Related-footer label becomes the target's canonical title. Do not
    rewrite source evidence, image embeds, external URLs, code, or suggestion-log
    examples because their text happens to match. Actual resolving references
-   in these files remain dependencies. An immutable investment record (§1) or
+   in these files remain dependencies. An investment note (§1) or
    an owner outside the authorized write scope blocks retirement of the old
    target; do not widen an explicit scope restriction or seek renewed approval
    for already-authorized repairs.
 4. Stage all complete bytes privately outside recursively scanned folders and
-   on each target's filesystem. Publish the destination entry exclusively,
-   conditionally replace every snapshotted inbound/hierarchy file, and rebuild
-   the connected Task-3 hierarchy closure from one tree. Re-read every result.
+   on each target's filesystem. Publish the destination entry exclusively and
+   conditionally replace every snapshotted inbound/hierarchy file. Re-read
+   every result.
 5. Re-scan before cleanup. Every changed link must resolve uniquely to the new
    entry, the old slug must have no unresolved inbound surface, and the new
    entry must pass the current entry rules. Only then conditionally remove the
    exact old entry version. If an intervening edit, ambiguous link, failed
    rewrite, or blocked restoration appears, retain both paths or the named
    recovery copy and report the mixed state. Never overwrite a later occupant
-   or delete the old entry merely to make the rename appear complete.
+   or delete the old entry merely to make the rename appear complete. Then
+   rebuild the connected Task-3 closure from the resulting tree and re-scan.
 
 Multi-file publication is not transactional; roll back only files whose
 published snapshots remain unchanged.
@@ -1259,8 +1263,7 @@ exception before retiring an old clipping note path.
 
 The same-stem candidate check above is mechanized on **both** sides —
 `wiki-build/scripts/lint_entry.py` as `4-duplicate-source` and
-`wiki-lint/scripts/scan_vault.py` as `item4`; the *form* half of item 4
-(extension present, anchor shape) is the scanner's alone. Neither report
+`wiki-lint/scripts/scan_vault.py` as `item4`. Neither report
 authorizes deletion without the provenance check above.
 
 **Depended on by:** wiki-build (writes them, and decides prior coverage only
@@ -1601,7 +1604,7 @@ from sources they already cite under the source-backed correction protocol; a
 new source routes to wiki-build. An explicitly requested structural refactor
 is executed under the refactor protocol, closing every affected reference and
 hierarchy surface. An approved rename repairs its dependencies, including the
-MOCs, subject to the immutable-record and write-scope blockers in the retitle
+MOCs, subject to the investment-note and write-scope blockers in the retitle
 protocol. A producer-mapped external-artifact repair is narrower: it rewrites
 only exact reported Wiki/MOC dependencies, re-runs the producer's probe, and
 leaves final artifact cleanup to that producer. Date and review-state

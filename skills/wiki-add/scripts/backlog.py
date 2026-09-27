@@ -706,6 +706,12 @@ def run_self_tests():
 
 
 def main(argv=None):
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if callable(reconfigure):
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (OSError, ValueError):
+            pass
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--test", action="store_true", help="run temporary-file self-tests")
     commands = parser.add_subparsers(dest="command")

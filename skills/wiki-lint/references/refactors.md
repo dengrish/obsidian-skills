@@ -45,7 +45,7 @@ affected entry and supported by its durable source.
    token equality never authorizes a rewrite. If an actual dependency owner is
    outside explicit write scope, report that blocker and retain the old entry.
    Existing authorization that covers the refactor and its dependencies needs
-   no additional approval. Historical notes in vault-root `Investments/`
+   no additional approval. Notes in vault-root `Investments/`
    remain outside this repair scope, including through linked-folder aliases.
    If one references an identity being retired, preserve that record and retain
    the referenced old entry; report the unresolved dependency.
@@ -84,8 +84,7 @@ filesystem transaction, so order prevents a disappearing target:
 
 1. Publish every new entry exclusively and conditionally replace retained
    entries from the exact snapshots used to plan them.
-2. Rewrite each inspected inbound link, then run Task 3 over the complete
-   connected hierarchy closure so `parents:` and MOCs come from one tree.
+2. Rewrite each inspected inbound link.
 3. Re-scan and independently refresh the complete live-reference inventory.
    Verify that every changed link or transclusion resolves with its retained
    anchor, every moved source-specific claim keeps its source, and no obsolete destination

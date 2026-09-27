@@ -15,8 +15,9 @@ description: >
 
 Read [shared/RUNTIME.md](../../shared/RUNTIME.md) once per task for vault
 selection, script paths, Python dependencies, and host tools. Use one
-interpreter with PyMuPDF and Pillow for all commands. Before extracting, run
-`python3 '<plugin>/shared/scripts/check_parsers.py'` with it under the
+interpreter with the plugin's `requirements.txt` installed for all commands.
+Before extracting, run `python3 '<plugin>/shared/scripts/check_parsers.py'`
+with it under the
 [parser-check rule](../../shared/RUNTIME.md#only-for-pdf-and-image-workflows);
 while it fails, extract nothing. The shipped scripts are the implementation;
 do not copy their caption detection or crop logic into a separate script.
@@ -98,10 +99,11 @@ source PDF revised at the same path (a verified skip proves ownership, not
 freshness), follow
 [ownership, adoption and review records](references/review-and-repair.md#ownership-legacy-adoption-and-review-records).
 
-Extract a PDF alone with `--ed-prefix ED` when its captions number Extended
-Data figures alongside its main figures, or when `<stem>_fig_ED*` files exist;
-the default folds Extended Data into `S` (`SI` stays distinct). For a switch
-after a default run, follow [Extended Data and Supplementary figures](references/review-and-repair.md#extended-data-and-supplementary-figures).
+Extract a PDF alone with `--ed-prefix ED` when `<stem>_fig_ED*` files exist,
+or when no `<stem>_fig*` crop exists yet and its captions number Extended Data
+figures alongside its main figures; the default folds Extended Data into `S`
+(`SI` stays distinct). After a default run, switch only a PDF whose summary
+prints an `--ed-prefix ED` rerun, following [Extended Data and Supplementary figures](references/review-and-repair.md#extended-data-and-supplementary-figures).
 Use `--keep-frame` to keep a publisher's surrounding frame, which is otherwise
 cropped away.
 

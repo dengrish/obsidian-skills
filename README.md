@@ -300,8 +300,7 @@ wiki-lint's [MOC procedure](skills/wiki-lint/references/hierarchy.md#build-or-ma
 own the details.
 
 Every skill can record evidenced improvements in its own suggestion log or
-the log of the skill that produced or governs an output it used. Verified
-resolutions are removed automatically; logs hold only open issues. Routine runs
+the log of the skill that produced or governs an output it used. Routine runs
 do not edit skill sources. An explicit plugin review fixes the source
 repository, never an installed cache, with validation and Git history instead
 of creating dated review reports; existing reports remain untouched. The

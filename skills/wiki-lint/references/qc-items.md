@@ -341,8 +341,8 @@ A simple verbal rule such as hard voting can remain prose-only even when every
 operation is specified. Do not manufacture an argmax/indicator formalism for
 it. Insert a useful equation in ordinary maintenance only when the note's own
 prose supplies every operand, operation, and essential assumption. A verified
-standard equation absent from that prose may be worthwhile, but acquiring its
-support follows the source-backed or builder workflow authorized for this run.
+standard equation absent from that prose may be worthwhile, but adding it
+follows the source-backed or builder workflow authorized for this run.
 Never invent a denominator or silently generalize a restricted case.
 
 Preserve assumptions that determine the mathematical claim, following the

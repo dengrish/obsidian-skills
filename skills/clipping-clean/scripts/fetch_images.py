@@ -220,7 +220,7 @@ from atomic_move import (LinkUnavailable, PublicationConflict, file_identity,
 from dedup_index import is_research_extract_text, normalize_url, read_source
 from figure_state import MANIFEST_FILE, read_manifest
 from yaml_scalars import parse_source_fields
-from entry_structure import mask_body_comments
+from entry_structure import _escaped_at, mask_body_comments
 
 
 def _name_key(name):
@@ -1076,6 +1076,9 @@ def _mask_inline_code(text):
         start = text.find("`", cursor)
         if start < 0:
             break
+        if _escaped_at(text, start):
+            cursor = start + 1
+            continue
         width = 1
         while start + width < len(text) and text[start + width] == "`":
             width += 1
@@ -1143,6 +1146,7 @@ def _rendered_embed_basenames(body):
         mask_body_comments(body, mask_code=True)))
     out = []
     fence = None
+    previous = ""
     for line in visible.splitlines(keepends=True):
         stripped = line.rstrip("\r\n")
         if fence is not None:
@@ -1156,8 +1160,13 @@ def _rendered_embed_basenames(body):
             marker = opened.group(1)
             fence = (marker[0], len(marker))
             continue
-        if line.startswith("\t") or line.startswith("    "):
+        # An indented list continuation renders; other indentation may be code.
+        if ((line.startswith("\t") or line.startswith("    "))
+                and not re.match(r" {0,3}(?:[-*+]|\d{1,9}[.)])(?:\s|$)|\s",
+                                 previous)):
             continue
+        if stripped.strip():
+            previous = stripped
         for match in re.finditer(r"(?<!\\)!\[\[([^\]\r\n]+)\]\]", line):
             target = match.group(1).split("|", 1)[0].split("#", 1)[0].strip()
             # The plugin's attachment convention is filename-only. Accepting
@@ -1170,7 +1179,6 @@ def _rendered_embed_basenames(body):
     return frozenset(out)
 
 
-_DEPENDENCY_SKIP_DIRS = frozenset((".git", ".obsidian", ".trash", "node_modules"))
 _MARKDOWN_LINK_TARGET = re.compile(
     r"!?\[[^\]\r\n]*\]\(\s*(?:<(?P<angle>[^>\r\n]+)>|(?P<plain>[^)\s\r\n]+))")
 _MARKDOWN_REFERENCE_TARGET = re.compile(
@@ -1304,7 +1312,7 @@ def _stable_markdown_text(path):
 
 
 def _vault_markdown_files(vault):
-    """Yield every vault Markdown file, following folder links without cycles."""
+    """Yield every visible vault Markdown file, following folder links without cycles."""
     def failed(exc):
         raise ValueError("cannot scan vault directory %r: %s" %
                          (getattr(exc, "filename", None) or vault, exc)) from exc
@@ -1321,8 +1329,8 @@ def _vault_markdown_files(vault):
             dirs[:] = []
             continue
         seen.add(identity)
-        dirs[:] = [name for name in dirs
-                   if name.casefold() not in _DEPENDENCY_SKIP_DIRS]
+        dirs[:] = [name for name in dirs if not name.startswith(".")
+                   and name.casefold() != "node_modules"]
         for name in files:
             if name.casefold().endswith(".md"):
                 yield os.path.join(root, name)
@@ -2896,7 +2904,12 @@ def _plan_slug_rename(attachments, old_slug, new_slug, *, sources,
         raise ValueError("--sources is required for every rename so PDF-owned "
                          "figures cannot be mistaken for clipping images")
     if not os.path.isdir(sources):
-        raise ValueError("--sources is not a directory: %r — cannot verify PDF ownership" % sources)
+        # Like preflight, an absent canonical Sources/PDFs holds no PDFs.
+        if os.path.lexists(sources) or os.path.abspath(sources) not in [
+                os.path.join(root, "Sources", "PDFs")
+                for root in _attachment_vault_roots(attachments)]:
+            raise ValueError("--sources is not a directory: %r — cannot verify PDF ownership" % sources)
+        sources = None
     if sources and _pdf_named(sources, old_slug):
         return [{"from": old_slug + "_fig_*", "to": None, "ok": False,
                  "error": "refusing to rename: %s.pdf exists in %s, so these "
@@ -3758,6 +3771,14 @@ continues here`
               "%% ![[Comment_fig_2.png]]\n"
               "<code>![[Html_fig_3.png]]\n"),
           frozenset())
+    check("indented list continuations still establish ownership",
+          _rendered_embed_basenames(
+              "1. Open.\n\n    ![[List_fig_1.png]]\n2. Save.\n\t![[List_fig_2.png]]\n"
+              "\nPara\n\n    ![[Code_fig_3.png]]\n"),
+          frozenset(("List_fig_1.png", "List_fig_2.png")))
+    check("an escaped backtick does not hide later embeds",
+          _rendered_embed_basenames("Press the \\` key.\n\n![[After_fig_1.png]]\n"),
+          frozenset(("After_fig_1.png",)))
     dependency_fixture = """[[Old_Slug_2025|old note]]
 ![[Sources/Images/Old_Slug_2025_fig_1.png#crop|figure]]
 [note](../Articles/Old_Slug_2025.md)
@@ -5342,6 +5363,17 @@ continues here`
         check("code and comments do not manufacture dependency blockers",
               dependency_status(dep_images, dep_owner,
                                 "Old_Dependency_2025")["blockers"], [])
+        os.makedirs(os.path.join(dep_vault, ".stversions"))
+        touch(os.path.join(dep_vault, ".stversions", "reference.md"),
+              b"[[Old_Dependency_2025]]\n")
+        check("hidden folders such as sync archives are not dependency blockers",
+              dependency_status(dep_images, dep_owner,
+                                "Old_Dependency_2025")["blockers"], [])
+        os.rmdir(dep_pdfs)
+        check("an absent canonical Sources/PDFs holds no PDFs, as in preflight",
+              [row["ok"] for row in _plan_slug_rename(
+                  dep_images, "Old_Dependency_2025", "New_Dependency_2026",
+                  sources=dep_pdfs, owner_note=dep_owner)], [True])
 
         handoff_vault, handoff_images, handoff_pdfs, handoff_owner, handoff_names = \
             canonical_rename_fixture("two-phase", "Old_Handoff_2025")

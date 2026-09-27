@@ -605,8 +605,10 @@ def adopt_legacy_files(out_dir, entries, eligible_stems, manifest):
                 "--adopt-legacy %r: %r is not the exact on-disk stem of one "
                 "eligible, uniquely identified PDF in this run" %
                 (entry, stem))
+        # A legacy panel such as `1a` keeps its lowercase letter.
+        panel = label[-1] if len(label) > 1 and "a" <= label[-1] <= "z" else ""
         try:
-            suffix = validated_figure_suffix(label)
+            suffix = validated_figure_suffix(label[:-1] if panel else label) + panel
         except ValueError as exc:
             raise ValueError("--adopt-legacy %r: %s" % (entry, exc)) from exc
         filename = "%s_fig_%s.png" % (stem, suffix)
@@ -1750,13 +1752,12 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
                 if f.startswith(book.stem + "_fig")
             )
             if stale:
-                print(f"    NOTE: {len(stale)} figure(s) under the BOOK's stem are still "
-                      f"in {out_dir}")
-                print(f"    from a run before this rule existed — duplicates of the "
-                      f"chapter figures.")
-                print(f"    They are unused and unreportable. After verifying their origin,")
-                print(f"    either keep the book with --include-split-books or remove exactly")
-                print(f"    {book.stem}_fig* only when that cleanup is authorized.")
+                print(f"    NOTE: {len(stale)} figure(s) under the BOOK's stem are in "
+                      f"{out_dir}")
+                print(f"    from a whole-book run (the book named directly, or "
+                      f"--include-split-books).")
+                print(f"    Remove exactly {book.stem}_fig* only when that cleanup is "
+                      f"authorized and no note embeds them.")
         print()
 
     if n_zero:
@@ -3189,6 +3190,13 @@ def run_self_test():
               (["Doe_Prior_2025_fig_1.png", "Doe_Prior_2025_fig_2.png"],
                ["Doe_Prior_2025_fig_1.png", "Doe_Prior_2025_fig_2.png"]))
         second_legacy.unlink()
+        panel_legacy = Path(seed_dir) / "Doe_Prior_2025_fig_1a.png"
+        shutil.copyfile(prior, panel_legacy)
+        check("a legacy panel keeps its letter when adopted",
+              [item[1] for item in adopt_legacy_files(
+                  seed_dir, ["Doe_Prior_2025:1a"], {"Doe_Prior_2025"}, {})],
+              ["Doe_Prior_2025_fig_1a.png"])
+        panel_legacy.unlink()
         existing_manifest = {"Other_Study_2025_fig_1.png": "a" * 64}
         existing_adoption = adopt_legacy_files(
             seed_dir, ["Doe_Prior_2025:1"], {"Doe_Prior_2025"},
