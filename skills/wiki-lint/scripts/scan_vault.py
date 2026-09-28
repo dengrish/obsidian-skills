@@ -1193,6 +1193,21 @@ def _compound_modifier_before(text, start):
     return match.group(1).lower() not in _NON_MODIFIER_WORDS
 
 
+# Italic spans (`*term*`, `_term_`), for the late-link exclusions below.
+_ITALIC_SPAN_RE = re.compile(
+    r"(?<![*\w])\*(?![*\s])([^*\n]+?)(?<![\s*])\*(?![*\w])"
+    r"|(?<![_\w])_(?![_\s])([^_\n]+?)(?<![\s_])_(?![_\w])")
+
+
+def _italic_inner_spans(text):
+    """``(start, end)`` of the text inside each italic span of ``text``."""
+    spans = []
+    for match in _ITALIC_SPAN_RE.finditer(text):
+        group = 1 if match.group(1) is not None else 2
+        spans.append((match.start(group), match.end(group)))
+    return spans
+
+
 def _late_link_index(displays):
     """Token index for first-link display surfaces (common nouns included).
 
@@ -1325,15 +1340,19 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
         proposed = set()
         late = set()
         global_hits = []
+        italic_spans = _italic_inner_spans(masked)
 
         def _earlier_mention(owner, start, end, surface):
             """A plain mention before the first link that could carry it.
 
             Alias-only bare nouns of qualified destinations (`covariate`), a
             word inside a hyphenated compound (`batch GD` in `mini-batch GD`),
-            a discipline root inside a compound (`cell biology`), and a
-            descriptor immediately followed by the link itself (`fission yeast
-            [[schizosaccharomyces-pombe|…]]`) are not separate first mentions.
+            a discipline root inside a compound (`cell biology`), a descriptor
+            immediately followed by the link itself (`fission yeast
+            [[schizosaccharomyces-pombe|…]]`), part of a longer italic term
+            (`*blending training set*`), and an italic gene symbol before a
+            link to its Gene/Protein entry (`*cdc2*` before the Cdc2 kinase)
+            are not separate first mentions.
             """
             link_start = first_link[owner][0]
             if start >= link_start or surface in quiet_surfaces:
@@ -1343,6 +1362,11 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
                 return False
             if owner in root_targets and _compound_modifier_before(masked, start):
                 return False
+            for inner_start, inner_end in italic_spans:
+                if inner_start <= start and end <= inner_end and (
+                        inner_end - inner_start > end - start
+                        or (entries.get(owner) or {}).get("type") == "Gene/Protein"):
+                    return False
             return link_start - end > 3
 
         for start, end, surface, matched in _scan_surface_spans(
@@ -9259,6 +9283,9 @@ def run_self_test():
         _st_write(v, "k-nearest-neighbors.md", _st_entry(
             "$k$-nearest neighbors",
             "**$\\boldsymbol{k}$-nearest neighbors** is a worked example."))
+        _st_write(v, "cdc2.md", _st_entry(
+            "Cdc2", "**Cdc2** is a worked example.", type_="Gene/Protein",
+            tags=('"#biology"',)))
         for slug_, prose in (
                 ("late", "**Late** fits a model on a training set first. It "
                          "then reuses the [[training-set|training set]]."),
@@ -9280,7 +9307,15 @@ def run_self_test():
                          "\\text{training set} = D\n$$\n\nreuses the "
                          "[[training-set|training set]]."),
                 ("math-only", "**Math only** minimizes $L(\\text{training set})$."),
-                ("latex-title", "**Latex title** votes with $k$-nearest neighbors.")):
+                ("latex-title", "**Latex title** votes with $k$-nearest neighbors."),
+                ("longer-italic", "**Longer italic** fits a *blending training "
+                                  "set* built from the [[training-set|training "
+                                  "set]]."),
+                ("gene-symbol", "**Gene symbol** names the *cdc2* gene, which "
+                                "encodes the [[cdc2|Cdc2]] kinase."),
+                ("italic-same", "**Italic same** fits a *training set* first. "
+                                "It then reuses the [[training-set|training "
+                                "set]].")):
             _st_write(v, slug_ + ".md", _st_entry(slug_.replace("-", " ").capitalize(), prose))
         res = scan(v)
         check("a plain mention before the first link is a late link; a later "
@@ -9290,6 +9325,12 @@ def run_self_test():
                ("late", "early", "hyphen", "apposition", "display",
                 "quiet-alias", "synonym")],
               [True, False, False, False, True, False, False])
+        check("a longer italic term and an italic gene symbol before a "
+              "Gene/Protein link are not earlier mentions; an italic mention "
+              "of the target itself still is",
+              ["item10/late-link" in _st_keys(res, slug_) for slug_ in
+               ("longer-italic", "gene-symbol", "italic-same")],
+              [False, False, True])
         check("LaTeX math is neither an earlier mention nor a backfill surface, "
               "but a LaTeX title's own surface is",
               ("item10/late-link" in _st_keys(res, "math"),
