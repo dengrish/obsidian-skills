@@ -849,9 +849,20 @@ def _predicate_is_negated(text, start, end):
         or _FOLLOWING_REJECTION_RE.search(suffix))
 
 
+# An asymptotic bound (``O(1/\epsilon)``, ``T(n) = \Theta(n^2)``) states a
+# complexity, which the equation policy keeps inline; it is never a defining
+# relation that needs its own display.
+_ASYMPTOTIC_BOUND_RE = re.compile(
+    r"^\s*(?:[^=<>$]+(?:=|\\in|\\sim)\s*)?"
+    r"(?:O|\\mathcal\s*\{\s*O\s*\}|\\Theta|\\Omega)\s*(?:\\left\s*)?"
+    r"\((?:[^()]|\([^()]*\))*(?:\\right\s*)?\)\s*$")
+
+
 def _inline_formula_is_substantive(formula):
     value = (formula or "").strip()
     if _SIMPLE_NUMERIC_ASSIGNMENT_RE.fullmatch(value):
+        return False
+    if _ASYMPTOTIC_BOUND_RE.fullmatch(value):
         return False
     if _SIMPLE_NOTATIONAL_REFERENCE_RE.fullmatch(value):
         return False
@@ -1348,6 +1359,15 @@ def run_self_test(verbose=False):
          "Each instance starts with weight $w^{(i)} = 1/m$.", 1, ()),
         ("a simple example assignment stays inline",
          "For example, choose $k = 3$ neighbors.", 0, ()),
+        ("a big-O bound after a definition cue stays inline",
+         "When the learning rate is fixed, reaching the optimum can take "
+         "$O(1/\\epsilon)$ iterations.", 0, ()),
+        ("an assigned big-Theta bound stays inline",
+         "The running time is $T(n) = \\Theta(n \\log n)$.", 0, ()),
+        ("a calligraphic big-O bound stays inline",
+         "The cost is $\\mathcal{O}(mn^2)$ per step.", 0, ()),
+        ("a rate formula next to a bound is still reported",
+         "The rate is $r = (1 - \\eta)/m$.", 1, ()),
         ("a subscripted numeric value stays inline after a definition cue",
          "The initial value is $x_0 = 1$.", 0, ()),
         ("a Greek numeric value stays inline after a definition cue",
