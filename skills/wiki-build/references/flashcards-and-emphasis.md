@@ -8,7 +8,7 @@
 
 ### Card shape
 
-The `## Flashcards` section ends the entry. After the Related footer come a blank line, `---`, a blank line, the heading and a blank line, then the cards, one blank line apart:
+The `## Flashcards` section ends the entry. After the Related footer come a blank line, `---`, a blank line, the heading and a blank line, then the card:
 
 ```markdown
 **Related:** [[…]] · [[…]] · [[…]]
@@ -26,52 +26,36 @@ A card is three content lines with no blank line between them. The vault's Space
 
 ### Line 1: the cue
 
-On the primary card, line 1 is the definition a learner recalls from the term and the cue that leads back to exactly one term. It is one sentence with a capitalized first word and a final period, about 20 words outside math.
+Line 1 is the definition a learner recalls from the term and the cue that leads back to exactly one term. It is one sentence with a capitalized first word and a final period, about 20 words outside math.
 
 **Kind plus essential property.** Line 1 reads naturally after `<term> is`: it names the kind of thing (method, metric, organelle, model organism) and the one property that sets it apart, such as its mechanism, function, defining relation or significance. A Person's cue states the contribution; an Organism's, what it is and why it is studied; a Device's, how it works; a Dataset's, what it contains and benchmarks. Never discriminate by a measurement, date, count, etymology or anecdote unless that number is the identity (MNIST's 28×28 digit images). State the ordinary case plainly under [principle 3](writing.md#prose-principles): no hedge, exception, minority case or trailing semicolon clause. When the plain property is false for the typical case, choose another essential property.
 
 **Sibling check.** Before finalizing line 1, read line 1 of the closest existing cards: the entry's Related targets and the other members of its family. Confirm that the new cue fits none of them; a Bagging cue must not also fit Boosting. Do not name the neighbours. Within a family of variants, reuse the family's lead phrase and put the one differing property early: "The gradient descent variant that computes each update from a single randomly picked training instance."
 
-**Leak-free.** Line 1 never contains the answer: the title or its base term, an alias, or the line-3 counterpart, compared after normalizing Unicode, case, punctuation and whitespace. Component words of a compound title stay allowed; a Key-value cache cue may say "keys and values". A cue also leaks when it rebuilds the name by expanding an acronym ("machine learning operations practice" for MLOps), reordering all its words, or swapping a synonym into each word of the title or an alias; state the cause or mechanism instead. When the name is itself the definition (Mean absolute error), an easy cue is acceptable, and an understanding card tests what the name does not reveal.
+**Leak-free.** Line 1 never contains the answer: the title or its base term, an alias, or the line-3 counterpart, compared after normalizing Unicode, case, punctuation and whitespace. Component words of a compound title stay allowed; a Key-value cache cue may say "keys and values". A cue also leaks when it rebuilds the name by expanding an acronym ("machine learning operations practice" for MLOps), reordering all its words, or swapping a synonym into each word of the title or an alias; state the cause or mechanism instead. When the name is itself the definition (Mean absolute error), an easy cue is acceptable.
 
 **Markup.** No Markdown or HTML: inline LaTeX is the only markup line 1 accepts, under [line-1 equation coverage](#line-1-equation-coverage).
 
 ### Line 2: the separator
 
-Line 2 is exactly one of three values, alone on its line:
+Line 2 is exactly one of two values, alone on its line:
 
-- `??` on the primary card: the plugin's reversed card, reviewed from cue to answer and from answer to cue, with one schedule per side. Never simplify a primary card's `??` to `?`; that halves the card and strands its second schedule.
-- `?` on an understanding card: the plugin's one-directional card.
-- `!!` on a card the user has disabled. Only the user writes `!!` or restores the original separator. Every workflow preserves it and reads the card's kind from line 1: a question marks an understanding card.
+- `??`: the plugin's reversed card, reviewed from cue to answer and from answer to cue, with one schedule per side. Never simplify a card's `??` to `?`, which the plugin reviews in one direction only; that halves the card and strands its second schedule.
+- `!!` on a card the user has disabled. Only the user writes `!!` or restores `??`, and every workflow preserves it.
 
-wiki-build writes `??` and `?` as the card set requires and never writes `!!`. When a section has no `??` card and a `?` card carries a statement cue and the canonical answer, restoring its `??` is the one change to a valid separator a workflow makes.
+wiki-build writes `??` and never writes `!!`. When the entry's card carries any other line 2, such as `?`, restoring its `??` is the one change to a separator a workflow makes; a legacy extra card keeps its separator (see [card set](#card-set)).
 
 ### Line 3: the answer
 
-Line 3 of the primary card is the entry's canonical title as plain text: `title:` verbatim, the base term of a parenthetical-disambiguated title (`Feature`, not `Feature (machine learning)`), or the meaning-preserving plain form of a mathematical title (`k-nearest neighbors` for `$k$-nearest neighbors`; see [plain forms](special-titles.md#base-term-and-mathematical-plain-forms)). It takes no markup of any kind, LaTeX included. Attachments are not answer markup; plainness never removes them.
+Line 3 is the entry's canonical title as plain text: `title:` verbatim, the base term of a parenthetical-disambiguated title (`Feature`, not `Feature (machine learning)`), or the meaning-preserving plain form of a mathematical title (`k-nearest neighbors` for `$k$-nearest neighbors`; see [plain forms](special-titles.md#base-term-and-mathematical-plain-forms)). It takes no markup of any kind, LaTeX included. Attachments are not answer markup; plainness never removes them.
 
 Append one counterpart in parentheses only when the opener binds it directly to the title and its slug is in `aliases:`. Three bindings qualify: an acronym and its full form (`**Principal component analysis** (PCA)` gives `Principal component analysis (PCA)`), a `(short for *…*)` expansion (`AdaBoost (adaptive boosting)`), and an italic scientific abbreviation (`Escherichia coli (E. coli)`). Nothing else goes in parentheses: not a spelling variant, plural or related form, and not a synonym's abbreviation (`Precision` stays `Precision` although `ppv` abbreviates *positive predictive value*).
 
 ### Card set
 
-Every entry has one **primary card**: the reversed `??` definition card, first in the section, testing the entity's main claim (the scope of the body's opening sentence). An entry whose body teaches more than its definition may add up to two **understanding cards** after it, one-directional `?` cards:
+Every entry has exactly one card: the reversed `??` definition card, testing the entity's main claim (the scope of the body's opening sentence). A [discipline root](../../wiki-lint/references/hierarchy.md#establish-discipline-roots) needs none, and an existing root card stays.
 
-```markdown
-Why does raising the decision threshold lower recall?
-?
-Fewer instances are predicted positive, so more actual positives are missed.
-```
-
-Line 1 is one question ending in `?`; it may name the entity but never contains its own answer. Line 3 answers in one plain line of about 15 words, or a short inline-LaTeX formula, with no other markup. Each card tests one claim the body states (principle 5(h) background included), chosen in this order:
-
-1. how or why it works;
-2. how it differs from its most confusable sibling, which needs no entry when the body states the difference;
-3. its defining formula, when a learner should be able to write it from memory (a defining relation, not a notation step);
-4. its main consequence or failure mode.
-
-Skip a category the body does not support. Never ask what the question's own words answer: "How does a parallel β sheet differ from an antiparallel one?" tests the names, not the structure.
-
-Never test a number, date or name the body mentions only in passing. An Organism titled by its scientific name may test the mapping: "Scientific name of the house mouse?" answered by `Mus musculus`. A Person, a Dataset, or a concept whose definition is the whole lesson keeps the primary card alone. Only a create, a merge, or an explicitly requested card redesign or deepening adds understanding cards; routine lint never does.
+A second card never belongs to an entry: a second source-supported entity earns its own entry, and a further claim about this one belongs in the body. A card beyond the first that an entry already holds, such as a second definition card or a question card from an earlier card set, is a **legacy extra**. Every workflow preserves it byte-for-byte, attachments included, and reports it; only an authorized refactor or a request naming it for deletion removes it ([flashcard maintenance](../../wiki-lint/references/flashcards.md#card-set)).
 
 ### Line-1 equation coverage
 
@@ -81,15 +65,9 @@ Never test a number, date or name the body mentions only in passing. An Organism
 The share $\text{TP}/(\text{TP}+\text{FP})$ of true positives among all positive predictions.
 ```
 
-A lone symbol never substitutes for the relationship being tested. The expression is complete (an Lp norm keeps its p-th root) and carries only the conditions that define the concept, without well-definedness boilerplate or index bounds that run over every term; card lines are exempt from the equation guide's condition list. A longer defining formula goes on its own understanding card, whose question names the symbols and whose answer is only the expression:
+A lone symbol never substitutes for the relationship being tested. The expression is complete (an Lp norm keeps its p-th root) and carries only the conditions that define the concept, without well-definedness boilerplate or index bounds that run over every term; card lines are exempt from the equation guide's condition list. A defining formula too long for one line stays in the body, and line 1 states its verbal core.
 
-```markdown
-Ridge regression cost in terms of $\text{MSE}(\boldsymbol{\theta})$, $\alpha$, $m$ and the feature weights $\theta_1,\dots,\theta_n$?
-?
-$\text{MSE}(\boldsymbol{\theta})+\frac{\alpha}{m}\sum_{i=1}^{n}\theta_i^2$
-```
-
-An existing card's long formula may give way to its verbal core when the formula stays in the body or moves to an understanding card; the tested concept is unchanged.
+An existing card's long formula may give way to its verbal core when the formula stays in the body; the tested concept is unchanged.
 
 ### Scheduling attachments
 

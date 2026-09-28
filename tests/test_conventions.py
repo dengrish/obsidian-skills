@@ -7567,16 +7567,15 @@ def _module_constant(text, name):
     return None
 
 
-#: One-card phrasing the card-set rule (one primary `??` card plus up to two
-#: `?` understanding cards) retired.  Case-insensitive.
+#: Phrasing of the retired understanding-card set (a primary `??` card plus up
+#: to two one-way `?` cards) and its helpers.  Case-insensitive.
 CARD_SET_STALE_PHRASES = (
-    "exactly one card",
-    "exactly one flashcard",
-    "one-card",
-    "one card only",
-    "no additional cards",
-    "never to words",
-    "every entry has one card",
+    "understanding card",
+    "understanding cards",
+    "card redesign pass",
+    "MAX_UNDERSTANDING_CARDS",
+    "UNDERSTANDING_SEPARATOR",
+    "flashcard_kind",
 )
 
 
@@ -7584,24 +7583,23 @@ def check_card_set_contract(rep, _conv):
     """The card set, its separator and attachment rules, and deck setup.
 
     flashcards-and-emphasis.md owns the card grammar, wiki-lint's
-    flashcards.md owns when a card may be rewritten, the knowledge README
-    tells the user how to set up review, and entry_checks.py enforces the
-    cap.  The one-card phrasing the card set replaced must not come back in
-    any canonical source.
+    flashcards.md owns when a card may be rewritten and how a legacy extra is
+    kept, the knowledge README tells the user how to set up review, and
+    entry_structure.py enforces the two separators.  The retired
+    understanding-card set must not come back in any canonical source.
     """
     check = "card-set-contract"
     fe_path = os.path.join(SKILLS_DIR, "wiki-build", "references",
                            "flashcards-and-emphasis.md")
     wl_path = os.path.join(SKILLS_DIR, "wiki-lint", "references",
                            "flashcards.md")
-    checks_path = os.path.join(SHARED_DIR, "scripts", "entry_checks.py")
+    structure_path = os.path.join(SHARED_DIR, "scripts", "entry_structure.py")
     pins = (
-        (fe_path, "up to two **understanding cards**",
-         "no longer states the card-set cap: one primary `??` card plus up "
-         "to two `?` understanding cards"),
-        (fe_path, "Never simplify a primary card's `??` to `?`",
-         "no longer forbids simplifying the primary card's `??` to `?`, "
-         "which halves the card and strands its second schedule"),
+        (fe_path, "Every entry has exactly one card",
+         "no longer states that every entry has exactly one card"),
+        (fe_path, "Never simplify a card's `??` to `?`",
+         "no longer forbids simplifying a card's `??` to `?`, which halves "
+         "the card and strands its second schedule"),
         (fe_path, "never move it between cards",
          "no longer forbids moving a schedule or block ID between cards"),
         (fe_path, "absence of attachments alone proves nothing",
@@ -7612,16 +7610,15 @@ def check_card_set_contract(rep, _conv):
          "math"),
         (fe_path, "**Line 1 is verbal by default.**",
          "no longer states that card line 1 is verbal by default"),
-        (wl_path, "## Card redesign pass",
-         "lost the `## Card redesign pass` section that explicit card "
-         "redesign requests route to"),
         (wl_path, "`spaced_repetition.schedules_outside_notes` is `false`",
          "no longer ties scan-proven card freshness to "
          "`spaced_repetition.schedules_outside_notes` being `false`"),
         (wl_path, "never move an attachment between cards",
          "no longer forbids moving an attachment between cards"),
-        (wl_path, "Routine lint never adds an understanding card",
-         "no longer forbids routine lint from adding an understanding card"),
+        (wl_path, "Routine lint never adds a second card",
+         "no longer forbids routine lint from adding a second card"),
+        (wl_path, "Never repair or reword a legacy extra",
+         "no longer keeps a legacy extra card report-only"),
         (KNOWLEDGE_README, "## Reviewing flashcards",
          "lost the `## Reviewing flashcards` setup section"),
         (KNOWLEDGE_README, "never edits the plugin's settings",
@@ -7641,17 +7638,22 @@ def check_card_set_contract(rep, _conv):
             rep.fail(check, "%s %s (missing %r)"
                      % (os.path.basename(path), why, marker), rel(path))
     try:
-        cap = _module_constant(read(checks_path), "MAX_UNDERSTANDING_CARDS")
+        structure = read(structure_path)
+        separators = (_module_constant(structure, "DEFINITION_SEPARATOR"),
+                      _module_constant(structure, "DISABLED_SEPARATOR"))
     except (OSError, SyntaxError) as exc:
-        rep.fail(check, "cannot read entry_checks.py: %s" % exc,
-                 rel(checks_path))
+        rep.fail(check, "cannot read entry_structure.py: %s" % exc,
+                 rel(structure_path))
     else:
-        if cap == 2:
+        if separators == ("??", "!!") and re.search(
+                r"^CARD_SEPARATORS = \(DEFINITION_SEPARATOR, "
+                r"DISABLED_SEPARATOR\)$", structure, re.M):
             held += 1
         else:
-            rep.fail(check, "entry_checks.py sets MAX_UNDERSTANDING_CARDS to "
-                     "%r, not 2 -- the enforced cap no longer matches the "
-                     "documented card set" % (cap,), rel(checks_path))
+            rep.fail(check, "entry_structure.py no longer limits "
+                     "CARD_SEPARATORS to `??` and the user's `!!` (found %r) "
+                     "-- the enforced separators no longer match the "
+                     "documented card" % (separators,), rel(structure_path))
 
     stale = [(phrase, _phrase_re(phrase, re.I))
              for phrase in CARD_SET_STALE_PHRASES]
@@ -7661,18 +7663,19 @@ def check_card_set_contract(rep, _conv):
         for phrase, rx in stale:
             for m in rx.finditer(text):
                 rep.fail(check,
-                         "%s restates the retired one-card rule (%r) -- an "
-                         "entry has one primary `??` card plus up to two `?` "
-                         "understanding cards"
+                         "%s restates the retired understanding-card set "
+                         "(%r) -- every entry has exactly one `??` "
+                         "definition card"
                          % (rel(path), " ".join(m.group(0).split())),
                          at(path, m.start(), text))
     rep.saw(check, "card-set pins held", held)
-    rep.saw(check, "canonical sources scanned for one-card phrasing", scanned)
+    rep.saw(check, "canonical sources scanned for understanding-card "
+            "phrasing", scanned)
     if held == len(pins) + 1 and not any(
             status == "FAIL" and name == check
             for name, status, _where, _message in rep.results):
         rep.ok(check, "%d card-set statements held at their owners; no "
-               "canonical source restates the one-card rule" % held,
+               "canonical source restates the understanding-card set" % held,
                rel(fe_path))
 
 

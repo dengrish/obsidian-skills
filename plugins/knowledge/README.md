@@ -32,18 +32,17 @@ kept in `Reviews/<skill>-suggestions.md` under the [shared protocol](shared/SUGG
 
 ## Reviewing flashcards
 
-Wiki entries end with flashcards for the Spaced Repetition community plugin
+Wiki entries end with a flashcard for the Spaced Repetition community plugin
 (`obsidian-spaced-repetition`), which you install and configure in the vault
 yourself. Each entry has one reversed definition card, separated by `??` and
-reviewed in both directions, and up to two one-way understanding cards
-separated by `?`; a discipline root may have none. Keep the plugin's
-multi-line separators at `?` and `??` and its multi-line end marker empty.
-The plugin reviews a note's cards only when its *Flashcard tags* setting lists
-the note's tag, unless folders-as-decks is on, so list every
+reviewed in both directions; a discipline root may have none. Keep the
+plugin's multi-line reversed separator at `??` and its multi-line end marker
+empty. The plugin reviews a note's card only when its *Flashcard tags* setting
+lists the note's tag, unless folders-as-decks is on, so list every
 [discipline tag](shared/CONVENTIONS.md#3-the-discipline-tag-enum) your Wiki
 uses. wiki-lint reports unlisted tags and changed separators but
 never edits the plugin's settings. To pause a card, change its separator line
-to `!!`; restore the original separator to resume it.
+to `!!`; restore `??` to resume it.
 
 ## Developing and packaging
 

@@ -17,8 +17,7 @@ and a split, merge, deletion, or cross-entry redistribution uses
 builder's creation-time teaching rules to it: the learner arc, core-facet check
 and examples of its
 [prose principles](../../wiki-build/references/writing.md#prose-principles),
-its [equation rules](../../wiki-build/references/equations.md) and its
-[card set](../../wiki-build/references/flashcards-and-emphasis.md#card-set).
+and its [equation rules](../../wiki-build/references/equations.md).
 Fill gaps from the entry's cited sources and 5(h) background. Keep every
 existing claim unless it is wrong, and every card and attachment byte-for-byte
 and in place.

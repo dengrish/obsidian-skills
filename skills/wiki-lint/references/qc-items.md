@@ -470,24 +470,21 @@ report the target question under the notes log; never retarget it.
 Apply the canonical [card format](../../wiki-build/references/flashcards-and-emphasis.md#4-flashcards)
 and [flashcard maintenance](flashcards.md). Every entry except a discipline
 root, which needs no card ([hierarchy](hierarchy.md#establish-discipline-roots)),
-has a Flashcards section after the Related footer and separator, holding one
-primary `??` card and at most two `?` understanding cards. Repair a variant
-heading in place rather than adding a section. Repair a missing or empty
-section by writing the primary card from the entry's already-established main
-claim, with `??` and the canonical primary answer, and itemize the addition.
-Routine lint never adds understanding cards.
+has a Flashcards section after the Related footer and separator, holding its
+one `??` definition card. Repair a variant heading in place rather than adding
+a section. Repair a missing or empty section by writing the card from the
+entry's already-established main claim, with `??` and the canonical primary
+answer, and itemize the addition. Routine lint never adds a second card.
 
-Inspect every card semantically: leaks and reconstructions, a primary answer
-that omits a qualifying opener binding, and any line-1 math, even when the
-scanner is silent. Preserve every valid existing separator (`??`, `?`, `!!`),
-apart from the one
+Inspect the primary card semantically: leaks and reconstructions, a primary
+answer that omits a qualifying opener binding, and any line-1 math, even when
+the scanner is silent. Preserve every existing separator, apart from the one
 [`??` restoration](../../wiki-build/references/flashcards-and-emphasis.md#line-2-the-separator),
 and every recognized scheduling or block-ID attachment byte-for-byte and in
 place. Routine lint applies the
 [rewrite bars](flashcards.md#card-freshness-and-the-rewrite-bars), the low
-bar included for a card the scan proves fresh; legacy extras follow flashcard
-maintenance, and a vault-wide redesign runs only as its explicitly requested
-[card redesign pass](flashcards.md#card-redesign-pass).
+bar included for a card the scan proves fresh; a
+[legacy extra](flashcards.md#card-set) stays report-only.
 
 ## Coding content in non-Software entries (item 6)
 

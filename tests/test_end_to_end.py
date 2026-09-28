@@ -2154,21 +2154,14 @@ A compact definition used only to exercise the shared contract.
             "with [[other/shared-target|another target]], while bare "
             "[[shared-target]] and [[SHARED-TARGET.md|Shared target]] remain "
             "ambiguous because a root file has the same basename.")
-        # The card set: one primary `??` card, then at most two `?`
-        # understanding cards whose answers take inline LaTeX only.
+        # The card set: one `??` definition card per entry. A further card is
+        # a report-only legacy extra; a card simplified to `?` needs its `??`.
         write_entry(
-            "understanding-cards", "Understanding cards",
-            "**Understanding cards** is a synthetic fixture that doubles its input.",
+            "legacy-extra-cards", "Legacy extra cards",
+            "**Legacy extra cards** is a deliberately malformed fixture.",
             extra_cards=(
-                "What does the synthetic fixture double?\n?\nIts input\n\n"
-                "Which expression gives the fixture's output for an input $x$?\n?\n$2x$"))
-        write_entry(
-            "too-many-understanding", "Too many understanding",
-            "**Too many understanding** is a deliberately malformed fixture.",
-            extra_cards=(
-                "What does the fixture count?\n?\nCards\n\n"
-                "How many question cards does the fixture carry?\n?\nThree\n\n"
-                "Which limit does the fixture exceed?\n?\nThe card cap"))
+                "Another claim about the fixture, stated once.\n??\nOther term\n\n"
+                "Why does the fixture exist?\n?\nTo carry a legacy question card."))
         write_entry(
             "simplified-primary", "Simplified primary",
             "**Simplified primary** is a deliberately malformed fixture.")
@@ -2177,14 +2170,9 @@ A compact definition used only to exercise the shared contract.
             simplified_primary.read_text(encoding="utf-8").replace(
                 "\n??\n", "\n?\n", 1),
             encoding="utf-8")
-        write_entry(
-            "understanding-answer-markup", "Understanding answer markup",
-            "**Understanding answer markup** is a deliberately malformed fixture.",
-            extra_cards="Which symbol names the fixture's variable?\n?\n**x**")
         card_set_faults = {
-            "too-many-understanding": "3 understanding cards",
-            "simplified-primary": "no `??` primary definition card",
-            "understanding-answer-markup": "answer has forbidden bold",
+            "legacy-extra-cards": "holds 3 cards",
+            "simplified-primary": "must be exactly",
         }
 
         lint = json.loads(self.run_script(
@@ -2205,7 +2193,7 @@ A compact definition used only to exercise the shared contract.
                      "x-1-2-transform", "r-plus",
                      "archaea", "hard-wrap-acronym", "adaboost",
                      "saccharomyces-cerevisiae", "historical-synonym",
-                     "canonical-code-shapes", "understanding-cards"):
+                     "canonical-code-shapes"):
             self.assertEqual(lint_items[slug], set(), slug)
         for slug in ("scalar-alias", "blank-alias", "missing-counterpart-acronym",
                      "synonym-parenthetical", "wrong-title-case",
@@ -2239,7 +2227,7 @@ A compact definition used only to exercise the shared contract.
                      "x-1-2-transform", "r-plus",
                      "archaea", "hard-wrap-acronym", "adaboost",
                      "saccharomyces-cerevisiae", "historical-synonym",
-                     "canonical-code-shapes", "understanding-cards"):
+                     "canonical-code-shapes"):
             self.assertEqual(scan_items.get(slug, set()), set(), slug)
         for slug in ("scalar-alias", "blank-alias", "missing-counterpart-acronym",
                      "synonym-parenthetical", "wrong-title-case",
