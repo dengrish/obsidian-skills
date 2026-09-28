@@ -66,7 +66,7 @@ print(json.dumps({"sources": fm.values("sources"),
 PY
 ```
 
-**A first `sources:` item of the form `"[[Something.pdf]]"` means the note is *about* that PDF, and the PDF is the source.** Run `python3 '<skill>/../../shared/scripts/vault_artifacts.py' pdfs --vault '<vault>'` and resolve the decoded target from its complete inventory, honoring folder qualification while comparing every path component with NFC normalization and case folding; preserve suffixes such as `_2` and `_01_ChapterName`. Apply [the resolved-PDF gate](#verify-a-resolved-pdf) before continuing. Process the resolved PDF instead of the note, and record the substitution in the run report. If the inventory is incomplete or several files match a basename, report the uncertainty and resolve it before reading or automatically skipping the source. **This is not a preference:** an `Articles/` note is somebody's hedged restatement of the paper, so extracting entries from it builds the vault on a summary while the document itself goes unread, and every `sources:` item it produces is an anchorless `[[Foo.md]]`. Only if a complete inventory proves the PDF genuinely missing from disk does the note become the source — say so in the report, since those entries get no page anchors. A first item that is a **URL** is a web clipping: that note *is* the source, and you carry on with it.
+**A first `sources:` item of the form `"[[Something.pdf]]"` means the note is *about* that PDF, and the PDF is the source.** Run `python3 '<plugin>/shared/scripts/vault_artifacts.py' pdfs --vault '<vault>'` and resolve the decoded target from its complete inventory, honoring folder qualification while comparing every path component with NFC normalization and case folding; preserve suffixes such as `_2` and `_01_ChapterName`. Apply [the resolved-PDF gate](#verify-a-resolved-pdf) before continuing. Process the resolved PDF instead of the note, and record the substitution in the run report. If the inventory is incomplete or several files match a basename, report the uncertainty and resolve it before reading or automatically skipping the source. **This is not a preference:** an `Articles/` note is somebody's hedged restatement of the paper, so extracting entries from it builds the vault on a summary while the document itself goes unread, and every `sources:` item it produces is an anchorless `[[Foo.md]]`. Only if a complete inventory proves the PDF genuinely missing from disk does the note become the source — say so in the report, since those entries get no page anchors. A first item that is a **URL** is a web clipping: that note *is* the source, and you carry on with it.
 
 **A current `sources:` key takes precedence even when its list is empty.** Only when that key is absent may the decoded `legacy_source` scalar supply the origin; classify that eligible fallback as above. Never fall through from an empty current list to `source:`. If the selected origin field is absent or empty in otherwise valid frontmatter, the note is an **unpaired markdown source**: process it as one and record the call in the run report. A markdown source with no frontmatter can likewise be unpaired after inspecting it. Malformed YAML, a non-list `sources:`, a null item, or conflicting current and older origins is not evidence of an unpaired source: report it and establish the identity before proceeding. Do not silently fall back to the summary or infer an automatic skip from malformed metadata.
 
@@ -77,8 +77,8 @@ canonical filename and unique portable-basename ownership across the vault.
 Bare PDF page links cannot disambiguate two paths:
 
 ```bash
-python3 '<skill>/../../shared/scripts/naming.py' canonical '<resolved pdf path>'
-python3 '<skill>/../../shared/scripts/vault_artifacts.py' pdfs \
+python3 '<plugin>/shared/scripts/naming.py' canonical '<resolved pdf path>'
+python3 '<plugin>/shared/scripts/vault_artifacts.py' pdfs \
     --vault '<vault>' --selected '<resolved pdf path>'
 ```
 
@@ -109,7 +109,7 @@ rename it or route it to `pdf-organize`, report the exception, and pass
 A whole-book PDF whose chapter PDFs exist (pdf-organize's
 `Sources/PDFs/<Work>/` split) is a split book; pair them over the complete
 `vault_artifacts.py pdfs --vault '<vault>'` inventory with
-`python3 '<skill>/../../shared/scripts/naming.py' chapter '<stem>'`. A book and
+`python3 '<plugin>/shared/scripts/naming.py' chapter '<stem>'`. A book and
 its chapters are one document:
 
 - A folder run that reaches both, or a request naming the split book,
@@ -118,9 +118,11 @@ its chapters are one document:
   for that file. Report each substantive table-of-contents section no chapter
   covers (often introductions, appendices, glossaries) as not processed.
 - Query prior coverage for both representations: a confirmed citation of the
-  whole book covers its chapters, and a chapter citation covers that chapter;
-  without rerun intent, skip covered parts. Never cite both book and chapter
-  pages for the same claim.
+  whole book covers its chapters, and a chapter citation covers that chapter.
+  When only chapter PDFs exist, query the chapters.
+  A folder run without rerun intent skips covered parts; a named book or
+  chapter [fills them in](#check-prior-coverage). Never cite both book and
+  chapter pages for the same claim.
 
 An unsplit book is an ordinary source.
 
@@ -176,11 +178,15 @@ behind that link cannot prove prior coverage. Preserve the occupant and resolve
 the filesystem issue separately rather than treating the empty record as a
 free slug or reading the link target as a vault-owned entry.
 
-**Any confirmed source match means the default action is to SKIP** — don't read it, don't extract, don't modify entries. Re-runs churn body prose, reset `updated:`, and — because churned prose is body content — clear `read:` on entries the user had already read, for no gain. **Proceed only on explicit re-run or resume intent in the user's request or existing authorization for this run** ("re-process", "re-run", "resume the interrupted run", "finish the incomplete run", "apply the new rules to existing entries", or equivalent). A plain "process Foo.pdf" does not qualify, even about a known-processed source. Ambiguous intent after a confirmed match → skip; unresolved source identity or malformed metadata → report and resolve, not an automatic previously-processed verdict. Ordinary intent is run-level: if the prompt signals it, all previously-processed sources in the batch proceed. The one narrow exception is an explicit candidate-specific request, which reopens only its named candidate and sources under [the candidate-specific protocol](multi-source-synthesis.md).
+**In a folder or inbox-wide run, a confirmed source match means SKIP** — don't read it, don't extract, don't modify entries — and report it with the number of entries citing it and the instruction to name the source to fill it in. Re-runs churn body prose, reset `updated:`, and — because churned prose is body content — clear `read:` on entries the user had already read, for no gain.
+
+**A source the user names (a file, a chapter, or a book) is filled in, not skipped.** Read it; each entity whose entry already cites this source is finished and stays untouched (no re-merge, no `updated:` or `read:` change); every other substantive entity goes through the ordinary workflow, creating an entry or merging into one that does not yet cite this source. The missed-entity audit applies as usual. A [named-entity request](named-entities.md) instead builds only its named entities.
+
+**Explicit re-run intent in the user's request or existing authorization for this run** ("re-process", "re-run", "apply the new rules to existing entries", or equivalent) additionally re-merges entries that already cite the source; resume intent ("resume the interrupted run", "finish the incomplete run") is covered below. Both are run-level: if the prompt signals one, all previously-processed sources in the batch proceed. Ambiguous intent is neither; unresolved source identity or malformed metadata → report and resolve, not an automatic previously-processed verdict.
 
 **Resume belongs to wiki-build.** A prior match proves that some entry cites the source; it does not prove that an interrupted run completed extraction, every merge, interlinking, or the three audits. Under explicit resume intent, re-read the complete source and run the normal workflow over it. Existing coverage goes through the same collision and source-no-op-merge checks, while missing entities and source-dependent repairs go through their ordinary gates. This is deliberately a safe re-run rather than an attempt to infer an interruption point from partial files. wiki-lint may clean source-independent residue before or after this run, but it cannot recover omitted source claims, entries, page anchors, or figure choices and is never the owner of completing the source run.
 
-**If every source in the run is skipped** — previously processed with no re-run/resume intent, or no durable content under step 2(c) — nothing is created and nothing is merged, so all step-7 audits have empty scope and entry processing is a no-op. Report the skips, then use the [shared suggestion closeout](../../../shared/SUGGESTIONS.md) only for evidence already obtained; do not audit skipped entries or sources for log maintenance. On an authorized resume, this skill's audits cover every entry the resumed run creates or touches; inherited source-independent defects elsewhere in the vault remain wiki-lint's scope.
+**If every source in the run is skipped** — previously processed in a folder run with no re-run/resume intent, or no durable content under step 2(c) — nothing is created and nothing is merged, so all step-7 audits have empty scope and entry processing is a no-op. Report the skips, then use the [shared suggestion closeout](../../../shared/SUGGESTIONS.md) only for evidence already obtained; do not audit skipped entries or sources for log maintenance. On an authorized resume, this skill's audits cover every entry the resumed run creates or touches; inherited source-independent defects elsewhere in the vault remain wiki-lint's scope.
 
 ## Read and classify
 

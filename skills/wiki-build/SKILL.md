@@ -3,12 +3,12 @@ name: wiki-build
 description: >
   Create or enrich interlinked Obsidian Wiki entries from source documents
   already in the vault, such as an organized PDF or a cleaned clipping, or
-  build one named entry from identified sources. Use for "build wiki entries
-  from this paper", "update the X entry with this article", "add this
-  clipping to my wiki" or "extract the concepts in chapter 3". Topics without
-  a source document use wiki-add; corrections from the sources an entry
-  already cites, link, parent and MOC maintenance, and renames or merges of
-  existing entries use wiki-lint.
+  build named entries from a source. Use for "build wiki entries from this
+  paper", "update the X entry with this article", "add this clipping to my
+  wiki" or "extract the concepts in chapter 3". Topics without a source
+  document use wiki-add; corrections from the sources an entry already cites,
+  link, parent and MOC maintenance, and renames or merges of existing entries
+  use wiki-lint.
 ---
 
 # Wiki Build
@@ -36,7 +36,10 @@ reconstruct an unstated fallback from memory.
 - For a preview, plan-only, or no-apply request, inspect and prepare the proposal without writing vault files. Report proposed work as proposed, and claim edits or validation only when actually performed.
 - Keep every create, merge, and interlink draft private through step 7. The
   public `Wiki/` tree must contain either the prior reviewed version or the
-  final reviewed version, never an intermediate draft.
+  final reviewed version, never an intermediate draft. List every staged
+  create and replacement in one manifest, `<scratch>/manifest.json`: a JSON
+  array of `{"path": "Wiki/<slug>.md", "draft": "<absolute draft path>"}`
+  objects, written with the host's file-writing tool.
 
 ## Workflow
 
@@ -47,9 +50,9 @@ working set, then step 7 once across the run with one consolidated report.
 which files a folder run selects. A later source that touches the same entry
 builds on that staged draft while retaining the original public snapshot as its
 publication precondition. Do not combine thin coverage across sources during an
-ordinary folder run; report a plausible combined candidate as deferred. An
-explicit request to build one named candidate from identified sources uses the
-[candidate-specific protocol](references/multi-source-synthesis.md).
+ordinary folder run; report a plausible combined candidate as deferred. A
+request naming one or several entities uses the
+[named-entity protocol](references/named-entities.md) for each named entity.
 
 ### 1. Read the source
 
@@ -61,11 +64,15 @@ source classification.
 Resolve those gates before extraction; a shared stem, body mention, or
 unconfirmed basename candidate never proves prior coverage.
 
-**A confirmed prior match defaults to skip.** Proceed only with explicit rerun
-or resume intent, or a candidate-specific request. Resume uses this skill's
-complete extraction and merge workflow; wiki-lint does not recover unfinished
-source processing. An all-skipped run goes directly to
-closeout without auditing unrelated entries.
+**A confirmed prior match skips the source in a folder or inbox-wide run**
+unless the request has explicit rerun or resume intent. A source the user
+names outside a named-entity request is
+[filled in](references/source-intake.md#check-prior-coverage) instead: entries
+already citing it stay untouched, and its other entities go through the
+ordinary workflow. Rerun intent also re-merges those entries.
+Resume uses this skill's complete extraction and merge workflow; wiki-lint
+does not recover unfinished source processing. An all-skipped run goes
+directly to closeout without auditing unrelated entries.
 
 For a source that proceeds, read the complete source, track each
 entity's introducing physical PDF page, and report the primary/secondary
@@ -85,7 +92,7 @@ A rejected mention is not appended to an existing entry's `sources:` and does no
 
 **Apply the atomicity test before drafting.** Each accepted candidate is one durable entity or concept under the naming, type, and same-entity rules, and its note carries the facts whose subject is that candidate. When the source substantively teaches a distinct neighboring concept, accept it as its own candidate and connect the entries with a concise relation and wikilinks; do not explain the neighbor inside this note. Do not split an entity merely because its explanation is long: mechanisms, conditions, stages, limitations, and other inherent facets stay together when they do not make coherent standalone entries. A thin mention still fails the filters above and never becomes a micro-note just to make another entry shorter.
 
-Record each accepted entity's canonical qualified name, same-entity aliases, type, description, source page, and substantive content. Read [writing](references/writing.md) before recording the first candidate: step 3 probes the titles chosen here, so apply its title selection and [cross-domain disambiguation](references/writing.md#cross-domain-term-disambiguation) now. Read [API surface](references/api-surface.md) when the source names a library or a candidate is `Software`; [rare types](references/rare-types.md) for uncommon types and `Person`/`Event` dates; [tag calibration](references/calibration.md) when the discipline call is uncertain or the source is history, law, politics, finance, or business.
+Record each accepted entity's canonical qualified name, same-entity aliases, type, description, source page, and substantive content. Read [writing](references/writing.md) before recording the first candidate: step 3 probes the titles chosen here, so apply its title selection and [cross-domain disambiguation](references/writing.md#cross-domain-term-disambiguation) now. Read [API surface](references/api-surface.md) when a candidate is `Software` or the source documents a library's API; [rare types](references/rare-types.md) for uncommon types and `Person`/`Event` dates; [tag calibration](references/calibration.md) when the discipline call is uncertain or the source is history, law, politics, finance, or business.
 
 ### 3. Resolve against existing entries
 
@@ -119,24 +126,34 @@ in collision ownership, reports it, and suppresses its target's metadata. Do
 not create over it or follow it; repairing it is separately scoped safe-write
 work.
 
+**Snapshot before relying on a path.** Record each existing entry this run may
+change before first reading it (a named merge target now), and each new slug
+when its collision decision is made; a new slug must record `absent`, otherwise
+redo its decision. The earlier index does not reserve a name, and an occupant
+that arrives later must survive unchanged.
+
+```bash
+python3 '<plugin>/shared/scripts/publish_files.py' snapshot --vault '<vault>' \
+    -o '<scratch>/snapshots.json' 'Wiki/<slug>.md'
+```
+
 ### 4. Create new entries
 
 Before drafting the first entry, read [flashcards/emphasis](references/flashcards-and-emphasis.md). Use the `slug` returned for that exact candidate by step 3's `find_collisions.py` report; it calls the canonical slug algorithm without interpolating source text into a shell command. Never improvise the slug algorithm. If a title changes after step 3, for example through cross-domain qualification or an acronym choice, re-run step 3 on the complete updated candidate list and use only the slug returned for the new title.
 
-**Count every drafted description before its file is written.** The cap is 110 characters, measured without YAML quotes. Batch the count, shorten every over-limit description under the [description rule](references/writing.md#description), and count again. This applies equally to later audit-created entries and descriptions rewritten by a merge. Final lint is a backstop, not the first count.
+**Check every drafted description's length before review.** The cap is 110 characters, measured without YAML quotes; `lint_entry.py` on the private draft reports it as `description_chars`. Shorten every over-limit description under the [description rule](references/writing.md#description) and check again. This applies equally to later audit-created entries and descriptions rewritten by a merge.
 
 Draft the complete bytes for `<wiki-folder>/<slug>.md` in the run's unique
 private working area, using [the entry shape](#the-entry). Do not publish it in
-this step. Record the intended public path and its expected-absent state; the
-earlier index does not reserve the name, and an occupant that arrives later
-must survive unchanged. New entries have bare `read: false`, `parents: []`,
+this step. Add it to the manifest; its path was snapshotted in step 3. New
+entries have bare `read: false`, `parents: []`,
 and no `importance:` key. Only the user sets review state to true.
 
-Read [equations](references/equations.md) before typesetting when the source states or describes a calculation, or an existing merged body already contains equations. Inventory source images with `python3 '<skill>/../../shared/scripts/vault_artifacts.py' figures --images '<images-folder>' --stem '<resolved_source_stem>'`; read [media](references/media.md) when `candidates` is nonempty, the report has findings, or the source refers to figures, including references whose image files are unavailable. The resolved source stem is the actual PDF chosen after any summary substitution, or the actual Markdown source—not the path first handed to the skill. Read the complete JSON and resolve/report an unsafe or incomplete inventory before embedding anything; never consume `blocked_matches`. When a PDF source refers to figures but its complete inventory has no `candidates`, an apply run first extracts that one PDF with `figure-extract` and re-inventories under [missing PDF figures](references/media.md#missing-pdf-figures).
+Read [equations](references/equations.md) before typesetting when the source states or describes a calculation, or an existing merged body already contains equations. Inventory source images with `python3 '<plugin>/shared/scripts/vault_artifacts.py' figures --images '<images-folder>' --stem '<resolved_source_stem>'`; read [media](references/media.md) when `candidates` is nonempty, the report has findings, or the source refers to figures, including references whose image files are unavailable. The resolved source stem is the actual PDF chosen after any summary substitution, or the actual Markdown source—not the path first handed to the skill. Read the complete JSON and resolve/report an unsafe or incomplete inventory before embedding anything; never consume `blocked_matches`. When a PDF source refers to figures but its complete inventory has no `candidates`, an apply run first extracts that one PDF with `figure-extract` and re-inventories under [missing PDF figures](references/media.md#missing-pdf-figures).
 
 ### 5. Merge into existing entries
 
-Follow [merge logic](references/merge.md#merge-logic): integrate substantive new information into one coherent staged entry, preserving earlier contributions rather than stacking paragraphs. Snapshot the existing note's exact bytes, identity, and permissions when reading it; keep that original snapshot as the final publication precondition. If a later source in this run touches the same entry, merge into the staged draft without replacing that original precondition. If the public file changes at any point, preserve the newer file, re-read it, and rebuild/re-review the complete merge instead of applying the stale draft. Existing images/tables, populated `parents:`, legacy `importance:`, keys outside the schema, user-disabled cards and scheduling metadata have preservation rules; they are not fields to regenerate from a blank template.
+Follow [merge logic](references/merge.md#merge-logic): integrate substantive new information into one coherent staged entry, preserving earlier contributions rather than stacking paragraphs. Snapshot an existing entry with the [step-3 command](#3-resolve-against-existing-entries) before first reading it, if step 3 did not already. A later call adds paths and keeps the earlier record of a path already present (exiting 1 if that path has since changed), so that original snapshot stays the publication precondition when a later source in this run merges into the staged draft. Add the draft to the manifest. If the public file changes at any point, preserve the newer file, re-snapshot it with `snapshot --replace`, then re-read it and rebuild/re-review the complete merge instead of applying the stale draft. Existing images/tables, populated `parents:`, legacy `importance:`, keys outside the schema, user-disabled cards and scheduling metadata have preservation rules; they are not fields to regenerate from a blank template.
 
 Cite the source only when it passes step 2's filters for this entity, with decoded source identity and confirmed PDF/summary pairing; a thin mention never earns a citation. A [source-no-op merge](references/merge.md#source-no-op-merges) appends its missing citation and skips source-driven body rewriting; step 7 still applies targeted independent QC. Update `updated:` whenever anything actually changes; preserve the old date only when the final entry is byte-unchanged.
 
@@ -150,23 +167,25 @@ Finish with a frequency-inverted check: take accepted entities from most-mention
 
 ### 7. Review and report
 
-Build a unique private **combined review tree** before linting: a scratch
-directory named like the real Wiki folder, such as `<scratch>/review/Wiki`.
-Copy each readable regular entry from the current Wiki snapshots into it, using
-ordinary byte copies rather than hard links. Lint that copied mirror with
-`lint_entry.py` and keep its findings as the baseline; take a fresh baseline
-whenever the combined view is rebuilt from new snapshots. Then overlay the
-run's staged creates and replacements at their intended relative paths.
-Preserve the real index's occupied-slug and unreadable/symlink findings
-alongside that mirror; never follow a leaf symlink into the review tree.
-
 Lint every staged created or merged entry with
-`python3 '<skill>/scripts/lint_entry.py' '<file>'`, then lint the combined
-review tree once. Folder mode adds the cross-entry checks a single file cannot
-run. **Resolve in the private working set every finding on a staged entry and
-every finding the overlay introduces (one absent from the baseline), except
-those listed below, then rebuild and re-lint until nothing fixable remains.**
-If any lint cannot run or its result is malformed or incomplete, leave all
+`python3 '<skill>/scripts/lint_entry.py' '<file>'`, then build and lint the
+private **combined review tree**:
+
+```bash
+python3 '<skill>/scripts/review_tree.py' --vault '<vault>' \
+    --wiki '<vault>/Wiki' --manifest '<scratch>/manifest.json' \
+    --out '<scratch>/review'
+```
+
+Each run byte-copies the current Wiki into a fresh mirror, lints it as the
+baseline, overlays the manifest drafts, and lints the combined tree in folder
+mode, which adds the cross-entry checks a single file cannot run. It never
+follows a symlink; paths listed under `unmirrored` stay occupied, as in the
+real index. **Resolve in the private working set every `on_staged` and
+`introduced` finding and every `dangling` link, except those listed below, then
+rerun it until nothing fixable remains: `clean` is true, or only the
+exceptions below and adjudicated review-only candidates remain.** If it exits
+2, or any lint cannot run or its result is malformed or incomplete, leave all
 dependent drafts unpublished and report the blocker; a prose-only review is not
 a clean lint.
 
@@ -217,28 +236,41 @@ Read [audits and report](references/review.md) now and run its three audits in
 the stated order, re-checking everything they create or change. Inherited
 vault-wide orphans belong to wiki-lint.
 
-After all content and link audits pass, refresh the **real** Wiki index and
-revalidate every collision decision and original replacement snapshot. Any
-new occupant, alias owner, changed file, or newly unreadable path invalidates
-the affected draft: preserve it, re-read current state, rebuild the combined
-view, and repeat review. A preview/no-apply run stops here and reports the
-reviewed proposal; it never creates `Wiki/` or a publication stage inside the
+After all content and link audits pass, refresh the **real** Wiki index,
+revalidate every collision decision, and check every original snapshot:
+
+```bash
+python3 '<plugin>/shared/scripts/publish_files.py' verify --vault '<vault>' \
+    --snapshots '<scratch>/snapshots.json'
+```
+
+Any new occupant, alias owner, changed file, or newly unreadable path
+invalidates the affected draft: preserve it, re-snapshot each changed path with
+`snapshot --replace` before re-reading that path, rebuild the draft and the
+combined view, and repeat review. A preview/no-apply run stops here and reports
+the reviewed proposal; it never creates `Wiki/` or a publication stage inside the
 vault.
 
 An ordinary request to build or update the wiki authorizes this apply; do not
 ask for a second human review. An explicit preview/plan-only/no-apply request
-does not. Re-lint the final bytes and leave no-op entries untouched. Then
-follow the shared [safe-write protocol and Python API recipe](../../shared/SAFE_WRITES.md#call-the-shared-python-api),
-staging each final reviewed file outside the recursive Wiki tree on the
-resolved Wiki directory's filesystem. If Wiki is absent, create that exact
-directory exclusively immediately before publication and verify it is the
-selected vault child. Publish new slugs with exclusive creation and
-replacements only against their original snapshots; handle a partial failure
-under the [multi-file rule](../../shared/SAFE_WRITES.md#multi-file-operations).
-Finally refresh the public index and re-lint the published entries and the
-whole Wiki collision surface. Claim completion only when the published bytes
-equal the reviewed bytes and no in-scope finding remains unresolved; reported
-findings and adjudicated review-only candidates follow the rules above.
+does not. Re-lint the final bytes and leave no-op entries untouched.
+Publish new slugs with exclusive creation and replacements only against their
+original snapshots, using the CLI for the shared
+[safe-write recipe](../../shared/SAFE_WRITES.md#call-the-shared-python-api):
+
+```bash
+python3 '<plugin>/shared/scripts/publish_files.py' publish --vault '<vault>' \
+    --snapshots '<scratch>/snapshots.json' --manifest '<scratch>/manifest.json'
+```
+
+Add `--create-dir Wiki` only when Wiki is absent. The helper skips a file that
+already equals its draft, reads each publication back, and stops at the first
+failure; report a partial failure path by path, and rerun the same command
+after fixing its cause. Finally refresh the public index and re-lint the
+published entries and the whole Wiki collision surface. Claim completion only
+when the published bytes equal the reviewed bytes and no in-scope finding
+remains unresolved; reported findings and adjudicated review-only candidates
+follow the rules above.
 
 Report actual creates/regular merges/source-no-op merges, skipped/deferred entities and reasons, review-state decisions, every audit count (including zero), unresolved findings, and unused source figures with the media rule's permitted reasons. Use the complete [report specification](references/review.md#run-report); do not describe proposals as applied. An all-skipped run reports skips without source-entry audits.
 

@@ -5984,6 +5984,7 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/entry_structure.py": 155,
     "shared/scripts/plugin_paths.py": 110,
     "shared/scripts/portable_names.py": 5,
+    "shared/scripts/publish_files.py": 20,
     "shared/scripts/plurals.py": 251,
     "shared/scripts/slugify.py": 80,  # device-name restrictions removed
     "shared/scripts/vault_artifacts.py": 66,
@@ -6032,6 +6033,7 @@ SELFTEST_MIN_CASES = {
     "skills/wiki-add/scripts/backlog.py": 48,
     "skills/wiki-build/scripts/find_collisions.py": 73,
     "skills/wiki-build/scripts/lint_entry.py": 364,
+    "skills/wiki-build/scripts/review_tree.py": 28,
     "skills/wiki-build/scripts/vault_index.py": 84,
     "skills/wiki-lint/scripts/scan_vault.py": 498,
 }

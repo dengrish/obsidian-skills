@@ -73,12 +73,12 @@ preferences above; otherwise it may still support a specific claim. Reuse it
 read-only. Use web evidence when no reusable local source supports a
 conforming entry, or for a claim none supports.
 
-A source no entry cites is unbuilt, and citing it would make wiki-build's
-prior-coverage check skip the whole source. Cite one only when it carries this
-workflow's [research-extract marker](#new-webpage-research-extracts), the
-user's request names it, or this run filed it under [New PDFs](#new-pdfs);
-report the last two as `<source> is cited by <entry> but not yet built:
-extracting its other topics needs an explicit wiki-build re-process request`.
+A source no entry cites is unbuilt, and citing it would make a wiki-build
+folder run skip the whole source. Cite one only when it carries this
+workflow's [research-extract marker](#new-webpage-research-extracts) or this
+run filed it under [New PDFs](#new-pdfs); report the latter as `<source> is
+cited by <entry> but not yet built: a wiki-build request naming it fills in
+its other topics`.
 Otherwise report `<source> also covers <topic>: run wiki-build on it` and
 continue with already-cited sources or web evidence, never another copy of
 that document; when neither suffices, leave the topic pending with that route.
