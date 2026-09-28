@@ -94,6 +94,10 @@ workflow-local copy.
 command line intentionally exposes only `--test`. Do not invent positional
 arguments or interpolate a vault path or note bytes into `python -c`, a shell
 heredoc, or command text. When a workflow-specific writer exists, use it.
+For publishing reviewed regular files, `shared/scripts/publish_files.py`
+provides this recipe as a CLI (`snapshot`, `verify`, `publish`); use it instead
+of a private driver unless the operation needs a primitive the CLI does not
+offer.
 Otherwise, put the publication logic in a private Python driver, pass paths as
 ordinary `sys.argv` values, and import `atomic_move` after putting the trusted
 plugin `shared/scripts/` directory first on `sys.path`, using the actual plugin

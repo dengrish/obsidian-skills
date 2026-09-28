@@ -1,6 +1,6 @@
 # API surface in body prose
 
-> **When to read this:** Read this before drafting or merging when the source names a software library or the candidate is `type: Software`. A grep over extracted text can double-check library mentions, but reading the source decides the gate; never grep compressed PDF bytes. The type first decides whether API identifiers may appear, then this guide decides which permitted identifiers actually serve the entry.
+> **When to read this:** Read this before drafting or merging when a candidate is `type: Software` or the source documents a library's API. A grep over extracted text can double-check library mentions, but reading the source decides the gate; never grep compressed PDF bytes. The type first decides whether API identifiers may appear, then this guide decides which permitted identifiers actually serve the entry.
 
 ---
 

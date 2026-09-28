@@ -62,7 +62,9 @@ steps 2–5 and their §6 completion; report and close out at the end. An entry
 published earlier in this run counts as existing for later items. When the
 builder's atomicity test splits a request into distinct topics, such as
 `Precision and recall`, each part is a request; `Bias–variance trade-off`
-stays one. Unclear intent stays pending while other items proceed.
+stays one. Unclear intent stays pending while other items proceed. A topic
+whose request names a vault source document belongs to wiki-build: report
+that route and do not build it.
 
 ## 2. Resolve identity without edits
 
@@ -124,7 +126,15 @@ and [entry shape](../wiki-build/SKILL.md#the-entry), plus its
 [rare types](../wiki-build/references/rare-types.md) and
 [tag calibration](../wiki-build/references/calibration.md) references when
 they apply. Draft complete bytes privately under the canonical title's
-reported slug, with today's creation/update dates and `read: false`.
+reported slug, with today's creation/update dates and `read: false`. When the
+collision decision settles that slug, snapshot `Wiki/<slug>.md` with the
+builder's [step-3 command](../wiki-build/SKILL.md#3-resolve-against-existing-entries),
+which must record it absent (otherwise redo the collision decision), and list
+the draft in the builder's [manifest format](../wiki-build/SKILL.md#scope-and-files).
+Give each request fresh files, such as `<scratch>/snapshots-<n>.json` and
+`<scratch>/manifest-<n>.json`, in place of the builder's `snapshots.json` and
+`manifest.json`: an entry published for an earlier request no longer matches
+its absent record.
 
 Cite only verified durable vault artifacts under [the source-reference contract](../../shared/CONVENTIONS.md#7-source-references).
 Link under [conventions §9](../../shared/CONVENTIONS.md#wiki-add--inside-new-requested-entries-only)
@@ -150,12 +160,14 @@ or alias owner without changing it: a newly arrived same-entity entry can
 become an existing-topic outcome; otherwise rebuild the affected draft or
 leave it pending.
 
-Publish through the [shared safe-write API](../../shared/SAFE_WRITES.md#call-the-shared-python-api)
+Publish and verify new source documents/notes and selected attachments first,
+through the [shared safe-write API](../../shared/SAFE_WRITES.md#call-the-shared-python-api)
 with exclusive creation and private staging on the target filesystem outside
 scanned output folders, never an overwrite-capable copy or rename as a
-fallback. Publish and verify new source documents/notes and selected
-attachments first, then the Wiki entry, creating only the missing output
-folders they need.
+fallback. Then publish the Wiki entry with the builder's
+[publish command](../wiki-build/SKILL.md#7-review-and-report), adding
+`--create-dir Wiki` only when Wiki is absent. Create only the missing output
+folders these writes need.
 
 Re-read the public entry, verify its bytes equal the reviewed draft, rerun its
 lint and the current collision checks, and confirm its sources and new links

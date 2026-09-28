@@ -86,9 +86,9 @@ required intermediate; builder may use it as fallback only under its
 A web capture follows clipping-clean into `Articles/`, and an Inbox PDF is
 filed by pdf-organize; only the cleaned note or filed PDF, never the raw
 `Inbox/` file, can become a wiki-build source.
-A source-first contribution, including an explicitly requested entry for one
-named candidate from identified sources, belongs to wiki-build. A topic
-without a source document belongs to wiki-add (below). Corrections or
+A source-first contribution, including a request naming entities from
+identified sources, belongs to wiki-build. A topic without a source document
+belongs to wiki-add (below). Corrections or
 requested simplifications confined to existing entries and supported only by
 sources each affected entry already cites belong to wiki-lint's
 source-backed correction mode; ordinary wiki-lint maintenance needs no source.
@@ -1441,7 +1441,8 @@ writing standard.
 
 **Missing-entry routes.** When a real topic has no entry, report both routes:
 wiki-add can research it (named directly, or queued in `add-to-wiki.md`, where
-only the user adds topics), or a supporting source can go through wiki-build.
+only the user adds topics), or a wiki-build named-entity request can build it
+from a supporting source.
 Neither wiki-build nor wiki-lint writes the queue.
 
 ### wiki-add — inside new requested entries only
