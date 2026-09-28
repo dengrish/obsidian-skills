@@ -42,23 +42,23 @@ Prefer suitable already-cited local evidence under that guide's
 [local-source rules](../../wiki-add/references/research.md#find-local-sources-first),
 which report an unbuilt source for wiki-build instead of citing it; otherwise
 create only the new webpage research extracts the missing roots need. This
-prerequisite never downloads or files a PDF and never downloads or places
-images. Do not fabricate citations or create every unused enum root.
-This exception creates only the roots needed by the authorized closure and
-does not alter the user's topic queue or extract unrelated entities.
+prerequisite creates only the roots the authorized closure needs. It never
+downloads or files a PDF, downloads or places images, fabricates citations,
+alters the user's topic queue or extracts unrelated entities.
 
 A discipline root is a short explanation of the field, not a duplicate MOC.
-The misc root is `Wiki/misc`, titled `Misc`: a brief source-backed
+It defines the field, states its method of inquiry and names its main
+branches, linking those with entries; prefer an encyclopedia or textbook
+source. The misc root is `Wiki/misc`, titled `Misc`: a brief source-backed
 definition of a miscellany (for example from a dictionary extract) that makes
 no claim about this vault's contents. Use the ordinary entry schema, one
-matching tag, a primary-definition card, and `parents: []`.
-New roots use today's `created:` and `updated:` dates and `read: false`;
-the ordinary maintenance freeze applies to existing notes, not this authorized
-new-entry case. Newly acquired source extracts retain the research-source
-marker and visible label defined by wiki-add's reference. Reuse that
-reference's [webpage-extract](../../wiki-add/references/research.md#new-webpage-research-extracts)
-format and publication procedure without invoking its topic-queue completion
-workflow.
+matching tag, `parents: []` and no Flashcards section; an existing root keeps
+its card unless the user asks to remove it.
+New roots use today's date for `created:` and `updated:` and set
+`read: false`; the maintenance date freeze covers existing notes only. Their
+new source extracts keep wiki-add's research-source marker and visible label
+and reuse its [webpage-extract](../../wiki-add/references/research.md#new-webpage-research-extracts)
+format and publication procedure, without its topic-queue completion.
 Preserve existing roots' substantive content, review state, and card history
 under the normal correction rules. A blocked source or ambiguous root owner
 blocks that group's publication; never fall back to an MOC parent.
@@ -88,9 +88,15 @@ already coherent structure stable rather than reorganizing for variety.
   variants beneath it (polynomial, ridge, lasso, and elastic-net regression
   under linear regression).
 - Use an existing broader entry as a linked category only when one of these
-  relationships holds. Otherwise use an unlinked category (for example,
-  `Classification metrics` holding precision, recall, and F1 beside the
-  confusion matrix), and skip it when deriving parents.
+  relationships holds; an entry goes under the most specific existing entry
+  its opener names as its kind or method (random forest, "trained via
+  bagging", under Bagging). Otherwise use an unlinked category, and skip it
+  when deriving parents. An unlinked category groups siblings along one axis
+  and is named for it (`By incrementality`: batch and online learning). Keep
+  named instances such as datasets apart from the concepts they illustrate.
+- Order siblings and categories so each follows those it relies on;
+  otherwise, and within a dependency cycle, keep the prior order and put a
+  new sibling last.
 - Use as much depth as the conceptual relationships need. Do not flatten
   genuine subtrees to satisfy a fixed depth limit. Avoid empty or redundant
   categories and chains that contribute no useful distinction.
@@ -131,6 +137,12 @@ shares the basename. `item2/parents-form` reports any other spelling.
 Generated MOC links always use the Wiki path, e.g.
 `[[Wiki/machine-learning|Machine learning]]`. MOC navigation links are
 `[[MOCs/<discipline-slug>-moc]]` and can never supply a parent.
+
+**Link each parent down.** After publishing parents, rescan. For each included
+parent in `unlinked_children`, append the listed children to its Related
+footer with the supplied targets and canonical piped labels, `branch_heads`
+first and each group in MOC order, until the footer holds twelve links. These
+are the only Related links Task 3 adds, and it removes none.
 
 ## Build or maintain the MOC files
 
@@ -238,6 +250,7 @@ actions.
   to `[[misc]]`, and a `moc-parent` is replaced by the discipline root or the
   nearest Wiki ancestor. Missing roots require the source-backed prerequisite
   above, never a fabricated hierarchy edge.
+- `unlinked_children`: [link each parent down](#populate-parents).
 - `moc_inventory_findings` and `legacy_moc_states` establish path ownership.
   Preserve and report unsafe or noncanonical paths, duplicates, legacy MOCs,
   unknown MOC files, and inactive canonical MOCs; they stay outside generated

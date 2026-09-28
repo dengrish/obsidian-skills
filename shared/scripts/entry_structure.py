@@ -28,6 +28,10 @@ from markdown_tables import markdown_block_start, markdown_table_spans
 from slugify import base_term, has_parenthetical
 
 __all__ = [
+    "CARD_SEPARATORS",
+    "DEFINITION_SEPARATOR",
+    "DISABLED_SEPARATOR",
+    "UNDERSTANDING_SEPARATOR",
     "answer_surface_match",
     "body_opens_with_prose",
     "count_sentences",
@@ -38,7 +42,10 @@ __all__ = [
     "strip_code",
     "strip_fenced",
     "strip_indented",
+    "ends_with_question_mark",
     "ends_with_sentence_period",
+    "flashcard_brevity_hints",
+    "flashcard_kind",
     "flashcard_line1_faults",
     "flashcard_line1_markup",
     "math_title_plain_text",
@@ -542,6 +549,8 @@ _CLAUSE_END_ABBREV_RE = re.compile(
 _SENTENCE_CLOSERS = "\"'”’»)]}"
 _TERMINAL_PERIOD_RE = re.compile(
     r"\.(?:[\"'”’»)\]}]*)\s*$")
+_TERMINAL_QUESTION_RE = re.compile(
+    r"\?(?:[\"'”’»)\]}]*)\s*$")
 
 _OBSIDIAN_LINK_RE = re.compile(r"!?\[\[[^\]\n]+\]\]")
 _MARKDOWN_LINK_RE = re.compile(r"!?\[[^\]\n]*\]\([^\n)]*\)")
@@ -717,6 +726,11 @@ def ends_with_sentence_period(text):
     return bool(_TERMINAL_PERIOD_RE.search(text or ""))
 
 
+def ends_with_question_mark(text):
+    """Whether prose ends in a question mark, allowing closing quotes/brackets."""
+    return bool(_TERMINAL_QUESTION_RE.search(text or ""))
+
+
 def normalized_answer_surface(text):
     """Fold case, Unicode, punctuation, slashes, and whitespace for leaks.
 
@@ -768,10 +782,11 @@ def answer_surface_match(text, candidate):
 
 
 def flashcard_line1_markup(text):
-    """Return forbidden Markdown/HTML forms in a card definition.
+    """Return forbidden Markdown/HTML forms in a card line.
 
-    Inline LaTeX is intentionally absent: it is the one markup form line 1
-    permits. The labels are stable, human-readable evidence for both callers.
+    It reads a card's line 1 and an understanding card's answer. Inline LaTeX
+    is intentionally absent: it is the one markup form those lines permit.
+    The labels are stable, human-readable evidence for both callers.
     """
     value = text or ""
     # Markdown-like characters can be valid mathematical syntax. Mask complete
@@ -823,8 +838,13 @@ def flashcard_line1_markup(text):
     return faults
 
 
-def flashcard_line1_faults(text):
-    """Return item-19 sentence/markup faults for one card definition."""
+def flashcard_line1_faults(text, question=False):
+    """Return item-19 sentence/markup faults for one card's line 1.
+
+    A definition cue ends in a period; with ``question=True`` the line is an
+    understanding card's question and ends in a question mark instead. Both
+    kinds are one capitalized sentence with inline LaTeX as the only markup.
+    """
     value = (text or "").strip()
     faults = []
     sentence_start = value.lstrip(" \t\"'“‘([{")
@@ -834,7 +854,10 @@ def flashcard_line1_faults(text):
             and sentence_start[0].isalpha()
             and not sentence_start[0].isupper()):
         faults.append("does not start with a capitalized word")
-    if not ends_with_sentence_period(value):
+    if question:
+        if not ends_with_question_mark(value):
+            faults.append("does not end with a question mark")
+    elif not ends_with_sentence_period(value):
         faults.append("does not end with a period")
     # Punctuation in a balanced inline equation is mathematical content, not
     # a prose boundary. Keep the view offset-preserving so punctuation outside
@@ -849,6 +872,65 @@ def flashcard_line1_faults(text):
     if markup:
         faults.append("has forbidden %s" % ", ".join(markup))
     return faults
+
+
+#: Card line-2 values. ``??`` is the reversed primary definition card, ``?``
+#: a one-directional understanding card, and ``!!`` a card the user disabled.
+DEFINITION_SEPARATOR = "??"
+UNDERSTANDING_SEPARATOR = "?"
+DISABLED_SEPARATOR = "!!"
+CARD_SEPARATORS = (DEFINITION_SEPARATOR, UNDERSTANDING_SEPARATOR,
+                   DISABLED_SEPARATOR)
+
+
+def flashcard_kind(card):
+    """Return "understanding" or "definition" for one parsed card block.
+
+    ``?`` marks a one-directional understanding card and ``??`` a reversed
+    definition card. The user's ``!!`` keeps the kind its line 1 shows: a
+    question is an understanding card. Any other line 2 is a separator fault
+    the callers report; the card is judged as a definition card, as before
+    the understanding-card grammar existed. A string is refused: indexing
+    one would read its characters as card lines.
+    """
+    if isinstance(card, str):
+        raise TypeError("flashcard_kind takes a parsed card block (a list of "
+                        "lines), not text")
+    line2 = card[1].strip() if len(card) > 1 else ""
+    if line2 == UNDERSTANDING_SEPARATOR:
+        return "understanding"
+    if line2 == DISABLED_SEPARATOR and ends_with_question_mark(card[0]):
+        return "understanding"
+    return "definition"
+
+
+_GLOSSARY_RE = re.compile(r",\s+where\b", re.IGNORECASE)
+
+
+def flashcard_brevity_hints(text, answer=False):
+    """Advisory item-19 hints for one card line; never a fault.
+
+    Words are counted outside inline math. A definition cue (the default) is
+    flagged over 25 words, for a ``, where`` symbol glossary when it carries
+    math, and for a semicolon outside math. An understanding answer
+    (``answer=True``) is flagged over 20 words.
+    """
+    value = text or ""
+    has_math = bool(_INLINE_LATEX_RE.search(value))
+    prose = _INLINE_LATEX_RE.sub(" ", value)
+    count = sum(1 for token in prose.split()
+                if any(char.isalnum() for char in token))
+    limit, target = (20, 15) if answer else (25, 20)
+    hints = []
+    if count > limit:
+        hints.append("%d words outside math (about %d is the target)"
+                     % (count, target))
+    if not answer:
+        if has_math and _GLOSSARY_RE.search(prose):
+            hints.append("a ', where' symbol glossary")
+        if ";" in prose:
+            hints.append("a second clause after a semicolon")
+    return hints
 
 
 _FLASHCARD_BLOCK_ID_SUFFIX_RE = re.compile(
@@ -979,10 +1061,12 @@ def strip_flashcard_review_metadata(text):
 def parse_flashcard_blocks(text):
     """Return visible flashcard blocks split on whitespace-only blank lines.
 
-    Recognized Spaced Repetition state and trailing block IDs attached to a
-    complete card are omitted by ``strip_flashcard_review_metadata``. Ordinary
-    visible content stays in its block so callers can report it as malformed
-    rather than silently treating it as review state.
+    It never reads line 2, so ``??``, ``?`` and ``!!`` cards parse alike;
+    :func:`flashcard_kind` classifies a block afterwards. Recognized Spaced
+    Repetition state and trailing block IDs attached to a complete card are
+    omitted by ``strip_flashcard_review_metadata``. Ordinary visible content
+    stays in its block so callers can report it as malformed rather than
+    silently treating it as review state.
     """
     visible = strip_flashcard_review_metadata(text)
     cards, buffer = [], []
@@ -1359,6 +1443,14 @@ def run_self_test(verbose=False):
         if not ok:
             print("  expected %r, got %r" % (expected, got))
             failed += 1
+
+    def raises(error, function, *args):
+        try:
+            function(*args)
+        except error:
+            return True
+        return False
+
     helper_cases = [
         ("source references use portable Unicode identity",
          [source_stem(value) for value in (
@@ -1789,6 +1881,78 @@ def run_self_test(verbose=False):
          ([["A complete definition.", "??", "Térm"]],
           ("A complete definition.\n??\n"
            "Térm <!--SR:!2026-09-20,30,250--> ^term-card").encode("utf-8"))),
+        ("the three card separators, primary first",
+         CARD_SEPARATORS, ("??", "?", "!!")),
+        ("a card's kind comes from line 2, and from line 1 under !!",
+         [flashcard_kind(card) for card in (
+             ["Q?", "?", "A"], ["D.", "??", "T"], ["Why X?", "!!", "A"],
+             ["A thing.", "!!", "T"], ["D.", "???", "T"], ["Only a cue."])],
+         ["understanding", "definition", "understanding", "definition",
+          "definition", "definition"]),
+        ("a card's kind is read from a parsed block, never from raw text",
+         raises(TypeError, flashcard_kind, "Q?\n?\nA"), True),
+        ("a question mark may sit inside closing quotes or brackets",
+         [ends_with_question_mark(value) for value in (
+             'What is "x?"', "Is it (really)?", "It is.", "", None)],
+         [True, True, False, False, False]),
+        ("an understanding question passes the question-aware line-1 check",
+         [flashcard_line1_faults(value, question=True) for value in (
+             "Why does raising the threshold lower recall?",
+             "What does $a?b$ denote?")],
+         [[], []]),
+        ("question-aware line-1 faults: terminal mark, capital, sentences, "
+         "markup",
+         [flashcard_line1_faults(value, question=True) for value in (
+             "A plot of x.", "why?", "What is it? Why?", "Why is **x** big?")],
+         [["does not end with a question mark"],
+          ["does not start with a capitalized word"],
+          ["contains roughly 2 sentences"],
+          ["has forbidden bold"]]),
+        ("a definition cue still needs its period",
+         flashcard_line1_faults("Why does raising the threshold lower recall?"),
+         ["does not end with a period"]),
+        ("brevity hints for a definition cue",
+         [flashcard_brevity_hints(value) for value in (
+             " ".join(["Word"] * 25) + " end.",
+             " ".join(["Word"] * 19) + r" end $\sum_{i=1}^{n} w_i x_i + b"
+             r" \cdot \lambda \lVert w \rVert_2^2$.",
+             "The fraction $a/b$ of things, where $a$ counts x.",
+             "A set of points, where each is close.",
+             "A cell; the unit of life.",
+             "The interval $[a; b]$ of real numbers.",
+             " ".join(["Word"] * 21) + " end.")],
+         [["26 words outside math (about 20 is the target)"], [],
+          ["a ', where' symbol glossary"], [],
+          ["a second clause after a semicolon"], [], []]),
+        ("brevity hints for an understanding answer",
+         [flashcard_brevity_hints(value, answer=True) for value in (
+             " ".join(["Word"] * 22), " ".join(["Word"] * 20),
+             "Fewer positives; more misses.")],
+         [["22 words outside math (about 15 is the target)"], [], []]),
+        ("every attachment form on an understanding card parses as on a "
+         "definition card",
+         [parse_flashcard_blocks("Why?\n?\nBecause." + attachment)
+          for attachment in (
+              " <!--SR:!2026-09-20,3,250-->",
+              "\n<!--SR:!2026-09-20,3,250-->",
+              "\n<!--SR:\n!2026-09-20,3,250\n-->",
+              "\n> [!sr|card-metadata]\n> <!--SR:!2026-09-20,3,250-->",
+              " ^why-card",
+              " <!--SR:!2026-09-20,3,250--> ^why-card")],
+         [[["Why?", "?", "Because."]]] * 6),
+        ("a definition card and an understanding card keep their own "
+         "attachments",
+         [parse_flashcard_blocks(value) for value in (
+             "Definition.\n??\nTerm\n\n"
+             "Why?\n?\nBecause.\n<!--SR:!2026-09-20,3,250-->",
+             "Definition.\n??\nTerm\n<!--SR:!2026-09-20,3,250-->\n\n"
+             "Why?\n?\nBecause.",
+             "Definition.\n??\nTerm\n\nWhy?\n?\nBecause.\n\n"
+             "<!--SR:detached-->")],
+         [[["Definition.", "??", "Term"], ["Why?", "?", "Because."]],
+          [["Definition.", "??", "Term"], ["Why?", "?", "Because."]],
+          [["Definition.", "??", "Term"], ["Why?", "?", "Because."],
+           ["<!--SR:detached-->"]]]),
     ]
     for opening, closing in (("<!--", "-->"), ("%%", "%%")):
         hidden = opening + "\n## Flashcards\n```\n[[hidden]]\n" + closing

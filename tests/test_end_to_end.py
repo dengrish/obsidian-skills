@@ -1631,6 +1631,84 @@ Control sample
             finding["kind"] == "malformed-line" and finding["line"] == 1
             for finding in revised_report["hierarchy_diagnostic"]["moc_consistency_findings"]))
 
+    def test_root_without_card_and_parents_link_down(self):
+        # A discipline root needs no Flashcards section, and the scanner lists
+        # a parent whose prose and footer leave a child unlinked for Task 3.
+        wiki = self.vault / "Wiki"
+        self.write_discipline_root("biology")
+        root = wiki / "biology.md"
+        root.write_text(
+            root.read_text(encoding="utf-8").split("\n---\n\n## Flashcards", 1)[0]
+            .replace("**Related:**", "**Related:** [[biological-cell|Biological cell]]"),
+            encoding="utf-8")
+        self.assertNotIn("## Flashcards", root.read_text(encoding="utf-8"))
+
+        def write_member(slug, title, parent, opener, cue, related):
+            (wiki / f"{slug}.md").write_text(f'''---
+title: "{title}"
+type: Concept
+sources:
+  - "[[Example_Fields_nd.md]]"
+created: 2026-08-30
+updated: 2026-08-30
+description: "{opener.replace('**', '')}"
+tags:
+  - "#biology"
+parents:
+  - "[[{parent}]]"
+read: false
+---
+{opener}
+
+**Related:** {related}
+
+---
+
+## Flashcards
+
+{cue}
+??
+{title}
+''', encoding="utf-8")
+
+        write_member(
+            "biological-cell", "Biological cell", "biology",
+            "A **biological cell** is the smallest unit of an organism that can live on its own.",
+            "The smallest membrane-bounded unit of an organism that can live on its own.",
+            "[[biology|Biology]]")
+        write_member(
+            "organelle", "Organelle", "biological-cell",
+            "An **organelle** is a specialized structure inside a cell that performs a distinct function.",
+            "A specialized structure inside a cell that performs a distinct function.",
+            "[[biological-cell|Biological cell]]")
+        (self.vault / "MOCs").mkdir()
+        (self.vault / "MOCs/biology-moc.md").write_text(
+            "- [[Wiki/biology|Biology]]\n  - [[Wiki/biological-cell|Biological cell]]\n"
+            "    - [[Wiki/organelle|Organelle]]\n", encoding="utf-8")
+
+        lint = self.vault / "lint.json"
+        self.run_script("skills/wiki-build/scripts/lint_entry.py", wiki, "-o", lint)
+        self.assertTrue(
+            json.loads(lint.read_text(encoding="utf-8"))["summary"]["clean"])
+
+        def scan():
+            report = json.loads(self.run_script(
+                "skills/wiki-lint/scripts/scan_vault.py", wiki,
+                "--images", self.images).stdout)
+            self.assertEqual(report["problems"], [])
+            return report["hierarchy_diagnostic"]
+
+        diagnostic = scan()
+        self.assertEqual(diagnostic["moc_consistency_findings"], [])
+        self.assertEqual(
+            [(row["slug"], row["unlinked"]) for row in diagnostic["unlinked_children"]],
+            [("biological-cell", ["organelle"])])
+        cell = wiki / "biological-cell.md"
+        cell.write_text(cell.read_text(encoding="utf-8").replace(
+            "**Related:** [[biology|Biology]]",
+            "**Related:** [[biology|Biology]] · [[organelle|Organelle]]"), encoding="utf-8")
+        self.assertEqual(scan()["unlinked_children"], [])
+
     def test_misc_requires_explicit_fallback_tag_and_retagging_updates_both_mocs(self):
         wiki = self.vault / "Wiki"
         entry = wiki / "reference-label.md"
@@ -1887,13 +1965,15 @@ Arithmetic mean
         def write_entry(slug, title, body, *, type_="Concept", aliases=(),
                         source="[[Clean.pdf#page=1]]", description=None,
                         tags_block='tags:\n  - "#statistics"', card=None,
-                        related=None):
+                        related=None, extra_cards=None):
             alias_yaml = ""
             if aliases:
                 alias_yaml = "aliases:\n" + "".join(
                     f'  - "{alias}"\n' for alias in aliases)
             footer = "\n\n**Related:**" + (f" {related}" if related else "")
             term = card if card is not None else title
+            # Raw cards after the primary card, each block blank-line separated.
+            more_cards = f"\n{extra_cards.rstrip()}\n" if extra_cards else ""
             text = f'''---
 title: "{title}"
 type: {type_}
@@ -1915,7 +1995,7 @@ read: false
 A compact definition used only to exercise the shared contract.
 ??
 {term}
-'''
+{more_cards}'''
             path = wiki / f"{slug}.md"
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
@@ -2074,12 +2154,46 @@ A compact definition used only to exercise the shared contract.
             "with [[other/shared-target|another target]], while bare "
             "[[shared-target]] and [[SHARED-TARGET.md|Shared target]] remain "
             "ambiguous because a root file has the same basename.")
+        # The card set: one primary `??` card, then at most two `?`
+        # understanding cards whose answers take inline LaTeX only.
+        write_entry(
+            "understanding-cards", "Understanding cards",
+            "**Understanding cards** is a synthetic fixture that doubles its input.",
+            extra_cards=(
+                "What does the synthetic fixture double?\n?\nIts input\n\n"
+                "Which expression gives the fixture's output for an input $x$?\n?\n$2x$"))
+        write_entry(
+            "too-many-understanding", "Too many understanding",
+            "**Too many understanding** is a deliberately malformed fixture.",
+            extra_cards=(
+                "What does the fixture count?\n?\nCards\n\n"
+                "How many question cards does the fixture carry?\n?\nThree\n\n"
+                "Which limit does the fixture exceed?\n?\nThe card cap"))
+        write_entry(
+            "simplified-primary", "Simplified primary",
+            "**Simplified primary** is a deliberately malformed fixture.")
+        simplified_primary = wiki / "simplified-primary.md"
+        simplified_primary.write_text(
+            simplified_primary.read_text(encoding="utf-8").replace(
+                "\n??\n", "\n?\n", 1),
+            encoding="utf-8")
+        write_entry(
+            "understanding-answer-markup", "Understanding answer markup",
+            "**Understanding answer markup** is a deliberately malformed fixture.",
+            extra_cards="Which symbol names the fixture's variable?\n?\n**x**")
+        card_set_faults = {
+            "too-many-understanding": "3 understanding cards",
+            "simplified-primary": "no `??` primary definition card",
+            "understanding-answer-markup": "answer has forbidden bold",
+        }
 
         lint = json.loads(self.run_script(
             "skills/wiki-build/scripts/lint_entry.py", wiki, "--compact").stdout)
+        lint_findings = {Path(entry["file"]).stem: entry["findings"]
+                         for entry in lint["entries"]}
         lint_items = {
-            Path(entry["file"]).stem: {finding["item"] for finding in entry["findings"]}
-            for entry in lint["entries"]
+            stem: {finding["item"] for finding in findings}
+            for stem, findings in lint_findings.items()
         }
         self.assertTrue({"2-type-enum", "4-sources", "7-description",
                          "8-tags", "18-alias-form", "19-flashcards"}
@@ -2091,7 +2205,7 @@ A compact definition used only to exercise the shared contract.
                      "x-1-2-transform", "r-plus",
                      "archaea", "hard-wrap-acronym", "adaboost",
                      "saccharomyces-cerevisiae", "historical-synonym",
-                     "canonical-code-shapes"):
+                     "canonical-code-shapes", "understanding-cards"):
             self.assertEqual(lint_items[slug], set(), slug)
         for slug in ("scalar-alias", "blank-alias", "missing-counterpart-acronym",
                      "synonym-parenthetical", "wrong-title-case",
@@ -2105,6 +2219,10 @@ A compact definition used only to exercise the shared contract.
         self.assertIn("9-person-event-date",
                       lint_items["malformed-person-date"])
         self.assertIn("16-code-typography", lint_items["bare-code-shapes"])
+        for slug, fragment in card_set_faults.items():
+            self.assertTrue(any(
+                finding["item"] == "19-flashcards" and fragment in finding["message"]
+                for finding in lint_findings[slug]), (slug, lint_findings[slug]))
 
         scan = json.loads(self.run_script(
             "skills/wiki-lint/scripts/scan_vault.py", wiki, "--indent", "0").stdout)
@@ -2121,8 +2239,8 @@ A compact definition used only to exercise the shared contract.
                      "x-1-2-transform", "r-plus",
                      "archaea", "hard-wrap-acronym", "adaboost",
                      "saccharomyces-cerevisiae", "historical-synonym",
-                     "canonical-code-shapes"):
-            self.assertEqual(scan_items.get(slug, set()), set())
+                     "canonical-code-shapes", "understanding-cards"):
+            self.assertEqual(scan_items.get(slug, set()), set(), slug)
         for slug in ("scalar-alias", "blank-alias", "missing-counterpart-acronym",
                      "synonym-parenthetical", "wrong-title-case",
                      "singular-parenthetical"):
@@ -2135,6 +2253,11 @@ A compact definition used only to exercise the shared contract.
         self.assertIn("item1", scan_items.get("malformed-flow-list", set()))
         self.assertIn("item9", scan_items.get("malformed-person-date", set()))
         self.assertIn("item16", scan_items.get("bare-code-shapes", set()))
+        for slug, fragment in card_set_faults.items():
+            self.assertTrue(any(
+                problem["slug"] == slug and problem["item"] == "item19"
+                and fragment in problem["message"]
+                for problem in scan["problems"]), slug)
         for slug in ("related-anchored", "related-wrong-label"):
             self.assertIn("item11", scan_items.get(slug, set()), scan_items.get(slug))
         self.assertNotIn("item10/dup",

@@ -1,7 +1,7 @@
 # Source-backed refactors of existing entries
 
 Read this only when the current request explicitly authorizes a split, merge,
-deletion, or redistribution of existing wiki content. An ordinary lint run
+deletion, consolidation or redistribution of existing wiki content. An ordinary lint run
 reports these candidates and stops; a long note, duplicate wording, or scanner
 similarity never activates this mode by itself. Authorization already present
 in the request is sufficient. This protocol requires no separate human review.
@@ -67,9 +67,12 @@ affected entry and supported by its durable source.
   and same-entity aliases, and apply the builder's body-change rule for
   `updated:` and `read:`. Report conflicting user-owned metadata from an entry
   that may be removed rather than silently selecting a value.
+- A consolidation keeps the full treatment of an explanation duplicated across
+  entries in its most specific canonical owner, moving any claim the owner
+  lacks, and leaves each other entry one relating sentence and a link.
 - Preserve the retained primary flashcard's recognized scheduling attachments
   and block ID byte-for-byte. Do not discard an extra card merely to enforce
-  the one-card presentation rule. Preserve every card unless the authorized
+  the card-set rule. Preserve every card unless the authorized
   refactor inventory assigns its tested claim to a retained or new entry, or
   the request explicitly names that card for deletion; quote every moved or
   removed card with all attachments in the report. Preserve existing exhibits

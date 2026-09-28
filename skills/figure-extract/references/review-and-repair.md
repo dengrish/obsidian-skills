@@ -197,10 +197,13 @@ unnumbered or colliding exhibit unextracted and report it.
        --out '<scratch>/page-preview-<unique-id>' --dpi 72
    ```
 
-   The render is in pixels; crop coordinates are PDF **points**, measured
+   Pass several pages comma-separated (`10,11,13`). The render is in pixels;
+   crop coordinates are PDF **points**, measured
    from the top-left. Multiply pixels by `72 / DPI`: at 72 DPI they are equal;
    at the default 100 DPI the factor is `0.72`. The renderer prints the
-   conversion factor.
+   conversion factor. An edge judged by eye can miss by tens of points; when
+   it sits near text, take the caption's and neighboring text's positions
+   from PyMuPDF's `page.get_text("words")`.
 
 3. Set `PAGE:FIG_LABEL:x0,y0,x1,y1` in points, using the source caption's
    label; output names follow the PDF's exact on-disk stem. The coordinates

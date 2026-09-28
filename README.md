@@ -66,7 +66,7 @@ Figure extraction supplies images to paper-summarize and wiki-build; each runs
 figure-extract on a source PDF whose figures are missing.
 Both paper-summarize and wiki-build read the **original PDF**. The summary
 is a finished reading note; builder may use it only under its
-[verified missing-PDF fallback](skills/wiki-build/references/source-intake.md#resolve-a-markdown-source).
+[verified missing-PDF fallback](skills/wiki-build/references/source-cases.md#resolve-a-markdown-source).
 A cleaned clipping is itself the source and can be used directly. wiki-build
 never reads a raw `Inbox/` file; clipping-clean or pdf-organize handles it
 first. wiki-add can reuse sources that Wiki entries already cite, file newly

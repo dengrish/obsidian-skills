@@ -7355,7 +7355,7 @@ def check_review_before_publication(rep, conv):
         rep.fail(check, "wiki-build still creates Wiki during collision "
                  "planning/no-apply", rel(builder_path))
     review_at = builder.find("### 7. Review and report")
-    publish_at = builder.find("Publish new slugs with exclusive")
+    publish_at = builder.find("creates new slugs exclusively")
     if review_at < 0 or publish_at < 0 or publish_at <= review_at:
         rep.fail(check, "final public publication is not confined to step 7 "
                  "after review", rel(builder_path))
@@ -7368,13 +7368,19 @@ def check_review_before_publication(rep, conv):
 
 
 def check_linter_finding_routes(rep, _conv):
-    """New scanner subkeys stay documented and routed to a concrete action."""
+    """New scanner keys stay documented and routed to a concrete action.
+
+    scanner.md documents each key; the file that acts on it routes it:
+    qc-items.md for item findings and worklists, hierarchy.md for Task 3's
+    `unlinked_children`, link-hygiene.md for Task 2's `hub_footer`.
+    """
     check = "linter-finding-routes"
+    refs = os.path.join(SKILLS_DIR, "wiki-lint", "references")
     paths = {
-        "scanner": os.path.join(
-            SKILLS_DIR, "wiki-lint", "references", "scanner.md"),
-        "actions": os.path.join(
-            SKILLS_DIR, "wiki-lint", "references", "qc-items.md"),
+        "scanner": os.path.join(refs, "scanner.md"),
+        "actions": os.path.join(refs, "qc-items.md"),
+        "hierarchy": os.path.join(refs, "hierarchy.md"),
+        "links": os.path.join(refs, "link-hygiene.md"),
     }
     try:
         texts = {name: read(path) for name, path in paths.items()}
@@ -7387,6 +7393,15 @@ def check_linter_finding_routes(rep, _conv):
         ("scanner", "`item10/redundant-pipe`"),
         ("actions", "`item10/redundant-pipe`"),
         ("scanner", "`item2/parents-null`"),
+        ("scanner", "`item19/brevity-candidate`"),
+        ("actions", "`item19/brevity-candidate`"),
+        ("scanner", "`card_rivals`"),
+        ("actions", "`card_rivals`"),
+        ("scanner", "`spaced_repetition`"),
+        ("scanner", "`unlinked_children`"),
+        ("hierarchy", "`unlinked_children`"),
+        ("scanner", "`hub_footer`"),
+        ("links", "`hub_footer`"),
     )
     found = 0
     for home, marker in pins:
@@ -7401,8 +7416,8 @@ def check_linter_finding_routes(rep, _conv):
             )
     rep.saw(check, "scanner-key documentation/action pins", found)
     if found == len(pins):
-        rep.ok(check, "new deterministic scanner subkeys have both detection "
-               "documentation and repair routing", rel(paths["scanner"]))
+        rep.ok(check, "new scanner keys have both detection documentation "
+               "and a routed action", rel(paths["scanner"]))
 
 
 def check_safe_write_programmatic_api(rep, _conv):
@@ -7487,6 +7502,260 @@ def check_safe_write_programmatic_api(rep, _conv):
                rel(paths["safe"]))
 
 
+# ===========================================================================
+# rules that later edits have re-grown before
+# ===========================================================================
+#
+# Earlier cycles shipped regressions when a later edit restored wording a
+# rule change had removed.  These checks pin each rule at its owner and fail
+# the retired phrasing wherever canonical text could bring it back.  They read
+# the authored sources only (`skills/`, `shared/`, the authored knowledge
+# README), never the generated `plugins/*/skills` or `plugins/*/shared` copies,
+# which the build rewrites from those sources.
+
+KNOWLEDGE_README = os.path.join(ROOT, "plugins", "knowledge", "README.md")
+
+
+def _phrase_re(phrase, flags=0):
+    """A whitespace-tolerant regex for ``phrase``; a heading must fill its line.
+
+    Prose may wrap anywhere, so any whitespace run matches any other.  A phrase
+    that begins or ends with a letter or digit may not continue into a longer
+    word ("one card" is not "one cardinality"); a hyphen may join it
+    ("exact-one-card rule" still contains "one-card").
+    """
+    body = r"\s+".join(re.escape(word) for word in phrase.split())
+    if phrase.startswith("#"):
+        return re.compile(r"^" + body + r"[ \t]*$", flags | re.M)
+    if phrase[0].isalnum():
+        body = r"(?<![A-Za-z0-9])" + body
+    if phrase[-1].isalnum():
+        body += r"(?![A-Za-z0-9])"
+    return re.compile(body, flags)
+
+
+def canonical_rule_sources():
+    """Yield (path, text) for each authored Markdown and Python source.
+
+    `skills/**` (Markdown and scripts), `shared/*.md`, `shared/scripts/*.py`
+    and `plugins/knowledge/README.md`.  Nothing else under `plugins/` is
+    authored: a stale phrase there is a stale build, which `build --check`
+    reports, not a second place the rule lives.
+    """
+    for _skill, path, text in walk_skill_files():
+        yield path, text
+    shared_scripts = os.path.join(SHARED_DIR, "scripts")
+    for folder, ext in ((SHARED_DIR, ".md"), (shared_scripts, ".py")):
+        for name in sorted(os.listdir(folder)):
+            path = os.path.join(folder, name)
+            if name.endswith(ext) and not name.startswith(".") \
+                    and os.path.isfile(path):
+                yield path, read(path)
+    yield KNOWLEDGE_README, read(KNOWLEDGE_README)
+
+
+def _module_constant(text, name):
+    """The literal value of a module-level ``name = <literal>``, else None."""
+    for node in ast.parse(text).body:
+        if (isinstance(node, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == name
+                        for t in node.targets)):
+            try:
+                return ast.literal_eval(node.value)
+            except (ValueError, TypeError, SyntaxError):
+                return None
+    return None
+
+
+#: One-card phrasing the card-set rule (one primary `??` card plus up to two
+#: `?` understanding cards) retired.  Case-insensitive.
+CARD_SET_STALE_PHRASES = (
+    "exactly one card",
+    "exactly one flashcard",
+    "one-card",
+    "one card only",
+    "no additional cards",
+    "never to words",
+    "every entry has one card",
+)
+
+
+def check_card_set_contract(rep, _conv):
+    """The card set, its separator and attachment rules, and deck setup.
+
+    flashcards-and-emphasis.md owns the card grammar, wiki-lint's
+    flashcards.md owns when a card may be rewritten, the knowledge README
+    tells the user how to set up review, and entry_checks.py enforces the
+    cap.  The one-card phrasing the card set replaced must not come back in
+    any canonical source.
+    """
+    check = "card-set-contract"
+    fe_path = os.path.join(SKILLS_DIR, "wiki-build", "references",
+                           "flashcards-and-emphasis.md")
+    wl_path = os.path.join(SKILLS_DIR, "wiki-lint", "references",
+                           "flashcards.md")
+    checks_path = os.path.join(SHARED_DIR, "scripts", "entry_checks.py")
+    pins = (
+        (fe_path, "up to two **understanding cards**",
+         "no longer states the card-set cap: one primary `??` card plus up "
+         "to two `?` understanding cards"),
+        (fe_path, "Never simplify a primary card's `??` to `?`",
+         "no longer forbids simplifying the primary card's `??` to `?`, "
+         "which halves the card and strands its second schedule"),
+        (fe_path, "never move it between cards",
+         "no longer forbids moving a schedule or block ID between cards"),
+        (fe_path, "absence of attachments alone proves nothing",
+         "no longer states that a card without visible attachments may still "
+         "carry review state"),
+        (fe_path, "### Line-1 equation coverage",
+         "lost the `### Line-1 equation coverage` heading that owns card "
+         "math"),
+        (fe_path, "**Line 1 is verbal by default.**",
+         "no longer states that card line 1 is verbal by default"),
+        (wl_path, "## Card redesign pass",
+         "lost the `## Card redesign pass` section that explicit card "
+         "redesign requests route to"),
+        (wl_path, "`spaced_repetition.schedules_outside_notes` is `false`",
+         "no longer ties scan-proven card freshness to "
+         "`spaced_repetition.schedules_outside_notes` being `false`"),
+        (wl_path, "never move an attachment between cards",
+         "no longer forbids moving an attachment between cards"),
+        (wl_path, "Routine lint never adds an understanding card",
+         "no longer forbids routine lint from adding an understanding card"),
+        (KNOWLEDGE_README, "## Reviewing flashcards",
+         "lost the `## Reviewing flashcards` setup section"),
+        (KNOWLEDGE_README, "never edits the plugin's settings",
+         "no longer states that the skills never edit the Spaced Repetition "
+         "plugin's settings"),
+    )
+    held = 0
+    for path, marker, why in pins:
+        try:
+            text = read(path)
+        except OSError as exc:
+            rep.fail(check, "cannot read a card-set home: %s" % exc, rel(path))
+            continue
+        if _phrase_re(marker).search(text):
+            held += 1
+        else:
+            rep.fail(check, "%s %s (missing %r)"
+                     % (os.path.basename(path), why, marker), rel(path))
+    try:
+        cap = _module_constant(read(checks_path), "MAX_UNDERSTANDING_CARDS")
+    except (OSError, SyntaxError) as exc:
+        rep.fail(check, "cannot read entry_checks.py: %s" % exc,
+                 rel(checks_path))
+    else:
+        if cap == 2:
+            held += 1
+        else:
+            rep.fail(check, "entry_checks.py sets MAX_UNDERSTANDING_CARDS to "
+                     "%r, not 2 -- the enforced cap no longer matches the "
+                     "documented card set" % (cap,), rel(checks_path))
+
+    stale = [(phrase, _phrase_re(phrase, re.I))
+             for phrase in CARD_SET_STALE_PHRASES]
+    scanned = 0
+    for path, text in canonical_rule_sources():
+        scanned += 1
+        for phrase, rx in stale:
+            for m in rx.finditer(text):
+                rep.fail(check,
+                         "%s restates the retired one-card rule (%r) -- an "
+                         "entry has one primary `??` card plus up to two `?` "
+                         "understanding cards"
+                         % (rel(path), " ".join(m.group(0).split())),
+                         at(path, m.start(), text))
+    rep.saw(check, "card-set pins held", held)
+    rep.saw(check, "canonical sources scanned for one-card phrasing", scanned)
+    if held == len(pins) + 1 and not any(
+            status == "FAIL" and name == check
+            for name, status, _where, _message in rep.results):
+        rep.ok(check, "%d card-set statements held at their owners; no "
+               "canonical source restates the one-card rule" % held,
+               rel(fe_path))
+
+
+#: (file under skills/, phrases) for the writing rules this check pins.
+WRITING_RULE_PINS = (
+    (("wiki-build", "references", "writing.md"), (
+        "Teach in the order a learner needs",
+        "Core-facet check",
+        "Never weaken a plainly stated source or textbook claim",
+        "are explanation, not examples",
+        "Frame the entry in its own field",
+        "Lead with the prototype",
+    )),
+    (("wiki-build", "references", "equations.md"), (
+        "Start from the defining relation",
+        "Explain each defining display in words",
+        "General form first",
+    )),
+    (("wiki-build", "references", "merge.md"), (
+        "Preservation protects claims, not arrangement",
+        "Restructuring inside this entry is integration, not a refactor",
+    )),
+    (("wiki-lint", "references", "source-backed-corrections.md"), (
+        "deepen, expand or enrich",
+    )),
+)
+
+#: Retired writing rules: the default against examples and the hedge repair
+#: that narrowed a claim's own wording.  Case-insensitive.
+WRITING_RULE_RETIRED = (
+    "Default to no example",
+    "narrowing its own wording",
+)
+
+
+def check_writing_rules(rep, _conv):
+    """The teaching-quality writing rules stay at their owners.
+
+    writing.md, equations.md and merge.md own the rules; wiki-lint's
+    source-backed-corrections.md routes deepen requests.  The two retired
+    rules must not return anywhere in wiki-build or wiki-lint Markdown.
+    """
+    check = "writing-rules"
+    held = total = 0
+    for parts, phrases in WRITING_RULE_PINS:
+        path = os.path.join(SKILLS_DIR, *parts)
+        total += len(phrases)
+        try:
+            text = read(path)
+        except OSError as exc:
+            rep.fail(check, "cannot read a writing-rule home: %s" % exc,
+                     rel(path))
+            continue
+        for phrase in phrases:
+            if _phrase_re(phrase).search(text):
+                held += 1
+            else:
+                rep.fail(check, "%s no longer states %r"
+                         % (os.path.basename(path), phrase), rel(path))
+    retired = [(phrase, _phrase_re(phrase, re.I))
+               for phrase in WRITING_RULE_RETIRED]
+    scanned = 0
+    for skill, path, text in walk_skill_files():
+        if skill not in ("wiki-build", "wiki-lint") or not path.endswith(".md"):
+            continue
+        scanned += 1
+        for phrase, rx in retired:
+            for m in rx.finditer(text):
+                rep.fail(check, "%s restates a retired writing rule (%r)"
+                         % (rel(path), " ".join(m.group(0).split())),
+                         at(path, m.start(), text))
+    rep.saw(check, "writing-rule pins held", held)
+    rep.saw(check, "wiki-build and wiki-lint Markdown files scanned for "
+                   "retired writing rules", scanned)
+    if held == total and not any(
+            status == "FAIL" and name == check
+            for name, status, _where, _message in rep.results):
+        rep.ok(check, "%d writing-rule statements held at their owners; no "
+               "retired rule restated" % held,
+               rel(os.path.join(SKILLS_DIR, "wiki-build", "references",
+                                "writing.md")))
+
+
 CHECKS = [
     check_readability,
     check_note_headings,
@@ -7514,6 +7783,8 @@ CHECKS = [
     check_review_before_publication,
     check_safe_write_programmatic_api,
     check_linter_finding_routes,
+    check_card_set_contract,
+    check_writing_rules,
 ]
 
 

@@ -82,7 +82,7 @@ own procedure
 [wiki-build](../skills/wiki-build/references/media.md#missing-pdf-figures)),
 and each reads the PDF itself. A summary is a finished reading note, not a
 required intermediate; builder may use it as fallback only under its
-[verified missing-PDF rule](../skills/wiki-build/references/source-intake.md#resolve-a-markdown-source).
+[verified missing-PDF rule](../skills/wiki-build/references/source-cases.md#resolve-a-markdown-source).
 A web capture follows clipping-clean into `Articles/`, and an Inbox PDF is
 filed by pdf-organize; only the cleaned note or filed PDF, never the raw
 `Inbox/` file, can become a wiki-build source.
@@ -1066,8 +1066,8 @@ need backticks in prose), `introduced_aliases.py` (alternate names that body
 prose introduces for the entry's subject), `entry_checks.py` (the per-entry
 Wiki floors both Wiki linters apply: the cross-domain common-noun slug, non-`Software`
 API surface, merge scars, source-meta phrasing, emphasis, display labels
-(including a label that drops its target title's head word) and the primary
-flashcard among several),
+(including a label that drops its target title's head word), the primary
+flashcard among several and the card-set shape),
 `check_parsers.py` (installed-version floors for the PDF and image parsers,
 knowledge only), `figure_state.py` (§8b),
 `portable_names.py` (NFC + case-fold filename identity used for case and
@@ -1100,7 +1100,7 @@ does not change the canonical output forms in §2.
 | `[[Wiki/<relative-entry-path>\|Label]]` | every generated MOC tree entry link; use the actual vault-relative Wiki folder prefix and no `.md`. Labels follow [hierarchy](../skills/wiki-lint/references/hierarchy.md#build-or-maintain-the-moc-files) |
 | `[[slug\|Display Label]]` | body link whose label differs by case, spacing or alias |
 | `[[Wiki/<entry-path>\|Label]]` | body or Related link to an entry whose bare basename has another real vault owner, such as a discipline root beside a previous-layout MOC (`[[Wiki/statistics\|statistics]]`); never guess an ambiguous owner |
-| `[[slug\|Canonical Title]]` | **every** `**Related:**` footer link, path-qualified as above when the basename is shared — always piped, even when slug-equal |
+| `[[slug\|Canonical Title]]` | **every** `**Related:**` footer link to an entry, path-qualified as above when the basename is shared — always piped, even when slug-equal |
 | `![[file.png]]` | image embed from `Sources/Images/` (Obsidian resolves the basename vault-wide) |
 | `![alt](https://…)` | remote image in a URL-origin source or derived entry — **the mandated form; never rewrite it to `![[…]]`**, which resolves to nothing and loses the URL |
 | `"[[file.pdf]]"` | a **link** to a local document — quoted, no anchor. This is `sources:` item 1 of a note about that document (§2b). Resolves **by basename, vault-wide**; §1a is what makes that safe |
@@ -1153,7 +1153,7 @@ organism's ordinary common name when the target's description or opening
 sentence explicitly binds it to that Organism's canonical title (`[[mus-musculus|mouse]]`
 where the target says “Mus musculus is the mouse”). The checkers recognize
 the synonym form for words in wiki-build's
-[cross-domain corpus](../skills/wiki-build/references/writing.md#cross-domain-term-disambiguation).
+[cross-domain corpus](../skills/wiki-build/references/special-titles.md#cross-domain-term-disambiguation).
 The Organism form may be unsafe as a global alias because the same common
 word can name something in another domain. It covers the complete bound
 phrase and its natural inflection; it does not strip a qualifier (`fruit fly`
@@ -1518,7 +1518,8 @@ make the current lint run incomplete.
   never pruned by this mechanism.
 - **Repair orphans inherited from earlier runs.** Assume the vault has *not*
   been swept.
-- **`parents:`, the MOCs, whole-vault dedup detection, and cross-entry QC** —
+- **`parents:`, the MOCs, the links from each parent to its children,
+  whole-vault dedup detection, and cross-entry QC** —
   the things wiki-build structurally cannot do, because it sees one source at
   a time and cannot know about entries that do not exist yet.
 

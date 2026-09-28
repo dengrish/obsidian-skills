@@ -50,11 +50,11 @@ CLI:
 Output: per candidate {candidate, slug, matches:[{probe, matched_slug,
 matched_via, alias?, entry_slug, implies}], verdict, naming?}, plus the top-level
 ``candidate_collisions[]``, ``index_problems[]`` and ``summary``.
-``naming: ["bare-common-noun"]`` marks a slug from writing.md's cross-domain
-corpus; it never changes the verdict (SKILL.md says how to act on it). Every
-index problem is reported, but only one that can hide slug, title or alias
-ownership (``_creation_blockers``) turns an otherwise-new candidate into
-``adjudicate``.
+``naming: ["bare-common-noun"]`` marks a slug from special-titles.md's
+cross-domain corpus; it never changes the verdict (SKILL.md says how to act on
+it). Every index problem is reported, but only one that can hide slug, title
+or alias ownership (``_creation_blockers``) turns an otherwise-new candidate
+into ``adjudicate``.
 
 For source-derived or otherwise untrusted titles, always use ``--titles``;
 never interpolate title text into a shell command. ``--title`` remains a

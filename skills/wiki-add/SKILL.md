@@ -97,12 +97,14 @@ merge or alias edit**. Read that complete regular note to establish identity;
 a similar filename, passing mention, or source citation alone is insufficient.
 
 An existing topic goes directly to completion, with no research, downloads,
-new source artifacts or quality repair. Multiple possible owners,
-unreadable/malformed entries that may hide ownership, and occupied symlinks
-cannot prove absence or completion: resolve read-only, never following a leaf
-symlink as entry evidence, or leave the item pending. Qualify a bare
-cross-domain title or a genuinely different topic under the builder's
-[disambiguation rule](../wiki-build/references/writing.md#cross-domain-term-disambiguation)
+new source artifacts or quality repair. Deepening a thin existing entry
+belongs to wiki-lint (its cited sources) or wiki-build (a new source).
+Multiple possible owners, unreadable/malformed entries that may hide
+ownership, and occupied symlinks cannot prove absence or completion: resolve
+read-only, never following a leaf symlink as entry evidence, or leave the item
+pending. Qualify a bare cross-domain title or a genuinely different topic
+under the builder's
+[disambiguation rule](../wiki-build/references/special-titles.md#cross-domain-term-disambiguation)
 and repeat the probes after any title change. Never rename an existing owner
 to free a slug.
 
@@ -123,9 +125,11 @@ Use the builder's [writing rules](../wiki-build/references/writing.md),
 and [entry shape](../wiki-build/SKILL.md#the-entry), plus its
 [equations](../wiki-build/references/equations.md),
 [API surface](../wiki-build/references/api-surface.md),
-[rare types](../wiki-build/references/rare-types.md) and
+[rare types](../wiki-build/references/rare-types.md),
+[special titles](../wiki-build/references/special-titles.md) and
 [tag calibration](../wiki-build/references/calibration.md) references when
-they apply. Draft complete bytes privately under the canonical title's
+their [reading-plan](../wiki-build/SKILL.md#what-to-read-and-when) triggers
+apply. Draft complete bytes privately under the canonical title's
 reported slug, with today's creation/update dates and `read: false`. When the
 collision decision settles that slug, snapshot `Wiki/<slug>.md` with the
 builder's [step-3 command](../wiki-build/SKILL.md#3-resolve-against-existing-entries),
@@ -209,7 +213,15 @@ Close every report with one standing line: *New entries keep `parents: []`
 and stay out of the MOCs until `wiki-lint` places them and links them from
 existing entries — run it to connect and file them.*
 
-At closeout, read the [shared suggestion-log rules](../../shared/SUGGESTIONS.md)
-and apply them to `Reviews/wiki-add-suggestions.md` and to the logs of
-producers whose outputs this run consumed. Record this run's §4 note-content
-proposals in `Reviews/wiki-notes-suggestions.md`.
+At closeout, write a suggestion log only when this run has something to
+record:
+
+- an evidenced workflow defect (`Reviews/wiki-add-suggestions.md`, or the log
+  of a producer whose output this run consumed);
+- a §4 note-content proposal (`Reviews/wiki-notes-suggestions.md`);
+- an open notes item naming an entry this run created (search that log for
+  the run's slugs);
+- on an apply-capable run, a missing canonical log for this plugin's skills.
+
+In any of these cases, read the [shared suggestion-log rules](../../shared/SUGGESTIONS.md)
+first and follow them. Otherwise write no log.

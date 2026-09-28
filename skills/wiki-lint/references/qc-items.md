@@ -53,13 +53,15 @@ ownership.
 | `item12/equation-typography` | In descriptions, replace raw ℓ-norm notation with plain `ell-one`/`ell-two` and retain Unicode `μm`. In prose and card prompts, replace raw ℓ-norm and `μm`/`µm` notation with canonical inline LaTeX. |
 | `item12/equation-coverage-candidate` | Inspect the local prose or inline formula. Apply the explanatory-value test; add math only when it clarifies the concept and the note supplies the relationship. Clear prose may be the correct outcome. |
 | `item12/equation-format` | Preserve the existing equation and put its opening and closing `$$` delimiters on separate lines. Do not add a duplicate display. |
-| `item12/boilerplate-candidate` | Remove each listed condition the formula already presupposes, under item 12's well-definedness rule, and report the removal. Keep a range the definition needs. On card line 1, shorten the math to its compact equivalent only when the tested claim is unchanged, preserving the cue, answer line, and attachments. |
+| `item12/boilerplate-candidate` | Remove each listed condition the formula already presupposes, under item 12's well-definedness rule, and report the removal. Keep a range the definition needs. On card line 1, shorten the math, or replace it with its verbal core, only when the tested claim is unchanged, preserving the cue, answer line, and attachments. |
 | `item12/panel-composite` | Preserve both embeds and report the duplicated exhibit until source-backed review chooses either the default composite or the subject-specific panel. |
 | `item12/remote-image`, `item12/missing-image` | Report and preserve the embed and caption; repair requires work outside this entry. |
 | `image_folder_findings` | Report and preserve nested, staging, unreadable, or portable-name-collision paths. Collision records retain all owner paths; an unreadable inventory also suppresses missing-image claims. |
 | `item17/alias-candidate` | Apply the same-entity, collision, cross-domain, and Organism-common-name gates before adding anything. |
 | `item18/partial-label` | Reword a label that keeps only the target title's modifiers so it names the target, preserving the claim; report a label that names a different entity. See [item 18](#18-alias-form-collisions-and-display-labels). |
 | `item19` | Apply the format floor only after reading [flashcard maintenance](flashcards.md). |
+| `item19/brevity-candidate` | Review the cue or answer under [flashcard maintenance](flashcards.md#card-freshness-and-the-rewrite-bars) and shorten it only when the card's bar allows; the candidate alone is never an order. |
+| `card_rivals` | Use as the forward check's rival list: could a rival's term answer this cue? A yes is an ambiguity defect under [flashcard maintenance](flashcards.md#flashcard-definition-review-item-19). The list is a floor, not an exhaustive rival set. |
 | `rename_candidates` | Propose with inbound count and collision warning; apply only under an explicit rename request, through the [entry-retitle protocol](../../../shared/CONVENTIONS.md#retitling-an-existing-wiki-entry). |
 | `collision_candidates` | Report; routine lint never merges existing entries. |
 | `hierarchy_diagnostic.parent_state_findings`, `moc_file_states`, `moc_inventory_findings`, `legacy_moc_states`, `moc_consistency_findings` | Use as report-only Task 3 inputs. Re-derive whole generated MOCs and complete parent unions from one authorized connected closure. Non-outline formatting needs no separate span approval; unsafe paths, legacy vault-root MOCs, and unknown files remain protected. |
@@ -199,9 +201,9 @@ There is no body sentence, paragraph, word, or heading-count target.
 opener, equations, flashcard, and close neighbors. They must identify the same
 entity and sense without incompatible scope, conditions, direction, or
 notation. A conflict that requires choosing or changing a fact is a
-source-backed proposal. Prefer proposing to narrow a claim's own wording, or
-to trim a detail that belongs to a neighbor's subject down to the relationship
-and a wikilink, over appending qualifications. A neighbor conflict may expose
+source-backed proposal. Prefer proposing a plain claim at the source's
+confidence, or trimming a neighbor's detail to the relationship and a
+wikilink, over appending qualifications. A neighbor conflict may expose
 a wrong link, duplicate, or split candidate; it does not authorize cross-entry
 redistribution.
 
@@ -216,19 +218,26 @@ catalogs only when they do not serve the entry, and report duplicated
 explanatory treatments by conceptual owner. Length, a missing transition word,
 list shape, or lexical similarity alone proves nothing.
 
-**Caveat review.** Inspect qualifications and final paragraphs for the caveats
-the [prose principles](../../wiki-build/references/writing.md#prose-principles)
-exclude because they do not help explain the ordinary concept. Do not add them
-from memory. A limitation or contrast the source teaches is explanation, not
-over-qualification. Routine lint removes empty rhetoric and repetition under
-the local repairs below and well-definedness boilerplate under item 12, but
-preserves substantive claims. Record the remaining over-qualified passages as
-[Over-qualification](backlogs.md#proposing-note-improvements) proposals in
-`Reviews/wiki-notes-suggestions.md`. An explicit request to simplify
-such content activates source-backed correction across the requested scope,
-including similar cases beyond named examples. Verify the affected
-passages against each entry's cited sources and retain essential conditions.
-A source-supported detail can still be unnecessary to this entry.
+**Caveat review.** Inspect qualifications, final paragraphs and the
+description for the hedges and caveats
+[principle 3](../../wiki-build/references/writing.md#prose-principles)
+excludes, including a claim hedged below its source; card line 1 follows
+[item 19](#19-flashcards). Never add caveats from memory; a limitation the
+source teaches is explanation. Routine lint removes only empty rhetoric and
+repetition (the local repairs below) and well-definedness boilerplate
+(item 12). Log every other over-qualified passage as an
+[Over-qualification](backlogs.md#proposing-note-improvements) proposal. An
+explicit simplification request activates source-backed correction across the
+requested scope, including similar cases beyond named examples; it verifies
+each passage against the entry's cited sources, and a source-supported detail
+can still be unnecessary.
+
+**Depth review.** Could a reader knowing only a Concept note explain how it
+works and apply it once? If not, log a
+[Depth & gaps](backlogs.md#proposing-note-improvements) proposal naming what
+is missing (a core facet, a model's prediction step or objective, a display's
+verbal reading) and its route: a deepen request or wiki-build on an
+unprocessed source. Routine lint never fills it.
 
 **Local editorial repairs.** Apply these autonomously when the existing entry
 establishes an unambiguous meaning:
@@ -256,7 +265,10 @@ Nor may an edit add a caveat, exception, or clarification the explanation
 does not need. Keep existing link tokens, citations, math spans and numerical values,
 image/table-plus-caption units, the complete flashcard section, and frontmatter
 verbatim during an item 9 edit. Do not drop a link or a qualifier when removing
-repetition. Descriptions follow item 7; links, equations, exhibits, and cards
+repetition. After any removal, including item 12's boilerplate removals,
+re-read the whole note and repair what it left behind: a connective or
+referent that now points at nothing ("still", "this"), or a claim now stated
+twice. Descriptions follow item 7; links, equations, exhibits, and cards
 may change only under their own authorized checks, recorded separately.
 During ordinary lint, editorial changes never advance dates or reset review state.
 
@@ -391,16 +403,16 @@ authors” do not.
 
 Apply builder [item 15](../../wiki-build/SKILL.md#quality-checklist) and
 [prose principle 7](../../wiki-build/references/writing.md#prose-principles)
-during semantic review. Identify an unnecessary, tangential, repetitive, or overly
-long example by purpose, never by sentence or note length. Trimming substantive
-example content or verifying its values needs the source, so record a specific
-proposal in `Reviews/wiki-notes-suggestions.md`. Source/tutorial scaffolding and
-application catalogs that do not serve the entry belong to item 9; `Software`
-API catalogs belong to item 6.
+during semantic review, judging an example by purpose, never by length.
+Trimming an unnecessary, tangential or repetitive example needs the source, so
+record a specific proposal in `Reviews/wiki-notes-suggestions.md`. An
+abstract, quantitative or procedural Concept with no concrete case is a Depth
+& gaps proposal. Scaffolding and application catalogs belong to item 9,
+`Software` API catalogs to item 6.
 
 ### 16. Bold, italic, and code typography
 
-Apply the canonical [emphasis rules](../../wiki-build/references/flashcards-and-emphasis.md#5-bold-and-italic).
+Apply the canonical [emphasis rules](../../wiki-build/references/flashcards-and-emphasis.md#5-bold-and-italic), [typography for works, organisms and genes](../../wiki-build/references/rare-types.md#typography-for-works-organisms-and-genes) and [mathematical title forms](../../wiki-build/references/special-titles.md#base-term-and-mathematical-plain-forms).
 Fix unenumerated bold, emphasis wrapped around links/math/code, and missing
 backticks on literal extensions or `[CLS]`/`[MASK]`/`[SEP]`/`[IMG]` tokens.
 The scanner recognizes a conservative extension list; review uncommon literal
@@ -421,7 +433,7 @@ Use the canonical [alias rule](../../wiki-build/references/writing.md#aliases).
 The note body itself can establish a missing alternate name for its subject;
 add its slug only after the same-entity, own-slug, cross-domain, Organism
 common-name, and whole-vault collision gates. A word from the builder's
-[cross-domain corpus](../../wiki-build/references/writing.md#cross-domain-term-disambiguation)
+[cross-domain corpus](../../wiki-build/references/special-titles.md#cross-domain-term-disambiguation)
 never becomes an alias, so the scanner does not propose one; its italic
 introduction stays in the body. A semantic-invalid existing alias
 is not list cleanup: preserve it during routine lint and propose the canonical
@@ -456,24 +468,26 @@ report the target question under the notes log; never retarget it.
 ### 19. Flashcards
 
 Apply the canonical [card format](../../wiki-build/references/flashcards-and-emphasis.md#4-flashcards)
-and the linter's [bidirectional definition review](flashcards.md). Every entry has one card after the Related footer and separator. A
-variant Flashcards heading is repaired in place rather than duplicated.
-A missing section or empty section is repaired by writing the one primary card
-from the entry's already-established main claim, with `??` and the canonical
-primary answer. This restores the required card without selecting a different
-tested facet; itemize the addition in the run report.
+and [flashcard maintenance](flashcards.md). Every entry except a discipline
+root, which needs no card ([hierarchy](hierarchy.md#establish-discipline-roots)),
+has a Flashcards section after the Related footer and separator, holding one
+primary `??` card and at most two `?` understanding cards. Repair a variant
+heading in place rather than adding a section. Repair a missing or empty
+section by writing the primary card from the entry's already-established main
+claim, with `??` and the canonical primary answer, and itemize the addition.
+Routine lint never adds understanding cards.
 
-Use the card-format guide for the three content lines and recognized
-attachments; use flashcard maintenance for the rewrite threshold and legacy
-extras. Inspect every card semantically, including whether the primary answer
-omits a qualifying opener binding and whether its definition leaks or
-reconstructs the answer. Check any line-1 math against the
-[line-1 equation rule](../../wiki-build/references/flashcards-and-emphasis.md#line-1-equation-coverage),
-even when the scanner is silent; line-1 math is optional. Preserve existing
-cues and every recognized scheduling/block-ID attachment byte-for-byte and in
-place; missing visible metadata does not establish a fresh card. Multiple
-cards remain report-only unless the user's request supplies the explicit
-refactor/deletion authority defined in flashcard maintenance.
+Inspect every card semantically: leaks and reconstructions, a primary answer
+that omits a qualifying opener binding, and any line-1 math, even when the
+scanner is silent. Preserve every valid existing separator (`??`, `?`, `!!`),
+apart from the one
+[`??` restoration](../../wiki-build/references/flashcards-and-emphasis.md#line-2-the-separator),
+and every recognized scheduling or block-ID attachment byte-for-byte and in
+place. Routine lint applies the
+[rewrite bars](flashcards.md#card-freshness-and-the-rewrite-bars), the low
+bar included for a card the scan proves fresh; legacy extras follow flashcard
+maintenance, and a vault-wide redesign runs only as its explicitly requested
+[card redesign pass](flashcards.md#card-redesign-pass).
 
 ## Coding content in non-Software entries (item 6)
 
