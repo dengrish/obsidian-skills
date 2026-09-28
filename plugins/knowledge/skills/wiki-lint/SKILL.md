@@ -14,7 +14,7 @@ description: >
 
 Maintain the existing wiki through three tasks: source-independent QC, retrospective link hygiene, and a consistent hierarchy rendered as `parents:` plus MOCs. Default to all three in order; honor requests for a narrower task or entry set.
 
-**Setup:** read [shared/RUNTIME.md](../../shared/RUNTIME.md) once for vault selection, paths, Python, and host tools. Apply the relevant [shared conventions](../../shared/CONVENTIONS.md) at each action below.
+**Setup:** read [shared/RUNTIME.md](../../shared/RUNTIME.md) once for vault selection, paths, Python, and host tools. Apply the relevant [shared conventions](../../shared/CONVENTIONS.md) at each action below. Before any step parses a PDF, set up the environment and run `python3 '<plugin>/shared/scripts/check_parsers.py'` with its interpreter under the [parser-check rule](../../shared/RUNTIME.md#only-for-pdf-and-image-workflows); while it fails, read the PDF pages directly.
 
 ## Scope and ownership
 
@@ -68,11 +68,7 @@ Read the
 before planning or writing. A source not already cited by the target is a new
 contribution and routes to `wiki-build`; identity changes and cross-entry
 content movement route to refactor mode. Generic maintenance requests do not
-activate this mode. Before this mode, refactor mode, or a missing-root search
-reads a PDF, set up the environment and run
-`python3 '<plugin>/shared/scripts/check_parsers.py'` with its interpreter under
-the [parser-check rule](../../shared/RUNTIME.md#only-for-pdf-and-image-workflows);
-while it fails, read the PDF pages directly.
+activate this mode.
 
 ### Explicit source-backed refactor mode
 
@@ -164,8 +160,6 @@ ledger and name every skipped or unreadable file. Judge prose by purpose rather
 than length or item count, and never resolve a factual conflict from memory.
 Missing source evidence or user-owned state becomes a nonblocking report item.
 
-For phrasing, flow, and succinctness, apply the shared writing standards through the bounded editorial repairs and before/after checks in [QC item 9](references/qc-items.md#9-body-structure-coherence-flow-and-scope). Fix concrete defects autonomously while preserving claims and protected content; leave already clear prose alone. Other body repairs, such as a date copied from the same entry, source-meta cleanup, equation work, or item 6's removal of clearly implementation-only material, follow their own numbered item. Source figure selection, table/source-value fidelity, fact-checking, conflict resolution, and content selection not explicitly authorized by a QC item require a separate source-backed request.
-
 ## Task 1 — Retro-QC (source-independent subset)
 
 **Read [QC items and actions](references/qc-items.md) before the first repair.** It is the complete dispatch and enforcement guide; [scanner item keys](references/scanner.md#item-keys-in-problems) describe detection. Each QC item links the builder's canonical rule, such as [fields, prose, and link form](../wiki-build/references/writing.md), [equations](../wiki-build/references/equations.md), [card format and emphasis](../wiki-build/references/flashcards-and-emphasis.md), or [media](../wiki-build/references/media.md); source-dependent rules there do not become maintenance permissions merely because they are nearby. Apply only a determinate, in-scope correction and preserve every claim that is not the violation.
@@ -180,7 +174,9 @@ Keep the non-obvious boundaries visible at the action point:
   preserving anchors and display labels. Multiple owners and real but unparsed
   targets are report-only. Task 2 owns true duplicates and danglers.
 - **Prose and metadata judgments:** use only the repair authorized by that
-  numbered item. Item 9 permits claim-preserving editorial repairs. Do not invent a discipline,
+  numbered item. [Item 9](references/qc-items.md#9-body-structure-coherence-flow-and-scope)'s
+  bounded editorial repairs fix phrasing, flow, and succinctness while
+  preserving claims; leave already clear prose alone. Do not invent a discipline,
   rewrite a fact, select source content, or redistribute material merely to
   close a finding.
 - **Cards:** read [flashcard maintenance](references/flashcards.md) before any
@@ -190,14 +186,6 @@ Keep the non-obvious boundaries visible at the action point:
   card only as the single primary-definition card from the entry's established
   main claim. Multiple pre-existing cards are report-only unless an explicitly
   authorized refactor accounts for them.
-
-Routine lint proposes retitles, semantic-invalid-alias removals, and other
-vault-wide refactors with the owner, inbound-reference, and collision evidence
-required by [QC fix discipline](references/qc-items.md#fix-discipline); an
-explicitly authorized one is executed as
-[refactor mode](#explicit-source-backed-refactor-mode) describes. Duplicate spellings
-within one alias list remain format fixes; duplicate or synonym entries are
-reported rather than merged.
 
 **Refresh after QC edits.** Re-run Step 0 before Task 2/3 consumes its worklists when QC changed entries. Use the refreshed inventory, aliases, backfill candidates, discipline tags, and hierarchy diagnostics, but retain the selected logical-run timestamp for logs, including an inherited coordinator timestamp, and the prior-group evidence of every retagged entry, which Task 3's closure needs (including a retag from or to misc).
 

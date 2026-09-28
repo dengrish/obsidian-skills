@@ -8,8 +8,10 @@ easier to understand, under the builder's
 background needs no citation. A request covering a class of defects or the whole Wiki
 applies to every matching entry in that scope, not just named examples. A generic lint request does not
 activate this mode. A source not already cited by the target is a new
-contribution and belongs to `wiki-build`; a split, merge, retitle, deletion,
-or cross-entry redistribution uses [source-backed refactors](refactors.md).
+contribution and belongs to `wiki-build`; a retitle uses the
+[entry-retitle protocol](../../../shared/CONVENTIONS.md#retitling-an-existing-wiki-entry),
+and a split, merge, deletion, or cross-entry redistribution uses
+[source-backed refactors](refactors.md).
 
 ## Establish the evidence and scope
 

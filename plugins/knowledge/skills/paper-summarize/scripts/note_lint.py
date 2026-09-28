@@ -372,7 +372,7 @@ def _split_front_matter(note):
         if m and not line.startswith((" ", "\t", "-")):
             cur = m.group(1)
             keys.append(cur)
-            kv[cur] = [strip_comment(m.group(2)).strip(), []]
+            kv[cur] = [strip_comment(m.group(2)).strip(), [], m.group(2).strip()]
         elif cur is not None:
             kv[cur][1].append(line)
             if cur not in ("author", "tags", "sources"):
@@ -434,6 +434,9 @@ def _check_front_matter(note, keys, kv, allow_unorganized=False):
         elif style == "bare" and non_string(parsed):
             note.fail(2, "quote `%s` as a YAML string; its unquoted value "
                          "is not a string" % key)
+        elif style == "bare" and kv[key][2] != value:
+            note.fail(2, "quote `%s`: an unquoted ` #` starts a YAML comment, "
+                         "so YAML reads only %r" % (key, parsed))
         elif not parsed or not parsed.strip():
             note.fail(2, "`%s` is empty" % key)
 
@@ -561,6 +564,9 @@ def _check_front_matter(note, keys, kv, allow_unorganized=False):
                 value, style = decoded(it[2:].strip(), "`author` entry")
                 if not value or (style == "bare" and non_string(value)):
                     note.fail(2, "`author` entries must be non-empty YAML strings")
+                elif style == "bare" and strip_comment(it[2:]) != it[2:]:
+                    note.fail(2, "quote `author` entry %r: an unquoted ` #` starts "
+                                 "a YAML comment, so YAML reads only %r" % (it, value))
 
     if "tags" in kv:
         inline = kv["tags"][0]
@@ -1502,6 +1508,9 @@ def _cases():
         ("a commented null is still not a title string",
          _mutate('title: "A Title: With a Colon"', 'title: null # not recorded'),
          "quote `title` as a YAML string"),
+        ("an unquoted ` #` cuts the title short",
+         _mutate('title: "A Title: With a Colon"', 'title: Why the #MeToo movement spread'),
+         "__ONLY__YAML reads only 'Why the'"),
         ("escaped ASCII in sources resolves to the real paper",
          _mutate('"[[Doe_X_2025.pdf]]"', '"[[\\x44oe_X_2025.pdf]]"'), CLEAN),
         ("comments and indentless sources retain their block-list meaning",

@@ -51,6 +51,7 @@ __all__ = [
     "sentence_prefix",
     "split_sentences",
     "strip_flashcard_review_metadata",
+    "title_display_form",
 ]
 
 
@@ -456,6 +457,20 @@ def math_title_plain_text(text):
     return re.sub(r"\s+", " ", value).strip()
 
 
+def title_display_form(title):
+    """Return the exact plain form a card answer or link label must use.
+
+    Only a mathematical title (inline LaTeX or Unicode scripts) takes
+    :func:`math_title_plain_text`; an ordinary title keeps its spelling,
+    including Greek letters (``TNF-α`` stays ``TNF-α``).
+    """
+    value = title or ""
+    if ("$" in value or _SUPERSCRIPT_RE.search(value)
+            or _SUBSCRIPT_RE.search(value)):
+        return math_title_plain_text(value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
 _BOLD_OUTER_RE = re.compile(
     r"(?<!\*)\*\*((?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)\*\*(?!\*)")
 
@@ -630,7 +645,8 @@ def _sentence_end_offsets(compact):
                     _CLAUSE_END_ABBREV_RE.search(head))
                 # An ordinary abbreviation may end a sentence before a clear
                 # sentence-start word. Honorifics remain attached to names.
-                if (abbreviation and not _HONORIFIC_TAIL_RE.search(head)
+                if (abbreviation and not name_initial
+                        and not _HONORIFIC_TAIL_RE.search(head)
                         and not re.search(r"(?:^|[^A-Za-z])(?:Dr|Prof|Mr|Mrs|Ms)\.$",
                                           head)):
                     clause_end = True
@@ -1441,6 +1457,10 @@ def run_self_test(verbose=False):
         ("an unknown command name cannot disappear",
          math_title_plain_text(r"$\frobnicate{x}$ norm"),
          "frobnicate x norm"),
+        ("only a mathematical title changes its answer and label form",
+         [title_display_form(value) for value in (
+             "TNF-α", "χ² test", r"$\chi^2$ test")],
+         ["TNF-α", "chi-squared test", "chi-squared test"]),
         ("plain terminal period",
          ends_with_sentence_period("A complete definition."), True),
         ("period inside straight quotation marks",
@@ -1463,6 +1483,11 @@ def run_self_test(verbose=False):
          split_sentences(
              "J. A. Swets developed detection theory. It matters."),
          ["J. A. Swets developed detection theory.", "It matters."]),
+        ("an initial chain that starts with an abbreviation letter stays whole",
+         [count_sentences(value) for value in (
+             "ANOVA was developed by R. A. Fisher for comparing means.",
+             "Quicksort was devised by C. A. R. Hoare in 1959.")],
+         [1, 1]),
         ("common publication abbreviations stay inside their sentence",
          [split_sentences(value) for value in (
              "The U.S. Dept. sets rules. It enforces them.",

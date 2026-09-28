@@ -2,7 +2,7 @@
 """Detect alternate names that wiki prose introduces for its own subject.
 
 The detector is deliberately narrow.  It recognizes an opener-bound
-parenthetical and an italicized name immediately after a synonym cue, then
+parenthetical and the italicized names a synonym cue directly introduces, then
 uses simple grammatical evidence to avoid treating a component's name as an
 alias of the entry subject. Semantic ownership and cross-domain safety remain
 the executing agent's responsibility.
@@ -42,6 +42,10 @@ _SYN_CUE_RE = re.compile(
     r"(?:often|commonly|usually)\s+called|"
     r"(?:many\s+)?people\s+call|some\s+call)\b", re.IGNORECASE)
 
+# The opener's direct parenthetical after the bold title, past any leading
+# date parenthetical; lint_entry.py and scan_vault.py share it for card
+# line 3. Only the literal noun ``algorithm`` may intervene; a general word
+# window would attach unrelated later parentheticals to the title.
 _BOLD_PAREN_RE = re.compile(
     r"(?<!\*)\*\*(?P<bold>(?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)"
     r"\*\*(?!\*)(?:\s+algorithm)?\s*"
@@ -63,6 +67,11 @@ _PAREN_LEADIN_RE = re.compile(
 
 _DIRECT_SYNONYM_RE = re.compile(
     r"^\s*(?:the\s+)?\*([^*\n]{2,60})\*", re.IGNORECASE)
+
+# A further name in the same cue: "also called *A* or the *B*".
+_CHAINED_SYNONYM_RE = re.compile(
+    r"\s*,?\s+or\s+(?:the\s+)?\*([^*\n]{2,60})\*",
+    re.IGNORECASE)
 
 
 def _fold_name(value):
@@ -199,6 +208,11 @@ def introduced_alias_candidates(prose_lines, subject_forms=None):
         if direct and _cue_names_subject(
                 sentence_prefix(prose, match.start()), subject_forms):
             add(direct.group(1), "italicized synonym")
+            chained = _CHAINED_SYNONYM_RE.match(
+                prose, match.end() + direct.end())
+            while chained:
+                add(chained.group(1), "italicized synonym")
+                chained = _CHAINED_SYNONYM_RE.match(prose, chained.end())
     return out
 
 
@@ -302,6 +316,13 @@ def run_self_test(verbose=False):
             ["**ROC curve**, also called *receiver plot*, contrasts *false positives*."],
             ["ROC curve"]),
         [("receiver plot", "italicized synonym")])
+    add("a cue introduces every name it chains with or",
+        introduced_alias_candidates(
+            ["**Normal distribution**, also called the *Gaussian "
+             "distribution* or the *bell curve*, is a distribution."],
+            ["Normal distribution"]),
+        [("Gaussian distribution", "italicized synonym"),
+         ("bell curve", "italicized synonym")])
     add("component synonym is excluded",
         introduced_alias_candidates(
             ["A **ROC curve** compares rates. The false positive rate, also "

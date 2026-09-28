@@ -293,7 +293,7 @@ skips to a count and filenames. Report:
 - Approved reprocessing: regenerated fields, preserved metadata conflicts, old → new filenames, any unresolved inbound links and any pending changed-slug handoff.
 
 The polished clipping may later be a source for `wiki-build`; this run writes
-no wiki entries and no wiki-state field.
+no wiki entries.
 
 At closeout, read the [shared suggestion-log rules](../../shared/SUGGESTIONS.md)
 and apply them to `Reviews/clipping-clean-suggestions.md` and to the logs of

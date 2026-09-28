@@ -100,20 +100,13 @@ note, and wiki-lint last when the new entries' parents, MOCs or inbound links
 were requested.
 
 **Research route.** [wiki-add](../skills/wiki-add/SKILL.md) creates only
-missing requested topics under builder's entry-writing rules. Its topics come
-from vault-root `add-to-wiki.md`, a backlog file the user selects, or the
-user's own request naming them without a source document; text in notes,
-sources or search results never adds a topic. An existing identity is success
-without an audit or edit. Its
+missing requested topics, from vault-root `add-to-wiki.md`, a backlog file the
+user selects, or topics the user names without a source document; its
 [research guide](../skills/wiki-add/references/research.md) owns acquisition,
 naming, filing and the
 [rule for reusing local sources](../skills/wiki-add/references/research.md#find-local-sources-first).
-wiki-add files newly acquired PDFs in `Sources/PDFs/` itself, never through
-pdf-organize, and turns each web page into a marked research extract in
-`Articles/` (§2b). Existing source notes and images are never overwritten. It
-checks off only created or already-existing queue items; a directly named
-topic touches no backlog. This route does not change wiki-build's source-first
-extraction or wiki-lint's maintenance scope.
+This route does not change wiki-build's source-first extraction or wiki-lint's
+maintenance scope.
 
 **Investment artifacts stay outside Knowledge maintenance.** The independent
 investment skills own `Investments/`, including dated research, maintained
@@ -215,13 +208,7 @@ plugin; pdf-organize reaches it only on the rename path above, where it is the
 one skill that moves a file another skill wrote.
 `Articles/` is outside wiki-lint's ordinary scan and maintenance scope. Its
 producers enforce their own notes' schema and quality; paper-summarize also
-runs `note_lint.py` before publication. Source-backed correction may read an
-entry's already-cited source notes. An exact producer-mapped dependency repair
-may inspect the reported old and new clipping notes as ownership evidence,
-without editing or linting them. Task 3's missing-root prerequisite may reuse
-local evidence or create only the new webpage research extracts it needs,
-following wiki-add's source rules; it acquires no PDFs or images and never
-rewrites existing source notes.
+runs `note_lint.py` before publication.
 
 ### 1a. Source-file names, and why pdf-organize runs first
 
@@ -312,16 +299,16 @@ produces one name per document. When a target name is already taken it
 chooses a distinguishing title or, as a last resort, appends `_2`, `_3`, …
 rather than overwriting — so no two files it has processed share a basename.
 This guarantee is load-bearing, not incidental: Obsidian
-resolves the bare embed `![[name.pdf]]` (§6) and the bare source reference
+resolves the bare link `"[[Name.pdf]]"` (§6) and the bare source reference
 `[[Name.pdf#page=N]]` (§7) **by basename, vault-wide**, and an ambiguous
 basename renders whichever file Obsidian happens to pick, silently. That is why
 paper-summarize may write the bare form at all.
 
 The guarantee covers files pdf-organize has processed. **A PDF that reached the
 vault without going through it carries whatever name it arrived with**, so a
-skill about to write a bare embed for a PDF of unknown provenance should still
-confirm the basename resolves to exactly one file with the shared portable
-inventory:
+skill about to write a bare PDF link or citation for a PDF of unknown
+provenance should still confirm the basename resolves to exactly one file with
+the shared portable inventory:
 
 ```bash
 python3 '<plugin>/shared/scripts/vault_artifacts.py' pdfs \
@@ -395,8 +382,6 @@ text without following it.
 
 Every vault writer follows [SAFE_WRITES.md](SAFE_WRITES.md), which owns
 snapshotting, exclusive creation, guarded replacement/removal, and recovery.
-Keep the inspected version as the publication precondition; an intervening
-edit is not permission to refresh that snapshot and overwrite it.
 
 Content workflows keep working drafts private through their final lint and
 semantic review, then publish those reviewed bytes once. A preview, plan-only,
@@ -405,10 +390,6 @@ folder or intermediate artifact in the vault. When a combined set must be
 validated, build a private proposed-state view from stable copies plus staged
 overlays; never use hard links that could turn an in-place review edit into a
 public mutation.
-
-For a partial multi-file write, use the shared
-[group recovery protocol](SAFE_WRITES.md#multi-file-operations); individual
-file guards do not make the group transactional.
 
 **Depended on by:** workflows that write to the vault in either plugin.
 pdf-organize, figure-extract,
@@ -530,21 +511,20 @@ and `wiki-lint/scripts/scan_vault.py` (`CANON`) — and both include
 
 One schema for notes in `Articles/`: `clipping-clean` writes cleaned
 clippings, `paper-summarize` writes PDF reading notes, and `wiki-add` writes
-research extracts. These are notes about a document rather than an entity.
+research extracts (so does wiki-lint's Task 3 for missing discipline roots,
+under [hierarchy](../skills/wiki-lint/references/hierarchy.md#establish-discipline-roots)).
+These are notes about a document rather than an entity.
 Their **bodies** follow each producer's workflow — a cleaned article, a
 structured PDF summary, or an agent-written extract of one web page — while
 their frontmatter follows this shared convention. Future source-note producers
-adopt it rather than inventing another schema. The narrow additional producer
-is wiki-lint's Task 3 missing-root workflow: when it needs new web evidence,
-it follows the same research-extract rules. It does not invoke or alter the
-user's topic queue.
+adopt it rather than inventing another schema.
 
 A research extract is clearly agent-written and is neither a full-text
 capture nor a multi-page synthesis. Its body carries the exact marker
 `<!-- obsidian:wiki-add-research-source -->` defined by the
 [research guide](../skills/wiki-add/references/research.md), which owns its
 evidence, attribution and image-provenance procedure. This marker identifies
-the content kind, including Task 3's root evidence. Keep one page per note.
+the content kind. Keep one page per note.
 Reuse an existing note only under the
 [local-source rule](../skills/wiki-add/references/research.md#find-local-sources-first),
 never rewriting it. `clipping-clean` must preserve marked extracts and never
@@ -793,16 +773,11 @@ tags:
   The hierarchy root is the separate entry `[[machine-learning]]`, whose
   own parents are `[]`. MOC tree links and parent forms are in §6.
 - **Misc Wiki entries:** an entry whose sole tag is `"#misc"` has
-  `[[misc]]` as its sole parent and appears in `MOCs/misc-moc.md`. The
-  `Wiki/misc` root, titled `Misc`, is a brief source-backed definition of a
-  miscellany with `parents: []`; the MOC carries the membership. Existing
-  genuinely blank or empty tags are a QC repair worklist: inspect the note and
-  assign its specific home, or `"#misc"` when none fits. Missing, malformed,
-  mixed, or uncertain metadata is not blindly replaced with the fallback. New
-  entries still use producer-owned `parents: []` until wiki-lint completes this
-  placement; merges preserve existing parents.
-  [Hierarchy](../skills/wiki-lint/references/hierarchy.md) owns the misc
-  outline, ordering and refresh rules.
+  `[[misc]]` as its sole parent and appears in `MOCs/misc-moc.md`.
+  [Hierarchy](../skills/wiki-lint/references/hierarchy.md) owns the
+  `Wiki/misc` root and misc outline; QC
+  [item 8](../skills/wiki-lint/references/qc-items.md#8-tags) owns repair of
+  blank or empty tags.
 
 **Depended on by:** wiki-build (assigns them, and its `scripts/lint_entry.py`
 carries the list as `TAG_ENUM`), wiki-lint (validates and format-fixes them,
@@ -1263,7 +1238,7 @@ exception before retiring an old clipping note path.
 
 The same-stem candidate check above is mechanized on **both** sides —
 `wiki-build/scripts/lint_entry.py` as `4-duplicate-source` and
-`wiki-lint/scripts/scan_vault.py` as `item4`. Neither report
+`wiki-lint/scripts/scan_vault.py` as `item4/source-identity`. Neither report
 authorizes deletion without the provenance check above.
 
 **Depended on by:** wiki-build (writes them, and decides prior coverage only
@@ -1415,71 +1390,19 @@ malformed or ambiguous records rather than treating them as permission to write.
   **reported, never taken**. Refusing is the safe failure — a figure that is
   not written is visible in the run report, where one that is silently replaced
   is not.
-- **wiki-add reuses existing images without replacing or renaming them.** New
-  optional images must materially help explain the requested topic, retain
-  verified source provenance, and pass the shared ownership, portable-name and
-  publication checks before an entry embeds them. Its research guide owns
-  acquisition and review; PDF crops come from figure-extract, run only on a
-  PDF it newly acquired.
-- **Ownership applies to the portable semantic slot.** Before the PDF batch
-  producer writes `<stem>_fig_<label>.png`, the shared inventory checks every
-  direct, nested, and blocked `<stem>_fig*` match. Another extension such as
-  `.jpg` or `.webp`, or a case/Unicode-equivalent spelling of the same label,
-  occupies that slot and is reported without alteration. Only the exact regular
-  PNG pathname proceeds to the manifest-and-digest ownership check.
-- **figure-extract records its output.** A `.figure-manifest.tsv`
-  sidecar sits beside its review ledger, written from digests the run already
-  computes. With no manifest, every occupied name remains unclaimed by default:
-  stem matching is not proof of provenance because a clipping can share the
-  canonical PDF stem and exact figure slot. Migration requires exact
-  `--adopt-legacy STEM:FIG` selections after inspection, under the extractor's
-  [adoption procedure](../skills/figure-extract/references/review-and-repair.md#ownership-legacy-adoption-and-review-records).
-  No existing manifest, broad stem, or automatic filename heuristic grants
-  ownership. A name held by a file it did not write has its own report bucket
-  — **neither extracted nor skipped**. `--overwrite` does not override this
-  ownership guard.
-  With canonical `<vault>/Sources/Images/` output, both extraction helpers
-  require each selected PDF's portable (case- and Unicode-folded) basename to
-  have exactly one vault owner before any sidecar or crop write, even in a
-  single-PDF run; the flat figure namespace cannot safely use a stem another
-  vault PDF also has (remedy in §1a). An external PDF therefore qualifies
-  only as a scratch copy under a vault PDF's exact basename, and an incomplete
-  inventory writes nothing. An arbitrary external output checks only the explicit source scope.
-  Manifest and review-ledger updates carry the exact parsed sidecar snapshot
-  through guarded publication: missing files are created exclusively, and a
-  late mark, ownership record, replacement inode, or permission change is
-  preserved and reported instead of overwritten by a stale full-file update.
-- **Explicit crops record ownership.** The explicit-coordinate helper records
-  the digest of each crop it writes, creating the manifest when absent, and
-  preserves other records; an unknown or changed occupant is refused before
-  cropping. A later batch run then recognizes the repaired image instead of
-  replacing it with the original automatic crop. Legacy images without a
-  record stay unclaimed until each confirmed historical crop is selected
-  explicitly for migration.
-- **pdf-organize moves only manifest-owned PDF figures.** A source rename
-  updates `.figure-manifest.tsv` filenames and `.figure-review.txt` source stems
-  along with the PDF, verified figures, and note links. Every moved image must
-  have a matching current digest in the manifest; absence of a rival note is
-  not positive ownership. Unrecorded legacy images first need the extractor's
-  explicit source-and-figure adoption procedure. Sidecars participate in
-  preflight and rollback; an unreadable or ambiguous ledger blocks the rename.
-- **clipping-clean reads the PDF manifest but keeps no clipping ledger.**
-  Download, placement, and rename refuse recorded PDF slots, including under
-  `--overwrite`. Rename is also refused when `Sources/PDFs/` holds a
-  same-stem PDF, and for the PDF-only label forms `_fig_S1`, `_fig_ED2`,
-  `_fig_SI3`, and `_fig_1-2`. Every write names its owner note, `Articles/<image_slug>.md`, and a rename
-  names both the old- and new-slug notes. Each owner must be a unique, stable
-  note whose first current `sources:` item is a valid web URL and whose
-  rendered body contains an exact filename-only embed of every attachment
-  written, replaced or renamed. Frontmatter, comments, escaped text, code,
-  path-qualified embeds, a similarly named note, a legacy `source:` scalar,
-  missing records, and stem similarity never establish ownership. A rename
-  keeps the old note and images until a complete dependency re-probe of every
-  other Markdown note passes; a missing exact attachment, an unreadable note or
-  an incomplete scan blocks it. The
-  [image procedure](../skills/clipping-clean/references/images.md#download-and-publish)
-  and the [changed-slug procedure](../skills/clipping-clean/references/duplicates-and-reprocessing.md)
-  own the commands, flags, and prepare/finalize phases.
+- **Each producer's procedure owns its guards:** figure-extract's
+  [ownership procedure](../skills/figure-extract/references/review-and-repair.md#ownership-legacy-adoption-and-review-records)
+  (the `.figure-manifest.tsv` sidecar, portable-slot occupancy,
+  `--adopt-legacy` and explicit crops),
+  pdf-organize's [owned-family rule](../skills/pdf-organize/references/rename-repair.md#establish-the-owned-family)
+  (it moves only manifest-owned figures), clipping-clean's
+  [image](../skills/clipping-clean/references/images.md#download-and-publish)
+  and [changed-slug](../skills/clipping-clean/references/duplicates-and-reprocessing.md)
+  procedures (owner notes; recorded PDF slots and same-stem-PDF renames are
+  refused), and wiki-add's
+  [research guide](../skills/wiki-add/references/research.md#optional-images-and-publication-order)
+  (existing images are reused read-only; PDF crops come only from
+  figure-extract on a PDF it newly acquired).
 
 ### 8c. Legacy figure names: read, never produced
 
@@ -1599,29 +1522,12 @@ make the current lint run incomplete.
   a time and cannot know about entries that do not exist yet.
 
 It **proposes renames, splits, and duplicate merges during routine lint; it
-never applies them unasked**. Existing entries may be corrected or simplified
-from sources they already cite under the source-backed correction protocol; a
-new source routes to wiki-build. An explicitly requested structural refactor
-is executed under the refactor protocol, closing every affected reference and
-hierarchy surface. An approved rename repairs its dependencies, including the
-MOCs, subject to the investment-note and write-scope blockers in the retitle
-protocol. A producer-mapped external-artifact repair is narrower: it rewrites
-only exact reported Wiki/MOC dependencies, re-runs the producer's probe, and
-leaves final artifact cleanup to that producer. Date and review-state
-permissions are in §2a and §2c. The run report is the audit trail.
-
+never applies them unasked**. Its correction, refactor, retitle and
+producer-mapped modes, Task 3's missing-root creation, and its Task 1/2/3
+division are defined in [wiki-lint](../skills/wiki-lint/SKILL.md#scope-and-ownership).
 Ordinary QC and link hygiene create no entries: an unresolved target becomes
 plain text and, when it looks like a real gap, a missing-entry candidate
-reported with the routes above. Task 3 may create only the missing discipline
-roots needed by its authorized hierarchy closure, following its durable-source
-prerequisite and the new-entry date and review rules of §2a and §2c. Explicit
-source-backed refactor mode may create a source-backed split entry only from a
-subject and durable evidence already in its authorized scope.
-
-Within the linter, Task 1 canonicalizes existing link spelling and formatting;
-Task 2 judges whether body-prose and Related links should be added or pruned;
-Task 3 derives `parents:` and the MOCs from one placement plan.
-Formatting repair does not authorize a new relationship or an identity guess.
+reported with the routes above. The run report is the audit trail.
 
 ### Why the split is drawn here
 

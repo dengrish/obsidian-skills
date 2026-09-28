@@ -12,7 +12,7 @@
 - **Thermodynamic entropy** → `#physics` (other fields use the concept; physics is the canonical home).
 - **Herbert Simon** → one home chosen from the entry's main treatment, such as `#economics` for bounded rationality; other fields remain prose relationships.
 
-When no specific discipline owns the entity, use `#misc` alone: `Asilomar Conference on Recombinant DNA` → `#misc`. Never leave Wiki tags blank or combine misc with a specific discipline.
+When no specific discipline owns the entity, use `#misc` alone. Never leave Wiki tags blank or combine misc with a specific discipline.
 
 ## Math vs statistics vs ML
 
