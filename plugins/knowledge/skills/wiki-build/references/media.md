@@ -1,118 +1,74 @@
-# Images and captions
+# Images, tables and captions
 
-> **When to read this:** Read this when the step-4 `vault_artifacts.py figures` report has candidates or findings, a Markdown source contains image references, or reading the source reveals figures with no available image file. Inventorying figures does not require using or extracting every one. When there are none, say so in the report rather than guessing at images.
-
----
+Scope: source figures, recreated tables and captions. Report a source with no figures as such; never guess at images.
 
 ## Images
 
-**Inventory all source figures, then select for the entry's needs.** Include the source's figure references, all matching local files, and Markdown image references in the inventory before judging relevance. Do not narrow the inventory to the images you expect to use. A focused wiki entry usually needs zero or one figure; an informative source figure is still optional. The [selection rule](#selection) decides what earns a place. Source tables follow the separate [Markdown table rule](writing.md#body-structure), which selects useful rows and columns while preserving their values.
+**Inventory every source figure before selecting:** the source's figure references and every matching local file and Markdown image reference, never only the images you expect to use.
 
-Use the shared inventory command from workflow step 4, not a recursive shell
-glob. It compares the literal `<resolved_source_stem>_fig` prefix under NFC
-normalization and case folding, accepts every extension and older separator
-form, and returns only direct regular non-staging files in `candidates`.
-`Sources/Images/` is flat: symlink/nonregular occupants, portable-equivalent
-names, and matching files in normal nested folders are `blocked_matches` and
-make the inventory unsafe. Recognizable staging residue is reported but never
-consumed. An unreadable directory makes absence unproved. Read the complete
-JSON, resolve or report those findings, and never turn an empty partial result
-into “this source has no figures.” The stem is from the source actually being
-read after source resolution: the PDF stem after a summary-to-PDF substitution,
-or the cleaned Markdown note's stem for a clipping.
+Use step 4's inventory command, never a recursive shell glob: it matches every case, extension and separator variant of the `<resolved_source_stem>_fig` prefix and returns direct regular files in `candidates`. `Sources/Images/` is flat: symlinks, nonregular occupants, portable-equivalent names and nested matches are `blocked_matches` that make the inventory unsafe, staging residue is reported but never consumed, and an unreadable directory leaves absence unproved. Read the complete JSON and resolve or report its findings; an empty partial result never means "this source has no figures."
 
-**Where images come from depends on the source type:**
+- **PDF source.** Figures come from `figure-extract`, named `[pdf_stem]_fig_<N>.png` by the source's figure number ([CONVENTIONS §8](../../../shared/CONVENTIONS.md#8-figure-naming-and-sourcesimages)). **A source figure with no extracted file stays in the inventory as unavailable**, never fabricated or denied: when the inventory is empty, first [prepare missing PDF figures](#missing-pdf-figures), and report an unavailable figure that would materially help.
+- **Markdown source.** Image references live in the note and resolve directly, even under an older filename prefix; a rendered one is never called unavailable or renamed. Downloads follow [§8](../../../shared/CONVENTIONS.md#8-figure-naming-and-sourcesimages). A failed download leaves `<!-- image download failed: … -->` in place: inventory it as an unavailable figure with that reason, and never copy the comment or its orphaned caption into an entry. An older note's remote `![alt](https://…)` image is inventoried from the text and reused in Markdown form, never rewritten as a wikilink, which would lose the URL.
 
-- **PDF source.** Figures come from the `figure-extract` skill in the vault's `Sources/Images/` folder. Naming pattern: `[pdf_stem]_fig_<N>.png`, where `<N>` is the figure number exactly as it appears in the source — which may be a simple integer (`1`), a chapter-and-figure pair (`1-2` for "Figure 1.2"), or a deeper hierarchy (`1-2-4` for "Figure 1.2.4"); supplementary figures use an `S` prefix on the number (`S1`, `S2-3`). Examples: `Burges_LearningToRank_2010_fig_1.png`, `Geron_HandsOnML_2025_03_Classification_fig_3-2.png` (chapter 3, figure 2), `Prince_UDL_2026_12_Transformers_fig_1-2-4.png`, `Doe_GutMicrobiome_2025_fig_S1.png` (supplementary figure 1) — all canonical stems, which is what `pdf-organize` produces and what `figure-extract` refuses to key a figure to otherwise (`CONVENTIONS.md` §1a). The step-4 inventory also matches older naming forms and any extension, so never replace it with a narrower glob ([CONVENTIONS §8](../../../shared/CONVENTIONS.md#8-figure-naming-and-sourcesimages)). **A source figure with no extracted file stays in the inventory as unavailable.** Do not fabricate it or silently claim that the source has no figures; when the inventory is empty, first [prepare missing PDF figures](#missing-pdf-figures). Report an unavailable figure that would materially help the entry. **Tables are not pre-extracted** — when the source has a table worth recreating in the entry, identify it while reading the PDF and recreate it in Markdown per the Body Structure tables rule.
-- **Markdown source.** Image references live in the source `.md` itself. **A note produced by `clipping-clean` names its downloaded images `[source_stem]_fig_<N>.<ext>` — the note's own filename stem, same string and same casing** — so the step-4 inventory and the unused-figure diagnostic below find them. Where a download failed, clipping-clean leaves `<!-- image download failed: … -->` at the image's position and keeps any former caption as an ordinary paragraph. Inventory each placeholder as an unavailable source figure with that skip reason; never copy the comment or its orphaned caption into an entry. Older or hand-made Markdown sources may still contain remote `![alt](https://…)` images, which have no file in `Sources/Images/`: inventory them from the source text, and reuse a selected one in Markdown form. Never rewrite it as a wikilink, which would resolve to nothing and lose the URL.
-
-**A figure and its panels are one exhibit, and the composite is the default when selected.** A file whose label ends in a lowercase letter — `Burges_LearningToRank_2010_fig_3a.png` beside `Burges_LearningToRank_2010_fig_3.png` — is one panel of that figure (`CONVENTIONS.md` §8b). It appears as a raw file in the inventory's `candidates` array because it answers the `_fig` match, but it is not a separate exhibit for selection or reporting. Prefer the whole figure; use an available panel when the entry's subject is that panel's alone. Never place a figure and a panel of it in the same entry. For selection and reporting, an exhibit is the composite: an unplaced panel needs no separate skip reason, placing the composite discharges every panel under it, and placing any panel discharges the composite. Preserve existing filenames and panel identity.
+**A figure and its panels are one exhibit, and the composite is the default.** A label ending in a lowercase letter (`…_fig_3a.png` beside `…_fig_3.png`) is a panel ([§8b](../../../shared/CONVENTIONS.md#8b-the-producer-conventions)): listed in `candidates`, but not a separate exhibit for selection or reporting. Use a panel only when the entry's subject is that panel's alone, and never beside its own figure; placing either discharges the other. Preserve existing filenames and panel identity.
 
 ### Missing PDF figures
 
-Sometimes a PDF source shows or refers to figures, but its complete, safe
-step-4 inventory has no `candidates`. After the parser check passes, an apply
-run then extracts that PDF alone, once, before selecting exhibits:
+When a PDF source shows or refers to figures but its complete, safe step-4
+inventory has no `candidates`, an apply run extracts that PDF alone, once,
+after the parser check passes and before selecting exhibits:
 
 ```bash
 python3 '<plugin>/skills/figure-extract/scripts/batch_extract.py' \
     --src '<resolved pdf path>' --out '<images-folder>'
 ```
 
-Carry any non-default option that intake or an earlier extraction report
-names, such as `--allow-unorganized`, into this and every repair command. Pass
-`--ed-prefix ED` when the captions number Extended Data figures alongside the
-main figures. Respect the extractor's refusals and read its diagnostics.
+Carry any non-default option intake or an earlier extraction report names
+(`--allow-unorganized`) into this and every repair command. Pass
+`--ed-prefix ED` when captions number Extended Data figures separately. Respect the extractor's refusals and read its diagnostics.
 
 Then complete figure-extract's
 [visual review](../../figure-extract/SKILL.md#3-inspect-the-summary-and-verify-crops)
-of the crops this run wrote. Repair only those crops, through its explicit-crop
-workflow, and re-run the inventory after the extraction and after each repair.
+of the crops this run wrote. A named-entity run may view only the crops it
+considers and report the rest as not visually verified. Repair only those crops, through its explicit-crop
+workflow, and re-run the inventory after extraction and each repair.
 Never overwrite, adopt or repair a pre-existing image; the image folder is
-otherwise read-only. A preview/no-apply run writes nothing and reports the gap;
-a figure the extraction cannot supply stays unavailable and is reported under
-*Unused source figures*.
+otherwise read-only. A preview/no-apply run writes nothing and reports the gap.
 
 ## Selection
 
-**Include a figure only when it directly clarifies the entry's own definition, mechanism, or an essential distinction and offers a real explanatory benefit over concise prose alone.** A visual can make the same point clearer, but being informative or appearing in the source is not enough. Leave out decoration, routine applications, and visuals that teach a neighboring concept. Do not add a paragraph, topic, or example just to accommodate an image.
+**Include a figure only when it clarifies the entry's own definition, mechanism or an essential distinction better than concise prose**; appearing in the source is not enough.
 
-**Default to zero or one figure per focused entry.** An additional figure must explain an essential, nonredundant aspect of the same entity that the retained figure and concise prose cannot explain as clearly. Record that concrete benefit in one line in the run report. Different aspects are not automatically essential: a mechanism diagram does not create a need for an applications gallery. For an existing entry, use the [merge preservation rule](merge.md#exhibits-and-headings); this preference never authorizes silently removing its current images.
+**Most focused entries need zero or one figure.** A second figure earns its place when it shows a different facet the prose explains, such as a mechanism diagram plus the key quantitative plot (PCA's cumulative explained-variance elbow); an applications gallery never does. For an existing entry, use the [merge preservation rule](merge.md#exhibits-and-headings); this preference never authorizes silently removing its current images.
 
-**Pair each selected figure with the most specific eligible entry it directly explains.** A gradient-scaling diagram belongs in `lambdarank.md`, not the broader `learning-to-rank.md`. When no entry has the right scope, skip the figure instead of stretching the nearest entry to fit it. A figure can inform the substance judgment, but it does not bypass step 2's eligibility rules.
+**Pair each selected figure with the most specific eligible entry it explains** (`lambdarank.md`, not `learning-to-rank.md`, for a gradient-scaling diagram); with none of the right scope, skip it. A figure never bypasses step 2's eligibility rules.
 
-**Open each newly selected local image before embedding it.** A valid filename does not prove the contents. Confirm that the image is the intended whole figure or panel, is readable, and contains no caption text or neighboring chart; then write its caption from what it shows, checked against the source. Skip and report a defective crop, or repair one this run extracted under [missing PDF figures](#missing-pdf-figures). If the host cannot display images, report that limit and embed no unviewed crop. Preserved existing embeds and remote images need no new check.
+**Open each newly selected local image before embedding it.** Skip and report a wrong, unreadable or badly cropped one (caption text, neighboring charts), or repair a crop this run extracted; a host that cannot display images embeds no unviewed crop and says so. Preserved embeds and remote images need no new check.
 
-**Record a specific reason for every unused exhibit.** Valid reasons include:
+**Give every unused exhibit a specific reason**, never an image limit; exhibits sharing a reason are grouped (`5-3, 5-6, 5-9: teach entities not requested`). Reconcile the whole inventory against embeds and reasons. An exhibit without a reason needs a decision, not automatic placement; many unused figures are fine. Valid reasons:
 
-- No explanatory benefit: decorative, or the concise prose already makes the point just as clearly.
-- Redundant with a retained figure: name the figure and the aspect already covered.
-- Outside the entry's scope, or an unnecessary application, example, or implementation detail.
-- No eligible entry: the relevant entity was deferred or rejected under step 2.
-- Unavailable or unusable asset: identify the source figure and any resulting limitation rather than inventing an embed.
+- No explanatory benefit: decorative, or prose is as clear.
+- Redundant with a retained figure, named with the aspect it covers.
+- Outside the entry's scope: an unnecessary application, example or implementation detail.
+- No eligible entry: deferred or rejected under step 2, or outside the requested scope.
+- Recreated as a Markdown [table](#tables).
+- Unavailable or unusable asset: name the source figure and the limitation.
 
-The reason must describe this figure's contribution, not merely say that the note has reached its image limit.
+## Tables
 
-**Diagnostic for forgotten figures.** Reconcile the complete inventory against embeds and recorded skip reasons (Quality Checklist item 12). An unused exhibit with no reason needs a selection decision, not automatic placement. Many unused figures are acceptable when their reasons hold; the check measures whether every figure was considered, not the proportion included. Report remote references, failure placeholders, and other unavailable source figures as well as local `[source_stem]_fig*` files, with panels grouped under their composite. For Markdown sources, include every rendered image reference even when an older local filename has a different source prefix. Resolve those references directly; the filename mismatch neither makes a resolving image unavailable nor authorizes renaming it.
+When the source presents data as a table and that form genuinely serves the entry (a method comparison or parameter table), **recreate it in Markdown**; tables are never pre-extracted or **embedded as images**. **Recreate, don't transcribe:** drop rows and columns that do not earn their place, rename headers to the entry's terminology, and simplify cells, but **the cells that survive keep the source's values**: they are the table's content, not examples to abstract. Only source-presented tabular material qualifies, never a worked example's intermediate steps or other content the source does not tabulate. Cells allow LaTeX and Markdown formatting, with backticks only where [inline code](writing.md#body-structure) allows them, but no wikilinks. A table sits inline beside the prose it illustrates, with an italic caption on the line immediately below it.
 
 ## Placement and embed syntax
 
-**Embed syntax.** Use Obsidian's image-embed wikilink form: `![[Burges_LearningToRank_2010_fig_3.png]]` for `Sources/Images/`-based images (Obsidian resolves the basename across the vault). For external URLs from a markdown source's clipping, use standard markdown image syntax `![alt](https://...)` since wikilinks don't handle remote URLs — the `alt` slot is plain alt-text (typically left empty or filled with a brief identifier), **not** the wiki-build caption. **The italic-caption-on-next-line rule (see *Captions* below) applies uniformly to both embed forms** — wikilink and markdown — so every image embed, however written, has its `*caption*` line directly below it.
+**Embed syntax.** Embed a `Sources/Images/` image as `![[Burges_LearningToRank_2010_fig_3.png]]` and a remote image from a Markdown source as `![alt](https://...)`, whose `alt` is plain alt-text, not the [caption](#captions).
 
-**Placement: inline, on the line immediately after the sentence or paragraph the image illustrates.** Placement is determined by the image's motivating prose, not by a fixed slot.
-
-Specifically forbidden:
-
-- **Image without a caption below it.** Every embed has a one-line italic caption on the next line — see "Captions" below.
-- **Image detached from its motivating prose, parked at the end of the body just before the Related footer.** This is the default "treat the image as a trailing afterthought" failure mode — and the most common image-placement mistake. If the image illustrates content from the second paragraph of a multi-paragraph body, the image goes between the second and third paragraphs — not at the bottom of the last paragraph. The rule is "next to the motivating prose" — wherever in the body that prose lives.
-- **Image at the top of the entry**, before the first prose paragraph. The opening sentence is the canonical definition; nothing visual precedes it.
-- **Multiple exhibits grouped as a gallery** anywhere in the body. Each selected image or table belongs beside its own motivating paragraph, and that paragraph must already earn its place without the exhibit. One paragraph supports at most one exhibit total: if two images, or an image and a table, compete for it, choose the more helpful form. Do not stack exhibits or write extra prose to create slots.
-
-Example of correct inline placement:
-
-```markdown
-**LambdaRank** is a [[learning-to-rank|learning to rank]] method that sidesteps the non-differentiability of ranking metrics by defining gradients directly, scaled by the change in the target metric from swapping a pair of items.
-
-It starts from [[ranknet|RankNet]]'s pairwise cross-entropy loss and scales each pair's gradient by the absolute change in [[ndcg|normalized discounted cumulative gain]] (NDCG) from swapping the two items in the current ranking.
-
-![[Burges_LearningToRank_2010_fig_3.png]]
-*The gradient is scaled by the NDCG change from swapping a pair of items.*
-
-Swaps involving top positions, where NDCG is most sensitive, change the metric more, so those pairs receive larger updates than pairs deep in the list.
-
-**Related:** [[ranknet|RankNet]] · [[ndcg|NDCG]] · ...
-```
-
-The image sits between the paragraph that introduces the gradient-scaling mechanism and the paragraph that explains its consequence — right where the diagram clarifies the surrounding text.
-
-**Images and tables do not appear in the YAML frontmatter, in the description, in aliases, or in the Related footer** — only in the body prose, where they must serve this entity under [Body structure](writing.md#body-structure).
+**Place each exhibit on the line immediately after the sentence or paragraph it illustrates**: never above the opening definition, and never detached at the end of the body before the Related footer. Never group exhibits as a gallery: each sits beside its own motivating paragraph, which must earn its place without it, and one paragraph supports at most one exhibit; when two compete, choose the more helpful form rather than stack them or write prose to create slots. **Images and tables appear only in body prose**, never in the frontmatter, description, aliases or Related footer.
 
 ## Captions
 
-Every image embed has a caption directly below it — **never omit it**, even when the surrounding prose already explains the figure. **Captions are brief and always italicized.** The same caption rule applies to recreated Markdown tables (see *Body Structure → Markdown tables*); a table's caption sits on the line immediately below the table, same format as an image caption.
+Every image embed and every recreated [table](#tables) has a caption directly below it, in the same format — **never omit it**, even when the prose already explains the exhibit.
 
-Describe what the figure or table shows in standalone form — no source-relative figure/table numbers (`Figure 3`, `Table 2`), no source attribution (`from Burges (2010)`).
-
-**Formatting — no wikilinks, no markdown formatting; LaTeX is allowed.** Wikilink syntax (`[[...]]`) and markdown formatting (`**bold**`, `*italic*`, backtick code) clutter the caption's role as a one-line self-description and conflict with the outer italic styling. LaTeX math is fine — `$\alpha$`, `$|\Delta\text{NDCG}|$`, `$O(n \log n)$` — when the caption refers to a quantity the figure or table depicts symbolically. Entity names that would be wikilinked in body prose stay bare in the caption; terms that would be emphasized with `**bold**` or `*italic*` in body prose stay plain in the caption (LaTeX symbols are the only inline markup allowed). Work titles and scientific taxon names that would be italicized in body prose also stay plain in captions — the no-formatting rule overrides typographic convention here, in the same trade-off as wikilink display labels (see the Limitation under Italic pattern 7).
+Describe what the exhibit shows, checked against the source, in standalone form, without source figure or table numbers (`Figure 3`) or attribution (`from Burges (2010)`). **No wikilinks and no Markdown formatting; LaTeX is allowed** for a quantity the exhibit depicts (`$|\Delta\text{NDCG}|$`). Entity names, Work titles and scientific names stay plain, as in display labels.
 
 **Style.** A one-line sentence wrapped in `*...*` (italic) **on the line immediately below the embed (or the table), with no blank line between them** — the embed-and-caption (or table-and-caption) form one visual unit, with blank lines above and below to separate the unit from surrounding prose. Example: `*The gradient is scaled by $|\Delta\text{NDCG}|$ — the NDCG change from swapping a pair of items.*`.

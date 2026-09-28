@@ -38,8 +38,9 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               (stems compared case- and
                               NFC-insensitively, anchor and folder stripped)
   5   5-slug                  re-run slugify on title:; must equal the filename
-  5   5-bare-common-noun      the filename is a bare term from writing.md's
-                              cross-domain corpus (shared COMMON_NOUNS)
+  5   5-bare-common-noun      the filename is a bare term from
+                              special-titles.md's cross-domain corpus (shared
+                              COMMON_NOUNS)
   6   6-api-surface           non-Software entry: fenced code or any
                               backticked identifier (error); a
                               code-identifier title or a library/how-to
@@ -117,23 +118,27 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               cross-domain carve-out stay with the executing agent;
                               a single-word candidate of a qualified or
                               common-noun subject carries the scanner's hint)
-  19  19-flashcards          `## Flashcards` present on every entry,
-                              preceded by a `---` separator, holding exactly
-                              one card; line 1 one capitalized, period-ended
-                              sentence with inline LaTeX as its only markup;
-                              line 2 exactly
-                              `??` (or the user's `!!`); line 3 the canonical
-                              title (base term for a parenthetical title, math
-                              skeleton for a symbol title; optional
-                              opener-established, alias-bound counterpart).
-                              Extra cards are report-only and keep their own
-                              line-3 answers; the section needs one card that
-                              carries the primary answer
-  19  19-flashcard-leak       Unicode/case/punctuation-normalized answer-
-                              surface search of card line 1 (including inside
-                              $...$) for that card's own line-3 answer and
-                              counterpart; entry aliases join the search only
-                              for the canonical/base/math-plain primary card
+  19  19-flashcards          `## Flashcards` present on every entry except a
+                              discipline root (`<discipline>.md` whose sole
+                              tag names it), preceded by a `---` separator;
+                              cards are `??` definition, `?` understanding or
+                              the user's `!!` (kind from line 1); one primary
+                              definition card and at most two understanding
+                              cards (extras report-only); line 1 one
+                              capitalized sentence ending in a period (a
+                              question mark on understanding cards) with
+                              inline LaTeX as its only markup; the primary
+                              card's line 3 the canonical title (base term,
+                              math skeleton; optional opener-established,
+                              alias-bound counterpart); an understanding
+                              answer takes inline LaTeX only
+      19-brevity-candidate   advisory: a definition cue over 25 words outside
+                              math, a `, where` glossary or a semicolon clause;
+                              an understanding answer over 20 words
+  19  19-flashcard-leak       normalized answer-surface search of card line 1
+                              (math included) for that card's own answer; a
+                              definition card adds its counterpart and, on the
+                              primary card, the entry aliases
   18  18-alias-collision      across a folder, no two entries share an alias
   18  18-alias-duplicate      the same alias listed twice within one entry
   18  18-alias-form           every alias is itself in slug form (warning); a
@@ -153,10 +158,11 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               an inflected or derived head, an alias, or a term
                               the target defines in italics passes (warning)
 
-Items 5, 6, 13, 14, 16 and 18, and item 19's choice of the primary card,
-share their per-entry rules with wiki-lint's scanner through
-``shared/scripts/entry_checks.py``. Item 10's self-link rule is implemented
-here and in the scanner; ``SHARED_MUTATIONS`` holds both to the same fixtures.
+Items 5, 6, 13, 14, 16 and 18, and item 19's card set, primary card and
+discipline-root test, share their per-entry rules with wiki-lint's scanner
+through ``shared/scripts/entry_checks.py``. Item 10's self-link rule is
+implemented here and in the scanner; ``SHARED_MUTATIONS`` holds both to the
+same fixtures.
 
 NOT implemented (out of scope by design): item 4's file existence and page
 correctness, item 9's semantic flow/atomicity judgments, item 10's dangling
@@ -301,6 +307,7 @@ from equation_coverage import (  # noqa: E402
 )
 from note_provenance import split_provenance  # noqa: E402
 from entry_structure import (  # noqa: E402
+    CARD_SEPARATORS,
     description_subject_forms as _description_subject_forms,
     acronym_initial_forms as _initial_forms,
     markdown_image_spans as _markdown_image_spans,
@@ -312,6 +319,8 @@ from entry_structure import (  # noqa: E402
     body_opens_with_prose,
     count_sentences,
     ends_with_sentence_period,
+    flashcard_brevity_hints,
+    flashcard_kind,
     flashcard_line1_markup,
     flashcard_line1_faults,
     math_title_plain_text,
@@ -340,6 +349,8 @@ from entry_checks import (  # noqa: E402
     cross_domain_synonym_label,
     display_label_links,
     emphasis_span_findings,
+    flashcard_set_faults,
+    is_discipline_root,
     label_drops_head,
     label_shares_surface,
     merge_scar_findings,
@@ -1666,7 +1677,7 @@ def _file_line(first_line, finding):
 
 
 def _check_bare_common_noun(findings, filename):
-    """Item 5: a bare filename from writing.md's cross-domain corpus.
+    """Item 5: a bare filename from special-titles.md's cross-domain corpus.
 
     The error is ``report_only``: a merge into an existing bare-slug entry
     reports the rename proposal it may not apply, while a new entry must
@@ -1677,7 +1688,7 @@ def _check_bare_common_noun(findings, filename):
         findings.append(_f(
             "5-bare-common-noun", "error",
             "bare-slug common noun %r -- qualify a new entry's title as "
-            "writing.md's cross-domain tests require and re-run "
+            "special-titles.md's cross-domain tests require and re-run "
             "find_collisions.py on it; an existing entry's rename stays a "
             "proposal" % stem,
             {"slug": stem, "report_only": True}))
@@ -2003,23 +2014,50 @@ def _flashcard_line3_fault(line3, fm, sections):
     return None
 
 
-def _check_flashcards_present(fm, sections, findings):
-    """Item 19's PRESENCE half: every entry carries `## Flashcards`.
+#: The frontmatter errors the scanner's ``parse_fm`` also collects (its
+#: ``_fm_bad``): a line no key owns, or a value that does not parse.
+_UNREADABLE_FM = re.compile(
+    r"line \d+: (?:unparseable |unexpected indented key |invalid YAML flow)")
+
+
+def _is_root_entry(fm, filename):
+    """Whether this entry is a discipline root, which needs no card.
+
+    The shared ``is_discipline_root`` test is the scanner's too, behind its
+    ``tags_valid_single`` gate: one ``tags:`` key written as a list and no
+    unreadable frontmatter line. A layout fault elsewhere (list indentation,
+    a duplicated non-tag key) keeps the root in both tools.
+    """
+    field = fm.get("tags")
+    tags = (field.values if field is not None and field.is_list
+            and fm.order.count("tags") == 1
+            and not any(_UNREADABLE_FM.match(e) for e in fm.errors)
+            else None)
+    stem = os.path.splitext(os.path.basename(filename))[0]
+    return is_discipline_root(stem, tags, TAG_ENUM)
+
+
+def _check_flashcards_present(fm, sections, findings, filename):
+    """Item 19's mechanical clauses for the section and its card set.
 
     The leak scan below is item 19's other half and it only runs when a
     Flashcards section exists -- so an entry with no section at all passed the
     whole of item 19 silently, which is the one failure mode item 19 has that a
     reader cannot see by looking at the entry (nothing is wrong; something is
-    missing).  SKILL.md's script table claims item 19; the three clauses
-    checked here are exactly its mechanical ones -- present, preceded by a
-    `---` separator of its own, at least one card.
+    missing).  Checked here: the section is present, preceded by a `---`
+    separator of its own, and holds the primary `??` card plus at most two
+    `?` understanding cards, each well formed.  A discipline root needs no
+    card, so it skips the missing-section, no-card and no-primary findings;
+    any card it keeps is checked as usual.
     """
+    root = _is_root_entry(fm, filename)
     if sections["flashcards_index"] is None:
-        findings.append(_f(
-            "19-flashcards", "error",
-            "entry has no `## Flashcards` section -- item 19 requires one "
-            "on every entry, after the Related footer, preceded by a "
-            "`---` separator line, holding at least one card"))
+        if not root:
+            findings.append(_f(
+                "19-flashcards", "error",
+                "entry has no `## Flashcards` section -- item 19 requires one "
+                "on every entry, after the Related footer, preceded by a "
+                "`---` separator line, holding the primary `??` card"))
         return
     # A tolerated heading spelling (### level, extra/leading spaces) is a
     # PRESENT section with a heading to fix -- never a missing section, whose
@@ -2058,42 +2096,48 @@ def _check_flashcards_present(fm, sections, findings):
                 "line 1",
                 {"line": fm.body_start_line + flashcards_index}))
     cards = parse_flashcards(sections["flashcard_lines"])
-    if not cards:
+    if not cards and not root:
         findings.append(_f(
             "19-flashcards", "error",
             "the `## Flashcards` section holds no card -- item 19 requires "
-            "exactly one"))
-    elif len(cards) > 1:
-        findings.append(_f(
-            "19-flashcards", "error",
-            "the `## Flashcards` section holds %d cards -- exactly one is the "
-            "current presentation shape, but extra cards are report-only in "
-            "routine lint; preserve every card and attachment unless an "
-            "explicitly authorized refactor accounts for its tested claim"
-            % len(cards),
-            {"cards": len(cards), "report_only": True}))
+            "the primary `??` definition card"))
+    # The card-set shape comes from the complete cards only; a malformed
+    # block keeps its own finding below. The scanner shares this helper.
+    kinds = [flashcard_kind(card) for card in cards if len(card) >= 3]
+    for message, report_only in flashcard_set_faults(kinds):
+        if root and not report_only:
+            continue                      # a root's missing primary card
+        evidence = {"cards": len(cards), "kinds": kinds}
+        if report_only:
+            evidence["report_only"] = True
+        findings.append(_f("19-flashcards", "error",
+                           "the `## Flashcards` section holds " + message,
+                           evidence))
 
     # Item 19's remaining mechanical clauses (scan_vault checks them too; the
-    # two tools must agree). Line 1 is one sentence. Line 2 is exactly `??` --
-    # or the user's `!!`, which marks a card they disabled and is preserved,
-    # never converted. Line 3 is the canonical title: the base term for a
-    # parenthetical-disambiguated title, the meaning-preserving plain form for a
-    # symbol title (line 3 is plain text, so `$k$-fold` can only ever appear
-    # there as `k-fold`), plus the entry's own opener-established, alias-bound
-    # counterpart.
+    # two tools must agree). Line 2 is `??` (a definition card), `?` (an
+    # understanding card) or the user's `!!`, which marks a card they
+    # disabled, keeps the kind its line 1 shows, and is preserved, never
+    # converted. A definition card's line 1 is one period-ended sentence; an
+    # understanding card's is one question. The primary card's line 3 is the
+    # canonical title: the base term for a parenthetical-disambiguated title,
+    # the meaning-preserving plain form for a symbol title (line 3 is plain
+    # text, so `$k$-fold` can only ever appear there as `k-fold`), plus the
+    # entry's own opener-established, alias-bound counterpart.
     title = fm.scalar("title")
-    line3_checks = []
+    line3_checks, brevity = [], []
     for card_no, card in enumerate(cards, 1):
         if len(card) < 3:
-            # A 1- or 2-line block is not a card at all (canon: definition /
-            # `??` / term, contiguous).  The length-gated checks below both
-            # skipped it silently, so the one card broken enough to be missing
-            # a line was the one card item 19 never flagged -- scan_vault
-            # reports the same input as malformed; the two tools must agree.
+            # A 1- or 2-line block is not a card at all (canon: cue /
+            # separator / answer, contiguous).  The length-gated checks below
+            # both skipped it silently, so the one card broken enough to be
+            # missing a line was the one card item 19 never flagged --
+            # scan_vault reports the same input as malformed; the two tools
+            # must agree.
             findings.append(_f(
                 "19-flashcards", "error",
                 "flashcard %d is malformed -- a card is 3 contiguous lines "
-                "(definition / `??` / term), found %d (a blank line between "
+                "(cue / separator / answer), found %d (a blank line between "
                 "lines 1-3 breaks the card)" % (card_no, len(card)),
                 {"card": card_no, "lines": len(card)}))
             continue
@@ -2104,42 +2148,66 @@ def _check_flashcards_present(fm, sections, findings):
                 "may be card content; recognized Spaced Repetition state may "
                 "be attached to line 3, follow it as `<!--SR:` metadata, or "
                 "use the exact `sr|card-metadata` callout, so other content "
-                "after the term is "
+                "after the answer is "
                 "malformed" % (card_no, len(card)),
                 {"card": card_no, "lines": len(card)}))
+        understanding = flashcard_kind(card) == "understanding"
         # Preserve indentation for the shared block-Markdown check; sentence
         # checks normalize their own surrounding whitespace.
-        line1 = card[0]
-        line1_faults = flashcard_line1_faults(line1)
+        line1, line2, line3 = card[0], card[1].strip(), card[2].strip()
+        line1_faults = flashcard_line1_faults(line1, question=understanding)
         if line1_faults:
             findings.append(_f(
                 "19-flashcards", "error",
-                "flashcard %d line 1 %s -- the definition must be one "
-                "capitalized, period-terminated sentence and takes inline "
-                "LaTeX only (no Markdown or HTML)"
-                % (card_no, " and ".join(line1_faults)),
-                {"card": card_no, "faults": line1_faults}))
-        if len(card) >= 2:
-            line2 = card[1].strip()
-            if line2 not in ("??", "!!"):
+                "flashcard %d line 1 %s -- %s and takes inline LaTeX only "
+                "(no Markdown or HTML)" % (
+                    card_no, " and ".join(line1_faults),
+                    "an understanding question is one capitalized sentence "
+                    "ending in `?`" if understanding else
+                    "the definition must be one capitalized, "
+                    "period-terminated sentence"),
+                {"card": card_no, "faults": line1_faults,
+                 "kind": "understanding" if understanding else "definition"}))
+        if line2 not in CARD_SEPARATORS:
+            findings.append(_f(
+                "19-flashcards", "error",
+                "flashcard %d line 2 is %r -- it must be exactly `??` (the "
+                "primary definition card), `?` (an understanding card) or the "
+                "user's `!!`, preserved verbatim, never converted"
+                % (card_no, line2[:20]),
+                {"card": card_no, "line2": line2[:40]}))
+        if understanding:
+            markup = flashcard_line1_markup(line3)
+            if markup:
                 findings.append(_f(
                     "19-flashcards", "error",
-                    "flashcard %d line 2 is %r -- it must be exactly `??` (or "
-                    "the user's `!!`, preserved verbatim, never converted)"
-                    % (card_no, line2[:20]),
-                    {"card": card_no, "line2": line2[:40]}))
-        if len(card) >= 3 and title:
-            line3 = card[2].strip()
-            line3_checks.append(
-                (card_no, line3, _flashcard_line3_fault(line3, fm, sections)))
+                    "flashcard %d answer has forbidden %s -- an understanding "
+                    "answer takes inline LaTeX only"
+                    % (card_no, ", ".join(markup)),
+                    {"card": card_no, "faults": markup}))
+            hints = flashcard_brevity_hints(line3, answer=True)
+        else:
+            if title:
+                line3_checks.append(
+                    (card_no, line3,
+                     _flashcard_line3_fault(line3, fm, sections)))
+            hints = flashcard_brevity_hints(line1)
+        if hints:
+            brevity.append({"card": card_no, "hints": hints})
+    if brevity:
+        findings.append(_f(
+            "19-brevity-candidate", "warning",
+            "possible over-long or two-idea card line; review it under the "
+            "card rules and shorten only a genuine shortfall",
+            {"matches": brevity, "agent_review": True}))
 
-    # A preserved extra card keeps its own answer: with several cards, only
-    # the primary card is held to the line-3 contract (the scanner makes the
-    # same choice through entry_checks).
+    # A preserved extra definition card keeps its own answer: with several,
+    # only the primary card is held to the line-3 contract (the scanner makes
+    # the same choice through entry_checks). Understanding cards never are.
     term, counterpart = _flashcard_primary_answer(fm, sections)
     faults, no_primary = primary_line3_faults(
-        len(cards), line3_checks, term, counterpart)
-    if no_primary:
+        len(line3_checks), line3_checks, term, counterpart)
+    if no_primary and not root:
         findings.append(_f(
             "19-flashcards", "error", no_primary,
             {"expected_line3": term + (" (%s)" % counterpart
@@ -2164,18 +2232,24 @@ def _check_flashcard_leak(fm, sections, findings):
     aliases = [alias for alias in fm.values("aliases") if alias]
     for card_no, card in enumerate(parse_flashcards(sections["flashcard_lines"]), 1):
         line1 = card[0]
-        term_main, paren = _line3_parts(card[2] if len(card) >= 3 else "")
-        paren_is_discipline = False
-        if paren:
-            try:
-                paren_is_discipline = slug_stem(paren) in TAG_ENUM
-            except SlugError:
-                pass
-        raw_needles = [("answer", term_main)]
-        if paren and not paren_is_discipline:
-            raw_needles.append(("answer counterpart", paren))
-        if expected_term and term_main == expected_term:
-            raw_needles.extend(("alias", alias) for alias in aliases)
+        if flashcard_kind(card) == "understanding":
+            # A question may name the entity; it only must not hold its own
+            # answer.
+            raw_needles = ([("answer", card[2].strip())]
+                           if len(card) >= 3 else [])
+        else:
+            term_main, paren = _line3_parts(card[2] if len(card) >= 3 else "")
+            paren_is_discipline = False
+            if paren:
+                try:
+                    paren_is_discipline = slug_stem(paren) in TAG_ENUM
+                except SlugError:
+                    pass
+            raw_needles = [("answer", term_main)]
+            if paren and not paren_is_discipline:
+                raw_needles.append(("answer counterpart", paren))
+            if expected_term and term_main == expected_term:
+                raw_needles.extend(("alias", alias) for alias in aliases)
 
         needles, seen_forms = [], set()
         for kind, surface in raw_needles:
@@ -2195,7 +2269,6 @@ def _check_flashcard_leak(fm, sections, findings):
                 % (card_no, kind, needle),
                 {"card": card_no, "needle": needle, "kind": kind,
                  "line1": line1}))
-
 
 
 def _check_source_duplicates(fm, findings):
@@ -2305,7 +2378,7 @@ def lint_text(text, filename):
     _check_merge_scars(fm, sections, findings)
     _check_source_meta(fm, sections, findings)
     _check_display_labels(sections, findings)
-    _check_flashcards_present(fm, sections, findings)
+    _check_flashcards_present(fm, sections, findings, filename)
     _check_flashcard_leak(fm, sections, findings)
     return result
 
@@ -3022,6 +3095,18 @@ def run_self_test():
     if complete_example is not None:
         check("the documented complete entry passes the actual linter",
               items(complete_example.group(1), "lambdarank.md"), [])
+        two_card_example = re.sub(
+            r"## Flashcards\n\n.*\Z",
+            "## Flashcards\n\n"
+            "The learning-to-rank method that multiplies each item pair's "
+            "RankNet gradient by the NDCG change their swap would cause.\n"
+            "??\nLambdaRank\n\n"
+            "Why do pairs near the top of a LambdaRank ranking get larger "
+            "updates?\n?\nSwapping top positions changes NDCG the most.\n",
+            complete_example.group(1), flags=re.DOTALL)
+        check("the complete entry with a primary and an understanding card "
+              "passes the actual linter",
+              items(two_card_example, "lambdarank.md"), [])
     commented = good.replace('title: "ROC curve"', 'title: "ROC curve" # user annotation')
     commented = commented.replace('"auroc"', '"aur\\u006fc" # an escaped alias')
     commented = commented.replace('sources:\n', 'sources: # reference\n# provenance annotation\n')
@@ -3087,6 +3172,38 @@ def run_self_test():
               any(f.get('evidence', {}).get('cards') == 2
                   for f in lint_text(extra, 'roc-curve.md')['findings']
                   if isinstance(f.get('evidence'), dict)), True)
+    why_card = ("Why does raising the decision threshold lower recall?\n?\n"
+                "Fewer instances are predicted positive, so more actual "
+                "positives are missed.\n")
+    why_answer = ("\nFewer instances are predicted positive, so more actual "
+                  "positives are missed.")
+    review_why = review_base.rstrip('\n') + '\n\n' + why_card
+    for storage_form, studied in (
+            ("next-line",
+             review_why + '<!--SR:!2026-09-20,30,250!2026-09-21,31,250-->\n'
+                          '<!--SR:preserved-state-->\n'),
+            ("multiline next-line",
+             review_why + '<!--SR:\n!2026-09-20,30,250\n\n'
+                          '!2026-09-21,31,250\n-->\n'),
+            ("same-line plus block ID",
+             review_why.replace(why_answer, why_answer
+                                + ' <!--SR:!2026-09-20,30,250--> ^why-card')),
+            ("next-line plus answer block ID",
+             review_why.replace(why_answer, why_answer + ' ^why-card')
+             + '<!--SR:!2026-09-20,30,250-->\n'),
+            ("metadata callout plus block ID",
+             review_why + '> [!sr|card-metadata] \n'
+                          '>  <!--SR:!2026-09-20,30,250--> ^why-card\n')):
+        before_bytes = studied.encode('utf-8')
+        check("protected %s state on an understanding card is not extra "
+              "card content" % storage_form,
+              _st_items(lint_text(studied, 'roc-curve.md')), [])
+        check("checking %s state on an understanding card preserves every "
+              "source byte" % storage_form,
+              studied.encode('utf-8'), before_bytes)
+    check("a blank detaches next-line state from an understanding card too",
+          _st_items(lint_text(review_why + '\n<!--SR:detached-after-blank-->\n',
+                              'roc-curve.md')), ["19-flashcards"])
     detached = review_base + '\n<!--SR:detached-after-blank-->\n'
     check("a blank detaches next-line state so item 19 can report it",
           "19-flashcards" in _st_items(
@@ -3639,10 +3756,14 @@ def run_self_test():
           items(mutate("The plot tracing the trade-off between two error rates "
                        "as a decision threshold moves.\n??\nROC curve\n", "")),
           ["19-flashcards"])
+    second_card = mutate(
+        "??\nROC curve\n",
+        "??\nROC curve\n\nAnother notion, stated briefly.\n??\nSecond idea\n")
     check("a ## Flashcards section with a SECOND card",
-          items(mutate("??\nROC curve\n",
-                       "??\nROC curve\n\nAnother notion, stated briefly.\n??\nSecond idea\n")),
-          ["19-flashcards"])
+          (items(second_card),
+           [(f["evidence"]["cards"], f["evidence"].get("report_only"))
+            for f in lint_text(second_card, "roc-curve.md")["findings"]]),
+          (["19-flashcards"], [(2, True)]))
     check("a ## Flashcards heading with no --- separator above it",
           items(mutate("\n---\n\n## Flashcards", "\n## Flashcards")),
           ["19-flashcards"])
@@ -3650,8 +3771,23 @@ def run_self_test():
           (items(mutate("\n---\n\n## Flashcards", "\n---\n## Flashcards")),
            items(mutate("## Flashcards\n\nThe plot", "## Flashcards\nThe plot"))),
           (["19-flashcards"], ["19-flashcards"]))
-    check("card line 2 that is not exactly `??` (or `!!`)",
-          items(mutate("??\nROC curve\n", "?\nROC curve\n")), ["19-flashcards"])
+    simplified = [f["message"] for f in lint_text(
+        mutate("??\nROC curve\n", "?\nROC curve\n"),
+        "roc-curve.md")["findings"]]
+    check("the only card simplified to `?` is a statement without its "
+          "question mark and a set without its `??` primary, never a line-3 "
+          "contract finding",
+          (len(simplified),
+           any("does not end with a question mark" in m for m in simplified),
+           any("no `??` primary" in m for m in simplified),
+           any("line 3" in m for m in simplified)),
+          (2, True, True, False))
+    triple = lint_text(mutate("??\nROC curve\n", "???\nROC curve\n"),
+                       "roc-curve.md")["findings"]
+    check("a line 2 that is no separator names all three",
+          [(f["item"], all(sep in f["message"]
+                           for sep in ("`??`", "`?`", "`!!`")))
+           for f in triple], [("19-flashcards", True)])
     check("a user-disabled `!!` card is preserved, not a line-2 finding",
           items(mutate("??\nROC curve\n", "!!\nROC curve\n")), [])
     check("card line 1 must be one sentence",
@@ -3912,6 +4048,159 @@ def run_self_test():
                 .replace("ROC curve\n??", "Variance\n??")
                 .replace("\nROC curve\n", "\nVariance\n"),
                 "variance.md"), [])
+
+    # -- item 19: the card set and understanding cards --------------------
+    why = ("Why does raising the decision threshold lower recall?\n?\n"
+           "Fewer instances are predicted positive, so more actual positives "
+           "are missed.\n")
+    differ = ("How does a ROC curve differ from a precision-recall curve?\n"
+              "?\nIt plots the false positive rate against recall.\n")
+
+    def with_cards(*extra):
+        return mutate("??\nROC curve\n",
+                      "??\nROC curve\n" + "".join("\n" + c for c in extra))
+
+    check("a primary card plus two understanding cards is a complete set",
+          items(with_cards(why, differ)), [])
+    third = lint_text(with_cards(why, differ, why.replace("recall", "TPR")),
+                      "roc-curve.md")["findings"]
+    check("a third understanding card is a report-only legacy extra",
+          [(f["item"], f["evidence"].get("report_only"),
+            f["evidence"].get("cards")) for f in third],
+          [("19-flashcards", True, 4)])
+    check("an understanding question needs its question mark",
+          [(f["item"], "question mark" in f["message"])
+           for f in lint_text(with_cards(why.replace("recall?", "recall.")),
+                              "roc-curve.md")["findings"]],
+          [("19-flashcards", True)])
+    check("an understanding answer takes inline LaTeX only",
+          ([(f["item"], "answer has forbidden bold" in f["message"])
+            for f in lint_text(with_cards(
+                "Why?\n?\nIt is **bold**.\n"), "roc-curve.md")["findings"]],
+           items(with_cards("What is the rate?\n?\n$\\sqrt{x}$\n"))),
+          ([("19-flashcards", True)], []))
+    check("an understanding question may name the title and an alias",
+          items(with_cards(
+              "Why does a ROC curve (AUROC) ignore class balance?\n?\n"
+              "Both of its rates are conditioned on the true class.\n")), [])
+    check("an understanding question may not contain its own answer",
+          items(with_cards(
+              "Which rate falls, recall or precision?\n?\nRecall\n")),
+          ["19-flashcard-leak"])
+    check("a user-disabled understanding card keeps its kind",
+          items(with_cards(why.replace("\n?\n", "\n!!\n"))), [])
+    long_cue = ("The plot tracing the trade-off between two error rates as a "
+                "decision threshold moves across every possible score value, "
+                "drawn for a binary classifier evaluated on a held-out test "
+                "set.")
+    check("a long definition cue is an advisory brevity candidate",
+          [(f["item"], f["severity"]) for f in lint_text(mutate(
+              "The plot tracing the trade-off between two error rates as a "
+              "decision threshold moves.", long_cue),
+              "roc-curve.md")["findings"]],
+          [("19-brevity-candidate", "warning")])
+    check("a long understanding answer is an advisory brevity candidate",
+          items(with_cards("Why does the curve bend?\n?\n"
+                           + " ".join(["word"] * 25) + "\n")),
+          ["19-brevity-candidate"])
+
+    # -- item 19: a discipline root needs no card --------------------------
+    stats_root = (
+        '---\n'
+        'title: "Statistics"\n'
+        'type: Concept\n'
+        'sources:\n'
+        '  - "[[Doe_X_2025.pdf#page=2]]"\n'
+        'created: 2026-01-01\n'
+        'updated: 2026-01-02\n'
+        'description: "Statistics is the study of collecting and interpreting '
+        'data."\n'
+        'tags:\n'
+        '  - "#statistics"\n'
+        'parents: []\n'
+        'read: false\n'
+        '---\n'
+        '**Statistics** is the study of collecting, analyzing and '
+        'interpreting data.\n'
+        '\n'
+        '**Related:** [[standard-deviation|Standard deviation]]\n')
+    check("a discipline root needs no Flashcards section",
+          items(stats_root, "statistics.md"), [])
+    check("the same text under another filename needs its card",
+          "19-flashcards" in items(stats_root, "stats-overview.md"), True)
+    check("a root whose tag names another discipline is not exempt",
+          "19-flashcards" in items(
+              stats_root.replace('"#statistics"', '"#mathematics"'),
+              "statistics.md"), True)
+    check("a scalar tag does not make a root, as in the scanner",
+          items(stats_root.replace('tags:\n  - "#statistics"',
+                                   'tags: "#statistics"'), "statistics.md"),
+          ["19-flashcards", "8-tags"])
+    check("a layout fault elsewhere keeps the root, as in the scanner",
+          [items(stats_root.replace("read: false\n", "read: false\nread: false\n"),
+                 "statistics.md"),
+           items(stats_root.replace('  - "#statistics"', '    - "#statistics"'),
+                 "statistics.md")],
+          [["1-valid-yaml"], ["1-valid-yaml"]])
+    check("an unreadable frontmatter line voids the root, as in the scanner",
+          "19-flashcards" in items(
+              stats_root.replace("read: false\n", "read: false\nstray prose\n"),
+              "statistics.md"), True)
+    check("a root with an empty Flashcards section has no card-count finding",
+          items(stats_root + "\n---\n\n## Flashcards\n", "statistics.md"),
+          [])
+    check("a root whose card set lacks a `??` primary has no missing-primary "
+          "finding",
+          items(stats_root + "\n---\n\n## Flashcards\n\n"
+                "Why do statisticians sample?\n?\n"
+                "A sample costs less than a census.\n", "statistics.md"), [])
+    check("a root's card is checked as usual",
+          [f["message"].startswith("flashcard 1 line 3")
+           for f in lint_text(
+               stats_root + "\n---\n\n## Flashcards\n\n"
+               "The study of collecting and interpreting data.\n??\nStats\n",
+               "statistics.md")["findings"]], [True])
+    check("the misc root needs no card",
+          items(stats_root.replace('"Statistics"', '"Misc"')
+                .replace('"#statistics"', '"#misc"')
+                .replace("Statistics is the study of collecting and "
+                         "interpreting data.",
+                         "Misc holds entries outside every discipline.")
+                .replace("**Statistics** is the study of collecting, "
+                         "analyzing and interpreting data.",
+                         "**Misc** holds entries outside every discipline."),
+                "misc.md"), [])
+    root_tmp = tempfile.mkdtemp(prefix="lint_entry-root-")
+    try:
+        with open(os.path.join(root_tmp, "statistics.md"), "w",
+                  encoding="utf-8") as handle:
+            handle.write(stats_root)
+        with open(os.path.join(root_tmp, "standard-deviation.md"), "w",
+                  encoding="utf-8") as handle:
+            handle.write(
+                good.replace('title: "ROC curve"', 'title: "Standard deviation"')
+                .replace('aliases:\n  - "auroc"\n', '')
+                .replace('description: "A ROC curve plots true positive rate '
+                         'against false positive rate."',
+                         'description: "Standard deviation measures spread '
+                         'around the mean."')
+                .replace("A **ROC curve** plots the trade-off between two "
+                         "error rates as a decision threshold moves.",
+                         "**Standard deviation** measures spread around the "
+                         "mean.")
+                .replace("[[precision|Precision]]", "[[statistics|Statistics]]")
+                .replace("The plot tracing the trade-off between two error "
+                         "rates as a decision threshold moves.",
+                         "The square root of the variance.")
+                .replace("\nROC curve\n", "\nStandard deviation\n"))
+        root_report = lint_path(root_tmp)
+        check("folder mode keeps the root exemption and its Related labels",
+              (root_report["summary"]["files"],
+               sorted((os.path.basename(entry["file"]), finding["item"])
+                      for entry in root_report["entries"]
+                      for finding in entry["findings"])), (2, []))
+    finally:
+        shutil.rmtree(root_tmp, ignore_errors=True)
 
     # -- item 9: structure plus semantic body review -----------------------
     check("the body starts immediately after frontmatter",

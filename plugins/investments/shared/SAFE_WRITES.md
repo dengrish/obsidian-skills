@@ -3,7 +3,10 @@
 Read this before a workflow creates, replaces, or removes a vault artifact.
 The user's permission to edit a file applies to the version the workflow
 inspected. It does not extend to a different file or a newer editor save that
-arrives after planning.
+arrives after planning. A workflow that publishes regular files with
+`publish_files.py` needs only that command's documented steps; the rest of
+this guide governs writes it does not perform, such as moves, removals and
+private drivers.
 
 ## Snapshot the version being edited
 

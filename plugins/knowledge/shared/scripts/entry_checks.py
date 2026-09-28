@@ -3,10 +3,11 @@
 
 wiki-build's ``lint_entry.py`` and wiki-lint's ``scan_vault.py`` read these
 source-independent Quality Checklist floors (items 5, 6, 13, 14, 16 and 18,
-item 17's single-word alias hint, and item 19's primary card) from this one
-copy, so an entry that passes the builder gate does not fail the next scan on
-the same mechanical rule. Each check returns dictionaries with a ``check``
-name, a ``message`` and evidence; callers choose the finding key and severity.
+item 17's single-word alias hint, and item 19's card set and primary card)
+and the discipline-root test from this one copy, so an entry that passes the
+builder gate does not fail the next scan on the same mechanical rule. Each
+check returns dictionaries with a ``check`` name, a ``message`` and evidence;
+callers choose the finding key and severity.
 ``prose`` is an entry's comment-masked explanatory body (up to the Related
 footer or the Flashcards section), without the blank lines after the
 frontmatter. Stdlib only (plus sibling shared helpers), Python 3.10+.
@@ -43,6 +44,7 @@ __all__ = [
     "BARE_WORD_ALIAS_HINT",
     "BOLD_OUTER_RE",
     "COMMON_NOUNS",
+    "MAX_UNDERSTANDING_CARDS",
     "SHARED_MUTATIONS",
     "SHARED_QUIET",
     "api_surface_findings",
@@ -53,6 +55,8 @@ __all__ = [
     "cross_domain_word",
     "display_label_links",
     "emphasis_span_findings",
+    "flashcard_set_faults",
+    "is_discipline_root",
     "label_drops_head",
     "label_shares_surface",
     "merge_scar_findings",
@@ -70,7 +74,7 @@ __all__ = [
 # item 5: the cross-domain common-noun floor
 # ---------------------------------------------------------------------------
 
-#: The explicit mechanical floor in wiki-build/references/writing.md,
+#: The explicit mechanical floor in wiki-build/references/special-titles.md,
 #: Cross-domain term disambiguation, test (c).  The prose rule remains broader
 #: (dictionary and drafting tests catch terms outside a finite set); every term
 #: it names explicitly must at least be guarded, both from a bare filename and
@@ -86,7 +90,8 @@ COMMON_NOUNS = frozenset({
 })
 
 #: Appended to an item-17 alias-candidate message for a single-word candidate
-#: of a disambiguated or cross-domain subject (writing.md cross-domain tests).
+#: of a disambiguated or cross-domain subject (special-titles.md cross-domain
+#: tests).
 BARE_WORD_ALIAS_HINT = (
     "a single-word synonym of a disambiguated or cross-domain subject stays "
     "out unless the cross-domain tests show it names only this subject")
@@ -738,18 +743,69 @@ def organism_common_name_bound(entry_type, title, description, opener,
 
 
 # ---------------------------------------------------------------------------
-# item 19: the primary flashcard
+# item 19: the card set and the primary flashcard
 # ---------------------------------------------------------------------------
+
+#: Understanding (``?``) cards allowed after the primary ``??`` card.
+MAX_UNDERSTANDING_CARDS = 2
+
+
+def is_discipline_root(slug, tags, disciplines):
+    """Whether an entry is a discipline root: ``<discipline>.md`` whose only
+    tag is ``#<discipline>``.
+
+    ``slug`` is the filename stem, ``tags`` the entry's tag values exactly as
+    parsed (pass none when the tags could not be read reliably) and
+    ``disciplines`` the caller's discipline-tag enum. A root needs no
+    flashcard (wiki-lint hierarchy.md, *Establish discipline roots*). The
+    builder gate and the scanner share this one test, so they agree on roots.
+    """
+    return (bool(slug) and slug in disciplines
+            and list(tags or ()) == ["#" + slug])
+
+
+def flashcard_set_faults(kinds):
+    """Item 19: card-set shape findings from the kinds of the complete cards.
+
+    ``kinds`` holds ``entry_structure.flashcard_kind`` for every card with at
+    least three visible lines, in section order. Returns ``(message,
+    report_only)`` pairs shared by lint_entry and the scanner, so the two
+    tools agree. Order is not checked: the primary card is identified by
+    kind and answer, never by position.
+    """
+    definitions = kinds.count("definition")
+    understanding = kinds.count("understanding")
+    faults = []
+    if kinds and not definitions:
+        faults.append((
+            "no `??` primary definition card: write it from the entry's main "
+            "claim, or restore `??` where a primary card's separator became "
+            "`?`", False))
+    if definitions > 1:
+        faults.append((
+            "%d definition cards: the card set has one primary `??` card, so "
+            "the extras are report-only in routine lint; preserve every card "
+            "and attachment unless an explicitly authorized refactor accounts "
+            "for its tested claim" % definitions, True))
+    if understanding > MAX_UNDERSTANDING_CARDS:
+        faults.append((
+            "%d understanding cards: at most %d follow the primary card, so "
+            "the extras are report-only in routine lint; preserve every card "
+            "and attachment unless an explicitly authorized refactor accounts "
+            "for its tested claim" % (understanding, MAX_UNDERSTANDING_CARDS),
+            True))
+    return faults
+
 
 def primary_line3_faults(card_count, rows, term, counterpart):
     """Item 19: the line-3 faults to report, plus any missing-primary message.
 
-    ``rows`` are ``(card_label, line3, fault_or_None)`` for each card with a
-    line 3; ``term`` and ``counterpart`` are the entry's primary answer. With
-    one card every fault is reported. With several, a passing card is the
-    primary one and extra cards keep their own answers; otherwise the one card
-    whose line-3 term normalizes to the primary answer is reported, or the
-    message asks for a primary card.
+    ``rows`` are ``(card_label, line3, fault_or_None)`` for each definition
+    card with a line 3; ``term`` and ``counterpart`` are the entry's primary
+    answer. With one card every fault is reported. With several definition
+    cards, a passing card is the primary one and extra cards keep their own
+    answers; otherwise the one card whose line-3 term normalizes to the
+    primary answer is reported, or the message asks for a primary card.
     """
     faults = [row for row in rows if row[2]]
     if card_count <= 1 or not faults:
@@ -1188,6 +1244,54 @@ def run_self_test(verbose=False):
           ([], True))
     check("with no primary term, nothing is asked",
           primary_line3_faults(2, near, "", None), ([], None))
+    check("one primary card plus up to two understanding cards, in any "
+          "order, is a valid card set",
+          [flashcard_set_faults(kinds) for kinds in (
+              [], ["definition"], ["definition", "understanding"],
+              ["definition", "understanding", "understanding"],
+              ["understanding", "definition"])],
+          [[]] * 5)
+    no_primary = flashcard_set_faults(["understanding"])
+    check("a set without a definition card needs its primary, not "
+          "report-only",
+          (len(no_primary), no_primary[0][1],
+           "restore `??`" in no_primary[0][0]),
+          (1, False, True))
+    extra_definition = flashcard_set_faults(["definition", "definition"])
+    check("a second definition card is a report-only legacy extra",
+          (len(extra_definition), extra_definition[0][1],
+           extra_definition[0][0].startswith("2 definition cards"),
+           "report-only" in extra_definition[0][0],
+           "preserve every card" in extra_definition[0][0]),
+          (1, True, True, True, True))
+    extra_understanding = flashcard_set_faults(
+        ["definition"] + ["understanding"] * 3)
+    check("a third understanding card is a report-only legacy extra",
+          (len(extra_understanding), extra_understanding[0][1],
+           extra_understanding[0][0].startswith("3 understanding cards"),
+           "preserve every card" in extra_understanding[0][0]),
+          (1, True, True, True))
+    check("both kinds of legacy extra are reported",
+          [report_only for _message, report_only in flashcard_set_faults(
+              ["definition", "definition"] + ["understanding"] * 3)],
+          [True, True])
+    check("the understanding-card cap", MAX_UNDERSTANDING_CARDS, 2)
+    disciplines = ("mathematics", "misc", "statistics")
+    check("a discipline root is <discipline>.md tagged only #<discipline>",
+          [is_discipline_root(slug, tags, disciplines) for slug, tags in (
+              ("statistics", ["#statistics"]),
+              ("misc", ("#misc",)),
+              ("stats-overview", ["#statistics"]),
+              ("statistics", ["#mathematics"]),
+              ("statistics", ["#statistics", "#mathematics"]),
+              ("statistics", ["statistics"]),
+              ("statistics", []),
+              ("statistics", None),
+              ("physics", ["#physics"]),
+              ("Statistics", ["#Statistics"]),
+              ("", ["#"]),
+              (None, ["#statistics"]))],
+          [True, True] + [False] * 10)
 
     failed = [case for case in cases if not case[1]]
     for label, ok, got, want in cases:

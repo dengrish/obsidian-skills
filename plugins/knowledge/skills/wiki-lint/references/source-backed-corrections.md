@@ -1,6 +1,6 @@
 # Source-backed corrections to an existing entry
 
-Read this when the user asks to correct or simplify existing entries. A
+Read this when the user asks to correct, simplify or deepen existing entries. A
 correction rests on the sources each entry already cites; the request need not
 name them. The corrected entry may also add accurate background that makes it
 easier to understand, under the builder's
@@ -12,6 +12,16 @@ contribution and belongs to `wiki-build`; a retitle uses the
 [entry-retitle protocol](../../../shared/CONVENTIONS.md#retitling-an-existing-wiki-entry),
 and a split, merge, deletion, or cross-entry redistribution uses
 [source-backed refactors](refactors.md).
+
+**Deepening.** A request to deepen, expand or enrich an entry applies the
+builder's creation-time teaching rules to it: the learner arc, core-facet check
+and examples of its
+[prose principles](../../wiki-build/references/writing.md#prose-principles),
+its [equation rules](../../wiki-build/references/equations.md) and its
+[card set](../../wiki-build/references/flashcards-and-emphasis.md#card-set).
+Fill gaps from the entry's cited sources and 5(h) background. Keep every
+existing claim unless it is wrong, and every card and attachment byte-for-byte
+and in place.
 
 ## Establish the evidence and scope
 
@@ -35,11 +45,16 @@ and a split, merge, deletion, or cross-entry redistribution uses
 ## Correct and publish
 
 Apply the current builder rules for fields, prose, equations, media, links, and
-flashcards. Correct the erroneous claim or remove the unnecessary caveat, preserving
-essential assumptions and the ordinary mechanism. Never remove an accurate claim
+flashcards. Correct the erroneous claim, remove the unnecessary caveat or add
+the missing explanation, preserving essential assumptions and the ordinary
+mechanism. Never remove an accurate claim
 merely because the cited source does not state it. Change only the same-entry surfaces needed
 to keep it coherent: for example its description, opener, equation, or primary
-card. Preserve unrelated prose, existing source membership, `created:`,
+card. Then re-read the whole note: merge claims the change left duplicated and
+restore teaching order under the builder's
+[integration principle](../../wiki-build/references/merge.md#integration-principle),
+losing no claim. A deepen request may restructure the whole body this way.
+Preserve unrelated prose, existing source membership, `created:`,
 `parents:`, user-owned fields, and protected card attachments.
 
 If the final entry changed, set `updated:` to today's local date. Reset

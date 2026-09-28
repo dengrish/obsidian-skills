@@ -1,12 +1,14 @@
 # Writing an entry — flashcards, bold and italic
 
-> **When to read this:** before writing an entry. This guide owns [flashcard format](#4-flashcards) and [bold/italic rules](#5-bold-and-italic); [writing.md](writing.md) owns fields, prose, and link form. Maintenance of an existing card additionally follows [wiki-lint's review-history rules](../../wiki-lint/references/flashcards.md).
+> Scope: the card format and card set (§4) and bold and italic (§5). Rewrite bars for existing cards belong to wiki-lint's [flashcard maintenance](../../wiki-lint/references/flashcards.md).
 
 ---
 
 ## 4. Flashcards
 
-The `## Flashcards` section sits at the bottom of the entry, after the Related footer. **The section is preceded by a horizontal-rule separator (`---` on its own line) and a blank line, and the `## Flashcards` heading is followed by a blank line before the first flashcard's line 1.** The full shape between the Related footer and the first flashcard is:
+### Card shape
+
+The `## Flashcards` section ends the entry. After the Related footer come a blank line, `---`, a blank line, the heading and a blank line, then the cards, one blank line apart:
 
 ```markdown
 **Related:** [[…]] · [[…]] · [[…]]
@@ -15,129 +17,124 @@ The `## Flashcards` section sits at the bottom of the entry, after the Related f
 
 ## Flashcards
 
-<line 1: definition>
+<line 1: the cue>
 ??
-<line 3: term>
+<line 3: the answer>
 ```
 
-Each flashcard has **three content lines**. wiki-build writes those three at creation. After review, the **Obsidian Spaced Repetition plugin** may store scheduling state in any of these recognized forms:
+A card is three content lines with no blank line between them. The vault's Spaced Repetition community plugin reads these cards, so the format is a contract with that plugin; no skill runs it or can check that it ran. Its deck setup is in the plugin README under *Reviewing flashcards*.
 
-- on content line 3, after the term: `<term> <!--SR:…-->`;
-- beginning on the line immediately after line 3, with no intervening blank, as one or more whole-line `<!--SR:…-->` blocks, each ending at a line-final `-->` and possibly spanning several lines; or
-- beginning on the line immediately after line 3, with no intervening blank, in the exact metadata callout `> [!sr|card-metadata]`, whose quoted body contains the `<!--SR:…-->` schedule.
+### Line 1: the cue
 
-An existing card may also carry a trailing Obsidian block ID such as `^roc-card`: after the schedule on a same-line term or callout body, or after the term when the schedule follows separately. It is an inbound-link anchor, not card content. **Every recognized schedule and block ID is user-owned attachment state: preserve its bytes and position verbatim, and never move it between cards.** The plugin may instead store schedules outside the note, so absence of these attachments does not establish that an existing card is unstudied. The shared `entry_structure.py` parser is the canonical mechanical implementation: it removes attachments only from a read-only linting view and never rewrites source text.
+On the primary card, line 1 is the definition a learner recalls from the term and the cue that leads back to exactly one term. It is one sentence with a capitalized first word and a final period, about 20 words outside math.
 
-That plugin is a *community plugin installed in the vault* — it lives at `.obsidian/plugins/obsidian-spaced-repetition/`, it is **not** a skill in this plugin, and nothing here invokes it or can check that it ran. Everything below is a format contract with an external tool: wiki-build writes what that plugin parses and preserves what it writes. The plugin reviews a note's cards only when its *Flashcard tags* setting lists the note's tag or a parent tag, or when its folders-as-decks option is on; both are user settings.
+**Kind plus essential property.** Line 1 reads naturally after `<term> is`: it names the kind of thing (method, metric, organelle, model organism) and the one property that sets it apart, such as its mechanism, function, defining relation or significance. A Person's cue states the contribution; an Organism's, what it is and why it is studied; a Device's, how it works; a Dataset's, what it contains and benchmarks. Never discriminate by a measurement, date, count, etymology or anecdote unless that number is the identity (MNIST's 28×28 digit images). State the ordinary case plainly under [principle 3](writing.md#prose-principles): no hedge, exception, minority case or trailing semicolon clause. When the plain property is false for the typical case, choose another essential property.
 
-- **Line 1 — definition.** One sentence that is uniquely identifying, discriminating against neighbors, leak-free, and as short as unique identification allows — and grammatically self-contained (capitalized first word, ends with a period). **Discrimination, concretely:** a `Precision` definition must not equally describe `Recall` or `Accuracy`; a `RankNet` definition must not also fit `LambdaRank`; a `Bagging` definition must not also fit `Boosting` — fold in the property that singles this entity out rather than naming the neighbors (naming them clutters and can leak an alias).
+**Sibling check.** Before finalizing line 1, read line 1 of the closest existing cards: the entry's Related targets and the other members of its family. Confirm that the new cue fits none of them; a Bagging cue must not also fit Boosting. Do not name the neighbours. Within a family of variants, reuse the family's lead phrase and put the one differing property early: "The gradient descent variant that computes each update from a single randomly picked training instance."
 
-  **What "leak-free" means, exactly.** The definition must not contain the title's own string or any alias's string. The mechanical comparison normalizes Unicode and case and treats punctuation — including slash and dash variants — plus whitespace as word separators (Quality Checklist item 19). So a `Key-value cache` entry's definition may not contain "key-value cache" or "key value cache," and `Bias/variance trade-off` cannot be hidden as "bias – variance trade off." **Component words of a compound title are permitted:** that same definition may freely say "keys and values," because neither word is the title. Evading the component words produces contorted, less identifying definitions — the opposite of what the rule is for. Only whole title and whole alias surfaces are mechanically off-limits. The semantic review also rejects a definition that reconstructs the answer by merely expanding an acronym or reordering all of its components: "machine learning operations practice" still gives away `MLOps`, and "messenger RNA vaccine" still gives away `mRNA vaccine`, even when neither literal string matches.
+**Leak-free.** Line 1 never contains the answer: the title or its base term, an alias, or the line-3 counterpart, compared after normalizing Unicode, case, punctuation and whitespace. Component words of a compound title stay allowed; a Key-value cache cue may say "keys and values". A cue also leaks when it rebuilds the name by expanding an acronym ("machine learning operations practice" for MLOps), reordering all its words, or swapping a synonym into each word of the title or an alias; state the cause or mechanism instead. When the name is itself the definition (Mean absolute error), an easy cue is acceptable, and an understanding card tests what the name does not reveal.
 
-  Math on line 1 follows the [line-1 equation-coverage rule](#line-1-equation-coverage). **No Markdown or HTML other than inline LaTeX** — no Obsidian or Markdown links/images, bold, italic (asterisk or underscore form), strikethrough, backticks, or HTML tags. Those forms turn the answer-key sentence into styled content. LaTeX is the only inline markup line 1 accepts.
+**Markup.** No Markdown or HTML: inline LaTeX is the only markup line 1 accepts, under [line-1 equation coverage](#line-1-equation-coverage).
 
-- **Line 2 — `??` (active card) or `!!` (user-disabled card).** The literal two-character cue marking the boundary between prompt and answer. No surrounding whitespace, no other content on the line. **`??` is the Spaced Repetition plugin's *multi-line reversed* card separator, and the doubling is load-bearing** — a single `?` is that plugin's one-directional multi-line card. Reversed means the card is drilled both ways, definition→term and term→definition, which is why its scheduling state can carry one schedule per side and why wiki-lint reviews line 1 for clarity in *both* directions (`wiki-lint/references/flashcards.md`). "Simplifying" `??` to `?` silently halves every card in the vault and strands the second schedule. **Wiki-build always writes `??` verbatim on every card it creates and never writes `!!`.** The user may hand-edit a card's `??` to `!!` to temporarily remove the card from the Spaced Repetition plugin's queue without deleting it; `!!` only ever appears via that manual edit. Both values are valid, both are preserved verbatim on subsequent merges, and both pass the Quality Checklist's line-2 format check. The user re-enables a disabled card by changing `!!` back to `??` themselves; wiki-build takes no action on either form.
+### Line 2: the separator
 
-- **Line 3 — the term.** Before any protected schedule or block-ID suffix, the content is the entry's canonical title in its plain answer form: normally the YAML `title:` verbatim, with a mathematical title converted to its shared meaning-preserving plain form. Use the shared [mathematical plain-form rule](writing.md#cross-domain-term-disambiguation), preserving semantic notation rather than deleting symbols. Preserve the same ordinary text and casing, and append one **opener-established, alias-bound counterpart** in parentheses when present. **A parenthetical-disambiguated title instead answers with its base term** — `Feature`, not `Feature (machine learning)` — per the [base-term rule](writing.md#cross-domain-term-disambiguation), and line 1's leak check searches that base term accordingly (checklist item 19). The helper recognizes exactly three direct opener bindings: an acronym ↔ full-form pair (`**Principal component analysis** (PCA)`); a `(short for *…*)` expansion (`**AdaBoost** (short for *adaptive boosting*)`); or an italic scientific abbreviation (`***Escherichia coli*** (*E. coli*)`). In every class, the counterpart's slug must be present in this entry's `aliases:`. Line 3 removes opener markup and the `short for` lead-in, yielding `Principal component analysis (PCA)`, `AdaBoost (adaptive boosting)`, and `Escherichia coli (E. coli)`. With no qualifying binding, line 3's content is just the plain title form or base term, with no parenthetical.
+Line 2 is exactly one of three values, alone on its line:
 
-  **Only that direct, alias-bound counterpart goes in parentheses** — alternative spellings, plurals, related forms, and names introduced by other synonym cues do not appear. **A synonym's abbreviation is not the title's counterpart.** Title `Precision` therefore stays exactly `Precision` when `ppv` abbreviates the synonym *positive predictive value*. The direct `short for` and scientific-abbreviation forms above qualify because the opener explicitly binds them to the title itself; merely listing a synonym and its abbreviation does not.
+- `??` on the primary card: the plugin's reversed card, reviewed from cue to answer and from answer to cue, with one schedule per side. Never simplify a primary card's `??` to `?`; that halves the card and strands its second schedule.
+- `?` on an understanding card: the plugin's one-directional card.
+- `!!` on a card the user has disabled. Only the user writes `!!` or restores the original separator. Every workflow preserves it and reads the card's kind from line 1: a question marks an understanding card.
 
-  **The term content is plain — no markup of any kind, including LaTeX**, even when the canonical title and body set a symbol in LaTeX (the title `$k$-nearest neighbors` appears here as `k-nearest neighbors`). The protected schedule comment and block ID described above are attachments, not term markup, and must not be removed to enforce plainness. Line 3 matches the title's shared mathematical plain form, which preserves semantic exponents and names Greek symbols rather than deleting them. The body opener bolds the title and the No self-links rule applies in body prose; neither applies here, because the term is the *answer slot*, not a body-prose mention.
+wiki-build writes `??` and `?` as the card set requires and never writes `!!`. When a section has no `??` card and a `?` card carries a statement cue and the canonical answer, restoring its `??` is the one change to a valid separator a workflow makes.
 
-- **Review metadata and block IDs (not written by wiki-build).** At creation these attachments are absent — wiki-build writes lines 1–3. On a pre-existing card, recognize only the schedule/comment, metadata-callout, and block-ID forms listed above. **On subsequent merges, preserve every byte of every attachment on every existing card verbatim** — see *Merge Logic → Flashcards on merge* for the full preservation contract and its report-only handling of legacy extra cards. Ordinary visible text after line 3 is malformed card content, not scheduling metadata.
+### Line 3: the answer
 
-The three content lines run consecutively with **no blank line between any pair of them** (a blank line between lines 1–3 would break the card's contiguity). Following-line attachments also start directly after line 3: a blank line closes the attachment position, so an SR-looking comment or callout beyond it remains visible for repair rather than being reassigned to the card. The section's current presentation shape is **one card only**; anything attached directly to line 3 must match a recognized protected form above and is preserved verbatim. Other HTML comments, ordinary callouts, or visible text are malformed card content. A second definition/cue/term sequence is instead a report-only legacy extra card; see [Flashcards on merge](merge.md#flashcards-on-merge).
+Line 3 of the primary card is the entry's canonical title as plain text: `title:` verbatim, the base term of a parenthetical-disambiguated title (`Feature`, not `Feature (machine learning)`), or the meaning-preserving plain form of a mathematical title (`k-nearest neighbors` for `$k$-nearest neighbors`; see [plain forms](special-titles.md#base-term-and-mathematical-plain-forms)). It takes no markup of any kind, LaTeX included. Attachments are not answer markup; plainness never removes them.
 
-**Exactly one flashcard per entry is the target presentation shape.** The primary card covers the entity's main claim — the same conceptual scope as the body's opening sentence (prose principle 1), but rewritten in flashcard form: the definition leads (line 1), the canonical term answers (line 3). Fresh entries receive one term and one card.
+Append one counterpart in parentheses only when the opener binds it directly to the title and its slug is in `aliases:`. Three bindings qualify: an acronym and its full form (`**Principal component analysis** (PCA)` gives `Principal component analysis (PCA)`), a `(short for *…*)` expansion (`AdaBoost (adaptive boosting)`), and an italic scientific abbreviation (`Escherichia coli (E. coli)`). Nothing else goes in parentheses: not a spelling variant, plural or related form, and not a synonym's abbreviation (`Precision` stays `Precision` although `ppv` abbreviates *positive predictive value*).
+
+### Card set
+
+Every entry has one **primary card**: the reversed `??` definition card, first in the section, testing the entity's main claim (the scope of the body's opening sentence). An entry whose body teaches more than its definition may add up to two **understanding cards** after it, one-directional `?` cards:
+
+```markdown
+Why does raising the decision threshold lower recall?
+?
+Fewer instances are predicted positive, so more actual positives are missed.
+```
+
+Line 1 is one question ending in `?`; it may name the entity but never contains its own answer. Line 3 answers in one plain line of about 15 words, or a short inline-LaTeX formula, with no other markup. Each card tests one claim the body states (principle 5(h) background included), chosen in this order:
+
+1. how or why it works;
+2. how it differs from its most confusable sibling, which needs no entry when the body states the difference;
+3. its defining formula, when a learner should be able to write it from memory (a defining relation, not a notation step);
+4. its main consequence or failure mode.
+
+Skip a category the body does not support. Never ask what the question's own words answer: "How does a parallel β sheet differ from an antiparallel one?" tests the names, not the structure.
+
+Never test a number, date or name the body mentions only in passing. An Organism titled by its scientific name may test the mapping: "Scientific name of the house mouse?" answered by `Mus musculus`. A Person, a Dataset, or a concept whose definition is the whole lesson keeps the primary card alone. Only a create, a merge, or an explicitly requested card redesign or deepening adds understanding cards; routine lint never does.
 
 ### Line-1 equation coverage
 
-**When a useful body equation expresses the quantitative claim a card tests,
-line 1 may carry its compact core relationship inline, with a verbal cue.**
-The card stays one short sentence a learner can recall from the term, so the
-math is optional: keep line 1 verbal when the relationship cannot be written
-that compactly. Apply the body equation guide's explanatory-value test first.
-A simple verbal rule does not become a mathematical learning objective merely
-because an earlier note formalized it; hard voting needs no equation in either
-place. Under an authorized simplification, replace card math that is unhelpful
-or has no compact form with the verbal claim it expresses, removing the body
-equation too only when it fails the explanatory-value test, while preserving
-the tested concept and all scheduling state; otherwise shorten an existing
-card's long formula only to a compact equivalent, never to words.
-Review every card, including disabled and legacy extra cards, against its own
-tested claim; a different facet of the entry is not a reason to change that
-claim.
-
-Use `$…$` only, on **one physical line** with the description, never a display
-block, a separate equation line, or the answer line. Write the relationship a
-learner should recall, such as $\text{TP}/(\text{TP}+\text{FP})$ or
-$\sqrt{\operatorname{Var}(X)}$, in the body's notation or a demonstrably
-equivalent compact form, and name its symbols in words in the same sentence.
-Keep every defining operation (an Lp norm still needs its p-th root) and
-every condition, range, or excluded term the
-[equation guide](equations.md#1-coverage--explanatory-value-before-notation)
-requires. Omit only its well-definedness boilerplate, the $x_0=1$ augmentation
-device, index bounds that merely run over every term, and bindings for symbols
-the relationship does not use. A lone symbol does not substitute for the
-relationship being tested.
-
-Keep the equation leak-free: remove an answer-name left-hand side such as
-`\text{precision} =`, retaining the right-hand expression and a verbal cue;
-keep a neutral symbolic left side only when it does not reveal the answer.
-For example, this complete description occupies one physical line:
+**Line 1 is verbal by default.** It carries math only when the definition itself is a short standard expression a learner should memorize, such as $\text{TP}/(\text{TP}+\text{FP})$ or $\sqrt{\operatorname{Var}(X)}$. Write it inline in the body's notation or an equivalent compact form with `$…$` on the same physical line, name its symbols with role words in the same phrase rather than a *where …* glossary, and drop an answer-name left side such as `\text{precision} =`, keeping a neutral symbolic left side only when it does not reveal the answer:
 
 ```text
-The fraction $\text{TP}/(\text{TP}+\text{FP})$ of positive predictions that are correct, where $\text{TP}$ and $\text{FP}$ count true and false positives.
+The share $\text{TP}/(\text{TP}+\text{FP})$ of true positives among all positive predictions.
 ```
 
-Use only math that describes the existing tested claim. An unrelated example,
-performance result, or auxiliary calculation does not qualify, and qualitative
-cards need no math. If a mathematical card has no matching body equation or
-the relationship is underdetermined, preserve it and report the missing
-support; do not invent body math or choose a new learning objective. Any
-body-equation repair follows its own item-12 scope.
+A lone symbol never substitutes for the relationship being tested. The expression is complete (an Lp norm keeps its p-th root) and carries only the conditions that define the concept, without well-definedness boilerplate or index bounds that run over every term; card lines are exempt from the equation guide's condition list. A longer defining formula goes on its own understanding card, whose question names the symbols and whose answer is only the expression:
+
+```markdown
+Ridge regression cost in terms of $\text{MSE}(\boldsymbol{\theta})$, $\alpha$, $m$ and the feature weights $\theta_1,\dots,\theta_n$?
+?
+$\text{MSE}(\boldsymbol{\theta})+\frac{\alpha}{m}\sum_{i=1}^{n}\theta_i^2$
+```
+
+An existing card's long formula may give way to its verbal core when the formula stays in the body or moves to an understanding card; the tested concept is unchanged.
+
+### Scheduling attachments
+
+wiki-build writes only the three content lines. After review, the plugin may attach scheduling state to any card in one of three recognized forms:
+
+- on line 3, after the answer: `<answer> <!--SR:…-->`;
+- starting on the line directly after line 3: one or more whole-line `<!--SR:…-->` blocks, each ending at a line-final `-->`;
+- starting there: the exact callout `> [!sr|card-metadata]`, whose quoted body holds the `<!--SR:…-->` schedule.
+
+A card may also carry a trailing Obsidian block ID such as `^roc-card`, an inbound-link anchor: after a same-line or callout schedule, or after the answer when the schedule follows separately. **Every recognized schedule and block ID is user-owned: preserve its bytes and position verbatim, and never move it between cards.** A blank line ends the attachment position, so an SR-looking block after it stays visible for repair; other content after line 3 is malformed. The plugin may store schedules outside the note, so absence of attachments alone proves nothing about a card's history. The shared parser `entry_structure.py` hides attachments only from its read-only lint view and never rewrites them.
 
 ---
 
 ## 5. Bold and italic
 
-Bold and italic carry meaning in wiki entries — they are not decorative. The rules are mechanical so a reviewer can audit them.
+Bold and italic carry meaning, not decoration, and the rules are mechanical so a reviewer can audit them. **The reviewer test:** if the answer to "why is this bold/italic?" is not one of the patterns below, the styling is decoration and goes. Inside a Markdown table cell, `**bold**` and `*italic*` are ordinary formatting and are not audited; the patterns govern body prose.
 
-**The reviewer test.** If a reader asks "why is this bold/italic?" and the answer isn't one of the patterns enumerated below, the styling is decoration and gets removed. Apply this as the operating principle when in doubt; the enumerated patterns are worked applications of it.
+**Bold (`**...**`) is reserved for these uses, no others:**
 
-**Bold (`**...**`) is reserved for these uses, no others** — with one carve-out that sits outside the body-prose rules entirely: **inside a markdown table cell**, `**bold**` and `*italic*` are ordinary formatting and are not audited against these patterns. The patterns below govern body prose:
-
-1. **The entry's title on its first body appearance.** The canonical title form, verbatim. For a parenthetical-disambiguated title, the bolded span is the [base term](writing.md#cross-domain-term-disambiguation). **A determiner or short lead-in may precede the bolded span** — the bolded title is the first *bolded* thing in the body, not necessarily the first word: `An **attention mechanism** is a dictionary lookup…`, `The **Manhattan Project** (1942–1946) was…`, `In vertebrates, **hemoglobin** carries…`. Grammar wins over position; `**Attention mechanism** is a dictionary lookup…` is ungrammatical and wrong. Keep the lead-in short (an article, a determiner, or a brief prepositional frame) — it is not license for the biographical preamble prose principle 1 bans. **Carve-out:** a title containing a symbol or variable bolds the **math form**, with math-mode bold inside the math span (the title `k-nearest neighbors` sets its `k` in math-mode bold — see *Inline formatting* under [body structure](writing.md#body-structure)). When the complete title is a single inline-math span, outer bold marks that one title occurrence (`**$R^{+}$**`); this exact opener slot is the only case in which Markdown emphasis may wrap a lone math span. Acronym-titled entries follow the inverted pattern (prose principle 5(f)). **Two title classes combine this bold role with an italic role:** a `Work` title (`***Hamlet***`) and an `Organism` title whose canonical title is an evidence-backed scientific binomial or unranked lowercase trinomial (`***Mus musculus***`, `***Canis lupus familiaris***`). Triple emphasis applies to the first self-title mention only. A strain/isolate/serovar/subtype suffix keeps the whole self-title bold but remains outside the italic taxon: `***E. coli* K-12**`; later it becomes `*E. coli* K-12`. Later Work self-references are plain; later scientific-taxon mentions remain italic. An Organism titled by a common name stays bold-only (`**African elephant**`, `**House mouse**`), as do other entries such as `**LambdaRank**` and `**Yann LeCun**`. Capitalization and a two-word shape alone never establish the scientific-name role.
+1. **The entry's title on its first body appearance**, in its canonical form verbatim. A parenthetical-disambiguated title bolds its [base term](special-titles.md#base-term-and-mathematical-plain-forms), and a symbol-bearing title bolds its math form under the [math-bold rule](special-titles.md#base-term-and-mathematical-plain-forms). **A determiner or short lead-in may precede the bolded span** (`An **attention mechanism** is…`, `In vertebrates, **hemoglobin** carries…`): grammar wins over position, so `**Attention mechanism** is a dictionary lookup…` is wrong, and the lead-in never licenses the preamble principle 1 bans. Acronym-titled entries follow principle 5(f). `Work` titles and evidence-backed scientific `Organism` titles combine this bold with italics under the [typography rules](rare-types.md#typography-for-works-organisms-and-genes); other titles are bold-only (`**LambdaRank**`, `**Yann LeCun**`).
 2. **Bullet-list term anchors** in the `- **Term** — definition` pattern, where the bolded term is the subject the bullet defines.
-3. **The `**Related:**` footer label.** The literal string, always.
+3. **The `**Related:**` footer label**, always.
 
-**Synonyms are italicized, never bolded (Bold Pattern 1's *main name only* sub-rule = Italic Pattern 8).** Only the entry's canonical title gets bolded on first appearance. Alternate names, aliases, and "also called X" forms go in **italics**, as aliases of *this* entry's subject introduced inline as synonyms. The distinguishing trigger is whether the parenthetical or appositive introduces a *synonym* (the entry is showing the reader that this concept also goes by another name) or an *annotation* (an acronym definition or expansion, per prose principle 5(e)–(f)):
+**Synonyms are italicized, never bolded** (Italic Pattern 8); only the canonical title is bolded. Italicize an alternate name that a synonym trigger introduces for this entry's subject: "also called X", "known as X", "(short for X)", "or X" ("**Normal distribution**, also called the *Gaussian distribution*…"; "**Bagging** (short for *bootstrap aggregating*) is…"). An annotation stays plain: a bare acronym parenthetical, or the expansion of an acronym-titled entry ("**LSTM** (long short-term memory) is…", "**Mean squared error** (MSE) is…"). Later uses of an introduced alias are bare. **Every synonym this pattern introduces is an `aliases:` candidate**; one missing from the YAML is a checklist item 17 violation under the [alias completeness rule](writing.md#aliases).
 
-- **Synonym triggers → italics on the alternate name:** "also called X", "known as X", "(short for X)", "or X". Examples: "**Normal distribution**, also called the *Gaussian distribution* or the *bell curve*, is…"; "**Bagging** (short for *bootstrap aggregating*) is…"; "**Cross-attention**, also called *encoder-decoder attention*, is…"; "**Hebb's rule**, also called *Hebbian learning*, states…"; "**AdaBoost** (short for *adaptive boosting*) is…".
-- **Annotation → plain text:** a bare parenthetical carrying just the acronym, or the expansion of an acronym-titled entry. Examples: "**LSTM** (long short-term memory) is…"; "**DBSCAN** (Density-Based Spatial Clustering of Applications with Noise) is…"; "**Mean squared error** (MSE) is…". These are acronym bindings, so the parenthetical content takes no styling.
+**Bolded paragraph-leads are not section signals.** Paragraphs opening with `**Architecture.**`, `**Pretraining.**` or a named variant such as `**ResNet v1**` or `**Stage 1**` are de-facto headings. Run the atomicity test instead: a source-supported concept with its own identity becomes a linked entry, an inherent facet becomes a `##` heading under [body structure](writing.md#body-structure), and a term one clause can explain is introduced inline in italics.
 
-Subsequent uses of an introduced alias in the body stay bare text: italics on first mention, bare thereafter. **Every synonym this pattern introduces is an `aliases:` candidate**: an italicized alternate name for the entry's own subject that is missing from the YAML is a checklist item 17 violation — see the completeness rule under the [`aliases` field](writing.md#aliases).
-
-**Bolded paragraph-leads are not allowed as section signals.** The failure shape: paragraphs opening with `**Architecture.**`, `**Pretraining.**`, `**Deployment.**`, each acting as a de-facto section header. This overloads bold with section-marking duty on top of the title and emphasis uses above. Run the atomicity test first: a source-supported concept with its own identity and main claim becomes a linked entry; only inherent facets of this entity become `##` sub-sections under [body structure](writing.md#body-structure). If you find yourself wanting `**Term.** [paragraph explaining the term and its place in the entity]`, the right form is a separate entry when the term passes that test, a `## Term` heading for an inherent named facet, or plain prose with the term introduced inline in italics (`*term*`) when one clause is enough. **The same prohibition extends to bolded named-variant-as-paragraph-lead** — `**ResNet v1**`, `**Stage 1**`, `**Variant A**` as paragraph openers are de-facto sub-headings; apply the same entry-versus-facet decision rather than using bold as a shortcut.
-
-**Vocabulary-introduction bolding is never allowed.** Bold is *never* used to emphasize a newly-introduced term in body prose — that is Italic Pattern 1's slot (for terms without their own entries) or a wikilink (for terms that have them). The three Bold patterns above are exhaustive. Anything else bolded — `**weight sharing**`, `**softmax function**`, `**model**`, `**training set**` introduced inline in prose — is wrong; convert to italic (`*weight sharing*`) when the term has no wiki entry, or to a wikilink (`[[softmax-function|softmax function]]`) when it does. The diagnostic for any bolded span in the body: if it is *not* the entry's canonical title (Pattern 1), *not* the term-anchor of a definition bullet (Pattern 2), and *not* the `**Related:**` label (Pattern 3), it is decoration.
+**Vocabulary-introduction bolding is never allowed.** A newly introduced term takes italics (Italic Pattern 1) when it has no entry and a wikilink when it does: `**weight sharing**` becomes `*weight sharing*`, and `**softmax function**` becomes `[[softmax-function|softmax function]]`. A bolded span that is not Pattern 1, 2 or 3 is decoration.
 
 ***Italic (`*...*`) is reserved for these uses, no others:***
 
-1. **Defining a vocabulary term inline.** The first time the entry names a term it then uses unannotated: "points lying in dense neighborhoods, called *core points*"; "called *strata*"; "the *hypothesis*". Wikilinked terms are wikilinks, not italics — italics are for terms that do not have their own entries.
-2. **Named heuristics, rules, or principles** when invoked but not used as a structural subsection anchor: `*regression to the mean*`, `*68-95-99.7 rule*`, `*Garbage in, garbage out*`. The italics signal "this is a named thing being referenced," not emphasis.
-3. **Source-established named phrases, dubbed moments, and reference-as-object expressions** — a phrase *cited* rather than *used*: "the *AlexNet moment* for NLP" when the source itself presents that wording as a name, or a sentence discussed as a sentence-example. **Direct attributed quotations stay in double quotes**, not italics. A writer's paraphrase stays plain prose; never invent or italicize a colorful label merely to enliven the entry.
-4. **Image and table captions in their entirety.** Already canonical for image captions.
-5. **Titles of works without their own entries** (`*Hands-On Machine Learning*`, `*Literary Digest*`). Works with their own wiki entries are wikilinked, not italicized. **One exception** for a Work entry referring to *itself*: its title's first body mention is bold-and-italic per Bold Pattern 1's Work-entry clause (`***Perceptrons***`); subsequent self-references stay plain text.
-6. **Emphasis on a single critical word** that changes the meaning of a sentence: "set aside *before* exploration", "evaluate *only once*", "sample from a *conditional* rather than a *marginal* distribution". Use sparingly — overuse defeats the purpose.
-7. **Scientific binomials and unranked lowercase trinomials** in their Latin form: *Escherichia coli* (`*E. coli*` abbreviated), *Drosophila melanogaster*, *Homo sapiens*, *Canis lupus familiaris*. Italicize the complete scientific taxon core regardless of sentence position. Keep strain, isolate, serovar, subtype, other suffix designators, common names, and English descriptors plain (`*E. coli* K-12`, not `*E. coli K-12*`). In an `Organism` entry whose canonical title is such a scientific name, the first self-title mention combines this rule with Bold Pattern 1 (`***Mus musculus***`, `***Canis lupus familiaris***`); later mentions use italics alone. If the title has a plain suffix, outer bold spans the complete first title while inner italics stop after the taxon (`***E. coli* K-12**`); later mentions are `*E. coli* K-12`. A common-name Organism title has no italic role and remains bold-only. **Do not infer the scientific role from capitalization or a two-word shape alone:** `African elephant` is a common name. The mechanical floor treats an abbreviated-genus title, a matching one-letter-genus scientific-abbreviation alias, or an immediate title-bound abbreviation as evidence. A common-name equation establishes identity for links, not Latin typography. Taxon-shaped titles without that evidence, rank-marked names, and genus-only titles require a source-aware typography judgment; the scripts deliberately stay silent once their visible title text matches. **Limitation:** a scientific name inside a wikilink display label renders plain, since [display labels](writing.md#display-label-casing) take no markdown. Captions are subject to the same constraint.
-8. **Aliases or alternate names of *this* entry introduced inline as synonyms** — see the synonym-vs-annotation rule above.
-9. **Gene and allele symbols whose organism-specific nomenclature authority requires italics.** Preserve that authority's exact capitalization and symbol form, and name the authority in the run report. Do not infer the convention from token shape or apply one species' rule to another; the active source may establish that a token denotes a gene rather than its protein product, but incidental publisher styling alone does not establish a universal rule. When the identity or applicable convention is unresolved, keep the existing styling and report the question rather than guessing.
+1. **Defining a vocabulary term inline**, the first time the entry names a term it then uses unannotated ("points lying in dense neighborhoods, called *core points*"). Terms with their own entries are wikilinked, not italicized.
+2. **Named heuristics, rules or principles** referenced inline rather than used as a structural anchor (`*regression to the mean*`, `*68-95-99.7 rule*`).
+3. **Source-established named phrases and expressions cited rather than used** ("the *AlexNet moment* for NLP" when the source itself presents that wording as a name, or a sentence discussed as a sentence). Direct attributed quotations stay in double quotes, a writer's paraphrase stays plain, and a colorful label is never invented or italicized to enliven the entry.
+4. **Image and table captions in their entirety.**
+5. **Titles of works without their own entries** (`*Hands-On Machine Learning*`); works with entries are wikilinked, and a Work entry's own title follows the [typography rules](rare-types.md#typography-for-works-organisms-and-genes).
+6. **Emphasis on a single critical word** that changes a sentence's meaning ("evaluate *only once*"), used sparingly.
+7. **Scientific binomials and unranked lowercase trinomials** (*Escherichia coli*, *Homo sapiens*), while strain suffixes, common names and descriptors stay plain (`*E. coli* K-12`). The Organism self-title forms and the evidence test are in the [typography rules](rare-types.md#typography-for-works-organisms-and-genes).
+8. **Aliases or alternate names of *this* entry introduced inline as synonyms**, as above.
+9. **Gene and allele symbols** only where the organism's nomenclature authority requires italics; when the identity or convention is unresolved, keep the existing styling and report it ([gene symbols](rare-types.md#typography-for-works-organisms-and-genes)).
 
 **What never gets bold or italic:**
 
-- **Mathematical symbols, variables, Greek letters.** Use LaTeX (`$k$`, `$\theta_0$`), never `*k*` or `**k**`.
-- **Library, API, file-format, or code identifiers.** Use backticks, never bold or italic (`` `Pipeline` ``, `` `fit()` ``, `` `.ipynb` ``) — and only where the identifier may appear at all: API identifiers live in `Software` entries alone, and library *names* are never backticked (`references/api-surface.md`). **This includes literal special tokens in brackets** — `` `[CLS]` ``, `` `[MASK]` ``, `` `[SEP]` ``, `` `[IMG]` `` — wherever they appear in body prose. Bare `[brackets]` in prose collide with Obsidian's wikilink syntax and can be misrendered, so backticks are required regardless of how short the token is.
-- **Wikilinks.** The wikilink itself is the styling. Italics around a wikilink — `*[[entry-name|Display Label]]*` — are forbidden, since they add no information and visually clash with the link.
+- **Mathematical symbols, variables and Greek letters used as symbols:** use LaTeX (`$k$`, `$\theta_0$`), never `*k*` or `**k**`. A Greek letter inside an ordinary name (`α helix`) is plain Unicode text and takes the name's own styling.
+- **Library, API, file-format and code identifiers:** backticks (`` `Pipeline` ``, `` `.ipynb` ``), and only where the identifier may appear at all: API identifiers live only in `Software` entries, and library names are never backticked ([API surface](api-surface.md)). Bracket special tokens (`` `[CLS]` ``, `` `[MASK]` ``, `` `[SEP]` ``, `` `[IMG]` ``) are always backticked in body prose, because bare brackets collide with Obsidian's wikilink syntax.
+- **Wikilinks:** the link is the styling, so `*[[entry-name|Display Label]]*` is forbidden.
 
-**Disambiguating bold vs. italic for named patterns and rules.** When a named pattern, heuristic, or rule appears, the test is whether it is a *structural anchor* for the surrounding prose (a paragraph or sub-block organized around it) or is *referenced inline* (cited in passing as a named thing). Structural anchor → a `##` heading (`## 68-95-99.7 rule`). Inline reference → italic (Italic Pattern 2). Bold is not an option for either. The same rule styled differently in two entries means one is wrong: the `68-95-99.7 rule` is referenced inline in `normal-distribution`, so the mention in `standard-deviation` should match.
+**Bold versus italic for named patterns.** A named pattern, heuristic or rule that anchors a paragraph or sub-block gets a `##` heading (`## 68-95-99.7 rule`); one referenced in passing is italic (Italic Pattern 2); bold is never an option. The same rule styled differently in two entries means one is wrong: the `68-95-99.7 rule` is inline in `normal-distribution`, so the mention in `standard-deviation` should match.

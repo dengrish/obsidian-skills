@@ -290,8 +290,8 @@ def base_term(title: str) -> str:
     of the name, so ``"SU(2)"`` and ``"Iron(III)"`` come back unchanged, like
     a title without a trailing parenthetical.  Used by the body-opener,
     description-subject and flashcard checks (wiki-build
-    ``references/writing.md``, "Base-term and mathematical plain-form
-    rules").  The SLUG still derives from the full title.
+    ``references/special-titles.md``, "Base-term and mathematical plain
+    forms").  The SLUG still derives from the full title.
     """
     if not title:
         return title

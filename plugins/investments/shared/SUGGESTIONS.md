@@ -1,12 +1,14 @@
 # Shared suggestion logs
 
-Read this at the close of every skill run and before changing a suggestion
-log. All logs live in `<vault>/Reviews/`: **open issues first, then a short
-record of fixed ones** that stays until the user removes it. They are shared
-issue records, not fully generated notes: preserve existing items and
-unrelated content rather than rebuilding a log from a scan.
-Routine skill runs improve their authorized vault outputs, not skill source
-files; record evidence-backed changes to skill behavior here.
+Read this before writing any suggestion log: at closeout when the run has an
+item to add, update, move or verify, or a missing canonical log to initialize.
+A run with none of these writes no log. A report-only, preview, or no-apply
+run writes no logs or setup files. All logs live in `<vault>/Reviews/`:
+**open issues first, then a short record of fixed ones** that stays until the
+user removes it. They are shared issue records, not fully generated notes:
+preserve existing items and unrelated content rather than rebuilding a log
+from a scan. Routine skill runs improve their authorized vault outputs, not
+skill source files; record evidence-backed changes to skill behavior here.
 
 Use logs only when the run already has a selected or established vault.
 A workflow that supports standalone paths with no vault reports suggestions
@@ -14,58 +16,34 @@ in the conversation; do not create `Reviews/` beside an external input or ask
 for a vault solely for logging. This does not waive the selected workflow's
 own vault requirement.
 
-## Destination and attribution
+## Add or update one item
 
-Use `Reviews/<current-skill>-suggestions.md`, taking the exact skill name from
-its loaded `SKILL.md` and matching folder under the current plugin's `skills/`.
-Do not prefix the filename with a plugin namespace. Independently installed
-plugins use these same per-skill paths in the same selected vault; existing
-logs keep their identities when a plugin is renamed or split.
+This section covers adding or updating an open item in an existing log. Read
+on for anything else, including an item that may belong to another skill's
+log, initializing or migrating a log, an older-format log, or recording,
+verifying, reopening or removing a fixed issue.
 
-Content corrections follow the active workflow's ownership and history rules.
-A workflow handling Wiki entries uses `Reviews/wiki-notes-suggestions.md` for
-Wiki note-content issues that remain outside its repair scope. A workflow
-producing investment research follows its own daily-note continuity rules for
-factual corrections and keeps ideas, watchlist changes, and outcome learning
-in its research records. Skill logs track evidenced workflow defects; they
-are not topic backlogs or copies of the workflow's deliverables.
-
-A skill may update its own log and the log of the skill that produced or
-governs an output it actually consumed in this run. Attribute a proposal to
-the behavior that caused the evidenced defect. Establish the producer from the
-run's handoff record, a valid legacy provenance footer, or a producer record
-in the owning skill's private state. Notes otherwise carry no producer record:
-attribute a recurring output pattern, or one serious well-evidenced defect, to
-the skill whose instructions govern that output, and say in **Evidence** that
-attribution is by governing rule. A file's folder alone establishes neither.
-That skill may belong to another independently installed plugin; update its
-existing canonical log without requiring its plugin or invoking its skill.
-Ordinary setup does not initialize logs for an absent plugin.
-Do not blame a producer for work owned by its consumer: missing retrospective
-link backfill is not a builder defect. If attribution is uncertain, report
-that uncertainty without inventing an upstream owner.
-
-Write only actionable proposals supported by artifacts actually inspected
-in the run. Name the affected path, observed failure, and useful correction;
-include source/page evidence when relevant. Do not manufacture suggestions,
-copy whole scan outputs, or create one issue per occurrence of the same
-underlying problem. A clean run may have nothing to add. An all-skipped run
-may close out from evidence already obtained; closeout does not authorize new
-audits or expand the run's scope.
-
-## Log format and maintenance
+Skill logs track evidenced workflow defects; they are not topic backlogs or
+copies of the workflow's deliverables. Attribute a proposal to the behavior
+that caused the evidenced defect. Write only actionable proposals supported by
+artifacts actually inspected in the run. Name the affected path, observed
+failure, and useful correction; include source/page evidence when relevant.
+Do not manufacture suggestions, copy whole scan outputs, or create one issue
+per occurrence of the same underlying problem. An all-skipped run may close
+out from evidence already obtained; closeout does not authorize new audits or
+expand the run's scope.
 
 Read the existing log first. Reuse one stable ID per problem within each log;
-match the underlying issue before allocating a new ID. Preserve unrelated and
-unresolved items. Update an existing item's evidence and reporting skills when
-new observations warrant it; increment recurrence at most once per logical
-run, even across rescans, retries, or delegated checks. Use one run timestamp
-in `YYYY-MM-DD HH:MM` form. A coordinating agent passes that timestamp and the
-already-counted log/issue IDs to invoked skills; when none was inherited, use
-the run's start time. Combine parallel subtasks' findings
-before updating the same log. Keep the first timestamp and update latest only
-on a new occurrence. `Reported by` names the observing skill or skills, or
-`plugin review` for a source-development review.
+match the underlying issue before allocating a new ID. Update an existing
+item's evidence and reporting skills when new observations warrant it;
+increment recurrence at most once per logical run, even across rescans,
+retries, or delegated checks. Use one run timestamp in `YYYY-MM-DD HH:MM`
+form. A coordinating agent passes that timestamp and the already-counted
+log/issue IDs to invoked skills; when none was inherited, use the run's start
+time. Combine parallel subtasks' findings before updating the same log. Keep
+the first timestamp and update latest only on a new occurrence. `Reported by`
+names the observing skill or skills, or `plugin review` for a
+source-development review.
 
 A skill log has this form; substitute its actual skill name and issue data:
 
@@ -93,50 +71,9 @@ Open issues come first. A fixed issue moves to Fixed and stays until the user re
 - **Verified:** YYYY-MM-DD HH:MM — the check that confirmed the fix.
 ```
 
-The note-content log uses `# Wiki notes suggestions` with the same intro,
-sections, and item format; its **Fixed in** names the run that changed the
-notes, such as `wiki-lint run, YYYY-MM-DD HH:MM`. An empty section keeps its
-heading, followed by a blank line and `No open suggestions.` or
-`No fixed suggestions.`; remove that sentence when adding an item. Do not add
-dated sections or filler.
-
-**Fixing.** Move an item to Fixed when a released plugin version or a
-completed run fixes it. Keep its heading and **Issue** line, drop the other
-lines, and add **Fixed in**. A skill-source fix counts once the version that
-contains it is released; a planned or unreleased change leaves the item open.
-Keep an unresolved portion as its own open item.
-
-**Verifying.** A run that checks a fixed item's behavior or content, with the
-relevant validation, adds **Verified**; no confirmation is required. A version
-bump, nonrecurrence alone, or a finding absent from an incomplete scan is not
-verification. A run that verifies an open item's fix moves it with both lines,
-naming the installed version when the fixing release is unknown. When the
-check fails, or a fixed issue recurs, move it back to Open under the same ID in
-the full form, with **Evidence** that names the earlier fix and a fresh
-**Seen** line.
-
-**Removing.** Skills never delete fixed items: the user removes them after
-review, or an explicitly requested cleanup does. Never clear a section because
-the current run looks clean. Report what was added, updated, moved, or
-verified and the check used; do not archive fixed items in another generated
-report. Unchanged logs need no write, and empty canonical logs are kept rather
-than deleted.
-
-**Older logs.** A log without `## Open` and `## Fixed` predates this format.
-The next run that writes it replaces the old intro with the current one, puts
-the existing items under `## Open`, one heading level lower, and adds an empty
-`## Fixed`.
-
-## Publication and setup
-
-A report-only, preview, or no-apply run writes no logs or setup files. On an
-apply-capable run in an established vault, initialize any missing canonical
-skill logs for the skills shipped in the current plugin's `skills/` directory.
-Derive the roster from that installed package rather than a fixed list. Neither
-plugin requires the other or initializes its logs. Preserve any existing logs
-from either plugin; create the Wiki note-content log only when needed by a
-Wiki workflow.
-This initialization does not authorize adding issues to unrelated producer logs.
+An empty section keeps its heading, followed by a blank line and
+`No open suggestions.` or `No fixed suggestions.`; remove that sentence when
+adding an item. Do not add dated sections or filler.
 
 Use the shared [safe-write protocol](SAFE_WRITES.md): snapshot complete log
 bytes when read, stage the reviewed result privately, publish missing files
@@ -149,6 +86,77 @@ and report the blocked log update; complete other independent authorized work.
 Preserve concurrent changes and re-read before retrying; never overwrite newer
 content or blindly append. Scope is limited to recognized logs, not arbitrary
 files under `Reviews/`.
+
+Report what was added, updated, moved, or verified and the check used.
+
+## Destination and attribution
+
+Use `Reviews/<current-skill>-suggestions.md`, taking the exact skill name from
+its loaded `SKILL.md` and matching folder under the current plugin's `skills/`.
+Do not prefix the filename with a plugin namespace. Independently installed
+plugins use these same per-skill paths in the same selected vault; existing
+logs keep their identities when a plugin is renamed or split.
+
+Content corrections follow the active workflow's ownership and history rules.
+A workflow handling Wiki entries uses `Reviews/wiki-notes-suggestions.md` for
+Wiki note-content issues that remain outside its repair scope. A workflow
+producing investment research follows its own daily-note continuity rules for
+factual corrections and keeps ideas, watchlist changes, and outcome learning
+in its research records.
+
+A skill may update its own log and the log of the skill that produced or
+governs an output it actually consumed in this run. Establish the producer
+from the run's handoff record, a valid legacy provenance footer, or a producer
+record in the owning skill's private state. Notes otherwise carry no producer
+record: attribute a recurring output pattern, or one serious well-evidenced
+defect, to the skill whose instructions govern that output, and say in
+**Evidence** that attribution is by governing rule. A file's folder alone establishes neither.
+That skill may belong to another independently installed plugin; update its
+existing canonical log without requiring its plugin or invoking its skill.
+Do not blame a producer for work owned by its consumer: missing retrospective
+link backfill is not a builder defect. If attribution is uncertain, report
+that uncertainty without inventing an upstream owner.
+
+## Log format and maintenance
+
+The note-content log uses `# Wiki notes suggestions` with a skill log's intro,
+sections, and item format; its **Fixed in** names the run that changed the
+notes, such as `wiki-lint run, YYYY-MM-DD HH:MM`.
+
+**Fixing.** Move an item to Fixed when a released plugin version or a
+completed run fixes it. Keep its heading and **Issue** line, drop the other
+lines, and add **Fixed in**. A planned or unreleased skill-source change
+leaves the item open. Keep an unresolved portion as its own open item.
+
+**Verifying.** A run that checks a fixed item's behavior or content, with the
+relevant validation, adds **Verified**; no confirmation is required. A version
+bump, nonrecurrence alone, or a finding absent from an incomplete scan is not
+verification. A run that verifies an open item's fix moves it with both lines,
+naming the installed version when the fixing release is unknown. When the
+check fails, or a fixed issue recurs, move it back to Open under the same ID in
+the full form, with **Evidence** that names the earlier fix and a fresh
+**Seen** line.
+
+**Removing.** Skills never delete fixed items: the user removes them after
+review, or an explicitly requested cleanup does. Never clear a section because
+the current run looks clean. Do not archive fixed items in another generated
+report. Unchanged logs need no write, and empty canonical logs are kept rather
+than deleted.
+
+**Older logs.** A log without `## Open` and `## Fixed` predates this format.
+The next run that writes it replaces the old intro with the current one, puts
+the existing items under `## Open`, one heading level lower, and adds an empty
+`## Fixed`.
+
+## Setup and migration
+
+On an apply-capable run in an established vault, initialize any missing
+canonical skill logs for the skills shipped in the current plugin's `skills/`
+directory. Derive the roster from that installed package rather than a fixed
+list. Neither plugin requires the other or initializes its logs. Preserve any
+existing logs from either plugin; create the Wiki note-content log only when
+needed by a Wiki workflow.
+This initialization does not authorize adding issues to unrelated producer logs.
 
 Existing logs may be migrated to these canonical paths when migration is
 explicitly requested. Preserve unresolved content and verify the destination

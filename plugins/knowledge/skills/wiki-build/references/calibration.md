@@ -1,6 +1,6 @@
 # Tag calibration — discipline calls the ownership test does not settle
 
-> **When to read this:** Read this when either condition holds, and both are checkable before you write a line of the entry: (1) the ownership (“uses”) test in [CONVENTIONS §3](../../../shared/CONVENTIONS.md#3-the-discipline-tag-enum) and the [tag rule](writing.md#tags) leave a candidate's `tags:` genuinely undecided, especially among machine learning, statistics, and mathematics; or (2) the source itself is a history, law, political-science, finance/markets, or startup/business document, which you know when you open the file. Otherwise apply the ordinary tag rule and skip this file.
+Scope: discipline calls that the [tag rule](writing.md#tags) and the ownership ("uses") test in [CONVENTIONS §3](../../../shared/CONVENTIONS.md#3-the-discipline-tag-enum) leave undecided, and sources about history, law, politics, finance or business. The machine learning, statistics and mathematics boundary is in the [tag rule](writing.md#tags).
 
 ---
 
@@ -13,18 +13,6 @@
 - **Herbert Simon** → one home chosen from the entry's main treatment, such as `#economics` for bounded rationality; other fields remain prose relationships.
 
 When no specific discipline owns the entity, use `#misc` alone. Never leave Wiki tags blank or combine misc with a specific discipline.
-
-## Math vs statistics vs ML
-
-Entities a practitioner encounters in ML courses, papers, or textbooks — losses (including information-theoretic losses such as `Cross-entropy`), metrics, statistical algorithms, named RL formalisms — take `#machine-learning` even when their origins are mathematical or statistical; the origins belong in the body, not in `tags:`. `#mathematics` is reserved for **universal mathematical concepts** taught across many disciplines as primary topics, where ML is one application among many, including general information-theory quantities such as `Information entropy`. **`#statistics` is the home for descriptive statistics, sampling, and classical inference. Predictive modeling and model fitting belong to `#machine-learning`, including linear, polynomial, ridge, lasso, elastic-net, logistic, and softmax regression and their model-specific components.** An entity that is both classical inference and a way to fit or evaluate a predictive model (maximum likelihood estimation, least squares, residuals, the bias–variance trade-off) takes `#machine-learning`; `#statistics` keeps inference that fits no predictive model (hypothesis tests, confidence intervals, sampling design) and descriptive summaries. The same test decides all three — where a practitioner meets the entity as a *primary* topic: a `t`-test or ANOVA is a statistics-course topic, Gini impurity an ML-course topic, a measure-theoretic probability axiom a math-course topic.
-
-- **ML:** `Cross-entropy`, `Mean squared error`, `Markov decision process`.
-- **Statistics:** `Hypothesis testing`, `Analysis of variance`, `Pearson correlation coefficient`.
-- **Math:** `Random variable`, `Central limit theorem`, `Gaussian distribution`, `Markov chain`, `Information entropy`.
-
-Names in these lists are in **canonical title form** (`Mathematical vector`, not `Vector`) — a bare `vector` read off them is the bare-slug failure the disambiguation rules exist to prevent.
-
-**Borderline cases** (`Cosine similarity`, `Dot product`): the deciding test is **whether the entity has a strong independent identity outside ML**. If yes — foundational in another field that uses it independently of ML — prefer `#mathematics`, or `#statistics` where that identity is a classical-statistics one. If no, prefer `#machine-learning`. `Dot product` has independent identity in linear algebra → `#mathematics`; `Cosine similarity` is an inner-product computation whose canonical modern usage is NLP/IR similarity → `#machine-learning`.
 
 ## History owns named historical instances
 
@@ -47,4 +35,4 @@ Names in these lists are in **canonical title form** (`Mathematical vector`, not
 
 ## When in doubt
 
-Surface the call in the run report's *Notes for the user* with the two-options framing (`Dot product` → math or ML?; `Magna Carta` → history or law?) so the user can override; the cost of getting it wrong is small. Defaults meanwhile: the independent-identity test for ML-adjacent entities, `#history` for entities the source primarily treats historically.
+Surface the call in the run report's *Notes for the user* with the two-options framing (`Dot product` → math or ML?; `Magna Carta` → history or law?) so the user can override; the cost of getting it wrong is small. Defaults meanwhile: the [tag rule](writing.md#tags) for ML-adjacent entities, `#history` for entities the source primarily treats historically.

@@ -14,26 +14,18 @@ definition. Read [input safety](INPUT_SAFETY.md)
 before handling external values or content. Do not append skill-provenance
 footers to Markdown notes; [build identity](PROVENANCE.md) stays in the
 plugin's bundled `provenance.json`. At closeout, follow the
-[shared suggestion-log rules](SUGGESTIONS.md).
+[shared suggestion-log rules](SUGGESTIONS.md) whenever the run writes or
+initializes a log; the active workflow says when. A request to review or
+improve the plugin itself follows the
+[plugin-review rules](SUGGESTIONS.md#reviewing-the-plugin-itself).
 
 Before creating, replacing, moving, or removing a vault artifact, follow the
-shared [safe-write protocol](SAFE_WRITES.md). A scan or preflight does not
-reserve a pathname, and permission to edit the version that was read does not
-authorize overwriting a later editor save. An explicit immutable-history rule
-in the active workflow remains in force; safe replacement is a capability,
-not permission to revise a historical record.
-
-For research, use the search, page-reading and data-access capabilities
-available in the active host. No particular browser, connector or host-specific
-tool name is required. Follow the active workflow's evidence and coverage
-rules, record material access limitations, and leave unsupported conclusions
-or completion claims unresolved. Do not substitute unverified recollection
-for sources or quotes.
-
-Scheduling is external to the skills: configure recurring execution in the
-active host only when the user requests it, using an explicit vault and
-timezone. Installing a plugin or invoking a skill manually does not activate
-a schedule. No particular host's automation tool is required.
+shared [safe-write protocol](SAFE_WRITES.md). A workflow that publishes with
+`publish_files.py` follows the protocol by running its documented commands. A
+scan or preflight does not reserve a pathname, and permission to edit the
+version that was read does not authorize overwriting a later editor save. An
+explicit immutable-history rule in the active workflow remains in force; safe
+replacement is a capability, not permission to revise a historical record.
 
 ## Resolve the paths before acting
 
@@ -113,11 +105,6 @@ no package installation. Install only the active workflow's dependencies, from
 the current plugin's `requirements.txt` or an optional requirements file that
 workflow documents; another plugin is never a setup dependency.
 
-A workflow using named timezones also needs the system IANA timezone database,
-normally present on macOS and Linux. If that data is unavailable, report the
-missing timezone data; do not substitute a fixed UTC offset that breaks
-daylight-saving cutoffs.
-
 When required dependencies are missing, create a virtual environment in an
 approved, writable location outside the installed plugin cache, then use its
 interpreter for both installation and every script invocation:
@@ -127,10 +114,9 @@ python3 -m venv '<venv>'
 '<venv>/bin/python' -m pip install -r '<plugin>/requirements.txt'
 ```
 
-Use the environment's `bin/python` interpreter with the POSIX shell examples
-throughout the skills. Do not override an externally managed Python
-installation or install globally as a fallback. If installation is blocked,
-report the missing dependency and complete only work that does not depend on it.
+Do not override an externally managed Python installation or install globally
+as a fallback. If installation is blocked, report the missing dependency and
+complete only work that does not depend on it.
 
 ### Only for PDF and image workflows
 
@@ -159,6 +145,24 @@ not require delegation, an agent framework, or a host-specific skill invocation
 tool. The independently installable plugins do not require one another.
 A separately installed PDF or browser skill is optional; use it only when
 available and relevant.
+
+## Only when a workflow needs it
+
+For research, use the search, page-reading and data-access capabilities
+available in the active host. Follow the active workflow's evidence and
+coverage rules, record material access limitations, and leave unsupported
+conclusions or completion claims unresolved. Do not substitute unverified
+recollection for sources or quotes.
+
+Scheduling is external to the skills: configure recurring execution in the
+active host only when the user requests it, using an explicit vault and
+timezone. Installing a plugin or invoking a skill manually does not activate
+a schedule.
+
+A workflow using named timezones also needs the system IANA timezone database,
+normally present on macOS and Linux. If that data is unavailable, report the
+missing timezone data; do not substitute a fixed UTC offset that breaks
+daylight-saving cutoffs.
 
 Playwright/Chromium and OCR are optional, task-specific dependencies named by
 the workflow that uses them. Check the existing environment first and install

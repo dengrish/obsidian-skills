@@ -3,9 +3,12 @@
 
 Parses every `Wiki/**/*.md` entry once (recursively, like wiki-build's
 vault_index.py) and emits a single JSON object: the vault inventory, the
-deterministic QC violations ("problems"), and the three worklists the executing agent must
-judge — collision candidates (item-5 probes), rename candidates, and backfill
-candidates (Task 2) — plus the Task 3 hierarchy diagnostic.
+deterministic QC violations ("problems"), and the worklists the executing agent must
+judge — collision candidates (item-5 probes), rename candidates, backfill
+candidates and hub footer items (Task 2), and card rivals (item 19) — plus the
+Task 3 hierarchy diagnostic. Outside `Wiki/` it reads the MOCs and, for the
+advisory `spaced_repetition` report, the Spaced Repetition plugin's settings
+file; it never writes either.
 
 A file that cannot be read (not UTF-8, dangling symlink, permission error) is
 reported as an `item0` problem and skipped; it never aborts the scan. Unknown
@@ -41,6 +44,7 @@ import re
 import stat
 import sys
 import unicodedata
+from collections import Counter, defaultdict
 
 
 # Disciplines are the fixed tag enum (VALID_TAGS below).
@@ -164,6 +168,7 @@ from equation_coverage import (  # noqa: E402
     find_noncanonical_display_equation_candidates,
 )
 from entry_structure import (  # noqa: E402
+    CARD_SEPARATORS,
     description_subject_forms,
     acronym_initial_forms as _initial_forms,
     markdown_image_spans,
@@ -175,6 +180,8 @@ from entry_structure import (  # noqa: E402
     body_opens_with_prose,
     count_sentences,
     ends_with_sentence_period,
+    flashcard_brevity_hints,
+    flashcard_kind,
     flashcard_line1_markup,
     flashcard_line1_faults,
     math_title_plain_text,
@@ -184,6 +191,7 @@ from entry_structure import (  # noqa: E402
     opener_subject_date_status,
     parse_flashcard_blocks,
     split_sentences,
+    strip_flashcard_review_metadata,
     title_display_form,
 )
 from introduced_aliases import (  # noqa: E402
@@ -210,6 +218,8 @@ from entry_checks import (  # noqa: E402
     cross_domain_synonym_label,
     display_label_links,
     emphasis_span_findings,
+    flashcard_set_faults,
+    is_discipline_root,
     label_drops_head,
     label_shares_surface,
     merge_scar_findings,
@@ -1013,6 +1023,30 @@ def moc_discipline(stem):
     if folded.endswith(MOC_SUFFIX) and folded[:-len(MOC_SUFFIX)] in VALID_TAGS:
         return folded[:-len(MOC_SUFFIX)]
     return None
+
+
+#: Task 3 appends a parent's missing children to its Related footer up to this
+#: many links (hierarchy.md, *Populate parents*).
+FOOTER_CHILD_CAP = 12
+HUB_FOOTER_MIN = 15
+HUB_FOOTER_DIVISOR = 20
+
+
+def hub_footer_min(entry_count):
+    """Footer count at which a target is listed in ``hub_footer``."""
+    return max(HUB_FOOTER_MIN, entry_count // HUB_FOOTER_DIVISOR)
+
+
+def _record_is_discipline_root(slug_value, record):
+    """Apply the shared root predicate to one parsed scan record.
+
+    Tags count only when the frontmatter held one readable tag key with a
+    single enum value, so a malformed or duplicated key never makes a root.
+    """
+    return is_discipline_root(
+        slug_value,
+        record.get("tags_raw") if record.get("tags_valid_single") else None,
+        VALID_TAGS)
 
 #: Frontmatter keys that are Obsidian's own, not this schema's. They are NOT
 #: `item2` "unexpected key" findings: item 2 is a class-1 fix-in-place, and the
@@ -1849,6 +1883,101 @@ def duplicate_sentence_surfaces(prose, table_spans=()):
     return out
 
 
+def build_card_rivals(cues, parent_slugs, related_slugs, root_slugs):
+    """Item-19 review input: each entry's primary cue beside its closest rivals.
+
+    ``cues`` maps slug -> primary line 1; ``parent_slugs`` and
+    ``related_slugs`` map slug -> resolved entry slugs. Rivals are the
+    entry's Related-footer targets plus every entry that shares a resolved
+    parent other than a discipline root. Only entries with a cue count,
+    and an entry never rivals itself. Read-only; authorizes no edit.
+    """
+    children = {}
+    for slug_value, parents in parent_slugs.items():
+        for parent in parents:
+            if parent not in root_slugs:
+                children.setdefault(parent, set()).add(slug_value)
+    rows = []
+    for slug_value in sorted(cues):
+        rivals = set(related_slugs.get(slug_value, ()))
+        for parent in parent_slugs.get(slug_value, ()):
+            if parent not in root_slugs:
+                rivals |= children.get(parent, set())
+        rivals = sorted(r for r in rivals if r != slug_value and r in cues)
+        if rivals:
+            rows.append({"slug": slug_value, "cue": cues[slug_value],
+                         "rivals": rivals})
+    return rows
+
+
+SR_SETTINGS_PARTS = (".obsidian", "plugins", "obsidian-spaced-repetition",
+                     "data.json")
+
+
+def spaced_repetition_report(vault_root, discipline_counts,
+                             entries_with_card_attachments):
+    """Advisory, read-only view of the Spaced Repetition plugin's settings.
+
+    ``discipline_counts`` is the scan's ``discipline_tags`` census and
+    ``entries_with_card_attachments`` the item-19 count of entries whose
+    Flashcards section carries a recognized attachment. Never writes, never
+    follows a symlinked settings file, never raises.
+    """
+    report = {"settings": "absent", "uncovered_tags": {},
+              "separator_findings": [], "schedules_outside_notes": None,
+              "entries_with_card_attachments": entries_with_card_attachments}
+    path = os.path.join(vault_root, *SR_SETTINGS_PARTS)
+    if not os.path.lexists(path):
+        return report
+    descriptor = None
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                             | getattr(os, "O_NONBLOCK", 0))
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise OSError("not a regular file")
+        with os.fdopen(descriptor, encoding="utf-8") as handle:
+            descriptor = None
+            data = json.load(handle)
+    except (OSError, ValueError, UnicodeDecodeError, RecursionError):
+        report["settings"] = "unreadable"
+        return report
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    settings = data.get("settings") if isinstance(data, dict) else None
+    if not isinstance(settings, dict):
+        report["settings"] = "unreadable"
+        return report
+    report["settings"] = "read"
+    tags = settings.get("flashcardTags", ["#flashcards"])
+    listed = {tag.strip().lstrip("#").casefold()
+              for tag in (tags if isinstance(tags, list) else [])
+              if isinstance(tag, str)}
+    if settings.get("convertFoldersToDecks") is not True:
+        report["uncovered_tags"] = {
+            slug_value: count
+            for slug_value, count in sorted(discipline_counts.items())
+            if count and slug_value.casefold() not in listed}
+    for key, expected in (("multilineCardSeparator", "?"),
+                          ("multilineReversedCardSeparator", "??")):
+        value = settings.get(key, expected)
+        if value != expected:
+            report["separator_findings"].append(
+                "%s is %r; wiki cards use %r" % (key, value, expected))
+    marker = settings.get("multilineCardEndMarker", "")
+    if marker:
+        report["separator_findings"].append(
+            "multilineCardEndMarker is %r; wiki cards end at a blank line"
+            % marker)
+    schedule = data.get("scheduleData")
+    card_schedules = (schedule.get("cardSchedules")
+                      if isinstance(schedule, dict) else None)
+    report["schedules_outside_notes"] = not (
+        settings.get("dataStore") == "NOTES"
+        and isinstance(card_schedules, dict) and not card_schedules)
+    return report
+
+
 def _vault_root_for(wiki, images=None, vault=None):
     """Use an explicit vault root, otherwise retain legacy path inference."""
     if vault is not None:
@@ -2171,7 +2300,7 @@ def scan(wiki, images=None, vault=None):
     on_disk_fold = {fold_name(_sl) for _sl in on_disk} - set(fold_of)
     # fold_name(alias) -> (owning slug, the alias as spelled). Obsidian
     # resolves [[tpr]] to the entry whose `aliases:` carries "tpr" when no FILE
-    # answers to that name -- references/writing.md calls an alias an
+    # answers to that name -- shared/CONVENTIONS.md §4b calls an alias an
     # alternative slug, and wiki-build's find_collisions.build_targets probes
     # aliases for exactly that reason. A file always wins over an alias, so
     # this is consulted only after the slug and on-disk lookups, and it is not
@@ -2489,8 +2618,22 @@ def scan(wiki, images=None, vault=None):
                 return True
         return False
 
+    # Read-only inputs for Task 2 (`hub_footer`), Task 3 (`unlinked_children`)
+    # and item 19 (`card_rivals`, `spaced_repetition`), collected once in the
+    # per-entry loop. Only uniquely owned slugs take part: a basename shared by
+    # two files names no single entry to link, place or compare.
+    _linked_owners = defaultdict(set)   # slug -> entries its prose or footer links
+    _footer_owners = defaultdict(set)   # slug -> entries its Related footer links
+    _footer_links = {}                  # slug -> wikilinks in its Related footer
+    _primary_cues = {}                  # slug -> line 1 of its primary card
+    _card_attachment_paths = set()      # entries whose cards carry review state
+
+    def _unique_slug(slug_value):
+        return slug_value in entries and fold_name(slug_value) not in ambiguous_files
+
     for e in diagnostic_records:
         sl = e["slug"]
+        _unique_owner = _unique_slug(sl)
         problems.current_path = (
             e["path_key"]
             if fold_name(sl) in ambiguous_files else "")
@@ -3282,8 +3425,12 @@ def scan(wiki, images=None, vault=None):
                 _structural_separator_i = None
         for _scar in merge_scar_findings(e["prose"], _structural_separator_i):
             problems.append((sl, "item13", _scar["message"]))
-        # ---- item 19: Flashcards presence/absence + one-card cap + per-card structure / markup / answer-leak ----
-        if not e["has_flashcards"]:
+        # ---- item 19: Flashcards presence/absence + card-set shape + per-card structure / markup / answer-leak ----
+        # A discipline root needs no card (hierarchy.md, *Establish discipline
+        # roots*): it skips the missing-section, no-card and no-primary
+        # findings. A card it keeps gets every per-card check.
+        _root_entry = _record_is_discipline_root(sl, e)
+        if not e["has_flashcards"] and not _root_entry:
             problems.append((sl,"item19","entry missing ## Flashcards section"))
         if e["has_flashcards"]:
             # A tolerated heading spelling (### level, extra/leading spaces) is a
@@ -3325,25 +3472,25 @@ def scan(wiki, images=None, vault=None):
             # Inline, next-line, and callout scheduling state plus block IDs
             # belong to the review plugin/user. None is another card whose
             # removal may be proposed. Mask it only in this read-only check.
+            if strip_flashcard_review_metadata(after_head) != after_head:
+                _card_attachment_paths.add(e["path_key"])
             cards = parse_flashcard_blocks(after_head)
-            if not cards:
+            if not cards and not _root_entry:
                 problems.append((sl,"item19","## Flashcards section has no card"))
-            elif len(cards) > 1:
-                problems.append((
-                    sl, "item19",
-                    f'{len(cards)} cards in ## Flashcards — exactly one is the '
-                    "current presentation shape, but extra cards are report-only "
-                    "in routine lint; identify the primary card, preserve every "
-                    "card and attachment, and move/remove an extra only under an "
-                    "explicitly authorized refactor that accounts for its claim"))
+            _kinds = [flashcard_kind(cl) for cl in cards if len(cl) >= 3]
+            for _message, _report_only in flashcard_set_faults(_kinds):
+                if _root_entry and not _report_only:
+                    continue    # the missing-primary finding; a root needs none
+                problems.append((sl, "item19", "## Flashcards holds " + _message))
             alias_forms = list(e["aliases"])
             _expected_term, _expected_counterpart = flashcard_primary_answer(
                 title, e["aliases"], opener, e["type"])
             _line3_faults = []
+            _definition_cues = []
             for ci, cl in enumerate(cards, 1):
                 tag = (f"card {ci}" if len(cards) > 1 else "flashcard")
                 if len(cl) < 3:
-                    problems.append((sl,"item19",f'{tag} malformed — needs 3 contiguous lines (definition / ?? / term), found {len(cl)} (a blank line between lines 1–3 breaks the card)'))
+                    problems.append((sl,"item19",f'{tag} malformed — needs 3 contiguous lines (cue / separator / answer), found {len(cl)} (a blank line between lines 1–3 breaks the card)'))
                     continue
                 if len(cl) > 3:
                     problems.append((
@@ -3354,6 +3501,7 @@ def scan(wiki, images=None, vault=None):
                         'as `<!--SR:` metadata, or use the exact '
                         '`sr|card-metadata` callout, so other content '
                         'after the term is malformed'))
+                _understanding = flashcard_kind(cl) == "understanding"
                 line1, line2, line3 = cl[0], cl[1].strip(), cl[2]
                 _card_boilerplate = find_boilerplate_candidates(
                     strip_code(line1), card_line=True)
@@ -3378,34 +3526,42 @@ def scan(wiki, images=None, vault=None):
                         sl, "item12/equation-typography",
                         f"raw micrometre notation in {tag} line 1 must use "
                         "inline LaTeX, such as `$\\mu\\mathrm{m}$`"))
-                if line2 not in ("??","!!"):
-                    problems.append((sl,"item19",f'{tag} line 2 is "{line2[:20]}", must be exactly ?? (or !! if the user disabled the card)'))
-                _sentence_faults = flashcard_line1_faults(line1)
+                if line2 not in CARD_SEPARATORS:
+                    problems.append((sl,"item19",f'{tag} line 2 is "{line2[:20]}", must be exactly ?? (primary definition card), ? (understanding card) or !! (a card the user disabled)'))
+                _sentence_faults = flashcard_line1_faults(
+                    line1, question=_understanding)
                 if _sentence_faults:
                     problems.append((
                         sl, "item19",
                         f'{tag} line 1 {" and ".join(_sentence_faults)} — '
-                        "the definition must be one capitalized, "
-                        "period-terminated sentence and takes inline LaTeX "
-                        "only (no Markdown or HTML)"))
-                # leak check: line 1 must not contain THIS card's answer — its own line-3 term (+ parenthetical
-                # expansion); add the entry's aliases only when this card's term is the entry title (the primary
-                # card). A secondary card legitimately names the primary entity, so don't test it against the title.
-                mt = re.match(r"^(.*?)(?:\s+\(([^)]*)\))?\s*$", line3.strip())
-                term_main = (mt.group(1) if mt else line3).strip()
-                paren = mt.group(2).strip() if (mt and mt.group(2)) else ""
-                # the parenthetical is a leak candidate only when it is a real acronym/expansion of the term; a
-                # discipline-disambiguation parenthetical ("Model (machine learning)") is just a domain tag, not part
-                # of the recall answer, so its appearance in line 1 ("a machine learning system") is context, not a leak.
-                cands = [term_main] + ([paren] if (paren and slug(paren) not in VALID_TAGS) else [])
-                # The primary-card test compares against the title with a trailing
-                # discipline-disambiguation parenthetical stripped: the primary
-                # card's line 3 is the BASE term for a disambiguated title
-                # ("Feature", not "Feature (machine learning)"), so an exact
-                # compare skipped the alias needles for exactly the entries that
-                # carry them — every disambiguated entry sat in the blind spot.
-                if _expected_term and term_main == _expected_term:
-                    cands += alias_forms
+                        + ("an understanding question is one capitalized "
+                           "sentence ending in `?`" if _understanding else
+                           "the definition must be one capitalized, "
+                           "period-terminated sentence")
+                        + " and takes inline LaTeX only (no Markdown or HTML)"))
+                if _understanding:
+                    # A question may name the title and aliases; it must not
+                    # contain its own answer.
+                    cands = [line3.strip()]
+                else:
+                    # leak check: line 1 must not contain THIS card's answer — its own line-3 term (+ parenthetical
+                    # expansion); add the entry's aliases only when this card's term is the entry title (the primary
+                    # card). A secondary card legitimately names the primary entity, so don't test it against the title.
+                    mt = re.match(r"^(.*?)(?:\s+\(([^)]*)\))?\s*$", line3.strip())
+                    term_main = (mt.group(1) if mt else line3).strip()
+                    paren = mt.group(2).strip() if (mt and mt.group(2)) else ""
+                    # the parenthetical is a leak candidate only when it is a real acronym/expansion of the term; a
+                    # discipline-disambiguation parenthetical ("Model (machine learning)") is just a domain tag, not part
+                    # of the recall answer, so its appearance in line 1 ("a machine learning system") is context, not a leak.
+                    cands = [term_main] + ([paren] if (paren and slug(paren) not in VALID_TAGS) else [])
+                    # The primary-card test compares against the title with a trailing
+                    # discipline-disambiguation parenthetical stripped: the primary
+                    # card's line 3 is the BASE term for a disambiguated title
+                    # ("Feature", not "Feature (machine learning)"), so an exact
+                    # compare skipped the alias needles for exactly the entries that
+                    # carry them — every disambiguated entry sat in the blind spot.
+                    if _expected_term and term_main == _expected_term:
+                        cands += alias_forms
                 # Unicode punctuation, slash/dash variants, and whitespace are
                 # normalized by the shared leak matcher. lint_entry uses the
                 # same matcher, so the two tools agree.
@@ -3425,23 +3581,48 @@ def scan(wiki, images=None, vault=None):
                         break
                 if hit:
                     problems.append((sl,"item19",f'{tag} line 1 leaks the answer ("{hit}")'))
-                l3 = []                              # line 3 (term) is plain text — no markup at all, including LaTeX
-                if "[[" in line3: l3.append("wikilink")
-                if "`" in line3: l3.append("backtick")
-                if "$" in line3: l3.append("$ (LaTeX)")
-                if "**" in line3: l3.append("bold")
-                elif re.search(r"\*\w[^*]*\*", line3): l3.append("italic")
-                if l3:
-                    problems.append((sl,"item19",f'{tag} line 3 (term) has {", ".join(l3)} — line 3 must be plain text (no markup, including LaTeX); remove only the markup'))
-                _line3_faults.append((tag, line3, flashcard_line3_fault(
-                    line3, title, e["aliases"], opener, e["type"])))
+                if _understanding:
+                    _answer_markup = flashcard_line1_markup(line3)
+                    if _answer_markup:
+                        problems.append((
+                            sl, "item19",
+                            f'{tag} answer has forbidden '
+                            f'{", ".join(_answer_markup)} — an understanding '
+                            "answer takes inline LaTeX only"))
+                    _hints = flashcard_brevity_hints(line3, answer=True)
+                else:
+                    l3 = []                              # line 3 (term) is plain text — no markup at all, including LaTeX
+                    if "[[" in line3: l3.append("wikilink")
+                    if "`" in line3: l3.append("backtick")
+                    if "$" in line3: l3.append("$ (LaTeX)")
+                    if "**" in line3: l3.append("bold")
+                    elif re.search(r"\*\w[^*]*\*", line3): l3.append("italic")
+                    if l3:
+                        problems.append((sl,"item19",f'{tag} line 3 (term) has {", ".join(l3)} — line 3 must be plain text (no markup, including LaTeX); remove only the markup'))
+                    _line3_fault = flashcard_line3_fault(
+                        line3, title, e["aliases"], opener, e["type"])
+                    _line3_faults.append((tag, line3, _line3_fault))
+                    _definition_cues.append((_line3_fault is None, line1.strip()))
+                    _hints = flashcard_brevity_hints(line1)
+                if _hints:
+                    problems.append((
+                        sl, "item19/brevity-candidate",
+                        f'{tag}: {"; ".join(_hints)} — review under flashcard '
+                        "maintenance; a candidate is never an order"))
             # The line-3 term contract binds the primary card only. A legacy
             # extra card keeps its own answer: rewriting it would repoint that
             # card's review schedule. lint_entry makes the same choice.
+            # Understanding cards never carry the primary answer.
             _report_line3, _no_primary = primary_line3_faults(
-                len(cards), _line3_faults, _expected_term,
+                len(_line3_faults), _line3_faults, _expected_term,
                 _expected_counterpart)
-            if _no_primary:
+            # `card_rivals` input: the first definition card that carries the
+            # primary answer, else the first definition card.
+            if _unique_owner and _definition_cues:
+                _primary_cues[sl] = next(
+                    (cue for passes, cue in _definition_cues if passes),
+                    _definition_cues[0][1])
+            if _no_primary and not _root_entry:
                 problems.append((sl, "item19", _no_primary))
             for tag, line3, line3_fault in _report_line3:
                 problems.append((sl, "item19",
@@ -3636,6 +3817,11 @@ def scan(wiki, images=None, vault=None):
                     "render a subject mention as plain text; if an anchored body "
                     "link is deliberate navigation, use a local anchor"))
                 continue
+            # A path, case variant or exact link to an entry counts as linked
+            # for `unlinked_children`, even when a repair below respells it.
+            if (file_record is not None and _unique_owner
+                    and _unique_slug(file_record["slug"])):
+                _linked_owners[sl].add(file_record["slug"])
             canonical_target = (
                 _canonical_qualified_target(tgt, _file_path, _entry_vault_target(e))
                 if file_record is not None and _file_path is not None else None
@@ -3695,6 +3881,8 @@ def scan(wiki, images=None, vault=None):
                         "subject mention as plain text, or remove it from the "
                         "Related footer"))
                     continue
+                if _unique_owner and _unique_slug(_own_sl):
+                    _linked_owners[sl].add(_own_sl)
                 _anchor_match = re.search(r"[#^].*", m.group(1))
                 _anchor = _anchor_match.group(0) if _anchor_match else ""
                 _label = m.group(2) if m.group(2) is not None else tgt
@@ -3756,6 +3944,9 @@ def scan(wiki, images=None, vault=None):
                                  f'entry target "{key}" is wikilinked {count}× in prose '
                                  f'({forms}) — keep first only'))
         # ---- item 11: every Related footer link is piped to its canonical title ----
+        if _unique_owner:
+            # Every footer wikilink counts toward the child-link cap.
+            _footer_links[sl] = len(WIKILINK.findall(strip_code(e["rel"])))
         for m in WIKILINK.finditer(e["rel"]):
             tgt, disp = m.group(1).strip(), m.group(2)
             # The link target may carry an anchor and/or a vault path while
@@ -3771,6 +3962,9 @@ def scan(wiki, images=None, vault=None):
             if (record is not None
                     and record.get("path_key") == e.get("path_key")):
                 continue
+            if (record is not None and _unique_owner
+                    and _unique_slug(record["slug"])):
+                _footer_owners[sl].add(record["slug"])
             raw_title = record.get("title", "") if record else ""
             tt = title_display_form(raw_title) if raw_title else ""
             if not tt:
@@ -4125,8 +4319,7 @@ def scan(wiki, images=None, vault=None):
     # Discipline roots: backfill tags their candidates `discipline_root` for
     # batch review and drops compound mentions ("cell biology").
     _root_slugs = {s for s, r in entries.items()
-                   if s in VALID_TAGS and r.get("tags_valid_single")
-                   and r.get("tag_slugs") == [s]}
+                   if _record_is_discipline_root(s, r)}
     _late_links = []
     backfill = (build_backfill(entries, surf_map, _moc_basename_owners, _backfill_owner,
                                root_targets=_root_slugs, late_links=_late_links,
@@ -4293,6 +4486,60 @@ def scan(wiki, images=None, vault=None):
              for _target in _parent_targets(e)]
         for sl, e in entries.items()
     }
+
+    # ---- Task 3: parents link down; Task 2: hub footer items ----
+    # Both lists are report-only and empty while alias ownership is incomplete.
+    _parent_owners = {s: {o for _t, o, _r in rows if o in entries and o != s}
+                      for s, rows in canonical_parents.items()}
+    _children = defaultdict(set)
+    for _c, _owners in _parent_owners.items():
+        if not _unique_slug(_c):
+            continue
+        for _p in _owners:
+            _children[_p].add(_c)
+
+    unlinked_children = []
+    if alias_inventory_complete:
+        for _p in sorted(_children):
+            if _p == "misc" or _footer_links.get(_p, 0) >= FOOTER_CHILD_CAP:
+                continue
+            _missing = sorted(_children[_p] - _linked_owners.get(_p, set()))
+            if not _missing:
+                continue
+            unlinked_children.append({
+                "slug": _p,
+                "children": len(_children[_p]),
+                "footer_links": _footer_links.get(_p, 0),
+                "unlinked": [_entry_parent_target(entries[c]) for c in _missing],
+                "branch_heads": [_entry_parent_target(entries[c])
+                                 for c in _missing if _children.get(c)],
+            })
+
+    hub_footer = []
+    if alias_inventory_complete:
+        _hub_min = hub_footer_min(len(entries))
+        _counts = Counter(t for owners in _footer_owners.values() for t in owners)
+        for _t, _n in sorted(_counts.items()):
+            if _n < _hub_min or _t in _root_slugs or _t not in entries:
+                continue
+            _pt = _parent_owners.get(_t, set()) - _root_slugs
+            _listed = []
+            for _s in sorted(_footer_owners):
+                if _t not in _footer_owners[_s]:
+                    continue
+                _ps = _parent_owners.get(_s, set()) - _root_slugs
+                if (_t in _parent_owners.get(_s, ())
+                        or _s in _parent_owners.get(_t, ()) or _ps & _pt):
+                    continue
+                _listed.append(_s)
+            if _listed:
+                hub_footer.append({"target": _entry_parent_target(entries[_t]),
+                                   "footers": _n, "entries": _listed})
+
+    # Item 19's forward check: each primary cue beside its closest rivals.
+    card_rivals = build_card_rivals(
+        _primary_cues, {s: sorted(o) for s, o in _parent_owners.items()},
+        {s: sorted(o) for s, o in _footer_owners.items()}, _root_slugs)
 
     # ``moc_consistency_findings`` is a report-only worklist for complete
     # generated MOC documents. Every MOC-local record has
@@ -4770,10 +5017,17 @@ def scan(wiki, images=None, vault=None):
                                      key in _organism_common_surf,
                                  "discipline_root": t in _root_slugs}
                                 for s,t,f,key in sorted(backfill)],
+        # Report-only; Task 2 judges each listed footer item; no write authority.
+        "hub_footer": hub_footer,
+        # Item 19's forward-check input: a floor, not an exhaustive rival set.
+        "card_rivals": card_rivals,
         # Folder-level, report-only findings.  These are deliberately outside
         # `problems`: they are not entry checklist violations and must not
         # inflate per-entry problem tallies or imply deletion authority.
         "image_folder_findings": image_folder_findings,
+        # Advisory; the plugin's settings file is read, never written.
+        "spaced_repetition": spaced_repetition_report(
+            vault_root, tag_counts, len(_card_attachment_paths)),
         "hierarchy_diagnostic": {
             "entries": len(entries),
             "self_parented": selfp,
@@ -4783,6 +5037,9 @@ def scan(wiki, images=None, vault=None):
             "placement_gaps": placement_gaps,
             "unresolved_parents": unresolved_parents,
             "parent_state_findings": parent_state_findings,
+            # Parents whose body and footer leave direct children unlinked
+            # while the footer has room; Task 3 appends them.
+            "unlinked_children": unlinked_children,
             "moc_file_states": moc_states,
             "legacy_moc_states": legacy_moc_states,
             "moc_inventory_findings": moc_inventory_findings,
@@ -5223,8 +5480,15 @@ def run_self_test():
                     for row in gap_res["hierarchy_diagnostic"]["unresolved_parents"]
                     if row["slug"] == "alias-reader"]),
                   ([], False, [("known-alias", "unparsed")]))
+            check(label + " suppresses unlinked_children and hub_footer",
+                  (gap_res["hierarchy_diagnostic"]["unlinked_children"],
+                   gap_res["hub_footer"]), ([], []))
         _st_write(v_gap, "hidden-owner.md", hidden_text)
         repaired_alias_res = scan(v_gap)
+        check("repair and rescan restore unlinked_children through an alias parent",
+              [row["slug"] for row in
+               repaired_alias_res["hierarchy_diagnostic"]["unlinked_children"]],
+              ["known-owner"])
         check("repair and rescan restore ordinary alias resolution, including real ambiguity",
               {"item10/alias", "item10/ambiguous", "item10/self", "item10/dangling", "item11"}
               <= set(_st_keys(repaired_alias_res, "alias-reader")), True)
@@ -5798,9 +6062,10 @@ def run_self_test():
               duplicate_sentence_surfaces(math_a)[0][1].find("$x+y$") >= 0,
               True)
 
-        # writing.md's named corpus is the scanner's mechanical minimum.  A
-        # single fixture over every term prevents additions to one copied list
-        # from silently escaping both the filename and backfill gates.
+        # special-titles.md's common-noun corpus is the scanner's mechanical
+        # minimum.  A single fixture over every term prevents additions to one
+        # copied list from silently escaping both the filename and backfill
+        # gates.
         v = os.path.join(tmp, "v4d")
         for term in sorted(COMMON_NOUNS):
             title = term.capitalize()
@@ -7749,7 +8014,7 @@ def run_self_test():
                for k in _st_keys(res, name)
                if k == 'item19'], [])
         check("callout metadata is not counted, but a genuine second card still is",
-              '2 cards' in _st_msg(res, 'extra', 'item19'), True)
+              '2 definition cards' in _st_msg(res, 'extra', 'item19'), True)
         check("detached or unterminated SR comments remain reportable content",
               ['item19' in _st_keys(res, name)
                for name in ('detached', 'unterminated')], [True, True])
@@ -9209,6 +9474,388 @@ def run_self_test():
                      if p["slug"] == "recall-machine-learning"
                      and p["item"] == "item17/alias-candidate"),
               [("TPR", False), ("completeness", True)])
+
+        # ------------------------------------------------------------------
+        # Item 19 card set: one primary `??` card plus up to two `?`
+        # understanding cards; brevity candidates; attachments on either kind.
+        # ------------------------------------------------------------------
+        def _with_cards(title, extra, **kwargs):
+            return (_st_entry(title, "**%s** is a worked example." % title,
+                              **kwargs).rstrip("\n") + "\n\n" + extra)
+        _why = "Why does the example matter?\n?\nIt keeps each claim separate.\n"
+        _math_card = "What does $x$ denote here?\n?\n$x \\in \\mathbb{R}$\n"
+        v = os.path.join(tmp, "v-card-set")
+        _st_write(v, "understanding-pair.md", _with_cards(
+            "Understanding pair", _why + "\n" + _math_card))
+        _st_write(v, "three-understanding.md", _with_cards(
+            "Three understanding", _why + "\n" + _math_card + "\n"
+            + "Which case does it cover?\n?\nThe ordinary case.\n"))
+        _st_write(v, "simplified-primary.md", _st_entry(
+            "Simplified primary", "**Simplified primary** is a worked example.")
+            .replace("\n??\nSimplified primary\n", "\n?\nSimplified primary\n"))
+        _st_write(v, "answer-bold.md", _with_cards(
+            "Answer bold", "Why does it matter?\n?\nIt is **bold**.\n"))
+        _st_write(v, "question-names-title.md", _with_cards(
+            "Question names title",
+            "Why does Question names title matter?\n?\nIt anchors the idea.\n"))
+        _st_write(v, "question-leaks.md", _with_cards(
+            "Question leaks",
+            "Why is overfitting the answer here?\n?\nOverfitting\n"))
+        _st_write(v, "disabled-question.md", _with_cards(
+            "Disabled question", "Why does it matter?\n!!\nIt anchors the idea.\n"))
+        _st_write(v, "bad-separator.md", _st_entry(
+            "Bad separator", "**Bad separator** is a worked example.")
+            .replace("\n??\nBad separator\n", "\n???\nBad separator\n"))
+        _long_cue = ("A deliberately verbose definition that keeps adding "
+                     "ordinary words well beyond the target length so that the "
+                     "advisory brevity hint fires for this long card cue about "
+                     "nothing in particular.")   # 30 words
+        _st_write(v, "long-cue.md", _st_entry(
+            "Long cue", "**Long cue** is a worked example.").replace(
+                "The idea this entry is about, stated once.", _long_cue))
+        _st_write(v, "glossary-cue.md", _st_entry(
+            "Glossary cue", "**Glossary cue** is a worked example.").replace(
+                "The idea this entry is about, stated once.",
+                "The ratio $a/b$ of two counts, where $a$ counts hits."))
+        _st_write(v, "long-answer.md", _with_cards(
+            "Long answer", "Why does it matter?\n?\n" + " ".join(
+                ["It keeps every separate claim apart from the rest"] * 3)
+            + "\n"))
+        res = scan(v)
+        check("a primary card plus two understanding cards is a clean card set",
+              [k for k in _st_keys(res, "understanding-pair")
+               if k.startswith("item19")], [])
+        _three = _st_msg(res, "three-understanding", "item19")
+        check("a third understanding card is a report-only legacy extra",
+              ("3 understanding cards" in _three, "report-only" in _three,
+               "preserve every card" in _three), (True, True, True))
+        _simplified = _st_msg(res, "simplified-primary", "item19")
+        check("a primary card simplified to ? needs a question mark or its ?? back",
+              ("does not end with a question mark" in _simplified,
+               "no `??` primary definition card" in _simplified,
+               " line 3 is" in _simplified), (True, True, False))
+        check("an understanding answer takes inline LaTeX only",
+              ("answer has forbidden bold" in _st_msg(
+                  res, "answer-bold", "item19"),
+               "answer has forbidden" in _st_msg(
+                   res, "understanding-pair", "item19")), (True, False))
+        check("an understanding question may name the title but not its answer",
+              ("leaks the answer" in _st_msg(
+                  res, "question-names-title", "item19"),
+               "leaks the answer" in _st_msg(res, "question-leaks", "item19")),
+              (False, True))
+        check("the user's !! on an understanding question is valid",
+              _st_msg(res, "disabled-question", "item19"), "")
+        _separator = _st_msg(res, "bad-separator", "item19")
+        check("an invalid line 2 names all three separators",
+              all(part in _separator for part in (
+                  "?? (primary definition card)", "? (understanding card)",
+                  "!! (a card the user disabled)")), True)
+        check("brevity candidates are advisory and never item19 errors",
+              ([k for k in _st_keys(res, "long-cue") if k.startswith("item19")],
+               "glossary" in _st_msg(res, "glossary-cue",
+                                     "item19/brevity-candidate"),
+               "item19/brevity-candidate" in _st_keys(res, "long-answer"),
+               "item19/brevity-candidate" in _st_keys(res, "understanding-pair")),
+              (["item19/brevity-candidate"], True, True, False))
+
+        v = os.path.join(tmp, "v-card-attachments", "Wiki")
+        _attached = {
+            "inline-state": "It anchors the idea. <!--SR:!2026-09-20,30,250-->\n",
+            "next-line-state": "It anchors the idea.\n<!--SR:!2026-09-20,30,250-->\n",
+            "callout-state": ("It anchors the idea.\n> [!sr|card-metadata]\n"
+                              "> <!--SR:!2026-09-20,30,250--> ^u-card\n"),
+            "block-id-state": "It anchors the idea. ^u-card\n",
+        }
+        for _name, _answer in _attached.items():
+            _st_write(v, _name + ".md", _with_cards(
+                _name.replace("-", " ").capitalize(),
+                "Why does it matter?\n?\n" + _answer))
+        before = {p: open(p, "rb").read() for p in iter_entry_files(v)}
+        res = scan(v)
+        check("recognized attachments on an understanding card are not card content",
+              [k for name in _attached for k in _st_keys(res, name)
+               if k.startswith("item19")], [])
+        check("the scan leaves every card byte unchanged",
+              {p: open(p, "rb").read() for p in iter_entry_files(v)}, before)
+        check("entries whose cards carry review state are counted",
+              res["spaced_repetition"]["entries_with_card_attachments"], 4)
+        v = os.path.join(tmp, "v-one-attachment")
+        _st_write(v, "inline-card.md", _st_entry(
+            "Inline card", "**Inline card** is a worked example.").replace(
+                "\n??\nInline card\n",
+                "\n??\nInline card <!--SR:!2026-09-20,30,250-->\n"))
+        _st_write(v, "plain-card.md", _st_entry(
+            "Plain card", "**Plain card** is a worked example."))
+        check("one inline schedule counts one entry with card attachments",
+              scan(v)["spaced_repetition"]["entries_with_card_attachments"], 1)
+
+        check("card_rivals pairs siblings under a hub parent and Related targets only",
+              build_card_rivals(
+                  {"a": "A cue.", "b": "B cue.", "c": "C cue.", "d": "D cue.",
+                   "x": "X cue."},
+                  {"a": ["hub"], "b": ["hub"], "c": ["root"], "x": ["root"],
+                   "hub": ["root"]},
+                  {"a": ["a"], "c": ["nocue"], "d": ["b"]}, {"root"}),
+              [{"slug": "a", "cue": "A cue.", "rivals": ["b"]},
+               {"slug": "b", "cue": "B cue.", "rivals": ["a"]},
+               {"slug": "d", "cue": "D cue.", "rivals": ["b"]}])
+
+        # Spaced Repetition settings: advisory, read-only, never raises.
+        def _sr_vault(name, data=None, raw=None):
+            root = os.path.join(tmp, name)
+            path = os.path.join(root, *SR_SETTINGS_PARTS)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(raw if raw is not None else json.dumps(data))
+            return root, path
+        def _sr_settings(**changes):
+            data = {"settings": {
+                "flashcardTags": ["#statistics"], "convertFoldersToDecks": False,
+                "multilineCardSeparator": "?",
+                "multilineReversedCardSeparator": "??",
+                "multilineCardEndMarker": "", "dataStore": "NOTES"},
+                "scheduleData": {"cardSchedules": {}}}
+            for key, value in changes.items():
+                if key == "scheduleData":
+                    data[key] = value
+                else:
+                    data["settings"][key] = value
+            return data
+        _counts = {"physics": 1, "statistics": 2}
+        _absent = spaced_repetition_report(os.path.join(tmp, "no-vault"), _counts, 0)
+        check("absent plugin settings are reported as absent",
+              (_absent["settings"], _absent["schedules_outside_notes"]),
+              ("absent", None))
+        _root, _ = _sr_vault("sr-malformed", raw="{not json")
+        check("malformed plugin settings are unreadable",
+              spaced_repetition_report(_root, _counts, 0)["settings"], "unreadable")
+        _real_root, _real_path = _sr_vault("sr-real", _sr_settings())
+        _link_root = os.path.join(tmp, "sr-link")
+        _link_path = os.path.join(_link_root, *SR_SETTINGS_PARTS)
+        os.makedirs(os.path.dirname(_link_path))
+        # Only the link creation may fail (unsupported platform); an
+        # exception from the reader itself must fail the self-test.
+        try:
+            os.symlink(_real_path, _link_path)
+            _linked = True
+        except (OSError, NotImplementedError, AttributeError):
+            _linked = False
+        if _linked:
+            check("a symlinked settings file is never followed",
+                  spaced_repetition_report(_link_root, _counts, 0)["settings"],
+                  "unreadable")
+        _before_stat = os.stat(_real_path)
+        _before_bytes = open(_real_path, "rb").read()
+        _read = spaced_repetition_report(_real_root, _counts, 3)
+        check("readable settings report uncovered tags and fresh schedules",
+              (_read["settings"], _read["uncovered_tags"],
+               _read["separator_findings"], _read["schedules_outside_notes"],
+               _read["entries_with_card_attachments"]),
+              ("read", {"physics": 1}, [], False, 3))
+        check("reading the settings never changes the file",
+              (open(_real_path, "rb").read(), os.stat(_real_path).st_mtime_ns),
+              (_before_bytes, _before_stat.st_mtime_ns))
+        _variants = {}
+        for _name, _data in (
+                ("folders", _sr_settings(convertFoldersToDecks=True)),
+                ("separator", _sr_settings(multilineCardSeparator="::")),
+                ("end-marker", _sr_settings(multilineCardEndMarker="+++")),
+                ("schedules", _sr_settings(scheduleData={
+                    "cardSchedules": {"x": [1]}})),
+                ("no-schedule", {"settings": _sr_settings()["settings"]}),
+                ("json-store", _sr_settings(dataStore="PLUGIN"))):
+            _variants[_name] = spaced_repetition_report(
+                _sr_vault("sr-" + _name, _data)[0], _counts, 0)
+        check("folders-as-decks covers every tag",
+              _variants["folders"]["uncovered_tags"], {})
+        check("a changed separator or end marker is one finding each",
+              (len(_variants["separator"]["separator_findings"]),
+               len(_variants["end-marker"]["separator_findings"])), (1, 1))
+        check("schedules outside notes unless NOTES stores none elsewhere",
+              [_variants[name]["schedules_outside_notes"]
+               for name in ("schedules", "no-schedule", "json-store")],
+              [True, True, True])
+
+        # ------------------------------------------------------------------
+        # Discipline roots need no card; parents link down to their children.
+        # ------------------------------------------------------------------
+        v = os.path.join(tmp, "v-root-cards", "Wiki")
+        _st_write(v, "statistics.md", _st_entry(
+            "Statistics", "**Statistics** is a field.", card=False))
+        _st_write(v, "standard-deviation.md", _st_entry(
+            "Standard deviation", "**Standard deviation** is a spread.",
+            card=False))
+        _st_write(v, "mathematics.md", _st_entry(
+            "Mathematics", "**Mathematics** is a field.",
+            tags=('"#mathematics"',), card=False) + "\n---\n\n## Flashcards\n")
+        _st_write(v, "physics.md", _st_entry(
+            "Physics", "**Physics** is a field.", tags=('"#physics"',),
+            card="Wrong term"))
+        _st_write(v, "biology.md", _st_entry(
+            "Biology", "**Biology** is a field.", tags=('"#biology"',))
+            .replace("\n??\nBiology\n", "\n?\nBiology\n"))
+        _st_write(v, "chemistry.md", _st_entry(
+            "Chemistry", "**Chemistry** is a field.", tags=('"#chemistry"',),
+            card="Wrong term").rstrip("\n")
+            + "\n\nA different main claim.\n??\nOther term\n")
+        # lint_entry's _is_root_entry applies the same tags_valid_single gate.
+        for _tag, _extra in (("economics", "read: false\n"),
+                             ("finance", "stray prose\n")):
+            _st_write(v, _tag + ".md", _st_entry(
+                _tag.capitalize(), "**%s** is a field." % _tag.capitalize(),
+                tags=('"#%s"' % _tag,), card=False)
+                .replace("read: false\n", "read: false\n" + _extra))
+        res = scan(v)
+        check("a discipline root needs no Flashcards section",
+              [k for k in _st_keys(res, "statistics")
+               if k == "item19" or k == "item11" or k.startswith("item10")], [])
+        check("a non-root without a card still needs one",
+              "entry missing ## Flashcards section" in _st_msg(
+                  res, "standard-deviation", "item19"), True)
+        check("a root with an empty section raises no card-count finding",
+              ("has no card" in _st_msg(res, "mathematics", "item19"),
+               "primary" in _st_msg(res, "mathematics", "item19")),
+              (False, False))
+        check("a root that keeps its card is checked as usual",
+              "line 3 is" in _st_msg(res, "physics", "item19"), True)
+        _biology = _st_msg(res, "biology", "item19")
+        check("a root's ? card keeps its per-card checks but needs no ?? primary",
+              ("does not end with a question mark" in _biology,
+               "no `??` primary" in _biology), (True, False))
+        _chemistry = _st_msg(res, "chemistry", "item19")
+        check("a root with two definition cards needs no primary card",
+              ("2 definition cards" in _chemistry,
+               "no card carries the primary answer" in _chemistry),
+              (True, False))
+        check("a duplicated non-tag key keeps the root; an unreadable line voids it",
+              ["entry missing ## Flashcards section" in _st_msg(res, _tag, "item19")
+               for _tag in ("economics", "finance")], [False, True])
+
+        def _org_vault(name, models_prose=None, trees_aliases=(),
+                       models_related=None, extra=()):
+            wiki = os.path.join(tmp, name, "Wiki")
+            ml = ('"#machine-learning"',)
+            _st_write(wiki, "machine-learning.md", _st_entry(
+                "Machine learning", "**Machine learning** is a field.",
+                tags=ml, card=False, related="[[linear-model|Linear model]]"))
+            _st_write(wiki, "models.md", _st_entry(
+                "Models", models_prose or
+                "**Models** is a worked example that includes [[trees|trees]].",
+                tags=ml, parents=('"[[machine-learning]]"',),
+                related=models_related))
+            _st_write(wiki, "trees.md", _st_entry(
+                "Trees", "**Trees** is a worked example.", tags=ml,
+                aliases=trees_aliases, parents=('"[[models]]"',)))
+            _st_write(wiki, "linear-model.md", _st_entry(
+                "Linear model", "**Linear model** is a worked example.",
+                tags=ml, parents=('"[[models]]"',)))
+            _st_write(wiki, "decision-tree.md", _st_entry(
+                "Decision tree", "**Decision tree** is a worked example.",
+                tags=ml, parents=('"[[trees]]"',)))
+            for _file, _text in extra:
+                _st_write(wiki, _file, _text)
+            return wiki
+
+        def _rows(result):
+            return {row["slug"]: row for row in
+                    result["hierarchy_diagnostic"]["unlinked_children"]}
+        res = scan(_org_vault("v-org"))
+        _unlinked = _rows(res)
+        check("unlinked_children lists a parent's unlinked children",
+              (_unlinked.get("models", {}).get("unlinked"),
+               _unlinked.get("models", {}).get("branch_heads"),
+               _unlinked.get("models", {}).get("children")),
+              (["linear-model"], [], 2))
+        check("a root lists its unlinked branch heads and counts every footer wikilink",
+              (_unlinked.get("machine-learning", {}).get("unlinked"),
+               _unlinked.get("machine-learning", {}).get("branch_heads"),
+               _unlinked.get("machine-learning", {}).get("footer_links")),
+              (["models"], ["models"], 1))
+        _rivals = {row["slug"]: row["rivals"] for row in res["card_rivals"]}
+        check("children of a hub parent are each other's card rivals",
+              (_rivals.get("trees"), _rivals.get("linear-model"),
+               "machine-learning" in _rivals), (["linear-model"], ["trees"], False))
+        check("scan output keys follow the documented order",
+              [key for key in res if key in {
+                  "backfill_candidates", "hub_footer", "card_rivals",
+                  "image_folder_findings", "spaced_repetition",
+                  "hierarchy_diagnostic"}],
+              ["backfill_candidates", "hub_footer", "card_rivals",
+               "image_folder_findings", "spaced_repetition",
+               "hierarchy_diagnostic"])
+        res = scan(_org_vault(
+            "v-org-alias",
+            models_prose="**Models** is a worked example that includes "
+                         "[[tree-models|tree models]] and "
+                         "[[Linear-Model|linear model]].",
+            trees_aliases=('"tree-models"',)))
+        check("a child linked through an alias or case variant counts as linked",
+              "models" in _rows(res), False)
+        _full = " · ".join("[[n%02d|N%02d]]" % (i, i) for i in range(1, 13))
+        res = scan(_org_vault(
+            "v-org-full", models_related=_full,
+            extra=[("n%02d.md" % i, _st_entry(
+                "N%02d" % i, "**N%02d** is a worked example." % i,
+                tags=('"#machine-learning"',)))
+                   for i in range(1, 13)]))
+        check("a parent whose footer is full is not listed",
+              "models" in _rows(res), False)
+        v = os.path.join(tmp, "v-org-misc")
+        _st_write(v, "misc.md", _st_entry(
+            "Misc", "**Misc** is a holding area.", tags=('"#misc"',), card=False))
+        for _name in ("Loose one", "Loose two"):
+            _st_write(v, slug(_name) + ".md", _st_entry(
+                _name, "**%s** is a worked example." % _name,
+                tags=('"#misc"',), parents=('"[[misc]]"',)))
+        check("misc is exempt from unlinked_children",
+              "misc" in _rows(scan(v)), False)
+
+        def _hub_vault(name, footers=16, hub_parents=('"[[topic]]"',),
+                       owner_parents=()):
+            wiki = os.path.join(tmp, name)
+            _st_write(wiki, "statistics.md", _st_entry(
+                "Statistics", "**Statistics** is a field.", card=False))
+            _st_write(wiki, "topic.md", _st_entry(
+                "Topic", "**Topic** is a worked example."))
+            _st_write(wiki, "hub-term.md", _st_entry(
+                "Hub term", "**Hub term** is a worked example.",
+                parents=hub_parents))
+            footer = "[[hub-term|Hub term]] · [[statistics|Statistics]]"
+            _st_write(wiki, "hub-child.md", _st_entry(
+                "Hub child", "**Hub child** is a worked example.",
+                parents=('"[[hub-term]]"',), related=footer))
+            _st_write(wiki, "hub-sibling.md", _st_entry(
+                "Hub sibling", "**Hub sibling** is a worked example.",
+                parents=('"[[topic]]"',), related=footer))
+            for i in range(1, footers - 1):
+                _st_write(wiki, "u%02d.md" % i, _st_entry(
+                    "U%02d" % i, "**U%02d** is a worked example." % i,
+                    parents=owner_parents if i == 1 else (), related=footer))
+            return wiki
+        _hub_wiki = _hub_vault("v-hub")
+        res = scan(_hub_wiki)
+        check("hub_footer lists vocabulary footers at the threshold",
+              [(row["target"], row["footers"], row["entries"])
+               for row in res["hub_footer"]],
+              [("hub-term", 16, ["u%02d" % i for i in range(1, 15)])])
+        check("a discipline root is never a hub target",
+              [row["target"] for row in res["hub_footer"]
+               if row["target"] == "statistics"], [])
+        check("the scan is deterministic apart from its run timestamp",
+              {k: value for k, value in scan(_hub_wiki).items()
+               if k != "run_timestamp"},
+              {k: value for k, value in res.items() if k != "run_timestamp"})
+        check("below the threshold nothing is listed",
+              scan(_hub_vault("v-hub-14", footers=14))["hub_footer"], [])
+        res = scan(_hub_vault("v-hub-root", hub_parents=('"[[statistics]]"',),
+                              owner_parents=('"[[statistics]]"',)))
+        check("siblings under only a discipline root are not exempt",
+              any("u01" in row["entries"] for row in res["hub_footer"]
+                  if row["target"] == "hub-term"), True)
+        check("hub_footer_min grows with the Wiki",
+              (hub_footer_min(258), hub_footer_min(400), hub_footer_min(1000)),
+              (15, 20, 50))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
