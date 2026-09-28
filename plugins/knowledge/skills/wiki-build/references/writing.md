@@ -288,8 +288,4 @@ Swaps involving top positions, where NDCG is most sensitive, change the metric m
 The learning-to-rank method that multiplies each item pair's RankNet gradient by the NDCG change their swap would cause.
 ??
 LambdaRank
-
-Why do pairs near the top of a LambdaRank ranking get larger updates?
-?
-Swapping top positions changes NDCG the most.
 ```

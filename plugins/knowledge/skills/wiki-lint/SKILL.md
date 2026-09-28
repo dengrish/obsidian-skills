@@ -53,7 +53,7 @@ it and re-read/rejudge the file rather than applying a stale repair.
 
 ### Dates
 
-Ordinary Tasks 1–3 and producer-mapped dependency repair never set `created:` or `updated:` on an existing note and never reset, infer, or invent review state. Invalid dates and missing, null, arbitrary-string, or list-valued `read:` stay unchanged and are reported without blocking the run. The one repair is `item2/read-type`: a recognizable boolean in another spelling, such as quoted `"false"`, becomes bare `false`. New Task 3 roots and their new source extracts follow the [new-artifact rule](references/hierarchy.md#establish-discipline-roots). Source-backed correction, card redesign and refactor modes follow wiki-build's body-change rules and still never guess unknown review state. The shared rule of record is [CONVENTIONS §2c](../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox).
+Ordinary Tasks 1–3 and producer-mapped dependency repair never set `created:` or `updated:` on an existing note and never reset, infer, or invent review state. Invalid dates and missing, null, arbitrary-string, or list-valued `read:` stay unchanged and are reported without blocking the run. The one repair is `item2/read-type`: a recognizable boolean in another spelling, such as quoted `"false"`, becomes bare `false`. New Task 3 roots and their new source extracts follow the [new-artifact rule](references/hierarchy.md#establish-discipline-roots). Source-backed correction and refactor modes follow wiki-build's body-change rules and still never guess unknown review state. The shared rule of record is [CONVENTIONS §2c](../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox).
 
 ### Source-backed correction mode
 
@@ -146,7 +146,7 @@ Use the selected paths and a run-unique output file, and retain it for later sli
 
 **The scanner reads and reports; it never fixes the vault.** Save its initial `run_timestamp` for backlog updates unless a coordinating run already supplied one. Read the JSON in slices rather than loading a large vault report wholesale. Use `inventory`, `discipline_tags`, and `untagged_entries` for scope; `problems` for QC/link work; `collision_candidates` and `rename_candidates` for proposals; `backfill_candidates` and `hub_footer` for Task 2, `card_rivals` for item 19; `image_folder_findings` for report-only layout/staging/readability/portable-name observations; and `hierarchy_diagnostic` for Task 3. Counts and `problem_tally` also provide report/proposal evidence.
 
-`spaced_repetition` is advisory, read-only data from the Spaced Repetition plugin's settings: list its `uncovered_tags`, `separator_findings` and an `unreadable` settings file under *Notes for the user*; never edit the settings. While `schedules_outside_notes` is `false` and `entries_with_card_attachments` is 0, no card has review history yet: offer the [card redesign pass](references/flashcards.md#card-redesign-pass) there in one line.
+`spaced_repetition` is advisory, read-only data from the Spaced Repetition plugin's settings: list its `uncovered_tags`, `separator_findings` and an `unreadable` settings file under *Notes for the user*; never edit the settings.
 
 Read [the scanner contract](references/scanner.md) if it exits non-zero, a field or finding is unfamiliar, or `item16`/`item18` needs interpretation. Read [QC actions](references/qc-items.md) before fixing any Task 1 finding. Do not infer “fix in place” from a key's name: unreadable files, ambiguous identity, user-state problems, and valid user configuration may all appear in `problems` without authorizing an edit.
 
@@ -184,15 +184,14 @@ Keep the non-obvious boundaries visible at the action point:
   rewrite a fact, select source content, or redistribute material merely to
   close a finding.
 - **Cards:** read [flashcard maintenance](references/flashcards.md) before any
-  change. Preserve every valid pre-existing separator, apart from the one
+  change. Preserve every pre-existing separator, apart from the one
   [`??` restoration](../wiki-build/references/flashcards-and-emphasis.md#line-2-the-separator),
   and every recognized scheduling or block-ID attachment byte-for-byte and in
   place. Routine lint rewrites line 1 only for defects the card's
   [freshness](references/flashcards.md#card-freshness-and-the-rewrite-bars)
-  bar recognizes, restores a missing card only as the primary card, never adds
-  understanding cards, and keeps extras report-only; only an explicit
-  request runs the
-  [card redesign pass](references/flashcards.md#card-redesign-pass).
+  bar recognizes, restores a missing card with `??`, never adds a second
+  card, and keeps [legacy extras](references/flashcards.md#card-set)
+  report-only.
 
 **Refresh after QC edits.** Re-run Step 0 before Task 2/3 consumes its worklists when QC changed entries. Use the refreshed inventory, aliases, backfill candidates, discipline tags, and hierarchy diagnostics, but retain the selected logical-run timestamp for logs, including an inherited coordinator timestamp, and the prior-group evidence of every retagged entry, which Task 3's closure needs (including a retag from or to misc).
 

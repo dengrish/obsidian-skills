@@ -193,8 +193,8 @@ the single discipline [tag](references/writing.md#tags) and the
 [complete entry example](references/writing.md#complete-entry-example).
 
 Open with prose immediately after YAML. A fresh entry follows the body with one
-`**Related:**` line, `---`, and `## Flashcards` holding the primary `??` card
-and up to two `?` understanding cards ([card set](references/flashcards-and-emphasis.md#card-set)).
+`**Related:**` line, `---`, and `## Flashcards` holding its one `??`
+definition card ([card set](references/flashcards-and-emphasis.md#card-set)).
 On merge, existing cards, `parents:`, legacy `importance:`, and review state
 follow the [merge contract](references/merge.md#merge-logic).
 
@@ -222,4 +222,4 @@ Apply these gates in step 7, to audit-created entries too. Numbers match `lint_e
 | 16 | Enumerated bold and italic roles only; required opener forms | [emphasis](references/flashcards-and-emphasis.md#5-bold-and-italic), [typography](references/rare-types.md#typography-for-works-organisms-and-genes), [math](references/special-titles.md#base-term-and-mathematical-plain-forms) |
 | 17 | Aliases name this entity; body-introduced names listed | [aliases](references/writing.md#aliases) |
 | 18 | Alias form and collisions; labels name the target | [aliases](references/writing.md#aliases), [labels](references/writing.md#display-label-casing) |
-| 19 | One primary `??` card with a short verbal cue, plus at most two `?` understanding cards; pre-existing valid separators and attachments byte-for-byte, in place, except [`??` restoration](references/flashcards-and-emphasis.md#line-2-the-separator) | [flashcards](references/flashcards-and-emphasis.md#4-flashcards) |
+| 19 | One `??` definition card with a short verbal cue; pre-existing separators and attachments byte-for-byte, in place, except [`??` restoration](references/flashcards-and-emphasis.md#line-2-the-separator) | [flashcards](references/flashcards-and-emphasis.md#4-flashcards) |

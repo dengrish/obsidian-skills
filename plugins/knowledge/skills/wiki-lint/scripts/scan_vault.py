@@ -181,7 +181,6 @@ from entry_structure import (  # noqa: E402
     count_sentences,
     ends_with_sentence_period,
     flashcard_brevity_hints,
-    flashcard_kind,
     flashcard_line1_markup,
     flashcard_line1_faults,
     math_title_plain_text,
@@ -1982,12 +1981,11 @@ def spaced_repetition_report(vault_root, discipline_counts,
             slug_value: count
             for slug_value, count in sorted(discipline_counts.items())
             if count and slug_value.casefold() not in listed}
-    for key, expected in (("multilineCardSeparator", "?"),
-                          ("multilineReversedCardSeparator", "??")):
-        value = settings.get(key, expected)
-        if value != expected:
-            report["separator_findings"].append(
-                "%s is %r; wiki cards use %r" % (key, value, expected))
+    value = settings.get("multilineReversedCardSeparator", "??")
+    if value != "??":
+        report["separator_findings"].append(
+            "multilineReversedCardSeparator is %r; wiki cards use '??'"
+            % (value,))
     marker = settings.get("multilineCardEndMarker", "")
     if marker:
         report["separator_findings"].append(
@@ -3501,10 +3499,8 @@ def scan(wiki, images=None, vault=None):
             cards = parse_flashcard_blocks(after_head)
             if not cards and not _root_entry:
                 problems.append((sl,"item19","## Flashcards section has no card"))
-            _kinds = [flashcard_kind(cl) for cl in cards if len(cl) >= 3]
-            for _message, _report_only in flashcard_set_faults(_kinds):
-                if _root_entry and not _report_only:
-                    continue    # the missing-primary finding; a root needs none
+            for _message, _report_only in flashcard_set_faults(
+                    sum(1 for cl in cards if len(cl) >= 3)):
                 problems.append((sl, "item19", "## Flashcards holds " + _message))
             alias_forms = list(e["aliases"])
             _expected_term, _expected_counterpart = flashcard_primary_answer(
@@ -3525,7 +3521,6 @@ def scan(wiki, images=None, vault=None):
                         'as `<!--SR:` metadata, or use the exact '
                         '`sr|card-metadata` callout, so other content '
                         'after the term is malformed'))
-                _understanding = flashcard_kind(cl) == "understanding"
                 line1, line2, line3 = cl[0], cl[1].strip(), cl[2]
                 _card_boilerplate = find_boilerplate_candidates(
                     strip_code(line1), card_line=True)
@@ -3551,41 +3546,33 @@ def scan(wiki, images=None, vault=None):
                         f"raw micrometre notation in {tag} line 1 must use "
                         "inline LaTeX, such as `$\\mu\\mathrm{m}$`"))
                 if line2 not in CARD_SEPARATORS:
-                    problems.append((sl,"item19",f'{tag} line 2 is "{line2[:20]}", must be exactly ?? (primary definition card), ? (understanding card) or !! (a card the user disabled)'))
-                _sentence_faults = flashcard_line1_faults(
-                    line1, question=_understanding)
+                    problems.append((sl,"item19",f'{tag} line 2 is "{line2[:20]}", must be exactly ?? (or !! if the user disabled the card)'))
+                _sentence_faults = flashcard_line1_faults(line1)
                 if _sentence_faults:
                     problems.append((
                         sl, "item19",
                         f'{tag} line 1 {" and ".join(_sentence_faults)} — '
-                        + ("an understanding question is one capitalized "
-                           "sentence ending in `?`" if _understanding else
-                           "the definition must be one capitalized, "
-                           "period-terminated sentence")
-                        + " and takes inline LaTeX only (no Markdown or HTML)"))
-                if _understanding:
-                    # A question may name the title and aliases; it must not
-                    # contain its own answer.
-                    cands = [line3.strip()]
-                else:
-                    # leak check: line 1 must not contain THIS card's answer — its own line-3 term (+ parenthetical
-                    # expansion); add the entry's aliases only when this card's term is the entry title (the primary
-                    # card). A secondary card legitimately names the primary entity, so don't test it against the title.
-                    mt = re.match(r"^(.*?)(?:\s+\(([^)]*)\))?\s*$", line3.strip())
-                    term_main = (mt.group(1) if mt else line3).strip()
-                    paren = mt.group(2).strip() if (mt and mt.group(2)) else ""
-                    # the parenthetical is a leak candidate only when it is a real acronym/expansion of the term; a
-                    # discipline-disambiguation parenthetical ("Model (machine learning)") is just a domain tag, not part
-                    # of the recall answer, so its appearance in line 1 ("a machine learning system") is context, not a leak.
-                    cands = [term_main] + ([paren] if (paren and slug(paren) not in VALID_TAGS) else [])
-                    # The primary-card test compares against the title with a trailing
-                    # discipline-disambiguation parenthetical stripped: the primary
-                    # card's line 3 is the BASE term for a disambiguated title
-                    # ("Feature", not "Feature (machine learning)"), so an exact
-                    # compare skipped the alias needles for exactly the entries that
-                    # carry them — every disambiguated entry sat in the blind spot.
-                    if _expected_term and term_main == _expected_term:
-                        cands += alias_forms
+                        "the definition must be one capitalized, "
+                        "period-terminated sentence and takes inline LaTeX "
+                        "only (no Markdown or HTML)"))
+                # leak check: line 1 must not contain THIS card's answer — its own line-3 term (+ parenthetical
+                # expansion); add the entry's aliases only when this card's term is the entry title (the primary
+                # card). A legacy extra card legitimately names the primary entity, so don't test it against the title.
+                mt = re.match(r"^(.*?)(?:\s+\(([^)]*)\))?\s*$", line3.strip())
+                term_main = (mt.group(1) if mt else line3).strip()
+                paren = mt.group(2).strip() if (mt and mt.group(2)) else ""
+                # the parenthetical is a leak candidate only when it is a real acronym/expansion of the term; a
+                # discipline-disambiguation parenthetical ("Model (machine learning)") is just a domain tag, not part
+                # of the recall answer, so its appearance in line 1 ("a machine learning system") is context, not a leak.
+                cands = [term_main] + ([paren] if (paren and slug(paren) not in VALID_TAGS) else [])
+                # The primary-card test compares against the title with a trailing
+                # discipline-disambiguation parenthetical stripped: the primary
+                # card's line 3 is the BASE term for a disambiguated title
+                # ("Feature", not "Feature (machine learning)"), so an exact
+                # compare skipped the alias needles for exactly the entries that
+                # carry them — every disambiguated entry sat in the blind spot.
+                if _expected_term and term_main == _expected_term:
+                    cands += alias_forms
                 # Unicode punctuation, slash/dash variants, and whitespace are
                 # normalized by the shared leak matcher. lint_entry uses the
                 # same matcher, so the two tools agree.
@@ -3605,29 +3592,19 @@ def scan(wiki, images=None, vault=None):
                         break
                 if hit:
                     problems.append((sl,"item19",f'{tag} line 1 leaks the answer ("{hit}")'))
-                if _understanding:
-                    _answer_markup = flashcard_line1_markup(line3)
-                    if _answer_markup:
-                        problems.append((
-                            sl, "item19",
-                            f'{tag} answer has forbidden '
-                            f'{", ".join(_answer_markup)} — an understanding '
-                            "answer takes inline LaTeX only"))
-                    _hints = flashcard_brevity_hints(line3, answer=True)
-                else:
-                    l3 = []                              # line 3 (term) is plain text — no markup at all, including LaTeX
-                    if "[[" in line3: l3.append("wikilink")
-                    if "`" in line3: l3.append("backtick")
-                    if "$" in line3: l3.append("$ (LaTeX)")
-                    if "**" in line3: l3.append("bold")
-                    elif re.search(r"\*\w[^*]*\*", line3): l3.append("italic")
-                    if l3:
-                        problems.append((sl,"item19",f'{tag} line 3 (term) has {", ".join(l3)} — line 3 must be plain text (no markup, including LaTeX); remove only the markup'))
-                    _line3_fault = flashcard_line3_fault(
-                        line3, title, e["aliases"], opener, e["type"])
-                    _line3_faults.append((tag, line3, _line3_fault))
-                    _definition_cues.append((_line3_fault is None, line1.strip()))
-                    _hints = flashcard_brevity_hints(line1)
+                l3 = []                              # line 3 (term) is plain text — no markup at all, including LaTeX
+                if "[[" in line3: l3.append("wikilink")
+                if "`" in line3: l3.append("backtick")
+                if "$" in line3: l3.append("$ (LaTeX)")
+                if "**" in line3: l3.append("bold")
+                elif re.search(r"\*\w[^*]*\*", line3): l3.append("italic")
+                if l3:
+                    problems.append((sl,"item19",f'{tag} line 3 (term) has {", ".join(l3)} — line 3 must be plain text (no markup, including LaTeX); remove only the markup'))
+                _line3_fault = flashcard_line3_fault(
+                    line3, title, e["aliases"], opener, e["type"])
+                _line3_faults.append((tag, line3, _line3_fault))
+                _definition_cues.append((_line3_fault is None, line1.strip()))
+                _hints = flashcard_brevity_hints(line1)
                 if _hints:
                     problems.append((
                         sl, "item19/brevity-candidate",
@@ -3636,12 +3613,11 @@ def scan(wiki, images=None, vault=None):
             # The line-3 term contract binds the primary card only. A legacy
             # extra card keeps its own answer: rewriting it would repoint that
             # card's review schedule. lint_entry makes the same choice.
-            # Understanding cards never carry the primary answer.
             _report_line3, _no_primary = primary_line3_faults(
                 len(_line3_faults), _line3_faults, _expected_term,
                 _expected_counterpart)
-            # `card_rivals` input: the first definition card that carries the
-            # primary answer, else the first definition card.
+            # `card_rivals` input: the first card that carries the primary
+            # answer, else the first card.
             if _unique_owner and _definition_cues:
                 _primary_cues[sl] = next(
                     (cue for passes, cue in _definition_cues if passes),
@@ -8038,7 +8014,7 @@ def run_self_test():
                for k in _st_keys(res, name)
                if k == 'item19'], [])
         check("callout metadata is not counted, but a genuine second card still is",
-              '2 definition cards' in _st_msg(res, 'extra', 'item19'), True)
+              'holds 2 cards' in _st_msg(res, 'extra', 'item19'), True)
         check("detached or unterminated SR comments remain reportable content",
               ['item19' in _st_keys(res, name)
                for name in ('detached', 'unterminated')], [True, True])
@@ -9517,33 +9493,21 @@ def run_self_test():
               [("TPR", False), ("completeness", True)])
 
         # ------------------------------------------------------------------
-        # Item 19 card set: one primary `??` card plus up to two `?`
-        # understanding cards; brevity candidates; attachments on either kind.
+        # Item 19 card set: one `??` definition card per entry; a further card
+        # is a report-only legacy extra; brevity candidates.
         # ------------------------------------------------------------------
         def _with_cards(title, extra, **kwargs):
             return (_st_entry(title, "**%s** is a worked example." % title,
                               **kwargs).rstrip("\n") + "\n\n" + extra)
         _why = "Why does the example matter?\n?\nIt keeps each claim separate.\n"
-        _math_card = "What does $x$ denote here?\n?\n$x \\in \\mathbb{R}$\n"
         v = os.path.join(tmp, "v-card-set")
-        _st_write(v, "understanding-pair.md", _with_cards(
-            "Understanding pair", _why + "\n" + _math_card))
-        _st_write(v, "three-understanding.md", _with_cards(
-            "Three understanding", _why + "\n" + _math_card + "\n"
-            + "Which case does it cover?\n?\nThe ordinary case.\n"))
+        _st_write(v, "legacy-question.md", _with_cards("Legacy question", _why))
+        _st_write(v, "three-cards.md", _with_cards(
+            "Three cards", _why + "\n"
+            + "A second claim, stated once.\n??\nSecond term\n"))
         _st_write(v, "simplified-primary.md", _st_entry(
             "Simplified primary", "**Simplified primary** is a worked example.")
             .replace("\n??\nSimplified primary\n", "\n?\nSimplified primary\n"))
-        _st_write(v, "answer-bold.md", _with_cards(
-            "Answer bold", "Why does it matter?\n?\nIt is **bold**.\n"))
-        _st_write(v, "question-names-title.md", _with_cards(
-            "Question names title",
-            "Why does Question names title matter?\n?\nIt anchors the idea.\n"))
-        _st_write(v, "question-leaks.md", _with_cards(
-            "Question leaks",
-            "Why is overfitting the answer here?\n?\nOverfitting\n"))
-        _st_write(v, "disabled-question.md", _with_cards(
-            "Disabled question", "Why does it matter?\n!!\nIt anchors the idea.\n"))
         _st_write(v, "bad-separator.md", _st_entry(
             "Bad separator", "**Bad separator** is a worked example.")
             .replace("\n??\nBad separator\n", "\n???\nBad separator\n"))
@@ -9558,47 +9522,33 @@ def run_self_test():
             "Glossary cue", "**Glossary cue** is a worked example.").replace(
                 "The idea this entry is about, stated once.",
                 "The ratio $a/b$ of two counts, where $a$ counts hits."))
-        _st_write(v, "long-answer.md", _with_cards(
-            "Long answer", "Why does it matter?\n?\n" + " ".join(
-                ["It keeps every separate claim apart from the rest"] * 3)
-            + "\n"))
         res = scan(v)
-        check("a primary card plus two understanding cards is a clean card set",
-              [k for k in _st_keys(res, "understanding-pair")
-               if k.startswith("item19")], [])
-        _three = _st_msg(res, "three-understanding", "item19")
-        check("a third understanding card is a report-only legacy extra",
-              ("3 understanding cards" in _three, "report-only" in _three,
-               "preserve every card" in _three), (True, True, True))
+        _legacy = _st_msg(res, "legacy-question", "item19")
+        check("a legacy question card is a report-only extra whose own line 1 "
+              "and line 2 are reported",
+              ("holds 2 cards" in _legacy,
+               "report-only legacy extra" in _legacy,
+               "card 2 line 1 does not end with a period" in _legacy,
+               'card 2 line 2 is "?"' in _legacy, "card 1 " in _legacy),
+              (True, True, True, True, False))
+        _three = _st_msg(res, "three-cards", "item19")
+        check("every further card joins one report-only count",
+              ("holds 3 cards" in _three, "preserve every card" in _three),
+              (True, True))
         _simplified = _st_msg(res, "simplified-primary", "item19")
-        check("a primary card simplified to ? needs a question mark or its ?? back",
-              ("does not end with a question mark" in _simplified,
-               "no `??` primary definition card" in _simplified,
-               " line 3 is" in _simplified), (True, True, False))
-        check("an understanding answer takes inline LaTeX only",
-              ("answer has forbidden bold" in _st_msg(
-                  res, "answer-bold", "item19"),
-               "answer has forbidden" in _st_msg(
-                   res, "understanding-pair", "item19")), (True, False))
-        check("an understanding question may name the title but not its answer",
-              ("leaks the answer" in _st_msg(
-                  res, "question-names-title", "item19"),
-               "leaks the answer" in _st_msg(res, "question-leaks", "item19")),
-              (False, True))
-        check("the user's !! on an understanding question is valid",
-              _st_msg(res, "disabled-question", "item19"), "")
-        _separator = _st_msg(res, "bad-separator", "item19")
-        check("an invalid line 2 names all three separators",
-              all(part in _separator for part in (
-                  "?? (primary definition card)", "? (understanding card)",
-                  "!! (a card the user disabled)")), True)
+        check("a card simplified to ? needs its ?? back, and nothing else",
+              ('line 2 is "?"' in _simplified,
+               "must be exactly ??" in _simplified,
+               "does not end with" in _simplified, " line 3 is" in _simplified),
+              (True, True, False, False))
+        check("an invalid line 2 names both separators",
+              "must be exactly ?? (or !! if the user disabled the card)"
+              in _st_msg(res, "bad-separator", "item19"), True)
         check("brevity candidates are advisory and never item19 errors",
               ([k for k in _st_keys(res, "long-cue") if k.startswith("item19")],
                "glossary" in _st_msg(res, "glossary-cue",
-                                     "item19/brevity-candidate"),
-               "item19/brevity-candidate" in _st_keys(res, "long-answer"),
-               "item19/brevity-candidate" in _st_keys(res, "understanding-pair")),
-              (["item19/brevity-candidate"], True, True, False))
+                                     "item19/brevity-candidate")),
+              (["item19/brevity-candidate"], True))
 
         v = os.path.join(tmp, "v-card-attachments", "Wiki")
         _attached = {
@@ -9614,9 +9564,12 @@ def run_self_test():
                 "Why does it matter?\n?\n" + _answer))
         before = {p: open(p, "rb").read() for p in iter_entry_files(v)}
         res = scan(v)
-        check("recognized attachments on an understanding card are not card content",
-              [k for name in _attached for k in _st_keys(res, name)
-               if k.startswith("item19")], [])
+        check("recognized attachments on a legacy extra card are not card "
+              "content",
+              [("holds 2 cards" in _st_msg(res, name, "item19"),
+                any(word in _st_msg(res, name, "item19")
+                    for word in ("visible lines", "malformed")))
+               for name in _attached], [(True, False)] * len(_attached))
         check("the scan leaves every card byte unchanged",
               {p: open(p, "rb").read() for p in iter_entry_files(v)}, before)
         check("entries whose cards carry review state are counted",
@@ -9700,7 +9653,9 @@ def run_self_test():
         _variants = {}
         for _name, _data in (
                 ("folders", _sr_settings(convertFoldersToDecks=True)),
-                ("separator", _sr_settings(multilineCardSeparator="::")),
+                ("separator", _sr_settings(
+                    multilineReversedCardSeparator="::")),
+                ("basic-separator", _sr_settings(multilineCardSeparator="::")),
                 ("end-marker", _sr_settings(multilineCardEndMarker="+++")),
                 ("schedules", _sr_settings(scheduleData={
                     "cardSchedules": {"x": [1]}})),
@@ -9710,9 +9665,12 @@ def run_self_test():
                 _sr_vault("sr-" + _name, _data)[0], _counts, 0)
         check("folders-as-decks covers every tag",
               _variants["folders"]["uncovered_tags"], {})
-        check("a changed separator or end marker is one finding each",
+        check("a changed reversed separator or end marker is one finding "
+              "each; the one-way separator wiki cards never use is not read",
               (len(_variants["separator"]["separator_findings"]),
-               len(_variants["end-marker"]["separator_findings"])), (1, 1))
+               len(_variants["end-marker"]["separator_findings"]),
+               _variants["basic-separator"]["separator_findings"]),
+              (1, 1, []))
         check("schedules outside notes unless NOTES stores none elsewhere",
               [_variants[name]["schedules_outside_notes"]
                for name in ("schedules", "no-schedule", "json-store")],
@@ -9761,12 +9719,12 @@ def run_self_test():
         check("a root that keeps its card is checked as usual",
               "line 3 is" in _st_msg(res, "physics", "item19"), True)
         _biology = _st_msg(res, "biology", "item19")
-        check("a root's ? card keeps its per-card checks but needs no ?? primary",
-              ("does not end with a question mark" in _biology,
-               "no `??` primary" in _biology), (True, False))
+        check("a root's card simplified to ? keeps its per-card checks",
+              ("must be exactly ??" in _biology,
+               "no card carries the primary answer" in _biology), (True, False))
         _chemistry = _st_msg(res, "chemistry", "item19")
-        check("a root with two definition cards needs no primary card",
-              ("2 definition cards" in _chemistry,
+        check("a root with two cards needs no primary card",
+              ("holds 2 cards" in _chemistry,
                "no card carries the primary answer" in _chemistry),
               (True, False))
         check("a duplicated non-tag key keeps the root; an unreadable line voids it",

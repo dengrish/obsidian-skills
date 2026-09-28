@@ -44,7 +44,6 @@ __all__ = [
     "BARE_WORD_ALIAS_HINT",
     "BOLD_OUTER_RE",
     "COMMON_NOUNS",
-    "MAX_UNDERSTANDING_CARDS",
     "SHARED_MUTATIONS",
     "SHARED_QUIET",
     "api_surface_findings",
@@ -746,10 +745,6 @@ def organism_common_name_bound(entry_type, title, description, opener,
 # item 19: the card set and the primary flashcard
 # ---------------------------------------------------------------------------
 
-#: Understanding (``?``) cards allowed after the primary ``??`` card.
-MAX_UNDERSTANDING_CARDS = 2
-
-
 def is_discipline_root(slug, tags, disciplines):
     """Whether an entry is a discipline root: ``<discipline>.md`` whose only
     tag is ``#<discipline>``.
@@ -764,48 +759,34 @@ def is_discipline_root(slug, tags, disciplines):
             and list(tags or ()) == ["#" + slug])
 
 
-def flashcard_set_faults(kinds):
-    """Item 19: card-set shape findings from the kinds of the complete cards.
+def flashcard_set_faults(card_count):
+    """Item 19: the card-set finding for a Flashcards section.
 
-    ``kinds`` holds ``entry_structure.flashcard_kind`` for every card with at
-    least three visible lines, in section order. Returns ``(message,
+    ``card_count`` counts the cards with at least three visible lines; a
+    malformed block keeps its own finding. An entry has one ``??`` definition
+    card, so every further card is a legacy extra. Returns ``(message,
     report_only)`` pairs shared by lint_entry and the scanner, so the two
-    tools agree. Order is not checked: the primary card is identified by
-    kind and answer, never by position.
+    tools agree. Position is not checked: the primary card is identified by
+    its answer (``primary_line3_faults``), never by its place.
     """
-    definitions = kinds.count("definition")
-    understanding = kinds.count("understanding")
-    faults = []
-    if kinds and not definitions:
-        faults.append((
-            "no `??` primary definition card: write it from the entry's main "
-            "claim, or restore `??` where a primary card's separator became "
-            "`?`", False))
-    if definitions > 1:
-        faults.append((
-            "%d definition cards: the card set has one primary `??` card, so "
-            "the extras are report-only in routine lint; preserve every card "
-            "and attachment unless an explicitly authorized refactor accounts "
-            "for its tested claim" % definitions, True))
-    if understanding > MAX_UNDERSTANDING_CARDS:
-        faults.append((
-            "%d understanding cards: at most %d follow the primary card, so "
-            "the extras are report-only in routine lint; preserve every card "
-            "and attachment unless an explicitly authorized refactor accounts "
-            "for its tested claim" % (understanding, MAX_UNDERSTANDING_CARDS),
-            True))
-    return faults
+    if card_count <= 1:
+        return []
+    return [(
+        "%d cards: an entry has one `??` definition card, so each further "
+        "card is a report-only legacy extra; preserve every card and "
+        "attachment unless an explicitly authorized refactor, or a request "
+        "naming the card for deletion, accounts for it" % card_count, True)]
 
 
 def primary_line3_faults(card_count, rows, term, counterpart):
     """Item 19: the line-3 faults to report, plus any missing-primary message.
 
-    ``rows`` are ``(card_label, line3, fault_or_None)`` for each definition
-    card with a line 3; ``term`` and ``counterpart`` are the entry's primary
-    answer. With one card every fault is reported. With several definition
-    cards, a passing card is the primary one and extra cards keep their own
-    answers; otherwise the one card whose line-3 term normalizes to the
-    primary answer is reported, or the message asks for a primary card.
+    ``rows`` are ``(card_label, line3, fault_or_None)`` for each card with a
+    line 3; ``term`` and ``counterpart`` are the entry's primary answer. With
+    one card every fault is reported. With several cards, a passing card is
+    the primary one and legacy extras keep their own answers; otherwise the
+    one card whose line-3 term normalizes to the primary answer is reported,
+    or the message asks for a primary card.
     """
     faults = [row for row in rows if row[2]]
     if card_count <= 1 or not faults:
@@ -1244,38 +1225,19 @@ def run_self_test(verbose=False):
           ([], True))
     check("with no primary term, nothing is asked",
           primary_line3_faults(2, near, "", None), ([], None))
-    check("one primary card plus up to two understanding cards, in any "
-          "order, is a valid card set",
-          [flashcard_set_faults(kinds) for kinds in (
-              [], ["definition"], ["definition", "understanding"],
-              ["definition", "understanding", "understanding"],
-              ["understanding", "definition"])],
-          [[]] * 5)
-    no_primary = flashcard_set_faults(["understanding"])
-    check("a set without a definition card needs its primary, not "
-          "report-only",
-          (len(no_primary), no_primary[0][1],
-           "restore `??`" in no_primary[0][0]),
-          (1, False, True))
-    extra_definition = flashcard_set_faults(["definition", "definition"])
-    check("a second definition card is a report-only legacy extra",
-          (len(extra_definition), extra_definition[0][1],
-           extra_definition[0][0].startswith("2 definition cards"),
-           "report-only" in extra_definition[0][0],
-           "preserve every card" in extra_definition[0][0]),
-          (1, True, True, True, True))
-    extra_understanding = flashcard_set_faults(
-        ["definition"] + ["understanding"] * 3)
-    check("a third understanding card is a report-only legacy extra",
-          (len(extra_understanding), extra_understanding[0][1],
-           extra_understanding[0][0].startswith("3 understanding cards"),
-           "preserve every card" in extra_understanding[0][0]),
-          (1, True, True, True))
-    check("both kinds of legacy extra are reported",
-          [report_only for _message, report_only in flashcard_set_faults(
-              ["definition", "definition"] + ["understanding"] * 3)],
-          [True, True])
-    check("the understanding-card cap", MAX_UNDERSTANDING_CARDS, 2)
+    check("one card, or none, is a complete card set",
+          [flashcard_set_faults(count) for count in (0, 1)], [[], []])
+    extra = flashcard_set_faults(2)
+    check("a second card is a report-only legacy extra",
+          (len(extra), extra[0][1], extra[0][0].startswith("2 cards: "),
+           "report-only legacy extra" in extra[0][0],
+           "preserve every card" in extra[0][0],
+           "a request naming the card for deletion" in extra[0][0]),
+          (1, True, True, True, True, True))
+    check("every further card counts, in one finding",
+          [(len(faults), faults[0][0].split(":")[0], faults[0][1])
+           for faults in (flashcard_set_faults(3),)],
+          [(1, "3 cards", True)])
     disciplines = ("mathematics", "misc", "statistics")
     check("a discipline root is <discipline>.md tagged only #<discipline>",
           [is_discipline_root(slug, tags, disciplines) for slug, tags in (
