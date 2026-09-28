@@ -128,12 +128,14 @@ ownership checks. A preview, plan-only or no-apply run adds `--dry-run`, which
 writes nothing; report the missing figures as a gap and repair no crop.
 
 Read its diagnostics and respect its naming/ownership refusals. If it prints an
-`--ed-prefix ED` rerun, run it and repeat `--cites` with that option. When it
-flags a bad automatic crop, complete the extractor's own review-and-explicit-crop
-workflow, then re-run extraction; do not invent a separate crop or rename
-procedure. Crops it reports only as occupied are no gap: select from them and
-do not adopt them here. This is the only step that invokes `figure-extract`;
-otherwise the image folder is read-only, and
+`--ed-prefix ED` rerun, run it and repeat `--cites` with that option. Then
+complete figure-extract's
+[visual review](../figure-extract/SKILL.md#3-inspect-the-summary-and-verify-crops)
+of the crops this run wrote, repairing a bad one through its explicit-crop
+workflow; do not invent a separate crop or rename procedure. Crops it reports
+only as occupied are no gap: select from them and do not adopt them here. This
+is the only step that invokes `figure-extract`; otherwise the image folder is
+read-only, and
 [missing exhibits](references/figures.md#when-the-figure-you-need-is-not-there)
 governs a needed figure that is still absent or badly cropped.
 
@@ -181,11 +183,6 @@ If the scan listed figures or a main contribution merits a table, read
 captions and table reconstruction; inspect every file you embed. **The note is
 self-contained:** include an exhibit the argument needs or state the supported
 claim in prose; never point to an unseen figure, table or supplement.
-
-On creation write `read: false`; on an authorized rewrite preserve the existing
-review value and do not use format cleanup to discard unrelated user metadata.
-If an existing note cannot meet the format without a destructive metadata
-change, retain it and surface that conflict.
 
 Save the complete draft at a unique `<scratch>` path; never put an unfinished
 note in `Articles/`. Use the [worked example](references/worked-example.md)

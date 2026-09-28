@@ -65,11 +65,6 @@ or alias ownership: an unread, unsafe or unparsed file, or a malformed title or
 aliases field. Date, source, tag, type, description and filename/title errors
 leave it true.
 
-``importance`` is NOT in the record: the field left the schema, and nothing
-downstream read it (neither ``lint_entry.py``, which parses frontmatter
-itself, nor ``find_collisions.py``, which consumes only slug/title/aliases).
-Legacy entries still carrying the key are simply not reported on.
-
 Obsidian embeds (``![[fig.png]]``) are excluded from the wikilink
 targets, and dot-directories are skipped during the walk. A leaf ``.md``
 symlink remains an occupied slug but contributes no target-derived metadata;
@@ -185,6 +180,7 @@ SCHEMA_ORDER = [
 ]
 
 LIST_FIELDS = {"aliases", "sources", "tags", "parents"}
+_IDENTITY_KEYS = ("title", "aliases")
 
 #: A key's colon must be followed by whitespace or the end of the line, as
 #: YAML requires; ``title:"x"`` is one plain scalar, not a key.
@@ -242,7 +238,8 @@ class Field(object):
 class Frontmatter(object):
     """Parsed frontmatter: ordered fields, the body text, and any errors."""
 
-    __slots__ = ("fields", "order", "body", "body_start_line", "errors", "found")
+    __slots__ = ("fields", "order", "body", "body_start_line", "errors", "found",
+                 "non_identity_errors")
 
     def __init__(self):
         self.fields = {}          # key -> Field
@@ -251,6 +248,9 @@ class Frontmatter(object):
         self.body_start_line = 1
         self.errors = []
         self.found = False
+        # How many ``errors`` sit on a field other than title/aliases. The
+        # rest (a bad fence, a line no field owns) can hide identity.
+        self.non_identity_errors = 0
 
     def get(self, key):
         return self.fields.get(key)
@@ -318,6 +318,7 @@ def parse_frontmatter(text):
         lineno = offset + 1
         if raw_line.strip() == "" or raw_line.lstrip().startswith("#"):
             continue
+        before = len(fm.errors)
 
         item_m = _ITEM_RE.match(raw_line)
         if item_m and current is not None and current.kind in ("blank", "block_list"):
@@ -339,6 +340,8 @@ def parse_frontmatter(text):
             current.raw_items.append(raw_item)
             current.values.append(val)
             current.item_lines.append(lineno)
+            if current.key not in _IDENTITY_KEYS:
+                fm.non_identity_errors += len(fm.errors) - before
             continue
 
         key_m = _KEY_RE.match(raw_line)
@@ -400,6 +403,8 @@ def parse_frontmatter(text):
         fm.fields[key] = field
         fm.order.append(key)
         current = field
+        if key not in _IDENTITY_KEYS:
+            fm.non_identity_errors += len(fm.errors) - before
 
     return fm
 
@@ -610,9 +615,9 @@ def index_entry(path, text=None, root=None):
 
     fm = parse_frontmatter(text)
     record["errors"].extend(fm.errors)
-    # Any parser error (a skipped line, a duplicate key) may have dropped a
-    # title or alias; so may a malformed title or aliases field below.
-    identity_complete = not fm.errors
+    # A parser error off the title/aliases fields cannot drop a title or
+    # alias; any other one can, and so can a malformed title or aliases below.
+    identity_complete = len(fm.errors) == fm.non_identity_errors
 
     record["title"] = fm.scalar("title")
     record["type"] = fm.scalar("type")
@@ -1038,6 +1043,11 @@ def run_self_test():
         identity_cases = (
             ("a malformed date", ("created: 2026-01-01", "created: 2026-1-1"), True),
             ("a malformed source", ("[[Doe_X_2025.pdf#page=2]]", "placeholder"), True),
+            ("a tab-indented tag item", ('  - "#statistics"', '\t- "#statistics"'), True),
+            ("a duplicate updated key",
+             ("updated: 2026-01-02", "updated: 2026-01-02\nupdated: 2026-01-03"), True),
+            ("an over-indented alias item",
+             ('  - "anchor-second"', '    - "anchor-second"'), False),
             ("a filename/title mismatch", ('title: "Anchor"', 'title: "Renamed"'), True),
             ("a scalar aliases field",
              ('aliases:\n  - "anchor-alias"\n  - "anchor-second"',

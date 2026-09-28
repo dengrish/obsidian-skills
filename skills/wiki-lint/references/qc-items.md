@@ -108,10 +108,6 @@ Linter-specific routing:
   alone does not authorize deleting or repurposing user metadata; determine
   required tags from the entry under the ordinary tag rules.
 
-The `parents:` and `read:` empty cases intentionally differ: `[]` re-spells an
-already empty list, while `false` would supply an answer the review field does
-not contain.
-
 ### 3. Dates
 
 Require valid `YYYY-MM-DD` dates with `created <= updated`, as builder
@@ -312,10 +308,7 @@ that [canonical policy](../../wiki-build/references/equations.md) rather than
 reconstructing it from scanner output. Apply the separate canonical
 [media rules](../../wiki-build/references/media.md) to existing exhibits.
 The adjacent [body math typography](../../wiki-build/references/writing.md#prose-principles)
-still governs plain quantities and escaped literal dollars. It also keeps
-Greek-letter unit symbols in inline LaTeX: `10 $\mu\mathrm{m}$`, rather than
-raw `10 μm` or `10 µm`; descriptions retain their separate plain-Unicode
-allowance.
+still governs plain quantities and escaped literal dollars.
 
 **Media and table format.** Preserve both valid embed classes: a local image is
 an Obsidian embed by bare basename, while an external clipping image may remain
@@ -332,7 +325,8 @@ Never delete a missing embed or caption: repair belongs to extraction or an
 approved source rename. Preserve a composite and lowercase-suffixed panel until
 source-backed review decides whether the entry needs the default composite or
 the panel-specific view. Figure selection, source fidelity, table values, and
-retained rows or columns remain source-dependent.
+retained rows or columns remain source-dependent. An unused image file is not
+itself a missing-content finding.
 
 **Equation coverage and usefulness.** The scanner emits a conservative
 `item12/equation-coverage-candidate`; inspect it autonomously rather than treating
@@ -480,42 +474,6 @@ cues and every recognized scheduling/block-ID attachment byte-for-byte and in
 place; missing visible metadata does not establish a fresh card. Multiple
 cards remain report-only unless the user's request supplies the explicit
 refactor/deletion authority defined in flashcard maintenance.
-
-**The checklist ends at 19.** Existing `importance:` remains valid and
-preserved under item 2.
-
-## Source-dependent and proposal-only limits
-
-- **Item 3:** ordinary source-independent QC never chooses or rewrites a merge
-  date; explicit source-backed refactor mode follows its separate date rules.
-- **Item 4:** page-anchor syntax is checked; whether the physical page is
-  factually correct needs the source.
-- **Item 12:** entry-to-file resolution is source-independent, but figure
-  selection, source fidelity, caption facts, and table contents need the
-  source. An unused image file is not itself a missing-content finding.
-- **Item 15:** example purpose can be assessed now, but substantive trimming
-  and value verification are source-backed proposals.
-
-## Fix discipline
-
-- Make targeted, localized corrections. A format or schema finding usually has
-  one determinate output. Semantic metadata changes apply only when
-  unambiguous. Item 9 permits its bounded editorial repairs; item 6 may remove a
-  sentence whose entire function is a forbidden implementation signpost,
-  recipe, identifier catalog, or listing while preserving conceptual claims.
-  Neither permits discretionary rewrites of conforming prose or bypasses the
-  protected-content rules.
-- Fact changes, conflict resolution, source-content selection, and
-  substantive trimming use
-  [source-backed correction mode](../SKILL.md#source-backed-correction-mode),
-  which corrects or simplifies existing entries from sources each already
-  cites; a new source routes to builder. Cross-entry splits, merges, deletion,
-  and redistribution use
-  [explicit refactor mode](../SKILL.md#explicit-source-backed-refactor-mode).
-- A retitle or re-slug is a rename. Like a semantic-invalid alias removal,
-  propose it during routine lint with the evidence its
-  [finding action](#finding-actions) names, and apply it only under an
-  explicit request through the protocol linked there.
 
 ## Coding content in non-Software entries (item 6)
 

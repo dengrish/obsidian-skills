@@ -284,6 +284,7 @@ if _here != _shared:
 
 from slugify import SlugError, base_term, has_parenthetical, slug_stem  # noqa: E402
 from introduced_aliases import (  # noqa: E402
+    _BOLD_PAREN_RE,
     introduced_alias_candidates,
     missing_introduced_aliases,
 )
@@ -318,6 +319,7 @@ from entry_structure import (  # noqa: E402
     opening_paragraph,
     opener_subject_date_status,
     parse_flashcard_blocks,
+    title_display_form,
 )
 from markdown_tables import (  # noqa: E402
     caption_faults as _caption_faults,
@@ -1133,19 +1135,6 @@ def _check_aliases(fm, findings, filename):
 # item 17's introduced-alias scan
 # --------------------------------------------------------------------------
 
-#: The opener's direct counterpart binding after any permitted outer-bold
-#: title form: ordinary, bold-italic Work/binomial, or mixed taxon/strain.
-#: or the explicitly documented ``**title** algorithm (counterpart)`` form
-#: (prose principle 5(e)/(f)).  Scanned in the opening block only, so a
-#: definition bullet's ``- **True positives** (TP)`` never reaches it.  Only
-#: the literal noun ``algorithm`` may intervene; a general word window would
-#: attach unrelated later parentheticals to the title.
-_BOLD_PAREN_RE = re.compile(
-    r"(?<!\*)\*\*(?P<bold>(?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)"
-    r"\*\*(?!\*)(?:\s+algorithm)?\s*"
-    r"\((?P<paren>[A-Za-z*][^()\n]{0,59})\)",
-    re.IGNORECASE)
-
 #: A lexical marker LEADING the parenthetical name -- ``(singular,
 #: *archaeon*)``, ``(formerly Facebook)``.  Annotation, not part of the name:
 #: left in place, the candidate came out polluted ("singular, *archaeon*",
@@ -1937,7 +1926,7 @@ def _flashcard_primary_answer(fm, sections):
     """
     title = fm.scalar("title") or ""
     term = base_term(title) if has_parenthetical(title) else title
-    term = math_title_plain_text(term).strip()
+    term = title_display_form(term)
     alias_field = fm.get("aliases")
     aliases = {
         fold_name(a) for a in
@@ -1952,8 +1941,10 @@ def _flashcard_primary_answer(fm, sections):
     counterpart = None
     for match in _BOLD_PAREN_RE.finditer(_opening_block(sections)):
         visible, _style, _italic = _bold_parts(match)
-        visible = math_title_plain_text(visible).strip()
-        if not first_letter_ci_equal(visible, term):
+        # Identity is compared in plain form, so a Greek title bolded as
+        # LaTeX or spelled out still binds its counterpart.
+        if not first_letter_ci_equal(math_title_plain_text(visible),
+                                     math_title_plain_text(term)):
             continue
         raw_candidate = match.group("paren")
         # Item 17 treats annotated parentheticals such as
@@ -2576,7 +2567,7 @@ def _check_folder_related_labels(results, root, snapshot_text):
         for target, display in extract_wikilinks(related):
             owner = resolve(target)
             raw_canonical = titles.get(owner) if owner else None
-            canonical = (math_title_plain_text(raw_canonical)
+            canonical = (title_display_form(raw_canonical)
                          if raw_canonical else None)
             if not canonical:
                 continue
@@ -3578,6 +3569,10 @@ def run_self_test():
         "chi-squared test")
     check("the documented LaTeX chi-squared title has one readable plain form",
           items(chi_squared, "chi-2-test.md"), [])
+    check("a non-mathematical Greek title answers verbatim",
+          items(retitled("TNF-α", "tnf", "TNF-α is a worked example.",
+                         "**TNF-α** is a worked example.", "TNF-α"),
+                "tnf-alpha.md"), [])
     ell_one = retitled(
         "$\\\\ell_1$ norm", "l1-norm",
         "ell-one norm measures vector magnitude using absolute values.",
@@ -3968,6 +3963,14 @@ def run_self_test():
     check("valid Person and Event opener dates pass builder lint",
           (items(dated_person, "ada-lovelace.md"),
            items(dated_event, "trinity-test.md")), ([], []))
+    check("a date before an acronym expansion keeps the card counterpart",
+          items(retitled(
+              "ILSVRC", "imagenet-large-scale-visual-recognition-challenge",
+              "ILSVRC was an annual image-classification competition.",
+              "**ILSVRC** (2010–2017) (ImageNet Large Scale Visual "
+              "Recognition Challenge) was an annual competition.",
+              "ILSVRC (ImageNet Large Scale Visual Recognition Challenge)",
+              type_="Event"), "ilsvrc.md"), [])
     check("missing or misplaced Person/Event years fail builder item 9",
           (items(dated_person.replace(" (1815–1852)", ""),
                  "ada-lovelace.md"),
@@ -4337,13 +4340,12 @@ def run_self_test():
                              "the *hello world* of machine learning."),
               ["MNIST"])],
           ["hello world"])
-    check("a plural canonical subject is recognized, while only the immediate "
-          "candidate is mechanical",
+    check("a plural canonical subject is recognized with each chained candidate",
           [c for c, _w in _alias_candidates(
               split_sections("A **feature** is an input. Features are also "
                              "called *predictors* or *attributes*."),
               ["Feature (machine learning)"])],
-          ["predictors"])
+          ["predictors", "attributes"])
     check("an opener parenthetical's lead-in marker and italics are stripped",
           [c for c, _w in _alias_candidates(split_sections(
               "**Archaea** (singular, *archaeon*) are single-celled "

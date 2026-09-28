@@ -208,20 +208,19 @@ def wordorder_key_singular(slug):
 
 
 def real_permutation(slug_a, slug_b):
-    """True when two slugs sharing a singularised token sort are a real re-order.
+    """True when probe (e)'s singularised half must report a pair itself.
 
     The guard on probe (e)'s singularised half, in one place because both
     callers must draw the line identically or the same pair is reported twice
     under two names.  Two slugs whose RAW token sorts already agree are the
-    plain word-order hit, and two whose singularised token *sequences* are
-    identical are a plain plural pair -- each is already reported by its own
-    probe, so neither is a permutation finding as well.
+    plain word-order hit, and two whose head-token singular keys meet are the
+    plural pair probe (c) reports; neither is reported again here.  A plural
+    on another token (``theories-of-mind``) is left to this probe.
     """
     if sorted(t for t in slug_a.split("-") if t) \
             == sorted(t for t in slug_b.split("-") if t):
         return False
-    return [singularize(t) for t in slug_a.split("-") if t] \
-        != [singularize(t) for t in slug_b.split("-") if t]
+    return not (singular_keys(slug_a) & singular_keys(slug_b))
 
 
 # Probe (f)'s light morphology is shared for the same reason as the plural and
@@ -335,6 +334,7 @@ SLUG_CASES = [
     ("roc-curve",          "roc-curves",         True,  False),
     ("decision-tree",      "decision-trees",     True,  False),
     ("random-forest",      "gradient-boosting",  False, False),
+    ("theory-of-mind",     "theories-of-mind",   False, True),
 ]
 
 # `(slug_a, slug_b, same stem key?)`. The positive pair is the documented gap

@@ -23,11 +23,7 @@ while it fails, extract nothing. The shipped scripts are the implementation;
 do not copy their caption detection or crop logic into a separate script.
 
 The deliverable is **whole-figure PNGs**, not PDF renames, summaries, or wiki
-entries. `paper-summarize` owns document explanations and reading notes,
-`pdf-organize` owns source naming and chapter splitting, `wiki-build` owns
-wiki entries built from a source (new or enriched), `wiki-lint` owns
-maintenance of existing entries, and `clipping-clean` owns Web Clipper
-captures. An unspecified “process this PDF” request needs a stated
+entries. An unspecified “process this PDF” request needs a stated
 deliverable before selecting a workflow.
 
 Normally read `Sources/PDFs/` recursively and write to the **flat**, shared
@@ -59,13 +55,14 @@ symlinks; an unreadable subtree or a symlink loop blocks the run. When `--out`
 is the vault's canonical `Sources/Images/`, each selected PDF's basename,
 including case and Unicode variants, must have exactly one owner across the
 whole vault, even for a single named file, and nothing is written if the vault
-cannot be inventoried completely. An external PDF therefore has no owner there
-and is refused: use an external `--out` for a one-off, or, when the user wants
-it in the vault, copy it into `Inbox/` with their approval for `pdf-organize`
-to file, then extract from the filed path. A refused PDF writes and adopts
-nothing, even with `--overwrite`; other PDFs continue and the run exits
-nonzero. When another vault file shares a PDF basename, report both paths and
-give the user the
+cannot be inventoried completely. An external PDF is refused unless it is a
+[readable working copy](references/review-and-repair.md#readable-working-copies)
+under one vault PDF's exact basename; otherwise use an external `--out` for a
+one-off, or, when the user wants it in the vault, copy it into `Inbox/` with
+their approval for `pdf-organize` to file, then extract from the filed path.
+A refused PDF writes and adopts nothing, even with `--overwrite`; other PDFs
+continue and the run exits nonzero. When another vault file shares a PDF
+basename, report both paths and give the user the
 [shared-basename remedy](../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first).
 
 **In a recursive run containing both a book and its chapters, extract the
@@ -116,8 +113,7 @@ Output is `[pdf_stem]_fig_<label>.png`, with the exact PDF stem including
 order**: Figure 7 becomes `_fig_7.png`, Figure 1.2 becomes `_fig_1-2.png`, and
 Figure S1 becomes `_fig_S1.png`. Follow
 [conventions §8](../../shared/CONVENTIONS.md#8-figure-naming-and-sourcesimages);
-existing consumer matching remains `[source_stem]_fig*`, including older
-accepted names. Do not tighten it or rename legacy output to match new examples.
+never rename legacy output to match new examples.
 
 ### 3. Inspect the summary and verify crops
 

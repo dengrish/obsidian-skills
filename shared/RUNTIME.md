@@ -99,13 +99,9 @@ unknown additions, another run's files, a shared temporary base, or unrelated
 caches. Dependencies and reusable virtual environments belong outside disposable
 scratch unless deliberately created as disposable for this run.
 
-Final publication staging is not ordinary scratch. The
-[safe-write protocol](SAFE_WRITES.md#stage-complete-bytes-off-the-public-path)
-places it on the destination's filesystem, possibly inside the vault but
-outside scanned output folders, and owns the hard-link requirement and
-`LinkUnavailable` handling. Helper-managed temporary files and existing
-staging or recovery entries keep their own guards and cleanup rules. Do not
-relocate any of them into `<scratch>`.
+Final publication staging and helper staging/recovery entries follow the
+[safe-write protocol](SAFE_WRITES.md#stage-complete-bytes-off-the-public-path),
+not this section.
 
 ## Use one Python environment
 

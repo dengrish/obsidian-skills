@@ -2,24 +2,12 @@
 
 > **When to read this:** Read this when any one of these is true — each is checkable before you write the entry, from a command, a script's output, or a fact about the request:
 >
-> - the user says they hand-edited an entry since the last run;
 > - the request asks to rename, split, or merge existing entries — i.e. refactoring;
 > - `find_collisions.py` returns `adjudicate` on probe (c), (e) or (f) for two candidates that are genuinely different techniques (the same-surface-form case — the section's own detection signal includes plural/singular pairs, which fire probe (c));
 > - an entry keeps two or more equivalent equation forms of one quantity.
 
 ---
 
-- **Hand-edited entries remain merge input.** Read the current body, preserve
-  every substantive claim and deliberate structure, and integrate the active
-  source around that content under the ordinary Integration principle. A hand
-  edit does not need a protected-region marker or a second source note to
-  survive. If it conflicts with the active or cited sources, use *Conflict
-  handling*; when the available evidence cannot settle the disagreement,
-  preserve the edit and report the unresolved conflict. A source-no-op merge
-  leaves conforming prose byte-for-byte unchanged, while targeted step-7 QC may
-  still repair a current-rule defect. The exact snapshot guard in the main
-  workflow separately protects an editor save that lands while the merge is in
-  progress: re-read and rebuild rather than publishing the stale draft.
 - **Wiki refactoring is out of scope for this skill** — partitioning the current source into atomic candidates *before creation* is normal extraction; splitting a pre-existing file is refactoring. A new source correcting one existing entry is an ordinary builder merge. A correction using only that entry's already-cited sources uses wiki-lint's [source-backed correction mode](../../wiki-lint/references/source-backed-corrections.md). wiki-build does not rename existing slugs and update every wikilink that points at them, redistribute a mixed entry into multiple files after the fact, or merge two existing entries into one. Route those structural operations to wiki-lint's refactor mode, which inventories the affected vault-wide reference surfaces before writing. Determinate `type:` corrections under [item 6's API-surface rule](api-surface.md#the-author-test-apply-during-the-review-pass) remain ordinary QC. **The orphan-link audit (step 7) is not a refactoring exception** — it repairs body/Related links in this run's created or merged entries, using the normal gates for any missed entry. It does not authorize renaming, splitting, or merging pre-existing files, redistributing their earlier content, or editing unrelated entries.
 
 ## Same-surface-form, different-technique
@@ -46,10 +34,3 @@ $$
 ```
 
 This is a layout rule, not an inclusion rule. Keep a form only when it passes the [explanatory-value test](equations.md#1-coverage--explanatory-value-before-notation), as the count form above does by showing which confusion-matrix cells F1 ignores; do not transcribe rearrangements or derivation steps merely because the source prints them. A single-form equation keeps its equation content on one line inside a display block whose opening and closing `$$` delimiters each occupy their own line (`references/equations.md` §2), and does **not** use `aligned`.
-
-This section owns only the multi-form layout. Literal-`$` escaping and numbers
-in prose stay in [writing.md](writing.md#prose-principles); whether an equation
-is written at all (including from a calculation the source only describes in
-words), the display-vs-inline call, the vault notation standard, and the
-normalization of off-standard source equations are governed by
-[equations.md](equations.md).

@@ -184,8 +184,12 @@ from entry_structure import (  # noqa: E402
     opener_subject_date_status,
     parse_flashcard_blocks,
     split_sentences,
+    title_display_form,
 )
-from introduced_aliases import missing_introduced_aliases  # noqa: E402
+from introduced_aliases import (  # noqa: E402
+    _BOLD_PAREN_RE,
+    missing_introduced_aliases,
+)
 from markdown_tables import (  # noqa: E402
     caption_faults,
     markdown_block_start,
@@ -271,11 +275,6 @@ def description_has_entity_subject(description, title):
     return False
 
 
-_BOLD_PAREN_RE = re.compile(
-    r"(?<!\*)\*\*(?P<bold>(?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)"
-    r"\*\*(?!\*)(?:\s+algorithm)?\s*"
-    r"\((?P<paren>[A-Za-z*][^()\n]{0,59})\)",
-    re.IGNORECASE)
 _PAREN_LEADIN_RE = re.compile(
     r"^(?:(?:short\s+for|originally\s+called|also\s+called|"
     r"also\s+known\s+as|known\s+as)|singular|plural|abbreviated|"
@@ -283,9 +282,6 @@ _PAREN_LEADIN_RE = re.compile(
 _SHORT_FOR_PAREN_RE = re.compile(r"^short\s+for[\s,:]+", re.IGNORECASE)
 _SCI_ABBREV_RE = re.compile(
     r"^[A-Z]\.\s*[a-z][A-Za-z.-]*(?:\s+[a-z][A-Za-z.-]*)*$")
-_NON_NAME_PAREN_RE = re.compile(
-    r"^(?:b\.|c\.|d\.|fl\.|r\.|e\.g|i\.e|cf\.|vs\.|see\s|a\s|an\s|the\s|"
-    r"annual|ongoing)|\d{3,4}", re.IGNORECASE)
 
 
 def _acronym_counterpart(term, candidate):
@@ -389,15 +385,17 @@ def _clean_card_counterpart(raw, term, entry_type):
 def flashcard_primary_answer(title, aliases, opener, entry_type=""):
     """Return the exact plain-text term and any opener-bound counterpart."""
     term = base_term(title) if has_parenthetical(title) else (title or "")
-    term = math_title_plain_text(term).strip()
+    term = title_display_form(term)
     alias_keys = {fold_name(a) for a in aliases if a}
     counterpart = None
     opening_block = " ".join(
         line.strip() for line in (opener or "").splitlines())
     for match in _BOLD_PAREN_RE.finditer(opening_block):
         visible, _style, _italic = _bold_parts(match)
-        visible = math_title_plain_text(visible).strip()
-        if not _first_letter_ci_equal(visible, term):
+        # Identity is compared in plain form, so a Greek title bolded as
+        # LaTeX or spelled out still binds its counterpart.
+        if not _first_letter_ci_equal(math_title_plain_text(visible),
+                                      math_title_plain_text(term)):
             continue
         candidate = _clean_card_counterpart(
             match.group("paren"), term, entry_type)
@@ -1190,9 +1188,10 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
     counted as an earlier mention. When ``late_links`` is a list, it receives
     ``(slug, target, matched, surface)`` for each linked target whose first
     body link follows an earlier plain mention of the target's title, alias or
-    first-link display label; ``quiet_surfaces`` (alias-only bare nouns) never
-    count as such a mention, and neither does the word of a first-link label
-    that is a cross-domain synonym its target introduces.
+    first-link display label; ``quiet_surfaces`` (alias-only bare nouns of
+    qualified destinations) never count as such a mention, and neither does
+    the word of a first-link label that is a cross-domain synonym its target
+    introduces.
     """
     by_tokens, maxwords = _index_surfaces(surf_map)
     backfill = []
@@ -1296,10 +1295,10 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
         def _earlier_mention(owner, start, end, surface):
             """A plain mention before the first link that could carry it.
 
-            Alias-only bare nouns (`regressor`), a word inside a hyphenated
-            compound (`batch GD` in `mini-batch GD`), a discipline root inside
-            a compound (`cell biology`), and a descriptor immediately followed
-            by the link itself (`fission yeast
+            Alias-only bare nouns of qualified destinations (`covariate`), a
+            word inside a hyphenated compound (`batch GD` in `mini-batch GD`),
+            a discipline root inside a compound (`cell biology`), and a
+            descriptor immediately followed by the link itself (`fission yeast
             [[schizosaccharomyces-pombe|…]]`) are not separate first mentions.
             """
             link_start = first_link[owner][0]
@@ -3773,7 +3772,7 @@ def scan(wiki, images=None, vault=None):
                     and record.get("path_key") == e.get("path_key")):
                 continue
             raw_title = record.get("title", "") if record else ""
-            tt = math_title_plain_text(raw_title) if raw_title else ""
+            tt = title_display_form(raw_title) if raw_title else ""
             if not tt:
                 continue
             if disp is None:
@@ -4043,10 +4042,9 @@ def scan(wiki, images=None, vault=None):
     # shared/scripts/plurals.py's, the same one wiki-build calls, so there is nothing left
     # here to drift from it.
     #
-    # `real_permutation` is that module's guard, not a copy of it: this probe fires only on a
-    # GENUINE re-ordering. Equal raw sorts are the `word-order` hit above, and an identical
-    # singularized token SEQUENCE is a plain plural pair `plural` already reports — either
-    # would put the same pair in the worklist a second time.
+    # `real_permutation` is that module's guard, not a copy of it. Equal raw sorts are the
+    # `word-order` hit above, and a plural on the head token is a pair `plural` already
+    # reports — either would put the same pair in the worklist a second time.
     group_probe(wordorder_key_singular, "word-order-singular", real_permutation)
     # µ-variant probe via titles
     for sl,e in entries.items():
@@ -4310,7 +4308,7 @@ def scan(wiki, images=None, vault=None):
 
     def _moc_expected_label(entry, discipline):
         """Canonical visible label for an entry in one discipline MOC."""
-        title = math_title_plain_text(entry.get("title") or "")
+        title = title_display_form(entry.get("title") or "")
         match = re.search(r"\s+\(([^()]*)\)\s*$", title)
         if discipline != "misc" and match and slug(match.group(1)) == discipline:
             return title[:match.start()].rstrip()
@@ -8172,6 +8170,12 @@ def run_self_test():
             "The **Algorithm counterpart** algorithm (AC) predicts from nearby "
             "observations.", aliases=('"ac"',),
             card="Algorithm counterpart (AC)"))
+        _st_write(v, "ilsvrc.md", _st_entry(
+            "ILSVRC",
+            "**ILSVRC** (2010–2017) (ImageNet Large Scale Visual Recognition "
+            "Challenge) was an annual competition.", type_="Event",
+            aliases=('"imagenet-large-scale-visual-recognition-challenge"',),
+            card="ILSVRC (ImageNet Large Scale Visual Recognition Challenge)"))
         _st_write(v, "mark-twain.md", _st_entry(
             "Mark Twain", "**Mark Twain** (Samuel Clemens) was an author.",
             aliases=('"samuel-clemens"',), card="Mark Twain"))
@@ -8429,6 +8433,8 @@ def run_self_test():
         check("the documented intervening algorithm noun preserves an opener "
               "acronym binding",
               "item19" in _st_keys(res, "algorithm-counterpart"), False)
+        check("a date before an acronym expansion keeps the card counterpart",
+              "item19" in _st_keys(res, "ilsvrc"), False)
         check("pseudonyms and a later bold parenthetical are not acronym counterparts",
               ["item19" in _st_keys(res, name)
                for name in ("mark-twain", "counterpart-scope")], [False, False])

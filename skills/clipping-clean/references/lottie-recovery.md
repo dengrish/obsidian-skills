@@ -266,11 +266,6 @@ def main(src, out):
     for fr in frames:
         bg = Image.new("RGBA", fr.size, (255, 255, 255, 255)); bg.alpha_composite(fr)
         pal.append(bg.convert("P", palette=Image.ADAPTIVE, colors=256))
-    # The scratch file goes in the system temp directory, NOT next to `out`.
-    # It used to be written as out + ".tmp.gif", and `out` was a path inside
-    # Sources/Images -- a half-written, wrongly-named file in the vault for the
-    # length of the render, which CONVENTIONS §8b forbids: "Nothing unfinished
-    # is ever written into the folder".
     fd, tmp = tempfile.mkstemp(prefix="lottie_render.", suffix=".gif")
     os.close(fd)
     pal[0].save(tmp, save_all=True, append_images=pal[1:],

@@ -570,8 +570,11 @@ def _tokens_match(a, b):
     The four-character common-prefix floor alone misses short e-drop verb
     stems ("tuned" and "tuning" share only "tun"), so equal stems also match;
     a genuinely different word ("tuner", "transfer") still does not.
+    Irregular plurals ("taxa", "genera") match through the shared plural
+    table.
     """
-    if a in b or b in a or len(os.path.commonprefix([a, b])) >= 4:
+    if (a in b or b in a or len(os.path.commonprefix([a, b])) >= 4
+            or singular_forms(a) & singular_forms(b)):
         return True
     stem_a, stem_b = _token_stem(a), _token_stem(b)
     return len(stem_a) >= 3 and stem_a == stem_b
@@ -1080,6 +1083,11 @@ def run_self_test(verbose=False):
               ("tuner", ["Tuning"]),
               ("—", ["Gamma"]))],
           [True, True, True, False, False, True])
+    check("an irregular plural label shares its singular title's surface",
+          [label_shares_surface(label, surfaces) for label, surfaces in (
+              ("taxa", ["Taxon"]), ("genera", ["Genus"]),
+              ("loci", ["Locus (genetics)"]))],
+          [True, True, True])
     check("a math title's plain form is a shared surface",
           [label_shares_surface(label, surfaces) for label, surfaces in (
               ("chi-squared test", ["$\\chi^2$ test"]),

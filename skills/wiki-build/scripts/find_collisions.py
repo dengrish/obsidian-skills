@@ -114,7 +114,8 @@ if _here != _shared:
     _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
-from slugify import SlugError, mu_variants, slug_stem  # noqa: E402
+from slugify import (SlugError, base_term, has_parenthetical,  # noqa: E402
+                     mu_variants, slug_stem)
 from portable_names import portable_identity  # noqa: E402
 from entry_checks import bare_common_noun_slug  # noqa: E402
 # NO SINGULARISER LIVES HERE.  Probes (c) and (e) both turn on which two word
@@ -308,11 +309,14 @@ def build_targets(index):
     targets = []
     for rec in index.get("entries", []):
         slug = (rec.get("slug") or "").strip()
+        tags = rec.get("tags") or []
         if slug:
             targets.append({
                 "slug": slug, "via": "filename", "alias": None,
                 "entry_slug": slug, "path": rec.get("relpath") or rec.get("path"),
                 "entry_errors": list(rec.get("errors") or ()),
+                # A discipline root's sole tag names the root itself.
+                "root": len(tags) == 1 and _fold(str(tags[0]).lstrip("#")) == _fold(slug),
             })
         title = rec.get("title")
         title_slug = None
@@ -386,6 +390,13 @@ def _candidate_slugs(title, use_stem=True, use_superset=True):
             pass
     mu_slugs.discard(slug)
 
+    qualifier = None
+    if has_parenthetical(title):
+        try:
+            qualifier = _fold(slug_stem(title.strip()[len(base_term(title)):]))
+        except SlugError:
+            pass
+
     keys = {
         "slug": slug,
         "mu": mu_slugs,
@@ -397,6 +408,7 @@ def _candidate_slugs(title, use_stem=True, use_superset=True):
         "wordorder_singular": wordorder_key_singular(slug),
         "stem": stem_key(slug) if use_stem else None,
         "superset": stem_tokens(slug) if use_superset else None,
+        "qualifier": qualifier,
     }
     return slug, keys, None
 
@@ -442,11 +454,11 @@ def _probe_pair(keys, other_slug, use_stem=True, use_superset=True):
         fired.append("e-word-order-permutation")
     elif (wordorder_key_singular(other_slug) == keys["wordorder_singular"]
             and real_permutation(other_slug, slug)):
-        # Only a genuine permutation -- if the singularised token SEQUENCES are
-        # identical this is a pure plural pair that probe (c) already caught.
-        # The guard is `plurals.real_permutation` because wiki-lint's sweep
-        # has to draw the same line: a pair the two skills classify differently
-        # is one worklist item under two names.
+        # Only a genuine permutation -- a pair probe (c) already reports (a
+        # plural on the head token) is skipped.  The guard is
+        # `plurals.real_permutation` because wiki-lint's sweep has to draw
+        # the same line: a pair the two skills classify differently is one
+        # worklist item under two names.
         fired.append("e-word-order-permutation")
 
     if use_stem and keys["stem"] and stem_key(other_slug) == keys["stem"]:
@@ -499,6 +511,11 @@ def check_candidate(title, index, use_stem=True, use_superset=True, peers=None,
         other = target["slug"]
         for probe in _probe_pair(keys, other, use_stem=use_stem,
                                  use_superset=use_superset):
+            # A discipline root named as the candidate's qualifier
+            # ("Temperature (machine learning)") is its field, not a duplicate.
+            if (probe == "g-token-superset" and target.get("root")
+                    and _fold(other) == keys["qualifier"]):
+                continue
             match = {
                 "probe": probe,
                 "matched_slug": other,
@@ -849,6 +866,22 @@ def run_self_test():
         r = probe("K-means clustering", use_superset=False)
         check("--no-superset turns probe (g) off entirely",
               (_st_fired(r, "k-means"), r["verdict"]), ([], "create"))
+        roots = {"entries": [
+            {"slug": "machine-learning", "aliases": [], "tags": ["#machine-learning"],
+             "relpath": "machine-learning.md"},
+            {"slug": "kernel", "aliases": [], "tags": ["#machine-learning"],
+             "relpath": "kernel.md"},
+            {"slug": "convolution-kernel", "aliases": [],
+             "tags": ["#machine-learning"], "relpath": "convolution-kernel.md"}]}
+        check("(g) skips a discipline-root qualifier but not its base term or "
+              "an entry the qualifier names",
+              ([(m["probe"], m["matched_slug"]) for m in
+                check_candidate("Kernel (machine learning)", roots)["matches"]],
+               sorted((m["probe"], m["matched_slug"]) for m in
+                      check_candidate("Filter (convolution kernel)", roots)["matches"])),
+              ([("g-token-superset", "kernel")],
+               [("g-token-superset", "convolution-kernel"),
+                ("g-token-superset", "kernel")]))
 
         # -- every probe, NOT firing ----------------------------------------
         r = probe("Gradient boosting")

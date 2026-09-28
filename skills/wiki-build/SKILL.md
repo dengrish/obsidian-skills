@@ -112,7 +112,7 @@ with or ignore, earlier work. For an absent Wiki, use a unique empty scratch
 directory. Do not create the public folder during collision planning,
 especially in a preview/no-apply run.
 
-**A decisive exact/µ match permits a merge only when it has one existing owner.** Multiple owners and all broader probe matches require adjudication; never choose an owner by index order. A malformed/unreadable index keeps “no match” uncertain. Resolve that uncertainty before creating a file. On any match, read [collision decisions and merging](references/merge.md#collision-decisions); similar names can denote different entities. An empty wiki still requires candidate-to-candidate checks. A `naming: ["bare-common-noun"]` result needs a [qualified title](references/writing.md#cross-domain-term-disambiguation) and a new probe; an existing bare-slug entry of the same sense instead takes the merge and a qualified-rename proposal.
+**A decisive exact/µ match permits a merge only when it has one existing owner.** Multiple owners and all broader probe matches require adjudication; never choose an owner by index order. A malformed/unreadable index keeps “no match” uncertain. Resolve that uncertainty before creating a file. On any match, read [collision decisions and merging](references/merge.md#collision-decisions); similar names can denote [different entities](references/edge-cases.md#same-surface-form-different-technique). An empty wiki still requires candidate-to-candidate checks. A `naming: ["bare-common-noun"]` result needs a [qualified title](references/writing.md#cross-domain-term-disambiguation) and a new probe; an existing bare-slug entry of the same sense instead takes the merge and a qualified-rename proposal.
 
 A leaf `.md` symlink is an occupied slug, not merge input: the index keeps it
 in collision ownership, reports it, and suppresses its target's metadata. Do
@@ -136,11 +136,9 @@ Read [equations](references/equations.md) before typesetting when the source sta
 
 ### 5. Merge into existing entries
 
-Follow [merge logic](references/merge.md#merge-logic): integrate substantive new information into one coherent staged entry, preserving earlier contributions rather than stacking paragraphs. Snapshot the existing note's exact bytes, identity, and permissions when reading it; keep that original snapshot as the final publication precondition. If a later source in this run touches the same entry, merge into the staged draft without replacing that original precondition. If the public file changes at any point, preserve the newer file, re-read it, and rebuild/re-review the complete merge instead of applying the stale draft. Existing images/tables, populated `parents:`, legacy `importance:`, keys outside the schema, user-disabled cards and scheduling metadata have preservation rules; they are not fields to regenerate from a blank template. Read the [hand-edit case](references/edge-cases.md) when the user has edited an entry; there is no protected-region mechanism.
+Follow [merge logic](references/merge.md#merge-logic): integrate substantive new information into one coherent staged entry, preserving earlier contributions rather than stacking paragraphs. Snapshot the existing note's exact bytes, identity, and permissions when reading it; keep that original snapshot as the final publication precondition. If a later source in this run touches the same entry, merge into the staged draft without replacing that original precondition. If the public file changes at any point, preserve the newer file, re-read it, and rebuild/re-review the complete merge instead of applying the stale draft. Existing images/tables, populated `parents:`, legacy `importance:`, keys outside the schema, user-disabled cards and scheduling metadata have preservation rules; they are not fields to regenerate from a blank template.
 
-Cite the source only when it passes step 2's filters for this entity, with decoded source identity and confirmed PDF/summary pairing; a thin mention never earns a citation. For `Software`, using the artifact to teach another concept, enumerating its classes, or listing parameters and defaults is not a contribution about the artifact; another object that merely instantiates an interface convention the entry already explains is covered content. A [source-no-op merge](references/merge.md#source-no-op-merges) appends its missing citation and skips source-driven body rewriting; step 7 still applies targeted independent QC. Update `updated:` whenever anything actually changes; preserve the old date only when the final entry is byte-unchanged.
-
-**Reset `read: false` only when a merge adds or rewrites body content the user has not read.** Sources, Related links, descriptions, tags, and formatting alone do not reset it. This test is independent of the date bump. Preserve the review state on a close call and report the decision; never invent a missing/unknown user's answer. A rewritten description still passes step 4's count before writing.
+Cite the source only when it passes step 2's filters for this entity, with decoded source identity and confirmed PDF/summary pairing; a thin mention never earns a citation. A [source-no-op merge](references/merge.md#source-no-op-merges) appends its missing citation and skips source-driven body rewriting; step 7 still applies targeted independent QC. Update `updated:` whenever anything actually changes; preserve the old date only when the final entry is byte-unchanged.
 
 ### 6. Interlink
 
@@ -179,7 +177,7 @@ a new entry (such as `11-related-display` or `18-label-target`), a merged
 entry's inherited state that the
 [merge rules](references/merge.md#frontmatter-and-related-footer) preserve
 (including `report_only: true` user state), and its missing `Person`/`Event`
-date under the [rare-types report rule](references/rare-types.md#dates-in-the-opener-person-and-event).
+date when neither [rare-types route](references/rare-types.md#dates-in-the-opener-person-and-event) supplies one.
 The [run report](references/review.md#run-report) says where each goes.
 
 Re-read every active-source passage behind a new or changed claim and compare
