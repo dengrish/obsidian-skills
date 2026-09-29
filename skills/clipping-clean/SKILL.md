@@ -137,6 +137,14 @@ rename another owner's figures to free a stem. The
 [collision procedure](references/duplicates-and-reprocessing.md#settle-a-slug-before-writing-images)
 tells the two apart.
 
+For a new note, record the settled note path before drafting; step 6 publishes
+against this record. It must say `absent`; otherwise the stem is not free.
+
+```bash
+python3 '<plugin>/shared/scripts/publish_files.py' snapshot --vault '<vault>' \
+    -o '<scratch>/clipping-snapshots.json' 'Articles/<slug>.md'
+```
+
 ## 3. Clean the body and prepare images
 
 Read [body cleaning](references/body-cleaning.md) before changing the capture.
@@ -247,14 +255,21 @@ Retain the unchanged original until publication succeeds, and keep both
 resolving versions while handoff blockers remain. Do not apply the new-note
 sequence below to a reprocess.
 
-**For a new note**, follow the shared [safe-write protocol and Python API
-recipe](../../shared/SAFE_WRITES.md#call-the-shared-python-api)
-to stage beside the resolved real `Articles/` directory, outside the note folder
-and on its filesystem. Call the imported
-`atomic_move.publish_new(..., atomic_move.regular_file_snapshot, ...)` as shown
-there; do not replace it with a shell move or direct filesystem primitive.
-Any occupant, including a dangling symlink, must fail unchanged. If safe
-publication is unavailable, stop and report it.
+**For a new note**, publish the reviewed scratch draft against the step-2
+record with the shared `publish_files.py`. It creates the note exclusively, so
+any occupant, including a dangling symlink, is refused unchanged. The manifest
+is `[{"path": "Articles/<slug>.md", "draft": "<absolute draft path>"}]`:
+
+```bash
+python3 '<plugin>/shared/scripts/publish_files.py' publish --vault '<vault>' \
+    --snapshots '<scratch>/clipping-snapshots.json' \
+    --manifest '<scratch>/clipping-manifest.json'
+```
+
+Do not replace it with a shell move or direct filesystem primitive. An
+occupied path is the late collision above; stop and report any other refusal
+or failure.
+
 After the note is public, place each staged image through the guarded helper,
 using the published note as ownership evidence:
 
@@ -266,11 +281,12 @@ python3 '<skill>/scripts/fetch_images.py' place \
 ```
 
 If a late image-slot conflict is refused, keep the published note as owner for
-images already placed. Replace the failed embed with the documented placeholder
-by rewriting the note through `atomic_move.replace_expected` against the
-`published` snapshot that `publish_new` returned, with a fresh `stage_dir`.
-Never withdraw the only note that proves ownership of files already placed.
-Report the conflict and retained scratch file.
+images already placed. Replace the failed embed with the documented
+placeholder: re-record the note in the same snapshot file with
+`snapshot --replace` before re-reading it, then publish the placeholder
+version of what you read against that record. Never withdraw the only note
+that proves ownership of files already placed. Report the conflict and
+retained scratch file.
 
 Read back the published note and verify its final embeds before reporting
 completion. Report refused phases and retained recovery paths; a changed-slug

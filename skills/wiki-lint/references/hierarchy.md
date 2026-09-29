@@ -72,7 +72,8 @@ organization makes sense. The prior MOC is context, not the default answer.
 Fix existing conceptual defects even when no entries were added. Keep an
 already coherent structure stable rather than reorganizing for variety.
 
-- Put the discipline's Wiki root at the single top-level bullet.
+- Put the discipline's Wiki root at the single top-level bullet, and nowhere
+  else in the tree.
 - Group by concepts. The root may directly hold any topic in its field, such
   as Generalization. Below another linked entry, each child must be a kind of
   it, a component of it, a method for it, or a narrower topic chiefly about it
@@ -243,8 +244,8 @@ actions.
   out-of-scope findings.
 - `unresolved_parents`: a real Wiki file outranks an alias even when unparsed.
   A legacy vault-root or previous-layout MOC (`legacy-moc`) is never a parent
-  and cannot stand in for a missing discipline root, and a `noncanonical-moc`
-  is not a recognized discipline MOC. Preserve uncertain targets; fix relationships only inside
+  and cannot stand in for a missing discipline root, and neither is an
+  `unexpected-moc` target. Preserve uncertain targets; fix relationships only inside
   the authorized closure.
 - `parent_state_findings`: roots have empty parents, misc members point only
   to `[[misc]]`, and a `moc-parent` is replaced by the discipline root or the
@@ -278,7 +279,7 @@ unresolved/invalid parent, self-parent, or cycle. Every active included MOC is
 readable (or empty misc with zero members), contains only the complete generated
 outline and has no consistency
 finding. Each included entry's parents exactly
-match its nearest linked Wiki ancestors; discipline roots alone have `parents: []`. Re-scan to verify these conditions. After a
+match its nearest linked Wiki ancestors; discipline roots alone have `parents: []`. No included parent remains in `unlinked_children`. Re-scan to verify these conditions. After a
 full-vault pass they hold for all active disciplines, misc, and requested entries;
 inactive discipline MOCs, legacy MOCs, and skipped closures remain explicitly
 reported and preserved, not described as repaired.

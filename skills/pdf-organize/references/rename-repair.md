@@ -73,8 +73,11 @@ Apply only under the
 
 `rename_all` returns `(moves, edits, blockers)` and writes nothing while
 `blockers` is nonempty. Resolve every blocker: occupied destinations anywhere
-in the vault, collisions that differ only in case or Unicode normalization,
-overlong derived names, extension mismatches, unsafe paths, permissions, and
+in the vault, target-stem figures or `Articles/` notes outside the family,
+for the PDF or any renamed chapter (see
+[SKILL step 3](../SKILL.md#3-check-references-and-prepare-the-complete-rename-plan)),
+collisions that differ only in case or Unicode normalization, overlong
+derived names, extension mismatches, unsafe paths, permissions, and
 malformed or conflicting sidecars. Do not force a partial family through.
 
 `edits` maps note paths to their new text. Three associated fields are separate:

@@ -53,7 +53,10 @@ CAN_CREATE_SYMLINK = _can_create_symlink()
 def load(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # Import the checkout's shared helpers, whatever the caller exported.
+    with patch.dict(os.environ,
+                    {"OBSIDIAN_VAULT_SHARED": str(ROOT / "shared/scripts")}):
+        spec.loader.exec_module(module)
     return module
 
 

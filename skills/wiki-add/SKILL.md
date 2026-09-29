@@ -49,8 +49,9 @@ python3 '<skill>/scripts/backlog.py' scan '<backlog.md>' \
 ```
 
 Read the complete result and retain the snapshot. Nested lines are context
-for resolving their parent item, never extra requests. Report each
-`report_only` line with its line and reason. An
+for resolving their parent item, never extra requests; an unindented line
+reported as continuing an item is part of that item's request text. Report
+each `report_only` line with its line and reason. An
 `unclosed frontmatter, fence or comment` report is a valid result: process the
 returned items, but report the queue as incompletely scanned, never as empty
 or fully processed. A missing, crashing or malformed helper result blocks

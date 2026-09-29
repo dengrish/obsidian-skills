@@ -26,7 +26,7 @@ Choose by the requested result, not just the input's file type.
 | Clean Web Clipper captures | [knowledge:clipping-clean](skills/clipping-clean/SKILL.md) | raw capture → cleaned note in `Articles/` |
 | Build or enrich wiki entries from new evidence | [knowledge:wiki-build](skills/wiki-build/SKILL.md) | organized PDF or cleaned source note → entries in `Wiki/` |
 | Research and add missing requested topics | [knowledge:wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md` or topics named in the request → durable sources and new requested entries only |
-| Audit, correct or explicitly refactor existing wiki entries | [knowledge:wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources or an exact producer mapping → scoped repairs, links, parents and MOCs |
+| Audit, correct, deepen or explicitly refactor existing wiki entries | [knowledge:wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources or an exact producer mapping → scoped repairs, links, parents and MOCs |
 | Record selected X posts and RSS/Atom articles without interpretation | [investments:feed-collect](skills/feed-collect/SKILL.md) | `Investments/x-accounts.md` and `rss-feeds.md` → maintained X notes and RSS article notes in `Investments/Sources/` |
 | Analyze stock ideas from collected feeds | [investments:stock-research](skills/stock-research/SKILL.md) | saved posts + verified financial evidence → daily report and maintained stock notes |
 
@@ -68,7 +68,7 @@ Both paper-summarize and wiki-build read the **original PDF**. The summary
 is a finished reading note; builder may use it only under its
 [verified missing-PDF fallback](skills/wiki-build/references/source-cases.md#resolve-a-markdown-source).
 A cleaned clipping is itself the source and can be used directly. wiki-build
-never reads a raw `Inbox/` file; clipping-clean or pdf-organize handles it
+never cites a raw `Inbox/` file; clipping-clean or pdf-organize handles it
 first. wiki-add can reuse sources that Wiki entries already cite, file newly
 acquired PDFs itself under pdf-organize's naming rules, or save a clearly
 marked, agent-written research extract for each web page in `Articles/`; these
@@ -87,8 +87,8 @@ wiki-build adds source-supported content only to the entries in its current
 run. wiki-lint owns retrospective work across the existing wiki. Their
 [linking ownership](shared/CONVENTIONS.md#9-ownership-split-for-linking) prevents
 later source merges from reversing deliberate maintenance decisions.
-For a named existing entry, wiki-lint may correct it from sources it already
-cites or carry out an explicitly requested structural or producer-mapped
+For a named existing entry, wiki-lint may correct or deepen it from sources it
+already cites or carry out an explicitly requested structural or producer-mapped
 repair. Enriching an existing entry with new-source evidence still belongs to
 wiki-build.
 
@@ -96,7 +96,8 @@ wiki-build.
 topics queued in `add-to-wiki.md` or a backlog the user selects, or named
 directly without a source document. It leaves every existing entry unchanged
 and checks off only queued topics it created or found already present;
-enriching an existing entry remains wiki-build's job.
+enriching an existing entry from a new source remains wiki-build's job, and
+deepening it from the sources it already cites is wiki-lint's.
 
 stock-research analyzes ideas in feed-collect’s saved X notes and RSS articles for long-only
 buying opportunities in liquid U.S.-listed stocks over a 3–12 month momentum

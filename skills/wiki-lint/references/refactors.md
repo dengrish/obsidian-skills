@@ -71,12 +71,15 @@ affected entry and supported by its durable source.
   entries in its most specific canonical owner, moving any claim the owner
   lacks, and leaves each other entry one relating sentence and a link.
 - Preserve the retained primary flashcard's recognized scheduling attachments
-  and block ID byte-for-byte. Do not discard an extra card merely to enforce
-  the card-set rule. Preserve every card unless the authorized
-  refactor inventory assigns its tested claim to a retained or new entry, or
-  the request explicitly names that card for deletion; quote every moved or
-  removed card with all attachments in the report. Preserve existing exhibits
-  unless source evidence and the requested refactor establish their new owner.
+  and block ID byte-for-byte. Of the merged entries' primary cards, a merge
+  keeps only the survivor's: a retired entry's primary card tests the same
+  entity, so the merge authorization removes it. Do not discard a legacy
+  extra merely to enforce the card-set rule; preserve it unless the
+  authorized refactor inventory assigns its tested claim to a retained or new
+  entry, or the request explicitly names that card for deletion. Quote every
+  moved or removed card with all attachments in the report. Preserve existing
+  exhibits unless source evidence and the requested refactor establish their
+  new owner.
 
 ## Publish in dependency order
 
@@ -96,7 +99,11 @@ filesystem transaction, so order prevents a disappearing target:
    equation, exhibit, card (including its scheduling attachments and block ID),
    citation, and user-owned metadata value must either survive in an identified
    destination or be named explicitly by the authorized request as content to
-   delete. Missing or unverified source support is a reason to retain the
+   delete. A merged-away primary card counts as accounted for once it is
+   quoted in the report, because the survivor's primary card tests the same
+   entity. An inbound link or embed that targets that card's block ID cannot
+   keep its anchor, so it is an unresolved inbound reference that retains the
+   old entry. Missing or unverified source support is a reason to retain the
    content, never evidence that it is disposable. If a later edit or an
    unresolved inbound reference appears, retain the file and report the mixed
    state; never force cleanup to make the refactor look done.

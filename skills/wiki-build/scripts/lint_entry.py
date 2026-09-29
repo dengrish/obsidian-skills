@@ -59,7 +59,8 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               wikilink (listings/displays masked)
   10  10-duplicate-wikilink   same TARGET SLUG linked >1x in body prose
                               (counted by target, not display text; the
-                              Related footer is exempt).  This is item 10's
+                              Related footer and self-links, which are
+                              10-self-link's, are exempt).  This is item 10's
                               MECHANICAL HALF ONLY -- whether every target
                               resolves is a whole-VAULT question and belongs
                               to wiki-lint's scanner (CONVENTIONS.md §9),
@@ -76,9 +77,10 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               label or ` · `-separated whole wikilinks) before
                               the Flashcards separator, with a blank line
                               before `---`
-  11  11-related-display      every Related-footer link is piped; folder mode
-                              also requires the resolved target's canonical
-                              title
+  11  11-related-display      every Related-footer link except a self-link
+                              (reported only as 10-self-link) is piped;
+                              folder mode also requires the resolved target's
+                              canonical title
   12  12-image-caption        every Obsidian or Markdown image embed has an
                               immediate italic, plain-text caption
       12-table-caption        every Markdown table has an immediate italic,
@@ -127,13 +129,33 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               only markup; line 2 exactly `??` (or the user's
                               `!!`); the primary card's line 3 the canonical
                               title (base term, math skeleton; optional
-                              opener-established, alias-bound counterpart)
+                              opener-established, alias-bound counterpart);
+                              no `::` or `:::` on line 1 or 3 outside a
+                              backtick span, which the plugin reads as a
+                              card of its own.
+                              Once the answer contract identifies the primary
+                              card, every per-card finding on another card
+                              (item 19's and card line 1's item 12) is
+                              `report_only` and prefixed "legacy extra card
+                              N (report-only; never repair)"; its line 2
+                              keeps its separator
       19-brevity-candidate   advisory: a cue over 25 words outside math, a
                               `, where` glossary or a semicolon clause
   19  19-flashcard-leak       normalized answer-surface search of card line 1
                               (math included) for that card's own answer and
                               counterpart; entry aliases join the search only
                               for the primary card
+  19  19-sr-marker           the Spaced Repetition single-line separator
+                              `::` (or `:::`) outside a backtick span or a
+                              column-0 fence, anywhere before the Flashcards
+                              section, comments included except a line
+                              that starts with `<!--` and closes there,
+                              which the plugin skips with the line after
+                              it: the plugin reads the line as an extra
+                              card; a `<!--` opening a line and left open
+                              there hides the rest of the note, card
+                              included, and so does a column-0 fence that
+                              no later column-0 line closes
   18  18-alias-collision      across a folder, no two entries share an alias
   18  18-alias-duplicate      the same alias listed twice within one entry
   18  18-alias-form           every alias is itself in slug form (warning); a
@@ -153,9 +175,10 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               an inflected or derived head, an alias, or a term
                               the target defines in italics passes (warning)
 
-Items 5, 6, 13, 14, 16 and 18, and item 19's card set, primary card and
-discipline-root test, share their per-entry rules with wiki-lint's scanner
-through ``shared/scripts/entry_checks.py``. Item 10's self-link rule is
+Items 5, 6, 13, 14, 16 and 18, and item 19's card set, primary card,
+Spaced Repetition marker floor and discipline-root test, share their
+per-entry rules with wiki-lint's scanner through
+``shared/scripts/entry_checks.py``. Item 10's self-link rule is
 implemented here and in the scanner; ``SHARED_MUTATIONS`` holds both to the
 same fixtures.
 
@@ -334,6 +357,7 @@ from markdown_tables import (  # noqa: E402
 from entry_checks import (  # noqa: E402
     BARE_WORD_ALIAS_HINT,
     BOLD_OUTER_RE as _BOLD_OUTER_RE,
+    LEGACY_EXTRA_PREFIX,
     SHARED_MUTATIONS,
     SHARED_QUIET,
     api_surface_findings,
@@ -349,9 +373,12 @@ from entry_checks import (  # noqa: E402
     label_shares_surface,
     merge_scar_findings,
     organism_common_name_bound,
+    primary_card_label,
     primary_line3_faults,
     pure_math_opener_markup,
     source_meta_findings,
+    sr_card_marker_faults,
+    sr_marker_findings,
     unenumerated_bold_findings,
 )
 from vault_index import (  # noqa: E402
@@ -899,8 +926,12 @@ _RELATED_RENDERED_RE = re.compile(
     r"^ {0,3}(?:>[ \t]*)?\*\*Related:\*\*(?:[ \t]*.*)?$")
 
 
-def _check_related_footer(sections, findings):
-    """Require one canonical terminal footer without hiding malformed forms."""
+def _check_related_footer(sections, findings, own=frozenset()):
+    """Require one canonical terminal footer without hiding malformed forms.
+
+    ``own`` holds the entry's own link keys: a bare self-link is reported
+    only as ``10-self-link`` (remove it), never also as an unpiped label.
+    """
     visible = sections.get("visible_lines", sections["lines"])
     masked = strip_fenced("\n".join(visible)).split("\n")
     indexes = [index for index, line in enumerate(masked)
@@ -936,7 +967,8 @@ def _check_related_footer(sections, findings):
             {"body_line": index + 1, "text": line[:160]}))
     # Folder mode adds the resolved canonical title to these findings.
     for target, display in extract_wikilinks(line):
-        if display is None:
+        key = _link_key(target)
+        if display is None and not ("/" not in key and key in own):
             findings.append(_f(
                 "11-related-display", "error",
                 "Related footer link [[%s]] must be piped to the target's "
@@ -1147,7 +1179,7 @@ def _check_aliases(fm, findings, filename):
 _PAREN_LEADIN_RE = re.compile(
     r"^(?:(?:short\s+for|originally\s+called|also\s+called|"
     r"also\s+known\s+as|known\s+as)|singular|plural|abbreviated|"
-    r"formerly|n[ée]e|or)[\s,:]+", re.IGNORECASE)
+    r"formerly|n[ée]e|or|a\.k\.a\.?)[\s,:]+", re.IGNORECASE)
 
 _SHORT_FOR_PAREN_RE = re.compile(r"^short\s+for[\s,:]+", re.IGNORECASE)
 
@@ -1374,7 +1406,8 @@ def _check_table_captions(fm, sections, findings):
                  "caption": caption[:80]}))
 
 
-def _check_equation_coverage_candidates(fm, sections, findings):
+def _check_equation_coverage_candidates(fm, sections, findings,
+                                        extras=frozenset()):
     """Item 12's conservative floor for prose/inline defining math."""
     prose = "\n".join(sections["prose_lines"])
     masked = strip_code(prose)
@@ -1404,22 +1437,29 @@ def _check_equation_coverage_candidates(fm, sections, findings):
     boilerplate = find_boilerplate_candidates(masked, table_spans)
     for candidate in boilerplate:
         candidate["line"] += fm.body_start_line - 1
+    extra_matches = {}
     for card_no, card in enumerate(
             parse_flashcards(sections["flashcard_lines"]), 1):
         for candidate in find_boilerplate_candidates(
                 strip_code(card[0] if card else ""), card_line=True):
             candidate.pop("line", None)
             candidate["card"] = card_no
-            boilerplate.append(candidate)
+            (extra_matches.setdefault(card_no, []) if card_no in extras
+             else boilerplate).append(candidate)
+    message = (
+        "possible well-definedness boilerplate: a condition the formula "
+        "already presupposes (a nonempty set, a count guard, a sign range "
+        "on a named strength or rate, probabilities summing to one) or, "
+        "on card line 1, index bounds that run over every term. Remove "
+        "it unless the definition needs the range")
     if boilerplate:
         findings.append(_f(
-            "12-boilerplate-candidate", "warning",
-            "possible well-definedness boilerplate: a condition the formula "
-            "already presupposes (a nonempty set, a count guard, a sign range "
-            "on a named strength or rate, probabilities summing to one) or, "
-            "on card line 1, index bounds that run over every term. Remove "
-            "it unless the definition needs the range",
+            "12-boilerplate-candidate", "warning", message,
             {"matches": boilerplate, "agent_review": True}))
+    for card_no, matches in sorted(extra_matches.items()):
+        findings.append(_card_f(
+            "12-boilerplate-candidate", "warning", message,
+            {"matches": matches, "agent_review": True}, card_no, extras))
 
 
 def _literal_dollar_count(text):
@@ -1442,7 +1482,7 @@ def _check_literal_dollars(body, findings):
             (count, "" if count == 1 else "s")))
 
 
-def _check_unicode_math(fm, sections, findings):
+def _check_unicode_math(fm, sections, findings, extras=frozenset()):
     """Catch raw mathematical Unicode in rendered prose/card surfaces."""
     prose = strip_code("\n".join(sections["prose_lines"]))
     for line_no, line in enumerate(prose.split("\n"), 1):
@@ -1469,17 +1509,17 @@ def _check_unicode_math(fm, sections, findings):
             parse_flashcards(sections["flashcard_lines"]), 1):
         line1 = card[0] if card else ""
         if re.search(r"ℓ(?:[0-9₀-₉])", line1):
-            findings.append(_f(
+            findings.append(_card_f(
                 "12-equation-typography", "error",
                 "raw ℓ-norm notation in flashcard %d line 1 must use inline "
                 "LaTeX, such as `$\\ell_1$` or `$\\ell_2$`" % card_no,
-                {"card": card_no, "line1": line1[:160]}))
+                {"card": card_no, "line1": line1[:160]}, card_no, extras))
         if re.search(r"(?<!\w)(?:μ|µ)m\b", line1):
-            findings.append(_f(
+            findings.append(_card_f(
                 "12-equation-typography", "error",
                 "raw micrometre notation in flashcard %d line 1 must use "
                 "inline LaTeX, such as `$\\mu\\mathrm{m}$`" % card_no,
-                {"card": card_no, "line1": line1[:160]}))
+                {"card": card_no, "line1": line1[:160]}, card_no, extras))
 
 
 def _check_table_cell_wikilinks(fm, sections, findings):
@@ -1608,9 +1648,13 @@ def _append_duplicate_wikilink_findings(findings, occurrences, resolve=None):
                 {"target": key, "count": len(hits), "occurrences": hits}))
 
 
-def _check_duplicate_wikilinks(sections, findings):
+def _check_duplicate_wikilinks(sections, findings, own=frozenset()):
+    """Item 10: repeated body links; a self-link is ``10-self-link``'s alone."""
     _append_duplicate_wikilink_findings(
-        findings, _body_wikilink_occurrences(sections))
+        findings, [occurrence for occurrence in
+                   _body_wikilink_occurrences(sections)
+                   if "/" in occurrence["key"]
+                   or occurrence["key"] not in own])
 
 
 def _check_person_event_date(fm, sections, findings):
@@ -1814,14 +1858,20 @@ def _self_link_finding(occurrence):
         {"target": occurrence["target"], "region": occurrence["region"]})
 
 
+def _own_link_keys(fm, filename):
+    """The bare link keys that name this entry: its filename and aliases."""
+    stem = os.path.splitext(os.path.basename(filename))[0]
+    return ({fold_name(stem)}
+            | {fold_name(a) for a in fm.values("aliases") if a})
+
+
 def _check_self_links(fm, sections, findings, filename):
     """Item 10: no link to the entry itself (its filename or its own alias).
 
     A single file cannot tell which folder a path-qualified target names, so
     only bare targets are compared here; folder mode re-resolves every link.
     """
-    stem = os.path.splitext(os.path.basename(filename))[0]
-    own = {fold_name(stem)} | {fold_name(a) for a in fm.values("aliases") if a}
+    own = _own_link_keys(fm, filename)
     for occurrence in _self_link_occurrences(sections):
         if "/" not in occurrence["key"] and occurrence["key"] in own:
             findings.append(_self_link_finding(occurrence))
@@ -2031,7 +2081,39 @@ def _is_root_entry(fm, filename):
     return is_discipline_root(stem, tags, TAG_ENUM)
 
 
-def _check_flashcards_present(fm, sections, findings, filename):
+def _legacy_extra_cards(fm, sections):
+    """Card numbers of the legacy extras: every complete card but the primary.
+
+    The shared ``primary_card_label`` identifies the primary card by the
+    answer contract, as the scanner does. With fewer than two complete
+    cards, no title, or no identifiable primary card, no card is an extra
+    and per-card findings stay ordinary (the no-primary finding asks first).
+    """
+    if sections["flashcards_index"] is None or not fm.scalar("title"):
+        return frozenset()
+    rows = [(card_no, card[2].strip(),
+             _flashcard_line3_fault(card[2].strip(), fm, sections))
+            for card_no, card in enumerate(
+                parse_flashcards(sections["flashcard_lines"]), 1)
+            if len(card) >= 3]
+    if len(rows) < 2:
+        return frozenset()
+    primary = primary_card_label(rows, *_flashcard_primary_answer(fm, sections))
+    if primary is None:
+        return frozenset()
+    return frozenset(row[0] for row in rows if row[0] != primary)
+
+
+def _card_f(item, severity, message, evidence, card_no, extras):
+    """A per-card finding; on a legacy extra it is report-only and says so."""
+    if card_no in extras:
+        message = LEGACY_EXTRA_PREFIX % card_no + message
+        evidence = dict(evidence, report_only=True)
+    return _f(item, severity, message, evidence)
+
+
+def _check_flashcards_present(fm, sections, findings, filename,
+                              extras=frozenset()):
     """Item 19's mechanical clauses for the section and its card set.
 
     The leak scan below is item 19's other half and it only runs when a
@@ -2042,7 +2124,8 @@ def _check_flashcards_present(fm, sections, findings, filename):
     separator of its own, and holds one well-formed `??` card; a further card
     is a report-only legacy extra.  A discipline root needs no card, so it
     skips the missing-section, no-card and no-primary findings; any card it
-    keeps is checked as usual.
+    keeps is checked as usual.  Per-card findings on a legacy extra
+    (``extras``) are report-only too: a legacy extra keeps its separator.
     """
     root = _is_root_entry(fm, filename)
     if sections["flashcards_index"] is None:
@@ -2129,7 +2212,7 @@ def _check_flashcards_present(fm, sections, findings, filename):
                 {"card": card_no, "lines": len(card)}))
             continue
         if len(card) > 3:
-            findings.append(_f(
+            findings.append(_card_f(
                 "19-flashcards", "error",
                 "flashcard %d has %d visible lines -- only the first three "
                 "may be card content; recognized Spaced Repetition state may "
@@ -2137,38 +2220,55 @@ def _check_flashcards_present(fm, sections, findings, filename):
                 "use the exact `sr|card-metadata` callout, so other content "
                 "after the answer is "
                 "malformed" % (card_no, len(card)),
-                {"card": card_no, "lines": len(card)}))
+                {"card": card_no, "lines": len(card)}, card_no, extras))
         # Preserve indentation for the shared block-Markdown check; sentence
         # checks normalize their own surrounding whitespace.
         line1, line2, line3 = card[0], card[1].strip(), card[2].strip()
         line1_faults = flashcard_line1_faults(line1)
         if line1_faults:
-            findings.append(_f(
+            findings.append(_card_f(
                 "19-flashcards", "error",
                 "flashcard %d line 1 %s -- the definition must be one "
                 "capitalized, period-terminated sentence and takes inline "
                 "LaTeX only (no Markdown or HTML)"
                 % (card_no, " and ".join(line1_faults)),
-                {"card": card_no, "faults": line1_faults}))
-        if line2 not in CARD_SEPARATORS:
-            findings.append(_f(
+                {"card": card_no, "faults": line1_faults}, card_no, extras))
+        # The plugin reads a separator on line 1 or 3 as a card of its own
+        # (the scanner reports the same through entry_checks).
+        for line_no, marker, fault in sr_card_marker_faults(card):
+            findings.append(_card_f(
                 "19-flashcards", "error",
-                "flashcard %d line 2 is %r -- it must be exactly `??` (or the "
-                "user's `!!`, preserved verbatim, never converted)"
+                "flashcard %d line %d %s" % (card_no, line_no, fault),
+                {"card": card_no, "card_line": line_no, "marker": marker},
+                card_no, extras))
+        if line2 not in CARD_SEPARATORS:
+            findings.append(_card_f(
+                "19-flashcards", "error",
+                ("flashcard %d line 2 is %r -- a legacy extra keeps its "
+                 "separator" if card_no in extras else
+                 "flashcard %d line 2 is %r -- it must be exactly `??` (or "
+                 "the user's `!!`, preserved verbatim, never converted)")
                 % (card_no, line2[:20]),
-                {"card": card_no, "line2": line2[:40]}))
+                {"card": card_no, "line2": line2[:40]}, card_no, extras))
         if title:
             line3_checks.append(
                 (card_no, line3, _flashcard_line3_fault(line3, fm, sections)))
         hints = flashcard_brevity_hints(line1)
         if hints:
             brevity.append({"card": card_no, "hints": hints})
-    if brevity:
+    brevity_message = ("possible over-long or two-idea card line; review it "
+                       "under the card rules and shorten only a genuine "
+                       "shortfall")
+    primary_brevity = [row for row in brevity if row["card"] not in extras]
+    if primary_brevity:
         findings.append(_f(
-            "19-brevity-candidate", "warning",
-            "possible over-long or two-idea card line; review it under the "
-            "card rules and shorten only a genuine shortfall",
-            {"matches": brevity, "agent_review": True}))
+            "19-brevity-candidate", "warning", brevity_message,
+            {"matches": primary_brevity, "agent_review": True}))
+    for row in brevity:
+        if row["card"] in extras:
+            findings.append(_card_f(
+                "19-brevity-candidate", "warning", brevity_message,
+                {"matches": [row], "agent_review": True}, row["card"], extras))
 
     # A preserved legacy extra keeps its own answer: with several cards,
     # only the primary card is held to the line-3 contract (the scanner makes
@@ -2188,7 +2288,7 @@ def _check_flashcards_present(fm, sections, findings, filename):
             {"card": card_no, "line3": line3[:60], "title": title}))
 
 
-def _check_flashcard_leak(fm, sections, findings):
+def _check_flashcard_leak(fm, sections, findings, extras=frozenset()):
     if sections["flashcards_index"] is None:
         return
     title = fm.scalar("title")
@@ -2224,14 +2324,32 @@ def _check_flashcard_leak(fm, sections, findings):
             match_kind = answer_surface_match(line1, needle)
             if match_kind is None:
                 continue
-            findings.append(_f(
+            findings.append(_card_f(
                 "19-flashcard-leak",
                 "error",
                 "flashcard %d line 1 leaks the %s %r (Unicode/case/punctuation "
                 "normalized whole surface, math regions included)"
                 % (card_no, kind, needle),
                 {"card": card_no, "needle": needle, "kind": kind,
-                 "line1": line1}))
+                 "line1": line1}, card_no, extras))
+
+
+def _check_sr_markers(fm, sections, findings):
+    """Item 19: no Spaced Repetition card marker outside the Flashcards section.
+
+    The plugin parses the whole note, so a single-line separator in the body
+    or footer adds a card beside the entry's one definition card. It reads
+    the raw text under its own comment rule, so the shared floor (the
+    scanner's too) gets the unmasked lines.
+    """
+    lines = sections["lines"]
+    end = sections["flashcards_index"]
+    for hit in sr_marker_findings("\n".join(
+            lines if end is None else lines[:end])):
+        findings.append(_f(
+            "19-sr-marker", "error", hit["message"],
+            {"line": fm.body_start_line + hit["line"] - 1,
+             "marker": hit["marker"]}))
 
 
 def _check_source_duplicates(fm, findings):
@@ -2307,6 +2425,7 @@ def lint_text(text, filename):
     result["description_chars"] = len(desc) if desc else 0
 
     sections = split_sections(fm.body)
+    extras = _legacy_extra_cards(fm, sections)
 
     _check_field_order(fm, findings)
     _check_type(fm, findings)
@@ -2322,17 +2441,18 @@ def lint_text(text, filename):
     _check_aliases(fm, findings, filename)
     _check_alias_completeness(fm, sections, findings, filename)
     _check_body_structure(fm, sections, findings)
-    _check_related_footer(sections, findings)
+    own_keys = _own_link_keys(fm, filename)
+    _check_related_footer(sections, findings, own_keys)
     _check_table_cell_wikilinks(fm, sections, findings)
     _check_redundant_piped_wikilinks(sections, findings)
-    _check_duplicate_wikilinks(sections, findings)
+    _check_duplicate_wikilinks(sections, findings, own_keys)
     _check_self_links(fm, sections, findings, filename)
     _check_integrated_wikilinks(fm, sections, findings)
     _check_person_event_date(fm, sections, findings)
     _check_image_captions(fm, sections, findings)
-    _check_equation_coverage_candidates(fm, sections, findings)
+    _check_equation_coverage_candidates(fm, sections, findings, extras)
     _check_literal_dollars("\n".join(sections["prose_lines"]), findings)
-    _check_unicode_math(fm, sections, findings)
+    _check_unicode_math(fm, sections, findings, extras)
     _check_table_captions(fm, sections, findings)
     _check_bold_opener(fm, sections, findings)
     _check_code_typography(sections, findings)
@@ -2341,8 +2461,9 @@ def lint_text(text, filename):
     _check_merge_scars(fm, sections, findings)
     _check_source_meta(fm, sections, findings)
     _check_display_labels(sections, findings)
-    _check_flashcards_present(fm, sections, findings, filename)
-    _check_flashcard_leak(fm, sections, findings)
+    _check_flashcards_present(fm, sections, findings, filename, extras)
+    _check_flashcard_leak(fm, sections, findings, extras)
+    _check_sr_markers(fm, sections, findings)
     return result
 
 
@@ -2491,7 +2612,7 @@ def _recheck_folder_duplicate_wikilinks(results, root, snapshot_text):
     or aliases remain unresolved rather than choosing an owner by walk order.
     Repeats of one missing target still count as one target.
     """
-    resolve_target = _folder_resolver(results, root)[0]
+    resolve_target, owner_for_file, _owners = _folder_resolver(results, root)
 
     def resolve(occurrence):
         return resolve_target(occurrence["target"],
@@ -2504,7 +2625,12 @@ def _recheck_folder_duplicate_wikilinks(results, root, snapshot_text):
         fm = parse_frontmatter(text)
         if not fm.found:
             continue
-        occurrences = _body_wikilink_occurrences(split_sections(fm.body))
+        # A self-link is 10-self-link's alone, as in the scanner.
+        own = owner_for_file[result["file"]]
+        occurrences = [
+            occurrence for occurrence in
+            _body_wikilink_occurrences(split_sections(fm.body))
+            if resolve(occurrence) != own]
         result["findings"] = [
             finding for finding in result["findings"]
             if finding["item"] != "10-duplicate-wikilink"
@@ -2586,9 +2712,11 @@ def _check_folder_related_labels(results, root, snapshot_text):
 
     The title comparison is folder-only. A single entry cannot know whether a
     target, basename, or alias has one owner, and choosing one would turn an
-    ambiguous link into a destructive false prescription.
+    ambiguous link into a destructive false prescription. A footer link that
+    resolves to its own entry is reported only as ``10-self-link``, whose
+    remedy removes it.
     """
-    resolve, _owner_for_file, owners = _folder_resolver(results, root)
+    resolve, owner_for_file, owners = _folder_resolver(results, root)
     titles = {owner: result["title"] for owner, result in owners.items()
               if result.get("title")}
 
@@ -2600,8 +2728,15 @@ def _check_folder_related_labels(results, root, snapshot_text):
         if not fm.found:
             continue
         related = split_sections(fm.body)["related_line"] or ""
+        own = owner_for_file[result["file"]]
         for target, display in extract_wikilinks(related):
             owner = resolve(target)
+            if owner == own:
+                result["findings"] = [
+                    f for f in result["findings"]
+                    if not (f["item"] == "11-related-display"
+                            and f.get("evidence") == {"target": target})]
+                continue
             raw_canonical = titles.get(owner) if owner else None
             canonical = (title_display_form(raw_canonical)
                          if raw_canonical else None)
@@ -2959,12 +3094,16 @@ def run_self_test():
         hidden = (opening + "\n## Flashcards\n**Related:** [[ghost]]\n"
                   "```\n" + closing + "\n\n")
         commented = good.replace("**Related:**", hidden + "**Related:**", 1)
+        # An HTML comment left open on its first line, or the column-0 fence
+        # inside the %% comment, hides the rest of the note from the Spaced
+        # Repetition plugin; only that is reported.
+        open_comment = ["19-sr-marker"]
         check("hidden section markers do not create phantom cards: " + opening,
-              items(commented), [])
+              items(commented), open_comment)
         between_sections = good.replace("\n---\n\n## Flashcards", "\n" + hidden
                                         + "---\n\n## Flashcards", 1)
         check("a hidden template after the footer is not stray content: " + opening,
-              items(between_sections), [])
+              items(between_sections), open_comment)
         # A duplicate inside a comment is not a second rendered occurrence.
         duplicated = good.replace("**Related:**", opening + " [[precision]] "
                                   + closing + "\n\n**Related:**", 1)
@@ -3073,8 +3212,8 @@ def run_self_test():
                 f["evidence"].get("card"))
                for f in lint_text(two_card_example,
                                   "lambdarank.md")["findings"]],
-              [("19-flashcards", True, None), ("19-flashcards", None, 2),
-               ("19-flashcards", None, 2)])
+              [("19-flashcards", True, None), ("19-flashcards", True, 2),
+               ("19-flashcards", True, 2)])
     commented = good.replace('title: "ROC curve"', 'title: "ROC curve" # user annotation')
     commented = commented.replace('"auroc"', '"aur\\u006fc" # an escaped alias')
     commented = commented.replace('sources:\n', 'sources: # reference\n# provenance annotation\n')
@@ -3167,7 +3306,7 @@ def run_self_test():
         check("protected %s state on a legacy extra card is not card "
               "content" % storage_form,
               ([f['evidence'].get('cards') for f in legacy
-                if f['evidence'].get('report_only')],
+                if f['evidence'].get('cards')],
                any('visible lines' in f['message']
                    or 'malformed' in f['message'] for f in legacy)),
               ([2], False))
@@ -3866,6 +4005,16 @@ def run_self_test():
     check("a short-for expansion in the opener establishes the alias-bound "
           "flashcard counterpart",
           items(short_for_card, "adaboost.md"), [])
+    aka_card = retitled(
+        "PCA", "principal-component-analysis",
+        "PCA projects data onto its directions of greatest variance.",
+        "**PCA** (a.k.a. *principal component analysis*) projects data onto "
+        "its directions of greatest variance.",
+        "PCA (principal component analysis)")
+    check("an a.k.a. lead-in is stripped from the opener counterpart, as in "
+          "the scanner",
+          [f["item"] for f in lint_text(aka_card, "pca.md")["findings"]
+           if f["item"] == "19-flashcards"], [])
     originally_called = retitled(
         "Boosting", "hypothesis-boosting",
         "Boosting combines weak learners into a strong learner.",
@@ -4035,8 +4184,55 @@ def run_self_test():
           [(f["item"], f["evidence"].get("report_only"),
             f["evidence"].get("card"))
            for f in lint_text(with_cards(why), "roc-curve.md")["findings"]],
-          [("19-flashcards", True, None), ("19-flashcards", None, 2),
-           ("19-flashcards", None, 2)])
+          [("19-flashcards", True, None), ("19-flashcards", True, 2),
+           ("19-flashcards", True, 2)])
+    legacy_messages = [f["message"] for f in lint_text(
+        with_cards(why), "roc-curve.md")["findings"]
+        if f["evidence"].get("card") == 2]
+    check("a legacy extra's findings carry the report-only prefix, and its "
+          "line 2 keeps its separator",
+          ([m.startswith("legacy extra card 2 (report-only; never repair): ")
+            for m in legacy_messages],
+           any("keeps its separator" in m for m in legacy_messages),
+           any("must be exactly" in m for m in legacy_messages)),
+          ([True, True], True, False))
+    simplified_pair = with_cards(why).replace(
+        "??\nROC curve\n", "?\nROC curve\n", 1)
+    check("a primary card simplified to ? beside a legacy ? card: only the "
+          "primary's line 2 needs its ?? back",
+          [(f["evidence"].get("card"), f["evidence"].get("report_only"),
+            "must be exactly `??`" in f["message"])
+           for f in lint_text(simplified_pair, "roc-curve.md")["findings"]
+           if "line 2" in f["message"]],
+          [(1, None, True), (2, True, False)])
+    question_first = mutate(
+        "## Flashcards\n\n", "## Flashcards\n\n" + why + "\n")
+    check("a question card placed first is the legacy extra; the definition "
+          "card after it is the primary one",
+          [(f["evidence"].get("card"), f["evidence"].get("report_only"))
+           for f in lint_text(question_first, "roc-curve.md")["findings"]
+           if f["evidence"].get("card")],
+          [(1, True), (1, True)])
+    extra_faults = with_cards(
+        "The rate of positives found at 10 μm for a nonempty set of $m "
+        "\\ge 1$ instances, a second idea reading; stated at length across "
+        "many more ordinary words than any card cue should ever need to "
+        "carry here.\n??\nSecond idea\n")
+    check("a legacy extra with markup on line 3 draws no repair order",
+          [f["item"] for f in lint_text(with_cards(
+              "Another notion, stated briefly.\n?\nThe **$k$** term\n"),
+              "roc-curve.md")["findings"]
+           if not f["evidence"].get("report_only")], [])
+    check("line-1 leak, typography, boilerplate and brevity findings on a "
+          "legacy extra are report-only",
+          sorted((f["item"], f["evidence"].get("report_only"),
+                  f["message"].startswith("legacy extra card 2 "))
+                 for f in lint_text(extra_faults, "roc-curve.md")["findings"]
+                 if f["item"] != "19-flashcards"),
+          [("12-boilerplate-candidate", True, True),
+           ("12-equation-typography", True, True),
+           ("19-brevity-candidate", True, True),
+           ("19-flashcard-leak", True, True)])
     check("every further card joins the one report-only count",
           [(f["evidence"].get("cards"), f["evidence"].get("report_only"))
            for f in lint_text(with_cards(
@@ -4048,7 +4244,33 @@ def run_self_test():
           [(f["evidence"].get("report_only"), f["evidence"].get("card"))
            for f in lint_text(with_cards(why.replace("\n?\n", "\n!!\n")),
                               "roc-curve.md")["findings"]],
-          [(True, None), (None, 2)])
+          [(True, None), (True, 2)])
+    card_marker = mutate(
+        "The plot tracing the trade-off between two error rates as a "
+        "decision threshold moves.",
+        "The plot tracing the trade-off $a :: b$ between two error rates as "
+        "a decision threshold moves.")
+    check("a separator on card line 1 splits the card: one item-19 error "
+          "naming the line and the math remedy",
+          [(f["item"], f["evidence"].get("card_line"),
+            "\\mathbin{:}\\mathbin{:}" in f["message"])
+           for f in lint_text(card_marker, "roc-curve.md")["findings"]],
+          [("19-flashcards", 1, True)])
+    check("a separator on card line 3 replaces the card; on a legacy extra "
+          "it is report-only",
+          sorted((f["evidence"].get("card"), f["evidence"].get("card_line"),
+                  f["evidence"].get("report_only"),
+                  f["message"].startswith("legacy extra card 2 "))
+                 for f in lint_text(with_cards(
+                     "Another notion, stated $x ::: y$ briefly.\n??\n"
+                     "Second::idea\n"), "roc-curve.md")["findings"]
+                 if f["evidence"].get("card_line")),
+          [(2, 1, True, True), (2, 3, True, True)])
+    check("a card separator inside a backtick span is no card-line fault",
+          [f["evidence"].get("card_line") for f in lint_text(with_cards(
+              "Another notion `a::b`, stated briefly.\n??\nSecond idea\n"),
+              "roc-curve.md")["findings"] if f["evidence"].get("card_line")],
+          [])
     long_cue = ("The plot tracing the trade-off between two error rates as a "
                 "decision threshold moves across every possible score value, "
                 "drawn for a binary classifier evaluated on a held-out test "
@@ -4659,6 +4881,24 @@ def run_self_test():
               "sharing its target's surface passes",
               sorted({f["item"] for entry in lint_path(shared_tmp)["entries"]
                       for f in entry["findings"]}), ["10-self-link"])
+        folder_self = []
+        for text in (
+                mutate("[[precision|Precision]]\n",
+                       "[[precision|Precision]] · [[Wiki/roc-curve]]\n"),
+                mutate("[[precision|Precision]]\n",
+                       "[[precision|Precision]] · [[auroc|AUROC]]\n"),
+                with_paragraph("It is the [[roc-curve|curve]], and the "
+                               "[[auroc|curve]] again.")):
+            with open(os.path.join(shared_tmp, "roc-curve.md"), "w",
+                      encoding="utf-8") as fh:
+                fh.write(text)
+            folder_self.append(sorted({
+                f["item"] for entry in lint_path(shared_tmp)["entries"]
+                if os.path.basename(entry["file"]) == "roc-curve.md"
+                for f in entry["findings"]}))
+        check("folder mode reports a footer or repeated self-link only as "
+              "10-self-link, never also as a label or duplicate to fix",
+              folder_self, [["10-self-link"]] * 3)
         # The rows neither tool may flag (scan_vault runs them too).
         for name, text in (
                 ("mus-musculus.md", retitled(
@@ -4765,14 +5005,24 @@ def run_self_test():
               "It trades against [[precision|*exact* precision]]."), "18-"),
           [("18-display-label", "error")])
     check("item 10: a link to the entry itself by slug, case, anchor, alias "
-          "or in the footer",
-          [found(text, "10-") for text in (
+          "or in the footer is only a self-link, never also a footer label or "
+          "duplicate to fix",
+          [items(text) for text in (
               with_paragraph("It is the [[roc-curve|curve]] itself."),
               with_paragraph("It is the [[ROC-Curve.md#Uses|curve]] itself."),
               with_paragraph("It is the [[auroc]] itself."),
               mutate("[[precision|Precision]]",
-                     "[[precision|Precision]] · [[roc-curve|ROC curve]]"))],
-          [[("10-self-link", "error")]] * 4)
+                     "[[precision|Precision]] · [[roc-curve|ROC curve]]"),
+              mutate("[[precision|Precision]]",
+                     "[[precision|Precision]] · [[roc-curve]]"),
+              mutate("[[precision|Precision]]",
+                     "[[precision|Precision]] · [[auroc]]"),
+              with_paragraph("It is the [[roc-curve|curve]], and the "
+                             "[[roc-curve|curve]] again."))],
+          [["10-self-link"]] * 7)
+    check("a self-link's severity is error",
+          found(with_paragraph("It is the [[auroc]] itself."), "10-"),
+          [("10-self-link", "error")])
     check("a single file leaves path-qualified self-links to folder mode; "
           "MOC navigation and table cells are not self-links",
           [found(text, "10-self") for text in (

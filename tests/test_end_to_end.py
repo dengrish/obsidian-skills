@@ -227,6 +227,21 @@ class WorkflowTests(unittest.TestCase):
                         "--wiki", self.vault / "Wiki", "--entry", entry)
         self.assertEqual(queue.read_bytes(), original.replace(b"[ ]", b"[x]"))
 
+    def test_backlog_reports_an_unindented_continuation_as_request_text(self):
+        queue = self.vault / "add-to-wiki.md"
+        queue.write_text("- [ ] Kalman filter\nParticle filter\n- [ ] Next\n",
+                         encoding="utf-8")
+        snapshot = Path(self.scratch.name) / "queue.json"
+        report = json.loads(self.run_script(
+            "skills/wiki-add/scripts/backlog.py", "scan", queue,
+            "--out", snapshot).stdout)
+        self.assertEqual([item["text"] for item in report["items"]],
+                         ["Kalman filter", "Next"])
+        self.assertEqual(report["items"][0]["context_lines"], ["Particle filter"])
+        self.assertEqual(
+            [(row["line"], row["reason"]) for row in report["report_only"]],
+            [(2, "unindented line continues the request above")])
+
     def test_pdf_rename_does_not_claim_a_wrongly_qualified_article_origin(self):
         for folder in ("Missing", "Sources/Other"):
             with self.subTest(folder=folder):
@@ -2211,6 +2226,16 @@ A compact definition used only to exercise the shared contract.
             self.assertTrue(any(
                 finding["item"] == "19-flashcards" and fragment in finding["message"]
                 for finding in lint_findings[slug]), (slug, lint_findings[slug]))
+        # A legacy extra card's own findings are report-only and never ask
+        # for its separator to change; the scanner below agrees.
+        extra_findings = [finding for finding in lint_findings["legacy-extra-cards"]
+                          if (finding.get("evidence") or {}).get("card") == 3]
+        self.assertTrue(extra_findings, lint_findings["legacy-extra-cards"])
+        for finding in extra_findings:
+            self.assertTrue(finding["evidence"].get("report_only"), finding)
+            self.assertTrue(finding["message"].startswith(
+                "legacy extra card 3 (report-only; never repair): "), finding)
+            self.assertNotIn("must be exactly", finding["message"])
 
         scan = json.loads(self.run_script(
             "skills/wiki-lint/scripts/scan_vault.py", wiki, "--indent", "0").stdout)
@@ -2246,6 +2271,13 @@ A compact definition used only to exercise the shared contract.
                 problem["slug"] == slug and problem["item"] == "item19"
                 and fragment in problem["message"]
                 for problem in scan["problems"]), slug)
+        extra_problems = [problem["message"] for problem in scan["problems"]
+                          if problem["slug"] == "legacy-extra-cards"
+                          and "card 3" in problem["message"]]
+        self.assertTrue(extra_problems)
+        for message in extra_problems:
+            self.assertIn("legacy extra card 3 (report-only; never repair)", message)
+            self.assertNotIn("must be exactly", message)
         for slug in ("related-anchored", "related-wrong-label"):
             self.assertIn("item11", scan_items.get(slug, set()), scan_items.get(slug))
         self.assertNotIn("item10/dup",

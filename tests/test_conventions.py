@@ -5967,31 +5967,32 @@ SELFTEST_MIN_CASES = {
     # Lowered deliberately on 2026-09-26: a verified bloat audit removed
     # redundant cases (each duplicated one that stays) and the Extended Data
     # skip/refuse path in batch_extract.py.
-    # Updated after the full review of 2026-09-25. Raising after growth is the
+    # Updated after the full reviews of 2026-09-25 and 2026-09-29 (knowledge
+    # 1.10.0-1.12.0). Raising after growth is the
     # mirror duty of the "lowering is a deliberate, reviewable statement" rule
     # below: new regression cases must not disappear with the harness green.
     "shared/scripts/atomic_move.py": 32,
     "shared/scripts/check_parsers.py": 22,
     "shared/scripts/code_typography.py": 20,
-    "shared/scripts/entry_checks.py": 46,
-    "shared/scripts/equation_coverage.py": 160,
+    "shared/scripts/entry_checks.py": 69,
+    "shared/scripts/equation_coverage.py": 179,
     "shared/scripts/figure_state.py": 13,
-    "shared/scripts/introduced_aliases.py": 23,
+    "shared/scripts/introduced_aliases.py": 34,
     "shared/scripts/markdown_tables.py": 42,
     "shared/scripts/naming.py": 228,
     "shared/scripts/note_provenance.py": 12,
-    "shared/scripts/organism_names.py": 31,
-    "shared/scripts/entry_structure.py": 155,
+    "shared/scripts/organism_names.py": 34,
+    "shared/scripts/entry_structure.py": 164,
     "shared/scripts/plugin_paths.py": 110,
     "shared/scripts/portable_names.py": 5,
-    "shared/scripts/publish_files.py": 20,
-    "shared/scripts/plurals.py": 251,
+    "shared/scripts/publish_files.py": 25,
+    "shared/scripts/plurals.py": 259,
     "shared/scripts/slugify.py": 80,  # device-name restrictions removed
-    "shared/scripts/vault_artifacts.py": 66,
+    "shared/scripts/vault_artifacts.py": 68,
     "shared/scripts/yaml_scalars.py": 12,
     "skills/clipping-clean/scripts/dedup_index.py": 173,
-    "skills/clipping-clean/scripts/fetch_images.py": 543,
-    "skills/clipping-clean/scripts/slug.py": 146,  # device-name guards removed
+    "skills/clipping-clean/scripts/fetch_images.py": 561,
+    "skills/clipping-clean/scripts/slug.py": 147,  # device-name guards removed
     "skills/feed-collect/scripts/feed_collect.py": 13,
     "skills/feed-collect/scripts/feed_media.py": 4,
     "skills/feed-collect/scripts/rss_source.py": 4,
@@ -6022,20 +6023,20 @@ SELFTEST_MIN_CASES = {
     "skills/stock-research/scripts/market_prices.py": 28,
     "skills/stock-research/scripts/market_public.py": 140,
     "skills/stock-research/scripts/market_screen.py": 25,
-    "skills/paper-summarize/scripts/note_lint.py": 240,
-    "skills/paper-summarize/scripts/paper_scan.py": 173,
-    "skills/paper-summarize/scripts/paper_text.py": 63,
+    "skills/paper-summarize/scripts/note_lint.py": 246,
+    "skills/paper-summarize/scripts/paper_scan.py": 174,
+    "skills/paper-summarize/scripts/paper_text.py": 77,
     "skills/figure-extract/scripts/auto_fig_bbox.py": 349,
-    "skills/figure-extract/scripts/batch_extract.py": 399,
-    "skills/figure-extract/scripts/extract_figures.py": 194,
+    "skills/figure-extract/scripts/batch_extract.py": 416,
+    "skills/figure-extract/scripts/extract_figures.py": 222,
     "skills/figure-extract/scripts/render_page.py": 67,
-    "skills/pdf-organize/scripts/organize.py": 373,
-    "skills/wiki-add/scripts/backlog.py": 48,
-    "skills/wiki-build/scripts/find_collisions.py": 73,
-    "skills/wiki-build/scripts/lint_entry.py": 364,
-    "skills/wiki-build/scripts/review_tree.py": 28,
-    "skills/wiki-build/scripts/vault_index.py": 84,
-    "skills/wiki-lint/scripts/scan_vault.py": 498,
+    "skills/pdf-organize/scripts/organize.py": 383,
+    "skills/wiki-add/scripts/backlog.py": 54,
+    "skills/wiki-build/scripts/find_collisions.py": 77,
+    "skills/wiki-build/scripts/lint_entry.py": 420,
+    "skills/wiki-build/scripts/review_tree.py": 37,
+    "skills/wiki-build/scripts/vault_index.py": 85,
+    "skills/wiki-lint/scripts/scan_vault.py": 585,
 }
 
 
@@ -7395,6 +7396,8 @@ def check_linter_finding_routes(rep, _conv):
         ("scanner", "`item2/parents-null`"),
         ("scanner", "`item19/brevity-candidate`"),
         ("actions", "`item19/brevity-candidate`"),
+        ("scanner", "`item19/sr-marker`"),
+        ("actions", "`item19/sr-marker`"),
         ("scanner", "`card_rivals`"),
         ("actions", "`card_rivals`"),
         ("scanner", "`spaced_repetition`"),
@@ -7431,8 +7434,12 @@ def check_safe_write_programmatic_api(rep, _conv):
         "linter": os.path.join(SKILLS_DIR, "wiki-lint", "SKILL.md"),
         "clipping": os.path.join(
             SKILLS_DIR, "clipping-clean", "SKILL.md"),
+        "reprocess": os.path.join(
+            SKILLS_DIR, "clipping-clean", "references",
+            "duplicates-and-reprocessing.md"),
         "paper": os.path.join(
             SKILLS_DIR, "paper-summarize", "SKILL.md"),
+        "suggestions": os.path.join(SHARED_DIR, "SUGGESTIONS.md"),
     }
     try:
         texts = {name: read(path) for name, path in paths.items()}
@@ -7448,14 +7455,24 @@ def check_safe_write_programmatic_api(rep, _conv):
         ("safe", "Keep `stage_dir` and report its path on **any**"),
         ("safe", "expected=identity"),
         ("atomic", "programmatic import library, not a publication CLI"),
-        ("builder", "SAFE_WRITES.md#call-the-shared-python-api"),
         ("linter", "SAFE_WRITES.md#call-the-shared-python-api"),
-        ("clipping", "SAFE_WRITES.md#call-the-shared-python-api"),
-        ("clipping", "`atomic_move.publish_new(..., atomic_move.regular_file_snapshot, ...)`"),
-        ("clipping", "`atomic_move.replace_expected`"),
-        ("paper", "SAFE_WRITES.md#call-the-shared-python-api"),
-        ("paper", "`atomic_move.publish_new(..., atomic_move.regular_file_snapshot, ...)`"),
-        ("paper", "`atomic_move.replace_expected`"),
+        # Reviewed regular files go through the publish_files CLI; only an
+        # operation it cannot express keeps a documented atomic_move driver.
+        ("builder", "shared/scripts/publish_files.py' publish --vault"),
+        ("clipping", "shared/scripts/publish_files.py' snapshot --vault"),
+        ("clipping", "shared/scripts/publish_files.py' publish --vault"),
+        ("clipping", "`snapshot --replace`"),
+        ("reprocess", "SAFE_WRITES.md#call-the-shared-python-api"),
+        ("reprocess", "`atomic_move.publish_new(staged, target, "
+                      "atomic_move.regular_file_snapshot, stage_parent)`"),
+        ("reprocess", "`publish_files.py` offers no conditional removal "
+                      "(step 9)"),
+        ("paper", "shared/scripts/publish_files.py' snapshot --vault"),
+        ("paper", "shared/scripts/publish_files.py' publish --vault"),
+        ("suggestions",
+         "'<plugin>/shared/scripts/publish_files.py' snapshot --vault"),
+        ("suggestions",
+         "'<plugin>/shared/scripts/publish_files.py' publish --vault"),
     )
     found = 0
     for owner, marker in markers:
@@ -7576,6 +7593,9 @@ CARD_SET_STALE_PHRASES = (
     "MAX_UNDERSTANDING_CARDS",
     "UNDERSTANDING_SEPARATOR",
     "flashcard_kind",
+    "cue or answer",
+    "primary card's answer line",
+    "card beyond the first",
 )
 
 
@@ -7619,6 +7639,11 @@ def check_card_set_contract(rep, _conv):
          "no longer forbids routine lint from adding a second card"),
         (wl_path, "Never repair or reword a legacy extra",
          "no longer keeps a legacy extra card report-only"),
+        (wl_path, "A removal advances `updated:` and preserves `read:`",
+         "no longer states the date rule for a requested card removal"),
+        (os.path.join(SKILLS_DIR, "wiki-lint", "references", "refactors.md"),
+         "a merge keeps only the survivor's",
+         "no longer keeps a single card when two entries merge"),
         (KNOWLEDGE_README, "## Reviewing flashcards",
          "lost the `## Reviewing flashcards` setup section"),
         (KNOWLEDGE_README, "never edits the plugin's settings",
@@ -7804,6 +7829,9 @@ def _configure_utf8_stdio():
 
 def main(argv=None):
     _configure_utf8_stdio()
+    # Validate this checkout's shared/scripts through the plugin-relative
+    # walk-up that check_bootstrap asserts, never an exported install.
+    os.environ.pop("OBSIDIAN_VAULT_SHARED", None)
     ap = argparse.ArgumentParser(
         prog="test_conventions.py",
         description="Check the skills against shared/CONVENTIONS.md.")

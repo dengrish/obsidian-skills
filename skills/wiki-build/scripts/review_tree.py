@@ -20,14 +20,29 @@ diff in one call:
      finding was already on that path's baseline copy), ``introduced`` (in an
      unmodified file and absent from the baseline), or baseline (counted).
      Findings match the baseline by message, less any cross-entry count.
-  5. Dangling links: body and Related wikilinks of each staged entry whose
-     target matches no entry of the combined tree by filename stem or alias,
-     nor, when bare, a file stem in the vault's ``MOCs`` folder
-     (case/NFC-insensitive).
+  5. Links: body and Related wikilinks of each staged entry. ``dangling``
+     lists a target that matches no entry of the combined tree by filename
+     stem or alias, nor, when bare, a file stem in the vault's ``MOCs``
+     folder (case/NFC-insensitive). ``noncanonical`` lists a target that
+     resolves but not by its exact filename: ``case`` (one owner spelled
+     differently), ``alias`` (no file has the name, bare or ending a path,
+     and one entry claims it) or ``ambiguous`` (a name or path several
+     entries share, a bare name shared by an entry and a MOC, or an owner
+     unmirrored paths or unread aliases leave uncertain). For ``case`` and
+     ``alias``, ``replacement`` is the whole link to write, keeping its
+     anchor and, in body prose, its displayed text; a Related-footer label
+     becomes the owner's canonical title. An unmirrored ``.md`` file owns a
+     bare name it shares, so an alias link to it is skipped. Any unmirrored
+     path, or an entry whose aliases cannot be read, makes an ``alias``
+     result ``ambiguous``, and an unmirrored folder does the same to a bare
+     ``case`` result. Self-links stay lint's ``10-self-link``, and a bare
+     MOC stem no entry shares is MOC navigation, left to wiki-lint.
      ``MOCs/...`` targets, embeds, links in code and anchors after ``#`` are
-     ignored. A dangling link lists under ``unmirrored`` the unmirrored file
-     matching its stem and every unmirrored folder it may live in; an
-     unmirrored folder also adds a note.
+     ignored. A dangling link, or an ambiguous one an unmirrored path may
+     own, lists under ``unmirrored`` the unmirrored file matching its stem
+     (otherwise every unmirrored file and, for a dangling link, every entry
+     whose aliases are unread) and every unmirrored folder it
+     may live in; an unmirrored folder or unread alias list adds a note.
 
 The manifest is the shared publication manifest: a JSON list of
 ``{"path": "Wiki/<slug>.md", "draft": "<absolute draft path>"}`` objects with
@@ -49,9 +64,11 @@ CLI:
         --out '<scratch>/review' [--vault VAULT] [--compact]
 
 Output: {ok, clean, tree, staged[], on_staged[], introduced[],
-baseline_count, dangling[], unmirrored[], notes[]}. A finding is {file, item,
-severity, message, evidence}; ``clean`` is true when on_staged, introduced
-and dangling are all empty.
+baseline_count, dangling[], noncanonical[], unmirrored[], notes[]}. A finding
+is {file, item, severity, message, evidence}; a dangling link {file, section,
+target, unmirrored?}; a noncanonical link {file, section, target, kind,
+replacement?, unmirrored?}. ``clean`` is true when on_staged, introduced,
+dangling and noncanonical are all empty.
 
 Exit codes: 0 the review ran (clean or not), 2 it could not run (bad usage,
 refused ``--out``, unreadable manifest or draft, incomplete lint); 1 a
@@ -121,10 +138,17 @@ if _here != _shared:
     _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
+from entry_structure import (  # noqa: E402
+    mask_body_comments,
+    mask_escaped_wikilinks,
+    title_display_form,
+)
 from lint_entry import lint_path  # noqa: E402
 from vault_index import (  # noqa: E402
+    _WIKILINK_RE,
     extract_wikilinks,
     fold_name,
+    index_entry,
     parse_frontmatter,
     split_sections,
 )
@@ -399,18 +423,22 @@ def _link_stem(target):
     return fold_name(stem)
 
 
+def _link_regions(text):
+    """``(section, text)`` for an entry's body prose and Related footer."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    sections = split_sections(parse_frontmatter(text).body)
+    return (("body", "\n".join(sections["prose_lines"])),
+            ("related", sections["related_line"] or ""))
+
+
 def dangling_links(text, known, mocs=()):
     """``(section, target)`` for each unresolved body or Related wikilink.
 
     ``known`` holds entry stems and aliases; ``mocs`` holds MOC stems, which
     resolve only a bare target.
     """
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    sections = split_sections(parse_frontmatter(text).body)
-    regions = (("body", "\n".join(sections["prose_lines"])),
-               ("related", sections["related_line"] or ""))
     found = []
-    for section, region in regions:
+    for section, region in _link_regions(text):
         for target, _label in extract_wikilinks(region):
             stem = _link_stem(target)
             bare = "/" not in target.replace("\\", "/").strip().strip("/")
@@ -418,6 +446,178 @@ def dangling_links(text, known, mocs=()):
                     or (section, target) in found):
                 continue
             found.append((section, target))
+    return found
+
+
+def _aliases_readable(path):
+    """Whether a tree entry's alias ownership is fully known.
+
+    Unreadable bytes or an unparsed title or aliases field can hide an alias;
+    a readable plain note with no frontmatter claims none.
+    """
+    try:
+        text = _read_regular(path).decode("utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        return False
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return (index_entry(path, text=text)["identity_complete"]
+            or not text.startswith("---"))
+
+
+def _root_split(parts, wiki_parts):
+    """``(prefix, rest)``: a leading Wiki-folder qualifier, as spelled on disk.
+
+    Accepts the vault-relative Wiki path, the folder's own name or ``Wiki``,
+    longest first, as the linters do.
+    """
+    for spelled in (list(wiki_parts), list(wiki_parts[-1:]), ["Wiki"]):
+        size = len(spelled)
+        if (len(parts) > size and [fold_name(part) for part in parts[:size]]
+                == [fold_name(part) for part in spelled]):
+            return spelled, parts[size:]
+    return [], parts
+
+
+def noncanonical_links(text, stems, alias_owners, mocs=(), own=None,
+                       wiki_parts=("Wiki",), titles=None, unmirrored=(),
+                       folders=(), aliases_complete=True):
+    """Body and Related links that resolve, but not by the exact filename.
+
+    ``stems`` maps each folded filename stem to the Wiki-relative paths
+    (without ``.md``) that carry it, ``alias_owners`` each folded alias to
+    its owners' paths, ``titles`` each such path to its entry's title, and
+    ``mocs`` holds MOC stems. ``own`` is the linking entry's path: its
+    self-links are lint's ``10-self-link``. ``wiki_parts`` spell the Wiki's
+    vault-relative path, which qualifies a replacement whose bare name a MOC
+    or another file shares.
+
+    ``unmirrored`` lists the unmirrored ``.md`` files and ``folders`` the
+    unmirrored folders, as reported paths; ``aliases_complete`` is false
+    when a tree entry's aliases could not be read. An unmirrored file owns
+    a bare name it shares: an alias link to that name is skipped, and the
+    name is ambiguous when a mirrored file also carries it. Any unmirrored
+    path or unread alias list makes an ``alias`` result ambiguous, and an
+    unmirrored folder does the same to a bare ``case`` result; those records
+    list the unmirrored paths.
+
+    Returns ``{section, target, kind, replacement?, unmirrored?}`` records;
+    dangling targets, ``MOCs/...`` targets and bare MOC stems no entry
+    shares are skipped. A replacement keeps the link's anchor and, in body
+    prose, its displayed text; a Related-footer label becomes the owner's
+    canonical title.
+    """
+    paths = {fold_name(path): path
+             for owners in stems.values() for path in owners}
+    titles = titles or {}
+    folders = list(folders)
+    occupants = {}
+    for path in unmirrored:
+        occupants.setdefault(
+            fold_name(path.rsplit("/", 1)[-1][:-3]), []).append(path)
+    unread = list(unmirrored) + folders
+    aliases_complete = aliases_complete and not unread
+    own = fold_name(own) if own else None
+    found = []
+
+    def claim(stem):
+        """``(kind, owner)`` for a name no file carries; None when dangling."""
+        claimants = alias_owners.get(stem, set())
+        if len(claimants) > 1:
+            return "ambiguous", None
+        if claimants:
+            return "alias", next(iter(claimants))
+        return None
+
+    for section, region in _link_regions(text):
+        visible = mask_escaped_wikilinks(
+            mask_body_comments(region, mask_code=True))
+        for match in _WIKILINK_RE.finditer(visible):
+            parsed = extract_wikilinks(match.group(0))
+            if not parsed or _link_stem(parsed[0][0]) is None:
+                continue
+            target, label = parsed[0]
+            stem = _link_stem(target)
+            head = match.group(1).split("|", 1)[0]
+            if head.endswith("\\") and "|" in match.group(1):
+                head = head[:-1]
+            anchor = head[len(head.split("#", 1)[0].split("^", 1)[0]):].strip()
+            written = target.replace("\\", "/").strip().strip("/")
+            parts = written.split("/")
+            suffix = parts[-1][-3:] if parts[-1].lower().endswith(".md") else ""
+            parts[-1] = parts[-1][:len(parts[-1]) - len(suffix)]
+            files = stems.get(stem, set())
+            occupied = occupants.get(stem, [])
+            kind = owner = None
+            where = []
+            prefix, rest = [], parts
+            bare = len(parts) == 1
+            if bare:
+                if not files and not occupied:
+                    if stem in mocs:
+                        continue              # MOC navigation is wiki-lint's
+                    kind, owner = claim(stem) or (None, None)
+                    if kind is None:
+                        continue              # dangling
+                elif len(files) + len(occupied) + (stem in mocs) > 1:
+                    kind, where = "ambiguous", (occupied + folders
+                                                if occupied else [])
+                elif occupied:
+                    continue                  # the unmirrored file owns it
+                else:                         # a file outranks an alias
+                    owner = next(iter(files))
+            elif written.startswith(("./", "../")):
+                continue
+            else:
+                prefix, rest = _root_split(parts, wiki_parts)
+                lookup = fold_name("/".join(rest))
+                owners = ([paths[lookup]] if lookup in paths else
+                          [path for key, path in paths.items()
+                           if key.endswith("/" + lookup)])
+                if len(owners) > 1:
+                    kind = "ambiguous"
+                elif owners:
+                    owner = owners[0]
+                elif not files and not occupied:
+                    kind, owner = claim(stem) or (None, None)  # by basename
+                    if kind is None:
+                        continue              # dangling
+                else:
+                    continue                  # dangling, or lint's to resolve
+            replacement = None
+            if kind != "ambiguous":
+                if fold_name(owner) == own:
+                    continue
+                if kind == "alias":
+                    name = owner.rsplit("/", 1)[-1]
+                    shared = (fold_name(name) in mocs
+                              or len(stems.get(fold_name(name), ())) > 1)
+                    dest = ("/".join(list(wiki_parts) + [owner]) if shared
+                            else name)
+                    if not aliases_complete:
+                        kind, where = "ambiguous", unread
+                else:
+                    dest = "/".join(
+                        prefix + owner.split("/")[-len(rest):]) + suffix
+                    if dest == written:
+                        continue
+                    kind = "case"
+                    if bare and folders:
+                        kind, where = "ambiguous", folders
+            if kind != "ambiguous":
+                display = target if label is None else label
+                if section == "related" and titles.get(owner):
+                    display = title_display_form(titles[owner])
+                replacement = (
+                    "[[%s]]" % dest
+                    if section == "body" and not anchor and display == dest
+                    else "[[%s%s|%s]]" % (dest, anchor, display))
+            record = {"section": section, "target": target, "kind": kind}
+            if replacement is not None:
+                record["replacement"] = replacement
+            if where:
+                record["unmirrored"] = list(where)
+            if record not in found:
+                found.append(record)
     return found
 
 
@@ -446,9 +646,9 @@ def review(wiki, manifest, out, vault=None):
     mirrored, unmirrored, folders = (mirror_wiki(wiki, tree, prefix)
                                      if os.path.isdir(wiki) else ({}, [], []))
     if folders:
-        notes.append("dangling links and alias collisions are incomplete for "
-                     "entries that may live in unmirrored folder(s): %s"
-                     % ", ".join(folders))
+        notes.append("dangling and noncanonical links and alias collisions "
+                     "are incomplete for entries that may live in unmirrored "
+                     "folder(s): %s" % ", ".join(folders))
 
     baseline = collections.Counter(
         _match_key(rel, finding)
@@ -491,35 +691,62 @@ def review(wiki, manifest, out, vault=None):
         else:
             introduced.append(record)
 
-    known = set()
+    known, stems, alias_owners, titles, unread = set(), {}, {}, {}, []
     for entry in combined["entries"]:
         known.add(fold_name(os.path.splitext(os.path.basename(entry["file"]))[0]))
         known.update(fold_name(alias) for alias in entry.get("aliases") or [])
+        rel = os.path.relpath(entry["file"], tree).replace(os.sep, "/")
+        path = os.path.splitext(rel)[0]
+        stems.setdefault(fold_name(path.rsplit("/", 1)[-1]), set()).add(path)
+        for alias in entry.get("aliases") or []:
+            alias_owners.setdefault(fold_name(alias), set()).add(path)
+        if entry.get("title"):
+            titles[path] = entry["title"]
+        if not _aliases_readable(entry["file"]):
+            unread.append(staged_paths.get(fold_name(rel), prefix + rel))
+    # Unmirrored entry files a staged draft does not replace.
+    leaves = [item["path"] for item in unmirrored
+              if item["path"] not in folders
+              and item["path"].lower().endswith(".md")
+              and fold_name(item["path"][len(prefix):]) not in staged_paths]
+    if leaves or unread:
+        notes.append("alias ownership is incomplete (aliases unread in: %s); "
+                     "alias links are listed as ambiguous"
+                     % ", ".join(leaves + unread))
     unmirrored_stems = {}
-    for item in unmirrored:
-        name = item["path"].rsplit("/", 1)[-1]
-        if name.lower().endswith(".md"):
-            unmirrored_stems.setdefault(fold_name(name[:-3]), item["path"])
-    mocs, dangling = _moc_stems(vault), []
-    for rel, _inner, data in staged:
+    for leaf in leaves:
+        unmirrored_stems.setdefault(
+            fold_name(leaf.rsplit("/", 1)[-1][:-3]), leaf)
+    mocs, dangling, noncanonical = _moc_stems(vault), [], []
+    for rel, inner, data in staged:
         text = data.decode("utf-8-sig", errors="replace")
         for section, target in dangling_links(text, known, mocs):
             record = {"file": rel, "section": section, "target": target}
             occupant = unmirrored_stems.get(_link_stem(target))
-            where = ([occupant] if occupant else []) + folders
+            # A file outranks an alias; otherwise every unmirrored leaf and
+            # every entry whose aliases are unread may own the name.
+            where = ([occupant] if occupant else leaves + unread) + folders
             if where:
                 record["unmirrored"] = where
             dangling.append(record)
+        noncanonical += [dict({"file": rel}, **record) for record in
+                         noncanonical_links(text, stems, alias_owners, mocs,
+                                            own=os.path.splitext(inner)[0],
+                                            wiki_parts=wiki_parts,
+                                            titles=titles, unmirrored=leaves,
+                                            folders=folders,
+                                            aliases_complete=not unread)]
 
     return {
         "ok": True,
-        "clean": not (on_staged or introduced or dangling),
+        "clean": not (on_staged or introduced or dangling or noncanonical),
         "tree": tree,
         "staged": [rel for rel, _inner, _data in staged],
         "on_staged": on_staged,
         "introduced": introduced,
         "baseline_count": baseline_count,
         "dangling": dangling,
+        "noncanonical": noncanonical,
         "unmirrored": unmirrored,
         "notes": notes,
     }
@@ -646,26 +873,39 @@ def run_self_test():
               (True, False))
         check("dangling body and Related links are listed; code, embeds, "
               "MOCs, MOC stems, anchors, aliases, paths and case variants "
-              "resolve; each names what it may live in",
+              "are not dangling; each names what it may live in",
               [(r["file"], r["section"], r["target"], r.get("unmirrored"))
                for r in report["dangling"]],
-              [("Wiki/f1-score.md", "body", "missing-entry", ["Wiki/synced"]),
+              [("Wiki/f1-score.md", "body", "missing-entry",
+                ["Wiki/linked.md", "Wiki/synced"]),
                ("Wiki/f1-score.md", "body", "linked",
                 ["Wiki/linked.md", "Wiki/synced"]),
                ("Wiki/f1-score.md", "related", "another-missing",
-                ["Wiki/synced"])])
+                ["Wiki/linked.md", "Wiki/synced"])])
+        check("beside an unmirrored folder a bare case variant is ambiguous "
+              "and names the folder; a shared alias is ambiguous; exact "
+              "names, paths, anchors and MOC stems are not noncanonical",
+              report["noncanonical"],
+              [{"file": "Wiki/f1-score.md", "section": "body",
+                "target": "Precision", "kind": "ambiguous",
+                "unmirrored": ["Wiki/synced"]},
+               {"file": "Wiki/f1-score.md", "section": "body",
+                "target": "positive-predictive-value", "kind": "ambiguous"}])
         check("symlinks are unmirrored and dot/non-entry files are skipped",
               (report["unmirrored"], sorted(os.listdir(tree))),
               ([{"path": "Wiki/linked.md", "reason": "symlink; not followed"},
                 {"path": "Wiki/synced", "reason": "symlink; not followed"}],
                ["f1-score.md", "metrics", "precision.md", "recall.md",
                 "specificity.md"]))
-        check("an outside manifest path and an unmirrored folder add notes",
+        check("an outside manifest path, an unmirrored folder and an "
+              "unmirrored entry file add notes",
               report["notes"], [
                   "ignored MOCs/Statistics.md: outside Wiki/",
-                  "dangling links and alias collisions are incomplete for "
-                  "entries that may live in unmirrored folder(s): "
-                  "Wiki/synced"])
+                  "dangling and noncanonical links and alias collisions are "
+                  "incomplete for entries that may live in unmirrored "
+                  "folder(s): Wiki/synced",
+                  "alias ownership is incomplete (aliases unread in: "
+                  "Wiki/linked.md); alias links are listed as ambiguous"])
         check("the report is not clean", report["clean"], False)
         mirror = os.path.join(tree, "precision.md")
         check("the mirror is a byte copy, not a hard link", (
@@ -682,9 +922,9 @@ def run_self_test():
                                       [("Wiki/f1-score.md", f1_draft)]), out)
         check("a rerun rebuilds the tree cleanly from a fresh baseline", (
             rerun["clean"], rerun["on_staged"], rerun["introduced"],
-            rerun["dangling"], rerun["baseline_count"],
+            rerun["dangling"], rerun["noncanonical"], rerun["baseline_count"],
             os.path.exists(os.path.join(tree, "specificity.md"))),
-            (True, [], [], [], report["baseline_count"], False))
+            (True, [], [], [], [], report["baseline_count"], False))
 
         inherited = review(wiki, manifest("third.json", [(
             "Wiki/recall.md", put(os.path.join(drafts, "recall.md"), recall))]),
@@ -711,6 +951,146 @@ def run_self_test():
         check("shrinking a three-way alias collision introduces nothing",
               (shrunk["on_staged"], shrunk["introduced"],
                shrunk["baseline_count"]), ([], [], 2))
+
+        canon_vault = os.path.join(tmp, "canon-vault")
+        canon_wiki = os.path.join(canon_vault, "Wiki")
+        for folder in ("metrics", "scores"):
+            os.makedirs(os.path.join(canon_wiki, folder))
+            put(os.path.join(canon_wiki, folder, "accuracy.md"), measure(
+                "Accuracy"))
+        os.makedirs(os.path.join(canon_vault, "MOCs"))
+        put(os.path.join(canon_vault, "MOCs", "statistics.md"), "# Map\n")
+        put(os.path.join(canon_wiki, "precision.md"), precision)
+        put(os.path.join(canon_wiki, "statistics.md"),
+            measure("Statistics", ["stats"]))
+        canon_draft = put(os.path.join(drafts, "canon.md"), _st_entry(
+            "F1 score", "F1 score is the harmonic mean of precision and "
+            "recall.", "The harmonic mean of the two error-rate shares.",
+            aliases=["f-score"], body=(
+                " It uses [[positive-predictive-value|positive predictive "
+                "value]], [[positive-predictive-value#Definition]], "
+                "[[stats|statistics]], [[statistics|statistics]], "
+                "[[Wiki/statistics|statistics]], [[wiki/statistics|"
+                "statistics]], [[accuracy]], [[Metrics/Accuracy|accuracy]], "
+                "[[scores/accuracy|accuracy]] and [[f-score|F-score]]."),
+            related=" [[Precision|Precision]]"))
+        canon = review(canon_wiki, manifest(
+            "canon.json", [("Wiki/f1-score.md", canon_draft)]),
+            os.path.join(tmp, "canon-review"))
+        check("a one-owner alias becomes its owner's slug, path-qualified "
+              "beside a same-named MOC, with anchor and display kept; "
+              "a case variant keeps its path qualifier",
+              [(r["section"], r["target"], r["kind"], r.get("replacement"))
+               for r in canon["noncanonical"]],
+              [("body", "positive-predictive-value", "alias",
+                "[[precision|positive predictive value]]"),
+               ("body", "positive-predictive-value", "alias",
+                "[[precision#Definition|positive-predictive-value]]"),
+               ("body", "stats", "alias", "[[Wiki/statistics|statistics]]"),
+               ("body", "statistics", "ambiguous", None),
+               ("body", "wiki/statistics", "case",
+                "[[Wiki/statistics|statistics]]"),
+               ("body", "accuracy", "ambiguous", None),
+               ("body", "Metrics/Accuracy", "case",
+                "[[metrics/accuracy|accuracy]]"),
+               ("related", "Precision", "case", "[[precision|Precision]]")])
+        check("a link to the entry's own alias stays lint's self-link, and "
+              "noncanonical links keep the review from being clean",
+              ("10-self-link" in items(canon["on_staged"], "Wiki/f1-score.md"),
+               canon["dangling"], canon["clean"]), (True, [], False))
+
+        def links_review(name, files, body, related="", links=()):
+            """Review one draft whose ``body`` links into ``files``."""
+            base = os.path.join(tmp, name)
+            base_wiki = os.path.join(base, "vault", "Wiki")
+            os.makedirs(base_wiki)
+            for rel, text in files.items():
+                os.makedirs(os.path.dirname(os.path.join(base_wiki, rel)),
+                            exist_ok=True)
+                put(os.path.join(base_wiki, rel), text)
+            for rel, target in links:
+                os.makedirs(os.path.dirname(os.path.join(base_wiki, rel)),
+                            exist_ok=True)
+                os.symlink(target, os.path.join(base_wiki, rel))
+            draft = put(os.path.join(base, "f1-score.md"), _st_entry(
+                "F1 score", "F1 score is the harmonic mean of precision and "
+                "recall.", "The harmonic mean of the two error-rate shares.",
+                body=body, related=related))
+            result = review(base_wiki, manifest(
+                name + ".json", [("Wiki/f1-score.md", draft)]),
+                os.path.join(base, "review"))
+            return result, [(r["section"], r["target"], r["kind"],
+                             r.get("replacement"), r.get("unmirrored"))
+                            for r in result["noncanonical"]]
+
+        _leaf, leaf_links = links_review(
+            "leaf", {"roc-curve.md": measure("ROC curve", ["roc"]),
+                     "precision.md": measure("Precision", ["ppv"]),
+                     "recall.md": measure("Recall")},
+            " It uses [[roc]], [[recall]], [[Precision|precision]] and "
+            "[[ppv|PPV]].",
+            links=[("roc.md", outside), ("metrics/recall.md", outside)])
+        check("an unmirrored file owns a bare name it shares: its alias link "
+              "is skipped, one a mirrored file also carries is ambiguous, and "
+              "an alias link is ambiguous while unmirrored aliases are unread",
+              leaf_links,
+              [("body", "recall", "ambiguous", None,
+                ["Wiki/metrics/recall.md"]),
+               ("body", "Precision", "case", "[[precision]]", None),
+               ("body", "ppv", "ambiguous", None,
+                ["Wiki/metrics/recall.md", "Wiki/roc.md"])])
+
+        external = os.path.join(tmp, "external")
+        os.makedirs(external)
+        put(os.path.join(external, "rate-of-change.md"),
+            measure("Rate of change", ["roc"]))
+        put(os.path.join(external, "precision.md"), measure("Precision"))
+        _folder, folder_links = links_review(
+            "folder", {"roc-curve.md": measure("ROC curve", ["roc"]),
+                       "precision.md": measure("Precision")},
+            " It uses [[roc]], [[Precision|precision]] and [[precision]].",
+            links=[("sub", external)])
+        check("an unmirrored folder makes alias and bare case links "
+              "ambiguous and names the folder",
+              folder_links,
+              [("body", "roc", "ambiguous", None, ["Wiki/sub"]),
+               ("body", "Precision", "ambiguous", None, ["Wiki/sub"])])
+
+        broken, broken_links = links_review(
+            "broken", {"roc-curve.md": measure("ROC curve", ["roc"]),
+                       "rate-of-change.md": measure(
+                           "Rate of change", ["roc"]).replace(
+                               'aliases:\n  - "roc"', 'aliases: ["roc"')},
+            " It uses [[roc]] and [[tpr]].")
+        check("an unparsed aliases field makes an alias link ambiguous and "
+              "adds a note",
+              (broken_links, broken["notes"]),
+              ([("body", "roc", "ambiguous", None, None)],
+               ["alias ownership is incomplete (aliases unread in: "
+                "Wiki/rate-of-change.md); alias links are listed as "
+                "ambiguous"]))
+        check("a dangling link names the entry whose aliases are unread",
+              [(r["target"], r.get("unmirrored")) for r in broken["dangling"]],
+              [("tpr", ["Wiki/rate-of-change.md"])])
+
+        _paths, path_links = links_review(
+            "paths", {"precision.md": measure("Precision", ["ppv"]),
+                      "recall.md": measure("Recall", ["tpr"]),
+                      "sensitivity.md": measure("Sensitivity", ["tpr"]),
+                      "notes.md": "# Notes\n"},
+            " It uses [[Wiki/ppv|PPV]], [[metrics/tpr|TPR]] and [[ppv|PPV]].",
+            related=" [[ppv|PPV]] · [[Recall|recall]]")
+        check("a path-qualified alias follows the bare alias rule by "
+              "basename, and a plain note leaves alias ownership complete",
+              [link for link in path_links if link[0] == "body"],
+              [("body", "Wiki/ppv", "alias", "[[precision|PPV]]", None),
+               ("body", "metrics/tpr", "ambiguous", None, None),
+               ("body", "ppv", "alias", "[[precision|PPV]]", None)])
+        check("a Related-footer replacement is labeled with the owner's "
+              "canonical title",
+              [link for link in path_links if link[0] == "related"],
+              [("related", "ppv", "alias", "[[precision|Precision]]", None),
+               ("related", "Recall", "case", "[[recall|Recall]]", None)])
 
         empty_vault = os.path.join(tmp, "empty-vault")
         os.makedirs(empty_vault)

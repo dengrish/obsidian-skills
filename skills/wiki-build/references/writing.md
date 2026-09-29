@@ -86,8 +86,13 @@ names the alternative. A decision-tree leaf belongs with decision trees, while
 a general data-structure entry or computing tool (NumPy, Jupyter) is
 `#computer-science`. Other boundaries are in [calibration](calibration.md).
 
-Every active discipline has a Wiki root entry; wiki-lint owns roots, MOCs and
-parent placement. On merge, follow [tag reconciliation](merge.md#frontmatter-and-related-footer).
+Every active discipline has a Wiki root entry; wiki-lint adds missing roots
+and owns MOCs and parent placement. A new entry that is itself a discipline
+(`Wiki/<discipline>.md` tagged only `#<discipline>`) is that discipline's root:
+write it in the [root form](../../wiki-lint/references/hierarchy.md#establish-discipline-roots),
+a short field overview that defines the field, states its method of inquiry
+and names its main branches, with `parents: []` and no Flashcards section. On
+merge, follow [tag reconciliation](merge.md#frontmatter-and-related-footer).
 
 ### parents
 

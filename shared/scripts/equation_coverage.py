@@ -851,11 +851,15 @@ def _predicate_is_negated(text, start, end):
 
 # An asymptotic bound (``O(1/\epsilon)``, ``T(n) = \Theta(n^2)``) states a
 # complexity, which the equation policy keeps inline; it is never a defining
-# relation that needs its own display.
+# relation that needs its own display. Soft-O (``\tilde{O}``), little-o,
+# sized parentheses (``O\big(n\big)``) and a relational bound
+# (``R_T \le O(\sqrt{T})``, ``\le O(1/n)``) count too.
 _ASYMPTOTIC_BOUND_RE = re.compile(
-    r"^\s*(?:[^=<>$]+(?:=|\\in|\\sim)\s*)?"
-    r"(?:O|\\mathcal\s*\{\s*O\s*\}|\\Theta|\\Omega)\s*(?:\\left\s*)?"
-    r"\((?:[^()]|\([^()]*\))*(?:\\right\s*)?\)\s*$")
+    r"^\s*(?:[^=<>$]*(?:=|\\in|\\sim|\\approx|\\leq?|\\geq?|<|>)\s*)?"
+    r"(?:O|o|\\(?:mathcal|mathrm|operatorname|tilde|widetilde)\s*"
+    r"(?:\{\s*O\s*\}|O)|\\Theta|\\Omega)"
+    r"\s*(?:\\(?:left|[bB]igg?l?)\s*)?"
+    r"\((?:[^()]|\([^()]*\))*\)\s*$")
 
 
 def _inline_formula_is_substantive(formula):
@@ -1366,6 +1370,13 @@ def run_self_test(verbose=False):
          "The running time is $T(n) = \\Theta(n \\log n)$.", 0, ()),
         ("a calligraphic big-O bound stays inline",
          "The cost is $\\mathcal{O}(mn^2)$ per step.", 0, ()),
+        ("soft-O, sized and unbraced bounds stay inline",
+         "The regret rate is $R_T \\le \\tilde{O}(\\sqrt{T})$, and the cost "
+         "is $\\mathcal O\\big(n/k\\big)$.", 0, ()),
+        ("a bare relation to a bound stays inline",
+         "The error rate is $\\le O(1/\\sqrt{T})$ after $T$ steps.", 0, ()),
+        ("a little-o bound stays inline",
+         "The error rate is $o(1/n)$ as the sample grows.", 0, ()),
         ("a rate formula next to a bound is still reported",
          "The rate is $r = (1 - \\eta)/m$.", 1, ()),
         ("a subscripted numeric value stays inline after a definition cue",

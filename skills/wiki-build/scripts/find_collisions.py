@@ -53,8 +53,8 @@ matched_via, alias?, entry_slug, implies}], verdict, naming?}, plus the top-leve
 ``naming: ["bare-common-noun"]`` marks a slug from special-titles.md's
 cross-domain corpus; it never changes the verdict (SKILL.md says how to act on
 it). Every index problem is reported, but only one that can hide slug, title
-or alias ownership (``_creation_blockers``) turns an otherwise-new candidate
-into ``adjudicate``.
+or alias ownership (``_creation_blockers``) turns an otherwise-new candidate,
+or a merge that rests on an alias alone, into ``adjudicate``.
 
 For source-derived or otherwise untrusted titles, always use ``--titles``;
 never interpolate title text into a shell command. ``--title`` remains a
@@ -579,13 +579,27 @@ def check_candidate(title, index, use_stem=True, use_superset=True, peers=None,
                 match["implies"] = "adjudicate"
         return result
 
+    blockers = (_creation_blockers(index) if creation_blockers is None
+                else creation_blockers)
+    merge_matches = [m for m in result["matches"]
+                     if m["matched_via"] != "candidate" and m["implies"] == "merge"]
+    if blockers and merge_matches and all(
+            m["matched_via"] == "alias" for m in merge_matches):
+        # A file outranks an alias, so an unread entry cannot contest a
+        # filename match; it can hold the same alias, though.
+        for match in merge_matches:
+            match["implies"] = "adjudicate"
+        result["verdict"] = "adjudicate"
+        result["error"] = ("the index reports %d problem(s) that can hide alias "
+                           "ownership, so this alias match may have another "
+                           "owner" % len(blockers))
+        return result
+
     verdict = "create"
     for match in result["matches"]:
         if VERDICT_RANK[match["implies"]] > VERDICT_RANK[verdict]:
             verdict = match["implies"]
     result["verdict"] = verdict
-    blockers = (_creation_blockers(index) if creation_blockers is None
-                else creation_blockers)
     if blockers and verdict == "create":
         result["verdict"] = "adjudicate"
         result["error"] = ("the index reports %d problem(s) that can hide slug, "
@@ -785,6 +799,29 @@ def run_self_test():
                   % (label, "allows" if want == "create" else "blocks"),
                   (rep["results"][0]["verdict"], bool(rep["index_problems"])),
                   (want, True))
+
+        # An unread alias list can claim the same alias, never the filename.
+        hidden = os.path.join(tmp, "hidden-alias-owner")
+        os.makedirs(hidden)
+        for name, text in (
+                ("roc-curve.md", _st_entry_text("ROC curve", aliases=["roc"])),
+                ("rate-of-change.md", _st_entry_text(
+                    "Rate of change", aliases=["roc"]).replace(
+                        'aliases:\n  - "roc"', 'aliases: ["roc"'))):
+            with open(os.path.join(hidden, name), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        rep = check_candidates(["ROC", "ROC curve"],
+                               _vault_index.build_index(hidden),
+                               include_peers=False)
+        check("an index problem turns an alias-only merge, not a filename "
+              "merge, into adjudicate",
+              [r["verdict"] for r in rep["results"]], ["adjudicate", "merge"])
+        check("...naming the possible second alias owner",
+              ("alias match may have another owner"
+               in rep["results"][0].get("error", ""),
+               [m["implies"] for m in rep["results"][0]["matches"]
+                if m["matched_via"] == "alias"]),
+              (True, ["adjudicate"]))
         malformed_index = os.path.join(tmp, "malformed-index.json")
         for payload in ({"entries": ["bad"]},
                         {"entries": [{"slug": "x", "aliases": 0}]},

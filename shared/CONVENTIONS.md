@@ -58,7 +58,7 @@ staging follows [SAFE_WRITES.md](SAFE_WRITES.md).
 | `Investments/` | dated stock analyses at the top level, plus maintained stock notes, research evidence and source collections in dedicated subfolders; each investments skill governs its own format | stock-research (immutable dated records/evidence and maintained Stocks/ notes), feed-collect (maintained source collections); the user maintains `x-accounts.md` | the investments skills within their own scope |
 | `add-to-wiki.md` at the *vault root* | requested-topic queue | the user; wiki-add checks off successful or already-existing items only | wiki-add |
 | `MOCs/` | **flat**; fully generated `<discipline>-moc.md` nested outlines plus `misc-moc.md` for Wiki entries tagged `#misc`; no marker comments, H1, or frontmatter | wiki-lint | wiki-lint (navigation/hierarchy diagnostics only; reads each before an in-place update) |
-| `Reviews/` | `<current-skill>-suggestions.md` for installed skills, plus `Reviews/wiki-notes-suggestions.md` for Wiki note-content improvements; open issues, then fixed ones | skills under the attribution and setup rules in [SUGGESTIONS.md](SUGGESTIONS.md); pdf-organize repairs a log's navigation links during an authorized PDF rename, never its issue claims | skills consuming the relevant outputs or verifying a fix |
+| `Reviews/` | `<current-skill>-suggestions.md` for installed skills, plus `Reviews/wiki-notes-suggestions.md` for Wiki note-content improvements; open issues, then fixed ones | skills under the attribution and setup rules in [SUGGESTIONS.md](SUGGESTIONS.md); pdf-organize (during an authorized PDF rename) and clipping-clean (during an authorized changed-slug handoff) repair a log's navigation links, never its issue claims | skills consuming the relevant outputs or verifying a fix |
 
 Suggestion logs use current skill names under `Reviews/`. The shared
 [SUGGESTIONS.md](SUGGESTIONS.md) owns attribution, the log format, moving
@@ -88,10 +88,10 @@ filed by pdf-organize; only the cleaned note or filed PDF, never the raw
 `Inbox/` file, can become a wiki-build source.
 A source-first contribution, including a request naming entities from
 identified sources, belongs to wiki-build. A topic without a source document
-belongs to wiki-add (below). Corrections or
-requested simplifications confined to existing entries and supported only by
-sources each affected entry already cites belong to wiki-lint's
-source-backed correction mode; ordinary wiki-lint maintenance needs no source.
+belongs to wiki-add (below). Corrections, requested simplifications or
+deepening confined to existing entries and supported only by sources each
+affected entry already cites belong to wiki-lint's source-backed correction
+mode; ordinary wiki-lint maintenance needs no source.
 
 When one request asks for several results, run each skill once in dependency
 order: intake first (pdf-organize or clipping-clean), then paper-summarize,
@@ -279,8 +279,9 @@ re-abbreviate the title so the two books differ **before** the year
 
 `naming.py` also recognises the legacy `<book>_src_NN_Name` mis-spelling as a
 chapter, deliberately: `looks_canonical()` still rejects it, so pdf-organize
-re-renames it, but a vault already holding those files still gets its book
-skipped rather than every figure written twice while the name is being fixed.
+re-renames it to `<book>_NN_Name_src`, moving the marker to the tail, but a
+vault already holding those files still gets its book skipped rather than
+every figure written twice while the name is being fixed.
 
 **PDF consumers check canonical stems before deriving files or references** —
 figure-extract, paper-summarize, wiki-build and wiki-add all key durable
@@ -457,11 +458,14 @@ read: false
   byte-unchanged source-no-op keeps the old date. wiki-lint's ordinary lint
   tasks and producer-mapped dependency repairs preserve both dates on existing
   entries. A missing discipline root created under Task 3 uses today's date
-  for both fields. An explicitly requested source-backed correction, split, or
-  merge follows wiki-build's creation and body-change rules for entries it
-  substantively rewrites or creates. pdf-organize's authorized rename repair
-  changes only references to the renamed source family and leaves the dates
-  and `read:` unchanged.
+  for both fields. An explicitly requested
+  [flashcard removal](../skills/wiki-lint/references/flashcards.md#card-set)
+  (a named card, or every legacy extra in a scope) advances `updated:` and
+  leaves `read:` unchanged. An explicitly requested source-backed correction,
+  split, or merge follows wiki-build's creation and body-change rules for
+  entries it substantively rewrites or creates. pdf-organize's authorized
+  rename repair changes only references to the renamed source family and
+  leaves the dates and `read:` unchanged.
 - **`read` is a boolean, written `read: false` on creation.** It is the user's
   review checkbox (`.obsidian/types.json` pins it as `checkbox`), and §2c is
   the whole rule for who may write it.
@@ -500,7 +504,7 @@ that enforcement may and may not write.
 
 **Depended on by:** wiki-build (writes it), wiki-lint (validates and fixes
 it; owns `parents:`, preserves existing dates during ordinary maintenance,
-and follows the creation/correction exceptions above), wiki-add (creates requested entries
+and follows the date exceptions above), wiki-add (creates requested entries
 with `parents: []` and `read: false` using builder's rules and validators,
 without editing existing entries). The two validator owners bundle scripts
 carrying the field order as a constant — `wiki-build/scripts/vault_index.py` (`SCHEMA_ORDER`)
@@ -1052,6 +1056,9 @@ The shared modules own these rules: `slugify.py` (§4a), `plugin_paths.py` (this
 section), `atomic_move.py` (exclusive source-family moves plus verified
 regular-file creation, replacement, and removal; late source/destination
 occupants are preserved and unsupported directory moves fail closed),
+`publish_files.py` (the command-line form of the
+[safe-write](SAFE_WRITES.md#call-the-shared-python-api) regular-file recipe:
+`snapshot`, `verify` and `publish` against recorded snapshots),
 `naming.py` (§1a), `plurals.py` (English inflection and light
 collision stemming shared by both Wiki skills), `organism_names.py` (Organism
 name and typography evidence shared by both Wiki skills), `entry_structure.py`

@@ -373,6 +373,19 @@ def _frontmatter_fence(line):
 _RAW_SRC_MARKER = re.compile(r"_src(?:_(?:%s))?\Z" % DISAMBIGUATOR)
 
 
+def _legacy_chapter_target(stem):
+    """`<book>_NN_Name_src` for a legacy `<book>_src_NN_Name` stem, else None.
+
+    CONVENTIONS 1a: the legacy spelling is the chapter's own `_src` marker in
+    the wrong position, so re-renaming it moves the marker to the tail.
+    """
+    parts = chapter_parts(stem, is_stem=True)
+    if parts is None or not stem[len(parts.book):].startswith("_src_"):
+        return None
+    tail = parts.tail if parts.tail.startswith("_src") else "_src" + parts.tail
+    return "%s_%s_%s%s" % (parts.book, parts.number, parts.name, tail)
+
+
 def _existing_src_marker(stem):
     """Return an exact on-disk `_src` marker, including on raw intake names.
 
@@ -380,10 +393,12 @@ def _existing_src_marker(stem):
     The organizer also receives unorganized downloads, and its user contract
     says a literal legal `_src` tail already on such a name must survive the
     canonicalizing rename. Match only that exact tail shape; an interior
-    ``src`` word or other suffix is ordinary title text.
+    ``src`` word or other suffix is ordinary title text. The one exception is
+    the legacy chapter spelling, whose marker sits before the chapter segment.
     """
     marker = split_tail(stem)[1]
-    return marker or ("_src" if _RAW_SRC_MARKER.search(stem) else "")
+    return marker or ("_src" if _RAW_SRC_MARKER.search(stem)
+                      or _legacy_chapter_target(stem) else "")
 
 
 def _quoted_source_spans(text):
@@ -1719,8 +1734,12 @@ def _target_stem_blockers(vault, stem, mine):
         if (_nfc_low(name) == wanted_note
                 and os.path.realpath(path) not in mine):
             blockers.append(
-                "%s already owns the target stem as an Articles note; choose "
-                "another canonical PDF name" % path)
+                "%s already owns the target stem %s as an Articles note "
+                "outside this PDF's family. Report it and the notes that link "
+                "it. If it was derived from this same document, ask the user "
+                "whether to clear it from that name before filing and restore "
+                "it afterward; otherwise choose another canonical PDF name."
+                % (path, stem))
 
     images = os.path.join(vault, "Sources", "Images")
     if os.path.isdir(images):
@@ -1732,8 +1751,13 @@ def _target_stem_blockers(vault, stem, mine):
         for path in inventory.candidates + inventory.blocked_matches:
             if os.path.realpath(path) not in mine:
                 blockers.append(
-                    "%s already occupies the target figure stem %s_fig*; "
-                    "establish its source owner or choose another PDF name"
+                    "%s already occupies the target figure stem %s_fig* "
+                    "outside this PDF's family; a figure manifest record "
+                    "cannot claim it for a PDF not yet under that name. Report "
+                    "it and the notes that embed it. If it was derived from "
+                    "this same document, ask the user whether to clear it from "
+                    "that name before filing and restore it afterward; "
+                    "otherwise choose another canonical PDF name."
                     % (path, stem))
     return blockers
 
@@ -1983,11 +2007,16 @@ def plan_rename(vault, path, new_basename, dest=None):
         change = ("remove the existing `_src` representation marker"
                   if old_src_marker else
                   "add an `_src` representation marker")
+        legacy = _legacy_chapter_target(old_stem)
+        hint = (" %r is the legacy chapter spelling; its marker moves to the "
+                "end: pass %r." % (src_basename, legacy + (old_ext or ".pdf"))
+                if legacy else "")
         return [], Edits(), [
             "refusing to %s while "
             "renaming %r to %r. Preserve that marker exactly; it distinguishes "
             "another representation of the same document from a different "
-            "document identity." % (change, src_basename, written_basename)]
+            "document identity.%s" % (change, src_basename, written_basename,
+                                      hint)]
     if not old_ext:
         try:
             with open(path, "rb") as source:
@@ -2076,6 +2105,15 @@ def plan_rename(vault, path, new_basename, dest=None):
     mine = {os.path.realpath(p) for p in keyed}
     if have_vault and _nfc_low(new_stem) != _nfc_low(old_stem):
         blockers.extend(_target_stem_blockers(vault, new_stem, mine))
+    # A book rename re-stems every chapter; each new chapter stem needs the
+    # same note/figure namespace check a direct chapter rename gets.
+    for member, name in sorted(keyed.items()):
+        if (have_vault and member != path and not os.path.isdir(member)
+                and _nfc_low(name).endswith(".pdf")):
+            old_member = os.path.splitext(name)[0]
+            new_member = os.path.splitext(ren[name])[0]
+            if _nfc_low(new_member) != _nfc_low(old_member):
+                blockers.extend(_target_stem_blockers(vault, new_member, mine))
 
     # Renaming an already-split book must not mint chapter names a later
     # extractor refuses or attributes to a different book. In particular a
@@ -2084,7 +2122,12 @@ def plan_rename(vault, path, new_basename, dest=None):
         book = chapter_book_stem(old) if old.lower().endswith(".pdf") else None
         if book and _nfc_low(book) == _nfc_low(core_stem(old_stem, is_stem=True)):
             new_book = chapter_book_stem(new)
-            if not looks_canonical(new) or new_book is None \
+            legacy = _legacy_chapter_target(os.path.splitext(old)[0])
+            if legacy:
+                blockers.append("%s uses the legacy chapter spelling; rename it "
+                                "to %s.pdf first, then rename the book."
+                                % (old, legacy))
+            elif not looks_canonical(new) or new_book is None \
                     or _nfc_low(new_book) != _nfc_low(core_stem(new_stem, is_stem=True)):
                 blockers.append("%s would become %s, which is not a canonical chapter "
                                 "of the renamed book. Re-abbreviate the book title "
@@ -6237,6 +6280,26 @@ def _selftest():
         check("renaming a split book cannot write invalid disambiguated chapters",
               (bool(_blockers), os.path.exists(_new_book)), (True, True))
 
+    # A legacy `<book>_src_NN_Name` chapter is re-renamed with its marker at
+    # the tail first; the book rename then carries the fixed chapter.
+    with _tf.TemporaryDirectory(prefix="org-legacy-chapter-test-") as _v:
+        _book = _put(_v, "Sources/PDFs/Doe_Book_2025_src.pdf", b"%PDF-1.4\n")
+        _legacy = _put(_v, "Sources/PDFs/Doe_Book_2025_src/"
+                       "Doe_Book_2025_src_01_Intro.pdf", b"%PDF-1.4\n")
+        _blockers = plan_rename(_v, _book, "Doe_Renamed_2025_src.pdf")[2]
+        check("a book holding a legacy chapter names the chapter fix",
+              any("legacy chapter spelling" in item
+                  and "Doe_Book_2025_01_Intro_src.pdf first" in item
+                  for item in _blockers), True)
+        _moves, _edits, _blockers = rename_all(
+            _v, _legacy, "Doe_Book_2025_01_Intro_src.pdf", apply=True)
+        _moves, _edits, _blockers2 = rename_all(
+            _v, _book, "Doe_Renamed_2025_src.pdf", apply=True)
+        check("after its legacy chapter is fixed, the book renames",
+              (_blockers, _blockers2, os.path.isfile(os.path.join(
+                  _v, "Sources/PDFs/Doe_Renamed_2025_src/"
+                  "Doe_Renamed_2025_01_Intro_src.pdf"))), ([], [], True))
+
     # Review regressions: directory names are link path segments, while the
     # same bare stem is an Obsidian note target and must remain untouched.
     with _tf.TemporaryDirectory(prefix="org-folder-link-test-") as _v:
@@ -6284,6 +6347,35 @@ def _selftest():
                any("Articles note" in item for item in _blockers),
                any("target figure stem" in item for item in _blockers)),
               (True, True, True))
+        # A manifest record cannot claim a target-stem figure, so the blocker
+        # names the same-document remedy instead of "establish its owner".
+        _put(_v, "Sources/Images/" + MANIFEST_FILE,
+             "Doe_Study_2025_fig_1.png\t" + file_digest(os.path.join(
+                 _v, "Sources/Images/Doe_Study_2025_fig_1.png")) + "\n")
+        _blockers = plan_rename(_v, _pdf, "Doe_Study_2025.pdf")[2]
+        check("a recorded target-stem figure still blocks, with the "
+              "same-document remedy",
+              [("cannot claim it" in item, "same document" in item)
+               for item in _blockers if "target figure stem" in item],
+              [(True, True)])
+
+    # A book rename re-stems its chapters; each new chapter stem gets the
+    # same note/figure namespace check as a direct chapter rename.
+    with _tf.TemporaryDirectory(prefix="org-chapter-target-stem-test-") as _v:
+        _book = _put(_v, "Sources/PDFs/Doe_Book_2021.pdf", b"%PDF-1.4\n")
+        _put(_v, "Sources/PDFs/Doe_Book_2021/Doe_Book_2021_02_Beta.pdf",
+             b"%PDF-1.4\n")
+        _put(_v, "Articles/Doe_Book_2022_02_Beta.md",
+             "---\nsources:\n  - https://example.com/beta\n---\n")
+        _put(_v, "Sources/Images/Doe_Book_2022_02_Beta_fig_1.png", b"png")
+        _blockers = plan_rename(_v, _book, "Doe_Book_2022.pdf")[2]
+        check("a book rename checks each renamed chapter's target stem",
+              (any("Articles note" in item and "Doe_Book_2022_02_Beta" in item
+                   for item in _blockers),
+               any("target figure stem Doe_Book_2022_02_Beta_fig*" in item
+                   for item in _blockers)), (True, True))
+        check("an unoccupied chapter target stem does not block a book rename",
+              plan_rename(_v, _book, "Doe_Book_2023.pdf")[2], [])
 
     with _tf.TemporaryDirectory(prefix="org-malformed-source-test-") as _v:
         _pdf = _put(_v, "Sources/PDFs/Doe_Old_2025.pdf", b"%PDF-1.4\n")
@@ -6326,6 +6418,22 @@ def _selftest():
               any("representation marker" in item for item in
                   plan_rename(None, _raw_marked,
                               "Doe_Download_2025.pdf")[2]), True)
+        _legacy = _put(_v, "Doe_Book_2025_src_01_Intro.pdf", b"%PDF-1.4\n")
+        check("a legacy chapter's marker moves to the tail",
+              plan_rename(None, _legacy, "Doe_Book_2025_01_Intro_src.pdf")[2],
+              [])
+        check("a legacy chapter's marker cannot be dropped, and the blocker "
+              "names the canonical target",
+              any("pass 'Doe_Book_2025_01_Intro_src.pdf'" in item for item in
+                  plan_rename(None, _legacy, "Doe_Book_2025_01_Intro.pdf")[2]),
+              True)
+        check("a legacy chapter's disambiguator follows the moved marker",
+              _legacy_chapter_target("Doe_Book_2025_src_01_Intro_2"),
+              "Doe_Book_2025_01_Intro_src_2")
+        check("a canonical chapter is not a legacy spelling",
+              [_legacy_chapter_target(_s) for _s in (
+                  "Doe_Book_2025_01_Intro_src", "Doe_Book_2025_01_Intro",
+                  "Doe_Book_2025_src")], [None, None, None])
         _raw = _put(_v, "download", b"%PDF-1.4\n")
         check("an extensionless source cannot remain extensionless",
               any("explicit .pdf destination" in item for item in

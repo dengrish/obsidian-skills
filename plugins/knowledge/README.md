@@ -37,12 +37,15 @@ Wiki entries end with a flashcard for the Spaced Repetition community plugin
 yourself. Each entry has one reversed definition card, separated by `??` and
 reviewed in both directions; a discipline root may have none. Keep the
 plugin's multi-line reversed separator at `??` and its multi-line end marker
-empty. The plugin reviews a note's card only when its *Flashcard tags* setting
-lists the note's tag, unless folders-as-decks is on, so list every
+empty. Keep cloze conversion off (no highlight, bold or curly-bracket
+conversion and no cloze patterns): the plugin reads the whole note, so it
+would turn entry markup such as bold openers into extra cards. The plugin
+reviews a note's card only when its *Flashcard tags* setting lists the note's
+tag, unless folders-as-decks is on, so list every
 [discipline tag](shared/CONVENTIONS.md#3-the-discipline-tag-enum) your Wiki
-uses. wiki-lint reports unlisted tags and changed separators but
-never edits the plugin's settings. To pause a card, change its separator line
-to `!!`; restore `??` to resume it.
+uses. wiki-lint reports unlisted tags, changed separators and active cloze
+conversion but never edits the plugin's settings. To pause a card, change its
+separator line to `!!`; restore `??` to resume it.
 
 ## Developing and packaging
 

@@ -618,6 +618,12 @@ def _sentence_end_offsets(compact):
         if (any(char in ")]" for char in compact[match.end():cursor])
                 and re.match(r"\s+[a-z]", after)):
             continue
+        # A question or exclamation inside a name or quotation, as in
+        # ``Yahoo! is`` or ``asked "Can machines think?" and``, runs on into
+        # a lowercase continuation; a new sentence starts capitalized.
+        if (match.group(0)[-1] in "?!"
+                and re.match(r"\s+[\"'“‘(\[*_]*[a-z]", after)):
+            continue
         if match.group(0) == ".":
             head = compact[max(0, match.end() - 16):match.end()]
             if _ETC_RE.search(head):
@@ -1583,6 +1589,13 @@ def run_self_test(verbose=False):
              "**Tardigrade** (water bear!) is an animal.",
              "**Rat** (sp. nov.) is a rodent.")],
          [1, 1, 1]),
+        ("a ? or ! inside a name or quotation does not end the sentence",
+         [count_sentences(value) for value in (
+             "What Is Life? is a 1944 book.",
+             "Yahoo! is a web portal.",
+             'It asked "Can machines think?" and proposed a test.',
+             "Why? It matters.")],
+         [1, 1, 1, 2]),
         ("lowercase no is an ordinary sentence ending",
          count_sentences("Answer yes or no. The result matters."), 2),
         ("a terminal one-letter label still ends a sentence",

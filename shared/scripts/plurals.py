@@ -110,6 +110,8 @@ def pluralize(word):
         return word
     if word in F_SINGULAR_PLURALS:
         return F_SINGULAR_PLURALS[word]
+    if word.endswith("sis") and len(word) > 4:
+        return word[:-2] + "es"          # Greek -sis: diagnosis -> diagnoses
     if _SIBILANT_RE.search(word):
         return word + "es"
     if word.endswith("y") and len(word) > 1 and word[-2] not in "aeiou":
@@ -166,6 +168,8 @@ def singular_forms(word):
         out.add(VES_IRREGULARS.get(word, word[:-3] + "ve"))
     if word.endswith("es") and len(word) > 2 and _SIBILANT_RE.search(word[:-2]):
         out.add(word[:-2])
+    if word.endswith("ses") and len(word) > 4:
+        out.add(word[:-2] + "is")        # Greek -ses: diagnoses -> diagnosis
     if word.endswith("s") and not word.endswith("ss") and len(word) > 2:
         out.add(word[:-1])
     return out
@@ -335,6 +339,8 @@ SLUG_CASES = [
     ("decision-tree",      "decision-trees",     True,  False),
     ("random-forest",      "gradient-boosting",  False, False),
     ("theory-of-mind",     "theories-of-mind",   False, True),
+    ("differential-diagnosis", "differential-diagnoses", True, False),
+    ("oasis",              "oases",              True,  False),
 ]
 
 # `(slug_a, slug_b, same stem key?)`. The positive pair is the documented gap
@@ -427,7 +433,8 @@ def run_self_test():
             failures.append("_stem_token(%r) -> %r, expected %r"
                             % (token, _stem_token(token), expected))
 
-    for singular, expected in (("proof", "proofs"), ("safe", "safes")):
+    for singular, expected in (("proof", "proofs"), ("safe", "safes"),
+                               ("synthesis", "syntheses"), ("oasis", "oases")):
         total += 1
         if pluralize(singular) != expected:
             failures.append("pluralize(%r) -> %r, expected %r"

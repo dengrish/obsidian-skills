@@ -96,6 +96,17 @@ helper then exits non-zero, but its other rows remain valid.
 Non-zero scan failures and unreadable directories are not empty inventories or
 zero figure counts. If the scan helper cannot run, stop and report it.
 
+Record each destination before relying on it: every selected `new` row, and
+every `done` row once its rewrite is authorized and before its existing note is
+read. Step 6 publishes against this record.
+
+```bash
+python3 '<plugin>/shared/scripts/publish_files.py' snapshot --vault '<vault>' \
+    -o '<scratch>/summary-snapshots.json' 'Articles/<pdf stem>.md'
+```
+
+A `new` row must record `absent`; otherwise rescan it.
+
 ### Prepare the figure inventory
 
 Before selecting exhibits, compare each selected PDF's inventory with the
@@ -221,16 +232,22 @@ the blocker; a checklist-only review is not a clean lint result.
 
 The destination is `Articles/<pdf stem>.md`. Re-inventory `Articles/` just
 before publishing; an equivalent spelling (NFC, case-folded) that arrived after
-intake occupies the destination. Follow
-the shared [safe-write recipe](../../shared/SAFE_WRITES.md#call-the-shared-python-api):
-stage beside the resolved real `Articles/` directory and publish through the
-selected logical path. Use `atomic_move.publish_new(..., atomic_move.regular_file_snapshot, ...)`
-for creation or `atomic_move.replace_expected` for an authorized rewrite, with
-the original snapshot and expected PDF origin retained from intake.
+intake occupies the destination. Write `<scratch>/<pdf stem>.manifest.json` as
+`[{"path": "Articles/<pdf stem>.md", "draft": "<absolute draft path>"}]` and
+publish with `publish_files.py`, which creates the note exclusively or replaces
+it only against its step-1 record (`--dry-run` plans without writing):
 
-Verify the published bytes against the reviewed draft; on failure, retain and
-report the draft and every staging/recovery path. Do not move/delete the PDF,
-rename images or write wiki entries.
+```bash
+python3 '<plugin>/shared/scripts/publish_files.py' publish --vault '<vault>' \
+    --snapshots '<scratch>/summary-snapshots.json' \
+    --manifest '<scratch>/<pdf stem>.manifest.json'
+```
+
+The helper reads the published note back. A destination that changed after its
+record is refused: rescan it and act on its new status, re-recording it with
+`snapshot --replace` before reading it again. On any failure, retain and report
+the draft and every staging or recovery path the helper prints, fix the cause
+and rerun. Do not move/delete the PDF, rename images or write wiki entries.
 
 ## 7. Report
 

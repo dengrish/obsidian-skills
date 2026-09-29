@@ -1,6 +1,6 @@
 # Merge Logic — integration, frontmatter, source-no-op merges, conflicts
 
-Scope: collisions and new-source merges; corrections from already-cited sources alone are wiki-lint's [source-backed correction mode](../../wiki-lint/references/source-backed-corrections.md).
+Scope: collisions and new-source merges; corrections or deepening from already-cited sources alone are wiki-lint's [source-backed correction mode](../../wiki-lint/references/source-backed-corrections.md).
 
 ## Collision decisions
 
@@ -18,7 +18,7 @@ Scope: collisions and new-source merges; corrections from already-cited sources 
 
 Multiple owners for (a) or (b) also need adjudication; never choose by index order. The other probes flag possible duplicates, not identity. A confirmed duplicate goes to one canonical entry, usually the literature's most common form, with a valid alternate slug as an alias; this never authorizes merging or deleting two pre-existing files, and renaming an existing entry stays a refactoring proposal. Distinct but confusable entities follow [same-surface-form handling](special-titles.md#same-surface-form-different-technique).
 
-An empty wiki still needs candidate-to-candidate checks. Index problems that can hide ownership (unreadable, unsafe or unparsed entries, malformed titles or aliases) keep unmatched candidates at `adjudicate`: never create from apparent absence, and report every index problem.
+An empty wiki still needs candidate-to-candidate checks. Index problems that can hide ownership (unreadable, unsafe or unparsed entries, malformed titles or aliases) keep unmatched candidates, and exact matches that rest on an alias alone, at `adjudicate`: never create from apparent absence, and report every index problem.
 
 ## Merge Logic
 
@@ -57,13 +57,13 @@ Integrate the active source into **one coherent explanation organized by the ent
 
 ### Flashcards on merge
 
-Before changing a card, read the [card format](flashcards-and-emphasis.md#4-flashcards) and wiki-lint's [high bar](../../wiki-lint/references/flashcards.md#card-freshness-and-the-rewrite-bars). A merge runs no vault scan, so every pre-existing card takes the high bar.
+Before the item-19 QC below, read the [card format](flashcards-and-emphasis.md#4-flashcards); before changing a card, also read wiki-lint's [high bar](../../wiki-lint/references/flashcards.md#card-freshness-and-the-rewrite-bars). A merge runs no vault scan, so every pre-existing card takes the high bar.
 
 - **Every merge, including source-no-ops:** run item-19 QC on the primary card. Restore a missing card, except on a discipline root, from the entry's established main claim with `??`; repair current-rule defects in place. Bring card math under [line-1 equation coverage](flashcards-and-emphasis.md#line-1-equation-coverage) for the same tested claim, preserving the answer line and attachments; that repair never invents an equation or changes the learning objective.
 - **Regular merges, primary definition:** if integration substantively changes the main claim, re-derive line 1 and replace it only when meaningfully more accurate or unambiguous. Mere phrasing drift does not qualify. If inspected evidence corrects a claim and its card now contradicts the body, correct the card in place rather than removing and re-adding it.
 - **Primary answer:** recompute its content when the canonical title, qualifying alias counterpart, or the opener's direct binding changes; apply the answer contract, preserving the separator and attachments.
 - **No second card:** a merge never adds a card. A key result the source adds belongs in the body, and a second source-supported entity earns its own entry.
-- **Legacy extras:** any card beyond the primary card, under the [card set](flashcards-and-emphasis.md#card-set). Never repair or reword one; preserve and quote it in full, including attachments, in *Notes for the user*. Moving or removing a pre-existing card requires an explicitly authorized source-backed refactor accounting for its claim and every attachment, or a request naming that card for deletion; a source merge alone supplies no such authority.
+- **Legacy extras:** any card other than the primary card, under the [card set](flashcards-and-emphasis.md#card-set). Never repair or reword one; preserve and quote it in full, including attachments, in *Notes for the user*. Moving or removing a pre-existing card requires an explicitly authorized source-backed refactor accounting for its claim and every attachment, or a request naming that card for deletion; a source merge alone supplies no such authority.
 
 Every pre-existing separator and recognized scheduling or block-ID attachment stays byte-for-byte and in place, even when a content line changes, apart from the [`??` restoration](flashcards-and-emphasis.md#line-2-the-separator). A conforming card stays unchanged.
 
@@ -77,7 +77,7 @@ Metadata/alias/source appends, description/card/footer/tag repairs, content remo
 
 A candidate must first pass step 2's substance and, for a secondary source, durability filters. After [example](writing.md#prose-principles), [figure](media.md#selection) and [table](media.md#tables) selection, compare **every selected source contribution** with the existing entry: a fact is covered when present verbatim or as a clear paraphrase, a figure by the same `Sources/Images/` filename, a table by the same recreated data, an equation by the same quantity's definition (different notation alone is not new), and for `Software` an interface or design idea rather than identifier spelling. If all are covered, the entry is **source-no-op-merged**; one new selected fact, relationship, image, table or equation makes the merge regular, while a documented decision to skip an optional example or figure is not net-new. Explicit reruns still need this comparison.
 
-A source-no-op skips source-driven body, description, card and Related-footer rewriting, leaving conforming content byte-for-byte unchanged. It still applies the metadata rules, including the active source's missing citation, and **all step-7 QC and audits**, making only their authorized repairs: a missing Person/Event date under [rare-types](rare-types.md#dates-in-the-opener-person-and-event), an equation warranted by carried-over prose, removal of a navigation-only cue, or a description or card defect.
+A source-no-op skips source-driven body, description, card and Related-footer rewriting, leaving conforming content byte-for-byte unchanged. It still applies the metadata rules, including the active source's missing citation, and **all step-7 QC and audits**, making only their authorized repairs: a missing Person/Event date under [rare-types](rare-types.md#dates-in-the-opener-person-and-event), an equation warranted by carried-over prose, removal of a navigation-only cue, a `noncanonical` link rewrite, or a description or card defect.
 
 Classification concerns the source's contribution, not the final bytes: an independent QC equation leaves the source a no-op while advancing `updated:` and resetting a known `read:` value, whereas an equation the active source contributes makes the merge regular. Report them under the [run report](review.md#run-report)'s source-no-op bullet, never describing a QC-changing run as leaving the wiki unchanged.
 

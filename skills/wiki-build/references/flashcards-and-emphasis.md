@@ -22,7 +22,7 @@ The `## Flashcards` section ends the entry. After the Related footer come a blan
 <line 3: the answer>
 ```
 
-A card is three content lines with no blank line between them. The vault's Spaced Repetition community plugin reads these cards, so the format is a contract with that plugin; no skill runs it or can check that it ran. Its deck setup is in the plugin README under *Reviewing flashcards*.
+A card is three content lines with no blank line between them. The vault's Spaced Repetition community plugin reads these cards, so the format is a contract with that plugin; no skill runs it or can check that it ran. Its deck setup is in the plugin README under *Reviewing flashcards*. The plugin parses the whole note, so no line of the entry, card lines included, holds its single-line card separator `::` (or `:::`) outside code, which would turn that line into a card of its own: keep code in a backtick span or a fence opened and closed at the start of its lines, and write a math `::` as `\mathbin{:}\mathbin{:}`.
 
 ### Line 1: the cue
 
@@ -43,7 +43,7 @@ Line 2 is exactly one of two values, alone on its line:
 - `??`: the plugin's reversed card, reviewed from cue to answer and from answer to cue, with one schedule per side. Never simplify a card's `??` to `?`, which the plugin reviews in one direction only; that halves the card and strands its second schedule.
 - `!!` on a card the user has disabled. Only the user writes `!!` or restores `??`, and every workflow preserves it.
 
-wiki-build writes `??` and never writes `!!`. When the entry's card carries any other line 2, such as `?`, restoring its `??` is the one change to a separator a workflow makes; a legacy extra card keeps its separator (see [card set](#card-set)).
+wiki-build writes `??` and never writes `!!`. When the primary card carries any other line 2, such as `?`, restoring its `??` is the one change to a separator a workflow makes; a legacy extra card keeps its separator (see [card set](#card-set)).
 
 ### Line 3: the answer
 
@@ -55,7 +55,7 @@ Append one counterpart in parentheses only when the opener binds it directly to 
 
 Every entry has exactly one card: the reversed `??` definition card, testing the entity's main claim (the scope of the body's opening sentence). A [discipline root](../../wiki-lint/references/hierarchy.md#establish-discipline-roots) needs none, and an existing root card stays.
 
-A second card never belongs to an entry: a second source-supported entity earns its own entry, and a further claim about this one belongs in the body. A card beyond the first that an entry already holds, such as a second definition card or a question card from an earlier card set, is a **legacy extra**. Every workflow preserves it byte-for-byte, attachments included, and reports it; only an authorized refactor or a request naming it for deletion removes it ([flashcard maintenance](../../wiki-lint/references/flashcards.md#card-set)).
+A second card never belongs to an entry: a second source-supported entity earns its own entry, and a further claim about this one belongs in the body. The **primary card** is the entry's only card or, when it holds several, the one whose line 3 meets the [answer contract](#line-3-the-answer) (else its one near miss), wherever it sits. Any other card an entry already holds, such as a second definition card or a question card from an earlier card set, is a **legacy extra**. Every workflow preserves it byte-for-byte, attachments included, and reports it, and the linters mark its findings report-only; only an authorized refactor or a request naming it for deletion removes it ([flashcard maintenance](../../wiki-lint/references/flashcards.md#card-set)).
 
 ### Line-1 equation coverage
 

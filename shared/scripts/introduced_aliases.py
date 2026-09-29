@@ -35,12 +35,14 @@ __all__ = ["introduced_alias_candidates", "missing_introduced_aliases"]
 _BOLD_OUTER_RE = re.compile(
     r"(?<!\*)\*\*((?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)\*\*(?!\*)")
 
+# ``a.k.a.`` sits outside the word-bounded group: a closing ``\b`` cannot
+# follow its final dot.
 _SYN_CUE_RE = re.compile(
     r"\b(?:also\s+(?:called|known\s+as|termed|named)|known\s+as|short\s+for|"
     r"informally\s+called|sometimes\s+called|or\s+simply|"
-    r"referred\s+to\s+as|a\.k\.a\.?|"
+    r"referred\s+to\s+as|"
     r"(?:often|commonly|usually)\s+called|"
-    r"(?:many\s+)?people\s+call|some\s+call)\b", re.IGNORECASE)
+    r"(?:many\s+)?people\s+call|some\s+call)\b|\ba\.k\.a\.?", re.IGNORECASE)
 
 # The opener's direct parenthetical after the bold title, past any leading
 # date parenthetical; lint_entry.py and scan_vault.py share it for card
@@ -63,14 +65,23 @@ _NON_NAME_PAREN_RE = re.compile(
 _PAREN_LEADIN_RE = re.compile(
     r"^(?:(?:short\s+for|originally\s+called|also\s+called|"
     r"also\s+known\s+as|known\s+as)|singular|plural|abbreviated|"
-    r"formerly|n[ée]e|or)[\s,:]+", re.IGNORECASE)
+    r"formerly|n[ée]e|or|a\.k\.a\.?)[\s,:]+", re.IGNORECASE)
+
+# A parenthetical that is only italic names joined by a comma, semicolon or
+# "or": "(*A*, *B*)", "(also called *A* or the *B*)". Only "or" may take an
+# indefinite article: "(*A*, a *B*)" pairs a name with a description.
+_PAREN_ITALIC_RE = re.compile(r"\*([^*\n]+)\*")
+_PAREN_NAME_LIST_RE = re.compile(
+    r"\*[^*\n]+\*(?:\s*(?:[,;]\s+(?:the\s+)?|,?\s+or\s+(?:(?:the|an?)\s+)?)"
+    r"\*[^*\n]+\*)*",
+    re.IGNORECASE)
 
 _DIRECT_SYNONYM_RE = re.compile(
-    r"^\s*(?:the\s+)?\*([^*\n]{2,60})\*", re.IGNORECASE)
+    r"^\s*(?:(?:the|an?)\s+)?\*([^*\n]{2,60})\*", re.IGNORECASE)
 
-# A further name in the same cue: "also called *A* or the *B*".
+# A further name in the same cue: "also called *A* or the *B*", "or a *B*".
 _CHAINED_SYNONYM_RE = re.compile(
-    r"\s*,?\s+or\s+(?:the\s+)?\*([^*\n]{2,60})\*",
+    r"\s*,?\s+or\s+(?:(?:the|an?)\s+)?\*([^*\n]{2,60})\*",
     re.IGNORECASE)
 
 
@@ -91,11 +102,20 @@ def _bold_parts(match):
     return raw, "plain", None
 
 
-def _clean_parenthetical_name(raw):
-    """Strip lexical lead-ins and emphasis from a parenthetical name."""
+def _parenthetical_names(raw):
+    """Return the names a parenthetical gives, lead-ins and emphasis stripped.
+
+    An article is part of the lead-in only after a synonym marker: "(also
+    called the *A*)" names *A*, while "(a *B*)" stays a description.
+    """
     value = " ".join((raw or "").split())
-    value = _PAREN_LEADIN_RE.sub("", value)
-    return value.replace("*", "").replace("_", "").strip()
+    names = _PAREN_LEADIN_RE.sub("", value)
+    listed = names
+    if names != value:
+        listed = re.sub(r"^(?:the|an?)\s+", "", names, flags=re.IGNORECASE)
+    if _PAREN_NAME_LIST_RE.fullmatch(listed):
+        return [name.strip() for name in _PAREN_ITALIC_RE.findall(listed)]
+    return [names.replace("*", "").replace("_", "").strip()]
 
 
 def _opening_block(prose_lines):
@@ -201,8 +221,8 @@ def introduced_alias_candidates(prose_lines, subject_forms=None):
             wanted = set().union(*(_surface_keys(form) for form in subject_forms))
             if not (_surface_keys(visible) & wanted):
                 continue
-        add(_clean_parenthetical_name(match.group("paren")),
-            "opener parenthetical")
+        for name in _parenthetical_names(match.group("paren")):
+            add(name, "opener parenthetical")
     for match in _SYN_CUE_RE.finditer(prose):
         direct = _DIRECT_SYNONYM_RE.match(prose[match.end():])
         if direct and _cue_names_subject(
@@ -323,6 +343,21 @@ def run_self_test(verbose=False):
             ["Normal distribution"]),
         [("Gaussian distribution", "italicized synonym"),
          ("bell curve", "italicized synonym")])
+    add("an indefinite article may precede a cued or chained name",
+        introduced_alias_candidates(
+            ["A **bull put spread**, also known as a *put credit spread* or "
+             "a *short put vertical*, sells a put."],
+            ["Bull put spread"]),
+        [("put credit spread", "italicized synonym"),
+         ("short put vertical", "italicized synonym")])
+    add("a.k.a. cues a synonym with or without its final dot",
+        [introduced_alias_candidates([value], ["Stochastic gradient descent"])
+         for value in (
+             "**Stochastic gradient descent**, a.k.a. *online gradient "
+             "descent*, updates weights.",
+             "**Stochastic gradient descent**, a.k.a *online gradient "
+             "descent*, updates weights.")],
+        [[("online gradient descent", "italicized synonym")]] * 2)
     add("component synonym is excluded",
         introduced_alias_candidates(
             ["A **ROC curve** compares rates. The false positive rate, also "
@@ -345,6 +380,43 @@ def run_self_test(verbose=False):
             ["**Archaea** (singular, *archaeon*) are prokaryotes."],
             ["Archaea"]),
         [("archaeon", "opener parenthetical")])
+    add("an article after a parenthetical lead-in is stripped",
+        [introduced_alias_candidates([value], [title]) for title, value in (
+            ("Normal distribution", "**Normal distribution** (also called "
+             "the *Gaussian distribution*) is common."),
+            ("Normal distribution", "**Normal distribution** (also known as "
+             "a *bell curve*) is common."),
+            ("SGD", "**SGD** (a.k.a. *online gradient descent*) updates "
+             "weights."))],
+        [[("Gaussian distribution", "opener parenthetical")],
+         [("bell curve", "opener parenthetical")],
+         [("online gradient descent", "opener parenthetical")]])
+    add("an article without a lead-in keeps a parenthetical descriptive",
+        introduced_alias_candidates(
+            ["**Mus musculus** (a *house mouse*) lives with humans."],
+            ["Mus musculus"]),
+        [])
+    add("several italic names in one parenthetical are separate candidates",
+        [introduced_alias_candidates([value], ["Normal distribution"])
+         for value in (
+             "**Normal distribution** (*Gaussian distribution*, *bell "
+             "curve*) is common.",
+             "**Normal distribution** (also called the *Gaussian "
+             "distribution* or the *bell curve*) is common.")],
+        [[("Gaussian distribution", "opener parenthetical"),
+          ("bell curve", "opener parenthetical")]] * 2)
+    add("only or takes an article in a name list: a comma or semicolon "
+        "before an indefinite description never splits it off",
+        [[name for name, _how in introduced_alias_candidates([value], ["TNF"])]
+         for value in (
+             "**TNF** (*tumor necrosis factor*, a *cytokine*) signals.",
+             "**TNF** (*tumor necrosis factor*; a *cytokine*) signals.",
+             "**TNF** (*tumor necrosis factor*, or a *cachexin*) signals.",
+             "**TNF** (*tumor necrosis factor*, the *cachexin*) signals.")],
+        [["tumor necrosis factor, a cytokine"],
+         ["tumor necrosis factor; a cytokine"],
+         ["tumor necrosis factor", "cachexin"],
+         ["tumor necrosis factor", "cachexin"]])
     add("scientific abbreviation is retained",
         introduced_alias_candidates(
             ["***Escherichia coli*** (*E. coli*) is a bacterium."],
@@ -398,6 +470,20 @@ def run_self_test(verbose=False):
             ["A **label**, also called the *target variable*, is an answer."],
             "Label (machine learning)", [], "label-machine-learning"),
         [("target variable", "italicized synonym", "target-variable")])
+    add("an indefinite-article synonym is a missing alias",
+        missing_introduced_aliases(
+            ["**Mean absolute error**, also called an *average absolute "
+             "deviation*, measures error."],
+            "Mean absolute error", [], "mean-absolute-error"),
+        [("average absolute deviation", "italicized synonym",
+          "average-absolute-deviation")])
+    add("a listed cross-domain word stays excluded beside a real alias",
+        missing_introduced_aliases(
+            ["**Recall** (also called *sensitivity* or *true positive rate*) "
+             "finds positives."],
+            "Recall (machine learning)", [], "recall-machine-learning"),
+        [("true positive rate", "opener parenthetical",
+          "true-positive-rate")])
     add("irregular singular of a canonical plural is not a missing alias",
         missing_introduced_aliases(
             ["**Archaea** (singular, *archaeon*) are prokaryotes."],
