@@ -148,19 +148,28 @@ import sys
 sys.path.insert(0, "<skill>/scripts")
 from organize import split_book, vault_names
 
-notes = split_book(pdf_path, chapters, out_dir, vault_names(vault), apply=True)
+notes = split_book(pdf_path, chapters, out_dir, vault_names(vault),
+                   apply=True, vault=vault)
 ```
 
-Use `--vault` / `vault_names(vault)` whenever a vault is in scope. Rebuild
-that map after every earlier rename or split; a snapshot from the start of
-a batch cannot protect against names created later in the same batch. Without
-a vault, pass an empty map and report that only destination checks ran.
+Use `--vault`, or `vault_names(vault)` with `vault=vault`, whenever a vault
+is in scope. Rebuild that map after every earlier rename or split; a snapshot
+from the start of a batch cannot protect against names created later in the
+same batch. Without a vault, pass an empty map and report that only
+destination checks ran.
 
 The helper resolves **all chapters before writing any**, on every call. Every
 heading must map to a verified start, all ranges must be in bounds and
 non-overlapping, and every filename must be a canonical chapter name of this
 book in increasing chapter order, remain under 200 bytes, and have an
-unoccupied destination both locally and vault-wide.
+unoccupied destination both locally and vault-wide. With a vault, a new
+chapter stem must not already name any `Articles/` note or `_fig*` image, even
+one left by an earlier split of this book, because the helper cannot tell who
+derived it. Resolve that blocker as for a
+[rename](../SKILL.md#3-check-references-and-prepare-the-complete-rename-plan):
+if the files came from this same chapter, ask the user to clear them from that
+name before splitting and restore them afterward; otherwise choose another
+chapter name.
 Occupied symlinks and case-equivalent names also block. `SplitRefused` lists
 unresolved problems; do not bypass one by extracting just the chapters that
 passed.

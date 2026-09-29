@@ -22,7 +22,7 @@ The `## Flashcards` section ends the entry. After the Related footer come a blan
 <line 3: the answer>
 ```
 
-A card is three content lines with no blank line between them. The vault's Spaced Repetition community plugin reads these cards, so the format is a contract with that plugin; no skill runs it or can check that it ran. Its deck setup is in the plugin README under *Reviewing flashcards*. The plugin parses the whole note, so no line of the entry, card lines included, holds its single-line card separator `::` (or `:::`) outside code, which would turn that line into a card of its own: keep code in a backtick span or a fence opened and closed at the start of its lines, and write a math `::` as `\mathbin{:}\mathbin{:}`.
+A card is three content lines with no blank line between them. The vault's Spaced Repetition community plugin reads these cards, so the format is a contract with that plugin; no skill runs it or can check that it ran. Its deck setup is in the plugin README under *Reviewing flashcards*. The plugin parses the whole note, so no line of the entry, card lines included, holds its single-line card separator `::` (or `:::`) outside code, or is only `?` or `??`, which would turn that line or its paragraph into a card of its own: keep code in a backtick span or a fence opened and closed at the start of its lines, and write a math `::` as `\mathbin{:}\mathbin{:}`.
 
 ### Line 1: the cue
 

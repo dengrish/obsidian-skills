@@ -868,7 +868,14 @@ def sr_inline_marker(line):
                      line, line.find(sep), sep)), None)
 
 
-def sr_marker_findings(text):
+#: The whitespace JavaScript's trim() removes, which the plugin uses: it differs
+#: from Python's default (U+FEFF counts; U+0085 and U+001C-U+001F do not).
+_SR_JS_SPACE = ("\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004"
+                "\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f"
+                "\u3000\ufeff")
+
+
+def sr_marker_findings(text, multiline=True):
     """Item 19: lines outside the Flashcards section that become cards.
 
     ``text`` is the raw body before the Flashcards heading (the whole body
@@ -880,7 +887,12 @@ def sr_marker_findings(text):
     is skipped with the line after it when it holds ``-->``; otherwise the
     plugin skips the rest of the note, card included, which is reported;
     a fence opened at column 0 that no later line starting with the same
-    run closes does the same, which is reported too. Obsidian ``%%`` comments and a
+    run closes does the same, which is reported too. A line that is only
+    ``?`` or ``??`` (its multi-line separators) starts a card once the
+    plugin's running card text is longer than one character, as it always
+    is after other text in the same paragraph; with ``multiline`` false (no
+    Flashcards section was found, so the entry's own card may lie in
+    ``text``) such lines are not reported. Obsidian ``%%`` comments and a
     comment later in a line are ordinary text to it, and the scheduling
     state it attaches under such a card is not parsed. Such a card breaks
     the one-card rule, so every hit is certain. Returns ``{check, line,
@@ -889,6 +901,9 @@ def sr_marker_findings(text):
     out = []
     lines = (text or "").split("\n")
     index = 0
+    # The length of the plugin's running card text: a blank line or a
+    # single-line card empties it, and a skipped comment leaves it alone.
+    pending = 0
     while index < len(lines):
         line = lines[index]
         if line.startswith("<!--") and not line.startswith("<!--SR:"):
@@ -905,8 +920,14 @@ def sr_marker_findings(text):
                 break
             index += 2
             continue
+        if not line.strip(_SR_JS_SPACE):
+            pending = 0
+            index += 1
+            continue
+        pending += (1 if pending else 0) + len(line.rstrip(_SR_JS_SPACE))
         marker = sr_inline_marker(line)
         if marker:
+            pending = 0
             at = line.find(marker)
             before, after = line[max(0, at - 40):at], line[at:at + 42]
             if at > 40:
@@ -930,6 +951,16 @@ def sr_marker_findings(text):
             elif rest and rest[0].startswith(SR_METADATA_CALLOUT):
                 index += next((n for n, attached in enumerate(rest, 1)
                                if "<!--SR:" in attached), len(rest))
+        elif (multiline and pending > 1
+              and line.strip(_SR_JS_SPACE) in ("?", "??")):
+            out.append({
+                "check": "sr-marker", "line": index + 1,
+                "marker": line.strip(_SR_JS_SPACE),
+                "message": (
+                    '"%s" alone on a line is a Spaced Repetition multi-line '
+                    "card separator, so the plugin reads its paragraph as an "
+                    "extra card; join it to the line before or reword it"
+                    % line.strip(_SR_JS_SPACE))})
         elif line.startswith(("```", "~~~")):
             close = re.match(r"`+|~+", line).group(0)
             opened = index
@@ -1037,6 +1068,9 @@ SHARED_MUTATIONS = (
      "item19/sr-marker", "19-sr-marker", False),
     ("item19 a column-0 fence no column-0 line closes",
      "%% The rates compare\n```\n%%",
+     "item19/sr-marker", "19-sr-marker", False),
+    ("item19 a line holding only the multi-line card separator",
+     "Why do the rates compare\n?\nAs a ratio.",
      "item19/sr-marker", "19-sr-marker", False),
 )
 
@@ -1470,6 +1504,22 @@ def run_self_test(verbose=False):
               "<!--SR:!2026-01-01,1,250--> a::b",
               "a::b\n<!-- open\nc::d -->\ne::f")],
           [[1, 2, 3], [3], [1], [1, 2]])
+    check("a line that is only ? or ?? starts a card after other text in "
+          "its paragraph; ?? alone does too, ? alone and code do not",
+          [[(row["line"], row["marker"]) for row in sr_marker_findings(text)]
+           for text in ("Why?\n?\nBecause.", "Prose.\n\n?\n\nMore.",
+                        "Prose.\n\n??\n\nMore.", "Prose.\n  ??  \nEnd.",
+                        "```\n?\n```", "a::b\n?\nc")],
+          [[(2, "?")], [], [(3, "??")], [(2, "??")], [], [(1, "::")]])
+    check("without a Flashcards section the entry's own card may be in the "
+          "text, so its ? and ?? lines are not reported",
+          (sr_marker_findings("Cue.\n??\nAnswer", multiline=False),
+           [row["line"] for row in sr_marker_findings("Cue.\n??\nAnswer")]),
+          ([], [2]))
+    check("blank and separator lines use the plugin's JavaScript whitespace",
+          [[row["line"] for row in sr_marker_findings(text)] for text in (
+              "Q\n\ufeff\n?", "Q\n\x85\n?", "\ufeff??", "\x85??")],
+          [[], [3], [1], []])
     check("a column-0 fence no later column-0 line closes ends the scan",
           [[(row["line"], row["marker"]) for row in sr_marker_findings(text)]
            for text in ("```text\na::b\n  ```\nc::d",

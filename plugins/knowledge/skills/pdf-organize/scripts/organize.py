@@ -1724,8 +1724,12 @@ def _family_basename_blockers(path, keyed, existing):
     return out
 
 
-def _target_stem_blockers(vault, stem, mine):
-    """Block a PDF rename onto a note/image namespace owned by another source."""
+def _target_stem_blockers(vault, stem, mine, action=None, alternative=None):
+    """Block a PDF rename (or a split's new chapter) onto a note/image
+    namespace owned by another source."""
+    clear_before = action or "filing"
+    access_before = action or "renaming"
+    alternative = alternative or "another canonical PDF name"
     blockers = []
     articles = os.path.join(vault, "Articles")
     wanted_note = _nfc_low(stem + ".md")
@@ -1737,9 +1741,9 @@ def _target_stem_blockers(vault, stem, mine):
                 "%s already owns the target stem %s as an Articles note "
                 "outside this PDF's family. Report it and the notes that link "
                 "it. If it was derived from this same document, ask the user "
-                "whether to clear it from that name before filing and restore "
-                "it afterward; otherwise choose another canonical PDF name."
-                % (path, stem))
+                "whether to clear it from that name before %s and restore "
+                "it afterward; otherwise choose %s."
+                % (path, stem, clear_before, alternative))
 
     images = os.path.join(vault, "Sources", "Images")
     if os.path.isdir(images):
@@ -1747,7 +1751,7 @@ def _target_stem_blockers(vault, stem, mine):
         if not inventory.complete:
             blockers.append(
                 "the target figure namespace %s_fig* could not be inventoried "
-                "completely; repair access before renaming" % stem)
+                "completely; repair access before %s" % (stem, access_before))
         for path in inventory.candidates + inventory.blocked_matches:
             if os.path.realpath(path) not in mine:
                 blockers.append(
@@ -1756,9 +1760,9 @@ def _target_stem_blockers(vault, stem, mine):
                     "cannot claim it for a PDF not yet under that name. Report "
                     "it and the notes that embed it. If it was derived from "
                     "this same document, ask the user whether to clear it from "
-                    "that name before filing and restore it afterward; "
-                    "otherwise choose another canonical PDF name."
-                    % (path, stem))
+                    "that name before %s and restore it afterward; "
+                    "otherwise choose %s."
+                    % (path, stem, clear_before, alternative))
     return blockers
 
 
@@ -3036,7 +3040,7 @@ def _split_failure_message(pdf_path, written_count, plan_count, exc,
 
 
 def split_book(pdf_path, chapters, out_dir, taken=None, verbose=True,
-               apply=False):
+               apply=False, vault=None):
     """Plan, or with `apply=True` write, one PDF per chapter under `out_dir`.
 
     `chapters` is a list of dicts in book order, each with `heading_text`,
@@ -3044,7 +3048,9 @@ def split_book(pdf_path, chapters, out_dir, taken=None, verbose=True,
     see `references/book-splitting.md`.  `taken` is `vault_names(vault)`:
     every basename already in the vault, so a chapter cannot collide with a
     file in another folder, and a book whose basename another vault file
-    shares is refused, even one that `check` exempts.  Returns the list
+    shares is refused, even one that `check` exempts.  With `vault`, each
+    new chapter stem's `Articles/` note and `_fig*` image namespace must be
+    free too, as for a rename.  Returns the list
     of `note:` strings.  Without
     `apply` it resolves and reports the final ranges and notes, writes
     nothing and creates no folder, so corrections are reviewed before any
@@ -3171,6 +3177,20 @@ def split_book(pdf_path, chapters, out_dir, taken=None, verbose=True,
         raise SplitRefused("%s: chapter destinations could not be inventoried "
                            "completely (%s). Nothing was written."
                            % (out_dir, exc))
+    if vault and not problems:
+        # A new chapter owns nothing yet, so a same-stem note or figure set
+        # belongs to another source; rename applies the same check.
+        try:
+            for _start, _end, _target, name in plan:
+                problems.extend(
+                    "%s: %s" % (name, blocker)
+                    for blocker in _target_stem_blockers(
+                        vault, os.path.splitext(name)[0], set(),
+                        action="splitting", alternative="another chapter name"))
+        except InventoryFailed as exc:
+            raise SplitRefused("%s: chapter note and figure namespaces could "
+                               "not be inventoried completely (%s). Nothing "
+                               "was written." % (pdf_path, exc))
     if problems:
         raise SplitRefused("Not splitting %s. Fix these first:\n  - "
                            % os.path.basename(pdf_path)
@@ -3460,7 +3480,7 @@ def _cmd_split(args):
               file=sys.stderr)
         return 1
     try:
-        split_book(pdf, chapters, out, taken, apply=args.apply)
+        split_book(pdf, chapters, out, taken, apply=args.apply, vault=vault)
     except SplitRefused as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -5473,6 +5493,67 @@ def _selftest():
                   _out, "Kuhn_S_2012_01_Intro.pdf")).pages),
                Path(_note).read_text(encoding="utf-8"), os.path.isfile(_book)),
               ([], 1, "existing chapter notes\n", True))
+
+    # A new chapter stem's note and figure namespace must be free, as for a
+    # rename: an unrelated clipping or figure set under that stem blocks.
+    with _tf.TemporaryDirectory(prefix="org-split-target-stem-") as _v:
+        _book = os.path.join(_v, "Sources", "PDFs", "Kuhn_S_2012.pdf")
+        os.makedirs(os.path.dirname(_book))
+        _source_writer = _TestPdfWriter()
+        _source_writer.add_blank_page(width=100, height=100)
+        with open(_book, "wb") as _fh:
+            _source_writer.write(_fh)
+        _reader_object = _TestPdfReader(_book)
+        _reader_object.pages[0].extract_text = lambda: "Chapter 1 Introduction"
+        _out = os.path.join(_v, "Sources", "PDFs", "Kuhn_S_2012")
+        _plan = [{"heading_text": "Chapter 1 Introduction",
+                  "filename": "Kuhn_S_2012_01_Intro.pdf",
+                  "start_idx": 0, "end_idx": 1}]
+        _put(_v, "Articles/Kuhn_S_2012_01_Intro.md",
+             "---\nsource: https://example.org/intro\n---\nA clipping.\n")
+        _put(_v, "Sources/Images/Kuhn_S_2012_01_Intro_fig_1.png", b"png")
+        _refusals = []
+        for _apply in (False, True):
+            try:
+                with patch.dict(globals(), _reader=lambda _path: _reader_object):
+                    split_book(_book, _plan, _out, vault_names(_v),
+                               verbose=False, apply=_apply, vault=_v)
+                _refusals.append("")
+            except SplitRefused as _exc:
+                _refusals.append(str(_exc))
+        check("a new chapter stem's occupied note and figure namespace block "
+              "the split in plan and apply mode",
+              [("Articles note" in r, "target figure stem" in r,
+                "Kuhn_S_2012_01_Intro.pdf: " in r,
+                "before splitting" in r and "another chapter name" in r)
+               for r in _refusals] + [os.path.exists(_out)],
+              [(True, True, True, True), (True, True, True, True), False])
+        _chapters = _put(_v, "chapters.json", json.dumps(_plan))
+        with patch.dict(globals(), _reader=lambda _path: _reader_object):
+            _code, _, _stderr = _run_cli(["split", _book, "--chapters",
+                                          _chapters, "--out", _out,
+                                          "--vault", _v, "--apply"])
+        check("split --vault applies the chapter-stem namespace check",
+              (_code, "Articles note" in _stderr,
+               "target figure stem" in _stderr, os.path.exists(_out)),
+              (1, True, True, False))
+        os.remove(os.path.join(_v, "Articles", "Kuhn_S_2012_01_Intro.md"))
+        os.remove(os.path.join(_v, "Sources", "Images",
+                               "Kuhn_S_2012_01_Intro_fig_1.png"))
+        # The book's own note and figures never block its chapters.
+        _put(_v, "Articles/Kuhn_S_2012.md", "---\nsource: book\n---\n")
+        _put(_v, "Sources/Images/Kuhn_S_2012_fig_1.png", b"png")
+        try:
+            with patch.dict(globals(), _reader=lambda _path: _reader_object):
+                split_book(_book, _plan, _out, vault_names(_v),
+                           verbose=False, apply=True, vault=_v)
+            _free_split = ""
+        except SplitRefused as _exc:
+            _free_split = str(_exc)
+        check("with the chapter namespace free, even beside the book's own "
+              "note and figures, the same split applies",
+              (_free_split, os.path.isfile(
+                  os.path.join(_out, "Kuhn_S_2012_01_Intro.pdf"))), ("", True))
 
     # split plans by default: the final ranges and every correction note are
     # shown before any chapter exists, and only --apply writes.
