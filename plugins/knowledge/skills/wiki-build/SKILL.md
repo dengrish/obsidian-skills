@@ -94,7 +94,7 @@ A request naming entities to build from identified durable sources ("PCA from ch
 - **Scope.** Intake every named source and extract only the named entities; rerun authority covers only them and their sources, never unrelated extraction or a refactor. When the named entry already cites every named source and the request asks to correct, simplify, expand or enrich it rather than re-run the source, use wiki-lint's [source-backed correction mode](../wiki-lint/SKILL.md#source-backed-correction-mode) instead.
 - **Unrequested neighbours.** List a neighbour the source teaches but the request does not name (LLE beside PCA) under *Entities not requested*; its mention in the requested entry follows the [atomicity limit](references/writing.md#body-structure). A shared genus or prerequisite with no entry (protein secondary structure for alpha helix and beta sheet) heads that list; build it only when the user names it.
 - **Evidence.** Apply the ordinary substance and durability tests ([several sources](references/source-cases.md#several-sources-in-one-run)); on failure, keep plain mentions and report what is missing. Never add sources from memory or web search; a web reference must first become a durable clipping.
-- **Report** each one's sources considered and retained, identity and substance calls, result and citations.
+- **Report** each one's sources considered and retained, identity and substance calls, result and citations. Name every source no entry cited before this run as `<source> is now cited by <entry> but not yet built: folder runs will skip it, and a wiki-build request naming the source fills in its other topics`.
 
 ### 3. Resolve against existing entries
 
