@@ -1,10 +1,10 @@
 # Research and durable sources
 
-Read this for a topic confirmed missing: a wiki-add request, or a discipline
-root that wiki-lint Task 3 creates within its own limits. Source acquisition is
-limited to evidence for that topic; it never authorizes processing the inbox,
-refreshing an existing source, or changing its dependent notes or figures.
-Backlog steps apply only to wiki-add.
+Read this for a topic that a wiki-add request confirms missing. Source
+acquisition is limited to evidence for that topic; it never authorizes
+processing the inbox, refreshing an existing source, or changing its dependent
+notes or figures. A discipline root is never researched: it is written with
+`sources: []` under its [root form](../../wiki-lint/references/hierarchy.md#establish-discipline-roots).
 
 ## Choose and inspect evidence
 
@@ -263,4 +263,4 @@ source, collision and guarded-write requirements still apply; never replace a
 pre-existing figure or trigger repairs of existing artifacts. A figure that
 cannot be acquired safely stays omitted with a reason. Complete verified
 source artifacts and selected images first, publish the Wiki entry second,
-and, for wiki-add, update the backlog last.
+and update the backlog last.
