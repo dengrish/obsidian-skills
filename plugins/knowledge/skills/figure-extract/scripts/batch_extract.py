@@ -858,8 +858,11 @@ def _ed_supplementary_pair(kept, dropped):
             != bool(_EXTENDED_DATA_RE.match(dropped)))
 
 
-_S_LABEL_RE = re.compile(r"s[0-9][0-9-]*")
-_ED_LABEL_RE = re.compile(r"ed[0-9][0-9-]*")
+#: Casefolded labels in the S namespace (`S1`, `S-1`, `SA1`, `SI1`), where a
+#: default-prefix run puts Extended Data captions, and the labels only
+#: `--ed-prefix ED` writes (`ED1`, `EDA1`, `EDS1`, `EDSI1`).
+_S_LABEL_RE = re.compile(r"s(?:-|[a-z]-?)?[0-9][0-9-]*")
+_ED_LABEL_RE = re.compile(r"ed(?:si|[a-z]-?)?[0-9][0-9-]*")
 
 
 def _records_extended_data(manifest, stem):
@@ -1396,15 +1399,26 @@ def mark_reviewed_command(src_dir, out_dir, stem, fig, *, ed_prefix="S",
         allow_unorganized=allow_unorganized, review_file=review_file, dpi=dpi)
 
 
-_S_ED_FILE_RE = re.compile(r"_fig_(S|ED)([0-9][0-9-]*)\.png\Z", re.I)
+_S_ED_FILE_RE = re.compile(r"_fig_((?:S|ED)[A-Z0-9-]*[0-9])\.png\Z", re.I)
 
 
 def _s_ed_twins(path, other):
-    """True for `<stem>_fig_S<N>.png` beside `<stem>_fig_ED<N>.png`."""
-    a = _S_ED_FILE_RE.search(os.path.basename(str(path)))
-    b = _S_ED_FILE_RE.search(os.path.basename(str(other)))
-    return bool(a and b and a.group(2) == b.group(2)
-                and {a.group(1).upper(), b.group(1).upper()} == {"S", "ED"})
+    """True for `<stem>_fig_S<N>.png` beside `<stem>_fig_ED<N>.png`.
+
+    The pair is one Extended Data caption's name under each prefix, so an
+    `ED` label is compared in the default namespace: `ED1` pairs with `S1`,
+    `EDA1` with `SA1` and `EDS1` with `S1`.
+    """
+    labels = []
+    for name in (path, other):
+        match = _S_ED_FILE_RE.search(os.path.basename(str(name)))
+        if not match:
+            return False
+        labels.append(match.group(1).upper())
+    ed = [label[2:] for label in labels if label.startswith("ED")]
+    s = [label for label in labels if not label.startswith("ED")]
+    return (len(ed) == 1 and len(s) == 1
+            and s[0] == (ed[0] if ed[0].startswith("S") else "S" + ed[0]))
 
 
 def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
@@ -1648,8 +1662,9 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
             print("  --mark-reviewed for that label; the dropped caption is not extracted.")
         if ed_pairs:
             print("  Extended Data and Supplementary figures share _fig_S<N> under the default")
-            print("  prefix. Remove any review rows for these PDFs' S labels, then rerun each")
-            print("  PDF alone (it replaces only _fig_S<N> crops) and view every PNG it writes:")
+            print("  prefix. For each collision above that kept an Extended Data caption, remove")
+            print("  that S label's review row, if any; then rerun each PDF alone (it replaces")
+            print("  only unmarked _fig_S<N> crops) and view every PNG it writes:")
             switch = ["--overwrite-supplementary"] + (["--dry-run"] if dry_run else [])
             for pdf_path in ed_pairs:
                 print("    " + _batch_command(
@@ -1734,7 +1749,7 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
         if namespaces:
             print("  An S<N>/ED<N> pair usually means _fig_S<N> still holds the Extended Data")
             print("  crop from an earlier default-prefix run. If that S label has its own")
-            print("  Supplementary caption, remove any review rows for the S labels and rerun")
+            print("  Supplementary caption, remove that S label's review row, if any, and rerun")
             print("  that PDF alone with --ed-prefix ED --overwrite-supplementary; otherwise")
             print("  report the S file as a stale mislabelled crop. View every PNG a rerun writes.")
         else:
@@ -3197,6 +3212,16 @@ def run_self_test():
                   seed_dir, ["Doe_Prior_2025:1a"], {"Doe_Prior_2025"}, {})],
               ["Doe_Prior_2025_fig_1a.png"])
         panel_legacy.unlink()
+        appendix_legacy = Path(seed_dir) / "Doe_Prior_2025_fig_SA1.png"
+        shutil.copyfile(prior, appendix_legacy)
+        try:
+            appendix_adopted = [item[1] for item in adopt_legacy_files(
+                seed_dir, ["Doe_Prior_2025:SA1"], {"Doe_Prior_2025"}, {})]
+        except ValueError as exc:
+            appendix_adopted = str(exc)
+        check("a marker-prefixed appendix label (SA1) can be adopted",
+              appendix_adopted, ["Doe_Prior_2025_fig_SA1.png"])
+        appendix_legacy.unlink()
         existing_manifest = {"Other_Study_2025_fig_1.png": "a" * 64}
         existing_adoption = adopt_legacy_files(
             seed_dir, ["Doe_Prior_2025:1"], {"Doe_Prior_2025"},
@@ -3706,6 +3731,166 @@ def run_self_test():
                                 "--mark-reviewed", "Doe_Namespaces_2025:ED1"])
             check("...and accepts a default-prefix review mark for it", code, 0)
         configure_marker_prefix("Extended Data", "S")
+
+        # Only the S label an Extended Data caption won needs its review row
+        # removed before the ED switch. Another S row protects an explicit
+        # repair of a genuine Supplementary figure, and the switch keeps it.
+        keep_src = Path(tmp) / "ed-keep-supplementary"
+        keep_src.mkdir()
+        keep_pdf = keep_src / "Doe_Keeps_2025.pdf"
+        kdoc = fitz.open()
+        for cap, fill in (("Extended Data Figure 1. First.", (1, 0, 0)),
+                          ("Supplementary Figure 1. Second.", (0, 0, 1)),
+                          ("Supplementary Figure 2. Third.", (0, 0.6, 0))):
+            kpage = kdoc.new_page(width=612, height=792)
+            kpage.draw_rect(fitz.Rect(100, 200, 500, 400), fill=fill)
+            kpage.insert_text((100, 430), cap, fontsize=9)
+        kdoc.save(str(keep_pdf))
+        kdoc.close()
+        keep_out = Path(tmp) / "ed-keep-supplementary-out"
+        code, so, se = run(["--src", str(keep_pdf), "--out", str(keep_out),
+                            "--dpi", "72"])
+        keep_hints = [line.strip() for line in so.splitlines()
+                      if line.strip().startswith(shlex.quote(sys.executable) + " ")
+                      and "--ed-prefix ED" in line
+                      and "--overwrite-supplementary" in line]
+        ok("the ED switch hint names only the collided S label's review row",
+           "For each collision above that kept an Extended Data caption" in so
+           and "Remove any review rows" not in so)
+        keep_s2 = keep_out / "Doe_Keeps_2025_fig_S2.png"
+        keep_s2_auto = keep_s2.read_bytes() if keep_s2.exists() else b""
+        keep_repair = subprocess.run(
+            [sys.executable,
+             str(Path(__file__).resolve().with_name("extract_figures.py")),
+             str(keep_pdf), "--out", str(keep_out), "--stem", keep_pdf.stem,
+             "--crop", "3:S2:150,250,450,350", "--dpi", "72", "--no-trim",
+             "--overwrite"],
+            capture_output=True, text=True, encoding="utf-8", cwd=tmp)
+        keep_s2_repaired = keep_s2.read_bytes() if keep_s2.exists() else b""
+        code, so, se = run(["--src", str(keep_pdf), "--out", str(keep_out),
+                            "--dpi", "72",
+                            "--mark-reviewed", "Doe_Keeps_2025:S2"])
+        check("an explicit, marked repair of Supplementary Figure 2 is in place",
+              (keep_repair.returncode, len(keep_hints),
+               keep_s2_repaired != keep_s2_auto,
+               "Recorded as reviewed: Doe_Keeps_2025 Fig S2" in so),
+              (0, 1, True, True))
+        if keep_hints:
+            code, so, se = run(shlex.split(keep_hints[0])[2:])
+            check("the ED switch keeps the marked Supplementary repair",
+                  (code, keep_s2.read_bytes() == keep_s2_repaired,
+                   (keep_out / "Doe_Keeps_2025_fig_ED1.png").is_file()),
+                  (0, True, True))
+        configure_marker_prefix("Extended Data", "S")
+
+        # Appendix labels take the same switch: `Extended Data Figure A1` and
+        # `Supplementary Figure A1` share _fig_SA1 by default, and the printed
+        # rerun must replace that S crop, write EDA1 and keep the namespace.
+        check("the S and ED label patterns cover appendix and SI forms",
+              ([bool(_S_LABEL_RE.fullmatch(label)) for label in (
+                  "s1", "s2-3", "s-1", "sa1", "sa-1", "si1", "1", "a1", "ed1")],
+               [bool(_ED_LABEL_RE.fullmatch(label)) for label in (
+                   "ed1", "ed2-3", "eda1", "eda-1", "eds1", "eds-1", "edsi1",
+                   "e1", "s1", "sa1")]),
+              ([True] * 6 + [False] * 3, [True] * 7 + [False] * 3))
+        check("an S/ED twin is one Extended Data caption under each prefix",
+              [_s_ed_twins("D_fig_%s.png" % a, "out/D_fig_%s.png" % b)
+               for a, b in (("ED1", "S1"), ("SA1", "EDA1"), ("EDS1", "S1"),
+                            ("EDSI1", "SI1"), ("ED2-3", "S2-3"), ("ED1", "SA1"),
+                            ("EDA1", "S1"), ("S1", "S1"), ("ED1", "ED1"),
+                            ("EDA1", "A1"))],
+              [True] * 5 + [False] * 5)
+        apx_src = Path(tmp) / "ed-appendix"
+        apx_src.mkdir()
+        apx_pdf = apx_src / "Doe_Appendix_2025.pdf"
+        adoc = fitz.open()
+        for cap, fill in (("Extended Data Figure A1. First.", (1, 0, 0)),
+                          ("Supplementary Figure A1. Second.", (0, 0, 1))):
+            apage = adoc.new_page(width=612, height=792)
+            apage.draw_rect(fitz.Rect(100, 200, 500, 400), fill=fill)
+            apage.insert_text((100, 430), cap, fontsize=9)
+        adoc.save(str(apx_pdf))
+        adoc.close()
+        apx_out = Path(tmp) / "ed-appendix-out"
+        code, so, se = run(["--src", str(apx_pdf), "--out", str(apx_out),
+                            "--dpi", "72"])
+        apx_hints = [line.strip() for line in so.splitlines()
+                     if line.strip().startswith(shlex.quote(sys.executable) + " ")
+                     and "--ed-prefix ED" in line
+                     and "--overwrite-supplementary" in line]
+        check("an Extended Data/Supplementary A1 collision prints one ED rerun",
+              (code, len(apx_hints)), (1, 1))
+        sa1 = apx_out / "Doe_Appendix_2025_fig_SA1.png"
+        eda1 = apx_out / "Doe_Appendix_2025_fig_EDA1.png"
+        sa1_before = sa1.read_bytes() if sa1.exists() else b""
+        code, so, se = run(["--src", str(apx_pdf), "--out", str(apx_out),
+                            "--dpi", "72", "--ed-prefix", "ED"])
+        ok("...a bare ED switch calls the identical SA1/EDA1 pair a leftover",
+           "still holds the Extended Data" in so
+           and "side-by-side panels" not in so)
+        if apx_hints:
+            code, so, se = run(shlex.split(apx_hints[0])[2:])
+            check("...and the printed rerun replaces the SA1 crop that held "
+                  "Extended Data Figure A1",
+                  (code, sa1.read_bytes() != sa1_before,
+                   eda1.read_bytes() == sa1_before), (0, True, True))
+        code, so, se = run(["--src", str(apx_src), "--out", str(apx_out),
+                            "--dpi", "72"])
+        check("...after which a default sweep keeps --ed-prefix ED for it",
+              (code, "Caption collisions:   0" in so,
+               "Using --ed-prefix ED for 1 PDF(s)" in so), (0, True, True))
+        configure_marker_prefix("Extended Data", "S")
+
+        # Every label the caption detector can produce must be one the
+        # explicit-crop and --adopt-legacy tools accept, under both prefixes;
+        # otherwise a bad automatic crop under that name cannot be repaired.
+        from auto_fig_bbox import MARKER_TO_PREFIX
+        grammar_markers = ("", "Supplementary ", "Supplemental ", "Suppl. ",
+                           "Supp. ", "Extended Data ")
+        # A base-14 synthetic page cannot carry an en dash (it reads back as
+        # U+00B7); auto_fig_bbox's own self-test pins that normalization.
+        grammar_labels = ("1", "1.2", "1-2", "1.2.4", "A1", "A.1", "B-3",
+                          "S1", "S2-3", "S.1", "SI1", "E1")
+        grammar_captions = [marker + "Figure " + label + ". Title."
+                            for marker in grammar_markers
+                            for label in grammar_labels]
+        grammar_doc = fitz.open()
+        for caption in grammar_captions:
+            grammar_doc.new_page(width=612, height=792).insert_text(
+                (72, 100), caption, fontsize=9)
+        saved_prefixes = dict(MARKER_TO_PREFIX)
+        try:
+            for prefix in ("S", "ED"):
+                configure_marker_prefix("Extended Data", prefix)
+                produced, rejected = {}, []
+                for index, caption in enumerate(grammar_captions):
+                    produced[caption] = [
+                        row[0] for row in find_caption_blocks(grammar_doc[index])]
+                    for label in produced[caption]:
+                        try:
+                            validated_figure_suffix(label)
+                        except ValueError:
+                            rejected.append((caption, label))
+                check("every generated caption is detected once "
+                      "(Extended Data prefix %s)" % prefix,
+                      [c for c in grammar_captions if len(produced[c]) != 1], [])
+                check("...and every detected label passes the explicit-crop "
+                      "grammar (Extended Data prefix %s)" % prefix, rejected, [])
+                want = ({"Supplementary Figure A1. Title.": ["SA1"],
+                         "Extended Data Figure A1. Title.": ["SA1"],
+                         "Extended Data Figure S1. Title.": ["S1"]}
+                        if prefix == "S" else
+                        {"Supplementary Figure A1. Title.": ["SA1"],
+                         "Extended Data Figure A1. Title.": ["EDA1"],
+                         "Extended Data Figure S1. Title.": ["EDS1"],
+                         "Extended Data Figure SI1. Title.": ["EDSI1"]})
+                check("...with the caption-label table's prefixed forms "
+                      "(Extended Data prefix %s)" % prefix,
+                      {c: produced[c] for c in want}, want)
+        finally:
+            MARKER_TO_PREFIX.clear()
+            MARKER_TO_PREFIX.update(saved_prefixes)
+            grammar_doc.close()
 
         # A PDF that could not be opened is a failed run, not a clean one.
         badsrc = os.path.join(tmp, "badsrc")

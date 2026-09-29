@@ -35,4 +35,4 @@ When no specific discipline owns the entity, use `#misc` alone. Never leave Wiki
 
 ## When in doubt
 
-Surface the call in the run report's *Notes for the user* with the two-options framing (`Dot product` → math or ML?; `Magna Carta` → history or law?) so the user can override; the cost of getting it wrong is small. Defaults meanwhile: the [tag rule](writing.md#tags) for ML-adjacent entities, `#history` for entities the source primarily treats historically.
+Surface the call in the run report's *Notes for the user* with the two-options framing (`Cosine similarity` → ML or math?; `British monarchy` → history or political science?) so the user can override; the cost of getting it wrong is small. Defaults meanwhile: the [tag rule](writing.md#tags) for ML-adjacent entities, `#history` for entities the source primarily treats historically.

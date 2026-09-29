@@ -220,7 +220,7 @@ from atomic_move import (LinkUnavailable, PublicationConflict, file_identity,
 from dedup_index import is_research_extract_text, normalize_url, read_source
 from figure_state import MANIFEST_FILE, read_manifest
 from yaml_scalars import parse_source_fields
-from entry_structure import _escaped_at, mask_body_comments
+from entry_structure import mask_body_comments
 
 
 def _name_key(name):
@@ -1063,51 +1063,6 @@ def _has_current_sources_key(text):
     return False
 
 
-def _mask_inline_code(text):
-    """Blank CommonMark backtick spans, including multiline spans.
-
-    A closing run must have exactly the opening width; a longer run is a
-    different delimiter. Unresolved runs mask to EOF because malformed
-    literal text cannot establish positive attachment ownership.
-    """
-    chars = list(text)
-    cursor = 0
-    while cursor < len(text):
-        start = text.find("`", cursor)
-        if start < 0:
-            break
-        if _escaped_at(text, start):
-            cursor = start + 1
-            continue
-        width = 1
-        while start + width < len(text) and text[start + width] == "`":
-            width += 1
-        end = -1
-        probe = start + width
-        while probe < len(text):
-            candidate = text.find("`", probe)
-            if candidate < 0:
-                break
-            run_end = candidate + 1
-            while run_end < len(text) and text[run_end] == "`":
-                run_end += 1
-            if run_end - candidate == width:
-                end = candidate
-                break
-            probe = run_end
-        if end < 0:
-            for index in range(start, len(text)):
-                if chars[index] not in "\r\n":
-                    chars[index] = " "
-            break
-        stop = end + width
-        for index in range(start, stop):
-            if chars[index] not in "\r\n":
-                chars[index] = " "
-        cursor = stop
-    return "".join(chars)
-
-
 def _mask_html_literal_blocks(text, *, mask_unclosed=True):
     """Blank raw HTML regions whose contents render as code or non-content."""
     chars = list(text)
@@ -1140,33 +1095,55 @@ def _rendered_embed_basenames(body):
     Those strings are not rendered attachment references and cannot prove that
     the note owns a same-named file. False negatives are intentional here: an
     owner check may refuse and ask for inspection, but it must never take a
-    shared-folder file based on inert source text.
+    shared-folder file based on inert source text. Code spans come from the
+    shared paragraph-bounded lexer, so an unmatched backtick stays literal
+    text, as it renders. Blockquote and callout markers are stripped only
+    after that masking, so a quoted fence line shown inside an unquoted fence
+    cannot close it. Indentation is read from the source line, where a masked
+    code span or comment is not whitespace.
     """
-    visible = _mask_inline_code(_mask_html_literal_blocks(
-        mask_body_comments(body, mask_code=True)))
+    source = body or ""
+    visible = _mask_html_literal_blocks(
+        mask_body_comments(source, mask_code=True))
     out = []
     fence = None
     previous = ""
+    offset = 0
     for line in visible.splitlines(keepends=True):
+        # Masking keeps every offset, so this is the same line unmasked.
+        raw = source[offset:offset + len(line)]
+        offset += len(line)
+        # Code inside a blockquote or callout is still code.
+        quote = re.match(r"(?: {0,3}>[ ]?)*", line)
+        depth = quote.group(0).count(">")
+        line, raw = line[quote.end():], raw[quote.end():]
         stripped = line.rstrip("\r\n")
         if fence is not None:
-            close = re.match(r" {0,3}(%s{%d,})[ \t]*$" %
+            close = re.match(r"([ \t]*)(%s{%d,})[ \t]*$" %
                              (re.escape(fence[0]), fence[1]), stripped)
-            if close:
+            # Only a closer at the opener's quote depth ends the fence; a
+            # deeper "> ```" line is content shown inside it.
+            if (close and depth == fence[3]
+                    and len(close.group(1).expandtabs(4)) <= fence[2]):
                 fence = None
             continue
-        opened = re.match(r" {0,3}(`{3,}|~{3,})", stripped)
+        # As in the shared lexer, any indentation opens a fence: in a quoted
+        # list continuation the fence sits four or more columns in.
+        opened = re.match(
+            r"((?:[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+)*[ \t]*)(`{3,}|~{3,})",
+            stripped)
         if opened:
-            marker = opened.group(1)
-            fence = (marker[0], len(marker))
+            marker = opened.group(2)
+            fence = (marker[0], len(marker),
+                     max(3, len(opened.group(1).expandtabs(4))), depth)
             continue
         # An indented list continuation renders; other indentation may be code.
-        if ((line.startswith("\t") or line.startswith("    "))
+        if ((raw.startswith("\t") or raw.startswith("    "))
                 and not re.match(r" {0,3}(?:[-*+]|\d{1,9}[.)])(?:\s|$)|\s",
                                  previous)):
             continue
         if stripped.strip():
-            previous = stripped
+            previous = raw.rstrip("\r\n")
         for match in re.finditer(r"(?<!\\)!\[\[([^\]\r\n]+)\]\]", line):
             target = match.group(1).split("|", 1)[0].split("#", 1)[0].strip()
             # The plugin's attachment convention is filename-only. Accepting
@@ -3767,10 +3744,12 @@ continues here`
           frozenset(("Visible_fig_1.png", "Aliased_fig_9.png")))
     check("malformed literal delimiters do not create ownership evidence",
           _rendered_embed_basenames(
-              "unclosed ` ![[Inline_fig_1.png]]\n"
               "%% ![[Comment_fig_2.png]]\n"
               "<code>![[Html_fig_3.png]]\n"),
           frozenset())
+    check("an unmatched backtick is literal text, so its embed renders",
+          _rendered_embed_basenames("unclosed ` ![[Inline_fig_1.png]]\n"),
+          frozenset(("Inline_fig_1.png",)))
     check("indented list continuations still establish ownership",
           _rendered_embed_basenames(
               "1. Open.\n\n    ![[List_fig_1.png]]\n2. Save.\n\t![[List_fig_2.png]]\n"
@@ -3779,6 +3758,48 @@ continues here`
     check("an escaped backtick does not hide later embeds",
           _rendered_embed_basenames("Press the \\` key.\n\n![[After_fig_1.png]]\n"),
           frozenset(("After_fig_1.png",)))
+    for prefix in ("Press the ` key.", "``quoted''", "Wrap code in ``` fences."):
+        check("a lone backtick run (%r) does not hide later embeds" % prefix,
+              _rendered_embed_basenames(prefix + "\n\n![[After_fig_1.png]]\n"),
+              frozenset(("After_fig_1.png",)))
+    check("backticks in separate paragraphs never pair across an embed",
+          _rendered_embed_basenames(
+              "Press ` now.\n\n![[Mid_fig_0.png]]\n\nThen ` again."
+              "\n\n![[After_fig_1.png]]\n"),
+          frozenset(("Mid_fig_0.png", "After_fig_1.png")))
+    check("a fence inside a blockquote or callout is still code",
+          [_rendered_embed_basenames(prefix + "```md\n" + prefix
+                                     + "![[Quoted_fig_1.png]]\n" + prefix + "```\n")
+           for prefix in ("> ", "> > ")]
+          + [_rendered_embed_basenames("> [!example]\n> ~~~\n> ![[Quoted_fig_1.png]]\n> ~~~\n"),
+             _rendered_embed_basenames("> [!note]\n> ![[Callout_fig_1.png]]\n")],
+          [frozenset(), frozenset(), frozenset(), frozenset(("Callout_fig_1.png",))])
+    check("a quoted fence line inside an unquoted fence does not close it",
+          _rendered_embed_basenames("```md\n> ```\n![[Fence_fig_1.png]]\n```\n"),
+          frozenset())
+    check("a leading code span is not indentation, quoted or not",
+          [_rendered_embed_basenames(prefix + "`x` ![[Lead_fig_1.png]]\n")
+           for prefix in ("", "> ")],
+          [frozenset(("Lead_fig_1.png",))] * 2)
+    check("a fence in a quoted list continuation is code at any indentation",
+          [_rendered_embed_basenames(body) for body in (
+              "> - item\n>\n>     ```md\n>     ![[F_fig_1.png]]\n>     ```\n> ![[After_fig_2.png]]\n",
+              "> - item\n>\t```md\n>\t![[F_fig_1.png]]\n>\t```\n> ![[After_fig_2.png]]\n")],
+          [frozenset(("After_fig_2.png",))] * 2)
+    check("a fence opened on a list item's marker line is code",
+          [_rendered_embed_basenames(body) for body in (
+              "1. ```md\n   ![[F_fig_1.png]]\n   ```\n",
+              "- ~~~\n  ![[F_fig_1.png]]\n  ~~~\n",
+              "> - ```md\n>   ![[F_fig_1.png]]\n>   ```\n")],
+          [frozenset()] * 3)
+    check("a deeper-quoted fence line inside a quoted fence does not close it",
+          _rendered_embed_basenames(
+              "> ```md\n> > ```\n> ![[Deep_fig_1.png]]\n> ```\n> ![[After_fig_2.png]]\n"),
+          frozenset(("After_fig_2.png",)))
+    check("indented code inside a blockquote is code; a quoted list continuation renders",
+          [_rendered_embed_basenames(lead + "\n>\n>     ![[Quote_fig_1.png]]\n")
+           for lead in ("> Para", "> `a` text", "> - item")],
+          [frozenset(), frozenset(), frozenset(("Quote_fig_1.png",))])
     dependency_fixture = """[[Old_Slug_2025|old note]]
 ![[Sources/Images/Old_Slug_2025_fig_1.png#crop|figure]]
 [note](../Articles/Old_Slug_2025.md)
@@ -5369,6 +5390,26 @@ continues here`
         check("hidden folders such as sync archives are not dependency blockers",
               dependency_status(dep_images, dep_owner,
                                 "Old_Dependency_2025")["blockers"], [])
+        os.makedirs(os.path.join(dep_vault, "Reviews"))
+        dep_log = os.path.join(dep_vault, "Reviews",
+                               "clipping-clean-suggestions.md")
+        log_text = ("- [ ] **CC-001** Summary drops a caveat\n"
+                    "  - Evidence: [[Articles/Old_Dependency_2025|the note]]; "
+                    "see `Articles/Old_Dependency_2025.md`.\n")
+        with open(dep_log, "w", encoding="utf-8") as fh:
+            fh.write(log_text)
+        check("a suggestion log's link to the old note is a named blocker",
+              dependency_status(dep_images, dep_owner,
+                                "Old_Dependency_2025")["blockers"],
+              [{"path": os.path.realpath(dep_log),
+                "references": ["Old_Dependency_2025.md"]}])
+        with open(dep_log, "w", encoding="utf-8") as fh:
+            fh.write(log_text.replace("[[Articles/Old_Dependency_2025|",
+                                      "[[Articles/New_Dependency_2026|"))
+        check("rewriting only the log's link target clears it; code stays inert",
+              dependency_status(dep_images, dep_owner,
+                                "Old_Dependency_2025")["blockers"], [])
+        os.remove(dep_log)
         os.rmdir(dep_pdfs)
         check("an absent canonical Sources/PDFs holds no PDFs, as in preflight",
               [row["ok"] for row in _plan_slug_rename(

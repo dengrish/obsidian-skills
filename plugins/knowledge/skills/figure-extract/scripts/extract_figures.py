@@ -2,7 +2,9 @@
 
 Each --crop spec is "PAGE:FIG_NUM:x0,y0,x1,y1":
   - PAGE     : 1-indexed page number
-  - FIG_NUM  : the source's figure number (e.g. "2.1", "S1", "S2-3")
+  - FIG_NUM  : the figure's output label as auto_fig_bbox/batch_extract
+               report it (e.g. "2.1", "S1" for Supplementary Figure 1
+               rather than its printed "1", "S2-3")
                — becomes the filename suffix "_fig_2-1", "_fig_S1", etc.
                Dots are normalized to dashes; dashes are preserved.
   - x0..y1   : bounding rectangle in PDF POINTS (origin top-left)
@@ -177,9 +179,13 @@ def vault_refusal(decision):
             decision.reason + "; inspect that vault PDF")
 
 
-# ASCII digits only: the label becomes part of a filename.
+# ASCII digits only: the label becomes part of a filename. A marker prefix
+# (`S`, or `ED` under `--ed-prefix ED`) may stand before an SI or appendix
+# label, as auto_fig_bbox writes for `Supplementary Figure A1` (`SA1`) or
+# `Extended Data Figure S1` (`EDS1`).
 _FIG_LABEL = re.compile(
-    r"(?:SI|ED|S)?[0-9]+(?:[.\-–][0-9]+)*|[A-Z][.\-–]?[0-9]+(?:[.\-–][0-9]+)*")
+    r"(?:SI|ED|S)?[0-9]+(?:[.\-–][0-9]+)*"
+    r"|(?:ED|S)?(?:SI|[A-Z][.\-–]?)[0-9]+(?:[.\-–][0-9]+)*")
 
 
 def parse_crop(spec):
@@ -241,8 +247,54 @@ def validated_figure_suffix(fig_num):
     if not _FIG_LABEL.fullmatch(fig_num):
         raise ValueError(
             f"FIG_NUM {fig_num!r} is not a supported whole-figure label "
-            "(examples: 2, 2.1, A.1, S2, ED3, SI4)")
+            "(examples: 2, 2.1, A.1, S2, SA1, ED3, SI4)")
     return normalize_fig_num(fig_num)
+
+
+#: An output label split into its letter prefix and its number.
+_LABEL_SERIES = re.compile(r"([A-Z]*)-?([0-9].*)")
+
+
+def _series_mismatch(fig_suffix, captions):
+    """The caption on the crop page that FIG_NUM probably meant, or None.
+
+    `captions` are `find_caption_blocks` rows. When no caption on the page
+    has FIG_NUM's output label but one has the same number in the other
+    series (a plain main label against a marker or appendix prefix, e.g.
+    `1` beside `Supplementary Figure 1`, which is `S1`, or an appendix label
+    against its S-prefixed form, `A1` beside `SA1`), return that caption's
+    (raw label, output label). A page without a caption of that number
+    returns None: a crop overleaf of its caption is legitimate.
+    """
+    labels = [(normalize_fig_num(num), raw) for num, raw, _rect in captions]
+    if any(label == fig_suffix for label, _raw in labels):
+        return None
+    want = _LABEL_SERIES.fullmatch(fig_suffix)
+    if not want:
+        return None
+    w = want.group(1)
+    for label, raw in labels:
+        got = _LABEL_SERIES.fullmatch(label)
+        if not got or got.group(2) != want.group(2):
+            continue
+        g = got.group(1)
+        if bool(g) != bool(w) or g == "S" + w or w == "S" + g:
+            return raw, label
+    return None
+
+
+def _extended_data_label(cap_raw, cap_label):
+    """The `--ed-prefix ED` output label of an Extended Data caption, or None.
+
+    `cap_label` is the caption's default-prefix label: `Extended Data Figure
+    1`, `A1` and `S1` are `S1`, `SA1` and `S1`, which a batch run with
+    `--ed-prefix ED` names `ED1`, `EDA1` and `EDS1`.
+    """
+    if (not re.match(r"\s*extended\s+data\b", cap_raw, re.I)
+            or not cap_label.startswith("S")):
+        return None
+    printed = cap_raw.split()[-1]
+    return "ED" + (cap_label if printed.startswith("S") else cap_label[1:])
 
 
 def positive_int(value):
@@ -912,6 +964,77 @@ def run_self_test():
           [parse_crop("1:%s:1,2,3,4" % lab)[1]
            for lab in ("2.1", "S2-3", "A.1", "10.5.3")],
           ["2-1", "S2-3", "A-1", "10-5-3"])
+    # auto_fig_bbox puts the marker prefix before an appendix or SI label
+    # (`Supplementary Figure A1` -> SA1; under --ed-prefix ED, `Extended Data
+    # Figure S1` -> EDS1). The explicit repair must accept what the batch
+    # wrote, or a bad automatic crop under such a name cannot be repaired.
+    def crop_label(lab):
+        try:
+            return parse_crop("1:%s:1,2,3,4" % lab)[1]
+        except SystemExit as exc:
+            return "refused: %s" % exc.code
+
+    check("...and marker-prefixed appendix and SI labels pass too",
+          [crop_label(lab) for lab in ("SA1", "SA.1", "EDS1", "EDA2", "EDSI1")],
+          ["SA1", "SA-1", "EDS1", "EDA2", "EDSI1"])
+    for bad in ("1a", "EDED1", "SAB1"):
+        msg = exits("parse_crop with label %r" % bad, parse_crop,
+                    "1:%s:1,2,3,4" % bad)
+        ok("...%r stays outside the producer grammar" % bad,
+           msg and "whole-figure label" in msg)
+
+    # --- _series_mismatch: a printed number is not always the label ------
+    supp1 = [("S1", "Supplementary Figure 1", None)]
+    check("a bare 1 beside Supplementary Figure 1 names that caption",
+          _series_mismatch("1", supp1), ("Supplementary Figure 1", "S1"))
+    check("...and the reverse (S1 on a main Figure 1 page) is named too",
+          _series_mismatch("S1", [("1", "Figure 1", None)]),
+          ("Figure 1", "1"))
+    check("...as is a bare number beside an appendix caption",
+          _series_mismatch("1-2", [("A1.2", "Figure A1.2", None)]),
+          ("Figure A1.2", "A1-2"))
+    check("a label some caption on the page carries is not a mismatch",
+          _series_mismatch("1", supp1 + [("1", "Figure 1", None)]), None)
+    check("ED1 beside a default-prefix Extended Data caption is not one",
+          _series_mismatch("ED1", [("S1", "Extended Data Figure 1", None)]),
+          None)
+    check("a page without a caption of that number is not one (overleaf)",
+          _series_mismatch("2", supp1), None)
+    # An appendix label beside its S-prefixed form is the same mistake:
+    # `Supplementary Figure A1` is SA1, and A1 would replace main Figure A1.
+    check("a printed A1 beside Supplementary Figure A1 names that caption",
+          _series_mismatch("A1", [("SA1", "Supplementary Figure A1", None)]),
+          ("Supplementary Figure A1", "SA1"))
+    check("...and the reverse (SA1 on a main Figure A1 page) is named too",
+          _series_mismatch("SA1", [("A1", "Figure A1", None)]),
+          ("Figure A1", "A1"))
+    check("...as is a dotted appendix label (A.1 beside SA-1)",
+          _series_mismatch("A-1", [("SA-1", "Supplementary Figure A.1", None)]),
+          ("Supplementary Figure A.1", "SA-1"))
+    check("EDA1 beside a default-prefix Extended Data Figure A1 is quiet",
+          _series_mismatch("EDA1", [("SA1", "Extended Data Figure A1", None)]),
+          None)
+    check("EDS1 beside a default-prefix Extended Data Figure S1 is quiet",
+          _series_mismatch("EDS1", [("S1", "Extended Data Figure S1", None)]),
+          None)
+    check("S1 beside Figure SI1 is quiet (a different series)",
+          _series_mismatch("S1", [("SI1", "Figure SI1", None)]), None)
+
+    # --- _extended_data_label: the ED form an --ed-prefix ED batch wrote --
+    check("an Extended Data caption's default label has an ED form",
+          [_extended_data_label(raw, label) for raw, label in (
+              ("Extended Data Figure 1", "S1"),
+              ("Extended Data Fig. 2-3", "S2-3"),
+              ("Extended Data Figure A1", "SA1"),
+              ("Extended Data Figure A.1", "SA-1"),
+              ("Extended Data Figure S1", "S1"),
+              ("Extended  data Figure SI1", "SI1"))],
+          ["ED1", "ED2-3", "EDA1", "EDA-1", "EDS1", "EDSI1"])
+    check("...and any other caption has none",
+          [_extended_data_label(raw, label) for raw, label in (
+              ("Supplementary Figure 1", "S1"), ("Figure S1", "S1"),
+              ("Figure 1", "1"))],
+          [None, None, None])
 
     tmp = tempfile.mkdtemp(prefix="extract-figures-selftest-")
     try:
@@ -1860,6 +1983,45 @@ def run_self_test():
         check("a crop that stops above the caption is not warned about",
               "WARNING" in se, False)
 
+        # `Supplementary Figure 1` is S1. Cropping it as `1` would write, and
+        # with --overwrite replace, the main Figure 1 crop: say so by name.
+        supp_pdf = _st_pdf(os.path.join(tmp, "Doe_Supp_2025.pdf"),
+                           caption="Supplementary Figure 1. Synthetic.")
+        supp_out = os.path.join(tmp, "SuppLabel")
+        supp_base = [supp_pdf, "--out", supp_out, "--dpi", "72", "--no-trim"]
+        code, so, se = run(supp_base + ["--crop", "1:S1:100,150,500,350"])
+        check("the output label S1 on a Supplementary Figure 1 page is quiet",
+              (code, "WARNING" in se), (0, False))
+        code, so, se = run(supp_base + ["--crop", "1:1:100,150,500,350"])
+        supp_main = os.path.join(supp_out, "Doe_Supp_2025_fig_1.png")
+        ok("a bare printed number there is warned about by caption and file",
+           code == 0 and "WARNING" in se
+           and "'Supplementary Figure 1'" in se and "'S1'" in se
+           and supp_main in se)
+        code, so, se = run(supp_base + ["--crop", "1:1:100,150,500,350",
+                                        "--overwrite"])
+        ok("...and says --overwrite replaces the crop already there",
+           "replaces the crop already there" in se)
+        code, so, se = run(supp_base + ["--crop", "1:1:100,150,500,350",
+                                        "--no-caption-check"])
+        ok("...even when the caption-overlap check is off",
+           "'Supplementary Figure 1'" in se)
+        # The check runs under the default prefix, where `Extended Data
+        # Figure 1` is S1. A PDF the batch extracted with --ed-prefix ED keeps
+        # its Supplementary Figure 1 at S1, so the warning also names ED1.
+        ed_pdf = _st_pdf(os.path.join(tmp, "Doe_ExtData_2025.pdf"),
+                         caption="Extended Data Figure 1. Synthetic.")
+        code, so, se = run([ed_pdf, "--out", os.path.join(tmp, "EdLabel"),
+                            "--dpi", "72", "--no-trim",
+                            "--crop", "1:1:100,150,500,350"])
+        ok("a bare number on an Extended Data page names both S1 and ED1",
+           code == 0 and "WARNING" in se
+           and "'Extended Data Figure 1'" in se
+           and "'S1' ('ED1' if this PDF uses --ed-prefix ED)" in se)
+        code, so, se = run(supp_base + ["--crop", "1:1:100,150,500,350"])
+        ok("...while a Supplementary caption's warning has no ED form",
+           "WARNING" in se and "--ed-prefix ED" not in se)
+
         blank_cli = os.path.join(tmp, "BlankCli")
         code, so, se = run([
             pdf, "--out", blank_cli, "--stem", "Doe_Figs_2025",
@@ -2403,31 +2565,59 @@ def main(argv=None):
 
     os.makedirs(out_dir, exist_ok=True)
 
-    # Caption rects, for the "is the caption inside this crop?" warning.
-    # Imported lazily and defensively: the check is a convenience, and a
-    # sibling-module import problem must not stop an explicit crop from being
-    # written — that crop is usually the fallback for something else that
-    # already went wrong.
+    # Captions, for the label check and the "is the caption inside this
+    # crop?" warning. Imported lazily and defensively: the checks are a
+    # convenience, and a sibling-module import problem must not stop an
+    # explicit crop from being written — that crop is usually the fallback
+    # for something else that already went wrong.
     find_caption_blocks = None
     to_page_space = None
-    if args.caption_check:
-        try:
-            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-            from auto_fig_bbox import find_caption_blocks, to_page_space
-        except (Exception, SystemExit) as e:
-            # SystemExit too: auto_fig_bbox exits with a message rather than
-            # a traceback when PyMuPDF is missing, and that must not take
-            # this script's own crop down with it.
-            print(f"note: caption-overlap check unavailable ({e})", file=sys.stderr)
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from auto_fig_bbox import find_caption_blocks, to_page_space
+    except (Exception, SystemExit) as e:
+        # SystemExit too: auto_fig_bbox exits with a message rather than
+        # a traceback when PyMuPDF is missing, and that must not take
+        # this script's own crop down with it.
+        print(f"note: caption checks unavailable ({e})", file=sys.stderr)
 
     blank_crops = 0
     for spec, page_idx, fig_suffix, (x0, y0, x1, y1) in parsed_crops:
+        out_path = os.path.join(out_dir, f"{args.stem}_fig_{fig_suffix}.png")
+        captions = []
+        if find_caption_blocks is not None:
+            try:
+                captions = find_caption_blocks(doc[page_idx])
+            except Exception as e:
+                print(f"note: caption checks skipped on page {page_idx + 1} "
+                      f"({e})", file=sys.stderr)
+        # A printed number is not always the output label: `Supplementary
+        # Figure 1` is `S1`. Passing `1` would write, and with --overwrite
+        # replace, the main Figure 1 crop.
+        mismatch = _series_mismatch(fig_suffix, captions)
+        if mismatch is not None:
+            cap_raw, cap_label = mismatch
+            # This check runs under the default prefix; a PDF the batch
+            # extracted with --ed-prefix ED names its Extended Data crops ED<N>.
+            ed_label = _extended_data_label(cap_raw, cap_label)
+            ed_form = (f" ({ed_label!r} if this PDF uses --ed-prefix ED)"
+                       if ed_label else "")
+            replaces = (", and --overwrite replaces the crop already there"
+                        if args.overwrite and os.path.lexists(out_path) else "")
+            print(
+                f"WARNING: --crop {spec!r} is labelled {fig_suffix!r}, but no "
+                f"caption on page {page_idx + 1} is; its caption {cap_raw!r} "
+                f"has output label {cap_label!r}{ed_form}. This crop goes to "
+                f"{out_path}{replaces}. Pass the Fig label auto_fig_bbox.py "
+                f"reports, not the printed number.",
+                file=sys.stderr,
+            )
         # The crop must stay clear of every caption, whichever side it sits
         # on. This is the constraint every hand-set crop gets wrong first, and
         # nothing about the result says so: the PNG is written, looks fine at
         # a glance, and carries the caption text the skill exists to leave out.
-        if find_caption_blocks is not None:
-            for cap_num, cap_raw, cap in find_caption_blocks(doc[page_idx]):
+        if args.caption_check:
+            for cap_num, cap_raw, cap in captions:
                 # `--crop` coordinates are the ones `get_pixmap(clip=...)`
                 # takes — the page's displayed space — while caption rects
                 # come back in unrotated content space. On a `/Rotate`d page
@@ -2442,7 +2632,6 @@ def main(argv=None):
                         f"(for a caption below, y1 <= {cap.y0 - 0.5:.1f}).",
                         file=sys.stderr,
                     )
-        out_path = os.path.join(out_dir, f"{args.stem}_fig_{fig_suffix}.png")
 
         def publication_guard():
             conflict = _figure_slot_conflict(

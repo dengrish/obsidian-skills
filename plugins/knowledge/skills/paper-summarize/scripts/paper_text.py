@@ -9,7 +9,8 @@ Four modes, all over one page-indexed extraction:
   ``--find STR``  which pages contain STR.  **Repeatable, and it exits 1 when
                   any needle is unfound** — that exit code is the whole point:
                   it turns "verify every number against the source" from an
-                  intention into a command with a result.
+                  intention into a command with a result.  A miss names the
+                  pages that have no text layer, which the search never saw.
   ``--cites``     how often each figure number appears anywhere in the text,
                   its own caption included.  A non-arbitrary tiebreak when
                   choosing which figures a summary carries.  The labels match
@@ -29,9 +30,13 @@ Four modes, all over one page-indexed extraction:
 Matching is deliberately forgiving, because a PDF's text layer is not the
 page: Unicode is NFKC-folded, the six dash characters and the curly quotes are
 mapped to ASCII, whitespace is collapsed, and case is ignored unless
-``--exact``.  A needle that still misses is retried with every space and
-hyphen removed, which is what recovers a word the PDF broke across a line —
-and a hit found only that way is reported as ``loose``, never as a clean one.
+``--exact``.  A needle that starts or ends with a digit matches only a whole
+number at that end, so ``8.2%`` is not found in ``18.2%`` and ``219`` is not
+found in ``2190``; ``219.5`` or ``219.14`` (a citation mark after a full stop)
+is only a ``loose`` hit for ``219``.  A needle that still misses is retried with
+every space and hyphen removed, which is what recovers a word the PDF broke
+across a line — and a hit found only that way is reported as ``loose``, never
+as a clean one.
 
     python3 '<skill>/scripts/paper_text.py' '<vault>/Sources/PDFs/Doe_Foo_2025.pdf' --sections
     python3 '<skill>/scripts/paper_text.py' '<document>.pdf' --find '13.2 months' --find '0.62'
@@ -224,21 +229,39 @@ def read_pages(path):
     return [(p.extract_text() or "") for p in reader.pages]
 
 
+def _needle_re(want, decimal_tail=True):
+    """A search for `want` that a longer number cannot satisfy: `8.2%` is not in
+    `18.2%`, `219` is not in `2190` or `219.5`, but `219` is in `219 adults`.
+    `decimal_tail=False` lets `219.5` and `219.14` count."""
+    if not want:
+        return None
+    pattern = re.escape(want)
+    if want[0].isdecimal():
+        pattern = r"(?<!\d)(?<!\d[.,])" + pattern
+    if want[-1].isdecimal():
+        pattern += r"(?!\d)(?![.,]\d)" if decimal_tail else r"(?!\d)"
+    return re.compile(pattern)
+
+
 def find(pages, needle, fold_case=True):
     """{'needle', 'pages', 'loose_pages'} — where a string occurs.
 
     `pages` are clean hits; `loose_pages` matched only after spacing and
-    hyphens were removed, and are reported separately because that relaxation
-    can join two words that the paper kept apart.
+    hyphens were removed, or only as a number followed by `.digits`/`,digits`
+    (a decimal or a citation mark), and are reported separately because those
+    relaxations can join things that the paper kept apart.
     """
     want = normalize(needle, fold_case)
-    want_sq = squash(want)
+    clean_re, loose_re = _needle_re(want), _needle_re(squash(want))
+    # `0.62.14` is a decimal or a sentence end with a citation mark.
+    tail_re = _needle_re(want, decimal_tail=False)
     hits, loose = [], []
     for i, raw in enumerate(pages, start=1):
         norm = normalize(raw, fold_case)
-        if want and want in norm:
+        if clean_re and clean_re.search(norm):
             hits.append(i)
-        elif want_sq and want_sq in squash(norm):
+        elif ((loose_re and loose_re.search(squash(norm)))
+              or (tail_re and tail_re.search(norm))):
             loose.append(i)
     return {"needle": needle, "pages": hits, "loose_pages": loose}
 
@@ -378,7 +401,11 @@ def sections(pages):
     return out
 
 
-def _render_find(results):
+def _render_find(results, textless=()):
+    """(text report, missing count); `textless` pages were never searchable."""
+    blind = (" not in the text layer; page(s) %s have no extractable text -- "
+             "check those page images before cutting the claim."
+             % ", ".join(map(str, textless))) if textless else ""
     lines, missing = [], 0
     for r in results:
         if r["pages"]:
@@ -387,14 +414,15 @@ def _render_find(results):
                             ", ".join(str(p) for p in r["pages"])))
         elif r["loose_pages"]:
             lines.append("loose   %-40r page(s) %s  (matched only with "
-                         "spacing and hyphens removed -- read the page before "
-                         "citing it)"
+                         "spacing and hyphens removed, or before .digits or "
+                         ",digits -- read the page before citing it)"
                          % (r["needle"],
                             ", ".join(str(p) for p in r["loose_pages"])))
         else:
             missing += 1
-            lines.append("MISSING %-40r not on any page. Cut the claim or "
-                         "fix it; do not soften it." % (r["needle"],))
+            lines.append("MISSING %-40r" % (r["needle"],) + (
+                blind or " not on any page. Cut the claim or fix it; do not "
+                         "soften it."))
     loose = sum(1 for r in results if not r["pages"] and r["loose_pages"])
     exact = len(results) - missing - loose
     lines.append("")
@@ -482,6 +510,24 @@ def run_self_test():
     hyph = find(_PAGES, "progression-free survival")
     case("word broken at a hyphen, clean", hyph["pages"], [])
     case("word broken at a hyphen, loose", hyph["loose_pages"], [2])
+    # A number inside a longer number is a different number: a draft that
+    # dropped a digit must not verify against the one the paper printed.
+    tail = find(_PAGES, "3.2 months")
+    case("a number is not found inside a longer one, clean", tail["pages"], [])
+    case("a number is not found inside a longer one, loose",
+         tail["loose_pages"], [])
+    pct = find(["Recurrence was 18.2% on transplant; n = 2190."], "8.2%")
+    case("a percentage is not found inside a longer one",
+         (pct["pages"], pct["loose_pages"]), ([], []))
+    case("a count is not found inside a larger count or a decimal",
+         find(["n = 2190; mean 219.5"], "219")["pages"], [])
+    case("a whole number beside words and punctuation is found",
+         find(["n = 219 adults (219)"], "219")["pages"], [1])
+    case("a number ending a sentence is found",
+         find(["We enrolled 219. Most were adults."], "219")["pages"], [1])
+    _cite = find(["The hazard ratio was 0.62.14 Mortality fell."], "0.62")
+    case("a number before a glued citation mark is loose, not missing",
+         (_cite["pages"], _cite["loose_pages"]), ([], [1]))
 
     c = cites(_PAGES)
     case("panel letter folds to its figure", c.get("2"), 3)
@@ -611,6 +657,15 @@ def run_self_test():
          True)
     case("loose does not set the exit code", _missing, 0)
     case("loose is called out", "NOT a verification" in _txt, True)
+    # A miss on a PDF with image-only pages is not proof the claim is absent.
+    _gone = [{"needle": "45.0%", "pages": [], "loose_pages": []}]
+    _txt, _missing = _render_find(_gone, [2])
+    case("a miss names the pages without text",
+         ("page(s) 2 have no extractable text" in _txt,
+          "not on any page" in _txt, _missing), (True, False, 1))
+    _txt, _missing = _render_find(_gone)
+    case("a miss on a fully searchable text is not on any page",
+         ("not on any page" in _txt, _missing), (True, 1))
 
     s = sections(_PAGES)
     case("results located", s.get("results"), [2])
@@ -660,6 +715,36 @@ def run_self_test():
                 _pypdf.PdfWriter().write(_fh)
             case("a zero-page PDF returns no pages for the caller's distinct verdict",
                  read_pages(_empty), [])
+
+            # A mixed PDF: page 2 has no text layer (an image-only table).
+            import contextlib
+            import io
+            _mixed = os.path.join(_td, "mixed.pdf")
+            _doc = _pm.open()
+            _doc.new_page().insert_text((72, 72), "We enrolled 219 adults.")
+            _doc.new_page()
+            _doc.save(_mixed)
+            _doc.close()
+            _buf = io.StringIO()
+            with contextlib.redirect_stdout(_buf):
+                _status = main([_mixed, "--find", "45.0%", "--json"])
+            _out = json.loads(_buf.getvalue())
+            case("--find reports textless pages in JSON and still exits 1",
+                 (_out.get("textless_pages"), _status), ([2], 1))
+            _buf = io.StringIO()
+            with contextlib.redirect_stdout(_buf):
+                _status = main([_mixed, "--find", "45.0%"])
+            case("--find text output names the textless page and still exits 1",
+                 ("page(s) 2 have no extractable text" in _buf.getvalue(), _status),
+                 (True, 1))
+            _buf = io.StringIO()
+            with contextlib.redirect_stdout(_buf):
+                main([_mixed, "--pages"])
+            case("--pages labels a page with no extractable text",
+                 [line for line in _buf.getvalue().splitlines()
+                  if line.startswith("=== page")],
+                 ["=== page 1 ===", "=== page 2 === (no extractable text: "
+                                    "read this page image)"])
 
     print("%d/%d self-test cases pass" % (n - bad, n))
     return 1 if bad else 0
@@ -724,11 +809,16 @@ def main(argv=None):
         return 4
 
     out, status = {}, 0
+    textless = [i for i, p in enumerate(pages, start=1) if not p.strip()]
+    if textless:
+        out["textless_pages"] = textless
     if args.pages:
         out["pages"] = pages
         if not args.json:
             for i, text in enumerate(pages, start=1):
-                print("=== page %d ===" % i)
+                print("=== page %d ===%s" % (
+                    i, " (no extractable text: read this page image)"
+                    if i in textless else ""))
                 print(text)
     if args.find:
         if any(not s.strip() for s in args.find):
@@ -738,7 +828,7 @@ def main(argv=None):
             return 2
         results = [find(pages, s, not args.exact) for s in args.find]
         out["find"] = results
-        rendered, missing = _render_find(results)
+        rendered, missing = _render_find(results, textless)
         if not args.json:
             print(rendered)
         status = 1 if missing else status

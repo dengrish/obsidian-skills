@@ -958,8 +958,8 @@ def _check_prose(note, bounds, captions, fenced, body_start, mode):
     # contiguous and capped so a source section is not copied wholesale.
     span = next(((s, e) for name, s, e in bounds if name == "Methods"), None)
     if span is not None:
-        steps = [note.raw_lines[n].strip() for n in range(*span)
-                 if n not in fenced and _STEP.match(note.raw_lines[n].strip())]
+        starts, in_steps = _step_lines(note, span[0], span[1], fenced)
+        steps = [note.raw_lines[n].strip() for n in starts]
         if steps and mode == "empirical" \
                 and not MIN_STEPS <= len(steps) <= MAX_STEPS:
             note.fail(span[0] + 1, "the empirical procedure lists %d numbered "
@@ -976,7 +976,6 @@ def _check_prose(note, bounds, captions, fenced, body_start, mode):
             note.fail(span[0] + 1, "the procedure steps are numbered %s; they "
                                    "must run 1..%d in their reported order"
                       % (", ".join(str(x) for x in numbers), len(numbers)))
-        in_steps = _step_lines(note, span[0], span[1], fenced)
         chars = sum(len(t) for n, t in
                     _prose_lines(note, span[0], span[1], captions, fenced)
                     if n not in in_steps)
@@ -1002,24 +1001,55 @@ def _check_prose(note, bounds, captions, fenced, body_start, mode):
                   % (chars, MAX_RESULTS_CHARS))
 
 
+def _list_column(raw):
+    """Text column of a list-item line, or None when it is not one."""
+    s = raw.lstrip()
+    m = _STEP.match(s) or re.match(r"\A[-*+]\s+(.*)\Z", s)
+    return None if m is None else len(raw) - len(m.group(m.lastindex))
+
+
+def _opens_step(raw, prev):
+    """The `_STEP` match for `raw` where CommonMark starts a list item there.
+
+    `prev` is None after a block boundary, "prose" after paragraph text, or
+    the text column of the list item the previous line belongs to. A number
+    other than 1 cannot interrupt a paragraph, so a wrapped `2021. ...`
+    continues its sentence; indented to an item's text, it continues the item.
+    """
+    m = _STEP.match(raw.strip())
+    if not m or prev is None or m.group(1) == "1":
+        return m
+    if prev == "prose":
+        return None
+    return None if len(raw) - len(raw.lstrip()) >= prev else m
+
+
 def _step_lines(note, start, end, fenced):
-    """Line indexes of numbered steps in [start, end), wrapped lines included.
+    """(step start lines, every step line) in [start, end), wrapped included.
 
     A line directly after a step continues it, as Markdown renders it; a
-    blank line, heading, bullet, exhibit or fence ends the step.
+    blank line, heading, bullet, exhibit or fence ends the step. A wrapped
+    number other than 1 continues its paragraph or step (`_opens_step`).
     """
-    out, in_step = set(), False
+    starts, out, in_step, prev = [], set(), False, None
     for n in range(start, end):
-        s = note.raw_lines[n].strip()
-        if (n in fenced or not s or s.startswith("## ") or s.startswith("- ")
+        raw = note.raw_lines[n]
+        s = raw.strip()
+        if (n in fenced or not s or s.startswith("## ")
                 or _EMBED.match(s) or _TABLE_ROW.match(s)):
-            in_step = False
+            in_step, prev = False, None
             continue
-        if _STEP.match(s):
-            in_step = True
+        if s.startswith("- "):
+            in_step, prev = False, _list_column(raw)
+            continue
+        if _opens_step(raw, prev):
+            starts.append(n)
+            in_step, prev = True, _list_column(raw)
+        elif prev is None:
+            prev = "prose"
         if in_step:
             out.add(n)
-    return out
+    return starts, out
 
 
 def _prose_blocks(note, body_start, captions, fenced):
@@ -1027,10 +1057,11 @@ def _prose_blocks(note, body_start, captions, fenced):
 
     A soft-wrapped sentence is still one sentence, and seven adjacent lines
     are still one paragraph. Blank lines, exhibits, headings, fences and new
-    list items separate blocks; wrapped numbered steps retain their 20-word target.
+    list items separate blocks; wrapped numbered steps retain their 20-word
+    target. A wrapped number other than 1 continues its paragraph or step.
     """
     pending = []
-    first, is_step = 0, False
+    first, is_step, prev = 0, False, None
     for n in range(body_start, len(note.raw_lines)):
         s = note.raw_lines[n].strip()
         boundary = (n in fenced or not s or s == "___"
@@ -1040,10 +1071,12 @@ def _prose_blocks(note, body_start, captions, fenced):
             if pending:
                 yield first, " ".join(pending), is_step
                 pending = []
+            prev = None
             continue
         # A callout marker is presentation, not part of the sentence.
-        s = re.sub(r"\A>\s*", "", s)
-        step = _STEP.match(s)
+        raw = re.sub(r"\A\s*>\s?", "", note.raw_lines[n])
+        s = raw.strip()
+        step = _opens_step(raw, prev)
         bullet = s.startswith("- ")
         if step or bullet or n in captions:
             if pending:
@@ -1055,6 +1088,10 @@ def _prose_blocks(note, body_start, captions, fenced):
         if n in captions:
             yield first, " ".join(pending), is_step
             pending = []
+        if step or bullet:
+            prev = _list_column(raw)
+        elif prev is None or n in captions:
+            prev = "prose"
     if pending:
         yield first, " ".join(pending), is_step
 
@@ -2178,6 +2215,39 @@ def _cases():
                  "1. The committee reviewed the proposal.\n"
                  "3. The committee published its decision."),
          "must run 1..", "argument"),
+        # Only a list starting at 1 can interrupt a paragraph (CommonMark), so
+        # a soft-wrapped line that opens with a year continues its sentence.
+        ("a wrapped year in Methods prose is not a numbered step",
+         _mutate(M_H + "\n\nProse.",
+                 M_H + "\n\nThe trial enrolled adults between March 2019 and\n"
+                 "2021. Capsules came from two stool banks."),
+         CLEAN),
+        ("a wrapped year indented under a step continues that step",
+         _mutate(M_H + "\n\nProse.",
+                 M_H + "\n\nProse.\n\n"
+                 "1. The team enrolled adults from March 2019 to\n"
+                 "   2021. It used two banks.\n"
+                 "2. The team randomized the adults.\n"
+                 "3. The team followed them for eight weeks."),
+         CLEAN),
+        ("NEAR MISS: an unindented number after a step starts a new item",
+         _mutate(M_H + "\n\nProse.",
+                 M_H + "\n\nProse.\n\n"
+                 "1. The team enrolled adults from March 2019 to\n"
+                 "2021. It used two banks.\n"
+                 "2. The team randomized the adults.\n"
+                 "3. The team followed them for eight weeks."),
+         "must run 1.."),
+        ("NEAR MISS: a list starting at 1 still interrupts a paragraph",
+         _mutate(M_H + "\n\nProse.",
+                 M_H + "\n\nThe trial ran in two phases.\n"
+                 "1. The team did a thing.\n2. The team did another thing."),
+         "empirical procedure lists 2"),
+        ("NEAR MISS: a wrapped year does not split a paragraph",
+         _mutate(I_H + "\n\nProse.",
+                 I_H + "\n\nOne. Two. Three. Four. Five. Six ran to March\n"
+                 "2021. Seven."),
+         "__ONLY__a paragraph holds 7 sentences"),
         ("a step over the 20-word target is advisory only",
          _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"

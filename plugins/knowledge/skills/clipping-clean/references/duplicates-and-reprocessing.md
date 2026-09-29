@@ -110,8 +110,10 @@ never moved, deleted or rewritten, including after a successful reprocess.
    resolved real `Articles/` directory, outside the note folder and on its filesystem. Preserve the original note's
    permissions. Recheck the destination before publication.
 4. Publish the complete staged note through the shared
-   [safe-write API](../../../shared/SAFE_WRITES.md#call-the-shared-python-api).
-   At a free destination (a changed slug), call
+   [safe-write API](../../../shared/SAFE_WRITES.md#call-the-shared-python-api);
+   `publish_files.py` offers no conditional removal (step 9) and cannot give a
+   new name the original note's permissions. At a free destination (a changed
+   slug), call
    `atomic_move.publish_new(staged, target, atomic_move.regular_file_snapshot, stage_parent)`.
    For a same-name or same-file-spelling rewrite, call
    `atomic_move.replace_expected(staged, target, expected, atomic_move.regular_file_snapshot, stage_dir, stage_parent=stage_parent)`
@@ -156,16 +158,24 @@ never moved, deleted or rewritten, including after a successful reprocess.
    scratch file. Once any new image has been published, keep its owner note
    public even if the later dependency handoff remains blocked.
 6. Do not finalize while prepare's `dependency.blockers` is nonempty. If every
-   blocker is a Wiki entry or recognized MOC (including one in `MOCs/`) and the
-   dependency rewrite is authorized, pass `wiki-lint`'s
+   blocker is a Wiki entry, a recognized MOC (including one in `MOCs/`) or a
+   suggestion log (`Reviews/*-suggestions.md`), and the dependency rewrite is
+   authorized, repair them. If the user's request did not already authorize
+   rewriting those files, ask once, naming the blocker paths; the prepare
+   report alone is not authorization. Repair each log first: record it with
+   `publish_files.py snapshot --replace` before reading it, rewrite only each parsed link
+   or embed that resolves to the old note or to an exact mapped old image,
+   pointing it at the mapped name, and publish the draft against that record
+   as in [publication](../SKILL.md#6-publish-safely). Keep labels, anchors,
+   code and every issue claim unchanged. Then pass any Wiki or MOC blockers to
+   `wiki-lint`'s
    [producer-mapped dependency repair](../../wiki-lint/references/external-artifact-repair.md)
-   the unchanged prepare JSON, the absolute old and new note paths, and the
-   step-7 `dependencies` command exactly as it will be re-run. If the user's
-   request did not already authorize rewriting those entries, ask once, naming
-   the blocker paths; the prepare report alone is not authorization. The old
-   and new images both resolve while it works. Foreign Markdown, unreadable
-   files, an incomplete scan, or an unauthorized rewrite remain blockers; leave
-   both versions in place and report the pending handoff.
+   with the unchanged prepare JSON, the absolute old and new note paths, and
+   the step-7 `dependencies` command exactly as it will be re-run. The old and
+   new images both resolve while this runs. Other Markdown (including
+   `Investments/` records), unreadable files, an incomplete scan or an
+   unauthorized rewrite remain blockers; leave both versions in place and
+   report the pending handoff.
 7. After the repair, run the same complete Markdown dependency re-probe:
 
    ```bash

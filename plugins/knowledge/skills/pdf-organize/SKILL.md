@@ -166,6 +166,13 @@ edition, bytes):
   the selected PDF or of a chapter in its family, the helper blocks the plan
   unless [conventions §1a](../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first)
   exempts that copy. Report both paths and relay the helper's remedy.
+- **Target stem occupied.** `<new stem>_fig*` images or an
+  `Articles/<new stem>.md` note outside the family, for the PDF or any of its
+  renamed chapters, block the plan even when the figure manifest records the
+  images. If they came from this same document (for example, figures a
+  deck already embeds), report them and the notes that embed them, and ask
+  the user to clear them from that name before filing and restore them
+  afterward. Otherwise use a distinguishing title.
 
 Never delete or move either copy yourself. Other blockers need their actual
 cause resolved. If the file is referenced and approval is absent, present the

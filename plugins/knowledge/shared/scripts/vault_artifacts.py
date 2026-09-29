@@ -29,6 +29,7 @@ do not turn a sound source inventory into a false absence.
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 import re
@@ -587,9 +588,10 @@ def inventory_source_figures(images, stem):
     Only unambiguous direct regular files can appear in ``candidates``.  The
     direct folder is checked by literal NFC/case-folded prefix, so shell glob
     characters in legacy source names have no special meaning.  Nested paths
-    are inspected only to report violations of the flat-folder contract;
-    nested symlink directories and recognizable private staging directories
-    are never followed.
+    are inspected only to report violations of the flat-folder contract.  A
+    symlinked directory directly in the folder has its direct entries listed
+    once; deeper symlinks and recognizable private staging directories are
+    never followed.
     """
     if not _valid_stem(stem):
         raise ValueError("stem must be one filename fragment, not a path")
@@ -690,6 +692,51 @@ def inventory_source_figures(images, stem):
                 add("changed-during-inventory", directory,
                     "nested directory contents changed during inventory")
 
+    def inspect_symlink(path, relative):
+        """Report a top-level link; list a linked directory's entries once."""
+        try:
+            target = os.stat(path)
+        except (FileNotFoundError, NotADirectoryError):
+            target = None
+        except OSError as exc:
+            if exc.errno != errno.ELOOP:
+                add("unreadable", path, "cannot inspect symlink target: %s: %s"
+                    % (type(exc).__name__, exc))
+                return
+            target = None
+        if target is None or not stat.S_ISDIR(target.st_mode):
+            add("nested-symlink", path,
+                "symlink in the flat image folder is not a figure",
+                severity="warning")
+            return
+        add("nested-symlink", path,
+            "symlinked directory in the flat image folder; only its direct "
+            "entries are inspected", severity="warning")
+        if (target.st_dev, target.st_ino) == (root_before.st_dev,
+                                              root_before.st_ino):
+            add("directory-cycle", path,
+                "symlink reaches the image folder itself", severity="warning")
+            return
+        try:
+            with os.scandir(path) as scan:
+                names = sorted((entry.name for entry in scan), key=_sort_key)
+        except OSError as exc:
+            add("unreadable", path, "cannot inspect symlinked directory: %s: %s"
+                % (type(exc).__name__, exc))
+            return
+        for name in names:
+            if not matching_name(name):
+                continue
+            if _looks_staging(relative + "/" + name):
+                add("staging-match", path / name,
+                    "source-keyed staging artifact is excluded",
+                    severity="warning")
+            else:
+                blocked.append(str(path / name))
+                add("nested-match", path / name,
+                    "source-keyed image sits in a symlinked directory under "
+                    "the flat image folder")
+
     for child in top:
         path = Path(child.path)
         relative = child.name
@@ -710,6 +757,8 @@ def inventory_source_figures(images, stem):
                 add("staging-residue", path,
                     "recognizable staging symlink in image folder",
                     severity="warning")
+            else:
+                inspect_symlink(path, relative)
             continue
         if stat.S_ISDIR(item.st_mode):
             if match:
@@ -1075,6 +1124,47 @@ def run_self_test():
               [Path(path).name for path in
                inventory_source_figures(images, "Study[1]").candidates],
               [literal.name])
+
+        # A symlinked directory directly in the image folder is listed once,
+        # so a source-keyed figure behind it blocks as a real nested one does.
+        # A link back to the image folder is a cycle, not a second copy.
+        linked_target = Path(tmp) / "linked-figures"
+        linked_target.mkdir()
+        (linked_target / "García_Study_2025_fig_6.png").write_bytes(b"image")
+        (linked_target / "Other_Work_2024_fig_2.png").write_bytes(b"image")
+        folder_link = images / "linked"
+        self_link = images / "self"
+        dangling_link = images / "gone"
+        if have_symlinks:
+            folder_link.symlink_to(linked_target, target_is_directory=True)
+        linked_fig_inv = inventory_source_figures(images, "García_Study_2025")
+        ok("a source-keyed figure behind a top-level directory symlink blocks",
+           not have_symlinks or (
+               linked_fig_inv.blocked_matches
+               == [str(folder_link / "García_Study_2025_fig_6.png")]
+               and not linked_fig_inv.safe
+               and any(item.kind == "nested-symlink"
+                       and item.path == str(folder_link)
+                       for item in linked_fig_inv.findings)))
+        if have_symlinks:
+            folder_link.unlink()
+            self_link.symlink_to(images, target_is_directory=True)
+            dangling_link.symlink_to(Path(tmp) / "missing-folder")
+        self_inv = inventory_source_figures(images, "García_Study_2025")
+        ok("a top-level link to the image folder is a cycle, not a second copy",
+           not have_symlinks or (
+               self_inv.candidates == fig_inv.candidates
+               and self_inv.blocked_matches == [] and self_inv.safe
+               and any(item.kind == "directory-cycle"
+                       and item.path == str(self_link)
+                       for item in self_inv.findings)
+               and any(item.kind == "nested-symlink"
+                       and item.path == str(dangling_link)
+                       and item.severity == "warning"
+                       for item in self_inv.findings)))
+        if have_symlinks:
+            self_link.unlink()
+            dangling_link.unlink()
 
         unrelated_nested = images / "archive"
         unrelated_nested.mkdir()

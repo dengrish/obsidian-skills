@@ -28,7 +28,7 @@ These rules govern the body; card line 1 follows its [own rule](flashcards-and-e
 
 **The equation that defines the entry's subject or a named quantity sits in a `$$…$$` display block**: each `$$` alone on its line, with a blank line above and below. Two genuinely different quantities get two blocks, each beside its motivating prose. **Inline `$…$` is for math woven into a sentence** (symbols such as $\sigma$, short expressions, bounds such as $0 \le p \le 1$), never the defining equation: `Min-max scaling` written inline as `$(x - \min)/(\max - \min)$` hides the key result at text height. A display may sit mid-sentence or close its sentence, right after the prose introducing the quantity. Display math uses `\frac{…}{…}`, `\left( … \right)` around tall content, `\sqrt{…}` and `\sum_{i=1}^{m}`; the slash form stays fine inline.
 
-Display blocks appear only in body prose. `description:` is plain text; captions and card lines allow **inline** math only, and a primary card's answer line allows none ([card math](flashcards-and-emphasis.md#line-1-equation-coverage)).
+Display blocks appear only in body prose. `description:` is plain text; captions and card line 1 allow **inline** math only, and card line 3 (the answer) allows none ([card math](flashcards-and-emphasis.md#line-1-equation-coverage)).
 
 ### Multi-form equations
 

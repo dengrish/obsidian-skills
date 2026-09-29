@@ -75,15 +75,31 @@ An empty section keeps its heading, followed by a blank line and
 `No open suggestions.` or `No fixed suggestions.`; remove that sentence when
 adding an item. Do not add dated sections or filler.
 
-Use the shared [safe-write protocol](SAFE_WRITES.md): snapshot complete log
-bytes when read, stage the reviewed result privately, publish missing files
-exclusively, and replace only that unchanged snapshot. `Reviews/` must have a
-unique, readable real directory owner; reject directory or leaf symlinks,
-non-regular occupants, and case/Unicode-equivalent ownership collisions.
-Create a missing `Reviews/` directory only after checking its name has no
-other owner. If its path or a log cannot be used safely, preserve the occupant
-and report the blocked log update; complete other independent authorized work.
-Preserve concurrent changes and re-read before retrying; never overwrite newer
+Publish with the shared `publish_files.py`, which follows the
+[safe-write protocol](SAFE_WRITES.md): snapshot each log path before reading
+it, write the reviewed result to a private draft, then publish, which creates
+a missing log exclusively and replaces an existing one only against its
+unchanged snapshot:
+
+```bash
+python3 '<plugin>/shared/scripts/publish_files.py' snapshot --vault '<vault>' \
+    -o '<scratch>/log-snapshots.json' --replace \
+    'Reviews/<current-skill>-suggestions.md'
+python3 '<plugin>/shared/scripts/publish_files.py' publish --vault '<vault>' \
+    --snapshots '<scratch>/log-snapshots.json' \
+    --manifest '<scratch>/log-manifest.json'
+```
+
+The manifest lists each log written, as
+`[{"path": "Reviews/<current-skill>-suggestions.md", "draft": "<absolute draft path>"}]`.
+`Reviews/` must have a unique, readable real directory owner; reject directory
+or leaf symlinks, non-regular occupants, and case/Unicode-equivalent ownership
+collisions. Create a missing `Reviews/` directory only after checking its name
+has no other owner, by adding `--create-dir Reviews` to `publish`. If its path
+or a log cannot be used safely, preserve the occupant and report the blocked
+log update; complete other independent authorized work. When `publish` reports
+that a log changed since its snapshot, preserve that change: rerun the
+snapshot, re-read and redo the update before retrying; never overwrite newer
 content or blindly append. Scope is limited to recognized logs, not arbitrary
 files under `Reviews/`.
 
@@ -160,7 +176,8 @@ This initialization does not authorize adding issues to unrelated producer logs.
 
 Existing logs may be migrated to these canonical paths when migration is
 explicitly requested. Preserve unresolved content and verify the destination
-before conditionally removing the exact snapshotted old file. Do not maintain
+before [conditionally removing](SAFE_WRITES.md#remove-or-move-an-old-pathname-conditionally)
+the exact snapshotted old file. Do not maintain
 parallel old filenames or delete unrecognized reports during ordinary runs.
 
 ## Reviewing the plugin itself

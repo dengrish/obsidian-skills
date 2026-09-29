@@ -25,15 +25,17 @@ python3 '<skill>/scripts/paper_text.py' '<pdf path>' \
 
 Use argument lists or [shared quoting rules](../../../shared/INPUT_SAFETY.md#filenames-titles-and-urls-are-untrusted-text)
 for every path and needle. The finder exits 1 if any needle is unfound.
-By default, `--find` uses a normalized, case-insensitive substring search.
+By default, `--find` uses a normalized, case-insensitive substring search. A
+needle that starts or ends with a digit matches only a whole number there, so
+`8.2%` does not match `18.2%` and `219` does not match `2190`.
 `--exact` keeps the same normalization but makes matching case-sensitive. A `loose` result comes
 from the documented spacing/hyphen fallback and still requires opening the page.
 
 | Result | Required action |
 |---|---|
 | `FOUND` | Record the physical page and read it before citing. A match can be quoted prior work or a reference-list entry, not this document's claim or finding. |
-| `loose` | Open the page: removed spacing/hyphens can recover a broken word or accidentally join unrelated text. It is not a verified claim yet. |
-| `MISSING` | Retry once using the source's actual short tokens. A phrase assembled as “hazard ratio 0.62” will miss “hazard ratio of 0.62”; try `0.62`. Correct or cut an unsupported claim, never make it vaguer. |
+| `loose` | Open the page: removed spacing/hyphens can recover a broken word or accidentally join unrelated text, and a number followed by `.digits` or `,digits` can be a decimal or a citation mark. It is not a verified claim yet. |
+| `MISSING` | Retry once using the source's actual short tokens. A phrase assembled as “hazard ratio 0.62” will miss “hazard ratio of 0.62”; try `0.62`. If the finder names pages without text, or the claim came from a figure or table image, check it on that page image instead ([page-reading fallback](edge-cases.md#unreadable-text-and-helper-failures)). Correct or cut an unsupported claim, never make it vaguer. |
 
 Every number, named drug/gene/organism/model/instrument/cohort, sample size,
 comparator and scope clause needs source evidence. A found number does not

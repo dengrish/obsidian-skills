@@ -67,6 +67,8 @@ LIST = re.compile(r"^([-+*]|[0-9]{1,9}[.)])([ \t]+)(.*)$")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 THEMATIC_BREAK = re.compile(r" {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*")
 CHECKED = re.compile(r"^\[[xX]\](?:[ \t]|$)")
+QUOTE = re.compile(r"^ {0,3}>[ \t]?(.*)$")
+HEADING = re.compile(r"^ {0,3}#{1,6}(?:[ \t]|$)")
 NOTICE = "File evidence is verified; semantic identity and note quality require caller judgment."
 
 
@@ -143,9 +145,26 @@ def parse_queue(data):
     # Keep YAML outside that view and retain the raw text for exact patches.
     comment_lines = lines[:body_at] + markdown_lines(mask_body_comments(
         "".join(lines[body_at:])))
-    # `floor` is the smallest indent that can continue the open parent item.
-    fence, comment, parent, floor, offset = None, False, None, 0, 0
+    # `floor` is the smallest indent that can continue the open parent item;
+    # `lazy` records that the previous line was that item's paragraph text.
+    fence, comment, parent, floor, offset, lazy = None, False, None, 0, 0, False
     opened_at = 1  # line of the frontmatter, fence or comment still open
+
+    def continues_item(number, line, clean):
+        """Keep an unindented text line directly under the open item's text.
+
+        Obsidian renders it inside that item, so it is never dropped: it
+        becomes context and, under a pending request, a report.
+        """
+        if (not lazy or parent is None or not clean.strip() or line[:1] in (" ", "\t")
+                or QUOTE.match(clean) or HEADING.match(clean)):
+            return False
+        parent["context_lines"].append(clean)
+        if "id" in parent:
+            reports.append({"line": number, "raw_line": line,
+                            "reason": "unindented line continues the request above"})
+        return True
+
     for number, raw in enumerate(lines, 1):
         start = offset
         offset += len(raw.encode("utf-8"))
@@ -169,6 +188,7 @@ def parse_queue(data):
         # them become syntax. Keep the visible part of an inline request.
         visible = []
         cursor = 0
+        began_in_comment = bool(comment)
         while cursor < len(line):
             if comment:
                 end = line.find(comment, cursor)
@@ -194,40 +214,64 @@ def parse_queue(data):
         original_match = LIST.match(line)
         lead = len(line) - len(line.lstrip(" "))
         marker_line = LIST.match(line[lead:]) if lead < 4 else None
-        if clean != line and (marker_line is None or
-                              not clean[lead:].startswith(marker_line[1] + marker_line[2])):
+        hidden = clean != line and (marker_line is None or not clean[lead:].startswith(
+            marker_line[1] + marker_line[2]))
+        if hidden and not began_in_comment and not visible[0].strip():
+            # A comment that opens the line starts its own block, which ends
+            # the item's text.
+            lazy = False
             continue
-        opening = FENCE.match(clean)
+        if hidden and not clean.strip():
+            continue
+        # Otherwise text beside a comment is plain text: never a request,
+        # fence or rule, but still context or a continuation of the item.
+        opening = None if hidden else FENCE.match(clean)
         if opening and not (opening[1][0] == "`" and "`" in opening[2]):
             fence = (opening[1][0], len(opening[1]))
             opened_at = number
-            parent = None
+            parent, lazy = None, False
             continue
         indent = len(clean) - len(clean.lstrip(" "))
         inside = parent is not None and (clean[:1] == "\t" or indent >= floor)
-        if not inside and THEMATIC_BREAK.fullmatch(clean):
+        if not hidden and not inside and THEMATIC_BREAK.fullmatch(clean):
             # `* * *` and `- - -` are rules, not requests.
-            parent = None
+            parent, lazy = None, False
             continue
-        match = LIST.match(clean)
+        match = None if hidden else LIST.match(clean)
         if not match:
             # A list item indented 1-3 spaces that cannot belong to the open
             # item is still a top-level item in Markdown: surface it rather
             # than dropping it or hiding it as context.
-            shifted = LIST.match(clean[indent:]) if 0 < indent < 4 and not inside else None
+            shifted = (LIST.match(clean[indent:])
+                       if 0 < indent < 4 and not inside and not hidden else None)
             if shifted:
                 if not CHECKED.match(shifted[3]):
                     reports.append({"line": number, "raw_line": line,
                                     "reason": "indented list item is not a top-level request"})
                 parent = {"context_lines": []}
                 floor = content_column(indent, shifted[1], shifted[2])
-            elif parent is not None and clean[:1] in (" ", "\t"):
+                lazy = bool(shifted[3].strip())
+                continue
+            if parent is not None and line[:1] in (" ", "\t"):
                 parent["context_lines"].append(clean)
-            elif clean.strip():
+                lazy = bool(clean.strip())
+                continue
+            if continues_item(number, line, clean):
+                continue
+            if clean.strip():
+                # Obsidian renders a task in a blockquote or callout as a
+                # checkbox, so a quoted request is surfaced, never dropped.
+                quoted = QUOTE.match(clean)
+                inner = LIST.match(quoted[1].lstrip(" >")) if quoted else None
+                if inner and not CHECKED.match(inner[3]):
+                    reports.append({"line": number, "raw_line": line,
+                                    "reason": "quoted list item is not a top-level request"})
                 parent = None
+            lazy = False
             continue
         # Nested lines under a skipped or reported item are discarded context.
         parent, floor = {"context_lines": []}, content_column(0, match[1], match[2])
+        lazy = bool(match[3].strip())
         body = match[3]
         prefix = match[1] + match[2]
         if original_match and prefix != original_match[1] + original_match[2]:
@@ -511,6 +555,41 @@ def run_self_tests():
               [(r["line"], r["reason"]) for r in parse_queue(
                   b"# H\n - [ ] Topic <!-- c -->\n- [ ] B %% x %%\n")[1]],
               [(2, "indented list item is not a top-level request")])
+
+        def shape(queue):
+            found, reported, _ = parse_queue(queue)
+            return ([(item["text"], item["context_lines"]) for item in found],
+                    [(row["line"], row["reason"]) for row in reported])
+
+        lazy_reason = "unindented line continues the request above"
+        check("an unindented line under a request is kept and reported, never dropped",
+              [shape(queue) for queue in (
+                  b"- [ ] Kalman filter\nParticle filter\n",
+                  b"- [ ] A\n  wrapped\ntail\n- [ ] B\n")],
+              [([("Kalman filter", ["Particle filter"])], [(2, lazy_reason)]),
+               ([("A", ["  wrapped", "tail"]), ("B", [])], [(3, lazy_reason)])])
+        check("an unindented line under a checked item is not reported",
+              shape(b"- [x] Done\nlazy\n- [ ] B\n"), ([("B", [])], []))
+        check("a blank line, heading, quote, rule or fence ends the request's text",
+              [shape(b"- [ ] A\n" + between + b"Prose\n") for between in (
+                  b"\n", b"# H\n", b"> quote\n", b"***\n", b"```\ncode\n```\n")],
+              [([("A", [])], [])] * 5)
+        check("a task in a blockquote or callout is reported, never dropped",
+              shape(b"> [!todo] Q\n> - [ ] Callout task\n> - [x] done\n"),
+              ([], [(2, "quoted list item is not a top-level request")]))
+        check("text beside an inline comment still continues the request",
+              [shape(queue) for queue in (
+                  b"- [ ] Kalman filter\nParticle filter %% maybe %%\n",
+                  b"- [ ] A <!-- start\nmiddle\nend -->\nParticle\n",
+                  b"- [ ] A\n-<!-- x --> Topic\n")],
+              [([("Kalman filter", ["Particle filter "])], [(2, lazy_reason)]),
+               ([("A", ["Particle"])], [(4, lazy_reason)]),
+               ([("A", ["- Topic"])], [(2, lazy_reason)])])
+        check("a comment that opens a line ends the request's text",
+              [shape(queue) for queue in (
+                  b"- [ ] A\n%% note %%\nProse\n",
+                  b"- [ ] A\n<!-- x\ny --> trailing\nProse\n")],
+              [([("A", [])], [])] * 2)
 
         unclosed = "unclosed frontmatter, fence or comment"
         comment_items, comment_reports, _ = parse_queue(b"- [ ] A\n<!--\n- [ ] B\n- [ ] C\n")

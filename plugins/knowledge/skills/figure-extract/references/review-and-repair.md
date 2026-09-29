@@ -45,10 +45,12 @@ reviews.
 ### Extended Data and Supplementary figures
 
 Under the default prefix, Extended Data and Supplementary figures share
-`_fig_S<N>`. To switch a PDF after a default run, remove any review rows for
-its S labels, run the rerun command the summary prints (that PDF alone with
-`--ed-prefix ED --overwrite-supplementary`, which replaces only `_fig_S<N>`
-crops), and compare every PNG it lists under `wrote:` with its page. A
+`_fig_S<N>`. To switch a PDF after a default run, remove the review row, if
+any, of each S label whose collision kept an Extended Data caption; other S
+rows protect Supplementary repairs. Then run the rerun command the summary
+prints (that PDF alone with `--ed-prefix ED --overwrite-supplementary`, which
+replaces only unmarked `_fig_S<N>` crops), and compare every PNG it lists
+under `wrote:` with its page. A
 `_fig_S<N>` that no Supplementary caption claims, such as one reported as
 identical to `_fig_ED<N>`, is a leftover Extended Data crop: report it as
 mislabelled and delete it only with authorization. Later runs keep
@@ -155,6 +157,8 @@ the figures.
 | `Figure S1`, `Supplementary Figure 1`, `Suppl. Figure 1`, `Supp. Figure 1` | `S1` |
 | `Figure SI1` | `SI1`, distinct from `S1` |
 | `Extended Data Figure 1` | `S1` by default; `ED1` with `--ed-prefix ED` |
+| `Supplementary Figure A1`, `Extended Data Figure A1` | `SA1`; the Extended Data form is `EDA1` with `--ed-prefix ED` |
+| `Extended Data Figure S1` | `S1` by default; `EDS1` with `--ed-prefix ED` |
 | `Figure 1: Title`, `Figure 1—Title`, `Figure 1–Title` | `1` |
 
 Caption keywords are case-insensitive and include `Fig.` / `FIG.` forms.
@@ -178,7 +182,8 @@ unnumbered or colliding exhibit unextracted and report it.
 
 1. Inspect detections and coverage for the affected PDF. Pass the same
    `--ed-prefix` and `--keep-frame` used in the batch so labels and geometry
-   agree. The table gives the figure bbox, caption rectangle, and raw label.
+   agree. The table gives each figure's output label (`Fig`), bbox, caption
+   rectangle, and raw caption label.
 
    ```bash
    python3 '<skill>/scripts/auto_fig_bbox.py' '<PDF path>' --coverage
@@ -205,10 +210,12 @@ unnumbered or colliding exhibit unextracted and report it.
    it sits near text, take the caption's and neighboring text's positions
    from PyMuPDF's `page.get_text("words")`.
 
-3. Set `PAGE:FIG_LABEL:x0,y0,x1,y1` in points, using the source caption's
-   label; output names follow the PDF's exact on-disk stem. The coordinates
-   below illustrate the syntax; replace them with the measured crop for the
-   actual page.
+3. Set `PAGE:FIG_LABEL:x0,y0,x1,y1` in points, using the output label from
+   step 1's `Fig` column or the
+   [caption-label table](#caption-labels-when-diagnosing-collisions) (`S1`,
+   not the printed `1`, for `Supplementary Figure 1`); output names follow
+   the PDF's exact on-disk stem. The coordinates below illustrate the syntax;
+   replace them with the measured crop for the actual page.
 
    ```bash
    python3 '<skill>/scripts/extract_figures.py' '<PDF path>' \

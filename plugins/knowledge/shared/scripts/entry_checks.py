@@ -3,7 +3,8 @@
 
 wiki-build's ``lint_entry.py`` and wiki-lint's ``scan_vault.py`` read these
 source-independent Quality Checklist floors (items 5, 6, 13, 14, 16 and 18,
-item 17's single-word alias hint, and item 19's card set and primary card)
+item 17's single-word alias hint, and item 19's card set, primary card and
+Spaced Repetition markers in the body and on card lines)
 and the discipline-root test from this one copy, so an entry that passes the
 builder gate does not fail the next scan on the same mechanical rule. Each
 check returns dictionaries with a ``check`` name, a ``message`` and evidence;
@@ -44,8 +45,10 @@ __all__ = [
     "BARE_WORD_ALIAS_HINT",
     "BOLD_OUTER_RE",
     "COMMON_NOUNS",
+    "LEGACY_EXTRA_PREFIX",
     "SHARED_MUTATIONS",
     "SHARED_QUIET",
+    "SR_INLINE_SEPARATORS",
     "api_surface_findings",
     "bare_common_noun_slug",
     "bare_word_alias_candidate",
@@ -62,9 +65,13 @@ __all__ = [
     "organism_common_name_bound",
     "organism_common_name_surfaces",
     "plural_surface",
+    "primary_card_label",
     "primary_line3_faults",
     "pure_math_opener_markup",
     "source_meta_findings",
+    "sr_card_marker_faults",
+    "sr_inline_marker",
+    "sr_marker_findings",
     "unenumerated_bold_findings",
 ]
 
@@ -778,6 +785,38 @@ def flashcard_set_faults(card_count):
         "naming the card for deletion, accounts for it" % card_count, True)]
 
 
+#: Message prefix for a per-card finding on a legacy extra card. Both tools
+#: use it, and lint_entry also marks the finding ``report_only``.
+LEGACY_EXTRA_PREFIX = "legacy extra card %d (report-only; never repair): "
+
+
+def _near_primary(rows, term, counterpart):
+    """The rows whose line-3 term normalizes to the primary answer."""
+    keys = {normalized_answer_surface(value)
+            for value in (term, counterpart) if value} - {""}
+    return [row for row in rows if normalized_answer_surface(
+        re.sub(r" \([^()\n]+\)$", "", row[1].strip())) in keys]
+
+
+def primary_card_label(rows, term, counterpart):
+    """Item 19: the label of the entry's primary card, or None.
+
+    ``rows`` have ``primary_line3_faults``' shape. One row is the primary
+    card. Otherwise the primary card is the first row that meets the answer
+    contract, else the one near miss ``primary_line3_faults`` reports. With
+    no such card the result is None and no card counts as a legacy extra:
+    the no-primary finding asks for the primary card first. Every other
+    complete card is a legacy extra, whose per-card findings are report-only.
+    """
+    if len(rows) == 1:
+        return rows[0][0]
+    passing = next((row[0] for row in rows if not row[2]), None)
+    if passing is not None:
+        return passing
+    near = _near_primary(rows, term, counterpart)
+    return near[0][0] if len(near) == 1 else None
+
+
 def primary_line3_faults(card_count, rows, term, counterpart):
     """Item 19: the line-3 faults to report, plus any missing-primary message.
 
@@ -793,10 +832,7 @@ def primary_line3_faults(card_count, rows, term, counterpart):
         return faults, None
     if len(faults) < len(rows):
         return [], None
-    keys = {normalized_answer_surface(value)
-            for value in (term, counterpart) if value} - {""}
-    near = [row for row in faults if normalized_answer_surface(
-        re.sub(r" \([^()\n]+\)$", "", row[1].strip())) in keys]
+    near = _near_primary(faults, term, counterpart)
     if len(near) == 1:
         return near, None
     if not term:
@@ -805,6 +841,140 @@ def primary_line3_faults(card_count, rows, term, counterpart):
     return [], ('no card carries the primary answer "%s"; preserve every '
                 "existing card and attachment and add or identify the primary "
                 "card (extra cards keep their own answers)" % answer)
+
+
+#: The Spaced Repetition plugin's default single-line card separators in the
+#: order it tries them: reversed ``:::``, then basic ``::``.
+SR_INLINE_SEPARATORS = (":::", "::")
+
+#: The callout that carries a card's scheduling state under the card.
+SR_METADATA_CALLOUT = "> [!sr|card-metadata]"
+
+
+def _sr_marker_in_code(line, index, marker):
+    """The plugin's own code test: odd backtick counts on both sides."""
+    return (line[:index].count("`") % 2 == 1
+            and line[index + len(marker):].count("`") % 2 == 1)
+
+
+def sr_inline_marker(line):
+    """The single-line separator the Spaced Repetition plugin finds, or None.
+
+    The plugin tries ``:::`` before ``::`` and tests only each separator's
+    first occurrence, which does not count inside a backtick span.
+    """
+    return next((sep for sep in SR_INLINE_SEPARATORS
+                 if sep in line and not _sr_marker_in_code(
+                     line, line.find(sep), sep)), None)
+
+
+def sr_marker_findings(text):
+    """Item 19: lines outside the Flashcards section that become cards.
+
+    ``text`` is the raw body before the Flashcards heading (the whole body
+    when there is none). The Spaced Repetition plugin parses the whole note
+    with its own rules, copied here as of 1.15.4: a line holding a
+    single-line separator becomes a card unless the separator's first
+    occurrence sits inside a backtick span, or the line lies inside a fence
+    opened at column 0. A line that starts with ``<!--`` (not ``<!--SR:``)
+    is skipped with the line after it when it holds ``-->``; otherwise the
+    plugin skips the rest of the note, card included, which is reported;
+    a fence opened at column 0 that no later line starting with the same
+    run closes does the same, which is reported too. Obsidian ``%%`` comments and a
+    comment later in a line are ordinary text to it, and the scheduling
+    state it attaches under such a card is not parsed. Such a card breaks
+    the one-card rule, so every hit is certain. Returns ``{check, line,
+    marker, message}`` with 1-based lines of ``text``.
+    """
+    out = []
+    lines = (text or "").split("\n")
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if line.startswith("<!--") and not line.startswith("<!--SR:"):
+            if "-->" not in line:
+                out.append({
+                    "check": "sr-marker", "line": index + 1, "marker": "<!--",
+                    "message": (
+                        '"%s" opens an HTML comment at the start of a line '
+                        "without closing it there, so the Spaced Repetition "
+                        "plugin skips the rest of the note, the definition "
+                        "card included; indent the `<!--` by one space "
+                        "(Obsidian still hides the comment) or close it on "
+                        "this line" % line.strip()[:60])})
+                break
+            index += 2
+            continue
+        marker = sr_inline_marker(line)
+        if marker:
+            at = line.find(marker)
+            before, after = line[max(0, at - 40):at], line[at:at + 42]
+            if at > 40:
+                before = before.split(" ", 1)[-1]
+            if at + 42 < len(line):
+                after = after.rsplit(" ", 1)[0]
+            out.append({
+                "check": "sr-marker", "line": index + 1, "marker": marker,
+                "message": (
+                    '"%s" holds `%s`, the Spaced Repetition single-line card '
+                    "separator, outside a backtick span, so the plugin reads "
+                    "the line as an extra card; reword it, write a math `::` "
+                    "as `\\mathbin{:}\\mathbin{:}`, and keep code in a "
+                    "backtick span or an unindented fence"
+                    % ((before + after).strip(), marker))})
+            # The plugin attaches the card's scheduling state unparsed: a
+            # next-line `<!--SR:` comment, or a callout through its comment.
+            rest = lines[index + 1:]
+            if rest and rest[0].startswith("<!--SR:"):
+                index += 1
+            elif rest and rest[0].startswith(SR_METADATA_CALLOUT):
+                index += next((n for n, attached in enumerate(rest, 1)
+                               if "<!--SR:" in attached), len(rest))
+        elif line.startswith(("```", "~~~")):
+            close = re.match(r"`+|~+", line).group(0)
+            opened = index
+            index += 1
+            while index < len(lines) and not lines[index].startswith(close):
+                index += 1
+            if index >= len(lines):
+                out.append({
+                    "check": "sr-marker", "line": opened + 1, "marker": close,
+                    "message": (
+                        '"%s" opens a fence at the start of a line that no '
+                        "later line starting with %s closes, so the Spaced "
+                        "Repetition plugin skips the rest of the note, the "
+                        "definition card included; indent this line by one "
+                        "space (Obsidian renders it the same) or start the "
+                        "closing fence at the beginning of its line"
+                        % (line.strip()[:60], close))})
+                break
+        index += 1
+    return out
+
+
+def sr_card_marker_faults(card):
+    """Item 19: card lines 1 and 3 that hold a single-line separator.
+
+    The plugin reads such a line 1 as a card of its own and the rest of the
+    block as a broken second card; such a line 3 becomes a card in place of
+    this one. Returns ``(line_number, marker, fault)`` rows, where ``fault``
+    completes "flashcard N line K ...".
+    """
+    out = []
+    for number, remedy in (
+            (1, "reads line 1 as a card of its own; write a math `::` as "
+                "`\\mathbin{:}\\mathbin{:}`"),
+            (3, "reads line 3 as a card in place of this one; the answer "
+                "line holds no `::`")):
+        if len(card) < number:
+            continue
+        marker = sr_inline_marker(card[number - 1])
+        if marker:
+            out.append((number, marker, (
+                "holds `%s`, the Spaced Repetition single-line card "
+                "separator, outside a backtick span, so the plugin %s"
+                % (marker, remedy))))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -853,6 +1023,21 @@ SHARED_MUTATIONS = (
      "item12/boilerplate-candidate", "12-boilerplate-candidate", False),
     ("item10 self-link", "The rate links [[{self}|itself]].",
      "item10/self", "10-self-link", False),
+    ("item19 Spaced Repetition separator in body math",
+     "The rates compare as $a : b :: c : d$ here.",
+     "item19/sr-marker", "19-sr-marker", False),
+    ("item19 Spaced Repetition separator in an Obsidian comment",
+     "%% The rates compare as a :: b here. %%",
+     "item19/sr-marker", "19-sr-marker", False),
+    ("item19 Spaced Repetition separator in a mid-line HTML comment",
+     "The rates compare <!-- as a::b --> here.",
+     "item19/sr-marker", "19-sr-marker", False),
+    ("item19 an HTML comment left open at the start of a line",
+     "<!-- The rates compare\nas a ratio. -->",
+     "item19/sr-marker", "19-sr-marker", False),
+    ("item19 a column-0 fence no column-0 line closes",
+     "%% The rates compare\n```\n%%",
+     "item19/sr-marker", "19-sr-marker", False),
 )
 
 #: Body paragraphs that neither linter may flag under the named keys:
@@ -894,6 +1079,15 @@ SHARED_QUIET = (
     ("item12 ranges a definition needs",
      "For $p \\ge 1$ the rate is a norm, with $0 \\le \\lambda \\le 1$.",
      "item12/boilerplate-candidate", "12-boilerplate-candidate"),
+    ("item19 a proportion written with the math remedy",
+     "The rates compare as $a : b \\mathbin{:}\\mathbin{:} c : d$ here.",
+     "item19/sr-marker", "19-sr-marker"),
+    ("item19 single colons are no card separator",
+     "The odds are 3:1, and the ratio a:b stays fixed.",
+     "item19/sr-marker", "19-sr-marker"),
+    ("item19 a line that starts with an HTML comment is skipped",
+     "<!-- The rates compare as a::b here. -->",
+     "item19/sr-marker", "19-sr-marker"),
 )
 
 
@@ -1225,6 +1419,90 @@ def run_self_test(verbose=False):
           ([], True))
     check("with no primary term, nothing is asked",
           primary_line3_faults(2, near, "", None), ([], None))
+    check("the primary card: the only card, else the first passing one, "
+          "else the one near miss, else none",
+          [primary_card_label(rows, "Bias-variance trade-off", None)
+           for rows in (
+               one, [],
+               [("card 1", "Why?", "fault"),
+                ("card 2", "Bias-variance trade-off", None),
+                ("card 3", "Bias-variance trade-off", None)],
+               [("card 1", "Overfitting", "fault"),
+                ("card 2", "Bias–variance trade-off", "fault")],
+               [("card 1", "Underfitting", "fault"),
+                ("card 2", "Overfitting", "fault")],
+               [("card 1", "Bias–variance trade-off", "fault"),
+                ("card 2", "Bias-variance trade-off (BVT)", "fault")])],
+          ["flashcard", None, "card 2", "card 2", None, None])
+    check("a legacy extra's prefix names the card and forbids repair",
+          LEGACY_EXTRA_PREFIX % 2,
+          "legacy extra card 2 (report-only; never repair): ")
+    marked = sr_marker_findings(
+        "The analogy $a : b :: c : d$ holds.\n"
+        "A reversed pair::: here.\n"
+        "The operator `std::vector` is code.\n"
+        "Odd ``a::b`` spans still count.\n"
+        "```cpp\nstd::cout << x;\n```\n"
+        "  ```\n  std::cin >> x;\n  ```\n"
+        "`x` then a::b after a closed span.\n"
+        "Ratios 3:1 and a:b are fine.")
+    check("the plugin's single-line separators outside a backtick span or "
+          "a column-0 fence are found at their lines",
+          [(row["line"], row["marker"]) for row in marked],
+          [(1, "::"), (2, ":::"), (4, "::"), (9, "::"), (11, "::")])
+    check("an sr-marker message names the remedy",
+          ("\\mathbin{:}\\mathbin{:}" in marked[0]["message"],
+           "extra card" in marked[0]["message"],
+           marked[0]["check"]), (True, True, "sr-marker"))
+    check("an sr-marker message quotes the text around the separator",
+          sr_marker_findings("word " * 30 + "so $a :: b$ holds.")[0][
+              "message"].startswith('"word word word word word word so $a :: '
+                                    'b$ holds." holds `::`'), True)
+    check("no separator, no finding",
+          (sr_marker_findings(""), sr_marker_findings(
+              "Plain prose.\n```\na :: b\n```\nMore prose.")), ([], []))
+    check("the plugin's comment rule: Obsidian and mid-line comments are "
+          "text; a column-0 HTML comment skips its line and the next; an "
+          "unclosed one ends the scan",
+          [[row["line"] for row in sr_marker_findings(text)] for text in (
+              "%% a :: b %%\nProse <!-- a::b --> more.\n  <!-- a::b -->",
+              "<!-- a::b -->\nskipped a::b\nread a::b",
+              "<!--SR:!2026-01-01,1,250--> a::b",
+              "a::b\n<!-- open\nc::d -->\ne::f")],
+          [[1, 2, 3], [3], [1], [1, 2]])
+    check("a column-0 fence no later column-0 line closes ends the scan",
+          [[(row["line"], row["marker"]) for row in sr_marker_findings(text)]
+           for text in ("```text\na::b\n  ```\nc::d",
+                        "  ```\n  a::b\n```\nc::d",
+                        "```text\na::b\n```\nc::d")],
+          [[(1, "```")], [(2, "::"), (3, "```")], [(4, "::")]])
+    check("the scheduling state the plugin attaches under a card is not "
+          "parsed: a next-line comment, or a callout through its comment",
+          [[row["line"] for row in sr_marker_findings(text)] for text in (
+              "a::b\n<!--SR:!2026-01-01,1,250--> c::d\ne::f",
+              "a::b\n> [!sr|card-metadata]\n> c::d\n> <!--SR:!2026-01-01,1,"
+              "250-->\ne::f",
+              "a::b\n> [!sr|card-metadata]\nc::d")],
+          [[1, 3], [1, 5], [1]])
+    check("a separator the plugin finds: the reversed one first, and only "
+          "its first occurrence tested against a backtick span",
+          [sr_inline_marker(line) for line in (
+              "a ::: b", "a :: b", "`a::b` then c::d", "a:b", "`x` a::b")],
+          [":::", "::", None, None, "::"])
+    check("card lines 1 and 3 holding a separator split the card; line 2 "
+          "and code spans do not",
+          [[(number, marker) for number, marker, _fault in
+            sr_card_marker_faults(card)] for card in (
+               ["The ratio $a :: b$ of two counts.", "??", "Ratio"],
+               ["The ratio of two counts.", "??", "Ratio::scope"],
+               ["The ratio `a::b` of two counts.", "??", "Ratio"],
+               ["A reversed a ::: b pair.", "??"])],
+          [[(1, "::")], [(3, "::")], [], [(1, ":::")]])
+    check("a card-line fault names its remedy",
+          [fault.split("; ", 1)[1] for _n, _m, fault in sr_card_marker_faults(
+              ["The $a :: b$ rule.", "??", "A::B"])],
+          ["write a math `::` as `\\mathbin{:}\\mathbin{:}`",
+           "the answer line holds no `::`"])
     check("one card, or none, is a complete card set",
           [flashcard_set_faults(count) for count in (0, 1)], [[], []])
     extra = flashcard_set_faults(2)

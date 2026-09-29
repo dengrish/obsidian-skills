@@ -5,7 +5,10 @@ workflow read is recorded with ``atomic_move.regular_file_snapshot``, a new
 file is published with ``atomic_move.publish_new`` and a replacement with
 ``atomic_move.replace_expected`` against that recorded version. PATH is
 vault-relative (forward slashes) or absolute and must resolve inside the
-vault's real path. A leaf symlink is never followed.
+vault's real path. A leaf symlink is never followed. A case alias of an
+existing file is unsafe, and a Unicode normalization variant is replaced
+under its on-disk spelling, so a replacement never renames the file. Manifest
+paths that differ only in case or normalization are refused.
 
   snapshot --vault VAULT [-o OUT [--replace]] PATH...
       Record each path before the workflow reads it: absent, or a regular
@@ -38,6 +41,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import unicodedata
 
 # Keep the sibling publication helper available when a harness imports this
 # file directly by path instead of executing it as a script.
@@ -46,6 +50,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 import atomic_move  # noqa: E402
+from portable_names import portable_identity  # noqa: E402
 
 
 STAGE_PREFIX = ".knowledge-publish-"
@@ -105,6 +110,16 @@ def _target(vault, key):
     return os.path.join(vault[1], *key.split("/"))
 
 
+def _listed_spelling(name, names):
+    """NAME as a directory listing spells it, exactly or up to Unicode
+    normalization (the exact spelling first), or ``None``."""
+    if name in names:
+        return name
+    wanted = unicodedata.normalize("NFC", name)
+    return next((n for n in names
+                 if unicodedata.normalize("NFC", n) == wanted), None)
+
+
 def observe(target):
     """``(state, token, error)`` for one path, never following a symlink."""
     try:
@@ -113,6 +128,19 @@ def observe(target):
         return "absent", None, None
     except OSError as exc:
         return "unsafe", None, _describe(exc)
+    # A case-insensitive filesystem finds the file under an alias spelling,
+    # and publishing through that spelling would rename it.
+    name = os.path.basename(target)
+    try:
+        names = os.listdir(os.path.dirname(target))
+    except OSError as exc:
+        return "unsafe", None, _describe(exc)
+    if _listed_spelling(name, names) is None:
+        actual = [n for n in names
+                  if portable_identity(n) == portable_identity(name)]
+        return "unsafe", None, (
+            "the path exists on disk as %s; use that spelling"
+            % (actual[0] if actual else "a different spelling"))
     if stat.S_ISLNK(item.st_mode):
         return "unsafe", None, "a symlink occupies the path; it is not followed"
     if not stat.S_ISREG(item.st_mode):
@@ -364,6 +392,18 @@ def _plan(vault, records, item, create_dir, new_mode):
     status, detail = compare(record, observed)
     if status != "unchanged":
         return _refuse(plan, "%s: %s" % (status, detail))
+    if record["state"] == "file":
+        # Replace under the listed spelling: a normalization-insensitive
+        # filesystem would otherwise store the requested spelling instead.
+        try:
+            listed = _listed_spelling(os.path.basename(target),
+                                      os.listdir(os.path.dirname(target)))
+        except OSError as exc:
+            return _refuse(plan, "cannot inspect the target directory (%s)"
+                           % _describe(exc))
+        if listed is not None:
+            target = os.path.join(os.path.dirname(target), listed)
+            plan["_target"] = target
 
     directory = os.path.dirname(target)
     make_dir = False
@@ -455,10 +495,11 @@ def cmd_publish(vault_arg, snapshots, manifest, create_dir=None,
     new_mode = _new_file_mode()
     plans = [_plan(vault, records, item, create_dir, new_mode)
              for item in items]
-    keys = [plan["path"] for plan in plans]
-    for plan in plans:
-        if keys.count(plan["path"]) > 1:
-            _refuse(plan, "listed more than once in the manifest")
+    keys = [portable_identity(plan["path"]) for plan in plans]
+    for plan, key in zip(plans, keys):
+        if keys.count(key) > 1:
+            _refuse(plan, "listed more than once in the manifest (up to case "
+                          "or Unicode normalization)")
     writes = [plan for plan in plans if plan["action"] in ("create", "replace")]
     for plan in writes:
         if plan["_location"] != writes[0]["_location"]:
@@ -719,6 +760,94 @@ def run_self_test():
                and not os.path.islink(os.path.join(vault, "Topics")),
                read(os.path.join(vault, "Topics", "t.md"))),
               (0, ["created"], True, b"topic\n"))
+
+        dups = os.path.join(scratch, "dups.json")
+        dup_paths = ["Wiki/Dup.md", "Wiki/dup.md",
+                     "Wiki/Caf\u00e9.md", "Wiki/Cafe\u0301.md"]
+        cmd_snapshot(vault, dup_paths, dups)
+        dup_manifest = manifest("dups-manifest.json", [
+            (path, draft("dup%d.md" % index, b"dup\n"))
+            for index, path in enumerate(dup_paths)])
+        dry_payload, dry_code = cmd_publish(vault, dups, dup_manifest,
+                                            dry_run=True)
+        payload, code = cmd_publish(vault, dups, dup_manifest)
+        dup_keys = {portable_identity(os.path.basename(p)) for p in dup_paths}
+        check("paths equal up to case or normalization are all refused",
+              (dry_code, actions(dry_payload), code, actions(payload),
+               "up to case" in payload["results"][0].get("detail", ""),
+               [n for n in os.listdir(os.path.join(vault, "Wiki"))
+                if portable_identity(n) in dup_keys], stage_parents()),
+              (1, ["refused"] * 4, 1, ["refused"] * 4, True, [], []))
+
+        put(wiki("Case.md"), b"case\n")
+        if os.path.lexists(wiki("cASE.md")):
+            alias_snap = os.path.join(scratch, "alias.json")
+            payload, code = cmd_snapshot(vault, ["Wiki/cASE.md"], alias_snap)
+            alias_record = payload["snapshots"][0]
+            check("a case alias of an existing file is unsafe and not stored",
+                  (code, alias_record["state"],
+                   "on disk as Case.md" in alias_record.get("error", ""),
+                   load_snapshots(alias_snap, _vault(vault))),
+                  (1, "unsafe", True, {}))
+            cmd_snapshot(vault, ["Wiki/Case.md"], alias_snap)
+            with open(alias_snap, encoding="utf-8") as fh:
+                forged = json.load(fh)
+            forged["snapshots"][0]["path"] = "Wiki/cASE.md"
+            with open(alias_snap, "w", encoding="utf-8") as fh:
+                json.dump(forged, fh)
+            payload, code = cmd_publish(vault, alias_snap, manifest(
+                "alias-manifest.json",
+                [("Wiki/cASE.md", draft("alias.md", b"ours\n"))]))
+            verify_status = cmd_verify(vault, alias_snap)[0]["results"][0]
+            check("publishing through a case alias is refused, not a rename",
+                  (code, actions(payload), verify_status["status"],
+                   "Case.md" in os.listdir(os.path.join(vault, "Wiki")),
+                   "cASE.md" in os.listdir(os.path.join(vault, "Wiki")),
+                   read(wiki("Case.md"))),
+                  (1, ["refused"], "unsafe", True, False, b"case\n"))
+        else:
+            check("case-alias regressions skipped on a case-sensitive "
+                  "filesystem", True, True)
+            check("case-alias publication skipped on a case-sensitive "
+                  "filesystem", True, True)
+
+        put(wiki("Caf\u00e9 note.md"), b"nfc\n")
+        if os.path.lexists(wiki("Cafe\u0301 note.md")):
+            put(wiki("Nai\u0308ve note.md"), b"nfd\n")
+
+            def notes():
+                return sorted(n for n in os.listdir(os.path.join(vault, "Wiki"))
+                              if n.endswith(" note.md"))
+
+            stored_names = notes()
+            nfd_snap = os.path.join(scratch, "nfd.json")
+            payload, code = cmd_snapshot(
+                vault, ["Wiki/Cafe\u0301 note.md", "Wiki/Na\u00efve note.md"],
+                nfd_snap)
+            published, pub_code = cmd_publish(vault, nfd_snap, manifest(
+                "nfd-manifest.json",
+                [("Wiki/Cafe\u0301 note.md", draft("nfd.md", b"cafe new\n")),
+                 ("Wiki/Na\u00efve note.md", draft("nfc.md", b"naive new\n"))]))
+            check("a normalization spelling of an existing file is that file "
+                  "and is replaced under its on-disk spelling",
+                  (code, [r["state"] for r in payload["snapshots"]], pub_code,
+                   actions(published), notes() == stored_names,
+                   read(wiki("Caf\u00e9 note.md")),
+                   read(wiki("Na\u00efve note.md"))),
+                  (0, ["file", "file"], 0, ["replaced", "replaced"], True,
+                   b"cafe new\n", b"naive new\n"))
+        else:
+            check("normalization-alias regression skipped on a "
+                  "normalization-sensitive filesystem", True, True)
+
+        check("the listed spelling prefers an exact name to a normalization "
+              "variant",
+              [_listed_spelling(name, names) for name, names in (
+                  ("Cafe\u0301.md", ["Caf\u00e9.md", "Cafe\u0301.md"]),
+                  ("Cafe\u0301.md", ["a.md", "Caf\u00e9.md"]),
+                  ("Caf\u00e9.md", ["Cafe\u0301.md"]),
+                  ("cafe.md", ["Cafe.md"]))],
+              ["Cafe\u0301.md", "Caf\u00e9.md", "Cafe\u0301.md", None])
 
         partial = os.path.join(scratch, "partial.json")
         put(wiki("p2.md"), b"p2 old\n")

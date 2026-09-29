@@ -126,7 +126,8 @@ def bound_common_names(title, description, opening):
     """Common names directly bound to an Organism's canonical title.
 
     Explicit ``called``/``known as`` cues may introduce an uncommon name.  A
-    weak ``is the`` or appositive cue is accepted when its complete phrase is
+    weak ``is the`` or appositive cue (including ``Saccharomyces cerevisiae,
+    or budding yeast,``) is accepted when its complete phrase is
     name-like, does not repeat a title word, and does not end in a generic
     taxonomic or experimental role (such as ``model organism``).  An
     optional parenthetical between title and equation must be the matching
@@ -155,7 +156,8 @@ def bound_common_names(title, description, opening):
             rf"{subject}\s+(?:is|are|was|were)\s+the\s+{label}{boundary}",
             re.IGNORECASE)),
         (False, re.compile(
-            rf"{subject}\s*,\s*(?:the\s+)?{label}(?=\s*[,;:—–])",
+            rf"{subject}\s*,\s*(?:or\s+(?:(?:the|an?)\s+)?|the\s+)?"
+            rf"{label}(?=\s*[,;:—–])",
             re.IGNORECASE)),
     ]
     found = []
@@ -175,7 +177,9 @@ def bound_common_names(title, description, opening):
                     item.casefold() for item in _COMMON_NAME_WORD_RE.findall(name)
                 ]
                 if not explicit:
-                    if (not words or words[0] in {"called", "commonly", "known", "usually"}
+                    if (not words or words[0] in {
+                            "a", "an", "called", "commonly", "known", "or",
+                            "usually"}
                             or title_words.intersection(words)
                             or words[-1] in _GENERIC_BINDING_HEADS):
                         continue
@@ -309,6 +313,20 @@ def _self_test():
         ("descriptive complement is not mistaken for a name",
          bound_common_names(
              "Mus musculus", "Mus musculus is the standard model organism used in genetics.", ""),
+         []),
+        ("an 'or' synonym appositive binds the name without the conjunction",
+         bound_common_names(
+             "Saccharomyces cerevisiae", "",
+             "***Saccharomyces cerevisiae*** (*S. cerevisiae*), or *budding "
+             "yeast*, is the yeast of baking."),
+         ["budding yeast"]),
+        ("an indefinite descriptive appositive is not a common name",
+         bound_common_names(
+             "Mus musculus", "Mus musculus, a small rodent, lives with humans.", ""),
+         []),
+        ("an 'or' appositive still applies the weak-cue guards",
+         bound_common_names(
+             "Mus musculus", "", "***Mus musculus***, or model organism, is x."),
          []),
         ("an unlisted common-name head is accepted by an explicit equation",
          bound_common_names(
