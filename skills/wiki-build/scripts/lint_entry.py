@@ -152,10 +152,14 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               that starts with `<!--` and closes there,
                               which the plugin skips with the line after
                               it: the plugin reads the line as an extra
-                              card; a `<!--` opening a line and left open
-                              there hides the rest of the note, card
-                              included, and so does a column-0 fence that
-                              no later column-0 line closes
+                              card, as it reads a paragraph with a line
+                              that is only `?` or `??` (not an unindented
+                              `?` with no text before it; only when the
+                              Flashcards section is found); a `<!--` opening a
+                              line and left open there hides the rest of
+                              the note, card included, and so does a
+                              column-0 fence that no later column-0 line
+                              closes
   18  18-alias-collision      across a folder, no two entries share an alias
   18  18-alias-duplicate      the same alias listed twice within one entry
   18  18-alias-form           every alias is itself in slug form (warning); a
@@ -2345,7 +2349,7 @@ def _check_sr_markers(fm, sections, findings):
     lines = sections["lines"]
     end = sections["flashcards_index"]
     for hit in sr_marker_findings("\n".join(
-            lines if end is None else lines[:end])):
+            lines if end is None else lines[:end]), multiline=end is not None):
         findings.append(_f(
             "19-sr-marker", "error", hit["message"],
             {"line": fm.body_start_line + hit["line"] - 1,

@@ -2018,6 +2018,12 @@ def spaced_repetition_report(vault_root, discipline_counts):
         report["separator_findings"].append(
             "multilineReversedCardSeparator is %r; wiki cards use '??'"
             % (value,))
+    value = settings.get("multilineCardSeparator", "?")
+    if value != "?":
+        report["separator_findings"].append(
+            "multilineCardSeparator is %r; a body line that is only it "
+            "becomes an extra card, and the entry check guards only '?'"
+            % (value,))
     marker = settings.get("multilineCardEndMarker", "")
     if marker:
         report["separator_findings"].append(
@@ -3515,7 +3521,7 @@ def scan(wiki, images=None, vault=None):
         # rule, so the floor gets the unmasked body.
         for _sr_hit in sr_marker_findings(
                 e["body"][:e["flash_off"]] if e["has_flashcards"]
-                else e["body"]):
+                else e["body"], multiline=e["has_flashcards"]):
             problems.append((sl, "item19/sr-marker", _sr_hit["message"]))
         if e["has_flashcards"]:
             # A tolerated heading spelling (### level, extra/leading spaces) is a
@@ -9946,12 +9952,12 @@ def run_self_test():
                 _sr_vault("sr-" + _name, _data)[0], _counts)
         check("folders-as-decks covers every tag",
               _variants["folders"]["uncovered_tags"], {})
-        check("a changed reversed separator or end marker is one finding "
-              "each; the one-way separator wiki cards never use is not read",
+        check("a changed multi-line separator or end marker is one finding "
+              "each",
               (len(_variants["separator"]["separator_findings"]),
                len(_variants["end-marker"]["separator_findings"]),
-               _variants["basic-separator"]["separator_findings"]),
-              (1, 1, []))
+               len(_variants["basic-separator"]["separator_findings"])),
+              (1, 1, 1))
         check("each active cloze conversion is one finding naming its toggle; "
               "an explicit empty pattern list turns the toggles off",
               [[(("convertBoldTextToClozes" in finding),

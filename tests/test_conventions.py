@@ -5974,7 +5974,7 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/atomic_move.py": 32,
     "shared/scripts/check_parsers.py": 22,
     "shared/scripts/code_typography.py": 20,
-    "shared/scripts/entry_checks.py": 69,
+    "shared/scripts/entry_checks.py": 72,
     "shared/scripts/equation_coverage.py": 179,
     "shared/scripts/figure_state.py": 13,
     "shared/scripts/introduced_aliases.py": 34,
@@ -6030,13 +6030,13 @@ SELFTEST_MIN_CASES = {
     "skills/figure-extract/scripts/batch_extract.py": 416,
     "skills/figure-extract/scripts/extract_figures.py": 222,
     "skills/figure-extract/scripts/render_page.py": 67,
-    "skills/pdf-organize/scripts/organize.py": 383,
+    "skills/pdf-organize/scripts/organize.py": 386,
     "skills/wiki-add/scripts/backlog.py": 54,
     "skills/wiki-build/scripts/find_collisions.py": 77,
-    "skills/wiki-build/scripts/lint_entry.py": 420,
+    "skills/wiki-build/scripts/lint_entry.py": 421,
     "skills/wiki-build/scripts/review_tree.py": 37,
     "skills/wiki-build/scripts/vault_index.py": 85,
-    "skills/wiki-lint/scripts/scan_vault.py": 585,
+    "skills/wiki-lint/scripts/scan_vault.py": 586,
 }
 
 
