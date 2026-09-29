@@ -800,6 +800,27 @@ def run_self_test():
                   (rep["results"][0]["verdict"], bool(rep["index_problems"])),
                   (want, True))
 
+        # An online page's URL is valid provenance (CONVENTIONS section 7): it
+        # is no index problem and leaves its entry a safe merge destination.
+        web_wiki = os.path.join(tmp, "web-source")
+        os.makedirs(web_wiki)
+        with open(os.path.join(web_wiki, "direct-preference-optimization.md"),
+                  "w", encoding="utf-8") as fh:
+            fh.write(_st_entry_text("Direct preference optimization").replace(
+                '  - "[[Doe_X_2025.pdf#page=2]]"',
+                '  - "https://arxiv.org/abs/2305.18290"\n'
+                '  - "[[Doe_X_2025.pdf#page=2]]"'))
+        rep = check_candidates(["Direct preference optimization",
+                                "Gradient boosting"],
+                               _vault_index.build_index(web_wiki),
+                               include_peers=False)
+        check("an entry citing a URL plus a PDF is a clean merge by its exact "
+              "title, and an unrelated title is still a create",
+              ([r["verdict"] for r in rep["results"]],
+               [m["entry_errors"] for m in rep["results"][0]["matches"]],
+               rep["index_problems"]),
+              (["merge", "create"], [[]], []))
+
         # An unread alias list can claim the same alias, never the filename.
         hidden = os.path.join(tmp, "hidden-alias-owner")
         os.makedirs(hidden)

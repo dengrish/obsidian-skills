@@ -25,7 +25,7 @@ Choose by the requested result, not just the input's file type.
 | Explain a paper, chapter, report, standard or publication notice | [knowledge:paper-summarize](skills/paper-summarize/SKILL.md) | PDF → reading note in `Articles/` |
 | Clean Web Clipper captures | [knowledge:clipping-clean](skills/clipping-clean/SKILL.md) | raw capture → cleaned note in `Articles/` |
 | Build or enrich wiki entries from new evidence | [knowledge:wiki-build](skills/wiki-build/SKILL.md) | organized PDF or cleaned source note → entries in `Wiki/` |
-| Research and add missing requested topics | [knowledge:wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md` or topics named in the request → durable sources and new requested entries only |
+| Research and add missing requested topics | [knowledge:wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md` or topics named in the request → new requested entries citing vault sources or web pages by URL, plus any newly filed PDFs |
 | Audit, correct, deepen or explicitly refactor existing wiki entries | [knowledge:wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources or an exact producer mapping → scoped repairs, links, parents and MOCs |
 | Record selected X posts and RSS/Atom articles without interpretation | [investments:feed-collect](skills/feed-collect/SKILL.md) | `Investments/x-accounts.md` and `rss-feeds.md` → maintained X notes and RSS article notes in `Investments/Sources/` |
 | Analyze stock ideas from collected feeds | [investments:stock-research](skills/stock-research/SKILL.md) | saved posts + verified financial evidence → daily report and maintained stock notes |
@@ -50,7 +50,7 @@ Inbox/*.pdf → pdf-organize → Sources/PDFs/
 Inbox/*.md → clipping-clean → Articles/ cleaned clipping
                                      └─ wiki-build → Wiki/
 
-add-to-wiki.md or named topics → wiki-add → durable sources → missing requested entries in Wiki/
+add-to-wiki.md or named topics → wiki-add → missing requested entries in Wiki/ (web pages cited by URL)
 
 Existing Wiki/ → wiki-lint → entry repairs, links, parents, MOCs and proposals
 
@@ -70,11 +70,10 @@ is a finished reading note; builder may use it only under its
 A cleaned clipping is itself the source and can be used directly. wiki-build
 never cites a raw `Inbox/` file; clipping-clean or pdf-organize handles it
 first. wiki-add can reuse sources that Wiki entries already cite, file newly
-acquired PDFs itself under pdf-organize's naming rules, or save a clearly
-marked, agent-written research extract for each web page in `Articles/`; these
-extracts are durable evidence, not full-text captures or multi-page summaries.
-Its [research guide](skills/wiki-add/references/research.md) owns that
-procedure.
+acquired PDFs itself under pdf-organize's naming rules, or cite a web page it
+researched by its URL in the entry's `sources:`; it never creates a note just
+to have something to cite. Its
+[research guide](skills/wiki-add/references/research.md) owns that procedure.
 
 **Organize PDFs before deriving filenames and links from them.** Later renames
 must carry the dependent notes, figures, references and sidecars together,
@@ -257,7 +256,7 @@ it and any per-run path overrides through [RUNTIME.md](shared/RUNTIME.md).
 ```text
 <vault>/
 ├── Inbox/                    raw clippings and incoming PDFs
-├── Articles/                 clippings, PDF reading notes and research extracts
+├── Articles/                 clippings, PDF reading notes and legacy research extracts
 ├── Sources/
 │   ├── PDFs/                 organized PDFs
 │   │   └── <Work>/           a split book's chapter PDFs
@@ -283,10 +282,11 @@ it and any per-run path overrides through [RUNTIME.md](shared/RUNTIME.md).
 
 PDFs move out of `Inbox/`; raw clippings stay as the record of what was
 captured. The clipping dedup index determines whether a capture was processed.
-All three source-note producers share `Articles/`: `sources:` item 1 identifies
-the origin used for deduplication, and a body marker distinguishes wiki-add's
-research extracts from full-text clippings. wiki-add reuses existing source
-notes only when Wiki entries already cite them, and reuses existing images,
+The source-note producers share `Articles/`: `sources:` item 1 identifies
+the origin used for deduplication, and a body marker distinguishes legacy
+wiki-add research extracts from full-text clippings. wiki-add reuses existing source
+notes only when Wiki entries already cite them (or, read-only, a legacy
+research extract), and reuses existing images,
 without overwriting either. Market research, MOCs, proposal logs and the topic
 queue stay outside `Wiki/` so they are not treated as entries.
 

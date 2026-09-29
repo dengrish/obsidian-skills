@@ -24,8 +24,9 @@ affected entry and supported by its durable source.
 ## Establish evidence and complete scope
 
 1. Run the normal Step 0 scan over the whole wiki. Snapshot every affected
-   entry and resolve its cited source files. For a PDF/summary pair, verify
-   claims against the original PDF. A missing, unreadable, or ambiguous source
+   entry and resolve its cited sources: vault files, and cited URLs read online.
+   For a PDF/summary pair, verify claims against the original PDF. A missing,
+   unreadable, unreachable or ambiguous source
    blocks only a movement that depends on it, such as a disputed or
    source-specific claim; accurate, well-established content may move to its
    owner without it. Never fill a gap with uncertain recollection.

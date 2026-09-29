@@ -126,8 +126,10 @@ history-dependent question; do not guess which date is wrong or try to make
 Use the canonical [source format](../../wiki-build/references/writing.md#sources).
 A [discipline root](hierarchy.md#establish-discipline-roots) may cite none,
 written exactly `sources: []`; respell a bare, null or spaced (`[ ]`) empty
-key on a root that way. Remove an
-exact repeated list item. A same-stem PDF/Markdown pair remains
+key on a root that way. An online page's URL item is valid as a quoted,
+full http(s) address; routine lint never fetches it, never converts it to or
+from a vault citation, and reports a malformed one without guessing a repair.
+Remove an exact repeated list item, URL items included. A same-stem PDF/Markdown pair remains
 `item4/source-identity` until decoded `sources:` or legacy `source:` in the
 Markdown note proves that it summarizes that PDF. Only then keep the anchored
 PDF citation, remove the duplicate Markdown citation, and report the evidence.

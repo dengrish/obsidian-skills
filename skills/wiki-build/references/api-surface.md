@@ -14,7 +14,7 @@ Do not turn the entry into a catalog of algorithm-specific classes, functions, p
 
 **The step-2 substance gate still applies.** A source that uses a library to teach another concept, or merely enumerates the library objects used to implement that concept, does not thereby teach the `Software` entity. Reject that create/merge contribution, do not append the source, and leave an already-explained interface convention unchanged. A source earns a `Software` contribution when it substantively explains the artifact's scope, architecture, interface contract, design tradeoff, or artifact-wide capability or limitation.
 
-A version-specific behavior claim needs a durable source that establishes that version: the active source, or a vault source such as the project's versioned documentation or release notes (process an existing capture through `clipping-clean` first), cited in `sources:` only when it contributes substantively. A floating “latest” page does not establish an older version's behavior. Otherwise omit the claim and report it rather than leaving a bare documentation URL in the entry.
+A version-specific behavior claim needs a durable source that establishes that version: the active source, or a vault source such as the project's versioned documentation or release notes (process an existing capture through `clipping-clean` first), cited in `sources:` only when it contributes substantively. wiki-add may instead cite the versioned documentation page it inspected by its URL (§7). A floating “latest” page does not establish an older version's behavior. Otherwise omit the claim and report it rather than leaving a documentation URL in the entry's prose.
 
 ## The rule: API identifiers live only in `Software` entries
 

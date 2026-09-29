@@ -1092,6 +1092,44 @@ def run_self_test():
               [("related", "ppv", "alias", "[[precision|Precision]]", None),
                ("related", "Recall", "case", "[[recall|Recall]]", None)])
 
+        # An online page's URL is a valid source item (CONVENTIONS section 7),
+        # and a frontmatter URL is never a link, even when its last path
+        # segment spells an entry's stem, in or out of case.
+        def cites(text, *urls):
+            return text.replace(
+                '  - "[[Doe_X_2025.pdf#page=2]]"',
+                "".join('  - "%s"\n' % url for url in urls)
+                + '  - "[[Doe_X_2025.pdf#page=2]]"')
+
+        web_wiki = os.path.join(tmp, "web-vault", "Wiki")
+        os.makedirs(web_wiki)
+        put(os.path.join(web_wiki, "precision.md"), measure("Precision"))
+        put(os.path.join(web_wiki, "recall.md"), cites(
+            measure("Recall"), "https://example.org/wiki/precision"))
+        web_merge = put(os.path.join(drafts, "web-recall.md"), cites(
+            _st_entry("Recall", "Recall is a test measure.", "A test measure.",
+                      body=" It is read beside [[precision]]."),
+            "https://example.org/wiki/precision"))
+        web_new = put(os.path.join(drafts, "web-f1.md"), cites(
+            _st_entry("F1 score", "F1 score is the harmonic mean of precision "
+                      "and recall.", "The harmonic mean of the two error-rate "
+                      "shares.", body=" It combines [[precision]] with "
+                      "[[recall]]."),
+            "https://example.org/wiki/Precision",
+            "https://example.org/wiki/missing-entry"))
+        web = review(web_wiki, manifest("web.json", [
+            ("Wiki/recall.md", web_merge), ("Wiki/f1-score.md", web_new)]),
+            os.path.join(tmp, "web-review"))
+        check("a merge draft citing a URL plus a PDF over an entry that "
+              "already cites the URL is clean, with no 4-sources finding",
+              ("4-sources" in items(web["on_staged"] + web["introduced"]),
+               web["on_staged"], web["introduced"], web["baseline_count"],
+               web["clean"]),
+              (False, [], [], 0, True))
+        check("a URL item whose last path segment spells an entry stem is "
+              "never dangling or noncanonical",
+              (web["dangling"], web["noncanonical"]), ([], []))
+
         empty_vault = os.path.join(tmp, "empty-vault")
         os.makedirs(empty_vault)
         fresh = review(os.path.join(empty_vault, "Wiki"), manifest(

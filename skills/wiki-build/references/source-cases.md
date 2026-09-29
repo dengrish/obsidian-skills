@@ -36,7 +36,7 @@ An existing, uniquely resolved PDF and its provenance-confirmed summary are one 
 Files under `Inbox/` are intake material, not sources; never cite one while it is there.
 
 - Route a raw `.md` capture through `clipping-clean` and an Inbox PDF through `pdf-organize`, then process the resulting `Articles/` note or `Sources/PDFs/` file.
-- When clipping-clean reports a duplicate, process the note it names, unless it is a wiki-add research extract (`research_extracts`): then ask whether to use the extract instead.
+- When clipping-clean reports a duplicate, process the note it names, unless it is a legacy wiki-add research extract (`research_extracts`): then ask whether to use the extract instead.
 - A user's own note with no capture URL is not a clipping: ask the user to move it out of `Inbox/`, or approve a destination, and process it there.
 - A preview run uses the producer only in its preview mode, extracts from the raw file, and cites the proposed path provisionally.
 
@@ -50,7 +50,7 @@ is an explicitly named feed-owned attachment
 rename it or route it to `pdf-organize`, report the exception, and pass
 `--allow-unorganized` to any figure extraction for it.
 
-A marked [wiki-add research extract](../../wiki-add/references/research.md) is a selective, agent-written extract of a URL, not a full capture. Cite its Markdown filename, never its URL; use only claims its own text supports, never extend it from the live page, and read nothing into what it omits. An ordinary builder run never creates an extract, and a search result is never a source.
+A marked [legacy wiki-add research extract](../../wiki-add/references/research.md#legacy-research-extracts) is a selective, agent-written extract of a URL, not a full capture. Cite its Markdown filename, never its URL; use only claims its own text supports, never extend it from the live page, and read nothing into what it omits. No skill creates an extract any more, and a search result is never a source.
 
 ## Several sources in one run
 

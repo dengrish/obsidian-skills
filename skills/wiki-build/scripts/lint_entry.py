@@ -31,7 +31,8 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               value is report-only, never inferred as false
   3   3-dates                 created/updated are YYYY-MM-DD; created <= updated
   4   4-sources               sources: is a list of PDF wikilinks with positive
-                              page anchors or unanchored markdown wikilinks
+                              page anchors, unanchored markdown wikilinks or
+                              online pages' full http(s) URLs
   4   4-duplicate-source      review a same-stem PDF/Markdown source pair;
                               provenance must establish whether the note is
                               about the PDF or is an independent clipping
@@ -368,6 +369,7 @@ from entry_checks import (  # noqa: E402
     LEGACY_EXTRA_PREFIX,
     SHARED_MUTATIONS,
     SHARED_QUIET,
+    SOURCE_REFERENCE_FORMS,
     api_surface_findings,
     bare_common_noun_slug,
     bare_word_alias_candidate,
@@ -385,6 +387,7 @@ from entry_checks import (  # noqa: E402
     primary_line3_faults,
     pure_math_opener_markup,
     source_meta_findings,
+    source_reference_kind,
     sr_card_marker_faults,
     sr_marker_findings,
     unenumerated_bold_findings,
@@ -682,7 +685,7 @@ def _check_read(fm, findings):
 
 
 def _check_sources(fm, findings, root=False):
-    """Item 4: a list of complete local-source wikilinks with physical pages.
+    """Item 4: a list of local-source wikilinks and online-page URLs.
 
     A discipline root may cite nothing (hierarchy.md, *Establish discipline
     roots*). Its empty list is spelled exactly `sources: []`: a bare or null
@@ -728,15 +731,13 @@ def _check_sources(fm, findings, root=False):
             findings.append(_f("4-sources", "error", "sources: contains a null or invalid item",
                                {"line": line}))
             continue
-        if re.fullmatch(r"\[\[[^\[\]\r\n|#]+\.(?i:pdf)#page=[1-9][0-9]*\]\]", value):
-            continue
-        if re.fullmatch(r"\[\[[^\[\]\r\n|#]+\.(?i:md)\]\]", value):
+        if source_reference_kind(value):
             continue
         findings.append(_f(
             "4-sources", "error",
-            "source must be [[Name.pdf#page=N]] with a positive physical "
-            "page number, or [[Name.md]] without an anchor; URLs, display "
-            "labels and incomplete wikilinks are not source references",
+            "source must be %s; display labels, Markdown links and "
+            "incomplete wikilinks are not source references"
+            % SOURCE_REFERENCE_FORMS,
             {"line": line, "source": value}))
 
 
@@ -3391,12 +3392,40 @@ def run_self_test():
     for source in ("[[Doe_X_2025.pdf]]", "[[Doe_X_2025.pdf#page=0]]",
                    "[[Doe_X_2025.pdf#page=01]]",
                    "[[Doe_X_2025.pdf#page=1garbage]]",
-                   "https://example.test/Doe_X_2025.pdf#page=1",
+                   "[Doe](https://example.test/Doe_X_2025.pdf)",
                    "Doe_X_2025.pdf#page=1", "[[Note.md#Heading]]"):
         check("reject malformed source %s" % source,
               items(mutate("[[Doe_X_2025.pdf#page=2]]", source)), ["4-sources"])
     check("a valid markdown source has no page anchor",
           items(mutate("[[Doe_X_2025.pdf#page=2]]", "[[Note.md]]")), [])
+    check("an online page is cited by its full URL",
+          items(mutate("[[Doe_X_2025.pdf#page=2]]",
+                       "https://arxiv.org/abs/2305.18290")), [])
+    check("an exactly repeated URL is one citation too many",
+          items(mutate('  - "[[Doe_X_2025.pdf#page=2]]"',
+                       '  - "https://example.org/a"\n  - "https://example.org/a"')),
+          ["4-sources"])
+    check("a scheme-less or spaced address is not a URL source",
+          [items(mutate("[[Doe_X_2025.pdf#page=2]]", value))
+           for value in ("example.org/page", "https://example.org/a b")],
+          [["4-sources"], ["4-sources"]])
+    check("a plain http URL is a source",
+          items(mutate("[[Doe_X_2025.pdf#page=2]]",
+                       "http://example.org/page")), [])
+    check("a URL with a query and a fragment is a source",
+          items(mutate("[[Doe_X_2025.pdf#page=2]]",
+                       "https://example.org/search?q=roc&page=2#results")), [])
+    # Each carries a real address, but only a bare http(s) URL is a source.
+    for value in ("ftp://example.org/Doe_X_2025.pdf",
+                  "[ROC](https://example.org/roc)",
+                  "Label https://example.org/roc",
+                  "<https://example.org/roc>",
+                  "[[https://example.org/roc]]"):
+        check("a wrapped or non-http address is not a URL source: %s" % value,
+              items(mutate("[[Doe_X_2025.pdf#page=2]]", value)), ["4-sources"])
+    check("an unquoted URL item is a quoting fault, not a source-form fault",
+          items(mutate('  - "[[Doe_X_2025.pdf#page=2]]"',
+                       "  - https://example.org/a")), ["2-quoting"])
     check("a source scalar is not a sources list",
           items(mutate('sources:\n  - "[[Doe_X_2025.pdf#page=2]]"',
                        'sources: "[[Doe_X_2025.pdf#page=2]]"')), ["4-sources"])
@@ -3524,10 +3553,25 @@ def run_self_test():
           items(mutate('  - "[[Doe_X_2025.pdf#page=2]]"\n',
                        '  - "[[Doe_X_2025.pdf#page=2]]"\n  - "[[Zed_Blog_2023.md]]"\n')),
           [])
+    check("a URL ending in the .md stem of a local pdf is no duplicate",
+          items(mutate('  - "[[Doe_X_2025.pdf#page=2]]"\n',
+                       '  - "[[Doe_X_2025.pdf#page=2]]"\n'
+                       '  - "https://example.org/Doe_X_2025.md"\n')),
+          [])
+    check("a URL ending in the .pdf stem of a local note is no duplicate",
+          items(mutate('  - "[[Doe_X_2025.pdf#page=2]]"\n',
+                       '  - "https://example.org/Doe_X_2025.pdf"\n'
+                       '  - "[[Doe_X_2025.md]]"\n')),
+          [])
     check("source_stem folds case/NFC and strips wrapper, pipe, anchor, folder",
           [source_stem(s) for s in ('"placeholder"', "[[Sources/PDFs/Doe_X_2025.pdf#page=2]]",
-                                    "[[doe_x_2025.md|label]]")],
-          [("", ""), ("doe_x_2025", "pdf"), ("doe_x_2025", "md")])
+                                    "[[doe_x_2025.md|label]]",
+                                    # an online page names no local document
+                                    "https://example.org/Doe_X_2025.pdf",
+                                    "http://example.org/doe_x_2025.md",
+                                    "https://example.org/Doe_X_2025.pdf#page=2")],
+          [("", ""), ("doe_x_2025", "pdf"), ("doe_x_2025", "md"),
+           ("", ""), ("", ""), ("", "")])
 
     # -- item 5: slug ------------------------------------------------------
     check("the filename does not match slug(title:)",

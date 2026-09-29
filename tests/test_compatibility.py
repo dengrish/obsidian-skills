@@ -1535,6 +1535,82 @@ read: false
             with self.subTest(item=item):
                 self.assertEqual(builder.source_stem(item),
                                  linter.source_stem(item))
+        # An online page names no local document, even when its path ends in
+        # a local source's extension, so it never pairs with a vault file.
+        for item in ("https://example.org/Doe_Study_2025.pdf",
+                     "http://example.org/notes/Cafe.md#top",
+                     "https://arxiv.org/abs/2305.18290"):
+            with self.subTest(url=item):
+                self.assertEqual(builder.source_stem(item), ("", ""))
+                self.assertEqual(linter.source_stem(item), ("", ""))
+
+    def test_source_reference_checkers_share_one_accepted_form_table(self):
+        shared = load(
+            "compat_shared_source_forms",
+            ROOT / "shared/scripts/entry_structure.py")
+        builder = load(
+            "compat_builder_source_forms",
+            ROOT / "skills/wiki-build/scripts/lint_entry.py")
+        linter = load(
+            "compat_linter_source_forms",
+            ROOT / "skills/wiki-lint/scripts/scan_vault.py")
+        index = load(
+            "compat_index_source_forms",
+            ROOT / "skills/wiki-build/scripts/vault_index.py")
+        cases = (
+            ("[[Doe_Study_2025.pdf#page=7]]", "pdf"),
+            ("[[Cafe.md]]", "md"),
+            ("https://arxiv.org/abs/2305.18290", "url"),
+            ("http://example.org/notes/page?q=1&r=2#part", "url"),
+            ("[[Doe_Study_2025.pdf]]", None),
+            ("[Doe](https://example.org/Doe_Study_2025.pdf)", None),
+            ("<https://example.org/page>", None),
+            ("[[https://example.org/page]]", None),
+            ("ftp://example.org/Doe_Study_2025.pdf", None),
+            ("https://example.org/a b", None),
+            ("example.org/page", None),
+            ("[[Doe_Study_2025.pdf#PAGE=7]]", None),
+            ("[[https://example.org/Doe_Study_2025.pdf#page=2]]", None),
+            ("https://example.org:99999/page", None),
+        )
+        with tempfile.TemporaryDirectory(prefix="obsidian-source-forms-") as tmp:
+            wiki = Path(tmp) / "Wiki"
+            wiki.mkdir()
+            notes = []
+            for number, (value, _) in enumerate(cases):
+                note = wiki / ("source-%d.md" % number)
+                note.write_text(
+                    '---\ntitle: "Source %d"\ntype: "Concept"\naliases: []\n'
+                    'sources:\n  - %s\ncreated: "2026-01-01"\n'
+                    'updated: "2026-01-01"\ndescription: "A source form probe."\n'
+                    'tags: []\nparents: []\nread: false\n---\n\n'
+                    '**Source %d** is a source form probe.\n'
+                    % (number, json.dumps(value), number),
+                    encoding="utf-8")
+                notes.append(note)
+            scanned = linter.scan(wiki)["problems"]
+            for number, ((value, kind), note) in enumerate(zip(cases, notes)):
+                with self.subTest(source=value):
+                    self.assertEqual(shared.source_reference_kind(value), kind)
+                    rejected = kind is None
+                    built = [row for row in builder.lint_file(note)["findings"]
+                             if row["item"] == "4-sources"]
+                    self.assertEqual(bool(built), rejected, built)
+                    if rejected:
+                        self.assertEqual(built[0]["evidence"]["source"], value)
+                        self.assertIn(shared.SOURCE_REFERENCE_FORMS,
+                                      built[0]["message"])
+                    linted = [row for row in scanned
+                              if row["slug"] == "source-%d" % number
+                              and row["item"] == "item4"]
+                    self.assertEqual(bool(linted), rejected, linted)
+                    if rejected:
+                        self.assertIn(shared.SOURCE_REFERENCE_FORMS,
+                                      linted[0]["message"])
+                        self.assertTrue(linted[0]["message"].endswith(value))
+                    indexed = [error for error in index.index_entry(note)["errors"]
+                               if error.startswith("sources: malformed")]
+                    self.assertEqual(bool(indexed), rejected, indexed)
 
     def test_source_note_consumers_agree_on_origin_ownership(self):
         clipping = load(

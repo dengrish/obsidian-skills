@@ -1575,11 +1575,13 @@ A field of knowledge used as a root in this synthetic example.
         self.assertEqual(located["find"][0]["pages"], [1])
         wiki = self.vault / "Wiki"
         entry = wiki / "control-sample.md"
+        # A verified online page may be cited beside the local PDF by its URL.
         entry.write_text('''---
 title: "Control sample"
 type: Concept
 sources:
   - "[[Doe_Study_2025.pdf#page=1]]"
+  - "https://en.wikipedia.org/wiki/Scientific_control"
 created: 2026-08-30
 updated: 2026-08-30
 description: "A control sample provides a baseline for comparing the effect of an experimental treatment."
@@ -1608,8 +1610,10 @@ Control sample
             "- [[Wiki/biology|Biology]]\n  - [[Wiki/control-sample|Control sample]]\n", encoding="utf-8")
         index = self.vault / "index.json"
         self.run_script("skills/wiki-build/scripts/vault_index.py", wiki, "-o", index)
-        self.assertEqual(
-            json.loads(index.read_text(encoding="utf-8"))["entry_count"], 2)
+        inventory = json.loads(index.read_text(encoding="utf-8"))
+        self.assertEqual(inventory["entry_count"], 2)
+        # The URL item is recorded as provenance, never as a malformed reference.
+        self.assertEqual(inventory["problems"], [])
         candidates = self.vault / "candidates.json"
         candidates.write_text(
             json.dumps(["Control sample", "Unrelated device"]), encoding="utf-8")
@@ -1835,6 +1839,9 @@ Reference label
         backlog.write_bytes(
             b"# Topics\r\n\r\n- [ ] Geometric average\r\n"
             b"- Arithmetic mean\r\n- [ ] Unresolved topic")
+        # A LEGACY research extract: current wiki-add writes none and cites an
+        # online page by its URL, but an extract already cited by an entry
+        # stays a valid source and keeps clipping-clean's ownership guards.
         source = self.notes / "Example_Averages_nd.md"
         source.write_text('''---
 title: Averages
@@ -1925,11 +1932,12 @@ Geometric mean <!--SR:!2026-09-05,7,250--> ^saved-card
         self.assertEqual(backlog.read_bytes(), before_failed_completion)
         # Establish the reviewed public-entry fixture. The helper does not
         # write Wiki notes; its evidence gate must see this real file first.
+        # A new entry cites the researched online page itself, not an extract.
         created.write_text(r'''---
 title: "Arithmetic mean"
 type: Concept
 sources:
-  - "[[Example_Averages_nd.md]]"
+  - "https://example.org/averages"
 created: 2026-09-05
 updated: 2026-09-05
 description: "The arithmetic mean is the sum of a collection of numbers divided by its size."
@@ -1958,6 +1966,22 @@ Arithmetic mean
         lint = scratch / "topic-entry-lint.json"
         self.run_script("skills/wiki-build/scripts/lint_entry.py", created, "-o", lint)
         self.assertTrue(json.loads(lint.read_text(encoding="utf-8"))["summary"]["clean"])
+        # The scanner accepts the same URL citation, and the builder's index
+        # neither rejects it nor counts it as a citation of the legacy extract.
+        scan = json.loads(self.run_script(
+            "skills/wiki-lint/scripts/scan_vault.py", wiki,
+            "--images", self.images).stdout)
+        self.assertEqual([row for row in scan["problems"]
+                          if row["slug"] == "arithmetic-mean"
+                          and row["item"].startswith("item4")], [])
+        self.run_script("skills/wiki-build/scripts/vault_index.py", wiki,
+                        "--source", source.name, "-o", index)
+        inventory = json.loads(index.read_text(encoding="utf-8"))
+        self.assertEqual([row["slug"] for row in inventory["source_matches"]],
+                         ["geometric-mean"])
+        self.assertFalse(any(problem.startswith("arithmetic-mean.md:")
+                             for problem in inventory["problems"]),
+                         inventory["problems"])
         self.run_script(helper, "complete", "--snapshot", second,
                         "--item", item["id"], "--wiki", wiki, "--entry", created)
         self.assertEqual(backlog.read_bytes(),
@@ -1973,18 +1997,33 @@ Arithmetic mean
             "skills/clipping-clean/scripts/dedup_index.py", self.notes,
             "--url", "https://example.org/averages").stdout)
         self.assertEqual(ownership["checked"][0]["status"], "duplicate")
+        # The legacy extract stays a named URL owner that no reprocessing
+        # exclusion can hide, even though the new entry cites the URL itself.
+        self.assertEqual([Path(path).name for path in
+                          ownership["checked"][0]["research_extracts"]],
+                         [source.name])
+        refused = json.loads(self.run_script(
+            "skills/clipping-clean/scripts/dedup_index.py", self.notes,
+            "--url", "https://example.org/averages", "--exclude", source,
+            expected=1).stdout)
+        self.assertIn("research extract", refused["error"])
+        self.assertNotIn("checked", refused)
+        self.assertEqual(source.read_bytes(), original_source)
 
     def test_builder_and_linter_share_the_same_entry_contract_floor(self):
         wiki = self.vault / "Wiki"
 
         def write_entry(slug, title, body, *, type_="Concept", aliases=(),
-                        source="[[Clean.pdf#page=1]]", description=None,
+                        source="[[Clean.pdf#page=1]]", sources=(),
+                        description=None,
                         tags_block='tags:\n  - "#statistics"', card=None,
                         related=None, extra_cards=None):
             alias_yaml = ""
             if aliases:
                 alias_yaml = "aliases:\n" + "".join(
                     f'  - "{alias}"\n' for alias in aliases)
+            # Several double-quoted items, in order, replace the one `source`.
+            source_yaml = "".join(f'  - "{item}"\n' for item in sources or (source,))
             footer = "\n\n**Related:**" + (f" {related}" if related else "")
             term = card if card is not None else title
             # Raw cards after the primary card, each block blank-line separated.
@@ -1993,8 +2032,7 @@ Arithmetic mean
 title: "{title}"
 type: {type_}
 {alias_yaml}sources:
-  - "{source}"
-created: 2026-08-31
+{source_yaml}created: 2026-08-31
 updated: 2026-08-31
 description: "{description or title + ' is a synthetic alignment fixture.'}"
 {tags_block}
@@ -2189,6 +2227,44 @@ A compact definition used only to exercise the shared contract.
             "legacy-extra-cards": "holds 3 cards",
             "simplified-primary": "must be exactly",
         }
+        # An online page is cited by its full http(s) URL (CONVENTIONS
+        # section 7), alone or beside local sources. A URL whose path ends in a
+        # local stem names no vault document, so it pairs with no note.
+        url_clean = {
+            "web-only-source": ("Web only source",
+                                ("https://arxiv.org/abs/2305.18290",)),
+            "web-and-paper-sources": ("Web and paper sources",
+                                      ("https://arxiv.org/abs/2305.18290",
+                                       "[[Clean.pdf#page=2]]")),
+            "plain-web-source": ("Plain web source",
+                                 ("http://example.org:8080/notes/page?q=1#part",)),
+            "web-file-beside-note": ("Web file beside note",
+                                     ("https://example.org/files/Clean.pdf",
+                                      "[[Clean.md]]")),
+        }
+        url_faults = {
+            "repeated-web-source": ("Repeated web source",
+                                    ("https://example.org/a", "https://example.org/a")),
+            "file-transfer-source": ("File transfer source",
+                                     ("ftp://example.org/Clean.pdf",)),
+            "spaced-web-source": ("Spaced web source", ("https://example.org/a b",)),
+            "linked-label-source": ("Linked label source",
+                                    ("[Averages](https://example.org/averages)",)),
+        }
+        for slug, (title, items) in {**url_clean, **url_faults}.items():
+            write_entry(slug, title, f"**{title}** is a source-form fixture.",
+                        sources=items)
+        # A valid URL spelled as a bare YAML item is a quoting fault only.
+        write_entry(
+            "unquoted-web-source", "Unquoted web source",
+            "**Unquoted web source** is a source-form fixture.",
+            source="https://example.org/unquoted")
+        unquoted_web = wiki / "unquoted-web-source.md"
+        unquoted_web.write_text(
+            unquoted_web.read_text(encoding="utf-8").replace(
+                '  - "https://example.org/unquoted"',
+                "  - https://example.org/unquoted", 1),
+            encoding="utf-8")
 
         lint = json.loads(self.run_script(
             "skills/wiki-build/scripts/lint_entry.py", wiki, "--compact").stdout)
@@ -2282,6 +2358,28 @@ A compact definition used only to exercise the shared contract.
             self.assertIn("item11", scan_items.get(slug, set()), scan_items.get(slug))
         self.assertNotIn("item10/dup",
                          scan_items.get("duplicate-link-forms", set()))
+        # Both checkers share one source-form predicate: the same URL items
+        # pass, and the same repeated or malformed items fail.
+        for slug in url_clean:
+            self.assertEqual(lint_items[slug], set(), (slug, lint_findings[slug]))
+            self.assertEqual(scan_items.get(slug, set()), set(), slug)
+        for slug in url_faults:
+            self.assertIn("4-sources", lint_items[slug], slug)
+            self.assertIn("item4", scan_items.get(slug, set()), slug)
+        self.assertTrue(any(
+            finding["item"] == "4-sources" and "listed 2 times" in finding["message"]
+            for finding in lint_findings["repeated-web-source"]))
+        self.assertIn(
+            'source "https://example.org/a" is listed 2 times',
+            " ".join(problem["message"] for problem in scan["problems"]
+                     if problem["slug"] == "repeated-web-source"))
+        self.assertNotIn("4-duplicate-source", lint_items["web-file-beside-note"])
+        self.assertNotIn("item4/source-identity",
+                         scan_items.get("web-file-beside-note", set()))
+        self.assertIn("2-quoting", lint_items["unquoted-web-source"])
+        self.assertNotIn("4-sources", lint_items["unquoted-web-source"])
+        self.assertIn("item2", scan_items.get("unquoted-web-source", set()))
+        self.assertNotIn("item4", scan_items.get("unquoted-web-source", set()))
         # Local QC remains available with malformed alias metadata, but
         # cross-entry alias ownership is provisional. Repair those fixture
         # prerequisites before checking alias additions and canonicalization.
@@ -2320,6 +2418,24 @@ A compact definition used only to exercise the shared contract.
                          {match["slug"] for match in index["source_matches"]})
         self.assertTrue(any("alignment-sample.md: sources:" in problem
                             for problem in index["problems"]))
+        # The index records a URL as provenance, not as a malformed local
+        # reference, while the malformed forms stay index problems.
+        for slug in (*url_clean, "repeated-web-source", "unquoted-web-source"):
+            self.assertFalse(any(problem.startswith(f"{slug}.md: sources:")
+                                 for problem in index["problems"]), slug)
+        for slug in ("file-transfer-source", "spaced-web-source",
+                     "linked-label-source"):
+            self.assertTrue(any(problem.startswith(f"{slug}.md: sources:")
+                                for problem in index["problems"]), slug)
+        # A source query matches only the local citation, never a URL whose
+        # path happens to end in the queried filename.
+        clean_matches = {match["slug"]: match["sources"] for match in json.loads(
+            self.run_script("skills/wiki-build/scripts/vault_index.py", wiki,
+                            "--source", "Clean.pdf").stdout)["source_matches"]}
+        self.assertEqual(clean_matches.get("web-and-paper-sources"),
+                         ["[[Clean.pdf#page=2]]"])
+        for slug in ("web-only-source", "plain-web-source", "web-file-beside-note"):
+            self.assertNotIn(slug, clean_matches)
 
     def test_builder_and_linter_literal_contract_constants_stay_aligned(self):
         def literal(relative, name):

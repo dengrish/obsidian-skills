@@ -4330,9 +4330,12 @@ def check_yaml_examples(rep, conv):
                 inner = item.strip('"').strip()
                 if _is_placeholder(inner):
                     continue
+                if _source_reference_kind(inner) == "url":
+                    continue                 # an online page's URL (§7)
                 mm = re.match(r"^\[\[([^\]]+)\]\]$", inner)
                 if not mm:
-                    bad("`sources:` item %s is not a quoted wikilink (§7)" % item, f)
+                    bad("`sources:` item %s is neither a quoted wikilink nor "
+                        "an online page's full URL (§7)" % item, f)
                     continue
                 target = mm.group(1)
                 if target.endswith(".md"):
@@ -5974,7 +5977,7 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/atomic_move.py": 32,
     "shared/scripts/check_parsers.py": 22,
     "shared/scripts/code_typography.py": 20,
-    "shared/scripts/entry_checks.py": 72,
+    "shared/scripts/entry_checks.py": 75,
     "shared/scripts/equation_coverage.py": 179,
     "shared/scripts/figure_state.py": 13,
     "shared/scripts/introduced_aliases.py": 34,
@@ -5982,7 +5985,7 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/naming.py": 228,
     "shared/scripts/note_provenance.py": 12,
     "shared/scripts/organism_names.py": 34,
-    "shared/scripts/entry_structure.py": 165,
+    "shared/scripts/entry_structure.py": 166,
     "shared/scripts/plugin_paths.py": 110,
     "shared/scripts/portable_names.py": 5,
     "shared/scripts/publish_files.py": 25,
@@ -6030,13 +6033,13 @@ SELFTEST_MIN_CASES = {
     "skills/figure-extract/scripts/batch_extract.py": 416,
     "skills/figure-extract/scripts/extract_figures.py": 222,
     "skills/figure-extract/scripts/render_page.py": 67,
-    "skills/pdf-organize/scripts/organize.py": 386,
+    "skills/pdf-organize/scripts/organize.py": 388,
     "skills/wiki-add/scripts/backlog.py": 54,
-    "skills/wiki-build/scripts/find_collisions.py": 77,
-    "skills/wiki-build/scripts/lint_entry.py": 429,
-    "skills/wiki-build/scripts/review_tree.py": 37,
-    "skills/wiki-build/scripts/vault_index.py": 85,
-    "skills/wiki-lint/scripts/scan_vault.py": 593,
+    "skills/wiki-build/scripts/find_collisions.py": 78,
+    "skills/wiki-build/scripts/lint_entry.py": 442,
+    "skills/wiki-build/scripts/review_tree.py": 39,
+    "skills/wiki-build/scripts/vault_index.py": 87,
+    "skills/wiki-lint/scripts/scan_vault.py": 607,
 }
 
 
@@ -7573,6 +7576,26 @@ def canonical_rule_sources():
     yield KNOWLEDGE_README, read(KNOWLEDGE_README)
 
 
+_SOURCE_KIND = []
+
+
+def _source_reference_kind(value):
+    """The shared ``source_reference_kind`` of the tree under test.
+
+    Loaded once from ``shared/scripts/entry_structure.py`` so an example is
+    judged by the same predicate the checkers use, never a copied regex.
+    """
+    if not _SOURCE_KIND:
+        try:
+            module = _load_module(os.path.join(SHARED_DIR, "scripts",
+                                               "entry_structure.py"),
+                                  "_shared_entry_structure_sources")
+            _SOURCE_KIND.append(module.source_reference_kind)
+        except (HarnessError, OSError, SyntaxError, AttributeError):
+            _SOURCE_KIND.append(lambda _value: None)
+    return _SOURCE_KIND[0](value)
+
+
 def _module_constant(text, name):
     """The literal value of a module-level ``name = <literal>``, else None."""
     for node in ast.parse(text).body:
@@ -7706,6 +7729,103 @@ def check_card_set_contract(rep, _conv):
                rel(fe_path))
 
 
+#: Retired wording of the wiki-add research-extract workflow. wiki-add now
+#: cites an online page by its URL and never creates a note just to cite it.
+ONLINE_SOURCE_STALE_PHRASES = (
+    "never contains a bare web URL",
+    "New webpage research extracts",
+    "new research extracts only",
+    "research-extract body order",
+    "For a new webpage extract",
+    "writes new research extracts",
+    "produces new research images",
+    "new entries and research extracts",
+)
+
+
+def check_online_source_contract(rep, _conv):
+    """Online pages are cited by URL; legacy research extracts stay protected.
+
+    CONVENTIONS §7 owns the URL item form, wiki-add's research guide the
+    citing step and the legacy marker, wiki-build's merge rule its
+    preservation, wiki-lint's correction mode how a cited page is read, and
+    clipping-clean the protection of existing extracts. The retired
+    extract-creation workflow must not come back in any canonical source.
+    """
+    check = "online-source-contract"
+    research = os.path.join(SKILLS_DIR, "wiki-add", "references", "research.md")
+    pins = (
+        (os.path.join(SHARED_DIR, "CONVENTIONS.md"), "- **Online page:**",
+         "lost the online-page URL form of a `sources:` item"),
+        (os.path.join(SHARED_DIR, "CONVENTIONS.md"),
+         "never creates a note in `Articles/` just to have something to cite",
+         "no longer forbids creating a note just to cite it"),
+        (research, "## Cite a webpage",
+         "lost the `## Cite a webpage` section"),
+        (research, "Never create a note in `Articles/` to cite",
+         "no longer forbids wiki-add from creating a note to cite"),
+        (research, "<!-- obsidian:wiki-add-research-source -->",
+         "no longer defines the legacy research-extract marker"),
+        (research, "Never create, edit, extend or rename one.",
+         "no longer keeps legacy research extracts read-only"),
+        (os.path.join(SKILLS_DIR, "wiki-build", "references", "merge.md"),
+         "Keep every online page's",
+         "no longer keeps an existing URL item on merge"),
+        (os.path.join(SKILLS_DIR, "wiki-lint", "references",
+                      "source-backed-corrections.md"),
+         "read a cited URL's page online",
+         "no longer says how a cited URL is read"),
+        (os.path.join(SKILLS_DIR, "clipping-clean", "SKILL.md"),
+         "<!-- obsidian:wiki-add-research-source -->",
+         "no longer protects legacy research extracts"),
+    )
+    held = 0
+    for path, marker, why in pins:
+        try:
+            text = read(path)
+        except OSError as exc:
+            rep.fail(check, "cannot read an online-source home: %s" % exc,
+                     rel(path))
+            continue
+        if _phrase_re(marker).search(text):
+            held += 1
+        else:
+            rep.fail(check, "%s %s (missing %r)"
+                     % (os.path.basename(path), why, marker), rel(path))
+    probes = (("https://arxiv.org/abs/2305.18290", "url"),
+              ("[[Doe_X_2025.pdf#page=2]]", "pdf"), ("[[Doe_X_2025.md]]", "md"),
+              ("[Doe](https://example.org/doe)", None))
+    kinds = [_source_reference_kind(value) for value, _kind in probes]
+    if kinds == [kind for _value, kind in probes]:
+        held += 1
+    else:
+        rep.fail(check, "entry_structure.source_reference_kind no longer "
+                 "tells the three source forms from a Markdown link (got %r)"
+                 % (kinds,), rel(os.path.join(SHARED_DIR, "scripts",
+                                              "entry_structure.py")))
+    stale = [(phrase, _phrase_re(phrase, re.I))
+             for phrase in ONLINE_SOURCE_STALE_PHRASES]
+    scanned = 0
+    for path, text in canonical_rule_sources():
+        scanned += 1
+        for phrase, rx in stale:
+            for m in rx.finditer(text):
+                rep.fail(check,
+                         "%s restates the retired research-extract workflow "
+                         "(%r) -- wiki-add cites an online page by its URL"
+                         % (rel(path), " ".join(m.group(0).split())),
+                         at(path, m.start(), text))
+    rep.saw(check, "online-source pins held", held)
+    rep.saw(check, "canonical sources scanned for extract-creation "
+            "phrasing", scanned)
+    if held == len(pins) + 1 and not any(
+            status == "FAIL" and name == check
+            for name, status, _where, _message in rep.results):
+        rep.ok(check, "%d online-source statements held at their owners; no "
+               "canonical source restates the extract-creation workflow"
+               % held, rel(research))
+
+
 #: (file under skills/, phrases) for the writing rules this check pins.
 WRITING_RULE_PINS = (
     (("wiki-build", "references", "writing.md"), (
@@ -7814,6 +7934,7 @@ CHECKS = [
     check_safe_write_programmatic_api,
     check_linter_finding_routes,
     check_card_set_contract,
+    check_online_source_contract,
     check_writing_rules,
 ]
 

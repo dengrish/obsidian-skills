@@ -40,7 +40,7 @@ Check new aliases against every other entry's titles and aliases before publicat
 
 ### sources
 
-List the durable sources that contributed to the entry under [CONVENTIONS §7](../../../shared/CONVENTIONS.md#7-source-references), which owns filenames, quoting, anchor syntax, identity and deduplication.
+List the durable sources that contributed to the entry under [CONVENTIONS §7](../../../shared/CONVENTIONS.md#7-source-references), which owns filenames, quoting, anchor syntax, identity and deduplication. The builder cites only vault documents it read and never writes a URL item; wiki-add cites an inspected web page by its verified URL, and a merge keeps an existing URL item unless an active source proven to be the same document replaces it ([merge rule 1](merge.md#frontmatter-and-related-footer)).
 
 For a PDF, cite the entity's introducing page once: the **physical page** (`#page=N`, never the printed page number) where the source's main explanation of the entity begins. That is the first page of its dedicated section when it has one, and otherwise the page of its defining passage. A section shared by several entities is each one's dedicated section unless a later section treats one alone. An entity that only a figure or table explains cites that exhibit's page; one it merely labels does not qualify. Markdown sources have no anchor. A PDF and its confirmed summary are one source, cited as the PDF ([source cases](source-cases.md#resolve-a-markdown-source)).
 

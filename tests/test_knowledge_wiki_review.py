@@ -35,13 +35,13 @@ class SourceCoverageTests(unittest.TestCase):
         path.write_text("Verified source fixture.\n", encoding="utf-8")
         return path
 
-    def note(self, slug, source, *, tree=None):
+    def note(self, slug, *sources, tree=None):
         path = (tree or self.wiki) / (slug + ".md")
         path.parent.mkdir(parents=True, exist_ok=True)
         title = path.stem.capitalize()
         path.write_text("\n".join([
             "---", "title: " + title, "type: Concept", "sources:",
-            "  - " + json.dumps(source, ensure_ascii=False),
+            *("  - " + json.dumps(source, ensure_ascii=False) for source in sources),
             "created: 2026-09-23", "updated: 2026-09-23",
             "description: A fixture verifies source identity.", "tags:",
             '  - "#engineering"', "parents: []", "read: false", "---",
@@ -99,6 +99,31 @@ class SourceCoverageTests(unittest.TestCase):
         self.assertEqual({item["relpath"] for item in result["source_matches"]},
                          {slug + ".md" for slug in targets})
         self.assertTrue(all(item["identity_confirmed"] for item in result["source_matches"]))
+
+    def test_online_page_url_beside_a_pdf_leaves_the_pdf_confirmed(self):
+        source = self.source("Sources/PDFs/Doe_Example_2025.pdf")
+        url = "https://arxiv.org/abs/2305.18290"
+        self.note("probe", url, "[[Doe_Example_2025.pdf#page=2]]")
+        result = self.index(source)
+        self.assertEqual(result["problems"], [])
+        self.assertEqual(result["source_problems"], [])
+        self.assertEqual([(item["slug"], item["sources"], item["identity_confirmed"])
+                          for item in result["source_matches"]],
+                         [("probe", ["[[Doe_Example_2025.pdf#page=2]]"], True)])
+        cited = [source for item in result["source_matches"] + result["source_match_candidates"]
+                 for source in item["sources"]]
+        self.assertNotIn(url, cited)
+
+    def test_url_ending_in_the_queried_pdf_name_is_not_coverage(self):
+        source = self.source("Sources/PDFs/Doe_Example_2025.pdf")
+        self.note("probe", "https://example.org/papers/Doe_Example_2025.pdf")
+        result = self.index(source)
+        self.assertEqual(result["problems"], [])
+        self.assertEqual(result["source_problems"], [])
+        self.assertEqual(result["source_matches"], [])
+        self.assertEqual(result["source_match_candidates"], [])
+        legacy = self.index("Doe_Example_2025.pdf", strict=False)
+        self.assertEqual(legacy["source_matches"], [])
 
     def test_markdown_qualification_and_duplicate_ownership_are_not_discarded(self):
         source = self.source("Articles/Explanation.md")

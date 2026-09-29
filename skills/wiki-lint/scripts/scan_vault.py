@@ -211,6 +211,7 @@ from entry_checks import (  # noqa: E402
     LEGACY_EXTRA_PREFIX,
     SHARED_MUTATIONS,
     SHARED_QUIET,
+    SOURCE_REFERENCE_FORMS,
     api_surface_findings,
     bare_common_noun_slug,
     bare_word_alias_candidate,
@@ -230,6 +231,7 @@ from entry_checks import (  # noqa: E402
     primary_line3_faults,
     pure_math_opener_markup,
     source_meta_findings,
+    source_reference_kind,
     sr_card_marker_faults,
     sr_marker_findings,
     unenumerated_bold_findings,
@@ -3046,7 +3048,7 @@ def scan(wiki, images=None, vault=None):
         # YAML null against the vault's multitext property, as for parents.
         if not e["sources"]:
             if not _record_is_discipline_root(sl, e):
-                problems.append((sl,"item4","sources: is empty; every entry needs a local source"))
+                problems.append((sl,"item4","sources: is empty; every entry needs at least one source"))
             elif ("sources" in e["key_order"]
                   and raw_scalar(fm_raw, "sources") != "[]"
                   and not has_block_items(fm_raw, "sources")):
@@ -3060,13 +3062,11 @@ def scan(wiki, images=None, vault=None):
             if src is None:
                 problems.append((sl,"item4","sources: contains a null or invalid item"))
                 continue
-            if re.fullmatch(r"\[\[[^\[\]\r\n|#]+\.(?i:pdf)#page=[1-9][0-9]*\]\]", src):
+            if source_reference_kind(src):
                 continue
-            if re.fullmatch(r"\[\[[^\[\]\r\n|#]+\.(?i:md)\]\]", src):
-                continue
-            problems.append((sl,"item4",f'source must be [[Name.pdf#page=N]] with a positive '
-                             f'physical page number, or [[Name.md]] without an anchor; '
-                             f'URLs, display labels and incomplete wikilinks are invalid: {src}'))
+            problems.append((sl,"item4",f'source must be {SOURCE_REFERENCE_FORMS}; '
+                             f'display labels, Markdown links and incomplete wikilinks '
+                             f'are invalid: {src}'))
         _source_values = [src for src in e["sources"] if src is not None]
         for _duplicate_source in sorted({
                 src for src in _source_values if _source_values.count(src) > 1}):
@@ -8047,7 +8047,7 @@ def run_self_test():
         for i, source in enumerate(("[[Doe_X_2025.pdf]]", "[[Doe_X_2025.pdf#page=0]]",
                                   "[[Doe_X_2025.pdf#page=01]]",
                                   "[[Doe_X_2025.pdf#page=1garbage]]",
-                                  "https://example.test/Doe_X_2025.pdf#page=1",
+                                  "[Doe](https://example.test/Doe_X_2025.pdf)",
                                   "Doe_X_2025.pdf#page=1", "[[Note.md#Heading]]")):
             name = "Source %s" % i
             _st_write(v, slug(name) + ".md", _st_entry(
@@ -8062,6 +8062,39 @@ def run_self_test():
             _st_write(v, slug(name) + ".md", _st_entry(
                 name, "**%s** is a worked example." % name).replace("read: false", "read: " + raw))
         _st_write(v, "no-source.md", _st_entry("No source", "**No source** is a worked example.", sources=()))
+        _st_write(v, "web-source.md", _st_entry(
+            "Web source", "**Web source** is a worked example.",
+            sources=('"https://arxiv.org/abs/2305.18290"', '"[[Doe_X_2025.pdf#page=2]]"')))
+        _st_write(v, "web-pair.md", _st_entry(
+            "Web pair", "**Web pair** is a worked example.",
+            sources=('"https://example.org/Doe_X_2025.pdf"', '"[[Doe_X_2025.md]]"')))
+        _st_write(v, "web-twice.md", _st_entry(
+            "Web twice", "**Web twice** is a worked example.",
+            sources=('"https://example.org/a"', '"https://example.org/a"')))
+        _st_write(v, "web-pair-md.md", _st_entry(
+            "Web pair md", "**Web pair md** is a worked example.",
+            sources=('"[[Doe_X_2025.pdf#page=2]]"', '"https://example.org/Doe_X_2025.md"')))
+        _st_write(v, "web-http.md", _st_entry(
+            "Web http", "**Web http** is a worked example.",
+            sources=('"http://example.org/page"',)))
+        _st_write(v, "web-query.md", _st_entry(
+            "Web query", "**Web query** is a worked example.",
+            sources=('"https://example.org/search?q=roc&page=2#results"',)))
+        _st_write(v, "web-bare.md", _st_entry(
+            "Web bare", "**Web bare** is a worked example.",
+            sources=('https://example.org/a',)))
+        # Each carries a real address, but only a bare http(s) URL is a source.
+        web_rejects = ("ftp://example.org/Doe_X_2025.pdf",
+                       "[ROC](https://example.org/roc)",
+                       "Label https://example.org/roc",
+                       "<https://example.org/roc>",
+                       "[[https://example.org/roc]]",
+                       "example.org/page", "https://example.org/a b")
+        for i, source in enumerate(web_rejects):
+            name = "Web reject %s" % i
+            _st_write(v, slug(name) + ".md", _st_entry(
+                name, "**%s** is a worked example." % name,
+                sources=(json.dumps(source),)))
         _st_write(v, "self-case.md", _st_entry("Self case", "**Self case** is a worked example.",
                   parents=('"[[SELF-CASE]]"',)))
         for kind, target in (("md", "self-md.md"), ("path", "Wiki/self-path"),
@@ -8077,6 +8110,30 @@ def run_self_test():
         check("every malformed source is an item4 finding",
               ["item4" in _st_keys(res, "source-%d" % i) for i in range(7)], [True] * 7)
         check("empty provenance is not a clean entry", "item4" in _st_keys(res, "no-source"), True)
+        check("an online page cited by URL is a valid source",
+              [k for k in _st_keys(res, "web-source") if k.startswith("item4")], [])
+        check("a URL ending in .pdf pairs with no local note",
+              [k for k in _st_keys(res, "web-pair") if k.startswith("item4")], [])
+        check("an exactly repeated URL is flagged once",
+              _st_msg(res, "web-twice", "item4"),
+              'source "https://example.org/a" is listed 2 times — keep one exact citation')
+        check("a URL ending in .md pairs with no local pdf",
+              [k for k in _st_keys(res, "web-pair-md") if k.startswith("item4")], [])
+        check("a plain http URL is a valid source",
+              _st_keys(res, "web-http"), [])
+        check("a URL with a query and a fragment is a valid source",
+              _st_keys(res, "web-query"), [])
+        for i, source in enumerate(web_rejects):
+            check("a wrapped, non-http or incomplete address is an item4 "
+                  "finding: %s" % source,
+                  ([k for k in _st_keys(res, "web-reject-%d" % i)
+                    if k.startswith("item4")],
+                   _st_msg(res, "web-reject-%d" % i, "item4").endswith(
+                       "are invalid: " + source)),
+                  (["item4"], True))
+        check("an unquoted URL item is an item2 quoting finding, not item4",
+              (_st_keys(res, "web-bare"), _st_msg(res, "web-bare", "item2")),
+              (["item2"], "sources item not double-quoted: https://example.org/a"))
         check("unknown review states route report-only, never read-type",
               [sorted(k for k in _st_keys(res, "unknown-%d" % i) if k.startswith("item2/read"))
                for i in range(4)], [["item2/read-unknown"]] * 4)
@@ -10103,7 +10160,7 @@ def run_self_test():
                for _tag in ("physics", "biology")], [True, True])
         check("a non-root with `sources: []` still needs a source",
               _st_msg(res, "variance", "item4"),
-              "sources: is empty; every entry needs a local source")
+              "sources: is empty; every entry needs at least one source")
         check("a root's null scalar is respelled; an empty item stays a bad citation",
               [_st_msg(res, "chemistry", "item4").startswith(
                   "empty sources: on a discipline root"),
@@ -10115,7 +10172,7 @@ def run_self_test():
               ("", True))
         check("the exemption needs the matching tag, not just the filename",
               _st_msg(res, "medicine", "item4"),
-              "sources: is empty; every entry needs a local source")
+              "sources: is empty; every entry needs at least one source")
 
         def _org_vault(name, models_prose=None, trees_aliases=(),
                        models_related=None, extra=()):

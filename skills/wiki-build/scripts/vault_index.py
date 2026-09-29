@@ -128,7 +128,8 @@ if _here != _shared:
 
 from yaml_scalars import (parse_scalar, split_flow as _split_flow,
                           strip_comment)  # noqa: E402
-from entry_structure import mask_body_comments, mask_escaped_wikilinks  # noqa: E402
+from entry_structure import (mask_body_comments, mask_escaped_wikilinks,  # noqa: E402
+                             source_reference_kind)
 from slugify import SlugError, slug_stem  # noqa: E402
 from portable_names import portable_identity  # noqa: E402
 from vault_artifacts import inventory_sources, local_link_matches  # noqa: E402
@@ -196,7 +197,6 @@ _ITEM_RE = re.compile(r"^(?P<indent>\s*)-(?:\s+(?P<val>.*)|\s*)$")
 _WIKILINK_RE = re.compile(r"(?<!\!)\[\[([^\[\]]+?)\]\]")
 _EMBED_RE = re.compile(r"\!\[\[([^\[\]]+?)\]\]")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_SOURCE_REF_RE = re.compile(r"\[\[[^\[\]|#]+\.(?:pdf#page=[1-9][0-9]*|md)\]\]", re.I)
 
 
 # --------------------------------------------------------------------------
@@ -651,7 +651,10 @@ def index_entry(path, text=None, root=None):
         if malformed and key == "aliases":
             identity_complete = False
     for source in record["sources"]:
-        if not _SOURCE_REF_RE.fullmatch(source):
+        # The shared predicate accepts a local source and an online page's URL
+        # (CONVENTIONS section 7); a URL names no vault file, so the coverage
+        # queries skip it.
+        if source_reference_kind(source) is None:
             record["errors"].append("sources: malformed local source reference %r" % source)
     if record["title"]:
         try:
@@ -776,7 +779,7 @@ def source_matches(index, filenames, *, vault_root=None, wiki_origin=None):
     for entry in index["entries"]:
         cited = []
         for source in entry["sources"]:
-            if not isinstance(source, str) or not _SOURCE_REF_RE.fullmatch(source):
+            if source_reference_kind(source) not in ("pdf", "md"):
                 continue
             target = source[2:-2].split("|", 1)[0].split("#", 1)[0].strip()
             basename = target.replace("\\", "/").rsplit("/", 1)[-1]
@@ -946,6 +949,22 @@ def run_self_test():
           index_entry("probe.md", text=_st_entry_text("Probe").replace(
               "[[Doe_X_2025.pdf#page=2]]", "placeholder"))["errors"],
           ["sources: malformed local source reference 'placeholder'"])
+    _web = _st_entry_text("Probe").replace(
+        '"[[Doe_X_2025.pdf#page=2]]"',
+        '"https://example.org/Doe_X_2025.pdf"\n  - "[[Doe_X_2025.pdf#page=2]]"')
+    check("an online page's URL is valid provenance and names no vault file",
+          (index_entry("probe.md", text=_web)["errors"],
+           [row["sources"] for row in source_matches(
+               {"entries": [index_entry("probe.md", text=_web)]},
+               ["Doe_X_2025.pdf"])]),
+          ([], [["[[Doe_X_2025.pdf#page=2]]"]]))
+    _wrapped = _st_entry_text("Probe").replace(
+        "[[Doe_X_2025.pdf#page=2]]", "[[https://example.org/Doe_X_2025.pdf#page=2]]")
+    check("a wikilinked URL is malformed provenance and never a coverage match",
+          (len(index_entry("probe.md", text=_wrapped)["errors"]),
+           source_matches({"entries": [index_entry("probe.md", text=_wrapped)]},
+                          ["Doe_X_2025.pdf"])),
+          (1, []))
     check("literal code links are absent from the index's orphan-audit surface",
           extract_wikilinks("`[[inline]]`\n\n    [[indented]]\n\n"
                             "```md\n[[fenced]]\n```\n\n[[visible]]"),

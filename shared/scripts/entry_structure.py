@@ -37,6 +37,8 @@ __all__ = [
     "description_subject_forms",
     "acronym_initial_forms",
     "markdown_image_spans",
+    "SOURCE_REFERENCE_FORMS",
+    "source_reference_kind",
     "source_stem",
     "strip_code",
     "strip_fenced",
@@ -1145,6 +1147,55 @@ def acronym_initial_forms(value):
     return {form for form in (all_words, content) if form}
 
 
+
+_PDF_SOURCE_RE = re.compile(r"\[\[[^\[\]\r\n|#]+\.(?i:pdf)#page=[1-9][0-9]*\]\]")
+_MD_SOURCE_RE = re.compile(r"\[\[[^\[\]\r\n|#]+\.(?i:md)\]\]")
+#: A full http(s) address of an online page: a dotted host, an optional port,
+#: then any path, query or fragment without whitespace, quotes, brackets or
+#: other characters a bare URL cannot carry. A Markdown link, a display label
+#: or a scheme-less address is not a source reference.
+_URL_SOURCE_RE = re.compile(
+    r"https?://[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+(?::[0-9]{1,5})?"
+    r"(?:[/?#][^\s\"<>\[\]{}|\\^`]*)?")
+
+_URL_PORT_RE = re.compile(r"https?://[^/?#:]+:([0-9]+)(?:[/?#]|$)")
+
+#: How the checkers name the valid forms in their finding messages.
+SOURCE_REFERENCE_FORMS = (
+    "[[Name.pdf#page=N]] with a positive physical page number, [[Name.md]] "
+    "without an anchor, or an online page's full http(s) URL")
+
+
+def source_reference_kind(value):
+    """``"pdf"``, ``"md"`` or ``"url"`` for a valid Wiki ``sources:`` item.
+
+    CONVENTIONS section 7: a local PDF cited at its physical page, a local
+    Markdown note without an anchor, or the verified URL of an online page.
+    Anything else, including a Markdown link, a display label, a scheme-less
+    address or an incomplete wikilink, returns ``None``. The builder gate, the
+    scanner and the builder's vault index share this one test.
+    """
+    if not isinstance(value, str):
+        return None
+    if value.startswith("[[") and "://" in value:
+        return None                          # a wikilinked URL is neither form
+    if _PDF_SOURCE_RE.fullmatch(value):
+        return "pdf"
+    if _MD_SOURCE_RE.fullmatch(value):
+        return "md"
+    if _URL_SOURCE_RE.fullmatch(value):
+        # A control or invisible format character (a zero-width space, a bidi
+        # override) and a port outside 1-65535 mark a corrupted address.
+        if any(unicodedata.category(ch) in ("Cc", "Cf") for ch in value):
+            return None
+        port = _URL_PORT_RE.match(value)
+        if port and not 1 <= int(port.group(1)) <= 65535:
+            return None
+        return "url"
+    return None
+
+
 def source_stem(item):
     """``(stem, ext)`` of one ``sources:`` item, both case-folded.
 
@@ -1158,9 +1209,12 @@ def source_stem(item):
 
     ``("", "")`` when the item carries no extension at all -- a plain text
     value, or a malformed item whose missing extension is item 4's own
-    finding rather than this one's.
+    finding rather than this one's -- and for an online page's URL, which
+    names no local document even when its path ends in ``.pdf``.
     """
     inner = (item or "").strip()
+    if inner.startswith(("http://", "https://")):
+        return "", ""                                    # an online page
     if inner.startswith("[[") and inner.endswith("]]"):
         inner = inner[2:-2]
     inner = inner.split("|", 1)[0]                       # display pipe
@@ -1439,6 +1493,11 @@ def run_self_test(verbose=False):
              "[[Cafe\u0301.md]]", "[[CAFÉ.MD]]", "no-extension")],
          [("strasse_study_2025", "pdf"), ("strasse_study_2025", "pdf"),
           ("café", "md"), ("café", "md"), ("", "")]),
+        ("an online page names no local document, even one ending in .pdf",
+         [source_stem(value) for value in (
+             "https://example.org/Straße_Study_2025.pdf",
+             "http://example.org/notes/Cafe.md#top")],
+         [("", ""), ("", "")]),
         ("description subjects retain qualified-base and mathematical forms",
          [description_subject_forms(value) for value in (
              "Feature (machine learning)", "$A^{*}$ search", "The Iliad")],

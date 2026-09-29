@@ -17,7 +17,8 @@ comes from the user's capture; live pages verify metadata and reveal gaps,
 never replace the captured prose.
 
 An `Articles/` note carrying `<!-- obsidian:wiki-add-research-source -->` is
-a [wiki-add](../wiki-add/SKILL.md) research extract, not a captured article.
+a legacy research extract written by an earlier
+[wiki-add](../wiki-add/SKILL.md) version, not a captured article.
 It stays a URL owner; this skill never reprocesses, overwrites or renames it
 or its images.
 

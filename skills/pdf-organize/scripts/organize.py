@@ -6195,6 +6195,28 @@ def _selftest():
             check("a local link adjacent to a URL is still repaired", _fh.read(),
                   '[Publisher](https://example.org/download.pdf)[[Doe_Method_2025.pdf]]\n')
 
+    # A Wiki entry may cite an online page by its URL beside a local PDF
+    # (CONVENTIONS section 7); only the wikilink names the local file.
+    with _tf.TemporaryDirectory(prefix="org-wiki-url-source-test-") as _v:
+        _pdf = _put(_v, "Inbox/download.pdf")
+        _web = ('---\ntitle: "Topic"\nsources: ["https://example.org/papers/download.pdf", '
+                '"[[download.pdf#page=3]]"]\n---\nA topic.\n')
+        _topic = _put(_v, "Wiki/topic.md", _web)
+        _remote = _put(_v, "Wiki/remote.md", _web.replace(
+            ', "[[download.pdf#page=3]]"', ""))
+        check("a Wiki URL source item is not a reference; its wikilink is",
+              references(_v, {"download.pdf"}), {_topic: ["download.pdf"]})
+        _code, _, _ = _run_cli(["rename", _pdf, "--vault", _v,
+                                "--to", "Doe_Method_2025.pdf", "--apply",
+                                "--dest", os.path.join(_v, "Sources/PDFs")])
+        with open(_topic, encoding="utf-8") as _fh, \
+                open(_remote, encoding="utf-8") as _rh:
+            check("an applied rename rewrites only the wikilink beside a URL item",
+                  (_code, _fh.read(), _rh.read()),
+                  (0, _web.replace("[[download.pdf#page=3]]",
+                                   "[[Doe_Method_2025.pdf#page=3]]"),
+                   _web.replace(', "[[download.pdf#page=3]]"', "")))
+
     for _stem, _quoted, _expected in (
             ("García", r'"[[Inbox/Garc\u00eda.pdf#page=2]]"',
              '"[[Doe_Method_2025.pdf#page=2]]"'),
