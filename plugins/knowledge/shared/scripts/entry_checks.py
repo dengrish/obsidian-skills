@@ -27,10 +27,12 @@ if _HERE not in sys.path:
 
 from code_typography import FILE_EXTENSIONS  # noqa: E402
 from entry_structure import (  # noqa: E402
+    SOURCE_REFERENCE_FORMS,
     _BOLD_OUTER_RE,
     mask_body_comments,
     math_title_plain_text,
     normalized_answer_surface,
+    source_reference_kind,
     strip_code,
     strip_fenced,
     strip_indented,
@@ -49,6 +51,7 @@ __all__ = [
     "SHARED_MUTATIONS",
     "SHARED_QUIET",
     "SR_INLINE_SEPARATORS",
+    "SOURCE_REFERENCE_FORMS",
     "api_surface_findings",
     "bare_common_noun_slug",
     "bare_word_alias_candidate",
@@ -72,6 +75,7 @@ __all__ = [
     "sr_card_marker_faults",
     "sr_inline_marker",
     "sr_marker_findings",
+    "source_reference_kind",
     "unenumerated_bold_findings",
 ]
 
@@ -1137,6 +1141,34 @@ def run_self_test(verbose=False):
 
     def checks(findings):
         return [finding["check"] for finding in findings]
+
+    # item 4
+    check("source forms: a paged PDF, an unanchored note and a full URL",
+          [source_reference_kind(value) for value in (
+              "[[Doe_X_2025.pdf#page=2]]", "[[Doe_X_2025.md]]",
+              "https://arxiv.org/abs/2305.18290",
+              "https://en.wikipedia.org/wiki/Online_(disambiguation)",
+              "http://example.org:8080/a/b?q=1&r=2#part",
+              "https://huggingface.co/docs/trl/sft_trainer")],
+          ["pdf", "md", "url", "url", "url", "url"])
+    check("not source forms: labels, links, fragments and bad schemes",
+          [source_reference_kind(value) for value in (
+              "[[Doe_X_2025.pdf]]", "[[Doe_X_2025.pdf#page=0]]",
+              "[[Doe_X_2025.md#Intro]]", "[[Doe_X_2025.md|Doe]]",
+              "[Paper](https://example.org/p)", "example.org/page",
+              "https://example.org/a b", "https://localhost/page",
+              "ftp://example.org/file", "HTTPS://example.org/", "https://",
+              "https://example.org/<x>", "", None, "Doe 2025",
+              "[[https://example.org/roc.md]]",
+              "[[https://example.org/Doe_X_2025.pdf#page=2]]",
+              "https://example.org/a\x01", "https://example.org/a\u200b",
+              "https://example.org/a\u202egnp.exe",
+              "https://example.org:99999/", "https://example.org:0/")],
+          [None] * 22)
+    check("a port inside 1-65535 is a valid URL source",
+          [source_reference_kind(value) for value in (
+              "https://example.org:1/", "https://example.org:65535/a")],
+          ["url", "url"])
 
     # item 5
     check("a qualified slug and an unnamed bare word pass the floor",

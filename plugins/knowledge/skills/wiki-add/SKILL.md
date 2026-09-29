@@ -120,8 +120,9 @@ research or substance and durability gate applies, and step 4 drafts it in
 the root form from accurate background with `sources: []`.
 
 Follow [research and durable sources](references/research.md), which
-searches the vault's sources before the web and routes unbuilt ones to
-wiki-build. The sources' neighboring concepts never become extra entries.
+searches the vault's sources before the web, routes unbuilt ones to
+wiki-build and cites a web page by its URL. The sources' neighboring concepts
+never become extra entries.
 
 Apply the builder's [substance, durability and atomicity gates](../wiki-build/SKILL.md#2-extract-entities)
 to the requested topic. Insufficient evidence, unresolved ambiguity or a topic
@@ -149,7 +150,9 @@ Give each request fresh files, such as `<scratch>/snapshots-<n>.json` and
 `manifest.json`: an entry published for an earlier request no longer matches
 its absent record.
 
-Cite only verified durable vault artifacts under [the source-reference contract](../../shared/CONVENTIONS.md#7-source-references).
+Cite verified vault documents, and the verified URLs of inspected web pages,
+under [the source-reference contract](../../shared/CONVENTIONS.md#7-source-references);
+never create a note just to cite it.
 Link under [conventions §9](../../shared/CONVENTIONS.md#wiki-add--inside-new-requested-entries-only)
 and the builder's relevance and display rules: only to existing entries,
 including ones this run already published; a requested entry published later
@@ -173,7 +176,7 @@ or alias owner without changing it: a newly arrived same-entity entry can
 become an existing-topic outcome; otherwise rebuild the affected draft or
 leave it pending.
 
-Publish and verify new source documents/notes and selected attachments first,
+Publish and verify newly filed PDFs and selected attachments first,
 through the [shared safe-write API](../../shared/SAFE_WRITES.md#call-the-shared-python-api)
 with exclusive creation and private staging on the target filesystem outside
 scanned output folders, never an overwrite-capable copy or rename as a
@@ -183,8 +186,8 @@ fallback. Then publish the Wiki entry with the builder's
 folders these writes need.
 
 Re-read the public entry, verify its bytes equal the reviewed draft, rerun its
-lint and the current collision checks, and confirm its sources and new links
-resolve. Only that verified public state permits completion. On a failed write
+lint and the current collision checks, and confirm its vault sources and new
+links resolve and each URL item is exactly the address read in this run. Only that verified public state permits completion. On a failed write
 preserve any recovery paths under the shared protocol and report partial
 publication; do not delete newer files or mark a failed draft complete.
 

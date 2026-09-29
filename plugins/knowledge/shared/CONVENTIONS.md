@@ -50,10 +50,10 @@ staging follows [SAFE_WRITES.md](SAFE_WRITES.md).
 | Path | Holds | Written by | Read by |
 |---|---|---|---|
 | `Inbox/` | **everything new, unsorted** — Web Clipper `.md` captures and dropped-in documents alike. The **file extension is the dispatch**, and it is the whole of it: `.md` to one skill, `.pdf` to the other, **anything else to neither** | the user, the user's clipper | clipping-clean (`.md` only), pdf-organize (`.pdf` only); wiki-build (routing and preview) and wiki-add (URL and same-document checks) read them but never cite them |
-| `Articles/` | **flat**; notes *about* a document — cleaned clippings, PDF reading notes and marked research extracts, one schema (§2b), with origin identified by `sources:` item 1 | clipping-clean, paper-summarize, wiki-add (new research extracts only); pdf-organize repairs source references during an authorized PDF rename | wiki-build, wiki-add (source reuse), clipping-clean (dedup index), paper-summarize (dedup and collision check), pdf-organize (authorized rename preflight), wiki-lint (already-cited correction sources and exact producer-mapped dependencies) |
+| `Articles/` | **flat**; notes *about* a document — cleaned clippings, PDF reading notes and legacy marked research extracts, one schema (§2b), with origin identified by `sources:` item 1 | clipping-clean, paper-summarize; pdf-organize repairs source references during an authorized PDF rename | wiki-build, wiki-add (source reuse), clipping-clean (dedup index), paper-summarize (dedup and collision check), pdf-organize (authorized rename preflight), wiki-lint (already-cited correction sources and exact producer-mapped dependencies) |
 | `Sources/PDFs/` | organized source documents, recursive; feed-owned attachments use the separate route below. Knowledge consumers check the canonical stem before deriving files or references (§1a) | pdf-organize (renames an `Inbox/` file **and moves it here**), wiki-add (newly acquired research PDFs only, named under pdf-organize's rules), feed-collect (raw linked PDFs), the user | figure-extract, paper-summarize, wiki-build, wiki-add; feed-collect within its own scope |
 | `Sources/PDFs/<Work>/` | book-chapter PDFs, e.g. `Sources/PDFs/Prince_UDL_2026/`. The folder is what pdf-organize creates when it splits a book. paper-summarize's batch **scans** it — a book is only recognisable as one when a chapter turns up beside it — and then **skips** every chapter it finds, so a sweep never becomes a book's worth of summaries | pdf-organize, the user | figure-extract (extracts the chapters, skips the split book), paper-summarize (scans, skips), wiki-build (processes the chapters instead of the split book), wiki-add (cites the chapters, never the split book) |
-| `Sources/Images/` | **flat**; every figure and downloaded image, all extensions, whatever it came from | figure-extract, clipping-clean, wiki-add (new research images only), feed-collect (original photo attachments); **pdf-organize** renames in place only within an approved source rename (§1a) | wiki-build, wiki-add, paper-summarize, clipping-clean (its `rename` path re-reads the folder — §8a), wiki-lint (with `--images`, validates embeds and reports nested/staging residue without opening or deleting files); feed-collect within its own scope |
+| `Sources/Images/` | **flat**; every figure and downloaded image, all extensions, whatever it came from | figure-extract, clipping-clean, wiki-add (figures of a PDF it newly filed only), feed-collect (original photo attachments); **pdf-organize** renames in place only within an approved source rename (§1a) | wiki-build, wiki-add, paper-summarize, clipping-clean (its `rename` path re-reads the folder — §8a), wiki-lint (with `--images`, validates embeds and reports nested/staging residue without opening or deleting files); feed-collect within its own scope |
 | `Wiki/` | wiki entries, one `.md` per entity (walked **recursively**) | wiki-build, wiki-add (missing requested entries only), wiki-lint; pdf-organize repairs source references during an authorized PDF rename | wiki-build, wiki-add, wiki-lint |
 | `Investments/` | dated stock analyses at the top level, plus maintained stock notes, research evidence and source collections in dedicated subfolders; each investments skill governs its own format | stock-research (immutable dated records/evidence and maintained Stocks/ notes), feed-collect (maintained source collections); the user maintains `x-accounts.md` | the investments skills within their own scope |
 | `add-to-wiki.md` at the *vault root* | requested-topic queue | the user; wiki-add checks off successful or already-existing items only | wiki-add |
@@ -159,8 +159,8 @@ All its producers write §2b notes-about-a-document with the same field order,
 named under the §4c source-note rule, so the folder and the filename shape
 settle nothing. The frontmatter does:
 
-- **`sources:` item 1 is a URL** → a cleaned clipping or wiki-add research
-  extract. The note *is* the local source. The research-extract body marker
+- **`sources:` item 1 is a URL** → a cleaned clipping or legacy wiki-add
+  research extract. The note *is* the local source. The research-extract body marker
   described in §2b distinguishes an agent-written extract from a full-text
   clipping; clipping-clean must not reprocess a marked extract as a capture.
 - **`sources:` item 1 is a `"[[Name.pdf]]"` wikilink** → a summary of that PDF. The
@@ -172,7 +172,7 @@ Every consumer of the folder branches on that one item: wiki-build's source inta
 clipping-clean's dedup index (a wikilink in `sources:` item 1 is another
 skill's note, not a defect), wiki-add's source reuse, and paper-summarize's
 collision check. A URL-origin note remains a URL dedup match whether it is a
-clipping or a research extract; the marker does not create a second URL identity.
+clipping or a legacy research extract; the marker does not create a second URL identity.
 The collision check inventories the flat basename namespace with NFC
 normalization and case folding:
 an `Articles/<stem>.md` portable equivalent whose `sources:` item 1 is not this
@@ -442,7 +442,8 @@ read: false
   `#`-prefixed enum value. Use `"#misc"` when no specific discipline fits.
   Multiple, blank, empty, missing, or malformed Wiki
   tags are QC errors. This requirement does not change source-note schemas.
-- **`sources` lists at least one source**, except on a discipline root, which
+- **`sources` lists at least one source** — a vault document or an online
+  page's URL (§7) — except on a discipline root, which
   may cite none; that empty list is written `sources: []`, never a bare
   `sources:` (see the `parents` rule below and
   [hierarchy](../skills/wiki-lint/references/hierarchy.md#establish-discipline-roots)).
@@ -518,19 +519,21 @@ and `wiki-lint/scripts/scan_vault.py` (`CANON`) — and both include
 ### 2b. Source note — a note *about* a document
 
 One schema for notes in `Articles/`: `clipping-clean` writes cleaned
-clippings, `paper-summarize` writes PDF reading notes, and `wiki-add` writes
-research extracts. These are notes about a document rather than an entity.
+clippings and `paper-summarize` writes PDF reading notes. Earlier `wiki-add`
+versions also wrote research extracts, which remain valid legacy source notes;
+wiki-add now cites a web page by its URL instead (§7). These are notes about a
+document rather than an entity.
 Their **bodies** follow each producer's workflow — a cleaned article, a
 structured PDF summary, or an agent-written extract of one web page — while
 their frontmatter follows this shared convention. Future source-note producers
 adopt it rather than inventing another schema.
 
-A research extract is clearly agent-written and is neither a full-text
+A legacy research extract is clearly agent-written and is neither a full-text
 capture nor a multi-page synthesis. Its body carries the exact marker
 `<!-- obsidian:wiki-add-research-source -->` defined by the
-[research guide](../skills/wiki-add/references/research.md), which owns its
-evidence, attribution and image-provenance procedure. This marker identifies
-the content kind. Keep one page per note.
+[research guide](../skills/wiki-add/references/research.md#legacy-research-extracts).
+This marker identifies the content kind; one page per note. No skill creates,
+edits or extends one any more.
 Reuse an existing note only under the
 [local-source rule](../skills/wiki-add/references/research.md#find-local-sources-first),
 never rewriting it. `clipping-clean` must preserve marked extracts and never
@@ -550,9 +553,8 @@ fixed by producer:
   verbatim from the raw capture's own `source:` key — the Web Clipper's field
   name in the *raw* is an external format and keeps its name; the *polished*
   schema's key is `sources`. Never overwritten, whatever a metadata fetch says.
-- **On a research extract: exactly one item, the verified origin URL** of the
-  page the note describes. Other pages belong in separate source notes, not
-  extra URL items or an unattributed combined body.
+- **On a legacy research extract: exactly one item, the verified origin URL**
+  of the page the note describes.
 - **On a note about a local document: item 1 is the quoted wikilink to that
   PDF** (`"[[Prince_UDL_2026_01_Intro.pdf]]"`), **and an optional second item may
   carry the document's printed origin** only when it prints a DOI or an arXiv
@@ -584,7 +586,7 @@ read: false
 
 - `format` is `Article` | `Post` | `Video` for a web clipping, and
   `Paper` | `Book` | `Report` for a note built from a local PDF (a note about a
-  book chapter is `Book`). A research extract uses `Article` or `Post` for its
+  book chapter is `Book`). A legacy research extract uses `Article` or `Post` for its
   source page. Unquoted.
 - `sources` is the block-form list above.
 - `author` is a block-form list when populated, even for one author; strip
@@ -635,8 +637,8 @@ existing-source boundary remains read-only.
 
 **Depended on by:** clipping-clean (writes it for a cleaned clipping), paper-summarize (writes
 it for a summary note, and is the only producer whose `sources` opens with a
-wikilink and may carry a second, printed-origin URL item), wiki-add (writes new
-research extracts and reuses existing sources without edits), wiki-build
+wikilink and may carry a second, printed-origin URL item), wiki-add (reuses
+existing sources without edits), wiki-build
 (reads a URL-origin clipping or marked extract as a source, using its filename
 stem under §8; a PDF summary instead resolves to its original PDF, with only
 the verified missing-PDF fallback defined by source intake).
@@ -652,7 +654,7 @@ pins it as `checkbox`, so the value is a bare YAML boolean.
 | clipping-clean | `false` on creation; an authorized reprocess preserves the existing value, including an absent or unknown state | a new cleaned clipping note |
 | paper-summarize | `false` on creation; an authorized rewrite preserves the existing value, including an absent or unknown state (regeneration is not new reading) | a new summary note in `Articles/` |
 | wiki-build | `false`, on creation; `false` again on a **body-content revision** | see the reset rule below |
-| wiki-add | `false`, on creation only | a new requested entry or research extract; existing notes are never edited |
+| wiki-add | `false`, on creation only | a new requested entry; existing notes are never edited |
 | wiki-lint | meaning-preserving spelling repair during ordinary maintenance; `false` for an authorized new note or substantive source-backed correction | existing entries keep their review state during ordinary Tasks 1–3; Task 3's missing discipline roots, plus explicit corrections/refactors, follow the creation/body-change rules below |
 | the user | `true`, whenever they have read it | this is the point of the field |
 
@@ -790,8 +792,8 @@ carries the list as `TAG_ENUM`), wiki-lint (validates and format-fixes them,
 derives MOCs and the hierarchy from them; `scripts/scan_vault.py` carries the
 list as `VALID_TAGS` plus safe abbreviation expansions in `TAG_ALIASES`),
 clipping-clean (assigns them to cleaned notes), paper-summarize (assigns
-them to summary notes), wiki-add (assigns them to new entries and research
-extracts using the same rules).
+them to summary notes), wiki-add (assigns them to new entries using the same
+rules).
 
 ---
 
@@ -943,7 +945,7 @@ a source note's stem *is* the source stem the figure glob keys to, whether that
 stem was derived from a web page's metadata or inherited from a PDF.
 
 **Depended on by:** clipping-clean and paper-summarize (4c); wiki-build
-and wiki-lint (4a, 4b); wiki-add (4a, 4b and the existing URL-origin rule in 4c).
+and wiki-lint (4a, 4b); wiki-add (4a, 4b).
 
 ---
 
@@ -1111,7 +1113,7 @@ does not change the canonical output forms in §2.
 | `[[Wiki/<entry-path>\|Label]]` | body or Related link to an entry whose bare basename has another real vault owner, such as a discipline root beside a previous-layout MOC (`[[Wiki/statistics\|statistics]]`); never guess an ambiguous owner |
 | `[[slug\|Canonical Title]]` | **every** `**Related:**` footer link to an entry, path-qualified as above when the basename is shared — always piped, even when slug-equal |
 | `![[file.png]]` | image embed from `Sources/Images/` (Obsidian resolves the basename vault-wide) |
-| `![alt](https://…)` | remote image in a URL-origin source or derived entry — **the mandated form; never rewrite it to `![[…]]`**, which resolves to nothing and loses the URL |
+| `![alt](https://…)` | remote image in a URL-origin source note or an entry derived from one — **the mandated form; never rewrite it to `![[…]]`**, which resolves to nothing and loses the URL. An entry that cites a page only by its URL (§7) never hotlinks that page's images |
 | `"[[file.pdf]]"` | a **link** to a local document — quoted, no anchor. This is `sources:` item 1 of a note about that document (§2b). Resolves **by basename, vault-wide**; §1a is what makes that safe |
 | `![[file.pdf]]` | PDF **embed**, rendering the document inline. No skill here writes one today; a legacy note left by an older producer may carry one, and it is left alone (§1) |
 | `[[Name.pdf#page=N]]` | source reference, §7 |
@@ -1192,24 +1194,35 @@ Every Wiki entry follows the same source-backed schema and requires real
 source references; insufficient source coverage means no entry and a deferred
 entity. A discipline root is the one exception: it may cite none and is then
 written `sources: []` (§2a). An entry's `sources:` list names the documents that contributed to it.
-Each item is a double-quoted wikilink carrying the source's **literal on-disk
-filename, extension included** — not a slug, never invented, never renamed.
+Each item is double-quoted and takes one of three forms. A vault document is a
+wikilink carrying its **literal on-disk filename, extension included** — not a
+slug, never invented, never renamed. An online page is its URL.
 
 - **PDF:** `"[[Author_Title_Year.pdf#page=N]]"` — always with a page anchor;
   `N` is a positive decimal written without leading zeros (`[1-9][0-9]*`).
 - **Markdown note:** `"[[Author_Title_Year.md]]"` — never an anchor.
+- **Online page:** `"https://example.org/page"` — the full, verified `http(s)`
+  address of the page actually read, with no display text or Markdown link.
+  Only wiki-add cites one, for a web page it researched: it points to the page
+  and never creates a note in `Articles/` just to have something to cite.
+  Prefer the page's canonical address over a tracking, mobile or AMP variant,
+  keep a version-specific address when the entry relies on that version, and
+  list each page once. A URL never stands in for a vault document: cite a
+  vault copy of the same document by its filename instead.
 
 **`N` is the physical page** — the 1-indexed position within the PDF file, what
 a viewer reports as "page X of Y" — **not the folio printed on the page.** A
 book-chapter PDF whose chapter starts at printed page 87 has its first page at
 `#page=1`.
 
-**One source is one of the two, never both**, and the same PDF legitimately
+**One document is cited in one form, never two**, and the same PDF legitimately
 appears with *different* anchors in different entries — each entity is anchored
 where it is introduced.
 
 **On a merge, compare full citations, including page anchors.** Do not append
-an exact wikilink already present. Different physical pages of one PDF are
+an exact item, wikilink or URL, already present, and keep every existing URL
+item exactly as written and in place, except for the same-document
+replacement below. Different physical pages of one PDF are
 distinct citations, not different documents; preserve existing anchors. If a
 rerun chooses another introducing page and adds that citation, report the
 anchor drift under *Notes for the user* rather than appending it silently.
@@ -1227,14 +1240,25 @@ citation. This is a replacement on a merge, not an append. If the note instead h
 sources. Missing, malformed or ambiguous provenance is report-only: never
 delete a source reference on the strength of its filename alone.
 
+**A URL item and a vault copy of the same document are one document.** A
+merge's active source replaces an entry's URL item, and the replacement is
+reported, when it is proven to be that document: a clipping whose decoded
+`sources:` item 1 clipping-clean's URL normalization matches to the URL, or a
+PDF whose printed DOI or arXiv identifier is the one the URL names. Without
+that proof both stay and the pair is reported. Outside that replacement a
+merge never rewrites or removes a URL item. wiki-build and routine lint never
+fetch one; wiki-lint's source-backed modes read a cited URL to check or
+correct the entry citing it, and wiki-add may inspect one as a research lead.
+
 Candidate comparison strips the wikilink wrapper, display label, page anchor
 and folder qualification, then folds case and normalises the basename stem to
 NFC. Only matches **across PDF and Markdown extensions** enter this review;
 several distinct PDFs or clippings remain separate sources. Filename matching
 does not replace the origin check.
 
-**Ordinary lint checks `sources:` format, not source existence.** The
-orphan audits of §9 skip `sources:` entirely. For a renamed `Articles/` note,
+**Ordinary lint checks `sources:` format, not source existence.** A URL item
+is checked for its form only and is never fetched. The orphan audits of §9
+skip `sources:` entirely. For a renamed `Articles/` note,
 wiki-lint's producer-mapped dependency mode requires an exact old → new note
 mapping, a complete dependency report and its unchanged re-probe command, and
 the rewrite may touch only a reported reference proven to resolve to that note.
@@ -1258,10 +1282,11 @@ unconfirmed basename candidate never establishes coverage.
 owns the query, its resolution-tree choice and its result fields), wiki-add
 (cites in these forms, reuses existing sources only under its
 [local-source rule](../skills/wiki-add/references/research.md#find-local-sources-first),
-and leaves an existing topic untouched), wiki-lint (checks the format in
-routine QC; its exact producer-mapped mode repairs a reported clipping-note
-rename, and source-backed modes retain their separately authorized citation
-scope), clipping-clean (its cleaned notes are Markdown sources),
+leaves an existing topic untouched, and is the only skill that cites a new
+URL),
+wiki-lint (checks the format in routine QC; its exact producer-mapped mode
+repairs a reported clipping-note rename, and source-backed modes read a cited
+URL online and retain their separately authorized citation scope), clipping-clean (its cleaned notes are Markdown sources),
 paper-summarize (its notes put the same wikilink form in `sources:` item 1,
 and are the Markdown half of a verified PDF/summary pair), pdf-organize (§1a).
 
@@ -1319,14 +1344,13 @@ png, jpg, gif, webp, svg, avif, bmp, tiff, ico
 
 ### 8b. The producer conventions
 
-All three knowledge producers write the **same** shape — `_fig_` then the
+Both knowledge producers write the **same** shape — `_fig_` then the
 number — and differ only in where the number comes from:
 
 | Producer | Pattern | Number form | Example |
 |---|---|---|---|
 | `figure-extract` | `[pdf_stem]_fig_<N>.png` | caption label, dots and numeric en dashes → ASCII **dashes** | `Figure 1.2` → `..._fig_1-2.png` |
 | `clipping-clean` | `<note_stem>_fig_<N>.<ext>` | sequential from 1 in capture order; audit recoveries and reprocess additions continue after the highest occupied number | `Teslo_Pancreatic_Cancer_2026_fig_3.webp` |
-| `wiki-add` | `<note_stem>_fig_<N>.<ext>` | sequential counter from 1, in research-extract body order | `Doe_Topic_2026_fig_1.png` |
 
 Feed-owned attachments follow the separate source-collection route in §1.
 They are not numbered knowledge figures and never enter the PDF extractor's
@@ -1375,13 +1399,11 @@ Shared sub-rules:
   captured image that has none; an image recovered by clipping-clean's
   [completeness audit](../skills/clipping-clean/references/completeness-audit.md#recover-missing-images)
   is captioned only through that audit's evidence-based fallback chain, which
-  marks any synthesized text. wiki-add follows its research guide for concise
-  explanatory captions and provenance, without presenting agent-written text
-  as a quotation from the source.
+  marks any synthesized text.
 - **Nothing unfinished is ever written into the folder.** A download, a render
   or a format conversion happens at a temp path *outside* `Sources/Images/`,
   and only the finished file is moved in, under its final name and with the
-  extension its own bytes justify. The three producers, the feed collector and
+  extension its own bytes justify. The two producers, the feed collector and
   pdf-organize's rename workflow share this folder; consumers can encounter any
   visible file. A same-filesystem rename or atomic link publishes the finished file without a
   window in which the name holds partial bytes. A cross-filesystem move may
@@ -1428,8 +1450,8 @@ producer convention.
 through 8a's loose glob to carry a note's whole figure set across a slug
 change), wiki-build (consumes — the figure selection and unused-figure
 accounting both walk 8a; PDF crops come only from figure-extract), wiki-add
-(produces new research images and consumes suitable existing images; uses
-figure-extract for PDF crops), paper-summarize (consumes —
+(consumes suitable existing images; uses figure-extract for crops of a PDF it
+newly filed), paper-summarize (consumes —
 `scripts/paper_scan.py` walks 8a to inventory a stem's figures; PDF crops come
 only from figure-extract), wiki-lint (checks embeds and reports flat-folder or
 unfinished-artifact violations without moving/deleting them), pdf-organize

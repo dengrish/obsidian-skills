@@ -22,7 +22,7 @@ CLI
                     direct-child Articles/ namespace; repeatable
     --exclude       a note to leave out of the index — use it when reprocessing a
                     file that itself lives in Articles/, so it can't match itself;
-                    a wiki-add research extract is refused
+                    a legacy wiki-add research extract is refused
     --dump-index    include the whole {normalized_url: path} map in the output
     --test          run the built-in cases (no arguments, writes nothing
                     outside a temp dir)
@@ -40,8 +40,9 @@ Importable
 
 Output: one JSON object on stdout. Exit status is 0 whenever the scan ran.
 Each `checked` row lists, in `research_extracts`, the matching Articles notes
-that are wiki-add research extracts. Dot-prefixed subfolders (private stages,
-hidden folders) are not scanned. Stdlib only.
+that are legacy research extracts written by earlier wiki-add versions (current
+wiki-add creates none). Dot-prefixed subfolders (private stages, hidden
+folders) are not scanned. Stdlib only.
 """
 
 import argparse
@@ -223,10 +224,13 @@ def _frontmatter_fence(line):
     return line.rstrip(" \t") == "---"
 
 
-#: wiki-add's research guide (skills/wiki-add/references/research.md) owns this
-#: marker and places it on the first body line after the frontmatter. A marked
-#: note is an agent-written extract: it stays in the URL index as an owner, but
-#: clipping-clean never overwrites, reprocesses or renames it.
+#: wiki-add's research guide (skills/wiki-add/references/research.md, "Legacy
+#: research extracts") owns this marker. Earlier wiki-add versions placed it on
+#: the first body line after the frontmatter of an agent-written extract;
+#: current wiki-add cites web pages directly and writes no new extracts. A
+#: marked note is a legacy extract that stays valid: it remains in the URL
+#: index as a URL and name owner, but clipping-clean never overwrites,
+#: reprocesses or renames it.
 RESEARCH_EXTRACT_MARKER = "<!-- obsidian:wiki-add-research-source -->"
 
 
@@ -272,7 +276,10 @@ def is_research_extract_text(text):
 
 
 def is_research_extract(path):
-    """Whether a readable regular note is a wiki-add research extract."""
+    """Whether a readable regular note is a legacy wiki-add research extract.
+
+    Earlier wiki-add versions wrote these; current wiki-add creates none.
+    """
     text = _read_regular_text(path)
     return text is not None and is_research_extract_text(text)
 
@@ -371,8 +378,8 @@ def _validated_exclusions(cleaned_dir, exclude):
 
     A typo must never make a duplicate check look clean. Exclusions therefore
     have to identify one existing, regular direct child of the Articles folder
-    under the plugin's portable filename identity. A wiki-add research extract
-    is never excluded: it stays a visible URL and name owner.
+    under the plugin's portable filename identity. A legacy wiki-add research
+    extract is never excluded: it stays a visible URL and name owner.
     """
     try:
         names = os.listdir(cleaned_dir)
@@ -1101,8 +1108,9 @@ def run_self_test():
              (code, [(row["slug"], row["status"]) for row in public_slugs]),
              (0, [("Held", "occupied"), ("Free", "free")]))
 
-        # A wiki-add research extract remains a URL owner. The scan names it so
-        # the workflow reports it rather than offering a clipping overwrite.
+        # A legacy wiki-add research extract remains a URL owner. The scan
+        # names it so the workflow reports it rather than offering a clipping
+        # overwrite.
         extract_url = "https://example.com/researched"
         extract = article("Researched.md",
                           '---\nsources:\n  - "%s"\n---\n%s\nResearch extract\n'
@@ -1269,8 +1277,8 @@ def main(argv=None):
         entries.append({"id": u, "source": u})
 
     results = check(entries, index)
-    # Only a published Articles owner can be a research extract; a pending
-    # earlier input in this batch cannot.
+    # Only a published Articles owner can be a legacy research extract; a
+    # pending earlier input in this batch cannot.
     owners = {path for paths in index.values() for path in paths}
     for r in results:
         r["research_extracts"] = [path for path in r["matches"]

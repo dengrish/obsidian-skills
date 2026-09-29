@@ -40,7 +40,7 @@ When a root is missing, Task 3 may create that narrow prerequisite using
 builder's entry rules. It writes the root from accurate background under
 [prose principle 5(h)](../../wiki-build/references/writing.md#prose-principles)
 with `sources: []`: it researches no evidence for a root and creates no
-source note, research extract, PDF or image. This prerequisite creates only
+source note, PDF or image. This prerequisite creates only
 the roots the authorized closure needs. It never fabricates citations,
 alters the user's topic queue or extracts unrelated entities.
 

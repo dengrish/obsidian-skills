@@ -6,7 +6,7 @@ in [source cases](source-cases.md).
 
 ## Require a durable source
 
-A source must be a durable file in the selected vault. For a bare URL, request
+A source must be a durable file in the selected vault; an entry's URL item is never a builder source. For a bare URL, request
 its Web Clipper capture and route that capture through `clipping-clean` first.
 For pasted text, use an existing user-named vault file or obtain the exact
 destination before saving it. Never invent a persistent source

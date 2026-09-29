@@ -41,8 +41,9 @@ were actually consumed in the run. Route by evidence and the change needed:
   whose rules govern the output, under the shared
   [attribution rules](../../../shared/SUGGESTIONS.md#destination-and-attribution).
   Entry content, format, cards, and link style are governed by wiki-build's
-  references, whichever skill wrote the entry; research-extract format belongs
-  to wiki-add, extracted figures to figure-extract, cleaned clippings to
+  references, whichever skill wrote the entry; a defect in a legacy research
+  extract goes under *Notes for the user*, since no skill edits one, extracted
+  figures to figure-extract, cleaned clippings to
   clipping-clean, reading notes to paper-summarize, and PDF names to
   pdf-organize.
 - **The note-content log** — a located content gap or worthwhile improvement

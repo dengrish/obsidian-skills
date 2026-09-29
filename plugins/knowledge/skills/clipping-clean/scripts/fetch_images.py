@@ -90,9 +90,11 @@ Guards, because this is the only script in the skill that writes into the vault:
   destroyed figures with no way back. Pass `--overwrite` for the documented
   reprocess-in-place case, together with `--owner-note` naming the unchanged
   clipping note whose rendered embed exactly names the file being replaced.
-  A wiki-add research extract (body opening with
-  `<!-- obsidian:wiki-add-research-source -->`) may own a new placement but
-  never authorizes `--overwrite` or either rename phase.
+  A legacy research extract written by an earlier wiki-add version (body
+  opening with `<!-- obsidian:wiki-add-research-source -->`) never authorizes
+  `--overwrite` or either rename phase. Current wiki-add writes no extracts and
+  places no images, so no current caller places images for one; a
+  non-overwrite placement it owns is still accepted as legacy behaviour.
 * **A changed clipping stem has no hidden dependants.** For a canonical vault,
   `rename` inventories every other Markdown note for inbound old-note links and
   old-image references before and during the operation. `prepare` reports those
@@ -1523,10 +1525,12 @@ def _load_clipping_owner(owner_note, slug, attachments, *, require_vault=False):
 
 
 def _refuse_research_extract(owner, action):
-    """A wiki-add research extract may own new placements, never replacements.
+    """A legacy wiki-add research extract may own placements, not replacements.
 
-    Its images belong to that extract. Only the destructive paths call this:
-    an ordinary non-overwrite `place` for wiki-add keeps working.
+    Earlier wiki-add versions wrote these extracts; current wiki-add writes
+    none. Their images belong to that extract. Only the destructive paths call
+    this: an ordinary non-overwrite `place` owned by an extract stays allowed
+    as legacy behaviour, although no current caller relies on it.
     """
     if owner is not None and owner.get("research_extract"):
         raise ValueError("%s is a wiki-add research extract; clipping-clean "
@@ -5141,8 +5145,8 @@ continues here`
                          overwrite=True,
                          owner_note=current_owner(
                              att, "Teslo_Cancer_2026"))["ok"], True)
-        # A wiki-add research extract can own the images it places, but it
-        # never authorizes clipping-clean to replace them.
+        # A legacy wiki-add research extract can still own a new placement, but
+        # it never authorizes clipping-clean to replace its images.
         extract_marker = ("<!-- obsidian:wiki-add-research-source -->\n"
                           "Research extract\n")
         extract_embeds = [os.path.basename(path) for path in
@@ -5542,8 +5546,8 @@ continues here`
             return [open(path, "rb").read() if os.path.isfile(path) else None
                     for path in paths]
 
-        # Neither rename phase may move a wiki-add research extract's images,
-        # whichever side of the handoff carries the marker.
+        # Neither rename phase may move a legacy wiki-add research extract's
+        # images, whichever side of the handoff carries the marker.
         for side in ("owner_note", "new_owner_note"):
             _vault, extract_args, extract_old, extract_new_paths = handoff_case(
                 "extract-" + side)
