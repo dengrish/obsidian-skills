@@ -5982,7 +5982,7 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/naming.py": 228,
     "shared/scripts/note_provenance.py": 12,
     "shared/scripts/organism_names.py": 34,
-    "shared/scripts/entry_structure.py": 164,
+    "shared/scripts/entry_structure.py": 165,
     "shared/scripts/plugin_paths.py": 110,
     "shared/scripts/portable_names.py": 5,
     "shared/scripts/publish_files.py": 25,
@@ -6033,10 +6033,10 @@ SELFTEST_MIN_CASES = {
     "skills/pdf-organize/scripts/organize.py": 386,
     "skills/wiki-add/scripts/backlog.py": 54,
     "skills/wiki-build/scripts/find_collisions.py": 77,
-    "skills/wiki-build/scripts/lint_entry.py": 421,
+    "skills/wiki-build/scripts/lint_entry.py": 422,
     "skills/wiki-build/scripts/review_tree.py": 37,
     "skills/wiki-build/scripts/vault_index.py": 85,
-    "skills/wiki-lint/scripts/scan_vault.py": 586,
+    "skills/wiki-lint/scripts/scan_vault.py": 587,
 }
 
 
@@ -7398,6 +7398,8 @@ def check_linter_finding_routes(rep, _conv):
         ("actions", "`item19/brevity-candidate`"),
         ("scanner", "`item19/sr-marker`"),
         ("actions", "`item19/sr-marker`"),
+        ("scanner", "`item19/hedge-candidate`"),
+        ("actions", "`item19/hedge-candidate`"),
         ("scanner", "`card_rivals`"),
         ("actions", "`card_rivals`"),
         ("scanner", "`spaced_repetition`"),

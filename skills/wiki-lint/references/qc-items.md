@@ -61,6 +61,7 @@ ownership.
 | `item18/partial-label` | Reword a label that keeps only the target title's modifiers so it names the target, preserving the claim; report a label that names a different entity. See [item 18](#18-alias-form-collisions-and-display-labels). |
 | `item19` | Apply the format floor only after reading [flashcard maintenance](flashcards.md). |
 | `item19/brevity-candidate` | Review the cue (line 1) under [flashcard maintenance](flashcards.md#card-freshness-and-the-rewrite-bars) and shorten it only when the card's bar allows; the candidate alone is never an order. |
+| `item19/hedge-candidate` | Review the cue under [flashcard maintenance](flashcards.md#card-freshness-and-the-rewrite-bars): when the card's bar allows, drop a hedge whose plain claim the note establishes for the ordinary case, and keep a word that states the definition itself; the candidate alone is never an order. |
 | `item19/sr-marker` | Reword the line so it holds no `::` or `:::` outside a backtick span, and join a line that is only `?` or `??` to its neighbor, preserving its claim: write a math `::` as `\mathbin{:}\mathbin{:}`, and keep code in a backtick span or an unindented fence. For an HTML comment left open at the start of a line, indent its `<!--` by one space, keeping the comment unchanged; for a fence line no later column-0 line closes, indent that line by one space or start its closing fence at column 0. Never add or change a card for it. |
 | `card_rivals` | Use as the forward check's rival list: could a rival's term answer this cue? A yes is an ambiguity defect under [flashcard maintenance](flashcards.md#flashcard-definition-review-item-19). The list is a floor, not an exhaustive rival set. |
 | `rename_candidates` | Propose with inbound count and collision warning; apply only under an explicit rename request, through the [entry-retitle protocol](../../../shared/CONVENTIONS.md#retitling-an-existing-wiki-entry). |
@@ -163,8 +164,10 @@ trim substantive prose from an existing `Software` entry.
 
 Apply the canonical [description rule](../../wiki-build/references/writing.md#description)
 to every entry. Besides the scanner's form checks, review the
-grammatical subject, current-status tense, precise phrasing, and mathematical
-completeness. Repair awkward wording or empty framing only when it is a
+grammatical subject, current-status tense, precise phrasing, mathematical
+completeness, and whether it describes the prototype rather than a variant
+([lead with the prototype](../../wiki-build/references/writing.md#prose-principles)).
+Repair awkward wording or empty framing only when it is a
 concrete clarity defect; do not rewrite an already clear description. A
 plain-language mathematical definition must retain every operation that
 determines the quantity. Fix only when the note establishes the corrected
@@ -204,7 +207,11 @@ entity and sense without incompatible scope, conditions, direction, or
 notation. A conflict that requires choosing or changing a fact is a
 source-backed proposal. Prefer proposing a plain claim at the source's
 confidence, or trimming a neighbor's detail to the relationship and a
-wikilink, over appending qualifications. A neighbor conflict may expose
+wikilink, over appending qualifications. The description, opener and primary
+card lead with the prototype, never a variant; when the note already states
+both the prototype and the variant, keep only the prototype on those surfaces;
+otherwise propose the change. A
+neighbor conflict may expose
 a wrong link, duplicate, or split candidate; it does not authorize cross-entry
 redistribution.
 

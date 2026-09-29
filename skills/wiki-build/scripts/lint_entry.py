@@ -141,6 +141,9 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               keeps its separator
       19-brevity-candidate   advisory: a cue over 25 words outside math, a
                               `, where` glossary or a semicolon clause
+      19-hedge-candidate     advisory: a frequency hedge (usually,
+                              typically, generally, often, sometimes,
+                              normally, commonly, frequently) on a cue
   19  19-flashcard-leak       normalized answer-surface search of card line 1
                               (math included) for that card's own answer and
                               counterpart; entry aliases join the search only
@@ -342,6 +345,7 @@ from entry_structure import (  # noqa: E402
     count_sentences,
     ends_with_sentence_period,
     flashcard_brevity_hints,
+    flashcard_hedge_hints,
     flashcard_line1_markup,
     flashcard_line1_faults,
     math_title_plain_text,
@@ -2199,7 +2203,7 @@ def _check_flashcards_present(fm, sections, findings, filename,
     # text, so `$k$-fold` can only ever appear there as `k-fold`), plus the
     # entry's own opener-established, alias-bound counterpart.
     title = fm.scalar("title")
-    line3_checks, brevity = [], []
+    line3_checks, brevity, hedges = [], [], []
     for card_no, card in enumerate(cards, 1):
         if len(card) < 3:
             # A 1- or 2-line block is not a card at all (canon: cue /
@@ -2260,6 +2264,9 @@ def _check_flashcards_present(fm, sections, findings, filename,
         hints = flashcard_brevity_hints(line1)
         if hints:
             brevity.append({"card": card_no, "hints": hints})
+        hedge_words = flashcard_hedge_hints(line1)
+        if hedge_words:
+            hedges.append({"card": card_no, "words": hedge_words})
     brevity_message = ("possible over-long or two-idea card line; review it "
                        "under the card rules and shorten only a genuine "
                        "shortfall")
@@ -2272,6 +2279,19 @@ def _check_flashcards_present(fm, sections, findings, filename,
         if row["card"] in extras:
             findings.append(_card_f(
                 "19-brevity-candidate", "warning", brevity_message,
+                {"matches": [row], "agent_review": True}, row["card"], extras))
+    hedge_message = ("card line 1 hedges its definition with a frequency word; "
+                     "state the ordinary case plainly when the card's bar "
+                     "allows")
+    primary_hedges = [row for row in hedges if row["card"] not in extras]
+    if primary_hedges:
+        findings.append(_f(
+            "19-hedge-candidate", "warning", hedge_message,
+            {"matches": primary_hedges, "agent_review": True}))
+    for row in hedges:
+        if row["card"] in extras:
+            findings.append(_card_f(
+                "19-hedge-candidate", "warning", hedge_message,
                 {"matches": [row], "agent_review": True}, row["card"], extras))
 
     # A preserved legacy extra keeps its own answer: with several cards,
@@ -4285,6 +4305,22 @@ def run_self_test():
               "decision threshold moves.", long_cue),
               "roc-curve.md")["findings"]],
           [("19-brevity-candidate", "warning")])
+    check("a frequency hedge on the cue is an advisory hedge candidate; on a "
+          "legacy extra it is report-only",
+          ([(f["item"], f["severity"], f["evidence"].get("report_only"))
+            for f in lint_text(mutate(
+                "The plot tracing the trade-off between two error rates as a "
+                "decision threshold moves.",
+                "The plot usually tracing the trade-off between two error "
+                "rates as a decision threshold moves."),
+                "roc-curve.md")["findings"]],
+           [(f["item"], f["evidence"].get("report_only"))
+            for f in lint_text(with_cards(
+                "Another notion that often holds, stated briefly.\n??\n"
+                "Second idea\n"), "roc-curve.md")["findings"]
+            if f["item"] == "19-hedge-candidate"]),
+          ([("19-hedge-candidate", "warning", None)],
+           [("19-hedge-candidate", True)]))
 
     # -- item 19: a discipline root needs no card --------------------------
     stats_root = (

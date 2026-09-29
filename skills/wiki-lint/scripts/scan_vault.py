@@ -181,6 +181,7 @@ from entry_structure import (  # noqa: E402
     count_sentences,
     ends_with_sentence_period,
     flashcard_brevity_hints,
+    flashcard_hedge_hints,
     flashcard_line1_markup,
     flashcard_line1_faults,
     math_title_plain_text,
@@ -3704,6 +3705,14 @@ def scan(wiki, images=None, vault=None):
                         sl, "item19/brevity-candidate",
                         f'{_lead}{tag}: {"; ".join(_hints)} — review under '
                         "flashcard maintenance; a candidate is never an order"))
+                _hedges = flashcard_hedge_hints(line1)
+                if _hedges:
+                    problems.append((
+                        sl, "item19/hedge-candidate",
+                        f'{_lead}{tag} line 1 hedges with '
+                        + ", ".join(f'"{word}"' for word in _hedges)
+                        + " — state the ordinary case plainly when the card's "
+                        "bar allows; a candidate is never an order"))
             # The line-3 term contract binds the primary card only. A legacy
             # extra card keeps its own answer: rewriting it would repoint that
             # card's review schedule. lint_entry makes the same choice.
@@ -9719,6 +9728,10 @@ def run_self_test():
             "Glossary cue", "**Glossary cue** is a worked example.").replace(
                 "The idea this entry is about, stated once.",
                 "The ratio $a/b$ of two counts, where $a$ counts hits."))
+        _st_write(v, "hedge-cue.md", _st_entry(
+            "Hedge cue", "**Hedge cue** is a worked example.").replace(
+                "The idea this entry is about, stated once.",
+                "The idea this entry is usually about, stated once."))
         _st_write(v, "simplified-pair.md", _with_cards(
             "Simplified pair", _why).replace(
                 "\n??\nSimplified pair\n", "\n?\nSimplified pair\n"))
@@ -9728,7 +9741,7 @@ def run_self_test():
         _st_write(v, "extra-faults.md", _with_cards(
             "Extra faults",
             "The rate at 10 μm for a nonempty set of $m \\ge 1$ instances, "
-            "stated at length across many more ordinary words than any card "
+            "usually stated at length across many more ordinary words than any card "
             "cue should ever need to carry, and one second idea.\n??\n"
             "Second idea (**SI**)\n"))
         _st_write(v, "card-line-marker.md", _st_entry(
@@ -9792,13 +9805,15 @@ def run_self_test():
                         "remove only the markup" in p["message"])
                        for p in res["problems"]
                        if p["slug"] == "extra-faults" and "card 2" in p["message"]]
-        check("markup, leak, typography, boilerplate and brevity problems on "
-              "a legacy extra are report-only, and none orders a repair",
+        check("markup, leak, typography, boilerplate, brevity and hedge "
+              "problems on a legacy extra are report-only, and none orders a "
+              "repair",
               sorted(set(_extra_rows)),
               [("item12/boilerplate-candidate", True, False),
                ("item12/equation-typography", True, False),
                ("item19", True, False),
-               ("item19/brevity-candidate", True, False)])
+               ("item19/brevity-candidate", True, False),
+               ("item19/hedge-candidate", True, False)])
         check("the extra's line-3 markup and leak are both reported",
               [any(word in p["message"] for p in res["problems"]
                    if p["slug"] == "extra-faults")
@@ -9817,6 +9832,11 @@ def run_self_test():
         check("an invalid line 2 names both separators",
               "must be exactly ?? (or !! if the user disabled the card)"
               in _st_msg(res, "bad-separator", "item19"), True)
+        check("a frequency hedge on the cue is an advisory candidate, never "
+              "an item19 error",
+              ([k for k in _st_keys(res, "hedge-cue") if k.startswith("item19")],
+               '"usually"' in _st_msg(res, "hedge-cue", "item19/hedge-candidate")),
+              (["item19/hedge-candidate"], True))
         check("brevity candidates are advisory and never item19 errors",
               ([k for k in _st_keys(res, "long-cue") if k.startswith("item19")],
                "glossary" in _st_msg(res, "glossary-cue",

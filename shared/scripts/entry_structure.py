@@ -43,6 +43,7 @@ __all__ = [
     "strip_indented",
     "ends_with_sentence_period",
     "flashcard_brevity_hints",
+    "flashcard_hedge_hints",
     "flashcard_line1_faults",
     "flashcard_line1_markup",
     "math_title_plain_text",
@@ -874,6 +875,27 @@ CARD_SEPARATORS = (DEFINITION_SEPARATOR, DISABLED_SEPARATOR)
 
 
 _GLOSSARY_RE = re.compile(r",\s+where\b", re.IGNORECASE)
+
+
+#: Frequency adverbs that hedge a definition's ordinary case. Words that are
+#: hedges only in some contexts (mostly, especially, can, including), a
+#: frequency the cue measures or compares (how often, more often than) and
+#: "normally distributed" are left to the reviewer, so a conforming cue is
+#: never flagged run after run.
+_HEDGE_RE = re.compile(
+    r"(?<!\bhow )(?<!\bmore )(?<!\bless )\b(?:usually|typically|generally|"
+    r"often|sometimes|commonly|frequently|normally(?![\s-]+distributed\b))\b",
+    re.IGNORECASE)
+
+
+def flashcard_hedge_hints(text):
+    """Advisory item-19 hints: frequency hedges on a card's line 1.
+
+    Words inside inline math are ignored. Returns the hedge words in order of
+    appearance, lowercased; a candidate for review, never a fault.
+    """
+    prose = _INLINE_LATEX_RE.sub(" ", text or "")
+    return [match.group(0).lower() for match in _HEDGE_RE.finditer(prose)]
 
 
 def flashcard_brevity_hints(text):
@@ -1852,6 +1874,17 @@ def run_self_test(verbose=False):
         ("a question is not a definition cue: it needs its period",
          flashcard_line1_faults("Why does raising the threshold lower recall?"),
          ["does not end with a period"]),
+        ("frequency hedges on a cue are review candidates; other words and "
+         "math are not",
+         [flashcard_hedge_hints(value) for value in (
+             "The model that usually lowers error, often by averaging.",
+             "A matrix containing mostly zero entries.",
+             "The rate $x_{often}$ of a well-generalized model.",
+             "The often-cited curve that can shift.",
+             "Typically the first model tried.",
+             "The table counting how often, or more often than chance, a "
+             "normally distributed value appears.")],
+         [["usually", "often"], [], [], ["often"], ["typically"], []]),
         ("brevity hints for a definition cue",
          [flashcard_brevity_hints(value) for value in (
              " ".join(["Word"] * 25) + " end.",
