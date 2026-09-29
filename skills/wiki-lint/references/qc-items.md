@@ -249,8 +249,10 @@ can still be unnecessary.
 works and apply it once? If not, log a
 [Depth & gaps](backlogs.md#proposing-note-improvements) proposal naming what
 is missing (a core facet, a model's prediction step or objective, a display's
-verbal reading) and its route: a deepen request or wiki-build on an
-unprocessed source. Routine lint never fills it.
+verbal reading) and its route: a deepen request from the entry's cited
+sources or accurate background. A gap that only an unbuilt source would fill
+is expected until that source is built and is not proposed. Routine lint
+never fills it.
 
 **Local editorial repairs.** Apply these autonomously when the existing entry
 establishes an unambiguous meaning:
