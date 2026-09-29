@@ -6033,10 +6033,10 @@ SELFTEST_MIN_CASES = {
     "skills/pdf-organize/scripts/organize.py": 386,
     "skills/wiki-add/scripts/backlog.py": 54,
     "skills/wiki-build/scripts/find_collisions.py": 77,
-    "skills/wiki-build/scripts/lint_entry.py": 422,
+    "skills/wiki-build/scripts/lint_entry.py": 429,
     "skills/wiki-build/scripts/review_tree.py": 37,
     "skills/wiki-build/scripts/vault_index.py": 85,
-    "skills/wiki-lint/scripts/scan_vault.py": 587,
+    "skills/wiki-lint/scripts/scan_vault.py": 593,
 }
 
 

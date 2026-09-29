@@ -17,7 +17,11 @@ document. Create complete entries only for missing topics. A positively
 identified existing entry is a successful no-edit outcome. Every pre-existing
 Wiki entry, source, image and MOC remains byte-for-byte unchanged. Every new
 Wiki entry has exactly one quoted discipline tag (`"#misc"` alone when none
-fits) and `parents: []`, the handoff to wiki-lint.
+fits) and `parents: []`, the handoff to wiki-lint. A missing topic that is
+itself a discipline (`Wiki/<discipline>.md` tagged only `#<discipline>`) is
+that discipline's root: write it in the
+[root form](../wiki-lint/references/hierarchy.md#establish-discipline-roots)
+from accurate background with `sources: []`, researching no source for it.
 
 Read [runtime setup](../../shared/RUNTIME.md) once per task. Before reading or
 acquiring a PDF, run `python3 '<plugin>/shared/scripts/check_parsers.py'`
@@ -110,6 +114,10 @@ and repeat the probes after any title change. Never rename an existing owner
 to free a slug.
 
 ## 3. Research only missing requested topics
+
+A discipline root (above) skips this step: no local-source search, web
+research or substance and durability gate applies, and step 4 drafts it in
+the root form from accurate background with `sources: []`.
 
 Follow [research and durable sources](references/research.md), which
 searches the vault's sources before the web and routes unbuilt ones to

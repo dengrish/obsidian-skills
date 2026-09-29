@@ -50,7 +50,7 @@ staging follows [SAFE_WRITES.md](SAFE_WRITES.md).
 | Path | Holds | Written by | Read by |
 |---|---|---|---|
 | `Inbox/` | **everything new, unsorted** — Web Clipper `.md` captures and dropped-in documents alike. The **file extension is the dispatch**, and it is the whole of it: `.md` to one skill, `.pdf` to the other, **anything else to neither** | the user, the user's clipper | clipping-clean (`.md` only), pdf-organize (`.pdf` only); wiki-build (routing and preview) and wiki-add (URL and same-document checks) read them but never cite them |
-| `Articles/` | **flat**; notes *about* a document — cleaned clippings, PDF reading notes and marked research extracts, one schema (§2b), with origin identified by `sources:` item 1 | clipping-clean, paper-summarize, wiki-add (new research extracts only); wiki-lint only for new evidence extracts that its hierarchy task (Task 3) needs for missing discipline roots; pdf-organize repairs source references during an authorized PDF rename | wiki-build, wiki-add (source reuse), clipping-clean (dedup index), paper-summarize (dedup and collision check), pdf-organize (authorized rename preflight), wiki-lint (root evidence, already-cited correction sources, and exact producer-mapped dependencies) |
+| `Articles/` | **flat**; notes *about* a document — cleaned clippings, PDF reading notes and marked research extracts, one schema (§2b), with origin identified by `sources:` item 1 | clipping-clean, paper-summarize, wiki-add (new research extracts only); pdf-organize repairs source references during an authorized PDF rename | wiki-build, wiki-add (source reuse), clipping-clean (dedup index), paper-summarize (dedup and collision check), pdf-organize (authorized rename preflight), wiki-lint (already-cited correction sources and exact producer-mapped dependencies) |
 | `Sources/PDFs/` | organized source documents, recursive; feed-owned attachments use the separate route below. Knowledge consumers check the canonical stem before deriving files or references (§1a) | pdf-organize (renames an `Inbox/` file **and moves it here**), wiki-add (newly acquired research PDFs only, named under pdf-organize's rules), feed-collect (raw linked PDFs), the user | figure-extract, paper-summarize, wiki-build, wiki-add; feed-collect within its own scope |
 | `Sources/PDFs/<Work>/` | book-chapter PDFs, e.g. `Sources/PDFs/Prince_UDL_2026/`. The folder is what pdf-organize creates when it splits a book. paper-summarize's batch **scans** it — a book is only recognisable as one when a chapter turns up beside it — and then **skips** every chapter it finds, so a sweep never becomes a book's worth of summaries | pdf-organize, the user | figure-extract (extracts the chapters, skips the split book), paper-summarize (scans, skips), wiki-build (processes the chapters instead of the split book), wiki-add (cites the chapters, never the split book) |
 | `Sources/Images/` | **flat**; every figure and downloaded image, all extensions, whatever it came from | figure-extract, clipping-clean, wiki-add (new research images only), feed-collect (original photo attachments); **pdf-organize** renames in place only within an approved source rename (§1a) | wiki-build, wiki-add, paper-summarize, clipping-clean (its `rename` path re-reads the folder — §8a), wiki-lint (with `--images`, validates embeds and reports nested/staging residue without opening or deleting files); feed-collect within its own scope |
@@ -442,6 +442,10 @@ read: false
   `#`-prefixed enum value. Use `"#misc"` when no specific discipline fits.
   Multiple, blank, empty, missing, or malformed Wiki
   tags are QC errors. This requirement does not change source-note schemas.
+- **`sources` lists at least one source**, except on a discipline root, which
+  may cite none; that empty list is written `sources: []`, never a bare
+  `sources:` (see the `parents` rule below and
+  [hierarchy](../skills/wiki-lint/references/hierarchy.md#establish-discipline-roots)).
 - **`parents` is a list, and an empty one is written `parents: []`** — never a
   bare `parents:`, which is YAML `null` rather than the empty list that the
   vault's `multitext` property type (`.obsidian/types.json`) declares. A
@@ -515,9 +519,7 @@ and `wiki-lint/scripts/scan_vault.py` (`CANON`) — and both include
 
 One schema for notes in `Articles/`: `clipping-clean` writes cleaned
 clippings, `paper-summarize` writes PDF reading notes, and `wiki-add` writes
-research extracts (so does wiki-lint's Task 3 for missing discipline roots,
-under [hierarchy](../skills/wiki-lint/references/hierarchy.md#establish-discipline-roots)).
-These are notes about a document rather than an entity.
+research extracts. These are notes about a document rather than an entity.
 Their **bodies** follow each producer's workflow — a cleaned article, a
 structured PDF summary, or an agent-written extract of one web page — while
 their frontmatter follows this shared convention. Future source-note producers
@@ -651,7 +653,7 @@ pins it as `checkbox`, so the value is a bare YAML boolean.
 | paper-summarize | `false` on creation; an authorized rewrite preserves the existing value, including an absent or unknown state (regeneration is not new reading) | a new summary note in `Articles/` |
 | wiki-build | `false`, on creation; `false` again on a **body-content revision** | see the reset rule below |
 | wiki-add | `false`, on creation only | a new requested entry or research extract; existing notes are never edited |
-| wiki-lint | meaning-preserving spelling repair during ordinary maintenance; `false` for an authorized new note or substantive source-backed correction | existing entries keep their review state during ordinary Tasks 1–3; Task 3's missing discipline roots and new evidence extracts, plus explicit corrections/refactors, follow the creation/body-change rules below |
+| wiki-lint | meaning-preserving spelling repair during ordinary maintenance; `false` for an authorized new note or substantive source-backed correction | existing entries keep their review state during ordinary Tasks 1–3; Task 3's missing discipline roots, plus explicit corrections/refactors, follow the creation/body-change rules below |
 | the user | `true`, whenever they have read it | this is the point of the field |
 
 **The linter preserves the meaning of `read:`.** It may normalize recognizable
@@ -1188,7 +1190,8 @@ what every `[[…]]` naming it resolves to — §1a).
 
 Every Wiki entry follows the same source-backed schema and requires real
 source references; insufficient source coverage means no entry and a deferred
-entity. An entry's `sources:` list names the documents that contributed to it.
+entity. A discipline root is the one exception: it may cite none and is then
+written `sources: []` (§2a). An entry's `sources:` list names the documents that contributed to it.
 Each item is a double-quoted wikilink carrying the source's **literal on-disk
 filename, extension included** — not a slug, never invented, never renamed.
 

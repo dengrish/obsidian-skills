@@ -681,15 +681,34 @@ def _check_read(fm, findings):
         {"line": field.line, "raw": raw, "report_only": True}))
 
 
-def _check_sources(fm, findings):
-    """Item 4: a list of complete local-source wikilinks with physical pages."""
+def _check_sources(fm, findings, root=False):
+    """Item 4: a list of complete local-source wikilinks with physical pages.
+
+    A discipline root may cite nothing (hierarchy.md, *Establish discipline
+    roots*). Its empty list is spelled exactly `sources: []`: a bare or null
+    key is YAML null against the vault's multitext property, as for parents.
+    Every empty non-list value on a root, and a spaced `[ ]`, gets that one
+    respelling finding, as scan_vault's item4 does.
+    """
     field = fm.get("sources")
     if field is None:
         return  # The mandatory-key check already reports a missing field.
+    root_spelling = _f(
+        "2-field-order", "error",
+        "empty sources: on a discipline root is spelled exactly "
+        "`sources: []` (a bare or null key is YAML null against the "
+        "vault's multitext property)", {"line": field.line})
+    if (root and not field.is_list
+            and all(value in (None, "") for value in field.values)):
+        findings.append(root_spelling)
+        return
     if not any(value not in (None, "") for value in field.values):
-        findings.append(_f(
-            "2-field-order", "error",
-            "sources: is empty; it must hold at least one item"))
+        if not root:
+            findings.append(_f(
+                "2-field-order", "error",
+                "sources: is empty; it must hold at least one item"))
+        elif not field.values and field.raw_value != "[]":
+            findings.append(root_spelling)
     if not field.values:
         return
     if not field.is_list:
@@ -2456,7 +2475,7 @@ def lint_text(text, filename):
     _check_quoting(fm, findings)
     _check_read(fm, findings)
     _check_dates(fm, findings)
-    _check_sources(fm, findings)
+    _check_sources(fm, findings, _is_root_entry(fm, filename))
     _check_source_duplicates(fm, findings)
     _check_slug(fm, findings, filename)
     _check_bare_common_noun(findings, filename)
@@ -4383,6 +4402,52 @@ def run_self_test():
                          "analyzing and interpreting data.",
                          "**Misc** holds entries outside every discipline."),
                 "misc.md"), [])
+
+    # -- item 4: a discipline root may cite nothing, spelled `sources: []` --
+    sourceless = stats_root.replace(
+        'sources:\n  - "[[Doe_X_2025.pdf#page=2]]"\n', "sources: []\n")
+    check("a discipline root may have `sources: []`",
+          items(sourceless, "statistics.md"), [])
+    check("...and so may the misc root",
+          items(sourceless.replace('"Statistics"', '"Misc"')
+                .replace('"#statistics"', '"#misc"')
+                .replace("Statistics is the study of collecting and "
+                         "interpreting data.",
+                         "Misc holds entries outside every discipline.")
+                .replace("**Statistics** is the study of collecting, "
+                         "analyzing and interpreting data.",
+                         "**Misc** holds entries outside every discipline."),
+                "misc.md"), [])
+    check("the same empty list on another entry needs a source",
+          [f["message"] for f in lint_text(
+              sourceless, "stats-overview.md")["findings"]
+           if f["item"] == "2-field-order"],
+          ["sources: is empty; it must hold at least one item"])
+    check("a root's bare or spaced empty sources: is spelled `sources: []`",
+          [[f["message"].startswith("empty sources: on a discipline root")
+            for f in lint_text(sourceless.replace("sources: []", spelling),
+                               "statistics.md")["findings"]]
+           for spelling in ("sources:", "sources: [ ]")],
+          [[True], [True]])
+    check("a root's null or empty-string scalar is respelled `sources: []`",
+          [[f["message"].startswith("empty sources: on a discipline root")
+            for f in lint_text(sourceless.replace("sources: []", spelling),
+                               "statistics.md")["findings"]
+            if f["item"] in ("2-field-order", "4-sources")]
+           for spelling in ("sources: ~", "sources: null", 'sources: ""')],
+          [[True], [True], [True]])
+    check("a root's empty-string item is still a bad citation",
+          [[(f["item"], f["message"].startswith("source must be"))
+            for f in lint_text(sourceless.replace("sources: []", spelling),
+                               "statistics.md")["findings"]]
+           for spelling in ('sources:\n  - ""', 'sources: [""]')],
+          [[("4-sources", True)], [("4-sources", True)]])
+    check("the exemption needs the matching tag, not just the filename",
+          [f["message"] for f in lint_text(
+              sourceless.replace('"#statistics"', '"#mathematics"'),
+              "statistics.md")["findings"]
+           if f["item"] == "2-field-order"],
+          ["sources: is empty; it must hold at least one item"])
     root_tmp = tempfile.mkdtemp(prefix="lint_entry-root-")
     try:
         with open(os.path.join(root_tmp, "statistics.md"), "w",

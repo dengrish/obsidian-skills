@@ -3041,8 +3041,19 @@ def scan(wiki, images=None, vault=None):
         if _created_d is not None and _updated_d is not None and _created_d > _updated_d:
             problems.append((sl,"item3/report-only",f'created {e["created"]} > updated {e["updated"]} — impossible ordering (updated is the last merge date, so it cannot precede creation); DO NOT FIX, leave unresolved and report without blocking the run'))
         # ---- item 4: sources format ----
+        # A discipline root may cite nothing (hierarchy.md, *Establish
+        # discipline roots*). Its empty list is `sources: []`: a bare key is
+        # YAML null against the vault's multitext property, as for parents.
         if not e["sources"]:
-            problems.append((sl,"item4","sources: is empty; every entry needs a local source"))
+            if not _record_is_discipline_root(sl, e):
+                problems.append((sl,"item4","sources: is empty; every entry needs a local source"))
+            elif ("sources" in e["key_order"]
+                  and raw_scalar(fm_raw, "sources") != "[]"
+                  and not has_block_items(fm_raw, "sources")):
+                problems.append((sl,"item4",
+                                 "empty sources: on a discipline root is spelled exactly `sources: []` — "
+                                 "a bare or null key is YAML null, which renders as an empty text "
+                                 "field rather than an empty list under the vault's multitext type"))
         elif not e["sources_is_list"]:
             problems.append((sl,"item4","sources: must be a list, not a scalar"))
         for i,src in enumerate(e["sources"]):
@@ -10055,6 +10066,56 @@ def run_self_test():
         check("a duplicated non-tag key keeps the root; an unreadable line voids it",
               ["entry missing ## Flashcards section" in _st_msg(res, _tag, "item19")
                for _tag in ("economics", "finance")], [False, True])
+
+        # item 4: a discipline root may cite nothing, spelled `sources: []`.
+        _src_v = os.path.join(tmp, "root-sources", "Wiki")
+        _st_write(_src_v, "statistics.md", _st_entry(
+            "Statistics", "**Statistics** is a field.", sources=(), card=False))
+        _st_write(_src_v, "misc.md", _st_entry(
+            "Misc", "**Misc** is a field.", tags=('"#misc"',), sources=(),
+            card=False))
+        for _tag, _spelling in (("physics", "sources:"),
+                                ("biology", "sources: [ ]")):
+            _st_write(_src_v, _tag + ".md", _st_entry(
+                _tag.capitalize(), "**%s** is a field." % _tag.capitalize(),
+                tags=('"#%s"' % _tag,), sources=(), card=False)
+                .replace("sources: []", _spelling))
+        for _tag, _spelling in (("chemistry", "sources: ~"),
+                                ("economics", 'sources:\n  - ""'),
+                                ("finance", "")):
+            _st_write(_src_v, _tag + ".md", _st_entry(
+                _tag.capitalize(), "**%s** is a field." % _tag.capitalize(),
+                tags=('"#%s"' % _tag,), sources=(), card=False)
+                .replace("sources: []\n", _spelling + ("\n" if _spelling else "")))
+        # The filename alone is not a root: medicine.md tagged #biology.
+        _st_write(_src_v, "medicine.md", _st_entry(
+            "Medicine", "**Medicine** is a field.", tags=('"#biology"',),
+            sources=(), card=False))
+        _st_write(_src_v, "variance.md", _st_entry(
+            "Variance", "**Variance** is a spread measure.", sources=()))
+        res = scan(_src_v)
+        check("a discipline root, misc included, may have `sources: []`",
+              [_st_msg(res, _slug, "item4") for _slug in ("statistics", "misc")],
+              ["", ""])
+        check("a root's bare or spaced empty sources: is spelled `sources: []`",
+              [_st_msg(res, _tag, "item4").startswith(
+                  "empty sources: on a discipline root")
+               for _tag in ("physics", "biology")], [True, True])
+        check("a non-root with `sources: []` still needs a source",
+              _st_msg(res, "variance", "item4"),
+              "sources: is empty; every entry needs a local source")
+        check("a root's null scalar is respelled; an empty item stays a bad citation",
+              [_st_msg(res, "chemistry", "item4").startswith(
+                  "empty sources: on a discipline root"),
+               _st_msg(res, "economics", "item4").startswith("source must be")],
+              [True, True])
+        check("a root with no sources: key gets only the missing-key finding",
+              (_st_msg(res, "finance", "item4"),
+               "missing sources: key" in _st_msg(res, "finance", "item2")),
+              ("", True))
+        check("the exemption needs the matching tag, not just the filename",
+              _st_msg(res, "medicine", "item4"),
+              "sources: is empty; every entry needs a local source")
 
         def _org_vault(name, models_prose=None, trees_aliases=(),
                        models_related=None, extra=()):

@@ -37,31 +37,28 @@ valid tag is placed under it even when its home is a reported close call.
 Reuse the canonical Wiki entry for each active tag, checking filename, identity,
 and tag ownership rather than treating a same-named MOC or alias as the root.
 When a root is missing, Task 3 may create that narrow prerequisite using
-builder's entry rules and [wiki-add's durable-source research](../../wiki-add/references/research.md).
-Prefer suitable already-cited local evidence under that guide's
-[local-source rules](../../wiki-add/references/research.md#find-local-sources-first),
-which report an unbuilt source for wiki-build instead of citing it; otherwise
-create only the new webpage research extracts the missing roots need. This
-prerequisite creates only the roots the authorized closure needs. It never
-downloads or files a PDF, downloads or places images, fabricates citations,
+builder's entry rules. It writes the root from accurate background under
+[prose principle 5(h)](../../wiki-build/references/writing.md#prose-principles)
+with `sources: []`: it researches no evidence for a root and creates no
+source note, research extract, PDF or image. This prerequisite creates only
+the roots the authorized closure needs. It never fabricates citations,
 alters the user's topic queue or extracts unrelated entities.
 
 A discipline root is a short explanation of the field, not a duplicate MOC.
 It defines the field, states its method of inquiry and names its main
-branches, linking those with entries; prefer an encyclopedia or textbook
-source. The misc root is `Wiki/misc`, titled `Misc`: a brief source-backed
-definition of a miscellany (for example from a dictionary extract) that makes
-no claim about this vault's contents. Use the ordinary entry schema, one
-matching tag, `parents: []` and no Flashcards section; an existing root keeps
-its card unless the user asks to remove it.
+branches, linking those with entries. The misc root is `Wiki/misc`, titled
+`Misc`: a brief definition of a miscellany that makes no claim about this
+vault's contents. Use the ordinary entry schema, one matching tag,
+`parents: []` and no Flashcards section; an existing root keeps its card
+unless the user asks to remove it. A root is the one entry whose `sources:`
+may be empty, written `sources: []` and never as a bare key. A root keeps a
+document it already cites, and wiki-build cites a source it genuinely builds
+the root from.
 New roots use today's date for `created:` and `updated:` and set
-`read: false`; the maintenance date freeze covers existing notes only. Their
-new source extracts keep wiki-add's research-source marker and visible label
-and reuse its [webpage-extract](../../wiki-add/references/research.md#new-webpage-research-extracts)
-format and publication procedure, without its topic-queue completion.
+`read: false`; the maintenance date freeze covers existing notes only.
 Preserve existing roots' substantive content, review state, and card history
-under the normal correction rules. A blocked source or ambiguous root owner
-blocks that group's publication; never fall back to an MOC parent.
+under the normal correction rules. An ambiguous root owner blocks that
+group's publication; never fall back to an MOC parent.
 
 ## Derive the hierarchy
 
@@ -249,8 +246,9 @@ actions.
   the authorized closure.
 - `parent_state_findings`: roots have empty parents, misc members point only
   to `[[misc]]`, and a `moc-parent` is replaced by the discipline root or the
-  nearest Wiki ancestor. Missing roots require the source-backed prerequisite
-  above, never a fabricated hierarchy edge.
+  nearest Wiki ancestor. Missing roots require the
+  [root prerequisite](#establish-discipline-roots) above, never a fabricated
+  hierarchy edge.
 - `unlinked_children`: [link each parent down](#populate-parents).
 - `moc_inventory_findings` and `legacy_moc_states` establish path ownership.
   Preserve and report unsafe or noncanonical paths, duplicates, legacy MOCs,
