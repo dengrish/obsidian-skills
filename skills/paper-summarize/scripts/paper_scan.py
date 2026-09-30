@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """What to summarise, and which figures are already on disk for it.
 
-One filesystem pass, before any PDF is opened, answers the three questions
+One filesystem pass, before any PDF is opened, answers the four questions
 that decide a run:
 
   * **Which PDFs are in scope, and which are already summarised.**  A paper is
@@ -45,9 +45,10 @@ their own right (`chapter`), so scanning wide does not turn into a whole book's
 worth of summaries.
 
 This is an inventory boundary, not a processing instruction. When the user
-named one PDF or a narrower folder, the main skill processes only matching rows
-from this whole-tree result. A row outside the requested scope is context for
-identity and book detection, not authorization to summarize that source.
+named a narrower folder, the main skill processes only matching rows from
+this whole-tree result; a named PDF is scanned alone instead (see below). A
+row outside the requested scope is context for identity and book detection,
+not authorization to summarize that source.
 
 `--notes` is the flat `Articles/` folder, which this skill shares with
 clipping-clean. A note whose basename differs only by case or Unicode
@@ -115,7 +116,7 @@ from naming import (chapter_book_stem, core_stem, is_feed_attachment,
 from portable_names import portable_identity
 from vault_artifacts import (inventory_pdfs, inventory_source_figures,
                              local_link_matches, output_vault_root, verify_selected_pdf)
-from yaml_scalars import parse_source_fields
+from yaml_scalars import parse_source_fields, read_note_origin, read_regular_text
 
 #: Figure-label namespaces, ranked so a listing reads main → appendix →
 #: supplementary → Supporting Information → Extended Data.  Longest prefix
@@ -149,9 +150,13 @@ _WIKILINK_RE = re.compile(r"\A!?\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]\Z")
 #: `Figure 1a` is rejected as a caption because it is a panel pointer -- so
 #: this split reads the convention rather than guessing at it.
 _PANEL_LABEL_RE = re.compile(r"\A(.*[0-9])([a-z])\Z")
+#: A derived variant follows `-` or `_` (`1-38-transparent`, `4-17_cropped`).
+#: Its first segment is never a bare number: that is part of the figure label,
+#: so `4-17_cropped` is a variant of 4-17, not of a phantom figure 4.
 _FIGURE_LABEL_RE = re.compile(
     r"\A(?P<base>(?:SI|ED|S)?\d+(?:-\d+)*|[A-Z]-?\d+(?:-\d+)*)"
-    r"(?P<panel>[a-z])?(?:-(?P<variant>[^-].*))?\Z")
+    r"(?P<panel>[a-z])?"
+    r"(?:[-_](?P<variant>(?!\d+(?:[-_]|\Z))[^-_].*))?\Z")
 
 
 def panel_parent(label):
@@ -308,69 +313,11 @@ def figures_for(attachments, stem):
     return out
 
 
-def _read_note_text(path):
-    """Read regular UTF-8 note bytes without waiting on a replaced FIFO."""
-    descriptor = None
-    try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            return None
-        with os.fdopen(descriptor, "r", encoding="utf-8-sig",
-                       errors="strict") as fh:
-            descriptor = None
-            return fh.read()
-    except (OSError, ValueError, UnicodeError):
-        return None
-    finally:
-        if descriptor is not None:
-            os.close(descriptor)
-
-
-def note_source(path):
-    """The note's origin from its frontmatter, or None.
-
-    The origin is item 1 of the block-form `sources:` list (schema 2b — the
-    shape this skill itself writes); a legacy scalar `source:` is read as a
-    fallback so an unmigrated note stays recognisable.  Deliberately the same
-    two-key logic and tolerances as clipping-clean's
-    `dedup_index.read_source` — a BOM, leading blank lines before the opening
-    fence, quote and trailing-comment stripping, and a value returned only
-    once the CLOSING fence has been seen (an unterminated `---` is not
-    frontmatter to Obsidian, and scanning on into the body would take
-    whatever `source:` the prose happens to contain) — because the two skills
-    read each other's notes out of one folder and must agree about what is
-    parseable. The complete note must decode strictly as UTF-8 before its
-    frontmatter can establish ownership; invalid bytes anywhere return None.
-    """
-    try:
-        # Decode the whole note before accepting its claimed origin. Otherwise
-        # valid-looking frontmatter can establish ownership even when invalid
-        # bytes later in the body make the note itself unreadable.
-        text = _read_note_text(path)
-        if text is None:
-            return None
-        lines = iter(text.splitlines())
-        for first in lines:
-            if first.strip():
-                break
-        else:
-            return None
-        if not _frontmatter_fence(first):
-            return None
-        frontmatter = []
-        for raw in lines:
-            if _frontmatter_fence(raw):
-                fields = parse_source_fields(frontmatter)
-                if "sources" in fields:
-                    sources = fields["sources"]
-                    return sources[0] if sources else None
-                return fields.get("source") or None
-            frontmatter.append(raw)
-    except UnicodeError:
-        return None
-    except (OSError, ValueError):
-        return None
-    return None
+#: The note's origin: item 1 of `sources:` (schema 2b, the shape this skill
+#: writes), else a legacy scalar `source:`. clipping-clean's dedup index reads
+#: the same Articles/ notes through this same shared function, so the two
+#: skills always agree about which notes each one owns.
+note_source = read_note_origin
 
 
 #: A body that is nothing but one PDF embed.  That is the shape of the light
@@ -384,7 +331,7 @@ _EMBED_ONLY_RE = re.compile(r"\A!\[\[[^\]\n]+\]\]\Z")
 
 def body_is_embed_only(path):
     """True when the note's body is a single `![[…]]` line and nothing else."""
-    text = _read_note_text(path)
+    text = read_regular_text(path)
     if text is None:
         return False
     # Split on the frontmatter FENCES, which are whole lines.  A bare
@@ -408,6 +355,36 @@ def body_is_embed_only(path):
     kept = [ln for ln in kept
             if ln and not ln.startswith(">") and not set(ln) <= set("_-*")]
     return len(kept) == 1 and bool(_EMBED_ONLY_RE.match(kept[0]))
+
+
+def bare_embed(path):
+    """The one embed a note with no `source`/`sources` field consists of.
+
+    pdf-organize's `_note_is_about` rule for the oldest embed-notes, which
+    carry no origin field at all: absent frontmatter, or closed frontmatter
+    that parses without either key, and a body that is exactly one `![[…]]`.
+    Unreadable, non-UTF-8, unterminated or malformed metadata establishes
+    nothing, so it returns None as that rule does.
+    """
+    text = read_regular_text(path)
+    if text is None:
+        return None
+    body = text.lstrip()
+    lines = body.splitlines()
+    if lines and _frontmatter_fence(lines[0]):
+        end = next((i for i in range(1, len(lines))
+                    if _frontmatter_fence(lines[i])), None)
+        if end is None:
+            return None
+        try:
+            fields = parse_source_fields(lines[1:end])
+        except ValueError:
+            return None
+        if "sources" in fields or "source" in fields:
+            return None
+        body = "\n".join(lines[end + 1:])
+    body = body.strip()
+    return body if _EMBED_ONLY_RE.match(body) else None
 
 
 def source_names(source, stem, *, pdf_path=None, vault_root=None, note_path=None):
@@ -527,8 +504,9 @@ def classify(stem, books, note_state, allow_unorganized=False,
     """One PDF's status.  Three skips, then a refusal, then the note check.
 
     `note_state` is "absent", "ours" (a note of this stem whose `source:` names
-    this PDF and whose body is a real summary), "legacy" (same `source:`, but
-    the body is a bare PDF embed — an older skill's note, not ours) or
+    this PDF and whose body is a real summary), "legacy" (same `source:`, or
+    no origin field at all, but the body is a bare embed of this PDF — an
+    older skill's note, not ours) or
     "theirs" (a note of this stem that belongs to something else).
 
     The two skips come first because both are decisions about *scope* — this
@@ -603,13 +581,17 @@ def scan(src, notes, images, allow_unorganized=False,
             state, existing = "theirs", None
         else:
             existing = note_source(note)
-            if not source_names(existing, stem, pdf_path=path, vault_root=vault_root,
-                                note_path=note):
-                state = "theirs"
-            elif body_is_embed_only(note):
+            if source_names(existing, stem, pdf_path=path, vault_root=vault_root,
+                            note_path=note):
+                state = "legacy" if body_is_embed_only(note) else "ours"
+            elif existing is None and source_names(
+                    bare_embed(note), stem, pdf_path=path,
+                    vault_root=vault_root, note_path=note):
+                # No origin field, and the body is one embed of this PDF:
+                # the oldest embed-note, which pdf-organize also keys here.
                 state = "legacy"
             else:
-                state = "ours"
+                state = "theirs"
         conflicts = [p for p in by_stem[_name_key(stem)] if p != path]
         source_gate_error = ""
         if selected_gate is not None and not selected_gate.unique:
@@ -778,11 +760,13 @@ def render(result):
             if (not row.get("source_conflicts")
                     and not row.get("source_gate_error")
                     and not row.get("note_conflicts")):
-                lines.append("      %s already exists and its source: is %r -- a "
+                source = row["note_source"]
+                lines.append("      %s already exists and its source: is %s -- a "
                          "different note under the same name. Do NOT write "
                          "over it; report both and let the user rename one."
                          % (shown_text(row["note"]),
-                            shown_text(row["note_source"])))
+                            '"%s"' % shown_text(source) if source is not None
+                            else "none"))
         if row["status"] == "legacy":
             lines.append("      %s is an embed-note left by an older skill, "
                          "not a summary. Nothing here overwrites a user file: "
@@ -838,6 +822,12 @@ _FIGURE_PART_CASES = [
     ("ED2-high-contrast", ("ED2", "", "high-contrast")),
     ("B-2-high-contrast", ("B-2", "", "high-contrast")),
     ("C3a-crop", ("C3", "a", "crop")),
+    # An underscore variant keeps its whole hierarchical base.
+    ("4-17_cropped", ("4-17", "", "cropped")),
+    ("12-3_crop", ("12-3", "", "crop")),
+    ("C3a_crop", ("C3", "a", "crop")),
+    # A variant may open with digits when its segment is not a bare number.
+    ("1-300dpi", ("1", "", "300dpi")),
 ]
 
 #: (stem, books-in-run, note state, expected status).
@@ -1307,12 +1297,14 @@ def run_self_test():
     variant_dir = os.path.join(_d, "images-variant")
     os.makedirs(variant_dir)
     for name in ("Doe_Variant_2025_fig_1-38.png",
-                 "Doe_Variant_2025_fig_1-38-transparent.png"):
+                 "Doe_Variant_2025_fig_1-38-transparent.png",
+                 "Doe_Variant_2025_fig_1-38_cropped.png"):
         open(os.path.join(variant_dir, name), "w", encoding="utf-8").close()
     variant_figures = figures_for(variant_dir, "Doe_Variant_2025")
     n += 1
     got = [(f["label"], f["variant_of"]) for f in variant_figures]
-    if got != [("1-38", None), ("1-38-transparent", "1-38")]:
+    if got != [("1-38", None), ("1-38_cropped", "1-38"),
+               ("1-38-transparent", "1-38")]:
         bad += 1
         print("FAIL derived figure variant classification -> %r" % (got,))
     n += 1
@@ -1444,7 +1436,7 @@ def run_self_test():
     _mk("Articles/Legacy_Old_2019.md",
         '---\nsource: "[[Legacy_Old_2019.pdf]]"\n---\n![[Legacy_Old_2019.pdf]]\n')
     # The same three states in the CURRENT 2b schema (block-form `sources:`),
-    # which is what this skill's own step 5 writes.  Before the sources-list
+    # which is what this skill's own step 6 publishes.  Before the sources-list
     # reader, all three of these classified as `collision`.
     _mk("Sources/PDFs/Doe_New_2025.pdf")
     _mk("Articles/Doe_New_2025.md",
@@ -1457,6 +1449,18 @@ def run_self_test():
     _mk("Articles/Embed_Old_2019.md",
         '---\nsources:\n  - "[[Embed_Old_2019.pdf]]"\n---\n'
         '![[Embed_Old_2019.pdf]]\n')
+    # The oldest embed-notes carry no origin field at all. pdf-organize keys
+    # one to its PDF only when the whole body is that PDF's embed, so this
+    # scan calls exactly those `legacy`, not a foreign `collision`.
+    _mk("Sources/PDFs/Bare_Embed_2020.pdf")
+    _mk("Articles/Bare_Embed_2020.md", "![[Bare_Embed_2020.pdf]]\n")
+    _mk("Sources/PDFs/Bare_Meta_2020.pdf")
+    _mk("Articles/Bare_Meta_2020.md",
+        "---\ntitle: x\n---\n\n![[Bare_Meta_2020.pdf]]\n")
+    _mk("Sources/PDFs/Bare_Other_2020.pdf")
+    _mk("Articles/Bare_Other_2020.md", "![[Other_Doc_2020.pdf]]\n")
+    _mk("Sources/PDFs/Bare_Open_2020.pdf")
+    _mk("Articles/Bare_Open_2020.md", "---\ntitle: x\n![[Bare_Open_2020.pdf]]\n")
     _mk("Articles/case_owner_2025.md",
         '---\nsources:\n  - "[[Case_Owner_2025.pdf]]"\n---\n'
         '\n## Methods\n\nA completed summary.\n')
@@ -1476,6 +1480,10 @@ def run_self_test():
                        ("Doe_New_2025", "done"),
                        ("Clip_Match_2024", "collision"),
                        ("Embed_Old_2019", "legacy"),
+                       ("Bare_Embed_2020", "legacy"),
+                       ("Bare_Meta_2020", "legacy"),
+                       ("Bare_Other_2020", "collision"),
+                       ("Bare_Open_2020", "collision"),
                        ("Case_Owner_2025", "done"),
                        ("Case_Foreign_2025", "collision"),
                        ("Prince_UDL_2026_src", "book"),
@@ -1491,6 +1499,13 @@ def run_self_test():
     if sum(res["counts"].values()) != len(res["pdfs"]):
         bad += 1
         print("FAIL scan(): the counts do not add up to the rows")
+    n += 1
+    _report = render(res)
+    if ("its source: is none" not in _report or "'None'" in _report
+            or 'its source: is "https://example.com/g"' not in _report):
+        bad += 1
+        print("FAIL a collision misquoted the existing note's source:\n%s"
+              % _report)
     if symlink_supported:
         blocked_figure = os.path.join(
             _v, "Sources", "Images", "Doe_Foo_2025_fig_99.png")

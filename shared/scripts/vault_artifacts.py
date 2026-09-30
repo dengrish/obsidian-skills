@@ -57,6 +57,7 @@ __all__ = [
     "source_stem_groups",
     "output_vault_root",
     "inventory_source_figures",
+    "looks_staging",
     "run_self_test",
 ]
 
@@ -126,10 +127,6 @@ def _snapshot(item):
         getattr(item, "st_mtime_ns", int(item.st_mtime * 1e9)),
         getattr(item, "st_ctime_ns", int(item.st_ctime * 1e9)),
     )
-
-
-def _is_pdf_name(name):
-    return portable_identity(os.path.splitext(name)[1]) == ".pdf"
 
 
 def _logical_path_key(path):
@@ -565,7 +562,15 @@ _STAGING_SUFFIX = re.compile(
     r"\.(?:tmp|temp|part|partial|download|crdownload)(?:\.\d+)?\Z", re.I)
 
 
-def _looks_staging(relative):
+def looks_staging(relative):
+    """Whether a folder-relative path has a recognizable staging name.
+
+    A component is staging when it starts ``.tmp``, ``.temp`` or ``.trash``,
+    contains ``.dltmp``, or ends in a download/temporary suffix
+    (``.tmp``/``.temp``/``.part``/``.partial``/``.download``/``.crdownload``,
+    optionally numbered). The figure inventory here and wiki-lint's
+    image-folder findings share this one test.
+    """
     for part in relative.replace("\\", "/").split("/"):
         low = part.casefold()
         if low.startswith((".tmp", ".temp", ".trash")):
@@ -577,7 +582,9 @@ def _looks_staging(relative):
 
 def _valid_stem(stem):
     value = os.fspath(stem)
-    if not value or not value.strip(". ") or "\x00" in value or ".." in value:
+    # Separators are refused below, so `..` is unsafe only as a whole
+    # fragment, which the strip already rejects: `Why... it matters` is fine.
+    if not value or not value.strip(". ") or "\x00" in value:
         return False
     return not any(sep and sep in value for sep in {"/", "\\", os.sep, os.altsep})
 
@@ -626,7 +633,7 @@ def inventory_source_figures(images, stem):
 
     def walk_nested(directory, relative, ancestors):
         nonlocal complete
-        staging = _looks_staging(relative)
+        staging = looks_staging(relative)
         add("staging-residue" if staging else "nested-directory", directory,
             ("recognizable staging residue under the flat image folder"
              if staging else "directory is nested under the flat image folder"),
@@ -674,7 +681,7 @@ def inventory_source_figures(images, stem):
                 walk_nested(path, child_rel, lineage)
                 continue
             if matching_name(child.name):
-                if _looks_staging(child_rel):
+                if looks_staging(child_rel):
                     add("staging-match", path,
                         "source-keyed staging artifact is excluded",
                         severity="warning")
@@ -727,7 +734,7 @@ def inventory_source_figures(images, stem):
         for name in names:
             if not matching_name(name):
                 continue
-            if _looks_staging(relative + "/" + name):
+            if looks_staging(relative + "/" + name):
                 add("staging-match", path / name,
                     "source-keyed staging artifact is excluded",
                     severity="warning")
@@ -747,7 +754,7 @@ def inventory_source_figures(images, stem):
                 (type(exc).__name__, exc))
             continue
         match = matching_name(child.name)
-        staging = _looks_staging(relative)
+        staging = looks_staging(relative)
         if stat.S_ISLNK(item.st_mode):
             if match:
                 blocked.append(str(path))
@@ -858,6 +865,19 @@ def run_self_test():
             ("sub/Study.pdf", "Articles/sub/Study.pdf", "Articles", True)):
         check("qualified local target: " + target,
               local_link_matches(target, actual, note_dir=note_dir), expected)
+
+    check("staging names: prefixes, .dltmp, numbered suffixes, any component",
+          [looks_staging(name) for name in (
+              ".tmp-render/x.png", ".TEMP_x.png", ".trash/old.png",
+              "Doe_X_2025_fig_1.png.dltmp", "a.dltmp.b.png",
+              "Doe_X_2025_fig_1.png.part", "x.png.PARTIAL.2",
+              "x.png.crdownload", "x.download", "sub\\y.tmp/fig.png")],
+          [True] * 10)
+    check("not staging: ordinary figures, inner suffixes and a newline",
+          [looks_staging(name) for name in (
+              "Doe_X_2025_fig_1.png", "tmp.png", "x.tmp.png", "temporal.png",
+              "partial_fig.png", "sub/fig.png", "x.tmp\n", "")],
+          [False] * 8)
 
     tmp = tempfile.mkdtemp(prefix="vault-artifacts-selftest-")
     try:
@@ -1227,6 +1247,10 @@ def run_self_test():
               _valid_stem("../escape"), False)
         check("ordinary source stem is accepted",
               _valid_stem("Doe_Study_2025_src"), True)
+        check("an ellipsis inside a source stem is accepted",
+              _valid_stem("Why... it matters"), True)
+        check("a dots-only source stem is rejected",
+              [_valid_stem(v) for v in ("..", "...", ". .")], [False] * 3)
 
         # An explicitly supplied empty value is still a selection request. It
         # must not fall through to the inventory-only success path merely
@@ -1260,8 +1284,6 @@ def main(argv=None):
     pdfs.add_argument("--selected", help="PDF whose basename must be unique")
     pdfs.add_argument("--include-hidden", action="store_true",
                       help="also inventory dot-prefixed files and subtrees")
-    pdfs.add_argument("--exclude-hidden", action="store_false",
-                      dest="include_hidden", help=argparse.SUPPRESS)
     figures = sub.add_parser("figures", help="inventory one source's figures")
     figures.add_argument("--images", required=True,
                          help="flat Sources/Images folder")

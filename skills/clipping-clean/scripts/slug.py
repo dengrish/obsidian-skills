@@ -36,8 +36,10 @@ CLI
 Case in: pass acronyms as they should appear (LLMs, GPT4, OOMs, iPhone, macOS,
 PyTorch). Any word already carrying a capital keeps its own casing; a plain
 lowercase word is Title-Cased; a lowercase word mixing letters and digits is
-uppercased as a unit (gpt4 -> GPT4); and a lowercase word that is a known
-acronym is fully uppercased, with a plural `s` left lowercase (llms -> LLMs).
+uppercased as a unit when its letters are a known acronym (gpt4 -> GPT4),
+otherwise only its first letter is capitalised (web3 -> Web3, covid19 ->
+Covid19); and a lowercase word that is a known acronym is fully uppercased,
+with a plural `s` left lowercase (llms -> LLMs).
 Clipped titles are often sentence-case, so that last rule fires often — but the
 built-in list can't know your field's initialisms, so short words that were
 merely Title-Cased are listed in `notes` for you to check, and `--acronym` is
@@ -55,12 +57,14 @@ so an uncapped one writes the note and then fails every figure of it with
 ENAMETOOLONG. Both trims are reported in `notes`.
 
 Importable
-    first_author(names) -> str
+    first_author(names) -> (str, notes)
     author_kind(name) -> (kind, why)             # person / publication / unsure
-    surname(name) -> str
-    topic_segment(words) -> str
-    build_slug(author=..., topic=..., year=..., no_author=False,
-               undated=False) -> dict
+    surname(name, notes=None) -> str
+    topic_segment(words, acronyms=None, notes=None) -> str
+    topic_from_title(title, limit=4, notes=None) -> list[str]
+    parse_acronyms(values) -> set[str]           # --acronym values + defaults
+    build_slug(author=..., topic=..., title=..., year=..., no_author=False,
+               topic_limit=4, acronyms=None, undated=False) -> dict
     run_self_test() -> int                       # also `--test`
     SlugError                                    # degenerate (empty) slug
 
@@ -69,6 +73,7 @@ establish a safe, dated-or-explicitly-undated filename. Stdlib only.
 """
 
 import argparse
+import collections
 import json
 import re
 import sys
@@ -189,9 +194,12 @@ DEFAULT_ACRONYMS = {
 # used to survive a blocklist that only named the punctuation someone thought
 # of; `#` is the one that breaks things, because `[[C#_And_F#_2020]]` parses in
 # Obsidian as a heading anchor, so wiki-build's `sources:` link to that note
-# silently resolves to nothing. Keep letters, digits and `_`; drop everything
-# else — hyphens included, per "Smith-Jones -> SmithJones". `isalnum` is
-# Unicode-aware on purpose, so an accented surname survives (Müller, not Mller).
+# silently resolves to nothing. Keep letters, digits, `_`, and the nonspacing
+# or spacing combining marks (Mn/Mc, never a variation selector or the
+# combining grapheme joiner) that follow a kept character; drop everything
+# else — hyphens, emoji and enclosing keycap marks included, per
+# "Smith-Jones -> SmithJones". `isalnum` is Unicode-aware on purpose, so an
+# accented surname survives (Müller, not Mller).
 #
 # These are the symbols that are simply DROPPED. The three below are not.
 SYMBOL_CHARS = "$&%@"
@@ -255,16 +263,62 @@ def _spell_symbols(word):
     return "".join(out)
 
 
+def _ignorable_mark(ch):
+    """Invisible selectors that are Mn but never part of a letter's spelling.
+
+    A variation selector turns `5` into a keycap emoji (`5` + VS16 + U+20E3)
+    and the combining grapheme joiner only steers rendering; kept, either
+    leaves an invisible character in the note filename and figure prefix.
+    """
+    code = ord(ch)
+    return (code == 0x034F or 0xFE00 <= code <= 0xFE0F
+            or 0xE0100 <= code <= 0xE01EF)
+
+
 def _strip_punct(word):
     # NFC first: a decomposed "u" + combining diaeresis would otherwise lose the
     # accent (which is not alphanumeric) and silently become a plain "u".
+    # Nonspacing and spacing marks with no precomposed form (Devanagari vowel
+    # signs and viramas, Thai tone marks) stay attached to the kept character
+    # they follow; dropping them silently changes the word ("ข่าว", news,
+    # becomes "ขาว", white). Enclosing marks (a keycap's U+20E3) are emoji
+    # decoration and are dropped; invisible selectors are skipped without
+    # detaching a later mark, and the result is renormalized.
     word = unicodedata.normalize("NFC", word)
-    return "".join(ch for ch in word if ch.isalnum() or ch == "_")
+    out, attached = [], False
+    for ch in word:
+        if _ignorable_mark(ch):
+            continue
+        attached = (ch.isalnum() or ch == "_"
+                    or (attached and unicodedata.category(ch) in ("Mn", "Mc")))
+        if attached:
+            out.append(ch)
+    return unicodedata.normalize("NFC", "".join(out))
+
+
+def _reported_drops(raw, cleaned):
+    """Whether cleaning removed an emoji, a symbol or a mark, not punctuation.
+
+    Ordinary punctuation (quotes, dashes, `.`) disappears silently; a removed
+    non-ASCII symbol, mark or format character (an emoji and its selectors,
+    a keycap, `™`) changed what the word looked like, so it is reported.
+    """
+    if not cleaned:
+        return False
+    kept = collections.Counter(unicodedata.normalize("NFC", cleaned))
+    for ch in _spell_symbols(_fold_typeset(unicodedata.normalize("NFC", raw))):
+        if kept[ch]:
+            kept[ch] -= 1
+        elif not ch.isascii() and unicodedata.category(ch) in (
+                "So", "Sk", "Mn", "Mc", "Me", "Cf"):
+            return True
+    return False
 
 
 def _clean_word(raw):
     """One raw title word, ready to be cased: typeset folded, symbols spelled,
-    everything else that is not a letter, a digit or `_` removed."""
+    everything else that is not a letter, a digit, `_` or a nonspacing or
+    spacing combining mark on a kept character removed."""
     return _strip_punct(_spell_symbols(_fold_typeset(raw)))
 
 
@@ -522,7 +576,8 @@ def topic_segment(words, acronyms=None, notes=None):
             if raw:
                 emptied.append(raw)
             continue
-        if any(ch in raw for ch in SYMBOL_CHARS):
+        if (any(ch in raw for ch in SYMBOL_CHARS)
+                or _reported_drops(raw, w)):
             symbol_words.append(f"{raw} → {w}")
         if any(ch in raw for ch in SYMBOL_WORDS):
             spelled_words.append(f"{raw} → {w}")
@@ -556,8 +611,10 @@ def topic_from_title(title, limit=4, notes=None):
     topic_auto and why `notes` spells out kept vs dropped: the point is to give
     you something to check, not something to trust. Pass --topic to decide.
     """
-    words = [w for w in (_clean_word(x) for x in re.split(r"[\s_]+", title))
-             if w]
+    raw_words = [x for x in re.split(r"[\s_]+", title) if x]
+    cleaned = [(x, _clean_word(x)) for x in raw_words]
+    words = [w for _, w in cleaned if w]
+    reduced = [f"{x} → {w}" for x, w in cleaned if _reported_drops(x, w)]
     kept = [w for w in words if w.lower() not in FILLER]
     dropped = [w for w in words if w.lower() in FILLER]
     over_limit = kept[limit:]
@@ -571,6 +628,9 @@ def topic_from_title(title, limit=4, notes=None):
         if over_limit:
             notes.append(f"topic from title — dropped past --topic-limit "
                          f"{limit}: " + ", ".join(over_limit))
+        if reduced:
+            notes.append("topic from title — emoji, symbols or marks "
+                         "removed from: " + "; ".join(reduced))
     return kept
 
 
@@ -1033,6 +1093,40 @@ def run_self_test():
     # output is a note filename and may carry the user's own script.)
     check("CJK survives", topic_segment("機械学習"), "機械学習")
     check("Arabic survives", topic_segment("التعلم الآلي"), "التعلم_الآلي")
+    # Combining vowel signs, viramas and tone marks with no precomposed form
+    # stay on their letter; dropping them changes the word, silently.
+    for topic, want in (("हिन्दी साहित्य", "हिन्दी_साहित्य_2026"),
+                        ("தமிழ் இலக்கியம்", "தமிழ்_இலக்கியம்_2026"),
+                        ("ภาษาไทย ข่าว", "ภาษาไทย_ข่าว_2026")):
+        check("combining marks survive (%r)" % topic,
+              slug_of(no_author=True, topic=topic, year=2026), want)
+    # Only letters' own marks (Mn/Mc) attach. A keycap's variation selector
+    # and enclosing mark are emoji decoration: kept, they left an invisible
+    # VS16 in the filename and figure prefix.
+    for label, kw, want in (
+            ("keycap topic", dict(topic="5️⃣ robot trends"),
+             "5_Robot_Trends_2026"),
+            ("keycap title", dict(title="Top 5️⃣ robot trends"),
+             "Top_5_Robot_Trends_2026"),
+            ("variation selector on a letter", dict(topic="a️ robots"),
+             "A_Robots_2026"),
+            ("combining grapheme joiner", dict(topic="a͏ robots"),
+             "A_Robots_2026")):
+        check("%s: selectors and enclosing marks are dropped" % label,
+              slug_of(no_author=True, year=2026, **kw), want)
+    check("a mark after a skipped selector stays on its letter, renormalized",
+          (_strip_punct("a️́"), _strip_punct(_strip_punct("a️́"))),
+          ("á", "á"))
+    _k = build_slug(no_author=True, year=2026, topic="5️⃣ robot trends")
+    _kt = build_slug(no_author=True, year=2026, title="Top 5️⃣ robot trends")
+    check("a dropped keycap is reported on the topic and title paths",
+          (any("5️⃣ → 5" in n for n in _k["notes"]),
+           any("removed from: 5️⃣ → 5" in n for n in _kt["notes"])),
+          (True, True))
+    _plain = build_slug(no_author=True, year=2026,
+                        topic="Smith-Jones “Quoted” Topic")
+    check("ordinary punctuation drops stay unreported",
+          any("removed from" in n for n in _plain["notes"]), False)
     check("an accented surname keeps its accent",
           surname("Jürgen Müller"), "Müller")
     # an emoji is not alphanumeric: it is dropped, and the drop is reported

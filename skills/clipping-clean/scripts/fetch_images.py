@@ -20,10 +20,7 @@ rules are in references/images.md.
 CLI
     python3 fetch_images.py stage --vault '<vault>' --out-dir '<scratch>/images' \\
         --slug Teslo_Pancreatic_Cancer_2026 [--start 1] URL [URL ...]
-    python3 fetch_images.py download --attachments '<vault>/Sources/Images' \\
-        --owner-note '<vault>/Articles/Teslo_Pancreatic_Cancer_2026.md' \\
-        --slug Teslo_Pancreatic_Cancer_2026 [--start 1] URL [URL ...]
-    python3 fetch_images.py download ... --urls-file list.txt     # one URL per line, - for stdin
+    python3 fetch_images.py stage ... --urls-file list.txt     # one URL per line, - for stdin
     python3 fetch_images.py fetch '<lottie source url>' \\
         [--out '<path>' --vault '<vault>']
     python3 fetch_images.py place --attachments '<vault>/Sources/Images' \\
@@ -78,18 +75,21 @@ Guards, because this is the only script in the skill that writes into the vault:
   or nothing at all is rejected, and every final path is checked to be under
   the Sources/Images folder before anything is moved or renamed. `--slug` is free
   text from the model, not necessarily what `slug.py` returned.
-* **Neither `download` nor a rename phase clobbers.** `prepare` exclusively
+* **Neither `place` nor a rename phase clobbers.** `prepare` exclusively
   publishes byte-identical new-name copies and retains every old name;
   `finalize` conditionally retires only its verified old duplicates. An
   unexpected destination is an error (`--dry-run` reports it too).
   Publication, retirement and every rollback
   are conditional, so a path claimed after the plan is preserved and any mixed
   state is reported for inspection.
-  `download` refuses an occupied `<slug>_fig_<N>.*` slot the same way —
-  `shutil.move` replaces silently, so a re-run with the wrong `--start`
-  destroyed figures with no way back. Pass `--overwrite` for the documented
-  reprocess-in-place case, together with `--owner-note` naming the unchanged
-  clipping note whose rendered embed exactly names the file being replaced.
+  `place` (and `stage`, in its scratch folder) refuses an occupied
+  `<slug>_fig_<N>.*` slot the same way — `shutil.move` replaces silently, so a
+  re-run with the wrong `--start` destroyed figures with no way back. No
+  clipping-clean workflow replaces an existing attachment: a reprocess keeps
+  existing figures, and a new or reformatted figure takes the next free number.
+  `place --overwrite` remains only as a guarded low-level capability; its
+  `--owner-note` must name the unchanged clipping note whose rendered embed
+  exactly names the file being replaced.
   A legacy research extract written by an earlier wiki-add version (body
   opening with `<!-- obsidian:wiki-add-research-source -->`) never authorizes
   `--overwrite` or either rename phase. Current wiki-add writes no extracts and
@@ -130,9 +130,12 @@ Guards, because this is the only script in the skill that writes into the vault:
 Importable
     sniff_extension(head, content_type=None, url=None) -> str | None
     describe_bytes(head) -> str                        # "a JSON body", "a PDF", …
+    check_url(url, allow_private=False) -> None        # raises ValueError
     download_one(url, attachments, slug, index, owner_note=None) -> dict
+                                                       # `stage`'s transport
     fetch_source(url, out=None) -> dict                # Lottie source, outside vault
     place_file(src, attachments, slug, index, owner_note=None) -> dict
+    slug_occupancy(vault, slug) -> dict                # `preflight`
     prepare_slug_rename(attachments, old_slug, new_slug, *, sources=...,
                         owner_note=..., new_owner_note=..., dry_run=False) -> dict
     finalize_slug_rename(attachments, old_slug, new_slug, *, sources=...,
@@ -176,8 +179,8 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 _OBSIDIAN_SHARED_MODULES = (
-    "atomic_move", "entry_structure", "figure_state", "markdown_tables", "slugify",
-    "yaml_scalars")
+    "atomic_move", "entry_structure", "figure_state", "markdown_tables",
+    "portable_names", "slugify", "yaml_scalars")
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/RUNTIME.md) ---
 import os as _os, sys as _sys
@@ -219,7 +222,8 @@ if _here != _shared:
 from atomic_move import (LinkUnavailable, PublicationConflict, file_identity,
                          link_noreplace, move_noreplace, remove_expected,
                          replace_expected, publish_new, set_private_mode)
-from dedup_index import is_research_extract_text, normalize_url, read_source
+from dedup_index import (is_research_extract_text, normalize_url, read_source,
+                         split_frontmatter)
 from figure_state import MANIFEST_FILE, read_manifest
 from yaml_scalars import parse_source_fields
 from entry_structure import mask_body_comments
@@ -373,7 +377,6 @@ CHUNK = 64 * 1024
 # protocol that makes the proxy connect to the vetted target address while the
 # origin Host/SNI stay unchanged. The stdlib proxy path makes no such promise,
 # so this helper is direct-only instead of silently weakening its address guard.
-PROXY_POLICY = "direct-only"
 
 
 def _report_url(url, limit=200):
@@ -1022,49 +1025,6 @@ def _stable_regular_snapshot(path, copy_to=None, copy_mode=None):
     return snapshot
 
 
-def _frontmatter_fence(line):
-    """True for a column-zero YAML fence, allowing only trailing whitespace."""
-    return line.rstrip("\r\n").rstrip(" \t") == "---"
-
-
-def _body_after_frontmatter(text):
-    """Return the body behind a closed leading YAML block, or ``None``.
-
-    This deliberately follows ``dedup_index.read_source``'s two harmless
-    tolerances (a BOM, already removed by ``utf-8-sig``, and leading blank
-    lines). Ownership evidence never comes from frontmatter text itself.
-    """
-    lines = text.splitlines(keepends=True)
-    opening = None
-    for index, line in enumerate(lines):
-        if line.strip():
-            opening = index
-            break
-    if opening is None or not _frontmatter_fence(lines[opening]):
-        return None
-    for index in range(opening + 1, len(lines)):
-        if _frontmatter_fence(lines[index]):
-            return "".join(lines[index + 1:])
-    return None
-
-
-def _has_current_sources_key(text):
-    """Whether the closed leading YAML block has one top-level ``sources``."""
-    lines = text.splitlines()
-    opening = next((index for index, line in enumerate(lines) if line.strip()), None)
-    if opening is None or not _frontmatter_fence(lines[opening]):
-        return False
-    frontmatter = []
-    for line in lines[opening + 1:]:
-        if _frontmatter_fence(line):
-            try:
-                return "sources" in parse_source_fields(frontmatter)
-            except ValueError:
-                return False
-        frontmatter.append(line)
-    return False
-
-
 def _mask_html_literal_blocks(text, *, mask_unclosed=True):
     """Blank raw HTML regions whose contents render as code or non-content."""
     chars = list(text)
@@ -1170,9 +1130,9 @@ _HTML_REFERENCE_TARGET = re.compile(
 
 def _visible_markdown(text):
     """Mask literal/comment regions while retaining rendered link syntax."""
-    body = _body_after_frontmatter(text)
-    prefix = text[:len(text) - len(body)] if body is not None else ""
-    body = text if body is None else body
+    split = split_frontmatter(text)
+    prefix = text[:len(text) - len(split[1])] if split is not None else ""
+    body = text if split is None else split[1]
     # A partial/existing MOC can begin with an indented list item. For this
     # retirement inventory, indentation is never proof that such links are
     # inert code; flatten only list-marker indentation in this read-only view.
@@ -1329,9 +1289,42 @@ def _same_logical_note(path, owner_path):
                          (owner_path, path, exc)) from exc
 
 
-def _canonical_vault_root(owner_path, attachments):
-    """Infer the vault only when owner and images are the canonical pair."""
-    return _bound_attachment_vault_root(owner_path, attachments)
+def _dependency_needles(old_slug, image_names):
+    """Portable name keys that every reportable target leaves in its note.
+
+    `_markdown_dependency_names` reports a target only when its unquoted
+    basename has the portable key of the old note or of an old image, and
+    masking only blanks text. Blanking can still change what `unquote` sees
+    at a boundary: a closed Obsidian `%%` comment directly before a target
+    (`[[%%c%%Adams_…]]`) is spaces in the full parse, but in the raw text its
+    closing `%` and the slug's first two hex letters decode as one byte
+    escape. `_dependency_prefilter_views` therefore also unquotes a view with
+    `%%` delimiters blanked; code spans, HTML comments and literal blocks end
+    in a backtick or `>`, and fence lines keep their newline, so no other
+    masked region can end in `%`. A note whose views contain none of these
+    keys cannot report anything, and skipping the full comment/code parse
+    for it is what keeps one vault scan cheap. Returns None (parse every
+    note) when a key starts with a combining mark, which NFC could compose
+    with the preceding delimiter (`<` + U+0338 is `≮`).
+    """
+    slug_key = _manifest_name_key(old_slug)
+    needles = {slug_key} | {key for key in map(_manifest_name_key, image_names)
+                            if slug_key not in key}
+    if any(unicodedata.category(key[:1] or "_").startswith("M")
+           for key in needles):
+        return None
+    return needles
+
+
+def _dependency_prefilter_views(text):
+    """Unquoted name-key views the `_dependency_needles` prefilter searches.
+
+    The raw view keeps every percent escape; the second blanks `%%`
+    delimiters as the full parse blanks a closed comment, so a comment's
+    closing `%` cannot swallow the first letters of a following target.
+    """
+    return (_manifest_name_key(urllib.parse.unquote(text)),
+            _manifest_name_key(urllib.parse.unquote(text.replace("%%", "  "))))
 
 
 def _vault_dependency_blockers(owner, old_slug, image_names):
@@ -1339,6 +1332,7 @@ def _vault_dependency_blockers(owner, old_slug, image_names):
     vault = owner.get("vault")
     if vault is None:
         return []
+    needles = _dependency_needles(old_slug, image_names)
     blockers = []
     try:
         paths = _vault_markdown_files(vault)
@@ -1351,6 +1345,11 @@ def _vault_dependency_blockers(owner, old_slug, image_names):
                 blockers.append({"path": os.path.abspath(path),
                                  "error": "cannot scan Markdown dependency: %s" % exc})
                 continue
+            if needles is not None:
+                views = _dependency_prefilter_views(text)
+                if not any(needle in view for view in views
+                           for needle in needles):
+                    continue
             found = _markdown_dependency_names(text, image_names, old_slug)
             if found:
                 blockers.append({"path": os.path.abspath(path),
@@ -1448,7 +1447,10 @@ def _bound_attachment_vault_root(owner_path, attachments):
 
 
 def _owner_namespace(owner_note, slug, attachments):
-    """Validate the note name, its unique Articles slot, and vault binding."""
+    """Validate the note name, its unique Articles slot, and vault binding.
+
+    Returns ``(path, vault)``; ``vault`` is None for a noncanonical folder.
+    """
     path = os.path.abspath(os.fspath(owner_note))
     parent = os.path.dirname(path)
     expected = slug + ".md"
@@ -1464,7 +1466,7 @@ def _owner_namespace(owner_note, slug, attachments):
     # A noncanonical attachment folder returns None and keeps the documented
     # isolated-library behavior. A canonical logical or physical path must bind
     # to this exact Articles directory, and ambiguity raises here.
-    _bound_attachment_vault_root(path, attachments)
+    vault = _bound_attachment_vault_root(path, attachments)
 
     try:
         with os.scandir(parent) as entries:
@@ -1481,14 +1483,14 @@ def _owner_namespace(owner_note, slug, attachments):
             raise ValueError("--owner-note does not identify the unique Articles/%s" % expected)
     except OSError as exc:
         raise ValueError("--owner-note cannot be identified safely: %s" % exc) from exc
-    return path
+    return path, vault
 
 
 def _load_clipping_owner(owner_note, slug, attachments, *, require_vault=False):
     """Snapshot exact clipping-note evidence for a destructive image action."""
     if not owner_note:
         raise ValueError("--owner-note is required to overwrite or rename clipping images")
-    path = _owner_namespace(owner_note, slug, attachments)
+    path, vault = _owner_namespace(owner_note, slug, attachments)
     with tempfile.TemporaryDirectory(prefix="clipping_owner.") as scratch:
         copied = os.path.join(scratch, "owner.md")
         try:
@@ -1504,15 +1506,17 @@ def _load_clipping_owner(owner_note, slug, attachments, *, require_vault=False):
         except (OSError, UnicodeDecodeError) as exc:
             raise ValueError("--owner-note is not a stable UTF-8 clipping note: %s" % exc) from exc
         origin = read_source(copied)
-        if (not _has_current_sources_key(note_text) or not origin
-                or not normalize_url(origin)):
+        # Ownership evidence never comes from frontmatter text itself: the
+        # embeds are read from the body behind a closed leading YAML block.
+        split = split_frontmatter(note_text)
+        try:
+            current = split is not None and "sources" in parse_source_fields(split[0])
+        except ValueError:
+            current = False
+        if not current or not origin or not normalize_url(origin):
             raise ValueError("--owner-note does not have a valid HTTP(S) URL as "
                              "its first current sources item")
-        body = _body_after_frontmatter(note_text)
-        if body is None:
-            raise ValueError("--owner-note has no closed leading YAML frontmatter")
-        embeds = _rendered_embed_basenames(body)
-    vault = _canonical_vault_root(path, attachments)
+        embeds = _rendered_embed_basenames(split[1])
     if require_vault and vault is None:
         raise ValueError(
             "destructive image operations require --attachments to be the "
@@ -1540,7 +1544,7 @@ def _refuse_research_extract(owner, action):
 
 def _validate_clipping_owner(owner):
     """Refuse if either the owner bytes or its portable note slot changed."""
-    path = _owner_namespace(owner["path"], owner["slug"], owner["attachments"])
+    path, _vault = _owner_namespace(owner["path"], owner["slug"], owner["attachments"])
     current = _stable_regular_snapshot(path)
     if current != owner["snapshot"]:
         raise ValueError("--owner-note changed during the image operation; refusing stale ownership")
@@ -2394,10 +2398,12 @@ def _refuse_existing(attachments, slug, index, overwrite, extension=None,
     would still overwrite a `.webp` with a `.png` at the same index — the
     extension-twin this script exists to prevent, in reverse.
 
-    The reprocess flow documented in references/images.md *does* want to
-    replace a figure in place, so the capability is kept behind both explicit
-    `--overwrite` and positive evidence from the exact clipping note that
-    embeds the occupied filename.
+    No clipping-clean workflow replaces an existing attachment
+    (references/images.md: existing attachments are never replaced, and a
+    format change takes a new number), so the refusal points only at the next
+    free number. The low-level replacement capability is kept as defence in
+    depth, behind both explicit `--overwrite` and positive evidence from the
+    exact clipping note that embeds the occupied filename.
     """
     owned = read_manifest(os.path.join(attachments, MANIFEST_FILE))
     prefix = _manifest_name_key(f"{slug}_fig_{index}.")
@@ -2432,9 +2438,9 @@ def _refuse_existing(attachments, slug, index, overwrite, extension=None,
     if hit:
         raise ValueError(
             f"{os.path.basename(hit[0])} already exists in the attachments "
-            "folder — refusing to overwrite it. Pass --overwrite if you are "
-            "deliberately replacing this figure (a reprocess), or --start at "
-            "the next free index if you are adding to the note.")
+            "folder — refusing to overwrite it. Existing attachments are never "
+            "replaced: leave it in place and use the next free figure number "
+            "(--start for stage, --index for place).")
 
 
 def _fetch_to_path(url, tmp, timeout, max_bytes, max_seconds, allow_private,
@@ -2443,7 +2449,7 @@ def _fetch_to_path(url, tmp, timeout, max_bytes, max_seconds, allow_private,
 
     The scheme allowlist, single-resolution address pinning, redirect guard,
     `Content-Length` pre-check, byte cap, wall-clock deadline and truncation
-    check live in one place. `download` and `fetch` are the same transport with
+    check live in one place. `stage` and `fetch` are the same transport with
     different destinations; a second fetch implementation is a guard bypass.
     """
     _validate_transfer_limits(timeout, max_bytes, max_seconds)
@@ -2573,7 +2579,7 @@ def fetch_source(url, out=None, timeout=45, max_bytes=DEFAULT_MAX_BYTES,
     """Download a Lottie JSON/dotLottie source under the transport guards.
 
     Lottie recovery needs the animation's `.json`/`.lottie` on disk
-    before anything can render it, and that is not an image, so `download`
+    before anything can render it, and that is not an image, so `stage`
     cannot carry it. It used to be fetched by a bare `urllib.request.urlopen`
     inside a heredoc the model was told to write — which meant the one fetch in
     this skill that runs on a URL lifted straight out of a hostile page was
@@ -2753,8 +2759,8 @@ _PDF_ONLY_LABEL = re.compile(r"_fig_?(?:S\d|SI\d|ED\d|\d+[.-]\d)", re.I)
 #: nothing in between) behind under the OLD stem while reporting
 #: `{"renamed": 3, "failed": 0}`: a stranded half-set nothing reports and no
 #: re-run reassembles, because the next `rename` looks under the new stem.
-#: `organize.py:294` and `paper_scan.figures_for` both match loosely;
-#: this is the same rule. `_refuse_existing`'s strict `_fig_<N>.*` glob is a
+#: organize.py's `_fig` prefix match and `paper_scan.figures_for` both match
+#: loosely; this is the same rule. `_refuse_existing`'s strict `_fig_<N>.*` glob is a
 #: different question — a PRODUCER checking the exact slot it is about to
 #: write — and stays strict.
 _FIG_GLOB = "_fig*"
@@ -4120,8 +4126,6 @@ continues here`
                    check_url, "https://[2001:4860:4860::8888]:/a.png")
         check("invalid empty and zero ports do not consult the host resolver",
               port_dns.call_count, 0)
-        check("the proxy policy is explicit and does not weaken address pinning",
-              PROXY_POLICY, "direct-only")
         # Loopback, link-local and private space, in the spellings that are
         # meant to slip past a string test. These resolve locally (a numeric
         # literal or /etc/hosts), so no DNS query leaves the machine.
@@ -4890,6 +4894,20 @@ continues here`
                os.path.exists(render_png),
                os.path.exists(os.path.join(att, "Teslo_Cancer_2026_fig_2.png"))),
               (False, False, b"x", True, False))
+        # ...even when the owner embeds both spellings, so ownership passes
+        # and only the slot's extension-twin check stands in the way.
+        twin_owner = current_owner(att, "Teslo_Cancer_2026",
+                                   ("Teslo_Cancer_2026_fig_2.png",))
+        twin_render = touch(os.path.join(tmp, "twin-format.png"), _PNG)
+        replaced = download_one(data_url, att, "Teslo_Cancer_2026", 2,
+                                overwrite=True, owner_note=twin_owner)
+        placed = place_file(twin_render, att, "Teslo_Cancer_2026", 2,
+                            overwrite=True, owner_note=twin_owner)
+        check("an owned second format at one index is still an extension twin",
+              (replaced["ok"], placed["ok"],
+               "different filename or format" in (placed["error"] or ""),
+               os.path.exists(os.path.join(att, "Teslo_Cancer_2026_fig_2.png"))),
+              (False, False, True, False))
         misleading = "data:image/png;base64," + base64.b64encode(
             b"\x00\xffnot an image\x01").decode("ascii")
         nonimage = download_one(misleading, att, "Teslo_Cancer_2026", 70)
@@ -5119,7 +5137,7 @@ continues here`
                             inside_out, vault=boundary_vault)["ok"],
                os.path.lexists(inside_out)), (False, False))
 
-        # `place` is the write half, and it is the SAME guards as `download`.
+        # `place` is the write half, and it is the SAME guards as `download_one`.
         gif = b"GIF89a\x01\x00\x01\x00\x00\xff\x00,"
         render = touch(os.path.join(tmp, "render.gif"), gif)
         res = place_file(render, att, "Teslo_Cancer_2026", 20)
@@ -5137,6 +5155,13 @@ continues here`
         check("place refuses an occupied figure slot, as download does",
               (res["ok"], "already exists" in (res["error"] or "")),
               (False, True))
+        # images.md: existing attachments are never replaced. The refusal an
+        # agent reads mid-reprocess must not steer it to --overwrite.
+        check("the occupied-slot refusal points only at the next free number",
+              ("--overwrite" in (res["error"] or ""),
+               "next free figure number" in (res["error"] or ""),
+               "--index for place" in (res["error"] or "")),
+              (False, True, True))
         check("...and the file that was there is untouched",
               open(os.path.join(att, "Teslo_Cancer_2026_fig_20.gif"),
                    "rb").read(), gif)
@@ -5563,6 +5588,97 @@ continues here`
                    [os.path.lexists(path) for path in extract_new_paths]),
                   (True, [_PNG, _PNG], [False, False]))
 
+        # The two-owner identity guards. Each refusal is pinned by its own
+        # message: without it, a later check would refuse for another reason.
+        _vault, guard_args, _old_paths, guard_new = handoff_case("other-origin")
+        clipping = open(guard_args["new_owner_note"], encoding="utf-8").read()
+        with open(guard_args["new_owner_note"], "w", encoding="utf-8") as fh:
+            fh.write(clipping.replace("/other-origin", "/another-article"))
+        error = failure(lambda: prepare_slug_rename(**guard_args))
+        check("prepare refuses owner notes from different web origins",
+              ("same normalized web origin" in error,
+               [os.path.lexists(path) for path in guard_new]), (True, [False, False]))
+        _vault, guard_args, _old_paths, guard_new = handoff_case("old-in-new")
+        with open(guard_args["new_owner_note"], "a", encoding="utf-8") as fh:
+            fh.write("![[Old_Test_2025_fig_1.png]]\n")
+        check("prepare refuses a new owner that still embeds an old image",
+              "still embeds old image" in failure(
+                  lambda: prepare_slug_rename(**guard_args)), True)
+        check("a handoff needs two distinct slug spellings",
+              "two distinct slug spellings" in failure(
+                  lambda: prepare_slug_rename(**dict(
+                      guard_args, new_slug=guard_args["old_slug"],
+                      new_owner_note=guard_args["owner_note"]))), True)
+        _vault, guard_args, _old_paths, guard_new = handoff_case("one-owner")
+        os.remove(guard_args["new_owner_note"])
+        os.link(guard_args["owner_note"], guard_args["new_owner_note"])
+        check("old and new owner paths cannot be one note",
+              "resolve to the same file" in failure(
+                  lambda: prepare_slug_rename(**guard_args)), True)
+        # A linked new name is itself an old-stem figure to the loose glob, so
+        # it reaches the mapping only when the old note also embeds it.
+        _vault, guard_args, guard_old, guard_new = handoff_case("one-image")
+        os.link(guard_old[0], guard_new[0])
+        with open(guard_args["owner_note"], "a", encoding="utf-8") as fh:
+            fh.write("![[%s]]\n" % os.path.basename(guard_new[0]))
+        check("an old and new image name that are one file are not handed off",
+              ("resolve to the same file" in failure(
+                  lambda: prepare_slug_rename(**guard_args)),
+               os.path.lexists(guard_new[1])), (True, False))
+        guard_vault, guard_args, guard_old, guard_new = handoff_case("dry-blocker")
+        prepare_slug_rename(**guard_args)
+        touch(os.path.join(guard_vault, "reference.md"), b"[[Old_Test_2025]]\n")
+        check("finalize --dry-run refuses while a dependency remains",
+              ("dependencies block" in failure(lambda: finalize_slug_rename(
+                  **guard_args, dry_run=True)), current_bytes(guard_old)),
+              (True, [_PNG, _PNG]))
+
+        # Two portable spellings of Articles/<slug>.md cannot both exist on
+        # every filesystem (macOS folds them), so present them to the guard.
+        _vault, guard_images, _pdfs, guard_owner, _names = \
+            canonical_rename_fixture("twin-owner", "Twin_Owner_2025")
+        real_scandir = os.scandir
+
+        class _Entries(list):
+            def __enter__(self):
+                return iter(self)
+
+            def __exit__(self, *_exc):
+                return False
+
+        def twin_owner_scandir(path=".", *args, **kwargs):
+            # rmtree scans by descriptor; only the owner's folder is doubled.
+            if (isinstance(path, int) or os.path.abspath(path)
+                    != os.path.dirname(os.path.abspath(guard_owner))):
+                return real_scandir(path, *args, **kwargs)
+            with real_scandir(path) as entries:
+                listed = list(entries)
+            return _Entries(listed + [entry for entry in listed
+                                      if entry.name == "Twin_Owner_2025.md"])
+
+        with patch.object(os, "scandir", side_effect=twin_owner_scandir):
+            error = failure(lambda: _load_clipping_owner(
+                guard_owner, "Twin_Owner_2025", guard_images))
+        check("two portable occupants of the owner name make ownership ambiguous",
+              "2 portable name occupants" in error, True)
+
+        # The CLI's `place` requires the canonical vault, and then a render
+        # inside that vault is not scratch, even outside Sources/Images.
+        place_vault, place_images, _pdfs, place_owner, _names = \
+            canonical_rename_fixture("render-in-vault", "Place_Guard_2025")
+        with open(place_owner, "a", encoding="utf-8") as fh:
+            fh.write("![[Place_Guard_2025_fig_2.gif]]\n")
+        os.makedirs(os.path.join(place_vault, "Scratch"))
+        vault_render = touch(os.path.join(place_vault, "Scratch", "render.gif"), gif)
+        res = place_file(vault_render, place_images, "Place_Guard_2025", 2,
+                         owner_note=place_owner, require_vault=True)
+        check("place refuses a --from-file elsewhere inside the vault",
+              (res["ok"], "inside the vault" in (res["error"] or ""),
+               os.path.exists(vault_render),
+               os.path.lexists(os.path.join(place_images,
+                                            "Place_Guard_2025_fig_2.gif"))),
+              (False, True, True, False))
+
         real_publish = publish_new
         _vault, handoff_args, old_paths, new_paths = handoff_case("changed-owner")
 
@@ -5673,6 +5789,73 @@ continues here`
         check("an NFD old pathname retains its exact external dependency",
               (nfd_result["ok"], os.path.isfile(os.path.join(nfd_images, nfd_names[0]))),
               (False, True))
+
+        # The substring prefilter skips the full parse only for notes that
+        # cannot name the old stem, after the same unquote/NFC/casefold.
+        pre_vault, pre_images, _pre_pdfs, pre_owner, _pre_names = \
+            canonical_rename_fixture("prefilter", "Old_Prefilter_2025")
+        os.makedirs(os.path.join(pre_vault, "Wiki"))
+        touch(os.path.join(pre_vault, "Wiki", "unrelated.md"),
+              b"[[Another_Note_2025]] and ![[Another_Note_2025_fig_1.png]]\n")
+        pre_encoded = touch(os.path.join(pre_vault, "Wiki", "encoded.md"),
+                            b"[old](old%5Fprefilter%5F2025.md)\n")
+        pre_cased = touch(os.path.join(pre_vault, "Wiki", "cased.md"),
+                          b"![](OLD_PREFILTER_2025_FIG_1.PNG)\n")
+        parsed = []
+        real_dependency_names = _markdown_dependency_names
+
+        def counting_dependency_names(text, *args, **kwargs):
+            parsed.append(text)
+            return real_dependency_names(text, *args, **kwargs)
+
+        with patch.dict(globals(),
+                        _markdown_dependency_names=counting_dependency_names):
+            pre_report = dependency_status(pre_images, pre_owner,
+                                           "Old_Prefilter_2025")
+        check("the dependency prefilter keeps encoded and case-variant "
+              "references and parses only candidate notes",
+              (pre_report["blockers"], len(parsed)),
+              ([{"path": os.path.realpath(pre_cased),
+                 "references": ["Old_Prefilter_2025_fig_1.png"]},
+                {"path": os.path.realpath(pre_encoded),
+                 "references": ["Old_Prefilter_2025.md"]}], 2))
+        # The full parse blanks a closed `%%` comment; in raw text its closing
+        # `%` plus a slug's first two hex letters (`%Ad`) would decode as one
+        # byte escape and hide the stem from a raw-only prefilter.
+        hex_vault, hex_images, _hex_pdfs, hex_owner, _hex_names = \
+            canonical_rename_fixture("prefilter-hex", "Adams_Robots_2025")
+        os.makedirs(os.path.join(hex_vault, "Wiki"))
+        hex_wiki = touch(
+            os.path.join(hex_vault, "Wiki", "Robots.md"),
+            b"See [[%%old%%Adams_Robots_2025|the article]] and "
+            b"![[%%x%%Adams_Robots_2025_fig_1.png]]\n")
+        hex_link = touch(os.path.join(hex_vault, "Wiki", "Linked.md"),
+                         b"[x](%%c%%Adams_Robots_2025.md) and "
+                         b"[y](<%%c%%Adams_Robots_2025.md>)\n")
+        hex_report = dependency_status(hex_images, hex_owner,
+                                       "Adams_Robots_2025")
+        with patch.dict(globals(), _dependency_needles=lambda *_a: None):
+            hex_full = dependency_status(hex_images, hex_owner,
+                                         "Adams_Robots_2025")
+        check("a hex-letter stem behind a closed %% comment stays a blocker, "
+              "exactly as the full parse reports it",
+              (hex_report["ok"], hex_report["blockers"],
+               hex_report["blockers"] == hex_full["blockers"]),
+              (False,
+               [{"path": os.path.realpath(hex_link),
+                 "references": ["Adams_Robots_2025.md"]},
+                {"path": os.path.realpath(hex_wiki),
+                 "references": ["Adams_Robots_2025.md",
+                                "Adams_Robots_2025_fig_1.png"]}], True))
+        check("the prefilter's %%-blanked view keeps the stem a raw unquote "
+              "would decode away",
+              [("adams_robots_2025" in view) for view in
+               _dependency_prefilter_views("[[%%c%%Adams_Robots_2025]]")],
+              [False, True])
+        check("a key that could compose with a delimiter disables the prefilter",
+              (_dependency_needles("̸Old", []),
+               _dependency_needles("Old", ["old_fig_1.png", "Other_fig_1.png"])),
+              (None, {"old", "other_fig_1.png"}))
 
         pdf_vault, pdf_images, pdf_sources, pdf_owner, pdf_names = \
             canonical_rename_fixture("linked-pdf", "Linked_PDF_2025")
@@ -6044,15 +6227,23 @@ continues here`
                              images_md)), True)
 
         # The Lottie converter: the download and the final placement must go
-        # through this script, and the heredoc must keep to rendering.
+        # through this script, and the shipped renderer must keep to rendering.
         check("the documented Lottie flow fetches through this script",
               "fetch_images.py' fetch" in lottie_md, True)
         check("...and places through this script",
               "fetch_images.py' place" in lottie_md, True)
-        heredoc = re.search(r"<<'PYEOF'\n(.*?)\nPYEOF", lottie_md, re.S)
-        check("the converter heredoc is still extractable", bool(heredoc), True)
-        if heredoc:
-            body = heredoc.group(1)
+        converter = None
+        try:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   "lottie_to_gif.py"), encoding="utf-8") as fh:
+                converter = fh.read()
+        except OSError:
+            pass
+        check("the documented Lottie flow renders with the shipped converter",
+              (converter is not None, "scripts/lottie_to_gif.py" in lottie_md),
+              (True, True))
+        if converter is not None:
+            body = converter
             # its comments explain what it no longer does, so judge the CODE
             code = "\n".join(ln for ln in body.split("\n")
                              if not ln.lstrip().startswith("#"))
@@ -6157,10 +6348,11 @@ continues here`
                     archive.writestr(
                         "manifest.json",
                         '{"version":"1","animations":[{"id":"a"}]}')
-                    archive.writestr("animations/a.json", b" " * 1024)
-                ns["MAX_JSON_BYTES"] = 64
+                    # Valid JSON, so only the cap can refuse it.
+                    archive.writestr("animations/a.json",
+                                     b'{"layers": []' + b" " * 1024 + b"}")
                 raises("a small ZIP cannot expand past the animation JSON cap",
-                       ns["load_anim"], packed)
+                       ns["load_anim"], packed, cap=64)
 
         # Fresh-note downloads must remain outside the vault until a public
         # owner note exists. Exercise the CLI branch end to end with a data URI.
@@ -6196,6 +6388,23 @@ continues here`
         check("stage refuses the vault root itself as an outside scratch directory",
               (equal_code, "outside --vault" in equal_report.get("error", ""),
                os.listdir(equal_vault)), (1, True, []))
+        populated = os.path.join(tmp, "populated-stage")
+        os.mkdir(populated)
+        touch(os.path.join(populated, "Example_Image_2026_fig_1.png"), b"earlier run")
+        populated_stdout = io.StringIO()
+        with patch.object(sys, "stdout", populated_stdout):
+            populated_code = main([
+                "stage", "--vault", stage_vault, "--out-dir", populated,
+                "--slug", "Example_Image_2026", "--start", "2",
+                "data:image/png;base64," +
+                base64.b64encode(_PNG).decode("ascii"),
+            ])
+        check("stage refuses a populated --out-dir without writing into it",
+              (populated_code,
+               "new or empty" in json.loads(
+                   populated_stdout.getvalue()).get("error", ""),
+               sorted(os.listdir(populated))),
+              (1, True, ["Example_Image_2026_fig_1.png"]))
     finally:
         tempfile.tempdir = previous_tempdir
         shutil.rmtree(tmp, ignore_errors=True)
@@ -6236,31 +6445,6 @@ def main(argv=None):
                "address pinning.")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    d = sub.add_parser("download", help="download images into Sources/Images/")
-    d.add_argument("urls", nargs="*")
-    d.add_argument("--attachments", required=True)
-    d.add_argument("--slug", required=True)
-    d.add_argument("--start", type=_positive_index_arg, default=1)
-    d.add_argument("--urls-file", help="file with one URL per line; - for stdin")
-    d.add_argument("--timeout", type=_positive_int_arg, default=45,
-                   help="per-socket-operation timeout, seconds (default 45)")
-    d.add_argument("--max-bytes", type=_positive_int_arg, default=DEFAULT_MAX_BYTES,
-                   help=f"per-image size cap (default {DEFAULT_MAX_BYTES})")
-    d.add_argument("--max-seconds", type=_positive_int_arg, default=DEFAULT_MAX_SECONDS,
-                   help="wall-clock budget for one image, across the whole "
-                        f"transfer (default {DEFAULT_MAX_SECONDS})")
-    d.add_argument("--allow-private-hosts", action="store_true",
-                   help="permit hosts resolving to loopback/link-local/private "
-                        "addresses (off by default; does not enable proxies)")
-    d.add_argument("--overwrite", action="store_true",
-                   help="replace an existing figure only at the same filename; "
-                        "a format change needs a fresh index (reprocess only; off by "
-                        "default, because a wrong --start otherwise destroys "
-                        "the figures already filed under that name)")
-    d.add_argument("--owner-note", required=True,
-                   help="published Articles/<slug>.md whose rendered embed "
-                        "exactly names the attachment")
-
     s = sub.add_parser("stage", help="download validated images to scratch "
                        "outside the vault before the note is published")
     s.add_argument("urls", nargs="*")
@@ -6271,12 +6455,16 @@ def main(argv=None):
     s.add_argument("--slug", required=True)
     s.add_argument("--start", type=_positive_index_arg, default=1)
     s.add_argument("--urls-file", help="UTF-8 file with one URL per line; - for stdin")
-    s.add_argument("--timeout", type=_positive_int_arg, default=45)
-    s.add_argument("--max-bytes", type=_positive_int_arg,
-                   default=DEFAULT_MAX_BYTES)
-    s.add_argument("--max-seconds", type=_positive_int_arg,
-                   default=DEFAULT_MAX_SECONDS)
-    s.add_argument("--allow-private-hosts", action="store_true")
+    s.add_argument("--timeout", type=_positive_int_arg, default=45,
+                   help="per-socket-operation timeout, seconds (default 45)")
+    s.add_argument("--max-bytes", type=_positive_int_arg, default=DEFAULT_MAX_BYTES,
+                   help=f"per-image size cap (default {DEFAULT_MAX_BYTES})")
+    s.add_argument("--max-seconds", type=_positive_int_arg, default=DEFAULT_MAX_SECONDS,
+                   help="wall-clock budget for one image, across the whole "
+                        f"transfer (default {DEFAULT_MAX_SECONDS})")
+    s.add_argument("--allow-private-hosts", action="store_true",
+                   help="permit hosts resolving to loopback/link-local/private "
+                        "addresses (off by default; does not enable proxies)")
 
     f = sub.add_parser("fetch", help="download a validated Lottie JSON/dotLottie "
                        "source; the default is a system temp path")
@@ -6308,8 +6496,11 @@ def main(argv=None):
                         "attachments folder; it is moved, not copied, and its "
                         "extension comes from its bytes, not from its name")
     p.add_argument("--overwrite", action="store_true",
-                   help="replace an existing figure only at the same filename; "
-                        "a format change needs a fresh index (off by default)")
+                   help="guarded low-level capability that no clipping-clean "
+                        "workflow uses (existing attachments are never "
+                        "replaced): replaces an existing figure only at the "
+                        "same filename; a format change needs a fresh index "
+                        "(off by default)")
     p.add_argument("--owner-note", required=True,
                    help="published Articles/<slug>.md whose rendered embed "
                         "exactly names the attachment")
@@ -6381,13 +6572,13 @@ def main(argv=None):
                          ensure_ascii=False))
         return 0 if report["ok"] else 1
 
-    if args.cmd in ("download", "stage"):
+    if args.cmd == "stage":
         urls = list(args.urls)
         if args.urls_file:
             try:
                 urls += _read_urls_file(args.urls_file)
             except (OSError, UnicodeError) as exc:
-                print(json.dumps({"mode": args.cmd, "slug": args.slug,
+                print(json.dumps({"mode": "stage", "slug": args.slug,
                                   "error": "cannot read --urls-file as complete "
                                            "UTF-8: %s" % exc,
                                   "results": [], "downloaded": 0,
@@ -6399,46 +6590,41 @@ def main(argv=None):
         try:
             validate_slug(args.slug)      # once, loudly, not N identical failures
         except ValueError as exc:
-            print(json.dumps({"mode": args.cmd, "slug": args.slug,
+            print(json.dumps({"mode": "stage", "slug": args.slug,
                               "error": str(exc), "results": [], "downloaded": 0,
                               "failed": len(urls)}, indent=2, ensure_ascii=False))
             return 1
-        attachments = args.attachments if args.cmd == "download" else args.out_dir
-        if args.cmd == "stage":
-            if not os.path.isdir(args.vault):
-                print(json.dumps({"mode": "stage", "slug": args.slug,
-                                  "error": "--vault is not a directory: %r" % args.vault,
-                                  "results": [], "downloaded": 0,
-                                  "failed": len(urls)}, indent=2,
-                                 ensure_ascii=False))
-                return 1
-            try:
-                if _at_or_inside_existing_directory(attachments, args.vault):
-                    raise ValueError("--out-dir must be outside --vault")
-                if os.path.lexists(attachments) and (
-                        not os.path.isdir(attachments)
-                        or os.listdir(attachments)):
-                    raise ValueError("--out-dir must be a new or empty unique "
-                                     "scratch directory")
-            except (OSError, ValueError) as exc:
-                print(json.dumps({"mode": "stage", "slug": args.slug,
-                                  "error": str(exc), "results": [],
-                                  "downloaded": 0, "failed": len(urls)},
-                                 indent=2, ensure_ascii=False))
-                return 1
+        staging = args.out_dir
+        if not os.path.isdir(args.vault):
+            print(json.dumps({"mode": "stage", "slug": args.slug,
+                              "error": "--vault is not a directory: %r" % args.vault,
+                              "results": [], "downloaded": 0,
+                              "failed": len(urls)}, indent=2,
+                             ensure_ascii=False))
+            return 1
+        try:
+            if _at_or_inside_existing_directory(staging, args.vault):
+                raise ValueError("--out-dir must be outside --vault")
+            if os.path.lexists(staging) and (
+                    not os.path.isdir(staging)
+                    or os.listdir(staging)):
+                raise ValueError("--out-dir must be a new or empty unique "
+                                 "scratch directory")
+        except (OSError, ValueError) as exc:
+            print(json.dumps({"mode": "stage", "slug": args.slug,
+                              "error": str(exc), "results": [],
+                              "downloaded": 0, "failed": len(urls)},
+                             indent=2, ensure_ascii=False))
+            return 1
         results = []
         for i, url in enumerate(urls, start=args.start):
             results.append(download_one(
-                url, attachments, args.slug, i, timeout=args.timeout,
+                url, staging, args.slug, i, timeout=args.timeout,
                 max_bytes=args.max_bytes, max_seconds=args.max_seconds,
-                allow_private=args.allow_private_hosts,
-                overwrite=(args.overwrite if args.cmd == "download" else False),
-                owner_note=(args.owner_note if args.cmd == "download" else None),
-                require_vault=(args.cmd == "download")))
+                allow_private=args.allow_private_hosts))
         failed = [x for x in results if not x["ok"]]
-        out = {"mode": args.cmd, "slug": args.slug,
-               ("attachments" if args.cmd == "download" else "staging_dir"):
-                   attachments, "results": results,
+        out = {"mode": "stage", "slug": args.slug, "staging_dir": staging,
+               "results": results,
                "downloaded": len(results) - len(failed), "failed": len(failed),
                "next_index": args.start + len(results)}
         print(json.dumps(out, indent=2, ensure_ascii=False))
@@ -6484,7 +6670,7 @@ def main(argv=None):
         print(json.dumps({"mode": "rename", "phase": args.phase,
                           "ok": False, "old_slug": args.old_slug,
                           "new_slug": args.new_slug, "error": str(exc),
-                          "results": [], "renamed": 0, "failed": 1},
+                          "results": []},
                          indent=2, ensure_ascii=False))
         return 1
 

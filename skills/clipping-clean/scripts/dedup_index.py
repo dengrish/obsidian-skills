@@ -2,8 +2,9 @@
 """Build the Articles/ dedup index and check raw clippings against it.
 
 `Articles/` is this skill's output and its sole dedup index: a raw is
-already processed if and only if some note in Articles/ carries its URL in `sources:`
-URL. This script does the mechanical half of step 1 — one pass over Articles/,
+already processed if and only if the first current `sources:` item (legacy
+`source:` only when `sources:` is absent) of some Articles/ note normalizes to
+its URL. This script does the mechanical half of step 1 — one pass over Articles/,
 URL normalization on both sides, and (optionally) a verdict per raw — so the
 scan is a single pass rather than a quadratic one, and the normalization rules
 are applied the same way every run.
@@ -29,6 +30,7 @@ CLI
 
 Importable
     normalize_url(url) -> str
+    split_frontmatter(text) -> (frontmatter_lines, body) | None
     read_source(path)  -> str | None
     is_research_extract(path) -> bool
     is_research_extract_text(text) -> bool
@@ -93,7 +95,7 @@ if _here != _shared:
     _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
-from yaml_scalars import parse_source_fields
+from yaml_scalars import read_note_origin, read_regular_text
 
 
 # Tracking parameters carry no page identity: the same article shared by email,
@@ -224,6 +226,25 @@ def _frontmatter_fence(line):
     return line.rstrip(" \t") == "---"
 
 
+def split_frontmatter(text):
+    """(frontmatter_lines, body) for a closed leading YAML block, else None.
+
+    Leading blank lines are skipped before the opening fence. Fences are
+    tested on ``splitlines()`` lines, and ``body`` is the exact text suffix
+    after the closing fence, so callers can recover the prefix by length.
+    """
+    bare = text.splitlines()
+    opening = next((i for i, line in enumerate(bare) if line.strip()), None)
+    if opening is None or not _frontmatter_fence(bare[opening]):
+        return None
+    for i in range(opening + 1, len(bare)):
+        if _frontmatter_fence(bare[i]):
+            # Both splitlines forms yield the same items, so `i` lines up.
+            return (bare[opening + 1:i],
+                    "".join(text.splitlines(keepends=True)[i + 1:]))
+    return None
+
+
 #: wiki-add's research guide (skills/wiki-add/references/research.md, "Legacy
 #: research extracts") owns this marker. Earlier wiki-add versions placed it on
 #: the first body line after the frontmatter of an agent-written extract;
@@ -234,44 +255,16 @@ def _frontmatter_fence(line):
 RESEARCH_EXTRACT_MARKER = "<!-- obsidian:wiki-add-research-source -->"
 
 
-def _read_regular_text(path):
-    """Decode one regular file strictly as UTF-8 (BOM allowed), else None.
-
-    Follow an explicitly selected read-only alias, but open nonblocking and
-    classify the handle before reading. A `.md` path swapped to a FIFO between
-    a path-stat and ordinary `open()` could otherwise block the whole batch
-    indefinitely while waiting for a writer.
-    """
-    descriptor = None
-    try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            return None
-        with os.fdopen(descriptor, "r", encoding="utf-8-sig",
-                       errors="strict") as fh:
-            descriptor = None                 # fdopen now owns the descriptor
-            return fh.read()
-    except (OSError, UnicodeError, ValueError):
-        return None
-    finally:
-        if descriptor is not None:
-            try:
-                os.close(descriptor)
-            except OSError:
-                pass
+#: The strict nonblocking UTF-8 reader shared with every Articles/ reader.
+_read_regular_text = read_regular_text
 
 
 def is_research_extract_text(text):
     """Whether the body after a closed leading frontmatter opens with the marker."""
-    lines = text.splitlines()
-    opening = next((i for i, line in enumerate(lines) if line.strip()), None)
-    if opening is None or not _frontmatter_fence(lines[opening]):
+    split = split_frontmatter(text)
+    if split is None:
         return False
-    closing = next((i for i in range(opening + 1, len(lines))
-                    if _frontmatter_fence(lines[i])), None)
-    if closing is None:
-        return False
-    first = next((line.strip() for line in lines[closing + 1:] if line.strip()), "")
+    first = next((line.strip() for line in split[1].splitlines() if line.strip()), "")
     return first == RESEARCH_EXTRACT_MARKER
 
 
@@ -284,60 +277,16 @@ def is_research_extract(path):
     return text is not None and is_research_extract_text(text)
 
 
-def read_source(path):
-    """Return a note's origin from its YAML frontmatter, or None.
-
-    The origin is the first item of the `sources:` list (schema 2b);
-    a legacy scalar `source:` is read as a fallback so unmigrated notes stay
-    indexed.
-
-    Two tolerances, both in the direction the guard's asymmetry demands — a note
-    this can't read is invisible to every duplicate check, and the cost of that
-    miss is a polished note silently clobbered:
-
-    * `utf-8-sig`, so a leading BOM (a note that went through an editor that
-      writes one) doesn't turn the opening `---` into `\\ufeff---`;
-    * leading blank lines are skipped before the opening fence is tested.
-
-    Both are still valid YAML frontmatter as far as Obsidian is concerned. The
-    entire note is nevertheless decoded strictly before this metadata can
-    establish ownership; invalid UTF-8 anywhere returns no origin.
-
-    The tolerance stops at the CLOSING fence, which is required. A value is
-    returned only once the frontmatter has been shown to end: an unterminated
-    `---` is not frontmatter to Obsidian, and scanning on into the body found
-    whatever `source:` the article's own prose or a quoted block happened to
-    contain, then indexed the note under it. That is worse than reading nothing
-    — an unreadable note is counted and reported as `unindexable`, while a note
-    indexed under the wrong URL is invisible to its own duplicate check *and*
-    answers somebody else's.
-    """
-    # Decode the whole note before trusting its frontmatter. Reading only
-    # through the closing fence lets invalid bytes in the body hide behind a
-    # valid-looking origin and claim a publication identity.
-    text = _read_regular_text(path)
-    if text is None:
-        return None
-    lines = iter(text.splitlines())
-    for first in lines:                        # skip leading blank lines
-        if first.strip():
-            break
-    else:
-        return None
-    if not _frontmatter_fence(first):
-        return None
-    frontmatter = []
-    try:
-        for raw in lines:
-            if _frontmatter_fence(raw):
-                found = parse_source_fields(frontmatter)
-                if "sources" in found:
-                    return (found["sources"] or [None])[0]
-                return found.get("source") or None
-            frontmatter.append(raw)
-    except (UnicodeError, ValueError):
-        return None
-    return None
+#: A note's origin: `sources:` item 1, else a legacy scalar `source:`.
+#: paper-summarize reads the same Articles/ notes through the same shared
+#: function, so the two skills cannot disagree about which notes they own.
+#: Its tolerances (BOM, CRLF, leading blank lines) keep an editor round-trip
+#: from hiding a note from every duplicate check; its refusals (unterminated
+#: fence, invalid UTF-8, ambiguous keys) keep a note from being indexed under
+#: a URL its prose happens to contain. An unreadable note is reported as
+#: `unindexable`, which is recoverable; a note indexed under the wrong URL
+#: misses its own duplicate check and answers somebody else's.
+read_source = read_note_origin
 
 
 def _md_files(folder):
@@ -1142,6 +1091,17 @@ def run_self_test():
               is_research_extract_text(
                   "---\ntitle: x\n%s\n" % RESEARCH_EXTRACT_MARKER)),
              (True, False, False))
+        crlf_note = "\r\n---\r\nsources:\r\n  - %s\r\n---\r\nBody\r\n" % URL
+        crlf_split = split_frontmatter(crlf_note)
+        case("split_frontmatter returns bare frontmatter lines and the exact body suffix",
+             (crlf_split, crlf_note.endswith(crlf_split[1] if crlf_split else "\0")),
+             ((["sources:", "  - %s" % URL], "Body\r\n"), True))
+        case("split_frontmatter refuses an unterminated block",
+             split_frontmatter("---\nsources:\n  - %s\nBody\n" % URL), None)
+        code, result = scan([vault, "--raw", os.path.join(tmp, "Inbx")])
+        case("a mistyped --raw path is an error, not a silent no-source row",
+             (code, "does not exist" in result.get("error", ""),
+              "checked" in result), (1, True, False))
 
         # Dot-prefixed folders are private stages or hidden content: a staged
         # copy inside Articles/ is not a second owner, and a hidden Inbox

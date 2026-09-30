@@ -75,6 +75,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import concurrent.futures
 import importlib.util
 import inspect
 import io
@@ -931,6 +932,30 @@ def _load_module(path, name, screen=False):
 #: Seconds a single module's probe may take before it is killed and FAILED.
 #: Generous -- the whole point is that a hang becomes a report, not a wedge.
 PROBE_TIMEOUT = 60
+
+#: Most probe or self-test processes the harness runs at once.  Each is a
+#: process of its own that the harness only waits on; the cap (and the CPU
+#: count below it) keeps a small CI runner from being oversubscribed against
+#: the timeouts above.
+PARALLEL_MAX = 8
+
+
+def _parallel_map(fn, items):
+    """``[fn(item) for item in items]``, with the calls in worker threads.
+
+    Only for calls that each run one subprocess and share no state beyond a
+    cache keyed by their own item.  Results come back in ``items`` order, so
+    the report reads the same however the runs interleave; submit the slowest
+    items first.
+    """
+    items = list(items)
+    cpus = getattr(os, "process_cpu_count", os.cpu_count)() or 1
+    workers = min(PARALLEL_MAX, cpus, len(items))
+    if workers < 2:
+        return [fn(item) for item in items]
+    with concurrent.futures.ThreadPoolExecutor(workers) as pool:
+        return list(pool.map(fn, items))
+
 
 #: Calls whose value is a constant table for our purposes.  Deliberately tiny:
 #: everything here builds a regex, a container or a number, and nothing here
@@ -2163,7 +2188,12 @@ def check_slug_single_implementation(rep, conv):
     #     copies are exactly what a syntactic scan cannot see.
     n_scanned = n_producers = n_skill_modules = 0
 
-    for path, text in walk_python_sources():
+    # Probe every module up front, concurrently: each probe is a process of
+    # its own, and this loop (and `scripts-run` after it) reads the cache.
+    sources = list(walk_python_sources())
+    _parallel_map(probe_module, [path for path, _text in sources])
+
+    for path, text in sources:
         n_scanned += 1
         r = rel(path)
         under_skills = os.path.abspath(path).startswith(SKILLS_DIR + os.sep)
@@ -2573,7 +2603,7 @@ NAMING_TAIL_FIRST_CUE = re.compile(
 #: negation ("`…_02_SupLearn_src`, never `…_src_02_SupLearn`") and names the
 #: legacy mis-spelling on purpose, so without this the file that states the
 #: convention is the file that fails it -- the same guard COUNTER_EXAMPLE
-#: gives §1b and FIG_STRICT_NEGATED gives §8a.
+#: gives the shell-quoting check and FIG_STRICT_NEGATED gives §8a.
 NAMING_CLAIM_NEGATED = re.compile(
     r"\b(?:never|not|no|rather than|instead of|avoid|wrong|legacy|used to|"
     r"refuses?|rejects?|re-?renames?|mis-?spell\w*|disagree\w*|don't|do not|"
@@ -2881,9 +2911,11 @@ def check_source_filename(rep, conv):
                    % (relpath, ", ".join(surface)), rel(path))
 
 
-#: A `<placeholder>` inside a shell command.  §1b rule 3 is about exactly this
-#: token: "Every `<placeholder>` standing for a filename, a path or a URL in
-#: these files is written inside `'…'`."
+#: A `<placeholder>` inside a shell command.  INPUT_SAFETY.md rule 3 ("Quote
+#: the placeholder in documentation too", under "Filenames, titles and URLs
+#: are untrusted text") is about exactly this token: every `<placeholder>`
+#: standing for a filename, path or URL in a command example belongs inside
+#: `'…'`.
 SHELL_PLACEHOLDER = re.compile(r"<[A-Za-z][A-Za-z0-9 _.\-/]*>")
 
 #: A fence line, opening or closing, with whatever info string it carries.
@@ -2892,29 +2924,32 @@ SHELL_PLACEHOLDER = re.compile(r"<[A-Za-z][A-Za-z0-9 _.\-/]*>")
 #: a terminated one.
 MD_FENCE_LINE_RE = re.compile(r"^[ \t]{0,3}(?:`{3,}|~{3,})[ \t]*([A-Za-z0-9_+.#-]*)")
 
-#: Fence tags that DECLARE shell.  Reported as its own population: §1b
-#: describes this guard as walking "every ```bash fence", so a tree with none
-#: left means the guard's own anchor is gone.  Relabelling every fence in the
-#: tree to ```zsh used to empty the corpus and still print `1 checked` -- the
-#: check counted violations and never its population.  A ```zsh fence is not
-#: silently readmitted here either: it falls through to the content sniff
-#: below, so coverage does not depend on this vocabulary being complete.
+#: Fence tags that DECLARE shell.  Reported as its own population:
+#: INPUT_SAFETY.md rule 3 names shell fences first among the places it
+#: applies, so a tree with none left means the guard's own anchor is gone.
+#: Relabelling every fence in the tree to ```zsh used to empty the corpus and
+#: still print `1 checked` -- the check counted violations and never its
+#: population.  A ```zsh fence is not silently readmitted here either: it
+#: falls through to the content sniff below, so coverage does not depend on
+#: this vocabulary being complete.
 SHELL_FENCE_TAGS = frozenset(("bash", "sh", "shell", "console"))
 
 #: Fence tags with quoting rules of their own.  A ```python or ```yaml fence
-#: is not what §1b rule 3 is about, and `"<slug>"` is correct Python.
+#: is not what INPUT_SAFETY.md rule 3 is about, and `"<slug>"` is correct
+#: Python.
 NON_SHELL_FENCE_TAGS = frozenset((
     "python", "py", "python3", "yaml", "yml", "json", "jsonl", "markdown",
     "md", "html", "xml", "css", "js", "javascript", "ts", "typescript",
     "latex", "tex", "diff", "patch", "toml", "ini", "sql", "r", "csv", "tsv",
     "make", "makefile", "dockerfile", "regex"))
 
-#: Command words that open a shell command line.  §1b rule 3 reaches any
-#: *command line* in these files, not only the ones that happen to sit in a
-#: tagged fence -- an untagged fence, a ```text fence, an inline `code` span
-#: and a four-space block all teach the model the same template.  So outside a
-#: declared shell fence the corpus is found by content, and this vocabulary is
-#: what "content" means.  Deliberately excludes `for`, `while`, `if`, `test`
+#: Command words that open a shell command line.  INPUT_SAFETY.md rule 3
+#: reaches any command example (shell fences, inline examples, command
+#: fragments), not only the ones that happen to sit in a tagged fence -- an
+#: untagged fence, a ```text fence, an inline `code` span and a four-space
+#: block all teach the model the same template.  So outside a declared shell
+#: fence the corpus is found by content, and this vocabulary is what
+#: "content" means.  Deliberately excludes `for`, `while`, `if`, `test`
 #: and `open`: those are Python keywords and builtins, and the corpus now
 #: includes .py docstrings and comments.
 SHELL_COMMANDS = (
@@ -2956,13 +2991,14 @@ FLAG_FRAGMENT = re.compile(r"\A\s*--[A-Za-z][A-Za-z0-9-]*[= ]\S")
 #: would match English -- `missing <key>: key` is a scanner's finding message,
 #: not a command -- so the placeholder arm requires the placeholder to look
 #: like a file or a path (`<input.pdf>`, `<path/to/page.html>`), which is also
-#: the only kind §1b rule 3 is about.
+#: the only kind INPUT_SAFETY.md rule 3 is about.
 #: One optional bare SUBCOMMAND word may sit between the command and its first
 #: argument shape: `fetch_images.py rename --attachments '<vault>/…'` and
 #: `organize.py split '<pdf>'` are the plugin's own template shapes, and a
 #: pattern requiring the flag/quoted/path token immediately after the command
-#: word read right past them -- §1b's "every command line" claim was false for
-#: exactly the templates that take attacker-adjacent paths.
+#: word read right past them -- the guard's claim to cover every command
+#: example was false for exactly the templates that take attacker-adjacent
+#: paths.
 GENERIC_COMMAND = re.compile(
     r"^[ \t>]*(?:[-*+]|\d+[.)])?[ \t]*(?:\$ +)?(?:sudo +)?"
     r"(?:[A-Za-z_][A-Za-z_0-9]*=\S*[ \t]+)*"
@@ -2974,10 +3010,11 @@ GENERIC_COMMAND = re.compile(
 def _looks_like_shell(fragment):
     """True when `fragment` reads as a shell command line.
 
-    A sniff, not a parser: it only decides whether §1b rule 3 looks at the
-    fragment at all, and every fragment it looks at must still contain a
-    `<placeholder>` before anything is reported.  Being wrong here costs a
-    missed template or a noisy one, never a wrong verdict about quoting.
+    A sniff, not a parser: it only decides whether INPUT_SAFETY.md rule 3
+    looks at the fragment at all, and every fragment it looks at must still
+    contain a `<placeholder>` before anything is reported.  Being wrong here
+    costs a missed template or a noisy one, never a wrong verdict about
+    quoting.
     """
     return bool(SHELL_LINE_START.search(fragment)
                 or SHELL_LINE_PIPED.search(fragment)
@@ -3023,8 +3060,9 @@ LIST_MARKER_RE = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]")
 #: A four-space (or tab) indented code block line.
 INDENTED_CODE_RE = re.compile(r"^(?: {4}|\t)[ \t]*\S")
 
-#: Placeholders that do not stand for a filename, path or URL, so §1b rule 3
-#: does not reach them.  Kept deliberately tiny: every addition is a hole.
+#: Placeholders that do not stand for a filename, path or URL, so
+#: INPUT_SAFETY.md rule 3 does not reach them.  Kept deliberately tiny:
+#: every addition is a hole.
 QUOTING_EXEMPT = {"<N>", "<number>", "<count>", "<n>"}
 
 #: HTML element names that could not be standing in for a path.  These skills
@@ -3041,8 +3079,8 @@ HTML_ELEMENTS_UNAMBIGUOUS = frozenset((
 #: Element names that are also the likeliest REAL placeholders in this plugin,
 #: so a bare name list exempts the very tokens the rule is for: `source:` is a
 #: §2b frontmatter field and the thing every clipping fetch is keyed to, and
-#: §1b names a clipping's *title* as attacker-controlled ("A clipping's title,
-#: author and image URLs come from a page fetched off the open web").  A real
+#: INPUT_SAFETY.md treats a title, author, caption or URL from a source
+#: written by someone else as untrusted text.  A real
 #: `grep -oiE '(…)' <source>` hid behind this list.  These are exempt only in
 #: markup context -- see :func:`_markup_context`.
 HTML_ELEMENTS_AMBIGUOUS = frozenset((
@@ -3068,13 +3106,12 @@ def _markup_context(fragment):
     return bool(_MARKUP_CONTEXT.search(fragment))
 
 
-#: A fragment ENDING in `# NO` is a deliberate counter-example -- §1b teaches
-#: the rule by showing the wrong form once, labelled.  Anchored hard: the old
+#: A fragment ENDING in `# NO` is a deliberate counter-example -- a rule can
+#: be taught by showing the wrong form once, labelled.  Anchored hard: the old
 #: `#\s*NO\b[^\n]*$` matched the marker anywhere with anything after it, so
 #: `mv <old>.pdf <new>.pdf   # NO-op when names match` exempted a whole line
-#: and hid two real placeholders behind an English word.  §1b already
-#: documents the marker as "a line ending in `# NO`"; this is the code
-#: catching up with the prose, not a new rule.
+#: and hid two real placeholders behind an English word.  Only a line ending
+#: in `# NO` is a labelled counter-example.
 COUNTER_EXAMPLE = re.compile(r"#[ \t]*NO[ \t]*$")
 
 #: Where a `'` may OPEN a quoted run: start of fragment, whitespace, or a
@@ -3083,8 +3120,9 @@ COUNTER_EXAMPLE = re.compile(r"#[ \t]*NO[ \t]*$")
 #: <target>.pdf`, or any of the "don't"/"it's"/"user's" that fill these files
 #: -- silently marked the whole rest of the line as quoted and every
 #: placeholder after it as compliant.  A word-internal `'` is an apostrophe,
-#: not a quote.  `\` is in the set for the `'\''` idiom §1b rule 2 teaches,
-#: and `$` for `$'…'`; both are how a quote legitimately opens mid-word.
+#: not a quote.  `\` is in the set for the `'\''` idiom INPUT_SAFETY.md rule 2
+#: teaches, and `$` for `$'…'`; both are how a quote legitimately opens
+#: mid-word.
 QUOTE_OPENERS = set(" \t=$(){}[],:;|&<>!\\")
 
 
@@ -3137,7 +3175,8 @@ def _is_html_tag(token, fragment):
 
 
 def _md_shell_fragments(text):
-    """Yield (lineno, fragment, kind) for the parts of a .md §1b rule 3 reaches.
+    """Yield (lineno, fragment, kind) for the .md parts INPUT_SAFETY.md rule 3
+    reaches.
 
     Four kinds, because the rule is about what a *template* teaches and all
     four teach identically.  Only the first was scanned before, and each of
@@ -3201,11 +3240,12 @@ def _md_shell_fragments(text):
 def _py_shell_fragments(path, text):
     """Yield (lineno, fragment, kind) for a .py file's docstrings and comments.
 
-    §1b rule 3 is about "these files", not about markdown: rule 1 is "prefer
-    the bundled script over the shell", and every one of those scripts
-    documents its CLI in a docstring usage block.  The check skipped every
-    non-.md file, so a `python3 fetch_images.py --attachments <vault>/…` usage
-    line -- the exact template a reader copies -- was outside the corpus.
+    INPUT_SAFETY.md rule 3 is not only about markdown: it names Python
+    comments and docstrings, rule 1 prefers the bundled scripts, and every
+    one of those scripts documents its CLI in a docstring usage block.  The
+    check skipped every non-.md file, so a
+    `python3 fetch_images.py --attachments <vault>/…` usage line -- the exact
+    template a reader copies -- was outside the corpus.
     """
     prose = []
     try:
@@ -3234,34 +3274,36 @@ def _py_shell_fragments(path, text):
 
 
 def check_shell_quoting(rep, conv):
-    """§1b rule 3: a path/filename/URL placeholder is written inside `'…'`.
+    """INPUT_SAFETY.md rule 3: a path/filename/URL placeholder is in `'…'`.
 
-    This is the one §1b rule with no mechanical guard, and it drifted in all
-    five skills -- including pdf-organize, which §1b itself names as "the
-    model for it".  The rule exists because the model copies the template it
-    is shown: a documented `awk '…' <cleaned-note>.md` teaches the unquoted
-    form, and the values that reach these command lines are filenames off the
+    The rule is item 3 under INPUT_SAFETY.md's "Filenames, titles and URLs
+    are untrusted text".  Before this guard it drifted in all five original
+    skills.  The rule exists because the model copies the template it is
+    shown: a documented `awk '…' <cleaned-note>.md` teaches the unquoted form,
+    and the values that reach these command lines are filenames off the
     user's disk and titles and image URLs off a fetched web page.  Inside
     `"…"` the shell still expands `$(…)`, backticks and `${…}`.
 
-    The corpus is every command line in every skill file and in CONVENTIONS.md
-    -- fenced or not, tagged or not, .md or .py.  Scanning only ```bash fences
+    The corpus is every command line in every file walk_plugin_files()
+    yields -- skills, shared docs and scripts, authored plugin READMEs --
+    fenced or not, tagged or not, .md or .py.  Scanning only ```bash fences
     in .md made six shapes of the same violation invisible while the summary
     line said the rule held.
     """
     check = "shell-quoting"
+    input_safety = os.path.join(SHARED_DIR, "INPUT_SAFETY.md")
     violations = 0
     n_tagged, n_sniffed, n_inline, n_py = 0, 0, 0, 0
 
-    # Every file that states plugin contract, not just skills/: §1b says "in
-    # these files", the old check already held CONVENTIONS.md to its own rule,
-    # and a shared/scripts/ usage block teaches a reader exactly what a skill's
-    # does.  walk_plugin_files() excludes tests/, which is the checker.
+    # Every file that states plugin contract, not just skills/: the shared
+    # docs that state the rule are held to it too, and a shared/scripts/ usage
+    # block teaches a reader exactly what a skill's does.  walk_plugin_files()
+    # excludes tests/, which is the checker.
     corpus = list(walk_plugin_files())
 
-    # `n_tagged` is counted here rather than inside the fragment walker: it is
-    # the population §1b's own description of this guard refers to, and it has
-    # to fail on its own when the tree stops declaring its shell fences.
+    # `n_tagged` is counted here rather than inside the fragment walker: shell
+    # fences are the first place INPUT_SAFETY.md rule 3 names, and this count
+    # has to fail on its own when the tree stops declaring its shell fences.
     for path, text in corpus:
         if not path.endswith(".md"):
             continue
@@ -3297,25 +3339,25 @@ def check_shell_quoting(rep, conv):
                 seen.add((path, lineno, token))
                 violations += 1
                 rep.fail(check,
-                         "%s: %s placeholder %s in %s. §1b rule 3: "
+                         "%s: %s placeholder %s in %s. INPUT_SAFETY.md rule 3: "
                          "write it inside '…' -- the model copies the template "
                          "it is shown, and these values are filenames off the "
                          "user's disk and URLs off a fetched page.%s%s"
                          % (rel(path), how, token, kind,
                             "" if how == "bare" else
                             " Double quotes do not stop $(…), backticks or ${…}.",
-                            "" if path != CONVENTIONS else
-                            " CONVENTIONS.md states this rule and then shows it broken."),
+                            "" if path != input_safety else
+                            " INPUT_SAFETY.md states this rule and then shows it broken."),
                          at(path, lineno))
 
-    rep.saw(check, "```bash/sh/shell/console fences (the corpus §1b names)",
-            n_tagged)
+    rep.saw(check, "```bash/sh/shell/console fences (the corpus "
+                   "INPUT_SAFETY.md names)", n_tagged)
     rep.saw(check, "command lines scanned for <placeholder>s", n_sniffed)
     rep.saw(check, "inline `code` spans holding a command line", n_inline)
     rep.saw(check, "shell commands in .py docstrings and comments", n_py)
     if violations == 0:
         rep.ok(check, "every <placeholder> in a command line is single-quoted "
-                      "(§1b rule 3; %d fragments across %d files)"
+                      "(INPUT_SAFETY.md rule 3; %d fragments across %d files)"
                % (n_sniffed, len(corpus)), rel(SKILLS_DIR))
 
 
@@ -5944,6 +5986,15 @@ def check_script_surface(rep, conv):
 #: so the number has to sit well clear of the slowest one in the tree.
 SELFTEST_TIMEOUT = 240
 
+#: Suites that take seconds rather than a fraction of one, started before the
+#: rest so the concurrent run is not left waiting on one of them at the end.
+#: A scheduling hint only: the others follow largest script first, and a
+#: stale entry costs nothing.
+SELFTEST_SLOW_FIRST = frozenset((
+    "skills/stock-research/scripts/market_filings.py",
+    "skills/figure-extract/scripts/batch_extract.py",
+))
+
 #: The self-test function itself: `run_self_test`, `_selftest`, `run_selftest`.
 SELFTEST_FUNC = re.compile(r"^def\s+(_?(?:run_)?self_?tests?\w*)\s*\(", re.M)
 
@@ -5970,32 +6021,34 @@ SELFTEST_MIN_CASES = {
     # Lowered deliberately on 2026-09-26: a verified bloat audit removed
     # redundant cases (each duplicated one that stays) and the Extended Data
     # skip/refuse path in batch_extract.py.
-    # Updated after the full reviews of 2026-09-25 and 2026-09-29 (knowledge
-    # 1.10.0-1.12.0). Raising after growth is the
+    # Updated after the full reviews of 2026-09-25, 2026-09-29 and 2026-09-30
+    # (knowledge 1.10.0 onward). Raising after growth is the
     # mirror duty of the "lowering is a deliberate, reviewable statement" rule
     # below: new regression cases must not disappear with the harness green.
     "shared/scripts/atomic_move.py": 32,
     "shared/scripts/check_parsers.py": 22,
     "shared/scripts/code_typography.py": 20,
-    "shared/scripts/entry_checks.py": 75,
-    "shared/scripts/equation_coverage.py": 179,
-    "shared/scripts/figure_state.py": 13,
+    "shared/scripts/entry_checks.py": 95,
+    "shared/scripts/equation_coverage.py": 191,
+    "shared/scripts/figure_state.py": 14,
     "shared/scripts/introduced_aliases.py": 34,
     "shared/scripts/markdown_tables.py": 42,
     "shared/scripts/naming.py": 228,
     "shared/scripts/note_provenance.py": 12,
     "shared/scripts/organism_names.py": 34,
-    "shared/scripts/entry_structure.py": 166,
-    "shared/scripts/plugin_paths.py": 110,
+    "shared/scripts/entry_structure.py": 172,
+    "shared/scripts/plugin_paths.py": 129,
     "shared/scripts/portable_names.py": 5,
     "shared/scripts/publish_files.py": 25,
     "shared/scripts/plurals.py": 259,
     "shared/scripts/slugify.py": 80,  # device-name restrictions removed
-    "shared/scripts/vault_artifacts.py": 68,
-    "shared/scripts/yaml_scalars.py": 12,
-    "skills/clipping-clean/scripts/dedup_index.py": 173,
-    "skills/clipping-clean/scripts/fetch_images.py": 561,
-    "skills/clipping-clean/scripts/slug.py": 147,  # device-name guards removed
+    "shared/scripts/vault_artifacts.py": 72,
+    "shared/scripts/yaml_scalars.py": 16,
+    "skills/clipping-clean/scripts/body_checks.py": 50,
+    "skills/clipping-clean/scripts/dedup_index.py": 176,
+    "skills/clipping-clean/scripts/fetch_images.py": 575,
+    "skills/clipping-clean/scripts/lottie_to_gif.py": 42,
+    "skills/clipping-clean/scripts/slug.py": 157,  # device-name guards removed
     "skills/feed-collect/scripts/feed_collect.py": 13,
     "skills/feed-collect/scripts/feed_media.py": 4,
     "skills/feed-collect/scripts/rss_source.py": 4,
@@ -6026,20 +6079,20 @@ SELFTEST_MIN_CASES = {
     "skills/stock-research/scripts/market_prices.py": 28,
     "skills/stock-research/scripts/market_public.py": 140,
     "skills/stock-research/scripts/market_screen.py": 25,
-    "skills/paper-summarize/scripts/note_lint.py": 246,
-    "skills/paper-summarize/scripts/paper_scan.py": 174,
-    "skills/paper-summarize/scripts/paper_text.py": 77,
-    "skills/figure-extract/scripts/auto_fig_bbox.py": 349,
-    "skills/figure-extract/scripts/batch_extract.py": 416,
-    "skills/figure-extract/scripts/extract_figures.py": 222,
-    "skills/figure-extract/scripts/render_page.py": 67,
-    "skills/pdf-organize/scripts/organize.py": 388,
+    "skills/paper-summarize/scripts/note_lint.py": 264,
+    "skills/paper-summarize/scripts/paper_scan.py": 183,
+    "skills/paper-summarize/scripts/paper_text.py": 87,
+    "skills/figure-extract/scripts/auto_fig_bbox.py": 364,
+    "skills/figure-extract/scripts/batch_extract.py": 433,
+    "skills/figure-extract/scripts/extract_figures.py": 223,
+    "skills/figure-extract/scripts/render_page.py": 68,
+    "skills/pdf-organize/scripts/organize.py": 415,
     "skills/wiki-add/scripts/backlog.py": 54,
     "skills/wiki-build/scripts/find_collisions.py": 78,
-    "skills/wiki-build/scripts/lint_entry.py": 442,
-    "skills/wiki-build/scripts/review_tree.py": 39,
-    "skills/wiki-build/scripts/vault_index.py": 87,
-    "skills/wiki-lint/scripts/scan_vault.py": 607,
+    "skills/wiki-build/scripts/lint_entry.py": 451,
+    "skills/wiki-build/scripts/review_tree.py": 40,
+    "skills/wiki-build/scripts/vault_index.py": 88,
+    "skills/wiki-lint/scripts/scan_vault.py": 629,
 }
 
 
@@ -6186,6 +6239,7 @@ def check_self_test(rep, conv):
     check = "self-test"
     n = n_ran = 0
     floors_used = set()
+    jobs = []
     for path in bundled_scripts():
         n += 1
         r = rel(path)
@@ -6215,9 +6269,19 @@ def check_self_test(rep, conv):
             continue
         if not fn:
             continue
+        jobs.append((path, ["--test"] if flag else ["selftest"]))
 
-        argv = ["--test"] if flag else ["selftest"]
-        rc, out, timed_out = _run_selftest(path, argv)
+    # Each suite is a process of its own working in its own temporary
+    # directory, so they run concurrently, slowest first; the results are
+    # still reported in bundled_scripts() order.
+    slowest_first = sorted(jobs, key=lambda job: (
+        rel(job[0]) not in SELFTEST_SLOW_FIRST, -len(read(job[0]))))
+    outcomes = dict(zip(
+        [path for path, _argv in slowest_first],
+        _parallel_map(lambda job: _run_selftest(*job), slowest_first)))
+    for path, argv in jobs:
+        r = rel(path)
+        rc, out, timed_out = outcomes[path]
         spelled = " ".join([os.path.basename(path)] + argv)
         if timed_out:
             rep.fail(check,
@@ -7268,10 +7332,22 @@ def check_physical_page(rep, conv):
 
 
 def check_autonomous_wiki_lint(rep, conv):
-    """wiki-lint's semantic pass belongs to the agent, not a human gate."""
+    """wiki-lint's semantic pass belongs to the agent, not a human gate.
+
+    Each pinned file states the autonomy where a reader could otherwise infer
+    a gate.  The retired gate phrasing must not return, in two scopes.
+    wiki-lint's own retired tokens (`item3/user-action`, `read-reviewed`, ...)
+    mean nothing outside it, so they are swept over every canonical source.
+    The generic gate phrases ("require human judgment", "so the user can
+    review", ...) are ordinary English: pdf-organize once offered a read-only
+    plan "so the user can review" it, and an investments disclaimer may
+    rightly say decisions require human judgment.  Those are swept only over
+    the contract ordinary lint reads -- skills/wiki-lint/**, shared/ and the
+    knowledge README -- so another skill's sentence is never reported as a
+    wiki-lint gate.
+    """
     check = "autonomous-wiki-lint"
     pins = [
-        (CONVENTIONS, conv, "An ordinary wiki-lint run is autonomous."),
         (os.path.join(SKILLS_DIR, "wiki-lint", "SKILL.md"), None,
          "This is autonomous agent work"),
         (os.path.join(SKILLS_DIR, "wiki-lint", "references", "qc-items.md"),
@@ -7285,16 +7361,22 @@ def check_autonomous_wiki_lint(rep, conv):
         (os.path.join(SKILLS_DIR, "wiki-lint", "scripts", "scan_vault.py"),
          None, "no user or other human review is required"),
     ]
-    forbidden = (
-        "anything needing a human call",
-        "require human judgment",
+    # Retired wiki-lint vocabulary: no other skill has a reason to use it.
+    retired_tokens = (
         "semantic selection remains manual",
-        "all signed off",
-        "so the user can review",
         "read-reviewed",
         "read-detected",
         "item3/user-action",
     )
+    # Ordinary English that implied a gate only in wiki-lint's contract.
+    gate_phrases = (
+        "anything needing a human call",
+        "require human judgment",
+        "all signed off",
+        "so the user can review",
+    )
+    lint_scope = (os.path.join(SKILLS_DIR, "wiki-lint") + os.sep,
+                  SHARED_DIR + os.sep)
     scanned = 0
     for path, supplied, marker in pins:
         try:
@@ -7304,15 +7386,36 @@ def check_autonomous_wiki_lint(rep, conv):
                      rel(path))
             continue
         scanned += 1
-        if marker not in text:
+        if not _phrase_re(marker).search(text):
             rep.fail(check, "missing autonomous-lint statement %r" % marker,
                      rel(path))
-        for phrase in forbidden:
-            if phrase.lower() in text.lower():
+    tokens = [_phrase_re(phrase, re.I) for phrase in retired_tokens]
+    gates = [_phrase_re(phrase, re.I) for phrase in gate_phrases]
+    swept = in_scope = 0
+    for path, text in canonical_rule_sources():
+        swept += 1
+        for rx in tokens:
+            for m in rx.finditer(text):
                 rep.fail(check,
-                         "ordinary lint again implies a human/manual gate: %r"
-                         % phrase, rel(path))
+                         "retired wiki-lint gate token %r is back; ordinary "
+                         "lint needs no human/manual gate"
+                         % " ".join(m.group(0).split()),
+                         at(path, m.start(), text))
+        if not (path.startswith(lint_scope) or path == KNOWLEDGE_README):
+            continue
+        in_scope += 1
+        scope = ("wiki-lint" if path.startswith(lint_scope[0])
+                 else "the shared contract wiki-lint reads")
+        for rx in gates:
+            for m in rx.finditer(text):
+                rep.fail(check,
+                         "%s again implies a human/manual gate on ordinary "
+                         "lint: %r" % (scope, " ".join(m.group(0).split())),
+                         at(path, m.start(), text))
     rep.saw(check, "autonomous-lint contract files", scanned)
+    rep.saw(check, "canonical sources scanned for retired lint tokens", swept)
+    rep.saw(check, "wiki-lint and shared sources scanned for gate phrasing",
+            in_scope)
     if scanned == len(pins) and not any(
             status == "FAIL" and name == check
             for name, status, _where, _message in rep.results):
@@ -7351,16 +7454,17 @@ def check_review_before_publication(rep, conv):
             continue
         texts[path] = text
         scanned += 1
-        if marker not in text:
+        if not _phrase_re(marker).search(text):
             rep.fail(check, "missing review-before-publication statement %r"
                      % marker, rel(path))
     builder = texts.get(builder_path, "")
-    if "mkdir -p '<wiki-folder>'" in builder:
+    if _phrase_re("mkdir -p '<wiki-folder>'").search(builder):
         rep.fail(check, "wiki-build still creates Wiki during collision "
                  "planning/no-apply", rel(builder_path))
-    review_at = builder.find("### 7. Review and report")
-    publish_at = builder.find("creates new slugs exclusively")
-    if review_at < 0 or publish_at < 0 or publish_at <= review_at:
+    review_at = _phrase_re("### 7. Review and report").search(builder)
+    publish_at = _phrase_re("creates new slugs exclusively").search(builder)
+    if (not review_at or not publish_at
+            or publish_at.start() <= review_at.start()):
         rep.fail(check, "final public publication is not confined to step 7 "
                  "after review", rel(builder_path))
     rep.saw(check, "review/publication contract statements", scanned)
@@ -7371,12 +7475,67 @@ def check_review_before_publication(rep, conv):
                "state before guarded public publication", rel(builder_path))
 
 
+#: A scanner finding key: its checklist item and a hyphenated kind.
+SCANNER_KEY = re.compile(r"item\d+/[a-z][a-z-]*\Z")
+
+
+def _emitted_scanner_keys(text):
+    """``(keys, lines)`` from scan_vault.py's ``problems.append((slug, key,
+    ...))`` rows: the ``itemN/kind`` literals, and the line of any row whose
+    key is not a string literal, which this check cannot read."""
+    keys, computed = set(), []
+    for node in ast.walk(ast.parse(text)):
+        if not (isinstance(node, ast.Call) and node.args
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "append"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "problems"
+                and isinstance(node.args[0], ast.Tuple)
+                and len(node.args[0].elts) > 1):
+            continue
+        key = node.args[0].elts[1]
+        if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+            computed.append(node.lineno)
+        elif SCANNER_KEY.match(key.value):
+            keys.add(key.value)
+    return keys, computed
+
+
+def _scanner_report_keys():
+    """The top-level and ``hierarchy_diagnostic`` keys of a real scan report.
+
+    scan_vault.py runs out of process, on an empty temporary Wiki, like any
+    other code of the tree under test.
+    """
+    with tempfile.TemporaryDirectory(prefix="conv_scan.") as vault:
+        wiki = os.path.join(vault, "Wiki")
+        os.mkdir(wiki)
+        proc = subprocess.run(
+            [sys.executable, SCAN_VAULT, wiki, "--vault", vault],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=PROBE_TIMEOUT, cwd=ROOT,
+            env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+    if proc.returncode != 0:
+        raise ValueError("exited %d: %s" % (
+            proc.returncode,
+            proc.stderr.decode("utf-8", "replace").strip()[:400]))
+    report = json.loads(proc.stdout.decode("utf-8"))
+    return sorted(report), sorted(report["hierarchy_diagnostic"])
+
+
 def check_linter_finding_routes(rep, _conv):
     """New scanner keys stay documented and routed to a concrete action.
 
-    scanner.md documents each key; the file that acts on it routes it:
-    qc-items.md for item findings and worklists, hierarchy.md for Task 3's
-    `unlinked_children`, link-hygiene.md for Task 2's `hub_footer`.
+    The keys are derived, not listed: every ``itemN/kind`` that scan_vault.py
+    emits (and entry_checks.py's shared fixtures name), and every top-level
+    and ``hierarchy_diagnostic`` key of a real scan report.  scanner.md
+    documents each one, and qc-items.md -- which owns wiki-lint's
+    finding-to-action rules -- routes every item key.  A mention in another
+    reference (flashcards.md calling a key a review candidate, say) is not a
+    routed action, so it does not stand in for the qc-items.md row.  The
+    worklists keep their owners: qc-items.md for `card_rivals`, hierarchy.md
+    for Task 3's `unlinked_children`, link-hygiene.md for Task 2's
+    `hub_footer`.
     """
     check = "linter-finding-routes"
     refs = os.path.join(SKILLS_DIR, "wiki-lint", "references")
@@ -7386,46 +7545,57 @@ def check_linter_finding_routes(rep, _conv):
         "hierarchy": os.path.join(refs, "hierarchy.md"),
         "links": os.path.join(refs, "link-hygiene.md"),
     }
+    shared_checks = os.path.join(SHARED_DIR, "scripts", "entry_checks.py")
     try:
         texts = {name: read(path) for name, path in paths.items()}
-    except OSError as exc:
+        emitted, computed = _emitted_scanner_keys(read(SCAN_VAULT))
+        fixtures = _module_constant(read(shared_checks), "SHARED_MUTATIONS")
+    except (OSError, SyntaxError) as exc:
         rep.fail(check, "cannot read the linter finding contract: %s" % exc)
         return
-    pins = (
-        ("scanner", "`item12/equation-typography`"),
-        ("actions", "`item12/equation-typography`"),
-        ("scanner", "`item10/redundant-pipe`"),
-        ("actions", "`item10/redundant-pipe`"),
-        ("scanner", "`item2/parents-null`"),
-        ("scanner", "`item19/brevity-candidate`"),
-        ("actions", "`item19/brevity-candidate`"),
-        ("scanner", "`item19/sr-marker`"),
-        ("actions", "`item19/sr-marker`"),
-        ("scanner", "`item19/hedge-candidate`"),
-        ("actions", "`item19/hedge-candidate`"),
-        ("scanner", "`card_rivals`"),
-        ("actions", "`card_rivals`"),
-        ("scanner", "`spaced_repetition`"),
-        ("scanner", "`unlinked_children`"),
-        ("hierarchy", "`unlinked_children`"),
-        ("scanner", "`hub_footer`"),
-        ("links", "`hub_footer`"),
-    )
+    for line in computed:
+        rep.fail(check, "scan_vault.py emits a finding whose key is not a "
+                 "string literal, so this check cannot hold it documented",
+                 "%s:%d" % (rel(SCAN_VAULT), line))
+    if not emitted:
+        rep.fail(check, "found no `itemN/kind` finding key in scan_vault.py, "
+                 "so no key is held documented", rel(SCAN_VAULT))
+    item_keys = set(emitted)
+    item_keys.update(row[2] for row in fixtures or ()
+                     if isinstance(row, tuple) and len(row) > 2
+                     and isinstance(row[2], str) and SCANNER_KEY.match(row[2]))
+    try:
+        top_keys, hierarchy_keys = _scanner_report_keys()
+    except (OSError, ValueError, KeyError, TypeError,
+            subprocess.TimeoutExpired) as exc:
+        rep.fail(check, "cannot read a scan report's keys from scan_vault.py: "
+                 "%s" % exc, rel(SCAN_VAULT))
+        top_keys = hierarchy_keys = []
+
+    pins = [("scanner", key) for key in sorted(item_keys)]
+    pins += [("actions", key) for key in sorted(item_keys)]
+    pins += [("scanner", key) for key in top_keys + hierarchy_keys]
+    pins += [("actions", "card_rivals"), ("hierarchy", "unlinked_children"),
+             ("links", "hub_footer")]
     found = 0
-    for home, marker in pins:
-        if marker in texts[home]:
+    for home, key in pins:
+        if _phrase_re("`%s`" % key).search(texts[home]):
             found += 1
         else:
             rep.fail(
                 check,
-                "%s no longer documents/routes scanner finding %s"
-                % (os.path.basename(paths[home]), marker),
+                "%s no longer documents/routes scanner finding `%s`"
+                % (os.path.basename(paths[home]), key),
                 rel(paths[home]),
             )
     rep.saw(check, "scanner-key documentation/action pins", found)
-    if found == len(pins):
-        rep.ok(check, "new scanner keys have both detection documentation "
-               "and a routed action", rel(paths["scanner"]))
+    if found == len(pins) and not any(
+            status == "FAIL" and name == check
+            for name, status, _where, _message in rep.results):
+        rep.ok(check, "all %d emitted item keys and %d report keys have "
+               "detection documentation, and item keys a qc-items.md action"
+               % (len(item_keys), len(top_keys) + len(hierarchy_keys)),
+               rel(paths["scanner"]))
 
 
 def check_safe_write_programmatic_api(rep, _conv):
@@ -7464,6 +7634,8 @@ def check_safe_write_programmatic_api(rep, _conv):
         # Reviewed regular files go through the publish_files CLI; only an
         # operation it cannot express keeps a documented atomic_move driver.
         ("builder", "shared/scripts/publish_files.py' publish --vault"),
+        ("linter", "shared/scripts/publish_files.py' snapshot --vault"),
+        ("linter", "shared/scripts/publish_files.py' publish --vault"),
         ("clipping", "shared/scripts/publish_files.py' snapshot --vault"),
         ("clipping", "shared/scripts/publish_files.py' publish --vault"),
         ("clipping", "`snapshot --replace`"),
@@ -7481,7 +7653,7 @@ def check_safe_write_programmatic_api(rep, _conv):
     )
     found = 0
     for owner, marker in markers:
-        if marker in texts[owner]:
+        if _phrase_re(marker).search(texts[owner]):
             found += 1
         else:
             rep.fail(check, "%s no longer documents %r" % (owner, marker),
@@ -7848,13 +8020,24 @@ WRITING_RULE_PINS = (
     (("wiki-lint", "references", "source-backed-corrections.md"), (
         "deepen, expand or enrich",
     )),
+    # A note thin only because its chapter is unbuilt waits for that build.
+    (("wiki-lint", "references", "backlogs.md"), (
+        "is expected and temporary: never propose filling it from that "
+        "unbuilt source",
+    )),
+    (("wiki-lint", "references", "qc-items.md"), (
+        "A gap that only an unbuilt source would fill",
+    )),
 )
 
-#: Retired writing rules: the default against examples and the hedge repair
-#: that narrowed a claim's own wording.  Case-insensitive.
+#: Retired writing rules: the default against examples, the hedge repair
+#: that narrowed a claim's own wording, and the lint route that deepened a
+#: thin note from an unbuilt source.  Case-insensitive.
 WRITING_RULE_RETIRED = (
     "Default to no example",
     "narrowing its own wording",
+    "wiki-build on an unprocessed source",
+    "overview-chapter-only citation",
 )
 
 
@@ -7862,8 +8045,10 @@ def check_writing_rules(rep, _conv):
     """The teaching-quality writing rules stay at their owners.
 
     writing.md, equations.md and merge.md own the rules; wiki-lint's
-    source-backed-corrections.md routes deepen requests.  The two retired
-    rules must not return anywhere in wiki-build or wiki-lint Markdown.
+    source-backed-corrections.md routes deepen requests, and backlogs.md and
+    qc-items.md leave a note thin only for want of an unbuilt source to that
+    source's build.  The retired rules must not return in any canonical
+    source.
     """
     check = "writing-rules"
     held = total = 0
@@ -7885,9 +8070,7 @@ def check_writing_rules(rep, _conv):
     retired = [(phrase, _phrase_re(phrase, re.I))
                for phrase in WRITING_RULE_RETIRED]
     scanned = 0
-    for skill, path, text in walk_skill_files():
-        if skill not in ("wiki-build", "wiki-lint") or not path.endswith(".md"):
-            continue
+    for path, text in canonical_rule_sources():
         scanned += 1
         for phrase, rx in retired:
             for m in rx.finditer(text):
@@ -7895,8 +8078,8 @@ def check_writing_rules(rep, _conv):
                          % (rel(path), " ".join(m.group(0).split())),
                          at(path, m.start(), text))
     rep.saw(check, "writing-rule pins held", held)
-    rep.saw(check, "wiki-build and wiki-lint Markdown files scanned for "
-                   "retired writing rules", scanned)
+    rep.saw(check, "canonical sources scanned for retired writing rules",
+            scanned)
     if held == total and not any(
             status == "FAIL" and name == check
             for name, status, _where, _message in rep.results):

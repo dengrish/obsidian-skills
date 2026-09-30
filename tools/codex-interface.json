@@ -1,0 +1,17 @@
+{
+  "knowledge": {
+    "shortDescription": "Build and maintain an Obsidian knowledge base",
+    "defaultPrompt": [
+      "Organize my PDFs and clean my web clippings.",
+      "Research queued topics and create missing wiki entries.",
+      "Audit my wiki and rebuild its maps of content."
+    ]
+  },
+  "investments": {
+    "shortDescription": "Research buying opportunities and track investment theses",
+    "defaultPrompt": [
+      "Research buying opportunities and write today's investment note.",
+      "Review the outcomes of earlier buying recommendations."
+    ]
+  }
+}

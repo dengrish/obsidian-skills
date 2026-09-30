@@ -30,15 +30,12 @@ same source-verification standard while changing what the six positions mean:
   selection, formal reasoning or development process the source supplies. An
   absent search protocol or experimental method is not a procedure to invent.
 - For a narrative review or book, synthesize the central argument and decisive
-  support instead of cataloguing sections. If it reports a reproducible search
-  and synthesis procedure as its contribution, use empirical mode instead.
+  support instead of cataloguing sections.
 - For a standard, preserve the source's distinction among requirements,
   recommendations and permissions. Explain the rationale and applicability
   conditions without turning a normative rule into an observed effect.
-- A report or thesis uses the mode of its main contribution, not whichever
-  `format` value its frontmatter needs.
 
-## Missing sections or figures
+## Missing sections
 
 - **No abstract heading:** read the first page before deciding the abstract is
   absent. `--sections` searches headings, not all abstract content. Do not
@@ -54,18 +51,11 @@ same source-verification standard while changing what the six positions mean:
   second position from the stated scope, premises, evidence base, reasoning or
   notice grounds. If none is supplied, state that boundary rather than
   manufacturing a method.
-- **No figure files, or a cited figure missing:** follow [intake's figure
-  preparation](../SKILL.md#prepare-the-figure-inventory).
-- **Needed figure still absent:** follow [missing exhibits](figures.md#when-the-figure-you-need-is-not-there).
-  A source-supported prose claim or rebuilt result table can remain; an invented
-  file, another paper's image or a pointer to the missing exhibit cannot.
 
 ## Notices and non-English sources
 
-A retraction, correction, erratum or expression of concern uses [notice
-mode](note-format.md#choose-the-body-mode) and is itself the note's subject. A
-comment that advances an argument instead uses argument/synthesis mode. State
-what changed, by whom, on what grounds and when, identifying the affected
+A [notice](note-format.md#choose-the-body-mode) is itself the note's subject.
+State what changed, by whom, on what grounds and when, identifying the affected
 article by its printed title/DOI where supplied. The first `sources:` item
 remains **this notice's PDF**, not the affected paper. Do not retell withdrawn
 findings as if the notice established them. Attribute the notice's statements

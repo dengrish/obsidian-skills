@@ -20,7 +20,7 @@ $$
 
 **Keep only the conditions without which a reader would misuse the formula in its ordinary setting:** $0 \le \lambda \le 1$ in the convexity inequality, $p \ge 1$ for an Lp norm, $y \in \{0,1\}$ in log loss, population versus sample. A property of the concept is content (softmax outputs sum to one). Do not append exhaustive domain checks, well-definedness guards ("for a nonempty cluster", $m \ge 1$, nonzero denominators or variance, probabilities that sum to one, ranges a parameter's name implies), tie-breaking, clipping tolerances, implementation alternatives, noise or independence assumptions behind a textbook decomposition (an assumption the defining relation itself rests on, such as independence making a likelihood a product, is content), notation devices ($x_0 = 1$), logarithm-base remarks, recaps of symbol conventions, or statements that two distributions range over the same outcomes. State a complexity or bound by its practical takeaway unless the formula itself teaches. Keep an exact definition distinct from numerical approximations when the source makes that distinction relevant; never turn an illustrative formula into an implementation specification.
 
-`lint_entry.py` and wiki-lint's scanner share `equation_coverage.py`, a conservative floor of equation-coverage and boilerplate candidates; each is a review candidate, never an order.
+`lint_entry.py` and wiki-lint's scanner share `equation_coverage.py`, a conservative floor of equation-coverage, boilerplate and two-relations-in-one-display candidates; each is a review candidate, never an order.
 
 These rules govern the body; card line 1 follows its [own rule](flashcards-and-emphasis.md#line-1-equation-coverage).
 

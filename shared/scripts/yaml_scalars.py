@@ -1,13 +1,17 @@
 """Read the single-line YAML scalars used in vault frontmatter, using stdlib.
 
 This is not a YAML document parser. Callers own fences, keys, list placement
-and schema checks; unsupported structures and malformed scalars raise
-ValueError rather than supplying a guessed title or source identity. Non-null
-plain values stay strings so each schema can validate its own booleans, dates
-and numbers.
+and schema checks, with one exception: `read_note_origin` finds a note's own
+leading frontmatter, because clipping-clean and paper-summarize read each
+other's `Articles/` notes and must agree about which notes they own.
+Unsupported structures and malformed scalars raise ValueError rather than
+supplying a guessed title or source identity. Non-null plain values stay
+strings so each schema can validate its own booleans, dates and numbers.
 """
 import argparse
+import os
 import re
+import stat
 
 
 def strip_comment(raw):
@@ -257,8 +261,119 @@ def parse_source_fields(frontmatter_lines):
     return result
 
 
+def read_regular_text(path):
+    """Decode one regular file strictly as UTF-8 (BOM allowed), else None.
+
+    Follow an explicitly selected read-only alias, but open nonblocking and
+    classify the handle before reading. A `.md` path swapped to a FIFO between
+    a path-stat and ordinary `open()` could otherwise block the whole batch
+    indefinitely while waiting for a writer.
+    """
+    descriptor = None
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            return None
+        with os.fdopen(descriptor, "r", encoding="utf-8-sig",
+                       errors="strict") as fh:
+            descriptor = None                 # fdopen now owns the descriptor
+            return fh.read()
+    except (OSError, UnicodeError, ValueError):
+        return None
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+def _origin_fence(line):
+    """True for a column-zero ``---`` with only trailing spaces or tabs.
+
+    YAML block-scalar content is indented, so an indented rule inside a
+    ``|`` value must not end the frontmatter before a later ``sources:`` key.
+    """
+    return line.rstrip(" \t") == "---"
+
+
+def read_note_origin(path):
+    """A note's origin, or None: the first current ``sources`` item.
+
+    A legacy scalar ``source`` is read only when ``sources`` is absent, so
+    unmigrated notes keep their identity; an empty or null ``sources`` never
+    falls through to it. clipping-clean and paper-summarize both read the
+    shared ``Articles/`` notes through this one function, because a note that
+    the two skills read differently is either invisible to one skill's
+    duplicate check or claimed by both.
+
+    The tolerances are the ones an editor round-trip produces and Obsidian
+    still reads as frontmatter: a BOM, CRLF line endings, leading blank lines
+    before the opening fence, and trailing spaces or tabs on a fence. The
+    whole note must decode strictly as UTF-8 before its metadata can establish
+    ownership, so invalid bytes in the body cannot hide behind a valid-looking
+    origin.
+
+    A CLOSING fence is required. An unterminated ``---`` is not frontmatter,
+    and reading on into the body would take whatever ``source:`` the prose or
+    a quoted block contains. Missing, non-regular, undecodable, unterminated
+    and malformed notes all return None, which callers report rather than
+    guess.
+    """
+    text = read_regular_text(path)
+    if text is None:
+        return None
+    lines = text.splitlines()
+    opening = next((i for i, line in enumerate(lines) if line.strip()), None)
+    if opening is None or not _origin_fence(lines[opening]):
+        return None
+    closing = next((i for i in range(opening + 1, len(lines))
+                    if _origin_fence(lines[i])), None)
+    if closing is None:
+        return None
+    try:
+        fields = parse_source_fields(lines[opening + 1:closing])
+    except ValueError:
+        return None
+    if "sources" in fields:
+        return (fields["sources"] or [None])[0]
+    return fields.get("source") or None
+
+
+#: Origin-ownership fixtures: the frontmatter text between the fences and the
+#: origin `read_note_origin` must return. The self-test runs them, and the
+#: compatibility suite runs them against pdf-organize's own rename-ownership
+#: reader, which must agree on which notes are about ``ORIGIN_CASE_PDF``.
+ORIGIN_CASE_PDF = "[[Doe_Study_2025.pdf]]"
+ORIGIN_CASE_URL = "https://example.org/observed#section"
+ORIGIN_CASES = (
+    ('sources:\n  - "%s"\nsource: "%s"' % (ORIGIN_CASE_URL, ORIGIN_CASE_PDF),
+     ORIGIN_CASE_URL),
+    ('"sources": ["%s"]' % ORIGIN_CASE_URL, ORIGIN_CASE_URL),
+    ('"so\\u0075rces": ["%s"]' % ORIGIN_CASE_PDF, ORIGIN_CASE_PDF),
+    ("'sources':\n- '%s' # origin" % ORIGIN_CASE_PDF, ORIGIN_CASE_PDF),
+    ('tags:\n- "#misc"\nsources:\n- "%s"' % ORIGIN_CASE_PDF, ORIGIN_CASE_PDF),
+    ('"sources": ["%s"]\nsources:\n  - "%s"' % (ORIGIN_CASE_URL, ORIGIN_CASE_PDF),
+     None),
+    ('"sources": ["%s"]\nsource: "%s"' % (ORIGIN_CASE_URL, ORIGIN_CASE_PDF),
+     ORIGIN_CASE_URL),
+    ('sources: "%s"\nsource: "%s"' % (ORIGIN_CASE_URL, ORIGIN_CASE_PDF), None),
+    ('sources: []\nsource: "%s"' % ORIGIN_CASE_PDF, None),
+    ('sources:\n  - "%s"\n  - [nested]' % ORIGIN_CASE_PDF, None),
+    ('sources:\n  - "%s"\n  - null' % ORIGIN_CASE_PDF, None),
+    ('"source": "%s"\nsource: "%s"' % (ORIGIN_CASE_URL, ORIGIN_CASE_PDF), None),
+    ('? sources\n: ["%s"]\nsource: "%s"' % (ORIGIN_CASE_URL, ORIGIN_CASE_PDF),
+     None),
+    ('<<: *other\nsource: "%s"' % ORIGIN_CASE_PDF, None),
+    ('source: "%s"' % ORIGIN_CASE_PDF, ORIGIN_CASE_PDF),
+)
+
+
 def self_test():
     import io
+    import shutil
+    import tempfile
+    import threading
     import unittest
 
     class ScalarTests(unittest.TestCase):
@@ -385,9 +500,93 @@ def self_test():
                 with self.subTest(lines=lines), self.assertRaises(ValueError):
                     parse_source_fields(lines)
 
+    class NoteOriginTests(unittest.TestCase):
+        def setUp(self):
+            self.tmp = tempfile.mkdtemp(prefix="yaml_scalars_selftest.")
+            self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+        def note(self, name, body):
+            path = os.path.join(self.tmp, name)
+            with open(path, "wb") as fh:
+                fh.write(body if isinstance(body, bytes) else body.encode("utf-8"))
+            return path
+
+        def test_origin_ownership_cases(self):
+            for number, (metadata, expected) in enumerate(ORIGIN_CASES):
+                with self.subTest(metadata=metadata):
+                    path = self.note("case-%d.md" % number, "---\n" + metadata +
+                                     "\n---\nOrdinary note body.\n")
+                    self.assertEqual(read_note_origin(path), expected)
+
+        def test_editor_round_trip_forms_keep_their_origin(self):
+            url = "https://example.com/a"
+            for label, body in (
+                    ("BOM", "﻿---\nsource: %s\n---\n" % url),
+                    ("CRLF", "---\r\nsources:\r\n  - %s\r\n---\r\nbody\r\n" % url),
+                    ("BOM and CRLF", "﻿---\r\nsource: %s\r\n---\r\n" % url),
+                    ("leading blank lines", "\n \n---\nsource: %s\n---\n" % url),
+                    ("trailing fence whitespace",
+                     "--- \t\nsources:\n  - %s\n---  \n" % url),
+                    ("indented block-scalar rule",
+                     '---\nsource: "https://stale.example/"\nnotes: |\n  ---\n'
+                     'sources:\n  - "%s"\n---\n' % url)):
+                with self.subTest(label=label):
+                    path = self.note(label.replace(" ", "-") + ".md", body)
+                    self.assertEqual(read_note_origin(path), url)
+
+        def test_only_a_closed_leading_block_is_frontmatter(self):
+            url = "https://example.com/a"
+            for label, body in (
+                    ("unterminated", "---\nsource: %s\n\nprose\n" % url),
+                    ("body rule does not reopen",
+                     "---\ntitle: x\n---\n\n---\nsource: %s\n---\n" % url),
+                    ("prose before the fence",
+                     "Intro\n---\nsource: %s\n---\n" % url),
+                    ("indented opening fence", " ---\nsource: %s\n---\n" % url),
+                    ("no frontmatter", "just prose\n"),
+                    ("empty note", ""),
+                    ("no origin key", "---\ntitle: x\n---\n"),
+                    ("empty legacy origin", "---\nsource:\n---\n"),
+                    ("nested origin",
+                     "---\ncitation:\n  source: %s\n---\n" % url)):
+                with self.subTest(label=label):
+                    path = self.note(label.replace(" ", "-") + ".md", body)
+                    self.assertIsNone(read_note_origin(path))
+
+        def test_unreadable_notes_establish_nothing(self):
+            text = "﻿---\nsource: https://example.com/a\n---\n"
+            self.assertEqual(read_regular_text(self.note("bom.md", text)),
+                             text[1:])
+            for label, body in (
+                    ("invalid frontmatter",
+                     b'---\ntitle: \xff\nsources:\n  - "https://example.com/a"\n---\n'),
+                    ("invalid body",
+                     b'---\nsources:\n  - "https://example.com/a"\n---\nbody \xff\n')):
+                with self.subTest(label=label):
+                    path = self.note(label.replace(" ", "-") + ".md", body)
+                    self.assertIsNone(read_regular_text(path))
+                    self.assertIsNone(read_note_origin(path))
+            for path in (os.path.join(self.tmp, "missing.md"), self.tmp):
+                with self.subTest(path=path):
+                    self.assertIsNone(read_regular_text(path))
+                    self.assertIsNone(read_note_origin(path))
+            if hasattr(os, "mkfifo"):
+                fifo = os.path.join(self.tmp, "capture-fifo.md")
+                os.mkfifo(fifo)
+                got = []
+                reader = threading.Thread(
+                    target=lambda: got.append((read_regular_text(fifo),
+                                               read_note_origin(fifo))),
+                    daemon=True)
+                reader.start()
+                reader.join(5)
+                self.assertFalse(reader.is_alive(), "a FIFO blocked the reader")
+                self.assertEqual(got, [(None, None)])
+
     output = io.StringIO()
-    result = unittest.TextTestRunner(stream=output).run(
-        unittest.defaultTestLoader.loadTestsFromTestCase(ScalarTests))
+    loader = unittest.defaultTestLoader
+    result = unittest.TextTestRunner(stream=output).run(unittest.TestSuite(
+        loader.loadTestsFromTestCase(case) for case in (ScalarTests, NoteOriginTests)))
     failed = len(result.failures) + len(result.errors)
     if failed:
         print(output.getvalue())

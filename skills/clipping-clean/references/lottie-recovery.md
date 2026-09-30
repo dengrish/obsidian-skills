@@ -2,7 +2,7 @@
 
 - [Check the source and renderer](#check-the-source-and-renderer)
 - [Fetch, render and place](#fetch-render-and-place)
-- [Scratch renderer recipe](#scratch-renderer-recipe)
+- [Render the GIF](#render-the-gif)
 - [Caption or fall back honestly](#caption-or-fall-back-honestly)
 
 Read only when the [media inventory](completeness-audit.md#inventory-and-match-media)
@@ -16,11 +16,12 @@ wired up client-side without an exposed source takes the fallback below; do not
 execute the source page's code to discover it.
 
 First check whether the reprocessed note already embeds this animation's GIF,
-anchored by position and the caption marker “animation converted to GIF”. Keep
-that embed instead of converting a duplicate. A changed slug follows the normal
+anchored by position and the caption marker “animation converted to GIF” (in
+any letter case). Keep that embed instead of converting a duplicate. A changed
+slug follows the normal
 [approved attachment rename](duplicates-and-reprocessing.md#publish-an-approved-replacement).
 
-Use headless Chromium with lottie-web for this recipe: the labels and embedded
+The renderer uses headless Chromium with lottie-web: the labels and embedded
 glyphs must render, not just the shapes. A browser-free conversion that drops
 text is not an acceptable substitute. Detect the toolchain before installing:
 
@@ -43,8 +44,8 @@ text is not an acceptable substitute. Detect the toolchain before installing:
 
 Create a fresh child directory under the active run's `<scratch>` for each
 conversion; `<figure-scratch>` below means that child's absolute path. Fetch and publication use
-`fetch_images.py`; the embedded renderer writes only scratch files. It uses a
-fixed renderer-library URL but refuses animation-supplied network requests and
+`fetch_images.py`; the renderer writes only scratch files. It uses a fixed
+renderer-library URL but refuses animation-supplied network requests and
 JavaScript expressions. External image/font dependencies take the fallback,
 not an unguarded network fetch.
 
@@ -61,10 +62,10 @@ not an unguarded network fetch.
 
    Use the returned local `path`. A nonzero exit means the source could not be
    fetched; report its `error` and take the fallback.
-2. Write the renderer recipe below to scratch and run it on that local source.
-   Give each run a new output pathname; the recipe creates it exclusively and
-   refuses an occupant left by another run. Inspect the output: a blank-image
-   detector cannot prove every label is correct.
+2. [Render the GIF](#render-the-gif) from that local source. Give each run a
+   new output pathname; the renderer creates it exclusively and refuses an
+   occupant left by another run. Inspect the output: a blank-image detector
+   cannot prove every label is correct.
 3. Keep the verified GIF at its scratch path and put its planned
    `<slug>_fig_<N>.gif` embed in the reviewed draft. After
    [publication](../SKILL.md#6-publish-safely) has safely published that note,
@@ -80,218 +81,15 @@ not an unguarded network fetch.
    Use the returned filename. `place` moves the scratch asset after safe
    publication. If it fails, inspect the reported cause; do not assume every
    failure is a collision or pass `--overwrite` to bypass it. The published
-   owner note must already contain that exact filename-only embed. An
-   intentional replacement must be this reprocess's own figure, pass
-   `--overwrite` in addition to the required owner note, and obey
-   [image rules](images.md).
+   owner note must already contain that exact filename-only embed.
 
-## Scratch renderer recipe
+## Render the GIF
 
-Write this recipe to `<figure-scratch>/lottie_to_gif.py`. It uses an
-already-available `lottie.min.js` beside that scratch script or
-its fixed CDN URL, the sole permitted network request in the renderer. Keep the
-`cat` command, Python body and `PYEOF` terminator flush-left when copying.
+Run the shipped renderer once per figure on the fetched or supplied **local**
+source, writing a new pathname in that figure's scratch child:
 
 ```bash
-cat > '<figure-scratch>/lottie_to_gif.py' <<'PYEOF'
-import json, io, sys, os, zipfile, tempfile, math, re
-LOTTIE_CDN = "https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.12.2/lottie.min.js"
-MAX_JSON_BYTES = 25 * 1024 * 1024
-def animation_path(manifest):
-    version = manifest.get("version") if isinstance(manifest, dict) else None
-    if not isinstance(version, str) or version.split(".", 1)[0] not in ("1", "2"):
-        raise ValueError("dotLottie manifest version must be 1 or 2")
-    major = version.split(".", 1)[0]
-    animations = manifest.get("animations")
-    if not isinstance(animations, list) or not animations:
-        raise ValueError("dotLottie manifest has no animations")
-    ids = []
-    for item in animations:
-        animation_id = item.get("id") if isinstance(item, dict) else None
-        if (not isinstance(animation_id, str)
-                or not re.fullmatch(r"[A-Za-z0-9._ -]+", animation_id)
-                or animation_id in (".", "..") or animation_id in ids):
-            raise ValueError("dotLottie animation id is missing, duplicate or unsafe")
-        ids.append(animation_id)
-    if major == "2":
-        initial = manifest.get("initial")
-        if initial is not None and not isinstance(initial, dict):
-            raise ValueError("dotLottie v2 initial must be an object")
-        selected = initial.get("animation") if initial else None
-        folder = "a"
-    else:
-        selected = manifest.get("activeAnimationId"); folder = "animations"
-    selected = selected or ids[0]
-    if not isinstance(selected, str) or selected not in ids:
-        raise ValueError("dotLottie initial animation is not in the manifest")
-    return f"{folder}/{selected}.json"
-def reject_duplicate_members(z):
-    seen, duplicates = set(), set()
-    for info in z.infolist():
-        if info.filename in seen:
-            duplicates.add(info.filename)
-        seen.add(info.filename)
-    if duplicates:
-        raise ValueError("dotLottie ZIP has duplicate member names: %s" %
-                         ", ".join(repr(name) for name in sorted(duplicates)))
-def load_anim(src):
-    if zipfile.is_zipfile(src):
-        with zipfile.ZipFile(src) as z:
-            reject_duplicate_members(z)
-            manifest_info = z.getinfo("manifest.json")
-            if manifest_info.file_size > MAX_JSON_BYTES:
-                raise ValueError("dotLottie manifest exceeds the size cap")
-            with z.open(manifest_info) as source:
-                manifest_raw = source.read(MAX_JSON_BYTES + 1)
-            if len(manifest_raw) > MAX_JSON_BYTES:
-                raise ValueError("dotLottie manifest exceeds the size cap")
-            manifest = json.loads(manifest_raw.decode("utf-8-sig"))
-            inner = animation_path(manifest)
-            info = z.getinfo(inner)
-            if info.file_size > MAX_JSON_BYTES:
-                raise ValueError("expanded animation JSON exceeds the size cap")
-            with z.open(info) as source:
-                raw = source.read(MAX_JSON_BYTES + 1)
-            if len(raw) > MAX_JSON_BYTES:
-                raise ValueError("expanded animation JSON exceeds the size cap")
-            return json.loads(raw.decode("utf-8-sig"))
-    if os.path.getsize(src) > MAX_JSON_BYTES:
-        raise ValueError("animation JSON exceeds the size cap")
-    with open(src, encoding="utf-8-sig", errors="strict") as source:
-        return json.load(source)
-def validate_anim(anim):
-    if not isinstance(anim, dict):
-        raise ValueError("animation must be a JSON object")
-    for field in ("w", "h", "fr"):
-        value = anim.get(field)
-        if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
-            raise ValueError("animation %s must be positive and finite" % field)
-    if int(anim.get("op", 0)) <= int(anim.get("ip", 0)):
-        raise ValueError("animation has no frames")
-    for asset in anim.get("assets", []):
-        if asset.get("p") and (not asset["p"].startswith("data:image/") or asset.get("u")):
-            raise ValueError("external image assets require the poster/link fallback")
-    for font in anim.get("fonts", {}).get("list", []):
-        if font.get("fPath") and not font["fPath"].startswith("data:"):
-            raise ValueError("external fonts require the poster/link fallback")
-    stack = [anim]
-    while stack:
-        value = stack.pop()
-        if isinstance(value, dict):
-            if isinstance(value.get("x"), str):
-                raise ValueError("animation expressions are not executed")
-            stack.extend(value.values())
-        elif isinstance(value, list):
-            stack.extend(value)
-def render_request_allowed(url):
-    return url == LOTTIE_CDN
-def json_for_script(obj):
-    # Embedding JSON inside a <script> is not the same as writing JSON. Every
-    # string field of this animation is text an author on the open web chose,
-    # and a "</script>" in one of them closes the tag early: the rest of the
-    # animation becomes markup and whatever the author put after it becomes a
-    # second script this page runs. Escaping "<" as \u003c is still valid JSON,
-    # decodes to the same string, and cannot close a tag; ensure_ascii covers
-    # U+2028/U+2029, which are line terminators to a JS parser.
-    return json.dumps(obj, ensure_ascii=True).replace("<", "\\u003c")
-def lottie_js():
-    local = os.path.join(os.path.dirname(__file__), "lottie.min.js")
-    if os.path.exists(local):
-        with open(local, encoding="utf-8", errors="strict") as source:
-            return "<script>" + source.read() + "</script>"
-    return '<script src="' + LOTTIE_CDN + '"></script>'
-def publish_scratch(tmp, out):
-    # `out` is still scratch, but it may belong to another run. Create it
-    # exclusively, stream complete bytes, and remove only the inode this run
-    # created if copying or verification fails.
-    created = None
-    try:
-        with open(tmp, "rb") as source, open(out, "xb") as target:
-            st = os.fstat(target.fileno())
-            created = (st.st_dev, st.st_ino)
-            while True:
-                block = source.read(1024 * 1024)
-                if not block:
-                    break
-                target.write(block)
-            target.flush(); os.fsync(target.fileno())
-        if os.path.getsize(out) != os.path.getsize(tmp):
-            raise OSError("published scratch GIF failed size verification")
-    except Exception:
-        if created is not None:
-            try:
-                current = os.lstat(out)
-                if (current.st_dev, current.st_ino) == created:
-                    os.unlink(out)
-            except FileNotFoundError:
-                pass
-        raise
-    os.unlink(tmp)
-def main(src, out):
-    from playwright.sync_api import sync_playwright
-    from PIL import Image, ImageStat
-    anim = load_anim(src)
-    validate_anim(anim)
-    w, h = anim["w"], anim["h"]; fps = anim["fr"]
-    ip, op = int(anim.get("ip", 0)), int(anim["op"]); n_total = op - ip
-    scale = min(1.0, 960 / max(w, h))
-    W, H = max(1, int(w * scale)), max(1, int(h * scale))
-    step = max(1, -(-n_total // 150))
-    html = f"""<!doctype html><html><head><meta charset="utf-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'">
-    <style>html,body{{margin:0;padding:0;background:#fff}}#c{{width:{W}px;height:{H}px}}</style>
-    {lottie_js()}</head><body><div id="c"></div><script>
-    window.anim = lottie.loadAnimation({{container:document.getElementById("c"),
-      renderer:"svg", loop:false, autoplay:false, animationData:{json_for_script(anim)},
-      rendererSettings:{{progressiveLoad:false, preserveAspectRatio:"xMidYMid meet"}}}});
-    window.ready=false; window.anim.addEventListener("DOMLoaded",()=>{{window.ready=true;}});
-    </script></body></html>"""
-    frames = []
-    with sync_playwright() as p:
-        executable = os.environ.get("OBSIDIAN_CHROMIUM_EXECUTABLE")
-        b = p.chromium.launch(**({"executable_path": executable} if executable else {}))
-        context = b.new_context(viewport={"width": W, "height": H}, service_workers="block")
-        context.route("**/*", lambda route: route.continue_()
-                      if render_request_allowed(route.request.url) else route.abort())
-        pg = context.new_page()
-        pg.set_content(html); pg.wait_for_function("window.ready === true", timeout=30000)
-        c = pg.locator("#c")
-        for i in range(0, n_total, step):
-            # goToAndStop takes a frame relative to the composition's in-point.
-            # lottie-web adds ip itself; adding it here makes nonzero-ip clips blank.
-            pg.evaluate(f"window.anim.goToAndStop({i}, true)")
-            frames.append(Image.open(io.BytesIO(c.screenshot(omit_background=False))).convert("RGBA"))
-        b.close()
-    pal = []
-    for fr in frames:
-        bg = Image.new("RGBA", fr.size, (255, 255, 255, 255)); bg.alpha_composite(fr)
-        pal.append(bg.convert("P", palette=Image.ADAPTIVE, colors=256))
-    fd, tmp = tempfile.mkstemp(prefix="lottie_render.", suffix=".gif")
-    os.close(fd)
-    pal[0].save(tmp, save_all=True, append_images=pal[1:],
-                duration=max(20, int(1000 / fps * step)), loop=0, disposal=2, optimize=True)
-    mid = ImageStat.Stat(frames[len(frames)//2].convert("L"))
-    if mid.stddev[0] < 2:
-        os.remove(tmp); print("BLANK render (stddev<2) - discarding", file=sys.stderr); return 2
-    if os.path.getsize(tmp) > 8_000_000:
-        os.remove(tmp); print("GIF too large - discarding", file=sys.stderr); return 3
-    publish_scratch(tmp, out)
-    print(f"OK {out}  {os.path.getsize(out)} bytes  {len(frames)} frames  mid-stddev={mid.stddev[0]:.1f}")
-    return 0
-if __name__ == "__main__":
-    try:
-        sys.exit(main(sys.argv[1], sys.argv[2]))
-    except Exception as e:
-        print(f"FAILED: {type(e).__name__}: {e}", file=sys.stderr)
-        sys.exit(1)
-PYEOF
-```
-
-Run once per figure on the fetched/supplied **local** source and a temporary
-destination outside the vault:
-
-```bash
-python3 '<figure-scratch>/lottie_to_gif.py' '<lottie_src .json/.lottie path>' '<figure-scratch>/lottie_render.gif'
+python3 '<skill>/scripts/lottie_to_gif.py' '<lottie_src .json/.lottie path>' '<figure-scratch>/lottie_render.gif'
 ```
 
 Paths are untrusted data too: use argument lists or the [shared quoting rules](../../../shared/INPUT_SAFETY.md#filenames-titles-and-urls-are-untrusted-text).
@@ -299,30 +97,40 @@ The renderer detects JSON versus dotLottie ZIP, bounds expanded JSON, renders on
 white, caps the longest side at 960px and frames at about 150, and rejects a
 blank middle frame or GIF over 8 MB. For dotLottie v1/v2 it loads the manifest's
 active/initial animation, or the first manifest animation when none is selected;
-ZIP member order cannot substitute a theme or unrelated JSON file. It never
-writes into `Sources/Images/`. Failure means unconverted, even if an intermediate
-file exists.
+ZIP member order cannot substitute a theme or unrelated JSON file. Its only
+permitted network request is the pinned lottie-web build; pass
+`--lottie-js '<local lottie.min.js>'` to use an already-available copy of that
+build instead. It refuses, before reading the animation or starting a browser,
+an output path inside the vault (at or below a folder holding `.obsidian/`) or
+one that already exists, so it never writes into `Sources/Images/`. Failure
+means unconverted, even if an intermediate file exists.
 
 ## Caption or fall back honestly
 
 A converted GIF follows the [recovered-image placement rules](completeness-audit.md#recover-missing-images).
-Caption it as a conversion, for example `*Figure N. <description> (animation
-converted to GIF; view the live version at the source).*`, and report it.
+Caption it with the audit's fallback-chain caption, keeping a figure label only
+if the source uses one, then append the conversion marker: `*<caption>
+(animation converted to GIF; view the live version at the source).*`. With no
+supported caption, the marker alone is the caption: `*(Animation converted to
+GIF; view the live version at the source.)*`. The marker is always required;
+report the conversion.
 
 If no reachable source, permitted renderer or valid output is available:
 
 1. Recover the associated **static poster**, if one exists, through the guarded
-   image pipeline. Its caption must say it is a still: `*Figure N. <description>
-   (static frame; the source shows this as an animation).*`. Never recover both
-   poster and GIF as separate figures.
+   image pipeline. Its caption must say it is a still, by the same pattern:
+   `*<caption> (static frame; the source shows this as an animation).*`, or
+   `*(Static frame; the source shows this as an animation.)*` with no supported
+   caption. Never recover both poster and GIF as separate figures.
 2. Otherwise keep one actionable placeholder at that location:
    `<!-- source has a Lottie animation here, not converted in this environment;
    lottie source: <redacted Lottie locator>; view at <capture URL> -->`. Use the
    fetch helper's redacted `url` field for the Lottie locator in both the
-   placeholder and report. If the helper was unavailable, omit credentials,
-   query, fragment and any inline data payload as required by
-   [image failure reporting](images.md#failures-and-readability). Record the
-   conversion failure; the retained raw capture is the retry record.
+   placeholder and report. If the helper never fetched the Lottie source, so
+   there is no redacted `url` field, keep the literal
+   `<redacted Lottie locator>` label and never copy the raw URL, as
+   [image failure reporting](images.md#failures-and-readability) does. Record
+   the conversion failure; the retained raw capture is the retry record.
 
 Do not invent a poster or pass an arbitrary animation frame off as the full
 figure. Reprocessing keeps an equivalent existing placeholder rather than

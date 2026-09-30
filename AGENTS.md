@@ -27,8 +27,10 @@ in `shared/SUGGESTIONS.md`.
 Canonical skill sources live in `skills/`; shared conventions and helpers live
 in `shared/`. Author each manifest in
 `plugins/<name>/.claude-plugin/plugin.json`, along with its README and any
-plugin-specific requirements file. All other files under `plugins/` are
-generated: edit their canonical inputs, never the generated copies.
+plugin-specific requirements file; author its Codex short description and
+default prompts in its entry of `tools/codex-interface.json`. All other files
+under `plugins/` are generated: edit their canonical inputs, never the
+generated copies.
 `tools/build_plugin.py` builds both self-contained plugin trees, their Codex
 manifests, and `knowledge.plugin` / `investments.plugin`. The shared marketplace
 definition remains `.claude-plugin/marketplace.json`.

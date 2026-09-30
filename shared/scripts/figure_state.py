@@ -17,13 +17,15 @@ import sys
 import tempfile
 import unicodedata
 
-# Keep the sibling publication helper available when a harness imports this
-# file directly by path instead of executing it as a script.
+# Keep the sibling publication and identity helpers available when a harness
+# imports this file directly by path instead of executing it as a script.
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 import atomic_move
+# Portable identity without changing a sidecar's original spelling.
+from portable_names import portable_identity as figure_identity
 
 
 MANIFEST_FILE = ".figure-manifest.tsv"
@@ -47,7 +49,8 @@ REVIEW_HEADER = (
     "# One per line: <pdf_stem><TAB><figure label>[<TAB>note]\n"
     "# A flagged bbox listed here is reported as reviewed, not as needing\n"
     "# review, so a crop you have already checked (or fixed explicitly) stops\n"
-    "# coming back every run. Delete a line to un-review it.\n"
+    "# coming back every run. To un-review a crop, run batch_extract.py on\n"
+    "# that PDF with --unmark-reviewed STEM:FIG; do not hand-edit this file.\n"
 )
 
 
@@ -61,11 +64,6 @@ class SidecarConflict(FileExistsError):
 
 
 _ABSENT_SNAPSHOT = (False, None, None, None, None)
-
-
-def figure_identity(name):
-    """Portable identity without changing a sidecar's original spelling."""
-    return unicodedata.normalize("NFC", name).casefold()
 
 
 def manifest_key(manifest, filename):
@@ -374,6 +372,16 @@ def self_test():
             for bad in ("Doe:2 extra\n", "no separator\n", "Doe: 2 extra\n"):
                 with self.assertRaises(ValueError):
                     parse_reviewed(bad)
+
+        def test_review_header_points_to_the_guarded_unmark(self):
+            # A fresh ledger's own guidance names --unmark-reviewed, never an
+            # unguarded hand edit, and stays comments the parser ignores.
+            self.assertEqual(parse_reviewed(REVIEW_HEADER), set())
+            self.assertIn("--unmark-reviewed", REVIEW_HEADER)
+            self.assertIn("do not hand-edit", REVIEW_HEADER)
+            self.assertNotIn("Delete a line", REVIEW_HEADER)
+            self.assertTrue(all(line.startswith("#")
+                                for line in REVIEW_HEADER.splitlines()))
 
         def test_hand_written_review_allows_space_after_colon(self):
             # The spelling --mark-reviewed accepts ('Doe: 2') stays a valid

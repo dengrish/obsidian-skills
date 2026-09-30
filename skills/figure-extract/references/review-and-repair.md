@@ -32,7 +32,7 @@ files, and review findings. Do not merge these into one extraction count.
 | No extractable text | Inspect the PDF; it may be a scan without OCR. Use available OCR on a [readable working copy](#readable-working-copies) if appropriate, following runtime tool guidance. |
 | Could not open or fully read PDF (including encrypted) | Report the file and error. An encrypted PDF needs a [readable working copy](#readable-working-copies). Corrupt downloads, HTML saved as PDF, or damaged pages need a valid source, not automatically OCR. Other PDFs continue and completed crops retain ownership records, but the run fails. |
 | Zero pages | Report an empty PDF separately; OCR cannot supply missing pages. |
-| Stem collisions | Neither colliding source is extracted or adopted, even with `--overwrite`. A canonical `<vault>/Sources/Images/` output makes this a whole-vault PDF-basename check even when `--src` names one file or a smaller subtree; arbitrary external outputs use the explicit source scope. When another vault file shares the basename, report both paths and give the user the [shared-basename remedy](../../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first). For two colliding sources outside the vault, give one a unique stem with `pdf-organize` run without `--vault`. |
+| Stem collisions | Neither colliding source is extracted or adopted, even with `--overwrite`. A canonical `<vault>/Sources/Images/` output makes this a whole-vault PDF-basename check even when `--src` names one file or a smaller subtree; arbitrary external outputs use the explicit source scope. When another vault file shares the basename, report both paths and give the user the [shared-basename remedy](../../../shared/CONVENTIONS.md#shared-pdf-basenames). For two colliding sources outside the vault, give one a unique stem with `pdf-organize` run without `--vault`. |
 
 The [visual-review scope defined in the main workflow](../SKILL.md#3-inspect-the-summary-and-verify-crops)
 still applies when no diagnostic fires. Top-of-page side-caption exceptions
@@ -45,16 +45,18 @@ reviews.
 ### Extended Data and Supplementary figures
 
 Under the default prefix, Extended Data and Supplementary figures share
-`_fig_S<N>`. To switch a PDF after a default run, remove the review row, if
-any, of each S label whose collision kept an Extended Data caption; other S
-rows protect Supplementary repairs. Then run the rerun command the summary
-prints (that PDF alone with `--ed-prefix ED --overwrite-supplementary`, which
-replaces only unmarked `_fig_S<N>` crops), and compare every PNG it lists
-under `wrote:` with its page. A
-`_fig_S<N>` that no Supplementary caption claims, such as one reported as
-identical to `_fig_ED<N>`, is a leftover Extended Data crop: report it as
-mislabelled and delete it only with authorization. Later runs keep
-`--ed-prefix ED` for a PDF whose manifest records `_fig_ED<N>` crops.
+`_fig_S<N>`. To switch a PDF after a default run, run the rerun command the
+summary prints: that PDF alone with `--ed-prefix ED --overwrite-supplementary`
+and an `--unmark-reviewed` for each S label whose collision kept an Extended
+Data caption. It replaces only unmarked `_fig_S<N>` crops, so other S marks
+keep protecting Supplementary repairs. Compare every PNG it lists under
+`wrote:` with its page. A `_fig_S<N>` that no Supplementary caption claims,
+such as one reported as identical to `_fig_ED<N>`, is a leftover Extended Data
+crop: report it as mislabelled and delete it only with authorization. Later
+runs, folder sweeps included, keep `--ed-prefix ED` for a PDF whose manifest
+records `_fig_ED<N>` crops or whose `Sources/Images/` holds an unrecorded
+`<stem>_fig_ED<N>.png`; adopt such a legacy crop only after comparing it with
+its page.
 
 ## Readable working copies
 
@@ -75,10 +77,11 @@ once its crops are verified.
 - `.figure-review.txt` records `<pdf_stem><TAB><label>` marks for crops that
   were checked. A mark is keyed to the label, not the bbox: it silences
   warnings for that existing verified crop and protects it from a later broad
-  batch `--overwrite` until its row is removed. A review mark is not an
-  ownership claim or permission to overwrite; remove the exact ledger row
-  deliberately before deleting the crop or asking automatic detection to
-  replace it.
+  batch `--overwrite` until the mark is removed. A review mark is not an
+  ownership claim or permission to overwrite; remove it deliberately with a
+  batch run of that PDF and `--unmark-reviewed '<pdf_stem>:<label>'` before
+  deleting the crop or asking automatic detection to replace it. Do not
+  hand-edit the ledger: one malformed line blocks every later run.
 
 A malformed, protected, or symlinked manifest blocks before extraction or
 review marks are written. A late save failure makes the run fail; resolve it
@@ -93,10 +96,10 @@ those crops even from batch `--overwrite`. Compare the affected figures with
 the revised source. Use [explicit cropping](#set-and-verify-an-explicit-crop)
 with `--overwrite` for a targeted refresh, then inspect the new PNGs; that
 command deliberately replaces verified crops even when they have review marks.
-For a chosen automatic refresh, first remove only the affected review rows,
-then run batch `--overwrite` with `--src` set to the revised PDF, then review
-its outputs again. A verified skip alone does not establish that figures
-reflect a replaced PDF.
+For a chosen automatic refresh, run batch `--overwrite` with `--src` set to
+the revised PDF and one `--unmark-reviewed` per affected reviewed figure, then
+review its outputs again. A verified skip alone does not establish that
+figures reflect a replaced PDF.
 
 For both extraction commands, occupancy is semantic and portable, including
 with `--overwrite`: every inventoried `<stem>_fig_<label>.*` spelling shares
@@ -131,15 +134,24 @@ cannot be combined with `--overwrite`; migrate ownership first, then run any
 requested re-extraction separately. Readable figure PNGs still participate in
 duplicate detection independently of ownership.
 
+A recorded crop whose bytes changed after extraction (an image optimizer or
+a hand edit) is never skipped, replaced or adopted; report it. With the
+user's authorization, either remove the changed PNG and rerun that PDF, or
+delete its manifest line and adopt it after comparing it with its page.
+Change the manifest only as a guarded vault edit: record it with
+`<plugin>/shared/scripts/publish_files.py snapshot`, delete just that line in
+a `<scratch>` draft (keep the TAB separators), and `publish` the draft against
+that record.
+
 A new explicit crop records its digest, creating the manifest when necessary.
 Inspect legacy images and explicitly adopt each confirmed `STEM:FIG` before
 repairing an existing crop. An explicit repair of a recorded crop updates its
 digest so a later batch recognizes the repaired output.
 
 Keep the default review ledger for canonical `Sources/Images/` output; if a
-custom `--review-file` is used, repeat it whenever adding marks. It does not
-relax image ownership, and the organizer's rename never updates it: re-mark
-renamed figures in a normal run with that ledger. See
+custom `--review-file` is used, repeat it whenever adding or removing marks.
+It does not relax image ownership, and the organizer's rename never updates
+it: re-mark renamed figures in a normal run with that ledger. See
 [conventions §8](../../../shared/CONVENTIONS.md#8-figure-naming-and-sourcesimages)
 for the shared figure contract.
 
@@ -223,7 +235,9 @@ unnumbered or colliding exhibit unextracted and report it.
        --crop '5:2:80,140,520,360' --overwrite
    ```
 
-   With canonical output, this command applies the same whole-vault basename
+   Pass the batch's non-default `--dpi` too, so the repair renders like its
+   siblings; this command takes no `--keep-frame`, because the coordinates
+   define the crop. With canonical output, this command applies the same whole-vault basename
    gate and remedies as `batch_extract.py` before it reads the ownership
    sidecar or writes a crop. For an encrypted source,
    use a [readable working copy](#readable-working-copies). Arbitrary external

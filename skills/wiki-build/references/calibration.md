@@ -6,13 +6,11 @@ Scope: discipline calls that the [tag rule](writing.md#tags) and the ownership (
 
 ## The governing test
 
-**Pick the single discipline where the entity is canonically defined or primarily classified**, not every discipline that uses it. The test for each: in which discipline would this entity appear in a textbook table of contents as a primary topic (not as an applied example)? **The "uses" trap** is that rule in one word: a discipline that *uses* an entity does not own it.
+Apply [§3's ownership test](../../../shared/CONVENTIONS.md#3-the-discipline-tag-enum). **The "uses" trap** is that test in one word: a discipline that *uses* an entity does not own it. These calls illustrate it:
 
 - **Cas9** → `#biology` (a molecular biology system, even though its headline uses are medical).
 - **Thermodynamic entropy** → `#physics` (other fields use the concept; physics is the canonical home).
 - **Herbert Simon** → one home chosen from the entry's main treatment, such as `#economics` for bounded rationality; other fields remain prose relationships.
-
-When no specific discipline owns the entity, use `#misc` alone. Never leave Wiki tags blank or combine misc with a specific discipline.
 
 ## History owns named historical instances
 

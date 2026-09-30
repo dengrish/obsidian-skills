@@ -31,6 +31,9 @@ __all__ = [
     "CARD_SEPARATORS",
     "DEFINITION_SEPARATOR",
     "DISABLED_SEPARATOR",
+    "FLASH_HEAD_CANON_RE",
+    "FLASH_HEAD_LINE_RE",
+    "RELATED_HEAD_LINE_RE",
     "answer_surface_match",
     "body_opens_with_prose",
     "count_sentences",
@@ -42,10 +45,12 @@ __all__ = [
     "source_stem",
     "strip_code",
     "strip_fenced",
+    "blank_fences",
     "strip_indented",
     "ends_with_sentence_period",
     "flashcard_brevity_hints",
     "flashcard_hedge_hints",
+    "first_letter_ci_equal",
     "flashcard_line1_faults",
     "flashcard_line1_markup",
     "math_title_plain_text",
@@ -145,6 +150,24 @@ def _escaped_at(text, offset):
     return (offset - start) % 2 == 1
 
 
+_MASK_FENCE_LINE_RE = re.compile(r"^(\s*)(`{3,}|~{3,})(.*)$")
+_MASK_INDENTED_RE = re.compile(r"^(?: {4}|\t)")
+_MASK_LIST_ITEM_RE = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:\s|$)")
+_MASK_BACKTICKS_RE = re.compile(r"`+")
+# Inline code may cross a soft newline, but the block parser ends its
+# paragraph before a blank line or a new structural block.
+_MASK_CODE_BOUNDARY_RE = re.compile(
+    r"\n(?:[ \t]*\n| {0,3}(?:#{1,6}(?:[ \t]|$)|>[ \t]*|"
+    r"`{3,}|~{3,}|(?:[-*+]|\d{1,9}[.)])[ \t]+|"
+    r"(?:-{3,}|_{3,}|\*{3,}|={2,}|\$\$)[ \t]*(?:\n|$)))")
+# The only characters at which the masking state can change.
+_MASK_NEXT_RE = re.compile(r"[`<%\n]")
+# The linters mask the same body many times per run; the view is a pure
+# function of its arguments, so repeats reuse it (oldest entry evicted first).
+_MASK_CACHE = {}
+_MASK_CACHE_SIZE = 1024
+
+
 def mask_body_comments(text, *, mask_code=False, mask_unclosed_comments=True):
     """Blank HTML/Obsidian comments, retaining every character/line offset.
 
@@ -158,7 +181,17 @@ def mask_body_comments(text, *, mask_code=False, mask_unclosed_comments=True):
     an unmatched opener and its text visible, while still masking actual code
     and any independently closed comments.
     """
-    text = text or ""
+    key = (text or "", bool(mask_code), bool(mask_unclosed_comments))
+    masked = _MASK_CACHE.get(key)
+    if masked is None:
+        if len(_MASK_CACHE) >= _MASK_CACHE_SIZE:
+            del _MASK_CACHE[next(iter(_MASK_CACHE))]
+        masked = _MASK_CACHE[key] = _mask_body_comments(*key)
+    return masked
+
+
+def _mask_body_comments(text, mask_code, mask_unclosed_comments):
+    """The uncached view :func:`mask_body_comments` returns."""
     chars = list(text)
     def blank(start, end):
         for pos in range(start, end):
@@ -169,18 +202,20 @@ def mask_body_comments(text, *, mask_code=False, mask_unclosed_comments=True):
     previous_nonblank = ""
     previous_blank = True
     indented_code = False
-    while index < len(text):
+    length = len(text)
+    while index < length:
         if index == 0 or text[index - 1] == "\n":
             end = text.find("\n", index)
-            end = len(text) if end < 0 else end
+            end = length if end < 0 else end
             line = text[index:end]
-            match = re.match(r"^(\s*)(`{3,}|~{3,})(.*)$", line)
+            match = _MASK_FENCE_LINE_RE.match(line)
             if fence:
                 if (match and match[2][0] == fence[0]
                         and len(match[2]) >= len(fence)
                         and not match[3].strip()
                         and len(match[1].expandtabs(4)) <= fence_indent):
                     fence = None
+                    previous_blank = True  # a closed fence ends its block
                 if mask_code:
                     blank(index, end)
                 index = end + 1
@@ -192,10 +227,9 @@ def mask_body_comments(text, *, mask_code=False, mask_unclosed_comments=True):
                 index = end + 1
                 previous_blank = False
                 continue
-            indented = bool(re.match(r"^(?: {4}|\t)", line))
+            indented = bool(_MASK_INDENTED_RE.match(line))
             in_list = bool(
-                re.match(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:\s|$)",
-                         previous_nonblank)
+                _MASK_LIST_ITEM_RE.match(previous_nonblank)
                 or previous_nonblank[:1].isspace())
             if indented_code and not line.strip():
                 index = end + 1
@@ -210,27 +244,22 @@ def mask_body_comments(text, *, mask_code=False, mask_unclosed_comments=True):
             previous_blank = not line.strip()
             if line.strip():
                 previous_nonblank = line
-        if text[index] == "`" and not _escaped_at(text, index):
-            match = re.match(r"`+", text[index:])
-            run = match[0]
-            # Inline code may cross a soft newline, but the block parser
-            # ends its paragraph before a blank line or a new structural block.
-            # A later unrelated tick must not hide either one.
-            remainder = text[index + len(run):]
-            boundary = re.search(
-                r"\n(?:[ \t]*\n| {0,3}(?:#{1,6}(?:[ \t]|$)|>[ \t]*|"
-                r"`{3,}|~{3,}|(?:[-*+]|\d{1,9}[.)])[ \t]+|"
-                r"(?:-{3,}|_{3,}|\*{3,}|={2,}|\$\$)[ \t]*(?:\n|$)))",
-                remainder)
-            code_region = remainder[:boundary.start()] if boundary else remainder
-            close = re.search(r"(?<!`)" + re.escape(run) + r"(?!`)", code_region)
+        char = text[index]
+        if char == "`" and not _escaped_at(text, index):
+            run = _MASK_BACKTICKS_RE.match(text, index)[0]
+            # A later unrelated tick must not hide a paragraph boundary, so
+            # the closing run is sought only before the next one.
+            start = index + len(run)
+            boundary = _MASK_CODE_BOUNDARY_RE.search(text, start)
+            close = re.compile(r"(?<!`)" + re.escape(run) + r"(?!`)").search(
+                text, start, boundary.start() if boundary else length)
             if close is not None:
-                end = index + len(run) + close.end()
+                end = close.end()
                 if mask_code:
                     blank(index, end)
                 index = end
                 continue
-            index += len(run)
+            index = start
             continue
         opener = ("<!--" if text.startswith("<!--", index) else
                   "%%" if text.startswith("%%", index) else None)
@@ -241,11 +270,18 @@ def mask_body_comments(text, *, mask_code=False, mask_unclosed_comments=True):
                 index += len(opener)
                 continue
             # An unfinished body comment hides the remaining rendered body.
-            end = len(text) if end < 0 else end + len(closer)
+            end = length if end < 0 else end + len(closer)
             blank(index, end)
             index = end
             continue
-        index += 1
+        if char == "\n":
+            index += 1
+            continue
+        # Skip to the next character that can open a span or start a line.
+        following = _MASK_NEXT_RE.search(text, index + 1)
+        index = following.start() if following else length
+        if following and text[index] == "\n":
+            index += 1
     return "".join(chars)
 
 
@@ -1107,6 +1143,38 @@ _FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 _INDENT_CODE = re.compile(r"^(?: {4}|\t)")
 _LIST_ITEM = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:\s|$)")
 
+#: A Flashcards heading, anchored to a whole line, as Obsidian renders one:
+#: at most 3 leading spaces, ``##`` or ``###``, spaces or tabs, the word, and
+#: an optional closing ``#`` run. A substring search matched the tail of a
+#: ``### Flashcards`` heading and a mid-line mention of the word. TOLERANT on
+#: purpose: every such spelling shows the reader a Flashcards section, so
+#: treating a noncanonical one as MISSING prescribed adding a second section
+#: beside it. wiki-build's vault_index/lint_entry and wiki-lint's scanner read
+#: this one rule, so they agree on what counts as the section; callers match
+#: it against a fence-masked line (a heading shown in a listing is a sample).
+FLASH_HEAD_LINE_RE = re.compile(
+    r"^ {0,3}#{2,3}[ \t]+Flashcards(?:[ \t]+#+)?[ \t]*$")
+#: The canonical spelling of that heading. A tolerated variant is a present
+#: section whose heading needs fixing in place, never a missing section.
+FLASH_HEAD_CANON_RE = re.compile(r"^## Flashcards[ \t]*$")
+#: A rendered ``**Related:**`` footer line, also inside a blockquote, with at
+#: most 3 leading spaces. Its canonical form is checked separately.
+RELATED_HEAD_LINE_RE = re.compile(
+    r"^ {0,3}(?:>[ \t]*)?\*\*Related:\*\*(?:[ \t]*.*)?$")
+
+
+def first_letter_ci_equal(a, b):
+    """Equality that is case-insensitive on the FIRST letter only.
+
+    The one case carve-out items 7, 16 and 19 allow between a written subject
+    and the canonical title: ``ArXiv`` names ``arXiv``, ``Arxiv`` does not.
+    """
+    if a is None or b is None or len(a) != len(b):
+        return False
+    if not a:
+        return True
+    return a[0].lower() == b[0].lower() and a[1:] == b[1:]
+
 
 def description_subject_forms(title):
     """Canonical plain-text subjects accepted by item 7.
@@ -1241,9 +1309,17 @@ def strip_fenced(text):
     `[[link]]` inside the outer listing came back item10/dangling — whose
     Task-2 remedy edits the listing.
     """
-    text = mask_body_comments(text)
+    return blank_fences(mask_body_comments(text))
+
+
+def blank_fences(masked):
+    """``strip_fenced`` for text whose comments are already masked.
+
+    A caller that also needs the comment-masked view masks once and passes
+    that view here instead of paying for ``mask_body_comments`` twice.
+    """
     out, fence = [], None            # fence = the opening run, e.g. "````"
-    for ln in (text or "").split("\n"):
+    for ln in (masked or "").split("\n"):
         m = _FENCE_RE.match(ln)
         # Backticks are forbidden in a backtick fence's info string. A prose
         # line such as `````code``` is inline`` therefore contains an inline
@@ -1511,8 +1587,20 @@ def run_self_test(verbose=False):
           for value in (
               "```md\n[[sample]]\n```\n[[visible]]",
               "    [[sample]]\n\n[[visible]]",
-              "``[[sample]]`` beside [[visible]]")],
-         [True, True, True]),
+              "``[[sample]]`` beside [[visible]]",
+              "```md\n[[sample]]\n```\n    [[sample]]\n\n[[visible]]")],
+         [True, True, True, True]),
+        ("a closed fence ends its block, but not a list item's continuation",
+         ["[[x]]" in strip_code(value) for value in (
+             "Para.\n\n```\ncode\n```\n    [[x]] indented\n",
+             "- item\n\n    ```\n    code\n    ```\n    [[x]] continues\n")],
+         [False, True]),
+        ("the masked view is cached without changing its answer",
+         [mask_body_comments("a <!-- b --> `c`", mask_code=flag)
+          for flag in (False, True, False, 1)]
+         + [mask_body_comments("x %% y %%") is mask_body_comments("x %% y %%")],
+         ["a            `c`", "a               ",
+          "a            `c`", "a               ", True]),
         ("Markdown image destinations accept balanced and angle syntax",
          [destination for _, _, destination in markdown_image_spans(
              '![one](plot(a).png) ![two](<plot b.png> "Caption") '
@@ -2048,6 +2136,33 @@ def run_self_test(verbose=False):
     helper_cases.append((
         "escaping the embed prefix preserves the following live wikilink",
         mask_escaped_wikilinks(r"\![[target]]"), "\\ [[target]]"))
+    helper_cases.append((
+        "every rendered Flashcards heading spelling is the section marker",
+        [bool(FLASH_HEAD_LINE_RE.match(line)) for line in (
+            "## Flashcards", "### Flashcards", "   ##\tFlashcards  ",
+            "## Flashcards ##", "#### Flashcards", "    ## Flashcards",
+            "# Flashcards", "## Flashcards review", "See ## Flashcards",
+            "##Flashcards")],
+        [True, True, True, True, False, False, False, False, False, False]))
+    helper_cases.append((
+        "only `## Flashcards` (trailing blanks allowed) is canonical",
+        [bool(FLASH_HEAD_CANON_RE.match(line)) for line in (
+            "## Flashcards", "## Flashcards \t", "### Flashcards",
+            " ## Flashcards", "## Flashcards ##")],
+        [True, True, False, False, False]))
+    helper_cases.append((
+        "a rendered Related footer line, quoted or not, is the marker",
+        [bool(RELATED_HEAD_LINE_RE.match(line)) for line in (
+            "**Related:**", "**Related:** [[a]] · [[b]]", "   **Related:**x",
+            "> **Related:** [[a]]", ">**Related:**", "    **Related:**",
+            "Related: [[a]]", "**Related**: [[a]]", "See **Related:** [[a]]")],
+        [True, True, True, True, True, False, False, False, False]))
+    helper_cases.append((
+        "only the first letter's case is folded",
+        [first_letter_ci_equal(a, b) for a, b in (
+            ("ArXiv", "arXiv"), ("Arxiv", "arXiv"), ("", ""), ("a", "A"),
+            ("ab", "abc"), (None, "a"), ("a", None), ("PCA", "pca"))],
+        [True, False, True, True, False, False, False, False]))
     for name, got, expected in helper_cases:
         ok = got == expected
         if verbose or not ok:

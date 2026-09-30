@@ -18,10 +18,13 @@ both may use the same selected vault.
 
 Read [runtime setup](shared/RUNTIME.md) once per task; each skill links the
 [vault conventions](shared/CONVENTIONS.md) sections it needs.
-Python 3.10+ is required. Wiki and clipping helpers use the standard library.
-Parsing a PDF or image, including a Wiki skill reading a source PDF, needs the
-packages in [requirements.txt](requirements.txt) in an isolated environment and
-a passing `shared/scripts/check_parsers.py`, as the runtime guide describes.
+Python 3.10+ is required. Wiki and clipping helpers use the standard library,
+except the optional Lottie renderer, which needs Playwright with Chromium and
+Pillow as [Lottie recovery](skills/clipping-clean/references/lottie-recovery.md)
+describes. Parsing a PDF or image, including a Wiki skill reading a source
+PDF, needs the packages in [requirements.txt](requirements.txt) in an
+isolated environment and a passing `shared/scripts/check_parsers.py`, as the
+runtime guide describes.
 Install this whole package so its relative skill and helper paths stay intact.
 
 Use the vault already selected for the task. Sources and reading notes retain

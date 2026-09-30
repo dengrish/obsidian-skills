@@ -21,7 +21,7 @@ a malformed entry is reported, never fatal.
 The index preserves parsed tag values; ``lint_entry.py`` validates their
 required membership and the sole ``#misc`` fallback rule.
 
-PACKAGE CONVENTIONS (all three scripts in this folder): Python 3 standard
+PACKAGE CONVENTIONS (every script in this folder): Python 3 standard
 library only -- no pyyaml, no third-party anything.  Each file works as a
 CLI *and* as an importable module, prints JSON to stdout, and takes
 ``--help``.  This module owns the hand-rolled frontmatter parser; the others
@@ -128,8 +128,14 @@ if _here != _shared:
 
 from yaml_scalars import (parse_scalar, split_flow as _split_flow,
                           strip_comment)  # noqa: E402
-from entry_structure import (mask_body_comments, mask_escaped_wikilinks,  # noqa: E402
-                             source_reference_kind)
+from entry_structure import (  # noqa: E402
+    FLASH_HEAD_LINE_RE,
+    RELATED_HEAD_LINE_RE,
+    blank_fences,
+    mask_body_comments,
+    mask_escaped_wikilinks,
+    source_reference_kind,
+)
 from slugify import SlugError, slug_stem  # noqa: E402
 from portable_names import portable_identity  # noqa: E402
 from vault_artifacts import inventory_sources, local_link_matches  # noqa: E402
@@ -413,20 +419,6 @@ def parse_frontmatter(text):
 # body sectioning + wikilinks
 # --------------------------------------------------------------------------
 
-_FENCE_LINE_RE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
-#: A Flashcards heading as Obsidian renders one: ≤3 leading spaces, ``##`` or
-#: ``###``, whitespace, the word.  Tolerant on purpose — every one of those
-#: spellings SHOWS the reader a Flashcards section, so treating one as missing
-#: prescribes adding a second section.  The canonical spelling is
-#: ``## Flashcards`` exactly; lint_entry reports a tolerated variant as a
-#: heading to fix.  scan_vault's ``_FLASH_HEAD_LINE`` is the same rule; the
-#: two tools must agree on what counts as the section.
-_FLASH_HEAD_LINE_RE = re.compile(
-    r"^ {0,3}#{2,3}[ \t]+Flashcards(?:[ \t]+#+)?[ \t]*$")
-_RELATED_HEAD_LINE_RE = re.compile(
-    r"^ {0,3}(?:>[ \t]*)?\*\*Related:\*\*(?:[ \t]*.*)?$")
-
-
 def split_sections(body):
     """Split an entry body into its three structural regions.
 
@@ -435,6 +427,12 @@ def split_sections(body):
     ``separator_index`` (indexes relative to the body, 0-based; ``None`` when
     absent).
 
+    The markers are ``entry_structure``'s ``RELATED_HEAD_LINE_RE`` and
+    ``FLASH_HEAD_LINE_RE``, which accepts every rendered ``##``/``###``
+    Flashcards spelling (lint_entry reports a tolerated variant as a heading
+    to fix). wiki-lint's scanner reads the same rules, so the tools agree on
+    what counts as each section.
+
     Lines inside fenced code blocks are never section markers: a
     ``**Related:**`` or ``## Flashcards`` shown in a listing is a sample, and
     adopting it truncated the prose there and parsed the fence's contents as
@@ -442,35 +440,16 @@ def split_sections(body):
     ``regions`` applies the same rule).
     """
     lines = body.split("\n")
-    related_index = None
-    flashcards_index = None
-    fence = None                          # the opening run, e.g. "````"
-    visible_lines = mask_body_comments(body).split("\n")
-    for i, ln in enumerate(visible_lines):
-        m = _FENCE_LINE_RE.match(ln)
-        # Backticks are forbidden in a backtick fence's info string. A line
-        # such as `````code``` is inline`` is an inline code span, not a
-        # fence opener; hiding every section marker below it makes the
-        # builder disagree with both linters' listing mask.
-        valid_opener = bool(
-            m and not (m.group(1).startswith("`") and "`" in m.group(2)))
-        if valid_opener and fence is None:
-            fence = m.group(1)
-            # Retain nested/list fences while rejecting a more-indented sample
-            # as the closer of a top-level fence. Tabs count as four columns.
-            fence_indent = max(3, len(ln[:m.start(1)].expandtabs(4)))
-            continue
-        if (fence is not None and m and m.group(1)[0] == fence[0]
-                and len(m.group(1)) >= len(fence) and not m.group(2).strip()
-                and len(ln[:m.start(1)].expandtabs(4)) <= fence_indent):
-            fence = None
-            continue
-        if fence is not None:
-            continue
-        if related_index is None and _RELATED_HEAD_LINE_RE.match(ln.rstrip("\r")):
-            related_index = i
-        if flashcards_index is None and _FLASH_HEAD_LINE_RE.match(ln.rstrip("\r")):
-            flashcards_index = i
+    visible = mask_body_comments(body)
+    visible_lines = visible.split("\n")
+    # strip_fenced's listing mask, applied to the view already masked above.
+    fenced = blank_fences(visible).split("\n")
+    related_index = next((i for i, ln in enumerate(fenced)
+                          if RELATED_HEAD_LINE_RE.match(ln.rstrip("\r"))),
+                         None)
+    flashcards_index = next((i for i, ln in enumerate(fenced)
+                             if FLASH_HEAD_LINE_RE.match(ln.rstrip("\r"))),
+                            None)
 
     separator_index = None
     if flashcards_index is not None:
@@ -1296,6 +1275,11 @@ def run_self_test():
               "exposed for the spelling check",
               (sec["flashcards_index"] is not None, sec["flashcards_head"]),
               (True, "### Flashcards"))
+        sec = split_sections("Prose.\n\n> **Related:** [[a|A]]\n\n---\n\n"
+                             "#### Flashcards\n\nDef.\n??\nTerm\n")
+        check("the shared marker rules: a quoted Related footer is one, a "
+              "level-4 Flashcards heading is not",
+              (sec["related_index"], sec["flashcards_index"]), (2, None))
 
         # -- fence exactness --------------------------------------------------
         fm = parse_frontmatter(' ---\ntitle: "A"\n---\nbody\n')

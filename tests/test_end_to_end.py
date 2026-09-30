@@ -1110,7 +1110,7 @@ raise SystemExit(main(fixture['args'], client))
             organizer, "rename", "--vault", self.vault, source,
             "--to", "Doe_Correction_2026.pdf")
         self.assertIn("Publication-date updates (1):", planned.stdout)
-        self.assertIn("2025-03-14 -> 2026-03-14", planned.stdout)
+        self.assertIn("2025-03-14 -> 2026-01-01", planned.stdout)
         self.assertTrue(source.is_file())
         self.assertIn("published: 2025-03-14", note.read_text(encoding="utf-8"))
 
@@ -1121,7 +1121,7 @@ raise SystemExit(main(fixture['args'], client))
         note = self.notes / "Doe_Correction_2026.md"
         body = note.read_text(encoding="utf-8")
         self.assertIn(
-            "published: 2026-03-14 # date printed by the document", body)
+            "published: 2026-01-01 # date printed by the document", body)
         self.assertIn("[[Doe_Correction_2026.pdf]]", body)
         context = citing_note.read_text(encoding="utf-8")
         self.assertIn("published: 1999-12-31", context)
@@ -1650,6 +1650,176 @@ Control sample
             finding["kind"] == "malformed-line" and finding["line"] == 1
             for finding in revised_report["hierarchy_diagnostic"]["moc_consistency_findings"]))
 
+    @staticmethod
+    def averages_entry(title, created, prose, card):
+        return f'''---
+title: "{title}"
+type: Concept
+sources:
+  - "https://example.org/averages"
+created: {created}
+updated: {created}
+description: "The {title.lower()} is one way to average a collection of numbers."
+tags:
+  - "#mathematics"
+parents: []
+read: false
+---
+{prose}
+
+**Related:**
+
+---
+
+## Flashcards
+
+{card}
+??
+{title}
+'''
+
+    def test_wiki_build_review_tree_then_publish_files(self):
+        # wiki-build step 7: review_tree.py lints the drafts that one
+        # manifest lists, and publish_files.py publishes that same manifest
+        # only against the snapshots taken before the entries were read.
+        wiki = self.vault / "Wiki"
+        run = Path(self.scratch.name) / "run"
+        (run / "drafts").mkdir(parents=True)
+        existing = wiki / "arithmetic-mean.md"
+        existing.write_text(self.averages_entry(
+            "Arithmetic mean", "2026-09-05",
+            "The **arithmetic mean** of a collection is its sum divided by "
+            "its size.",
+            "The sum of a collection of numbers divided by how many numbers "
+            "it holds."), encoding="utf-8")
+        created_draft = run / "drafts/geometric-mean.md"
+        merged_draft = run / "drafts/arithmetic-mean.md"
+
+        def draft_geometric(link, draft=created_draft):
+            contrast = "Unlike the %s, it" % link if link else "It"
+            draft.write_text(self.averages_entry(
+                "Geometric mean", "2026-09-06",
+                "The **geometric mean** of $n$ positive numbers is the $n$-th "
+                "root of their product. %s averages ratios and growth rates."
+                % contrast,
+                "The $n$-th root of the product of $n$ positive numbers."),
+                encoding="utf-8")
+
+        def draft_merge():
+            text = existing.read_text(encoding="utf-8")
+            merged_draft.write_text(text.replace(
+                "updated: 2026-09-05", "updated: 2026-09-06").replace(
+                " divided by its size.", " divided by its size. The "
+                "[[geometric-mean|geometric mean]] instead averages ratios."),
+                encoding="utf-8")
+
+        manifest = run / "manifest.json"
+        manifest.write_text(json.dumps([
+            {"path": "Wiki/geometric-mean.md", "draft": str(created_draft)},
+            {"path": "Wiki/arithmetic-mean.md", "draft": str(merged_draft)},
+        ]), encoding="utf-8")
+        snapshots = run / "snapshots.json"
+        publisher = "shared/scripts/publish_files.py"
+        recorded = json.loads(self.run_script(
+            publisher, "snapshot", "--vault", self.vault, "-o", snapshots,
+            "Wiki/geometric-mean.md", "Wiki/arithmetic-mean.md").stdout)
+        self.assertEqual(recorded["snapshots"][0]["state"], "absent")
+        self.assertNotEqual(recorded["snapshots"][1]["state"], "absent")
+        draft_geometric("[[harmonic-mean|harmonic mean]]")
+        draft_merge()
+
+        def review():
+            return json.loads(self.run_script(
+                "skills/wiki-build/scripts/review_tree.py", "--vault",
+                self.vault, "--wiki", wiki, "--manifest", manifest,
+                "--out", run / "review").stdout)
+
+        # The review lints the staged drafts, not the public Wiki.
+        first = review()
+        self.assertFalse(first["clean"])
+        self.assertEqual([row["target"] for row in first["dangling"]],
+                         ["harmonic-mean"])
+        draft_geometric("[[arithmetic-mean|arithmetic mean]]")
+        reviewed = review()
+        self.assertTrue(reviewed["clean"], reviewed)
+        self.assertEqual(sorted(reviewed["staged"]),
+                         ["Wiki/arithmetic-mean.md", "Wiki/geometric-mean.md"])
+
+        vault_names = sorted(path.name for path in self.vault.iterdir())
+        original = existing.read_bytes()
+        planned = json.loads(self.run_script(
+            publisher, "publish", "--vault", self.vault, "--snapshots",
+            snapshots, "--manifest", manifest, "--dry-run").stdout)
+        self.assertEqual([row["action"] for row in planned["results"]],
+                         ["create", "replace"])
+        self.assertFalse((wiki / "geometric-mean.md").exists())
+        self.assertEqual(existing.read_bytes(), original)
+
+        # A late edit to a snapshotted entry refuses the whole publication.
+        existing.write_text(original.decode("utf-8").replace(
+            "its sum divided", "its total divided"), encoding="utf-8")
+        edited = existing.read_bytes()
+        refused = json.loads(self.run_script(
+            publisher, "publish", "--vault", self.vault, "--snapshots",
+            snapshots, "--manifest", manifest, expected=1).stdout)
+        self.assertEqual([row["action"] for row in refused["results"]],
+                         ["pending", "refused"])
+        self.assertFalse((wiki / "geometric-mean.md").exists())
+        self.assertEqual(existing.read_bytes(), edited)
+        self.assertEqual(sorted(path.name for path in self.vault.iterdir()),
+                         vault_names)
+
+        # Re-snapshot the changed entry, rebuild its draft from the newer
+        # file, review again and publish the reviewed bytes.
+        self.run_script(publisher, "snapshot", "--vault", self.vault, "-o",
+                        snapshots, "--replace", "Wiki/arithmetic-mean.md")
+        draft_merge()
+        self.assertTrue(review()["clean"])
+        published = json.loads(self.run_script(
+            publisher, "publish", "--vault", self.vault, "--snapshots",
+            snapshots, "--manifest", manifest).stdout)
+        self.assertEqual([row["action"] for row in published["results"]],
+                         ["created", "replaced"])
+        self.assertEqual((wiki / "geometric-mean.md").read_bytes(),
+                         created_draft.read_bytes())
+        self.assertEqual(existing.read_bytes(), merged_draft.read_bytes())
+        self.assertIn(b"its total divided", existing.read_bytes())
+        self.assertEqual(sorted(path.name for path in self.vault.iterdir()),
+                         vault_names)
+        lint = run / "lint.json"
+        self.run_script("skills/wiki-build/scripts/lint_entry.py", wiki,
+                        "-o", lint)
+        self.assertTrue(
+            json.loads(lint.read_text(encoding="utf-8"))["summary"]["clean"])
+
+        # With Wiki absent, the review creates nothing and only an explicit
+        # --create-dir lets the publication create the folder.
+        fresh = Path(self.scratch.name) / "fresh vault"
+        fresh.mkdir()
+        fresh_draft = run / "drafts/fresh-geometric-mean.md"
+        draft_geometric(None, fresh_draft)
+        fresh_manifest = run / "fresh-manifest.json"
+        fresh_manifest.write_text(json.dumps([
+            {"path": "Wiki/geometric-mean.md", "draft": str(fresh_draft)},
+        ]), encoding="utf-8")
+        fresh_snapshots = run / "fresh-snapshots.json"
+        self.run_script(publisher, "snapshot", "--vault", fresh, "-o",
+                        fresh_snapshots, "Wiki/geometric-mean.md")
+        fresh_review = json.loads(self.run_script(
+            "skills/wiki-build/scripts/review_tree.py", "--vault", fresh,
+            "--wiki", fresh / "Wiki", "--manifest", fresh_manifest,
+            "--out", run / "fresh-review").stdout)
+        self.assertTrue(fresh_review["clean"], fresh_review)
+        self.assertEqual(list(fresh.iterdir()), [])
+        publish = (publisher, "publish", "--vault", fresh, "--snapshots",
+                   fresh_snapshots, "--manifest", fresh_manifest)
+        missing = json.loads(self.run_script(*publish, expected=1).stdout)
+        self.assertIn("--create-dir Wiki", missing["results"][0]["detail"])
+        self.assertEqual(list(fresh.iterdir()), [])
+        self.run_script(*publish, "--create-dir", "Wiki")
+        self.assertEqual((fresh / "Wiki/geometric-mean.md").read_bytes(),
+                         fresh_draft.read_bytes())
+
     def test_root_without_card_and_parents_link_down(self):
         # A discipline root needs no Flashcards section, and the scanner lists
         # a parent whose prose and footer leave a child unlinked for Task 3.
@@ -2009,6 +2179,68 @@ Arithmetic mean
         self.assertIn("research extract", refused["error"])
         self.assertNotIn("checked", refused)
         self.assertEqual(source.read_bytes(), original_source)
+
+    def test_topic_research_files_a_new_pdf_under_a_proven_free_name(self):
+        # wiki-add's new-PDF path: the free-name checks run on the private
+        # download, the PDF is filed exclusively against an `absent`
+        # snapshot, and only the filed copy passes the intake gate.
+        name = "Doe_Averages_2025"
+        run = Path(self.scratch.name) / "research"
+        run.mkdir()
+        download = run / (name + ".pdf")
+        self.make_pdf(download)
+        canonical = self.run_script("shared/scripts/naming.py", "canonical",
+                                    download.name).stdout
+        self.assertIn("canonical", canonical)
+        target = self.pdfs / download.name
+
+        def owners(selected, expected):
+            report = json.loads(self.run_script(
+                "shared/scripts/vault_artifacts.py", "pdfs", "--vault",
+                self.vault, "--selected", selected, expected=expected).stdout)
+            self.assertTrue(report["complete"])
+            return report["selection"]
+
+        def stem_checks(expected):
+            slug = json.loads(self.run_script(
+                "skills/clipping-clean/scripts/dedup_index.py", self.notes,
+                "--slug", name).stdout)["slug_checks"][0]["status"]
+            preflight = json.loads(self.run_script(
+                "skills/clipping-clean/scripts/fetch_images.py", "preflight",
+                "--vault", self.vault, "--slug", name,
+                expected=expected).stdout)
+            return slug, preflight["ok"]
+
+        free = owners(download, 1)
+        self.assertEqual((free["matches"], free["unique"], free["reason"]),
+                         ([], False, "no vault PDF owns this portable basename"))
+        self.assertEqual(stem_checks(0), ("free", True))
+        snapshots = run / "pdf-snapshots-1.json"
+        recorded = json.loads(self.run_script(
+            "shared/scripts/publish_files.py", "snapshot", "--vault",
+            self.vault, "-o", snapshots, "Sources/PDFs/" + download.name).stdout)
+        self.assertEqual(recorded["snapshots"][0]["state"], "absent")
+        manifest = run / "pdf-manifest-1.json"
+        manifest.write_text(json.dumps([
+            {"path": "Sources/PDFs/" + download.name, "draft": str(download)},
+        ]), encoding="utf-8")
+        filed = json.loads(self.run_script(
+            "shared/scripts/publish_files.py", "publish", "--vault",
+            self.vault, "--snapshots", snapshots, "--manifest",
+            manifest).stdout)
+        self.assertEqual(filed["results"][0]["action"], "created")
+        self.assertEqual(digest(target), digest(download))
+
+        # The intake gate accepts the filed path; the same checks now report
+        # the name taken, so a second download could not be filed over it.
+        gate = owners(target, 0)
+        self.assertTrue(gate["unique"])
+        self.assertEqual([Path(path).name for path in gate["matches"]],
+                         [download.name])
+        taken = owners(download, 0)
+        self.assertEqual([Path(path).resolve() for path in taken["matches"]],
+                         [target.resolve()])
+        self.assertEqual(stem_checks(1), ("free", False))
 
     def test_builder_and_linter_share_the_same_entry_contract_floor(self):
         wiki = self.vault / "Wiki"

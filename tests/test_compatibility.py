@@ -8,6 +8,7 @@ import io
 import json
 import os
 from pathlib import Path
+import posixpath
 import re
 import shlex
 import shutil
@@ -398,6 +399,39 @@ class CompatibilityTests(unittest.TestCase):
                     name.startswith(("tools/", "tests/", "plugins/"))
                     for name in expected))
 
+    def test_packaged_placeholder_commands_resolve_in_their_own_plugin(self):
+        # No packaged module imports publish_files.py; only the documented
+        # `'<plugin>/...'` commands reach it. A map that drops such a file
+        # from one plugin while the other still ships it passes every
+        # import-based check, so resolve each command path in its own package.
+        build = load("build_plugin_placeholder_paths",
+                     ROOT / "tools/build_plugin.py")
+        reference = re.compile(
+            r"<(plugin|skill)>/([A-Za-z0-9_./-]+\.(?:py|md|txt|json))")
+        for plugin_name in PLUGIN_SKILLS:
+            with self.subTest(plugin=plugin_name):
+                files = build.package_files(ROOT, plugin_name)
+                checked = 0
+                for name, data in sorted(files.items()):
+                    if not name.endswith(".md"):
+                        continue
+                    parts = name.split("/")
+                    for match in reference.finditer(data.decode("utf-8")):
+                        base, rest = match.groups()
+                        if base == "skill":
+                            self.assertEqual(
+                                parts[0], "skills",
+                                "%s: `<skill>/` outside a skill: %s"
+                                % (name, match.group(0)))
+                            rest = "skills/%s/%s" % (parts[1], rest)
+                        target = posixpath.normpath(rest)
+                        checked += 1
+                        self.assertTrue(
+                            target in files,
+                            "%s: %s is not in the %s package"
+                            % (name, match.group(0), plugin_name))
+                self.assertGreater(checked, 0)
+
     def test_packaged_market_cli_uses_private_credentials_without_local_launchers(self):
         with tempfile.TemporaryDirectory(prefix="obsidian-market-config-") as tmp:
             root = Path(tmp).resolve()
@@ -509,7 +543,9 @@ class CompatibilityTests(unittest.TestCase):
             with self.subTest(plugin=name), patch.object(
                     build, "_codex_manifest_bytes", return_value=derived) as convert:
                 files = build.package_files(ROOT, name)
-            convert.assert_called_once_with(files[".claude-plugin/plugin.json"])
+            convert.assert_called_once_with(
+                files[".claude-plugin/plugin.json"],
+                build.codex_interface(ROOT, name))
             self.assertEqual(files[".codex-plugin/plugin.json"], derived)
 
     def test_provenance_fingerprints_every_distributed_file_except_itself(self):
@@ -627,6 +663,66 @@ class CompatibilityTests(unittest.TestCase):
             self.assertEqual(metadata("knowledge"), knowledge)
             self.assertEqual(metadata("investments"), investment)
 
+            # One plugin's Codex presentation is its own input: editing it
+            # moves only that plugin's identity and manifest.
+            interface_path = root / build.CODEX_INTERFACE
+            interfaces = json.loads(interface_path.read_bytes())
+            interfaces["knowledge"]["defaultPrompt"].append("Summarize this paper.")
+            interface_path.write_text(json.dumps(interfaces, indent=2) + "\n",
+                                      encoding="utf-8")
+            interface_commit = commit("Knowledge-only Codex prompt update")
+            knowledge = metadata("knowledge")
+            self.assertEqual(knowledge["source_commit"], interface_commit)
+            self.assertIn("Summarize this paper.", json.loads(build.package_files(
+                root, "knowledge")[".codex-plugin/plugin.json"])["interface"][
+                    "defaultPrompt"])
+            self.assertEqual(metadata("investments"), investment)
+
+            def edit_prompt(name, prompt):
+                interfaces = json.loads(interface_path.read_bytes())
+                interfaces[name]["defaultPrompt"].append(prompt)
+                interface_path.write_text(json.dumps(interfaces, indent=2) + "\n",
+                                          encoding="utf-8")
+
+            # When a plugin's newest identity-defining commit touched only the
+            # shared presentation file, a later edit to the other plugin's entry
+            # there must still leave it alone.
+            edit_prompt("investments", "Review my watchlist.")
+            investment_prompt = commit("Investments-only Codex prompt update")
+            investment = metadata("investments")
+            self.assertEqual(investment["source_commit"], investment_prompt)
+            self.assertEqual(metadata("knowledge"), knowledge)
+            edit_prompt("knowledge", "Build entries from this chapter.")
+            knowledge_prompt = commit("Second knowledge-only Codex prompt update")
+            knowledge = metadata("knowledge")
+            self.assertEqual(knowledge["source_commit"], knowledge_prompt)
+            self.assertEqual(metadata("investments"), investment)
+
+            # Merging a branch that edited only the other plugin's entry keeps
+            # each plugin at the commit that introduced its own snapshot, not
+            # at the merge. Fixed dates list the merged-in side first by date,
+            # so a walk that stops at the first nonmatching commit would stop
+            # right after the merge.
+            fork = git("rev-parse", "HEAD")
+            git("checkout", "-b", "provenance-knowledge-source")
+            environment["GIT_COMMITTER_DATE"] = "2090-01-01T00:00:01Z"
+            knowledge_skill.write_bytes(knowledge_skill.read_bytes()
+                                        + b"\nKnowledge edit beside the merge.\n")
+            knowledge_branch = commit("Knowledge source on the main line")
+            git("checkout", "-b", "provenance-investments-prompt", fork)
+            environment["GIT_COMMITTER_DATE"] = "2090-01-01T00:00:02Z"
+            edit_prompt("investments", "Compare these two tickers.")
+            investment_branch = commit("Investments prompt on a side branch")
+            git("checkout", "provenance-knowledge-source")
+            environment["GIT_COMMITTER_DATE"] = "2090-01-01T00:00:03Z"
+            git("merge", "--no-ff", "provenance-investments-prompt",
+                "-m", "Join both plugins' edits")
+            del environment["GIT_COMMITTER_DATE"]
+            knowledge = metadata("knowledge")
+            investment = metadata("investments")
+            self.assertEqual(knowledge["source_commit"], knowledge_branch)
+            self.assertEqual(investment["source_commit"], investment_branch)
+
             investment_skill.write_bytes(investment_skill.read_bytes() + b"\nUncommitted change.\n")
             dirty = metadata("investments")
             self.assertEqual(dirty["source_status"], "uncommitted")
@@ -655,22 +751,36 @@ class CompatibilityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="independent-profile-bytes-") as tmp:
             root = Path(tmp) / "source"
             copy_package_source(root)
-            for name, skills in PLUGIN_SKILLS.items():
-                with self.subTest(plugin=name):
-                    before = {
-                        plugin: build.archive_bytes(build.package_files(root, plugin))
-                        for plugin in PLUGIN_SKILLS}
-                    changed = root / "skills" / sorted(skills)[0] / "SKILL.md"
-                    with changed.open("a", encoding="utf-8") as output:
-                        output.write("\nProfile-specific runtime update.\n")
-                    after = {
-                        plugin: build.archive_bytes(build.package_files(root, plugin))
-                        for plugin in PLUGIN_SKILLS}
-                    for plugin in PLUGIN_SKILLS:
-                        if plugin == name:
-                            self.assertNotEqual(before[plugin], after[plugin])
-                        else:
-                            self.assertEqual(before[plugin], after[plugin])
+            interface_path = root / build.CODEX_INTERFACE
+
+            def archives():
+                return {
+                    plugin: build.archive_bytes(build.package_files(root, plugin))
+                    for plugin in PLUGIN_SKILLS}
+
+            def edit_skill(name, skills):
+                changed = root / "skills" / sorted(skills)[0] / "SKILL.md"
+                with changed.open("a", encoding="utf-8") as output:
+                    output.write("\nProfile-specific runtime update.\n")
+
+            def edit_interface(name, _skills):
+                # The shared presentation file holds one entry per plugin.
+                interfaces = json.loads(interface_path.read_bytes())
+                interfaces[name]["defaultPrompt"].append("Profile-specific prompt.")
+                interface_path.write_text(json.dumps(interfaces, indent=2) + "\n",
+                                          encoding="utf-8")
+
+            for edit in (edit_skill, edit_interface):
+                for name, skills in PLUGIN_SKILLS.items():
+                    with self.subTest(plugin=name, edit=edit.__name__):
+                        before = archives()
+                        edit(name, skills)
+                        after = archives()
+                        for plugin in PLUGIN_SKILLS:
+                            if plugin == name:
+                                self.assertNotEqual(before[plugin], after[plugin])
+                            else:
+                                self.assertEqual(before[plugin], after[plugin])
 
     def test_build_preserves_authored_edits_and_rolls_back_generated_publications(self):
         build = load("build_plugin_authored_races", ROOT / "tools/build_plugin.py")
@@ -786,6 +896,40 @@ class CompatibilityTests(unittest.TestCase):
             (cache / "helper.pyc").write_bytes(b"bytecode")
             self.assertEqual(build.package_files(root, "knowledge")[
                 "skills/wiki-build/assets/diagram.svg"], b"<svg/>\n")
+
+    def test_codex_interface_requires_one_complete_entry_per_plugin(self):
+        build = load("build_plugin_codex_interface", ROOT / "tools/build_plugin.py")
+        with tempfile.TemporaryDirectory(prefix="obsidian-codex-interface-") as tmp:
+            root = Path(tmp) / "plugin"
+            copy_package_source(root)
+            path = root / build.CODEX_INTERFACE
+            valid = json.loads(path.read_text(encoding="utf-8"))
+            entry = json.dumps(valid["knowledge"])
+            invalid = {
+                "a missing plugin": json.dumps({"knowledge": valid["knowledge"]}),
+                "an unknown key": json.dumps(dict(
+                    valid, knowledge=dict(valid["knowledge"], category="x"))),
+                "no prompt": json.dumps(dict(
+                    valid, knowledge=dict(valid["knowledge"], defaultPrompt=[]))),
+                "a blank description": json.dumps(dict(
+                    valid, knowledge=dict(valid["knowledge"],
+                                          shortDescription=" "))),
+                "a repeated plugin": '{"knowledge": %s, "knowledge": %s, '
+                                     '"investments": %s}' % (
+                                         entry, entry,
+                                         json.dumps(valid["investments"])),
+            }
+            for label, text in invalid.items():
+                with self.subTest(label):
+                    path.write_text(text, encoding="utf-8")
+                    with self.assertRaises(ValueError):
+                        build.package_files(root, "knowledge")
+            path.write_text(json.dumps(valid), encoding="utf-8")
+            manifest = json.loads(build.codex_manifest(root, "knowledge"))
+            self.assertEqual(manifest["interface"]["shortDescription"],
+                             valid["knowledge"]["shortDescription"])
+            self.assertEqual(manifest["interface"]["defaultPrompt"],
+                             valid["knowledge"]["defaultPrompt"])
 
     def test_archive_rejects_unsafe_or_colliding_names(self):
         build = load("build_plugin_names", ROOT / "tools/build_plugin.py")
@@ -1619,36 +1763,30 @@ read: false
             "compat_paper_origin", ROOT / "skills/paper-summarize/scripts/paper_scan.py")
         organizer = load(
             "compat_organizer_origin", ROOT / "skills/pdf-organize/scripts/organize.py")
-        pdf = "[[Doe_Study_2025.pdf]]"
-        url = "https://example.org/observed#section"
-        cases = (
-            (f'sources:\n  - "{url}"\nsource: "{pdf}"', url),
-            (f'"sources": ["{url}"]', url),
-            (f'"so\\u0075rces": ["{pdf}"]', pdf),
-            (f"'sources':\n- '{pdf}' # origin", pdf),
-            (f'tags:\n- "#misc"\nsources:\n- "{pdf}"', pdf),
-            (f'"sources": ["{url}"]\nsources:\n  - "{pdf}"', None),
-            (f'"sources": ["{url}"]\nsource: "{pdf}"', url),
-            (f'sources: "{url}"\nsource: "{pdf}"', None),
-            (f'sources: []\nsource: "{pdf}"', None),
-            (f'sources:\n  - "{pdf}"\n  - [nested]', None),
-            (f'sources:\n  - "{pdf}"\n  - null', None),
-            (f'"source": "{url}"\nsource: "{pdf}"', None),
-            (f'? sources\n: ["{url}"]\nsource: "{pdf}"', None),
-            (f'<<: *other\nsource: "{pdf}"', None),
-            (f'source: "{pdf}"', pdf),
-        )
+        # clipping-clean and paper-summarize share Articles/, so both bind the
+        # one shared origin reader; its ownership cases live in the
+        # yaml_scalars self-test.
+        shared = sys.modules["yaml_scalars"]
+        self.assertEqual(Path(shared.__file__).resolve(),
+                         (ROOT / "shared/scripts/yaml_scalars.py").resolve())
+        self.assertIs(clipping.read_source, shared.read_note_origin)
+        self.assertIs(paper.note_source, shared.read_note_origin)
+        self.assertIs(clipping._read_regular_text, shared.read_regular_text)
+        self.assertFalse(hasattr(paper, "_read_note_text"))
+        # pdf-organize keeps its own rename-ownership reader. It must still
+        # claim exactly the notes whose shared origin is this PDF.
+        self.assertIn(shared.ORIGIN_CASE_PDF,
+                      [expected for _, expected in shared.ORIGIN_CASES])
         with tempfile.TemporaryDirectory(prefix="obsidian-origin-readers-") as tmp:
             note = Path(tmp) / "note.md"
-            for metadata, expected in cases:
+            for metadata, expected in shared.ORIGIN_CASES:
                 with self.subTest(metadata=metadata):
                     note.write_text(
                         "---\n" + metadata + "\n---\nOrdinary note body.\n",
                         encoding="utf-8")
-                    self.assertEqual(clipping.read_source(note), expected)
-                    self.assertEqual(paper.note_source(note), expected)
                     self.assertEqual(
-                        organizer._note_is_about(note, "Doe_Study_2025"), expected == pdf)
+                        organizer._note_is_about(note, "Doe_Study_2025"),
+                        expected == shared.ORIGIN_CASE_PDF)
 
     def test_heading_contract_requires_its_reference_and_ordered_examples(self):
         conventions = load("convention_heading_contract", ROOT / "tests/test_conventions.py")

@@ -163,6 +163,36 @@ class CiContractTests(unittest.TestCase):
         self.assertEqual(workflow.count(event_gate), 2)
         self.assertIn("--comparison \"$COMPARISON_MODE\"", workflow)
 
+    def test_workflow_runs_every_suite_and_caches_existing_requirements(self):
+        root = HERE.parents[1]
+        workflow = (HERE.parent / "workflows/validate.yml").read_text(
+            encoding="utf-8")
+        named = set(re.findall(
+            r"^\s*run:\s+python\s+tests/(test_\w+\.py)\s*$", workflow,
+            re.MULTILINE))
+        globs = re.findall(
+            r"^\s*run:\s+python\s+-m\s+unittest\s+discover\s+-s\s+tests\s+"
+            r"-p\s+\"(test_[\w*]+\.py)\"\s*$", workflow, re.MULTILINE)
+        self.assertTrue(named)
+        self.assertTrue(globs)
+        suites = sorted(path.name for path in (root / "tests").glob(
+            "test_*.py"))
+        unrun = [name for name in suites
+                 if name not in named and not any(
+                     Path(name).match(glob) for glob in globs)]
+        self.assertEqual(unrun, [], "suites missing from validate.yml")
+        self.assertEqual(sorted(named - set(suites)), [],
+                         "validate.yml names a missing suite")
+        block = re.search(
+            r"^(\s*)cache-dependency-path:\s*\|\n((?:\1\s+\S.*\n)+)",
+            workflow, re.MULTILINE)
+        self.assertIsNotNone(block)
+        cached = block.group(2).split()
+        self.assertIn("requirements-dev.txt", cached)
+        self.assertEqual(
+            [path for path in cached if not (root / path).is_file()], [],
+            "validate.yml caches on a missing requirements file")
+
     def test_version_gate_ignores_ci_and_requires_packaged_change_bump(self):
         with tempfile.TemporaryDirectory(prefix="obsidian-ci-version-") as tmp:
             root = Path(tmp)

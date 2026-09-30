@@ -30,6 +30,7 @@ import atomic_move
 PLUGIN_NAMES = ("knowledge", "investments")
 PACKAGE_TREES = ("skills", "shared")
 PACKAGE_INVENTORY = "tools/package-files.json"
+CODEX_INTERFACE = "tools/codex-interface.json"
 PACKAGE_PROVENANCE = "provenance.json"
 BUILD_INPUTS = ("tools/build_plugin.py", "shared/scripts/atomic_move.py")
 IGNORED_PACKAGE_FILES = {".DS_Store"}
@@ -63,18 +64,23 @@ def _validate_package_names(files):
                 "%r and %r" % (previous, name))
 
 
-def _package_inventory(root, snapshots=None):
-    """Validate exact per-plugin destination/source maps and source coverage."""
+def _read_json_input(root, relative, label, snapshots=None):
+    """Parse one authored JSON build input, refusing a repeated key."""
     def unique_pairs(pairs):
         result = {}
         for key, value in pairs:
             if key in result:
-                raise ValueError("duplicate package-map key: %s" % key)
+                raise ValueError("duplicate %s key: %s" % (label, key))
             result[key] = value
         return result
 
-    raw = _read_package_source(root, root / PACKAGE_INVENTORY, snapshots)
-    maps = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_pairs)
+    raw = _read_package_source(root, root / relative, snapshots)
+    return json.loads(raw.decode("utf-8"), object_pairs_hook=unique_pairs)
+
+
+def _package_inventory(root, snapshots=None):
+    """Validate exact per-plugin destination/source maps and source coverage."""
+    maps = _read_json_input(root, PACKAGE_INVENTORY, "package-map", snapshots)
     if not isinstance(maps, dict) or set(maps) != set(PLUGIN_NAMES):
         raise ValueError("package maps must contain exactly knowledge and investments")
     sources = set()
@@ -578,33 +584,49 @@ def _remove_generated(path, published, expected_parent):
         return _remove_bound(path.name, published)
 
 
-def _codex_manifest_bytes(authored):
+def codex_interface(root, plugin_name, snapshots=None):
+    """One plugin's authored Codex presentation text.
+
+    Each plugin's entry in the shared file is its own input: only that
+    projection reaches its Codex manifest and source identity, so editing one
+    plugin's prompts never changes the other's distribution.
+    """
+    if plugin_name not in PLUGIN_NAMES:
+        raise ValueError("unknown plugin: %s" % plugin_name)
+    interfaces = _read_json_input(
+        root, CODEX_INTERFACE, "Codex interface", snapshots)
+    if not isinstance(interfaces, dict) or set(interfaces) != set(PLUGIN_NAMES):
+        raise ValueError("%s must contain exactly knowledge and investments"
+                         % CODEX_INTERFACE)
+    interface = interfaces[plugin_name]
+    prompts = interface.get("defaultPrompt") if isinstance(interface, dict) else None
+    if (not isinstance(interface, dict)
+            or set(interface) != {"shortDescription", "defaultPrompt"}
+            or not isinstance(interface["shortDescription"], str)
+            or not interface["shortDescription"].strip()
+            or not isinstance(prompts, list) or not prompts
+            or not all(isinstance(prompt, str) and prompt.strip()
+                       for prompt in prompts)):
+        raise ValueError("%s %s entry needs a shortDescription and a nonempty "
+                         "defaultPrompt list of text" % (CODEX_INTERFACE, plugin_name))
+    return interface
+
+
+def _codex_manifest_bytes(authored, interface):
     """Derive host presentation fields from one authored plugin manifest."""
     manifest = json.loads(authored)
     name = manifest.get("name")
     if name not in PLUGIN_NAMES:
         raise ValueError("unknown plugin manifest name: %r" % name)
-    presentation = {
-        "knowledge": (
-            "Build and maintain an Obsidian knowledge base",
-            ["Organize my PDFs and clean my web clippings.",
-             "Research queued topics and create missing wiki entries.",
-             "Audit my wiki and rebuild its maps of content."]),
-        "investments": (
-            "Research buying opportunities and track investment theses",
-            ["Research buying opportunities and write today's investment note.",
-             "Review the outcomes of earlier buying recommendations."]),
-    }
-    subtitle, prompts = presentation[name]
     manifest["skills"] = "./skills/"
     manifest["interface"] = {
         "displayName": name.capitalize(),
-        "shortDescription": subtitle,
+        "shortDescription": interface["shortDescription"],
         "longDescription": manifest["description"],
         "developerName": manifest["author"]["name"],
         "category": "Productivity",
         "capabilities": ["Read", "Write"],
-        "defaultPrompt": prompts,
+        "defaultPrompt": interface["defaultPrompt"],
     }
     return (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
@@ -617,7 +639,7 @@ def codex_manifest(root, plugin_name):
     authored = _read_package_source(root, path)
     if json.loads(authored).get("name") != plugin_name:
         raise ValueError("authored plugin name disagrees with its package")
-    return _codex_manifest_bytes(authored)
+    return _codex_manifest_bytes(authored, codex_interface(root, plugin_name))
 
 
 class _GitUnavailable(Exception):
@@ -674,14 +696,23 @@ def _git_snapshot(root, commit, paths):
     return result
 
 
-def _source_identity(root, plugin_name, mapping, source_bytes):
+def _source_identity(root, plugin_name, projections, source_bytes):
     """Name a commit containing these exact canonical inputs, or say why not.
 
     Selecting history by canonical paths keeps a generated-assets commit from
-    changing its own embedded identity. A package-map-only change matters only
-    when this plugin's map subset changed. Shared build helper changes affect
-    both plugins. Full history is required; a shallow boundary is not evidence
-    that its apparent first commit really introduced a source snapshot.
+    changing its own embedded identity. ``projections`` maps each shared JSON
+    input (the package map, the Codex presentation) to this plugin's entry in
+    it, so an edit there matters only when this plugin's entry changed.
+    Shared build helper changes affect both plugins. Full history is
+    required; a shallow boundary is not evidence that its apparent first
+    commit really introduced a source snapshot.
+
+    The identity is the commit that introduced the current snapshot. Walking
+    the path-limited history back from ``HEAD`` through commits that still
+    match, it is the matching commit none of whose parents match (the newest
+    one, if merged branches each introduced the same snapshot). A later
+    commit that touches only another plugin's entry in a shared JSON input
+    still matches, so it extends that run without becoming its introduction.
     """
     try:
         top = _git_bytes(root, "rev-parse", "--show-toplevel").decode("utf-8").rstrip("\n")
@@ -693,52 +724,71 @@ def _source_identity(root, plugin_name, mapping, source_bytes):
         if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head):
             raise _GitUnavailable
 
+        verdicts = {}
+
         def matches(commit):
+            if commit not in verdicts:
+                verdicts[commit] = snapshot_matches(commit)
+            return verdicts[commit]
+
+        def snapshot_matches(commit):
             committed = _git_snapshot(
-                root, commit, (*source_bytes, PACKAGE_INVENTORY))
-            raw_map = committed.pop(PACKAGE_INVENTORY)
-            try:
-                committed_map = json.loads(raw_map) if raw_map is not None else None
-            except (TypeError, ValueError, UnicodeError):
-                committed_map = None
-            return (isinstance(committed_map, dict)
-                    and committed_map.get(plugin_name) == mapping
-                    and all(committed[path] == data
-                            for path, data in source_bytes.items()))
+                root, commit, (*source_bytes, *projections))
+            for path, projection in projections.items():
+                raw = committed.pop(path)
+                try:
+                    shared = json.loads(raw) if raw is not None else None
+                except (TypeError, ValueError, UnicodeError):
+                    shared = None
+                if (not isinstance(shared, dict)
+                        or shared.get(plugin_name) != projection):
+                    return False
+            return all(committed[path] == data
+                       for path, data in source_bytes.items())
 
         # Even an uncommitted reversion to an older snapshot is a development
         # build. Never infer release provenance from matching some old commit.
         if not matches(head):
             return None, "uncommitted"
 
-        def latest(paths):
-            commit = _git_bytes(root, "log", "-1", "--no-show-signature",
-                                "--no-follow", "--format=%H", head,
-                                "--", *sorted(paths)).decode("ascii").strip()
-            if commit and not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit):
+        # The path-limited history, parents rewritten to the nearest listed
+        # ancestor. A commit left out did not change these paths, so it holds
+        # the same snapshot as the listed commit it leads to.
+        listing = _git_bytes(root, "rev-list", "--topo-order", "--parents",
+                             head, "--", *sorted((*source_bytes, *projections)))
+        order, parents = [], {}
+        for line in listing.decode("ascii").splitlines():
+            row = line.split()
+            if not row or not all(re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", name)
+                                  for name in row):
                 raise _GitUnavailable
-            return commit
-
-        # Usually the latest source edit already includes the right map. Only
-        # consult map history separately when it does not, so an unrelated
-        # plugin's map edit does not force a new identity for this package.
-        # Combined history also sees a merge joining a source change from one
-        # parent and a map change from another; neither parent is its source.
-        candidates = set()
-        for paths in (source_bytes, (PACKAGE_INVENTORY,),
-                      (*source_bytes, PACKAGE_INVENTORY)):
-            candidate = latest(paths)
-            if not candidate or candidate in candidates:
-                continue
-            candidates.add(candidate)
-            if matches(candidate):
-                return candidate, "committed"
-        return None, "unavailable"
+            order.append(row[0])
+            parents[row[0]] = row[1:]
+        if not order:
+            return None, "unavailable"
+        # HEAD is listed when it changed these paths; otherwise the newest
+        # listed commit is the one whose snapshot HEAD carries.
+        start = head if head in parents else order[0]
+        if not matches(start):
+            return None, "unavailable"
+        # Walk every matching commit reachable through matching commits. A
+        # commit that touched only another plugin's entry in a shared input
+        # still matches, so it neither ends the run nor starts it; a merge
+        # that first joins two edits matches while neither parent does.
+        run, pending = {start}, [start]
+        while pending:
+            for parent in parents.get(pending.pop(), ()):
+                if parent not in run and parent in parents and matches(parent):
+                    run.add(parent)
+                    pending.append(parent)
+        introduced = [commit for commit in order if commit in run
+                      and not any(parent in run for parent in parents[commit])]
+        return (introduced[0], "committed") if introduced else (None, "unavailable")
     except (_GitUnavailable, UnicodeError):
         return None, "unavailable"
 
 
-def _provenance_bytes(root, plugin_name, mapping, files, snapshots):
+def _provenance_bytes(root, plugin_name, mapping, interface, files, snapshots):
     """Describe this exact distribution without hashing its own description."""
     authored = json.loads(files[".claude-plugin/plugin.json"])
     source_bytes = {source: files[destination]
@@ -748,7 +798,9 @@ def _provenance_bytes(root, plugin_name, mapping, files, snapshots):
         if source in source_bytes and source_bytes[source] != data:
             raise OSError(errno.EBUSY, "build helper changed during collection", source)
         source_bytes[source] = data
-    commit, status = _source_identity(root, plugin_name, mapping, source_bytes)
+    commit, status = _source_identity(
+        root, plugin_name,
+        {PACKAGE_INVENTORY: mapping, CODEX_INTERFACE: interface}, source_bytes)
     hashes = {path: hashlib.sha256(data).hexdigest()
               for path, data in sorted(files.items())}
     digest = hashlib.sha256(json.dumps(
@@ -785,10 +837,11 @@ def package_files(root, plugin_name, *, snapshots=None):
              for destination, source in maps[plugin_name].items()}
     if json.loads(files[".claude-plugin/plugin.json"]).get("name") != plugin_name:
         raise ValueError("authored plugin name disagrees with its package")
+    interface = codex_interface(root, plugin_name, snapshots)
     files[".codex-plugin/plugin.json"] = _codex_manifest_bytes(
-        files[".claude-plugin/plugin.json"])
+        files[".claude-plugin/plugin.json"], interface)
     files[PACKAGE_PROVENANCE] = _provenance_bytes(
-        root, plugin_name, maps[plugin_name], files, snapshots)
+        root, plugin_name, maps[plugin_name], interface, files, snapshots)
     _validate_package_names(files)
     return files
 

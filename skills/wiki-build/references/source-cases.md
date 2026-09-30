@@ -41,7 +41,7 @@ Files under `Inbox/` are intake material, not sources; never cite one while it i
 - A preview run uses the producer only in its preview mode, extracts from the raw file, and cites the proposed path provisionally.
 
 A folder run never selects an `Inbox/` file or a
-[feed-owned attachment](../../../shared/CONVENTIONS.md#1-vault-folder-layout).
+[feed-owned attachment](../../../shared/CONVENTIONS.md#1c-feed-owned-attachments).
 The only exception to [canonical PDF naming](source-intake.md#verify-a-resolved-pdf)
 is an explicitly named feed-owned attachment
 (`naming.py feed '<name>'` reports `feed-owned`), including one a named note's

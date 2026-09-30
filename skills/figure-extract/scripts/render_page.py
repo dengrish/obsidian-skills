@@ -173,12 +173,12 @@ def parse_pages(spec, n_pages):
         try:
             idx = int(s) - 1
         except ValueError:
-            sys.exit(f"--pages: {s!r} is not an integer page number")
+            sys.exit(f"pages: {s!r} is not an integer page number")
         if idx < 0 or idx >= n_pages:
-            sys.exit(f"--pages: page {s} out of range (PDF has {n_pages} pages)")
+            sys.exit(f"pages: page {s} out of range (PDF has {n_pages} pages)")
         idxs.append(idx)
     if not idxs:
-        sys.exit(f"--pages: {spec!r} names no page")
+        sys.exit(f"pages: {spec!r} names no page")
     return idxs
 
 
@@ -389,6 +389,10 @@ def run_self_test():
     ok("...page numbers are 1-indexed", msg and "out of range" in msg)
     msg = exits("a page past the end", parse_pages, "21", 20)
     ok("...says how many pages there are", msg and "PDF has 20 pages" in msg)
+    # The page list is positional; naming a `--pages` option that this script
+    # does not have sends the reader looking for it.
+    ok("...without naming an option this script lacks",
+       msg and "--pages" not in msg)
     exits("a negative page", parse_pages, "-2", 20)
     exits("no page at all", parse_pages, ",", 20)
     # Every page is checked before anything is rendered.

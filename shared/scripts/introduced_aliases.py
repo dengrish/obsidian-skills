@@ -15,7 +15,6 @@ import argparse
 import os
 import re
 import sys
-import unicodedata
 
 # Keep sibling imports working when a harness loads this file directly by path
 # rather than running it as a script (where Python supplies this path).
@@ -23,17 +22,21 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-from entry_checks import cross_domain_word
+# The opener's direct parenthetical after the bold title and the lexical
+# lead-ins inside it are the same slot and markers item 19 reads, so item-17
+# alias evidence uses entry_checks' one copy of each pattern.
+from entry_checks import (BOLD_OUTER_RE as _BOLD_OUTER_RE,
+                          BOLD_PAREN_RE as _BOLD_PAREN_RE,
+                          PAREN_LEADIN_RE as _PAREN_LEADIN_RE,
+                          bold_parts as _bold_parts, cross_domain_word)
 from entry_structure import math_title_plain_text, sentence_prefix
 from plurals import singular_keys
+from portable_names import portable_identity
 from slugify import SlugError, base_term, has_parenthetical, slug_stem
 
 
 __all__ = ["introduced_alias_candidates", "missing_introduced_aliases"]
 
-
-_BOLD_OUTER_RE = re.compile(
-    r"(?<!\*)\*\*((?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)\*\*(?!\*)")
 
 # ``a.k.a.`` sits outside the word-bounded group: a closing ``\b`` cannot
 # follow its final dot.
@@ -44,28 +47,11 @@ _SYN_CUE_RE = re.compile(
     r"(?:often|commonly|usually)\s+called|"
     r"(?:many\s+)?people\s+call|some\s+call)\b|\ba\.k\.a\.?", re.IGNORECASE)
 
-# The opener's direct parenthetical after the bold title, past any leading
-# date parenthetical; lint_entry.py and scan_vault.py share it for card
-# line 3. Only the literal noun ``algorithm`` may intervene; a general word
-# window would attach unrelated later parentheticals to the title.
-_BOLD_PAREN_RE = re.compile(
-    r"(?<!\*)\*\*(?P<bold>(?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)"
-    r"\*\*(?!\*)(?:\s+algorithm)?\s*"
-    r"(?:\((?:[?0-9]|b\.|c\.|fl\.|annual\b|ongoing\b)"
-    r"[^()\n]{0,59}\)\s*)?"
-    r"\((?P<paren>[A-Za-z*][^()\n]{0,59})\)",
-    re.IGNORECASE)
-
 _NON_NAME_PAREN_RE = re.compile(
     r"^(?:b\.|c\.|d\.|fl\.|r\.|e\.g|i\.e|cf\.|vs\.|see\s|a\s|an\s|the\s|"
     r"annual|ongoing|born\b|died\b|founded\b|established\b|launched\b|"
     r"acquired\b|renamed\b|now\b|figure\s+[A-Za-z0-9])|\d{3,4}",
     re.IGNORECASE)
-
-_PAREN_LEADIN_RE = re.compile(
-    r"^(?:(?:short\s+for|originally\s+called|also\s+called|"
-    r"also\s+known\s+as|known\s+as)|singular|plural|abbreviated|"
-    r"formerly|n[ée]e|or|a\.k\.a\.?)[\s,:]+", re.IGNORECASE)
 
 # A parenthetical that is only italic names joined by a comma, semicolon or
 # "or": "(*A*, *B*)", "(also called *A* or the *B*)". Only "or" may take an
@@ -87,19 +73,7 @@ _CHAINED_SYNONYM_RE = re.compile(
 
 def _fold_name(value):
     """Case- and Unicode-normalization-fold a slug or link target."""
-    return unicodedata.normalize("NFC", value or "").casefold()
-
-
-def _bold_parts(match):
-    """Return visible text and style details for an outer-bold match."""
-    raw = match.group(1)
-    if raw.startswith("*"):
-        close = raw.find("*", 1)
-        if close > 1:
-            italic = raw[1:close]
-            suffix = raw[close + 1:]
-            return italic + suffix, ("full-italic" if not suffix else "mixed"), italic
-    return raw, "plain", None
+    return portable_identity(value or "")
 
 
 def _parenthetical_names(raw):

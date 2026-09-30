@@ -715,11 +715,16 @@ def _is_paper_summary_metadata(text):
     summary is identifiable by its `published` key, even when that key is
     malformed, or by paper-summarize's format enum when `published` is the
     missing field that must block the year repair.
+
+    The frontmatter is located as `_note_is_about` locates it (a BOM, leading
+    blank lines and a fence with trailing whitespace are accepted), so a note
+    ownership carries along can never skip the year repair unnoticed.
     """
-    lines = text.splitlines()
-    if not lines or lines[0] != "---":
+    lines = text.removeprefix("\ufeff").lstrip().splitlines()
+    if not lines or not _frontmatter_fence(lines[0]):
         return False
-    end = next((i for i in range(1, len(lines)) if lines[i] == "---"), None)
+    end = next((i for i in range(1, len(lines))
+                if _frontmatter_fence(lines[i])), None)
     if end is None:
         return False
     for line in lines[1:end]:
@@ -741,6 +746,45 @@ def _is_paper_summary_metadata(text):
     return False
 
 
+class _FrontmatterShapeError(ValueError):
+    """The note's `---` fences, not its date, stop the year rewrite."""
+
+
+def _frontmatter_shape_problem(text):
+    """Name the invisible fence bytes that stop an exact frontmatter, or None.
+
+    Ownership (`_note_is_about`) and `_is_paper_summary_metadata` tolerate a
+    UTF-8 byte-order mark, whitespace before the opening fence, and trailing
+    spaces or tabs on either fence; the year rewrite deliberately refuses
+    them. Most editors display none of these, so each cause is named in the
+    note's own bytes rather than claiming the note has no `---` line. None
+    means either an exact block or no tolerated frontmatter at all.
+    """
+    causes = []
+    rest = text
+    if rest.startswith("\ufeff"):
+        causes.append("a UTF-8 byte-order mark precedes the opening `---`")
+        rest = rest[1:]
+    lines = rest.splitlines()
+    first = next((i for i, line in enumerate(lines) if line.strip()), None)
+    if first is None:
+        return None
+    opening = lines[first].lstrip()
+    if not _frontmatter_fence(opening):
+        return None
+    if first:
+        causes.append("blank lines precede the opening `---`")
+    if opening != lines[first]:
+        causes.append("the opening `---` is indented")
+    if opening != "---":
+        causes.append("the opening `---` fence has trailing spaces or tabs")
+    closing = next((line for line in lines[first + 1:]
+                    if _frontmatter_fence(line)), None)
+    if closing is not None and closing != "---":
+        causes.append("the closing `---` fence has trailing spaces or tabs")
+    return "; ".join(causes) or None
+
+
 def _reconcile_published_year(text, target_year):
     """Rewrite one owned summary note's publication date for ``target_year``.
 
@@ -749,14 +793,17 @@ def _reconcile_published_year(text, target_year):
     segment changes. This parser deliberately handles only the one top-level,
     single-line scalar accepted by paper-summarize. Missing, duplicate,
     quoted, multiline, or invalid values raise ``ValueError`` so the rename
-    transaction remains read-only.
+    transaction remains read-only; a fence-shape problem raises the
+    ``_FrontmatterShapeError`` subclass naming its invisible cause.
 
-    A dated target retains a valid existing month/day. A null value has no
-    components to retain and becomes January 1, the summary schema's explicit
-    padding rule. If carrying a month/day into the target year would make an
-    impossible date (notably February 29 in a non-leap year), the source
-    metadata is contradictory and requires another source-backed metadata
-    decision rather than silently discarding those components.
+    A valid date already in the target year is the document's own date (the
+    stem year was the misread part), so it is returned unchanged. A date from
+    another year, or a null, becomes January 1 of the target year, the summary
+    schema's explicit padding: the old month and day describe the old year
+    and are no evidence for the new one, and only the document itself,
+    through a paper-summarize correction, may supply a more precise date. The
+    existing value is still validated, so contradictory metadata keeps
+    blocking.
     """
     if target_year != "nd" and not re.fullmatch(r"(?!0000)[0-9]{4}", target_year):
         raise ValueError("the target filename has no usable canonical year segment")
@@ -766,12 +813,17 @@ def _reconcile_published_year(text, target_year):
     def without_eol(line):
         return line.rstrip("\r\n")
 
+    shape = _frontmatter_shape_problem(text)
+    if shape:
+        raise _FrontmatterShapeError(shape)
     if not lines or without_eol(lines[0]) != "---":
-        raise ValueError("frontmatter must open with `---` on line 1")
+        raise _FrontmatterShapeError("frontmatter must open with `---` on line 1")
+    # The first fence closes the block, exactly as ownership reads it; the
+    # shape check above has already proved that fence is an exact `---`.
     end = next((i for i in range(1, len(lines))
-                if without_eol(lines[i]) == "---"), None)
+                if _frontmatter_fence(lines[i])), None)
     if end is None:
-        raise ValueError("frontmatter is not closed by a `---` line")
+        raise _FrontmatterShapeError("frontmatter is not closed by a `---` line")
 
     candidates = []
     for index in range(1, end):
@@ -817,16 +869,10 @@ def _reconcile_published_year(text, target_year):
             datetime.date(*(int(part) for part in date_match.groups()))
         except ValueError as exc:
             raise ValueError("`published: %s` is not a real date" % value) from exc
-        if target_year == "nd":
-            desired = "null"
-        else:
-            desired = target_year + "-" + date_match.group(2) + "-" + date_match.group(3)
-            try:
-                datetime.date(*(int(part) for part in desired.split("-")))
-            except ValueError as exc:
-                raise ValueError(
-                    "the existing month/day %s cannot be preserved in target year %s"
-                    % (value[5:], target_year)) from exc
+        if date_match.group(1) == target_year:
+            # Already the document's year: keep the read month and day.
+            return text, old_surface, old_surface
+        desired = "null" if target_year == "nd" else target_year + "-01-01"
 
     clean = strip_comment(raw)
     leading = clean[:len(clean) - len(clean.lstrip(" \t"))]
@@ -1193,6 +1239,7 @@ def references(vault, names, dirs=None, directory_names=()):
     if not names:
         return {}
     pat, lut, slut, _stems = _reference_re(names)
+    probe = _citation_probe(names)
     hits = {}
     for md in md_files(vault):
         try:
@@ -1227,6 +1274,8 @@ def references(vault, names, dirs=None, directory_names=()):
         except OSError as exc:
             raise InventoryFailed("cannot read Markdown note %r during the "
                                   "reference scan: %s" % (md, exc)) from exc
+        if not _may_cite(body, probe):
+            continue
         note_dir = os.path.relpath(os.path.dirname(md), vault)
         found = set()
         for _original, part, _style in _source_text_parts(body):
@@ -1295,6 +1344,11 @@ def debase_links(text, names, dirs=None, note_dir=""):
     cites it, so "the new folder" is a different string per note and getting
     one wrong is the same dangling link with more machinery behind it.
     """
+    return _map_source_text(text, _debase_transform(names, dirs, note_dir))
+
+
+def _debase_transform(names, dirs=None, note_dir=""):
+    """The per-part transform `debase_links` maps over a note's text."""
     def debase(part):
         for name in sorted(names, key=len, reverse=True):
             if name:
@@ -1308,7 +1362,7 @@ def debase_links(text, names, dirs=None, note_dir=""):
                     part = rx.sub(replace, part)
         return part
 
-    return _map_source_text(text, debase)
+    return debase
 
 
 def _rewrite_directory_paths(original, rewritten, directory_ren):
@@ -1430,9 +1484,16 @@ def rewrite_text(text, ren, stem_ren, dirs=None, note_dir="",
     anchors alone — an invariant nothing stated and nothing tested.  Here it
     is structural: there is one pass, so there is nothing to order.
     """
+    rewrite = _rewrite_transform(ren, stem_ren, dirs, note_dir, directory_ren)
+    return text if rewrite is None else _map_source_text(text, rewrite)
+
+
+def _rewrite_transform(ren, stem_ren, dirs=None, note_dir="",
+                       directory_ren=None):
+    """The per-part transform `rewrite_text` maps, or None with no names."""
     ren = {o: n for o, n in ren.items() if o}
     if not ren:
-        return text
+        return None
     pat, lut, slut, _stems = _reference_re(set(ren))
     new_of = {}
     for o, n in ren.items():
@@ -1464,7 +1525,46 @@ def rewrite_text(text, ren, stem_ren, dirs=None, note_dir="",
         rewritten = pat.sub(repl, part)
         return _rewrite_directory_paths(part, rewritten, directory_ren or {})
 
-    return _map_source_text(text, rewrite)
+    return rewrite
+
+
+def _citation_probe(names):
+    """A case-insensitive literal search for every spelling of `names` that
+    `_reference_re` or `_debase_res` can match, or None when there is none.
+
+    A note's masked, decoded parse is most of a vault scan's cost, and almost
+    no note mentions the names one rename changes.  Masking only blanks text,
+    so it cannot create a match; `_may_cite` also searches the decoded views.
+    A Markdown note's wikilinks carry its stem, which every name spelling of
+    it contains, so the stem stands for both.
+    """
+    spellings = set()
+    for name in names:
+        if name:
+            stem, ext = os.path.splitext(name)
+            spellings |= _name_variants(stem if ext.lower() == ".md" else name)
+    return re.compile(_alternation(spellings), re.I) if spellings else None
+
+
+def _may_cite(text, probe):
+    """Whether any view `_source_text_parts` decodes from `text` can match.
+
+    False only when neither the raw text, its Markdown-destination decode,
+    nor a quoted YAML source scalar holds a spelling `probe` searches for;
+    the note then cites none of those names and no rewrite can change it.
+    """
+    if probe is None or probe.search(text):
+        return True
+    if ("%" in text or "\\" in text) and probe.search(
+            unquote(_MARKDOWN_ESCAPE.sub(r"\1", text))):
+        return True
+    if "\\" in text or "''" in text:
+        try:
+            return any(probe.search(value) for _start, _end, value, _style
+                       in _quoted_source_spans(text))
+        except ValueError:
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -1644,7 +1744,7 @@ def _image_ownership_blockers(vault, source, keyed):
         return []
     try:
         manifest = read_manifest(os.path.join(images, MANIFEST_FILE))
-        blockers = []
+        unowned = []
         for image_path, image_name in candidates:
             try:
                 key = manifest_key(manifest, image_name)
@@ -1653,12 +1753,16 @@ def _image_ownership_blockers(vault, source, keyed):
             except (OSError, UnicodeError, ValueError):
                 owned = False
             if not owned:
-                blockers.append(
-                    "%s has no matching current PDF ownership record. "
-                    "Matching a source stem is not ownership; explicitly adopt "
-                    "or repair this legacy figure through figure-extract "
-                    "before renaming the PDF." % image_path)
-        return blockers
+                unowned.append(image_name)
+        # One blocker naming every file: a paragraph per figure buried a
+        # single refusal under dozens of copies of the same remedy.
+        if not unowned:
+            return []
+        return ["%d derived image(s) in %s have no matching current PDF "
+                "ownership record: %s. Matching a source stem is not "
+                "ownership; explicitly adopt or repair each legacy figure "
+                "through figure-extract before renaming the PDF."
+                % (len(unowned), images, ", ".join(sorted(unowned)))]
     except (OSError, UnicodeError, ValueError) as exc:
         return ["Cannot establish PDF ownership of derived images (%s). "
                 "Repair the figure records before renaming." % exc]
@@ -1724,6 +1828,25 @@ def _family_basename_blockers(path, keyed, existing):
     return out
 
 
+def _citing_notes(vault, names, pronoun):
+    """One blocker sentence naming the vault notes that cite `names`.
+
+    An occupied target stem's remedy starts from those notes: a clipping's
+    note embeds its own images, and another tool's crops move to the stem of
+    the note that embeds them.
+    """
+    try:
+        hits = references(vault, set(names))
+    except InventoryFailed as exc:
+        return "The notes citing %s could not be listed: %s." % (
+            pronoun, str(exc).rstrip("."))
+    if not hits:
+        return "No vault note cites %s." % pronoun
+    return "Notes citing %s: %s." % (pronoun, "; ".join(
+        "%s (%s)" % (os.path.relpath(md, vault), ", ".join(found))
+        for md, found in sorted(hits.items())))
+
+
 def _target_stem_blockers(vault, stem, mine, action=None, alternative=None):
     """Block a PDF rename (or a split's new chapter) onto a note/image
     namespace owned by another source."""
@@ -1739,11 +1862,16 @@ def _target_stem_blockers(vault, stem, mine, action=None, alternative=None):
                 and os.path.realpath(path) not in mine):
             blockers.append(
                 "%s already owns the target stem %s as an Articles note "
-                "outside this PDF's family. Report it and the notes that link "
-                "it. If it was derived from this same document, ask the user "
-                "whether to clear it from that name before %s and restore "
-                "it afterward; otherwise choose %s."
-                % (path, stem, clear_before, alternative))
+                "outside this PDF's family. %s Report it and those notes. If "
+                "it is a reading note of this same PDF, ask the user whether "
+                "to clear it from that name before %s and restore it "
+                "afterward. A clipping-clean note, whatever it captures, "
+                "keeps its own name: ask the user to rename the note and its "
+                "images to a free slug through clipping-clean before %s, "
+                "never back to Articles/%s.md or under %s_fig*. Otherwise "
+                "choose %s."
+                % (path, stem, _citing_notes(vault, [name], "it"),
+                   clear_before, clear_before, stem, stem, alternative))
 
     images = os.path.join(vault, "Sources", "Images")
     if os.path.isdir(images):
@@ -1752,17 +1880,31 @@ def _target_stem_blockers(vault, stem, mine, action=None, alternative=None):
             blockers.append(
                 "the target figure namespace %s_fig* could not be inventoried "
                 "completely; repair access before %s" % (stem, access_before))
-        for path in inventory.candidates + inventory.blocked_matches:
-            if os.path.realpath(path) not in mine:
-                blockers.append(
-                    "%s already occupies the target figure stem %s_fig* "
-                    "outside this PDF's family; a figure manifest record "
-                    "cannot claim it for a PDF not yet under that name. Report "
-                    "it and the notes that embed it. If it was derived from "
-                    "this same document, ask the user whether to clear it from "
-                    "that name before %s and restore it afterward; "
-                    "otherwise choose %s."
-                    % (path, stem, clear_before, alternative))
+        # One blocker per stem, naming every occupant: the remedy is the
+        # same for each, and repeating it per figure buried the refusal.
+        occupants = sorted(
+            os.path.relpath(path, images)
+            for path in inventory.candidates + inventory.blocked_matches
+            if os.path.realpath(path) not in mine)
+        if occupants:
+            blockers.append(
+                "The target figure stem %s_fig* is already occupied outside "
+                "this PDF's family by %d file(s) in %s: %s. %s A figure "
+                "manifest record cannot claim it for a PDF not yet under "
+                "that name. Report each file and the notes citing it. If "
+                "figure-extract cropped one from this same document, ask the "
+                "user whether to clear it from that name before %s and "
+                "restore it afterward. A clipping-clean image, whatever it "
+                "captures, stays with its note: ask the user to rename that "
+                "note and its images to a free slug through clipping-clean. "
+                "Ask the user to move another tool's images, such as a slide "
+                "deck's crops, permanently to the embedding note's own stem "
+                "and update its embeds. Do either before %s, never back "
+                "under %s_fig* or Articles/%s.md. Otherwise choose %s."
+                % (stem, len(occupants), images, ", ".join(occupants),
+                   _citing_notes(vault, [os.path.basename(occupant)
+                                         for occupant in occupants], "them"),
+                   clear_before, clear_before, stem, stem, alternative))
     return blockers
 
 
@@ -2144,20 +2286,14 @@ def plan_rename(vault, path, new_basename, dest=None):
     # vault reference to the new basename, and reports success — the file is
     # outside the vault and every link now resolves to nothing.
     if dest is not None:
+        # A source outside a given vault was already refused above: an
+        # external download is never imported because a name was requested.
         if not have_vault:
             blockers.append(
                 "a destination was given (%s) but there is no vault to move "
                 "into (--vault %s). Relocating a file needs a vault: outside "
                 "one there is nothing to be inside, and nothing to rewrite."
                 % (dest, vault or "not given"))
-        elif not _inside(vault, path):
-            # SKILL.md scope: an external source is not imported merely
-            # because a better name was requested. Deciding that a download
-            # belongs in the vault is the user's call.
-            blockers.append(
-                "%s is outside the vault %s, so it is renamed where it sits "
-                "and no destination applies. Move it into the vault yourself "
-                "first if that is what you meant." % (path, vault))
         if not os.path.isabs(dest):
             blockers.append(
                 "destination %r is a relative path. It would resolve against "
@@ -2308,6 +2444,7 @@ def plan_rename(vault, path, new_basename, dest=None):
     dirs = keyed_dirs(vault, keyed) if have_vault else None
     edits = Edits()
     unreadable = []
+    probe = _citation_probe(set(reference_ren) | moved_source_names)
     if have_vault:
         investment_roots = []
         try:
@@ -2356,22 +2493,40 @@ def plan_rename(vault, path, new_basename, dest=None):
                 else:
                     unreadable.append("%s (%s)" % (md, type(exc).__name__))
                 continue
+            # A note no decoded view of which can name a changed file is
+            # left unparsed; an owned summary still gets its year check.
+            if md not in published_year_targets and not _may_cite(body, probe):
+                continue
             note_dir = os.path.relpath(os.path.dirname(md), vault)
-            qualified = (debase_links(body, moved_source_names, dirs, note_dir)
-                         if moved_source_names else body)
-            new = rewrite_text(
-                qualified, reference_ren, stem_ren, dirs, note_dir, directory_ren)
+            # One masked parse per note: debasing, then rewriting, each
+            # decoded part is what the two separate passes produced.
+            steps = [step for step in (
+                _debase_transform(moved_source_names, dirs, note_dir)
+                if moved_source_names else None,
+                _rewrite_transform(reference_ren, stem_ren, dirs, note_dir,
+                                   directory_ren)) if step is not None]
+
+            def _both(part, steps=steps):
+                for step in steps:
+                    part = step(part)
+                return part
+            new = _map_source_text(body, _both)
             if (md in published_year_targets
                     and _is_paper_summary_metadata(new)):
                 try:
                     reconciled, old_published, new_published = \
                         _reconcile_published_year(new, published_year_targets[md])
                 except ValueError as exc:
+                    remedy = (
+                        "Fix those fence bytes in the note itself (the date "
+                        "is not the cause)"
+                        if isinstance(exc, _FrontmatterShapeError) else
+                        "Correct that one field from the source document")
                     blockers.append(
                         "%s is the owned paper-summary note, but its `published` "
                         "metadata cannot follow the source year rename (%s). "
-                        "Correct that one field from the source, then re-plan."
-                        % (md, exc))
+                        "%s, then re-plan."
+                        % (md, exc, remedy))
                 else:
                     if reconciled != new:
                         edits.published_updates[md] = (
@@ -2644,7 +2799,8 @@ def rename_all(vault, path, new_basename, apply=False, dest=None):
         if failed:
             raise RenameFailed(
                 msg + " The ROLLBACK ALSO FAILED, so the vault is in a mixed "
-                "state. Undo these by hand before doing anything else:\n  - "
+                "state. Stop, report these paths to the user, and preserve "
+                "them until reconciled; never undo the moves by hand:\n  - "
                 + "\n  - ".join(failed), rolled_back=False) from exc
         staging_path = getattr(exc, "staging_path", None)
         if staging_path:
@@ -2654,13 +2810,6 @@ def rename_all(vault, path, new_basename, apply=False, dest=None):
         raise RenameFailed(
             msg + " Rolled back — nothing from this rename is on disk.") from exc
     return moves, edits, blockers
-
-
-# `looks_canonical`, `chapter_parts`, `chapter_book_stem` and `core_stem` are
-# imported from `shared/scripts/naming.py` at the top of this file and
-# re-exported here, so `from organize import looks_canonical` keeps working
-# for every caller SKILL.md documents.  They are not defined here: one home
-# per fact (CONVENTIONS.md §1a, §5).
 
 
 # ---------------------------------------------------------------------------
@@ -3532,12 +3681,6 @@ def _selftest():
         return (path in rendered or escaped in rendered
                 or os.path.basename(path) in rendered)
 
-    check("a nested error still identifies its recovery directory",
-          _reports_path(
-              "nested failure retained .organize-recovery-1/topic.md",
-              os.path.join("vault", ".organize-recovery-1")),
-          True)
-
     # 1. The new stem contains the old stem — this skill's ordinary rename.
     ren = {"UDL_2026.pdf": "Prince_UDL_2026.pdf",
            "UDL_2026": "Prince_UDL_2026",
@@ -4143,10 +4286,15 @@ def _selftest():
         "See [[Doe_Foo_2024.pdf]].\n")
     _reconciled, _old_published, _new_published = \
         _reconcile_published_year(_published_note, "2026")
-    check("a source-year correction preserves a valid month/day and comment",
+    check("a source-year correction pads the new year and keeps the comment",
           (_old_published, _new_published,
-           "published: 2026-03-14   # document date" in _reconciled),
-          ("2024-03-14", "2026-03-14", True))
+           "published: 2026-01-01   # document date" in _reconciled),
+          ("2024-03-14", "2026-01-01", True))
+    check("a leap day from the old year is padding in the new one, not a "
+          "blocker",
+          _reconcile_published_year(
+              "---\npublished: 2024-02-29\n---\n", "2025")[1:],
+          ("2024-02-29", "2025-01-01"))
     _null_note = _published_note.replace(
         "published: 2024-03-14   # document date", "published: null")
     check("a null publication date gains the target year with explicit padding",
@@ -4155,21 +4303,85 @@ def _selftest():
     check("an undated target gets the canonical explicit null",
           _reconcile_published_year(_published_note, "nd")[1:],
           ("2024-03-14", "null"))
+    # The stem year was the misread part: a date already in the target year
+    # is the document's own and keeps its month and day, byte for byte.
+    _same_year_note = _published_note.replace(
+        "published: 2024-03-14", "published: 2026-03-14")
+    check("a date already in the target year is kept unchanged",
+          _reconcile_published_year(_same_year_note, "2026"),
+          (_same_year_note, "2026-03-14", "2026-03-14"))
     check("a current summary with missing published metadata is recognized",
           _is_paper_summary_metadata(
               "---\nformat: Paper\nsources:\n  - \"[[Doe_Foo_2024.pdf]]\"\n---\n"),
           True)
     check("an embed-only legacy source note is not converted into a summary",
           _is_paper_summary_metadata("![[Doe_Foo_2024.pdf]]\n"), False)
+    # Ownership accepts these frontmatter shapes, so the year check must see
+    # them too; the rewrite then refuses them rather than moving a stale date,
+    # naming the invisible cause and sending the fix to the note's own bytes.
+    _shapes = (("a BOM", "\ufeff" + _published_note,
+                "a UTF-8 byte-order mark precedes the opening `---`"),
+               ("a leading blank line", "\n" + _published_note,
+                "blank lines precede the opening `---`"),
+               ("an indented opening fence", "  " + _published_note,
+                "the opening `---` is indented"),
+               ("a trailing-space fence", "--- " + _published_note[3:],
+                "the opening `---` fence has trailing spaces or tabs"),
+               ("a trailing-tab closing fence", _published_note.replace(
+                   "created: 2026-09-04\n---\n", "created: 2026-09-04\n---\t\n"),
+                "the closing `---` fence has trailing spaces or tabs"))
+    check("summary metadata is found behind every fence shape ownership accepts",
+          [_is_paper_summary_metadata(_text) for _label, _text, _cause in _shapes],
+          [True] * len(_shapes))
+    check("fence-shape causes combine, and exact or absent frontmatter has none",
+          (_frontmatter_shape_problem("\ufeff--- \ntitle: x\n---  \n"),
+           _frontmatter_shape_problem(_published_note),
+           _frontmatter_shape_problem("\ufeff\nNo frontmatter here.\n"),
+           _frontmatter_shape_problem("")),
+          ("a UTF-8 byte-order mark precedes the opening `---`; the opening "
+           "`---` fence has trailing spaces or tabs; the closing `---` fence "
+           "has trailing spaces or tabs", None, None, None))
+
+    def _plan_owned_summary(text):
+        _fv = _make_fixture_dir()
+        _fpdf = os.path.join(_fv, "Sources", "PDFs", "Doe_Foo_2024.pdf")
+        _fnote = os.path.join(_fv, "Articles", "Doe_Foo_2024.md")
+        for _path, _body in ((_fpdf, "%PDF"), (_fnote, text)):
+            os.makedirs(os.path.dirname(_path), exist_ok=True)
+            with open(_path, "w", encoding="utf-8", newline="") as _fh:
+                _fh.write(_body)
+        _fm, _fe, _fb = plan_rename(_fv, _fpdf, "Doe_Foo_2026.pdf")
+        return _fnote, _fe, _fb
+
+    for _label, _text, _cause in _shapes:
+        _fnote, _fe, _fb = _plan_owned_summary(_text)
+        _year_blockers = [_b for _b in _fb
+                          if "cannot follow the source year rename" in _b]
+        check("an owned summary behind %s blocks, naming that cause and the "
+              "note's fence bytes as the fix" % _label,
+              (len(_year_blockers), _cause in "".join(_year_blockers),
+               "Fix those fence bytes in the note itself" in "".join(_year_blockers),
+               _fe.published_updates), (1, True, True, {}))
+    _fnote, _fe, _fb = _plan_owned_summary(_published_note.replace(
+        "published: 2024-03-14", 'published: "2024-03-14"'))
+    check("a malformed date field sends its fix to the source document, not "
+          "the fences",
+          [("Correct that one field from the source document" in _b,
+            "fence bytes" in _b)
+           for _b in _fb if "cannot follow the source year rename" in _b],
+          [(True, False)])
+    _fnote, _fe, _fb = _plan_owned_summary(_same_year_note)
+    check("a same-year date plans the rename with no publication-date update",
+          (_fb, _fe.published_updates,
+           "published: 2026-03-14   # document date" in _fe.get(_fnote, "")),
+          ([], {}, True))
 
     for _label, _bad_published, _target, _reason in (
             ("missing", "", "2026", "missing"),
             ("duplicate", "published: 2024-03-14\n"
              "published: 2024-03-15\n", "2026", "duplicated"),
             ("quoted", 'published: "2024-03-14"\n', "2026", "unquoted"),
-            ("impossible", "published: 2024-02-30\n", "2026", "not a real date"),
-            ("leap-day conflict", "published: 2024-02-29\n", "2025",
-             "cannot be preserved")):
+            ("impossible", "published: 2024-02-30\n", "2026", "not a real date")):
         _bad_note = "---\n" + _bad_published + "created: 2026-09-04\n---\n"
         try:
             _reconcile_published_year(_bad_note, _target)
@@ -4197,8 +4409,8 @@ def _selftest():
         _yv, _ypdf, "Doe_Foo_2026.pdf")
     check("the dry-run plans the owned note's publication-date update",
           (_yblock, _yedits.published_updates.get(_ynote),
-           "published: 2026-03-14" in _yedits.get(_ynote, "")),
-          ([], ("2024-03-14", "2026-03-14"), True))
+           "published: 2026-01-01" in _yedits.get(_ynote, "")),
+          ([], ("2024-03-14", "2026-01-01"), True))
     check("a citing note keeps its own publication date",
           ("published: 1999-12-31" in _yedits.get(_yother, ""),
            "published: 2026-12-31" not in _yedits.get(_yother, "")),
@@ -4213,14 +4425,14 @@ def _selftest():
     _ynote = os.path.join(_yv, "Articles/Doe_Foo_2026.md")
     check("the source, link, and publication date change in one transaction",
           (os.path.isfile(_ypdf),
-           "published: 2026-03-14" in open(
+           "published: 2026-01-01" in open(
                _ynote, encoding="utf-8").read(),
            "[[Doe_Foo_2026.pdf]]" in open(
                _ynote, encoding="utf-8").read()),
           (True, True, True))
     _ambiguous = open(_ynote, encoding="utf-8").read().replace(
-        "published: 2026-03-14   # document date",
-        "published: 2026-03-14\npublished: 2026-03-15")
+        "published: 2026-01-01   # document date",
+        "published: 2026-01-01\npublished: 2026-01-02")
     with open(_ynote, "w", encoding="utf-8") as _fh:
         _fh.write(_ambiguous)
     _ymoves, _yedits, _yblock = rename_all(
@@ -6250,6 +6462,13 @@ def _selftest():
                open(_image, "rb").read(), os.path.lexists(os.path.join(
                    _v, "Sources/Images/Doe_New_2025_fig_1.png"))),
               (True, b"pdf bytes", b"unattributed image bytes", False))
+        _put(_v, "Sources/Images/Doe_Old_2025_fig_2.png", b"more image bytes")
+        _unowned = [item for item in plan_rename(
+            _v, _pdf, "Doe_New_2025.pdf")[2] if "ownership record" in item]
+        check("unowned derived images share one blocker naming each",
+              [(item.count("figure-extract"), "2 derived image(s)" in item,
+                "Doe_Old_2025_fig_1.png, Doe_Old_2025_fig_2.png" in item)
+               for item in _unowned], [(1, True, True)])
 
     with _tf.TemporaryDirectory(prefix="org-clipping-image-test-") as _v:
         _pdf = _put(_v, "Inbox/download.pdf")
@@ -6461,6 +6680,36 @@ def _selftest():
               [("cannot claim it" in item, "same document" in item)
                for item in _blockers if "target figure stem" in item],
               [(True, True)])
+        # Many occupants are one refusal that names each of them, not one
+        # copy of the same remedy per figure.
+        for _n in (2, 3):
+            _put(_v, "Sources/Images/Doe_Study_2025_fig_%d.png" % _n, b"png")
+        _stem_blockers = [item for item in plan_rename(
+            _v, _pdf, "Doe_Study_2025.pdf")[2] if "target figure stem" in item]
+        check("occupants of one target figure stem share one blocker",
+              [(item.count("same document"), "by 3 file(s)" in item,
+                all("Doe_Study_2025_fig_%d.png" % _n in item for _n in (1, 2, 3)))
+               for item in _stem_blockers], [(1, True, True)])
+        _note_blockers = [item for item in plan_rename(
+            _v, _pdf, "Doe_Study_2025.pdf")[2] if "Articles note" in item]
+        check("an occupied target note's blocker lists its citing notes and "
+              "renames a clipping instead of restoring it",
+              [("No vault note cites it." in item,
+                "through clipping-clean before filing" in item,
+                "never back to Articles/Doe_Study_2025.md" in item)
+               for item in _note_blockers], [(True, True, True)])
+        _put(_v, "Articles/Deck_Note.md", "![[Doe_Study_2025_fig_2.png]]\n")
+        _stem_blockers = [item for item in plan_rename(
+            _v, _pdf, "Doe_Study_2025.pdf")[2] if "target figure stem" in item]
+        check("a target figure stem's blocker names the notes citing its "
+              "occupants and restores only figure-extract crops",
+              [("Notes citing them: Articles/Deck_Note.md "
+                "(Doe_Study_2025_fig_2.png)." in item,
+                "If figure-extract cropped one from this same document" in item,
+                "through clipping-clean" in item,
+                "never back under Doe_Study_2025_fig* or "
+                "Articles/Doe_Study_2025.md" in item)
+               for item in _stem_blockers], [(True, True, True, True)])
 
     # A book rename re-stems its chapters; each new chapter stem gets the
     # same note/figure namespace check as a direct chapter rename.
@@ -6611,6 +6860,199 @@ def _selftest():
             check("a physical alias of Investments remains protected",
                   (any("protected Investments/ record" in item for item in _blockers),
                    bool(_edits)), (True, False))
+
+    # --- guards no other case reached: each blocker below could be deleted
+    # --- with this suite green (mutation audit of 2026-09-30).
+    from types import SimpleNamespace as _NS
+    _posix_user = os.name == "posix" and hasattr(os, "geteuid") \
+        and os.geteuid() != 0
+
+    def _guard_blockers(_v, _pdf, _to, dest=None, **_patches):
+        with patch.dict(globals(), **_patches):
+            return plan_rename(_v, _pdf, _to, dest=dest)[2]
+
+    with _tf.TemporaryDirectory(prefix="org-guard-clash-") as _v:
+        _pdf = _put(_v, "Inbox/download.pdf")
+        _old = _put(_v, "Sources/PDFs/Old/Doe_X_2025.pdf")
+        check("a target name filed in another folder blocks the rename",
+              [_old in item for item in _guard_blockers(
+                  _v, _pdf, "Doe_X_2025.pdf",
+                  dest=os.path.join(_v, "Sources", "PDFs"))
+               if "Doe_X_2025.pdf already exists at" in item], [True])
+
+        def _no_names(_vault):
+            raise InventoryFailed("injected walk failure")
+        check("an incomplete vault-wide name walk blocks the rename",
+              any("uniqueness could not be checked" in item
+                  for item in _guard_blockers(_v, _pdf, "Doe_Y_2025.pdf",
+                                              vault_names=_no_names)), True)
+
+        def _no_notes(_vault):
+            raise InventoryFailed("injected walk failure")
+            yield
+        check("an incomplete Markdown walk blocks the rename",
+              any("could not be scanned completely" in item
+                  for item in _guard_blockers(_v, _pdf, "Doe_Y_2025.pdf",
+                                              md_files=_no_notes)), True)
+
+        def _gone(_path):
+            raise OSError("injected late change")
+        check("a source that cannot be snapshotted blocks the rename",
+              any("changed while the move plan was being finalized" in item
+                  for item in _guard_blockers(_v, _pdf, "Doe_Y_2025.pdf",
+                                              _move_snapshot=_gone)), True)
+
+        _real_inventory = inventory_source_figures
+
+        def _partial(_images, _stem):
+            if _stem == "Doe_Y_2025":
+                return _NS(complete=False, candidates=[], blocked_matches=[])
+            return _real_inventory(_images, _stem)
+        _put(_v, "Sources/Images/Other_Z_2020_fig_1.png", b"png")
+        check("an incomplete target figure inventory blocks the rename",
+              any("Doe_Y_2025_fig* could not be inventoried completely" in item
+                  for item in _guard_blockers(
+                      _v, _pdf, "Doe_Y_2025.pdf",
+                      inventory_source_figures=_partial)), True)
+
+        _latin = _put(_v, "Wiki/latin.md", b"caf\xe9 [[download.pdf]]\n")
+        _real_snapshot = _read_snapshot
+
+        def _no_reread(_path, *, errors="strict"):
+            if errors != "strict":
+                raise OSError("injected re-read failure")
+            return _real_snapshot(_path, errors=errors)
+        check("a non-UTF-8 note that cannot be re-read blocks the rename",
+              any(_latin in item and "could not be re-read" in item
+                  for item in _guard_blockers(_v, _pdf, "Doe_Y_2025.pdf",
+                                              _read_snapshot=_no_reread)), True)
+        os.remove(_latin)
+
+    with _tf.TemporaryDirectory(prefix="org-guard-outside-") as _tmp:
+        _v = os.path.join(_tmp, "vault")
+        os.makedirs(os.path.join(_v, "Sources", "PDFs"))
+        _outside = _put(_tmp, "Downloads/download.pdf")
+        _moves, _edits, _blockers = plan_rename(
+            _v, _outside, "Doe_X_2025.pdf",
+            dest=os.path.join(_v, "Sources", "PDFs"))
+        check("--dest never imports a source from outside the vault",
+              (_moves, [("outside the vault passed as --vault" in item)
+                        for item in _blockers]), ([], [True]))
+
+    with _tf.TemporaryDirectory(prefix="org-guard-long-chapter-") as _v:
+        _book = _put(_v, "Sources/PDFs/Doe_Book_2021.pdf")
+        _put(_v, "Sources/PDFs/Doe_Book_2021/Doe_Book_2021_01_"
+             + "Intro" * 30 + ".pdf")
+        _long_stem = "Doe_" + "Book" * 10 + "_2021"
+        check("a derived chapter name over the byte limit blocks a book rename",
+              any("-byte limit" in item for item in _guard_blockers(
+                  _v, _book, _long_stem + ".pdf")), True)
+
+    with _tf.TemporaryDirectory(prefix="org-guard-year-") as _v:
+        _book = _put(_v, "Sources/PDFs/Doe_Book_2021.pdf")
+        _put(_v, "Sources/PDFs/Doe_Book_2021/Doe_Book_2021_notes.pdf")
+        _put(_v, "Articles/Doe_Book_2021_notes.md",
+             '---\nsources:\n  - "[[Doe_Book_2021_notes.pdf]]"\n---\n')
+        check("an owned note that would lose its canonical year blocks",
+              any("would not retain a canonical year segment" in item
+                  for item in _guard_blockers(_v, _book, "Doe_Book_2022.pdf")),
+              True)
+
+    with _tf.TemporaryDirectory(prefix="org-guard-sidecar-") as _v:
+        _pdf = _put(_v, "Sources/PDFs/Doe_Old_2025.pdf")
+        _real_manifest = _put(_v, "Elsewhere/manifest.tsv", "")
+        os.makedirs(os.path.join(_v, "Sources", "Images"))
+        try:
+            os.symlink(_real_manifest,
+                       os.path.join(_v, "Sources", "Images", MANIFEST_FILE))
+        except (OSError, NotImplementedError):
+            pass
+        else:
+            check("a figure sidecar that cannot follow the rename blocks it",
+                  any("cannot safely follow the source rename" in item
+                      for item in plan_rename(_v, _pdf, "Doe_New_2025.pdf")[2]),
+                  True)
+
+    if _posix_user:
+        with _tf.TemporaryDirectory(prefix="org-guard-readonly-") as _v:
+            _pdf = _put(_v, "Sources/PDFs/Doe_Old_2025.pdf")
+            _cite = _put(_v, "Wiki/topic.md", "See [[Doe_Old_2025.pdf]].\n")
+            os.chmod(_cite, 0o444)
+            try:
+                check("a read-only citing note blocks the rename",
+                      any(_cite in item and "is not writable" in item
+                          for item in plan_rename(
+                              _v, _pdf, "Doe_New_2025.pdf")[2]), True)
+            finally:
+                os.chmod(_cite, 0o644)
+            _pdfs = os.path.dirname(_pdf)
+            os.chmod(_pdfs, 0o555)
+            try:
+                check("a read-only source folder blocks the move",
+                      any("is not writable, so Doe_Old_2025.pdf cannot be "
+                          "moved" in item for item in plan_rename(
+                              _v, _pdf, "Doe_New_2025.pdf")[2]), True)
+            finally:
+                os.chmod(_pdfs, 0o755)
+
+    # --- A note is parsed once per rename plan: the literal pre-gate skips
+    # --- notes that cannot name a changed file, and debasing then rewriting
+    # --- each decoded part must equal the two separate whole-text passes.
+    _probe = _citation_probe({"Doe_Book_2021.pdf", "O'Reilly_X_2020.pdf",
+                              "Doe_Note_2021.md"})
+    check("the citation pre-gate sees every decoded spelling and no other",
+          [_may_cite(_text, _probe) for _text in (
+              "[a](Doe%5FBook_2021.pdf)", "[a](Doe\\_Book_2021.pdf)",
+              '---\nsources:\n  - "[[Doe\\u005fBook_2021.pdf]]"\n---\n',
+              "---\nsources:\n  - '[[O''Reilly_X_2020.pdf]]'\n---\n",
+              "[[Articles/doe_note_2021|x]]",
+              "Nothing cites it: 45% of \\alpha, [a](x%20y.pdf).")],
+          [True, True, True, True, True, False])
+    with _tf.TemporaryDirectory(prefix="org-one-pass-") as _v:
+        _book = _put(_v, "Inbox/Doe_Book_2021.pdf")
+        _put(_v, "Sources/PDFs/Doe_Book_2021/Doe_Book_2021_01_Intro.pdf")
+        _put(_v, "Articles/Doe_Book_2021_01_Intro.md",
+             '---\nsources:\n  - "[[Doe_Book_2021_01_Intro.pdf]]"\n---\nx\n')
+        for _rel, _text in (
+                ("Wiki/qualified.md",
+                 "See [[Inbox/Doe_Book_2021.pdf#page=2|2]] and "
+                 "[[Articles/Doe_Book_2021_01_Intro]].\n"),
+                ("Wiki/markdown.md",
+                 "[a](Inbox/Doe%5FBook_2021.pdf) [b](<Inbox/Doe_Book_2021.pdf>) "
+                 "[c](Sources/PDFs/Doe\\_Book\\_2021/Doe_Book_2021_01_Intro.pdf)\n"),
+                ("Wiki/yaml.md",
+                 '---\nsources:\n  - "[[Inbox/Doe\\u005fBook_2021.pdf]]"\n'
+                 "  - '[[Doe_Book_2021_01_Intro.pdf]]'\n---\nbody\n"),
+                ("Wiki/masked.md",
+                 "`[[Doe_Book_2021.pdf]]` <!-- [[Doe_Book_2021.pdf]] -->\n"
+                 "| a | [[Inbox/Doe_Book_2021.pdf\\|x]] |\n"),
+                ("Wiki/unrelated.md", "Nothing here: 45% of $\\alpha$.\n")):
+            _put(_v, _rel, _text)
+        _edits = plan_rename(_v, _book, "Roe_Book_2021.pdf",
+                             dest=os.path.join(_v, "Sources", "PDFs"))[1]
+        _keyed = keyed_files(_v, _book)
+        _ren = {_b: _derive("Doe_Book_2021", _b, "Roe_Book_2021")
+                for _b in _keyed.values()}
+        _dirs = keyed_dirs(_v, _keyed)
+        _folders = {_b: _ren[_b] for _p, _b in _keyed.items()
+                    if os.path.isdir(_p)}
+        _two_pass = {}
+        for _md in md_files(_v):
+            with open(_md, encoding="utf-8", newline="") as _fh:
+                _text = _fh.read()
+            _nd = os.path.relpath(os.path.dirname(_md), _v)
+            _new = rewrite_text(
+                debase_links(_text, {"Doe_Book_2021.pdf"}, _dirs, _nd),
+                {_o: _n for _o, _n in _ren.items() if _o not in _folders},
+                {os.path.splitext(_o)[0]: os.path.splitext(_n)[0]
+                 for _o, _n in _ren.items() if _o.endswith(".md")},
+                _dirs, _nd, _folders)
+            if _new != _text:
+                _two_pass[_md] = _new
+        check("one parse per note gives the two passes' edits byte for byte",
+              (dict(_edits), sorted(os.path.basename(_p) for _p in _two_pass)),
+              (_two_pass, ["Doe_Book_2021_01_Intro.md", "markdown.md",
+                           "masked.md", "qualified.md", "yaml.md"]))
 
     failed = [c for c in cases if not c[1]]
     for label, ok, got, want in cases:

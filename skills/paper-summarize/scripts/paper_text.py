@@ -33,7 +33,9 @@ mapped to ASCII, whitespace is collapsed, and case is ignored unless
 ``--exact``.  A needle that starts or ends with a digit matches only a whole
 number at that end, so ``8.2%`` is not found in ``18.2%`` and ``219`` is not
 found in ``2190``; ``219.5`` or ``219.14`` (a citation mark after a full stop)
-is only a ``loose`` hit for ``219``.  A needle that still misses is retried with
+is only a ``loose`` hit for ``219``, and so is ``-0.31`` for ``0.31`` (a minus
+sign the needle dropped; the dash in ``11.1-15.4`` or ``covid-19`` is not a
+sign).  A needle that still misses is retried with
 every space and hyphen removed, which is what recovers a word the PDF broke
 across a line — and a hit found only that way is reported as ``loose``, never
 as a clean one.
@@ -42,7 +44,7 @@ as a clean one.
     python3 '<skill>/scripts/paper_text.py' '<document>.pdf' --find '13.2 months' --find '0.62'
 
 The paths are the user's and the needles come from the document, so both are
-single-quoted (`CONVENTIONS.md` §1b).
+single-quoted (`shared/INPUT_SAFETY.md`).
 
 PyMuPDF is used when present (figure-extract already depends on it) and
 pypdf otherwise; neither is imported until a PDF is actually opened.
@@ -229,39 +231,64 @@ def read_pages(path):
     return [(p.extract_text() or "") for p in reader.pages]
 
 
-def _needle_re(want, decimal_tail=True):
+#: A minus sign directly before a number: `r = -0.31`, `(-0.31)`, a leading
+#: `-0.31`.  A dash after a word character, a closing bracket or `%` joins a
+#: range or a compound instead (`11.1-15.4`, `covid-19`, `p. 11-12`,
+#: `10%-20%`), so the number after it is still a whole number.
+_SIGN_GUARD = r"(?<![^\w)\]%]-)(?<!^-)"
+
+
+def _needle_re(want, decimal_tail=True, sign_guard=False):
     """A search for `want` that a longer number cannot satisfy: `8.2%` is not in
     `18.2%`, `219` is not in `2190` or `219.5`, but `219` is in `219 adults`.
-    `decimal_tail=False` lets `219.5` and `219.14` count."""
+    `decimal_tail=False` lets `219.5` and `219.14` count; `sign_guard=True`
+    also refuses `0.31` in `r = -0.31`, a sign the needle dropped."""
     if not want:
         return None
     pattern = re.escape(want)
     if want[0].isdecimal():
-        pattern = r"(?<!\d)(?<!\d[.,])" + pattern
+        pattern = (r"(?<!\d)(?<!\d[.,])" + (_SIGN_GUARD if sign_guard else "")
+                   + pattern)
     if want[-1].isdecimal():
         pattern += r"(?!\d)(?![.,]\d)" if decimal_tail else r"(?!\d)"
     return re.compile(pattern)
 
 
-def find(pages, needle, fold_case=True):
+def prepare(pages, fold_case=True):
+    """(normalized pages, squashed pages): what `find` searches, built once so
+    many needles over a whole book do not re-normalize every page each time."""
+    norm = [normalize(raw, fold_case) for raw in pages]
+    return norm, [squash(text) for text in norm]
+
+
+def find(pages, needle, fold_case=True, prepared=None):
     """{'needle', 'pages', 'loose_pages'} — where a string occurs.
 
     `pages` are clean hits; `loose_pages` matched only after spacing and
-    hyphens were removed, or only as a number followed by `.digits`/`,digits`
-    (a decimal or a citation mark), and are reported separately because those
-    relaxations can join things that the paper kept apart.
+    hyphens were removed, only as a number followed by `.digits`/`,digits`
+    (a decimal or a citation mark), or only after a minus sign the needle
+    dropped, and are reported separately because those relaxations can join
+    things that the paper kept apart.  `prepared` is `prepare(pages,
+    fold_case)`, passed in when one text is searched for several needles.
     """
     want = normalize(needle, fold_case)
-    clean_re, loose_re = _needle_re(want), _needle_re(squash(want))
-    # `0.62.14` is a decimal or a sentence end with a citation mark.
+    flat_want = squash(want)
+    clean_re, loose_re = (_needle_re(want, sign_guard=True),
+                          _needle_re(flat_want))
+    # `0.62.14` is a decimal or a sentence end with a citation mark; this
+    # unguarded form also catches `-0.31`, so a dropped sign reads as loose.
     tail_re = _needle_re(want, decimal_tail=False)
+    norm_pages, squashed = (prepared if prepared is not None
+                            else prepare(pages, fold_case))
     hits, loose = [], []
-    for i, raw in enumerate(pages, start=1):
-        norm = normalize(raw, fold_case)
-        if clean_re and clean_re.search(norm):
+    for i, (norm, flat) in enumerate(zip(norm_pages, squashed), start=1):
+        # Every pattern contains its needle literally, so a plain substring
+        # test skips the regexes on the pages that cannot match at all.
+        whole = want in norm
+        if whole and clean_re and clean_re.search(norm):
             hits.append(i)
-        elif ((loose_re and loose_re.search(squash(norm)))
-              or (tail_re and tail_re.search(norm))):
+        elif ((flat_want in flat and loose_re and loose_re.search(flat))
+              or (whole and tail_re and tail_re.search(norm))):
             loose.append(i)
     return {"needle": needle, "pages": hits, "loose_pages": loose}
 
@@ -317,25 +344,41 @@ def cites(pages, ed_prefix="S"):
         raise ValueError("ed_prefix must be 'S' or 'ED'")
     counts = {}
     # Captions are line-shaped, so look for them before whitespace collapses.
-    hyphenated = any(
-        "-" in m.group("label")
+    caption_labels = {
+        m.group("label")
         for raw in pages
         for m in _CAPTION_LABEL.finditer(
-            unicodedata.normalize("NFKC", raw).translate(_TRANSLATE)))
+            unicodedata.normalize("NFKC", raw).translate(_TRANSLATE))}
+    hyphenated = any("-" in label for label in caption_labels)
+    caption_keys = {label.replace(".", "-") for label in caption_labels}
+
+    def unglue(label):
+        # A footnote marker flattened onto a sentence-ending reference
+        # (`Figure 8-10.7 When`) reads as a deeper label no caption has. As
+        # in the extractor's reference scan, it folds to the caption it
+        # extends, before any range expansion, so a range member is never
+        # folded; a caption that really has the deeper label keeps it.
+        base, dot, tail = label.rpartition(".")
+        if (dot and tail.isdigit()
+                and label.replace(".", "-") not in caption_keys
+                and base.replace(".", "-") in caption_keys):
+            return base
+        return label
+
     for raw in pages:
         text = normalize(raw, fold_case=False)
         for m in _FIG_REF.finditer(text):
             marker = m.group("marker")
-            labels = _range_labels(m.group("label"), bool(m.group("plural")),
-                                   hyphenated)
+            labels = _range_labels(unglue(m.group("label")),
+                                   bool(m.group("plural")), hyphenated)
             pos = m.end()
             if m.group("plural"):
                 while True:
                     more = _FIG_MORE.match(text, pos)
                     if not more:
                         break
-                    labels.extend(_range_labels(more.group("label"), True,
-                                                hyphenated))
+                    labels.extend(_range_labels(unglue(more.group("label")),
+                                                True, hyphenated))
                     pos = more.end()
             for label in labels:
                 label = label.replace(".", "-")
@@ -414,8 +457,9 @@ def _render_find(results, textless=()):
                             ", ".join(str(p) for p in r["pages"])))
         elif r["loose_pages"]:
             lines.append("loose   %-40r page(s) %s  (matched only with "
-                         "spacing and hyphens removed, or before .digits or "
-                         ",digits -- read the page before citing it)"
+                         "spacing and hyphens removed, before .digits or "
+                         ",digits, or after a minus sign the needle dropped "
+                         "-- read the page before citing it)"
                          % (r["needle"],
                             ", ".join(str(p) for p in r["loose_pages"])))
         else:
@@ -528,6 +572,35 @@ def run_self_test():
     _cite = find(["The hazard ratio was 0.62.14 Mortality fell."], "0.62")
     case("a number before a glued citation mark is loose, not missing",
          (_cite["pages"], _cite["loose_pages"]), ([], [1]))
+    # A draft that dropped a minus sign must not verify clean: the typeset
+    # minus folds to `-`, and `0.31` after it is only a loose hit.
+    _signed = ["The correlation was r = −0.31 (p < 0.01)."]
+    _drop = find(_signed, "0.31")
+    case("a number after a minus sign is loose, not found",
+         (_drop["pages"], _drop["loose_pages"]), ([], [1]))
+    case("the signed needle itself is found",
+         [find(_signed, n)["pages"] for n in ("-0.31", "−0.31")], [[1], [1]])
+    _kg = find(["Mean change −4.2 kg versus placebo."], "4.2 kg")
+    case("a dropped sign before a unit is loose too",
+         (_kg["pages"], _kg["loose_pages"]), ([], [1]))
+    case("a sign after =, ( or at the start is a sign",
+         [find([text], "0.31")["pages"]
+          for text in ("r=-0.31", "(-0.31)", "-0.31 was the slope")],
+         [[], [], []])
+    case("a range or compound dash is not a sign",
+         [find([text], needle)["pages"]
+          for text, needle in (("95% CI 11.1–15.4", "15.4"),
+                               ("COVID-19 cases", "19"),
+                               ("see p. 11-12", "12"),
+                               ("a 10%–20% fall", "20%"),
+                               ("ages 18 - 65", "65"))],
+         [[1], [1], [1], [1], [1]])
+    # Many needles share one normalization of the pages.
+    _prep, _needles = prepare(_PAGES), ("13.2 months", "progression-free survival",
+                                        "14.9 months", "0.62")
+    case("prepared pages give the same answer as a fresh search",
+         [find(_PAGES, n, True, _prep) for n in _needles],
+         [find(_PAGES, n) for n in _needles])
 
     c = cites(_PAGES)
     case("panel letter folds to its figure", c.get("2"), 3)
@@ -650,6 +723,21 @@ def run_self_test():
     case("multi-level dashed labels are not truncated",
          cites(["Figure 1-2-3 shows the hierarchy. Figure C-2-1 is the control."]),
          {"1-2-3": 1, "C-2-1": 1})
+    # A footnote number flattened onto a sentence-ending reference is not a
+    # deeper figure; a caption that really has the deeper label keeps it.
+    case("a glued footnote folds to the caption it follows",
+         cites(["Figure 8-10. A caption.\nAs in Figure 8-10.7 When the model"]),
+         {"8-10": 2})
+    case("a real three-part caption keeps its label",
+         cites(["Figure 1.2.4. A caption.\nSee Figure 1.2.4 for the trace."]),
+         {"1-2-4": 2})
+    case("a dotted en-dash range cites both figures",
+         cites(["Figure 12.10. A caption.\nSee figures 12.10–12.11."]),
+         {"12-10": 2, "12-11": 1})
+    case("a range member is expanded, never folded onto a shorter caption",
+         cites(["Figure 12. A caption.\nFigure 12.10. A caption.\n"
+                "See figures 12.10–12.11."]),
+         {"12": 1, "12-10": 2, "12-11": 1})
     # A loose match is reported as loose and is not counted as found.
     _txt, _missing = _render_find([{"needle": "2015.3", "pages": [],
                                     "loose_pages": [1]}])
@@ -826,7 +914,8 @@ def main(argv=None):
                   "drop it rather than reading it as a missing claim",
                   file=sys.stderr)
             return 2
-        results = [find(pages, s, not args.exact) for s in args.find]
+        prepared = prepare(pages, not args.exact)
+        results = [find(pages, s, not args.exact, prepared) for s in args.find]
         out["find"] = results
         rendered, missing = _render_find(results, textless)
         if not args.json:

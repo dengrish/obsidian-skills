@@ -91,6 +91,9 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               lacks canonical nearby display form; agent reviews
       12-equation-format       an existing display has content on the same line
                               as its `$$` delimiters
+      12-equation-split-candidate
+                              one display sets relations with different
+                              left-hand sides side by side; agent reviews
       12-boilerplate-candidate
                               well-definedness boilerplate in body prose or card
                               line 1 (nonempty and count guards, sign ranges on
@@ -183,12 +186,13 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               an inflected or derived head, an alias, or a term
                               the target defines in italics passes (warning)
 
-Items 5, 6, 13, 14, 16 and 18, and item 19's card set, primary card,
-Spaced Repetition marker floor and discipline-root test, share their
-per-entry rules with wiki-lint's scanner through
-``shared/scripts/entry_checks.py``. Item 10's self-link rule is
-implemented here and in the scanner; ``SHARED_MUTATIONS`` holds both to the
-same fixtures.
+Items 5, 6, 13, 14, 16 and 18, item 7's description subject, and item 19's
+card set, primary answer (card line 3), primary card, Spaced Repetition
+marker floor and discipline-root test, share their per-entry rules with
+wiki-lint's scanner through ``shared/scripts/entry_checks.py``; the
+Related/Flashcards section markers come from ``entry_structure.py``. Item
+10's self-link rule is implemented here and in the scanner;
+``SHARED_MUTATIONS`` holds both to the same fixtures.
 
 NOT implemented (out of scope by design): item 4's file existence and page
 correctness, item 9's semantic flow/atomicity judgments, item 10's dangling
@@ -216,6 +220,8 @@ CLI:
       [--severity error|warning|info]   drop findings below this floor
       [-o out.json]                     write JSON here instead of stdout
       [--compact]                       compact JSON
+      [--findings-only]                 omit entries without findings
+                                        (summary still counts every file)
 
 Output: {root, entries:[{file, findings:[{item, severity, message,
 evidence}], title, aliases, description_chars}], alias_collisions[],
@@ -254,6 +260,7 @@ missing target argument or other usage error.
 from __future__ import annotations
 
 import argparse
+import copy
 import datetime as _dt
 import json
 import os
@@ -316,26 +323,26 @@ if _here != _shared:
 
 from slugify import SlugError, base_term, has_parenthetical, slug_stem  # noqa: E402
 from introduced_aliases import (  # noqa: E402
-    _BOLD_PAREN_RE,
     introduced_alias_candidates,
     missing_introduced_aliases,
 )
 from plurals import singular_keys  # noqa: E402
 from organism_names import (  # noqa: E402
     organism_title_classification as _organism_title_classification,
-    scientific_abbreviation_matches as _scientific_abbreviation_matches,
 )
 from code_typography import find_bare_code_shapes  # noqa: E402
 from equation_coverage import (  # noqa: E402
     find_boilerplate_candidates,
     find_missing_display_equation_candidates,
+    find_multi_relation_display_candidates,
     find_noncanonical_display_equation_candidates,
 )
 from note_provenance import split_provenance  # noqa: E402
 from entry_structure import (  # noqa: E402
     CARD_SEPARATORS,
-    description_subject_forms as _description_subject_forms,
-    acronym_initial_forms as _initial_forms,
+    FLASH_HEAD_CANON_RE,
+    RELATED_HEAD_LINE_RE,
+    first_letter_ci_equal,
     markdown_image_spans as _markdown_image_spans,
     source_stem,
     strip_code,
@@ -366,21 +373,29 @@ from markdown_tables import (  # noqa: E402
 from entry_checks import (  # noqa: E402
     BARE_WORD_ALIAS_HINT,
     BOLD_OUTER_RE as _BOLD_OUTER_RE,
+    BOLD_PAREN_RE,
     LEGACY_EXTRA_PREFIX,
+    PAREN_LEADIN_RE,
     SHARED_MUTATIONS,
     SHARED_QUIET,
     SOURCE_REFERENCE_FORMS,
+    acronym_counterpart,
     api_surface_findings,
     bare_common_noun_slug,
     bare_word_alias_candidate,
     bold_parts as _bold_parts,
     cross_domain_synonym_label,
+    description_has_entity_subject,
+    description_subject_findings,
     display_label_links,
     emphasis_span_findings,
+    flashcard_line3_fault,
+    flashcard_primary_answer,
     flashcard_set_faults,
     is_discipline_root,
     label_drops_head,
     label_shares_surface,
+    line3_parts,
     merge_scar_findings,
     organism_common_name_bound,
     primary_card_label,
@@ -448,27 +463,9 @@ def _f(item, severity, message, evidence=None):
             "evidence": evidence}
 
 
-def _organism_title_parts(title, aliases=(), opening=""):
-    """Scientific taxon parts only when independent evidence proves the role."""
-    status, parts = _organism_title_classification(
-        title, aliases, opening)
-    return parts if status == "scientific" else None
-
-
 # --------------------------------------------------------------------------
 # small text helpers
 # --------------------------------------------------------------------------
-
-def first_letter_ci_equal(a, b):
-    """Equality that is case-insensitive on the FIRST letter only (item 16)."""
-    if a is None or b is None:
-        return False
-    if len(a) != len(b):
-        return False
-    if not a:
-        return True
-    return a[0].lower() == b[0].lower() and a[1:] == b[1:]
-
 
 def _valid_date(value):
     if not value or not _DATE_RE.match(value):
@@ -781,36 +778,6 @@ def _check_slug(fm, findings, filename):
              "actual_filename": os.path.basename(filename)}))
 
 
-_LEADING_ARTICLE_RE = re.compile(r"^(?:a|an|the)\s+", re.IGNORECASE)
-_SUBJECT_BOUNDARY_RE = re.compile(r"^(?:$|[\s,(:;\u2013\u2014])")
-
-
-def _description_has_entity_subject(description, title):
-    """Conservative mechanical floor for the entity-as-subject rule."""
-    if not description or not title:
-        return True  # Presence/title validity have their own findings.
-    forms = _description_subject_forms(title)
-    starts = [description.strip()]
-    article = _LEADING_ARTICLE_RE.match(starts[0])
-    # A leading article is optional only when it is not already part of the
-    # canonical name.  This keeps "The Iliad" valid without accepting the
-    # nonsensical "The The Iliad".
-    if article and not any(_LEADING_ARTICLE_RE.match(form) for form in forms):
-        starts.append(starts[0][article.end():])
-    for text in starts:
-        if has_parenthetical(title):
-            full = text[:len(title)]
-            if (first_letter_ci_equal(full, title)
-                    and _SUBJECT_BOUNDARY_RE.match(text[len(title):])):
-                continue
-        for form in forms:
-            prefix = text[:len(form)]
-            if (first_letter_ci_equal(prefix, form)
-                    and _SUBJECT_BOUNDARY_RE.match(text[len(form):])):
-                return True
-    return False
-
-
 def _check_description(fm, findings, title=None):
     field = fm.get("description")
     if field is None:
@@ -850,13 +817,9 @@ def _check_description(fm, findings, title=None):
             % sentence_count,
             {"sentences": sentence_count, "description": desc}))
 
-    if title and not _description_has_entity_subject(desc, title):
-        findings.append(_f(
-            "7-description", "error",
-            "description subject must begin with the canonical title or base "
-            "term (an optional leading article is allowed)",
-            {"description": desc,
-             "expected_subjects": _description_subject_forms(title)}))
+    for subject in description_subject_findings(desc, title) if title else ():
+        findings.append(_f("7-description", "error", subject["message"],
+                           subject["evidence"]))
 
     if desc[0].isalpha() and not desc[0].isupper():
         # Carve-out: the description's subject must be the canonical title form,
@@ -950,10 +913,6 @@ def _check_body_structure(fm, sections, findings):
                  "text": visible_lines[line_i - 1].strip()[:160]}))
 
 
-_RELATED_RENDERED_RE = re.compile(
-    r"^ {0,3}(?:>[ \t]*)?\*\*Related:\*\*(?:[ \t]*.*)?$")
-
-
 def _check_related_footer(sections, findings, own=frozenset()):
     """Require one canonical terminal footer without hiding malformed forms.
 
@@ -963,7 +922,7 @@ def _check_related_footer(sections, findings, own=frozenset()):
     visible = sections.get("visible_lines", sections["lines"])
     masked = strip_fenced("\n".join(visible)).split("\n")
     indexes = [index for index, line in enumerate(masked)
-               if _RELATED_RENDERED_RE.match(line)]
+               if RELATED_HEAD_LINE_RE.match(line)]
     if not indexes:
         findings.append(_f(
             "11-related-footer", "error",
@@ -1200,111 +1159,6 @@ def _check_aliases(fm, findings, filename):
 # item 17's introduced-alias scan
 # --------------------------------------------------------------------------
 
-#: A lexical marker LEADING the parenthetical name -- ``(singular,
-#: *archaeon*)``, ``(formerly Facebook)``.  Annotation, not part of the name:
-#: left in place, the candidate came out polluted ("singular, *archaeon*",
-#: expected alias "singular-archaeon").
-_PAREN_LEADIN_RE = re.compile(
-    r"^(?:(?:short\s+for|originally\s+called|also\s+called|"
-    r"also\s+known\s+as|known\s+as)|singular|plural|abbreviated|"
-    r"formerly|n[ée]e|or|a\.k\.a\.?)[\s,:]+", re.IGNORECASE)
-
-_SHORT_FOR_PAREN_RE = re.compile(r"^short\s+for[\s,:]+", re.IGNORECASE)
-
-#: A direct italic scientific abbreviation can be the title's own established
-#: counterpart: ``**Saccharomyces cerevisiae** (*S. cerevisiae*)``.  This is
-#: deliberately narrower than "any italic parenthetical" so an annotated
-#: synonym does not become a flashcard counterpart merely because it is also
-#: listed in aliases.
-_SCI_ABBREV_RE = re.compile(r"^[A-Z]\.\s*[a-z][A-Za-z.-]*(?:\s+[a-z][A-Za-z.-]*)*$")
-
-
-def _acronym_counterpart(term, candidate):
-    """Whether the pair has an acronym/full-form relationship.
-
-    The check is deliberately structural.  It rejects arbitrary alternate
-    names such as Mark Twain/Samuel Clemens while admitting canonical shapes
-    such as PCA, CART, Lasso, MLOps, OOB, and t-SNE.
-    """
-    term_words = re.findall(r"[A-Za-z0-9]+", term or "")
-    cand_words = re.findall(r"[A-Za-z0-9]+", candidate or "")
-    if not term_words or not cand_words:
-        return False
-
-    def compact_forms(value, words):
-        forms = set()
-        first = re.sub(r"[^A-Za-z0-9]", "", words[0])
-        if len(first) >= 2:
-            forms.add(first.casefold())
-        uppers = "".join(ch for ch in value if ch.isupper())
-        if len(uppers) >= 2:
-            forms.add(uppers.casefold())
-        whole = re.sub(r"[^A-Za-z0-9]", "", value)
-        if len(words) == 1 and len(whole) >= 2:
-            forms.add(whole.casefold())
-        return forms
-
-    def related(short, long):
-        if len(short) < 2 or len(long) < len(short):
-            return False
-        if short == long or long.startswith(short):
-            return True
-        it = iter(long)
-        return all(ch in it for ch in short)
-
-    def acronym_tokens(value):
-        """Compact tokens that visibly behave as abbreviations.
-
-        Initials alone miss established forms whose letters come from a
-        compound or morpheme (ATP, DNA, RNA, MLOps) and a short token carried
-        beside a shared tail (OOB evaluation).  Requiring at least two written
-        capitals keeps ordinary title-cased names and pseudonyms out.
-        """
-        out = set()
-        for token in re.findall(r"[A-Za-z0-9]+", value or ""):
-            compact = re.sub(r"[^A-Za-z0-9]", "", token)
-            if (2 <= len(compact) <= 10
-                    and sum(1 for ch in token if ch.isupper()) >= 2):
-                out.add(compact.casefold())
-        return out
-
-    def lexical_compact(value):
-        return re.sub(r"[^A-Za-z0-9]", "", value or "").casefold()
-
-    term_compact = compact_forms(term, term_words)
-    cand_compact = compact_forms(candidate, cand_words)
-    initial_match = (
-        any(related(short, initials)
-            for short in cand_compact for initials in _initial_forms(term))
-        or any(related(short, initials)
-               for short in term_compact for initials in _initial_forms(candidate))
-    )
-    if initial_match:
-        return True
-    term_text, candidate_text = lexical_compact(term), lexical_compact(candidate)
-    return (
-        any(related(short, candidate_text) for short in acronym_tokens(term))
-        or any(related(short, term_text) for short in acronym_tokens(candidate))
-    )
-
-def _clean_paren_name(raw):
-    """The name inside an opener parenthetical, markers stripped.
-
-    ``(singular, *archaeon*)`` names *archaeon*: the lead-in word and the
-    italic/bold markers are annotation around the name, not part of it.
-    """
-    s = " ".join((raw or "").split())
-    s = _PAREN_LEADIN_RE.sub("", s)
-    return s.replace("*", "").replace("_", "").strip()
-
-
-def _opening_block(sections):
-    """The first contiguous run of non-empty prose lines (the opener)."""
-    # A masked leading comment is blank; the opener starts at visible text.
-    block = opening_paragraph("\n".join(sections["prose_lines"]).lstrip())
-    return " ".join(line.strip() for line in block.splitlines())
-
-
 def _alias_candidates(sections, subject_forms=None):
     """Names the body introduces for the entry's subject: ``(name, where)``."""
     prose_lines = strip_code("\n".join(sections["prose_lines"])).split("\n")
@@ -1462,6 +1316,17 @@ def _check_equation_coverage_candidates(fm, sections, findings,
             "display math has content on the same line as its `$$` delimiters; "
             "keep the existing equation and put each delimiter on its own line",
             {"matches": form_candidates}))
+    split_candidates = find_multi_relation_display_candidates(
+        masked, table_spans)
+    for candidate in split_candidates:
+        candidate["line"] += fm.body_start_line - 1
+    if split_candidates:
+        findings.append(_f(
+            "12-equation-split-candidate", "warning",
+            "one display sets relations with different left-hand sides side "
+            "by side; when they define different quantities, split them into "
+            "two displays, each beside the prose that introduces its quantity",
+            {"matches": split_candidates, "agent_review": True}))
     boilerplate = find_boilerplate_candidates(masked, table_spans)
     for candidate in boilerplate:
         candidate["line"] += fm.body_start_line - 1
@@ -1996,94 +1861,28 @@ def _check_bold_opener(fm, sections, findings):
          "bolded_skeleton": skeleton, "opening": opening[:200]}))
 
 
-def _flashcard_primary_answer(fm, sections):
-    """Return ``(term, counterpart)`` established by the entry itself.
+def _primary_answer_inputs(fm, sections):
+    """``(title, aliases, opener, type)`` for the shared item-19 contract.
 
-    The main term has one exact plain-text spelling: ``title:`` verbatim, its
-    base term for a disambiguation parenthetical, or its mathematical plain
-    form for a symbol title. An opener parenthetical becomes a required counterpart only
-    when its slug is actually present in ``aliases:``; that distinguishes an
-    opener-established binding from a date or explanatory aside and avoids
-    inferring counterpart semantics from an alias list that can also hold
-    synonyms.
+    Only a list ``aliases:`` field can bind a counterpart; a malformed scalar
+    keeps its own item-18 finding. A masked leading comment is blank, so the
+    opener starts at visible text.
     """
-    title = fm.scalar("title") or ""
-    term = base_term(title) if has_parenthetical(title) else title
-    term = title_display_form(term)
     alias_field = fm.get("aliases")
-    aliases = {
-        fold_name(a) for a in
-        (alias_field.values if alias_field is not None and alias_field.is_list else [])
-        if a
-    }
-    entry_type = fm.scalar("type") or ""
-    opening = _opening_block(sections)
-    organism_parts = (_organism_title_parts(
-        term, fm.values("aliases"), opening)
-        if entry_type == "Organism" else None)
-    counterpart = None
-    for match in _BOLD_PAREN_RE.finditer(_opening_block(sections)):
-        visible, _style, _italic = _bold_parts(match)
-        # Identity is compared in plain form, so a Greek title bolded as
-        # LaTeX or spelled out still binds its counterpart.
-        if not first_letter_ci_equal(math_title_plain_text(visible),
-                                     math_title_plain_text(term)):
-            continue
-        raw_candidate = match.group("paren")
-        # Item 17 treats annotated parentheticals such as
-        # ``(singular, *archaeon*)`` as alias evidence.  They are not the
-        # title's direct opener-established binding and therefore do not belong
-        # on flashcard line 3.  Keep this narrower than `_clean_paren_name`,
-        # whose lead-in stripping is correct for alias completeness.
-        short_for = bool(_SHORT_FOR_PAREN_RE.match(raw_candidate))
-        cleaned = _clean_paren_name(raw_candidate)
-        scientific_abbreviation = bool(
-            organism_parts
-            and _scientific_abbreviation_matches(cleaned, organism_parts[0])
-            and
-            re.fullmatch(r"\*[^*\n]+\*", raw_candidate.strip())
-            and _SCI_ABBREV_RE.fullmatch(cleaned))
-        acronym_binding = _acronym_counterpart(term, cleaned)
-        if short_for or scientific_abbreviation or acronym_binding:
-            candidate = cleaned
-        else:
-            continue
-        try:
-            candidate_slug = fold_name(slug_stem(candidate))
-        except SlugError:
-            continue
-        if candidate_slug in aliases:
-            counterpart = candidate
-            break
-    return term, counterpart
+    aliases = (alias_field.values
+               if alias_field is not None and alias_field.is_list else [])
+    opener = opening_paragraph("\n".join(sections["prose_lines"]).lstrip())
+    return fm.scalar("title") or "", aliases, opener, fm.scalar("type") or ""
 
 
-_LINE3_RE = re.compile(r"(?P<term>.*?)(?: \((?P<paren>[^()\n]+)\))?")
-
-
-def _line3_parts(line3):
-    """Split card line 3 into its term and optional parenthetical."""
-    line3 = line3.strip()
-    match = _LINE3_RE.fullmatch(line3)
-    return (match.group("term"), match.group("paren")) if match else (line3, None)
+def _flashcard_primary_answer(fm, sections):
+    """The entry's own ``(term, counterpart)``: ``flashcard_primary_answer``."""
+    return flashcard_primary_answer(*_primary_answer_inputs(fm, sections))
 
 
 def _flashcard_line3_fault(line3, fm, sections):
-    """Explain a line-3 contract violation, or return ``None``."""
-    expected_term, required_counterpart = _flashcard_primary_answer(fm, sections)
-    term, counterpart = _line3_parts(line3)
-    if expected_term and term != expected_term:
-        return "the term must be exactly %r (same canonical casing)" % expected_term
-
-    if counterpart is not None:
-        if required_counterpart is None:
-            return ("the parenthetical %r is not established as the title's own "
-                    "opener-established, alias-bound counterpart" % counterpart)
-        if counterpart != required_counterpart:
-            return "the established counterpart must appear exactly as (%s)" % required_counterpart
-    if required_counterpart is not None and counterpart != required_counterpart:
-        return "the established counterpart must appear exactly as (%s)" % required_counterpart
-    return None
+    """The shared line-3 contract fault for this entry, or ``None``."""
+    return flashcard_line3_fault(line3, *_primary_answer_inputs(fm, sections))
 
 
 #: The frontmatter errors the scanner's ``parse_fm`` also collects (its
@@ -2169,7 +1968,7 @@ def _check_flashcards_present(fm, sections, findings, filename,
     # remedy would add a second one beside the section Obsidian already
     # renders.  scan_vault reports the same finding; the two tools must agree.
     _head = (sections.get("flashcards_head") or "").rstrip("\r")
-    if _head and not re.match(r"^## Flashcards[ \t]*$", _head):
+    if _head and not FLASH_HEAD_CANON_RE.match(_head):
         findings.append(_f(
             "19-flashcards", "error",
             "the Flashcards heading is spelled %r -- the canonical heading is "
@@ -2345,7 +2144,7 @@ def _check_flashcard_leak(fm, sections, findings, extras=frozenset()):
     aliases = [alias for alias in fm.values("aliases") if alias]
     for card_no, card in enumerate(parse_flashcards(sections["flashcard_lines"]), 1):
         line1 = card[0]
-        term_main, paren = _line3_parts(card[2] if len(card) >= 3 else "")
+        term_main, paren = line3_parts(card[2] if len(card) >= 3 else "")
         paren_is_discipline = False
         if paren:
             try:
@@ -2511,8 +2310,13 @@ def lint_text(text, filename):
     return result
 
 
-def lint_file(path, _snapshot_text=None):
-    """Lint one file on disk. Optionally retain its guarded text internally."""
+def lint_file(path, _snapshot_text=None, _cache=None):
+    """Lint one file on disk. Optionally retain its guarded text internally.
+
+    ``_cache`` is a dict shared across calls: a file read with the same path
+    and bytes as before gets a copy of its earlier single-file result, since
+    ``lint_text`` reads nothing but the text and the filename.
+    """
     abspath = os.path.abspath(path)
     preamble = []
     descriptor = None
@@ -2551,10 +2355,6 @@ def lint_file(path, _snapshot_text=None):
             preamble.append(_f("0-encoding", "error",
                                "file is not valid UTF-8 (%s); linted with "
                                "replacement characters" % exc))
-    except UnicodeDecodeError as exc:
-        preamble.append(_f("0-encoding", "error",
-                           "file is not valid UTF-8 (%s); linted with "
-                           "replacement characters" % exc))
     except Exception as exc:
         return {"file": abspath, "title": None, "aliases": [],
                 "description_chars": None,
@@ -2564,12 +2364,21 @@ def lint_file(path, _snapshot_text=None):
     finally:
         if descriptor is not None:
             os.close(descriptor)
+    if _cache is not None and (abspath, raw) in _cache:
+        result, snapshot = _cache[abspath, raw]
+        if _snapshot_text is not None:
+            _snapshot_text[abspath] = snapshot
+        return copy.deepcopy(result)
     try:
         result = lint_text(text, abspath)
         result["findings"] = preamble + result["findings"]
+        # Match lint_text's read-only newline view, including legacy CR.
+        snapshot = text.replace("\r\n", "\n").replace("\r", "\n")
         if _snapshot_text is not None:
-            # Match lint_text's read-only newline view, including legacy CR.
-            _snapshot_text[abspath] = text.replace("\r\n", "\n").replace("\r", "\n")
+            _snapshot_text[abspath] = snapshot
+        if _cache is not None:
+            # A copy taken before the folder passes edit the findings.
+            _cache[abspath, raw] = (copy.deepcopy(result), snapshot)
         return result
     except Exception as exc:  # a malformed entry is a finding, never a crash
         return {"file": abspath, "title": None, "aliases": [],
@@ -2647,7 +2456,20 @@ def _strip_wiki_root(key, root):
     return key
 
 
-def _recheck_folder_duplicate_wikilinks(results, root, snapshot_text):
+def _folder_parses(snapshot_text):
+    """``file -> (fm, sections)`` for each guarded text with frontmatter.
+
+    Parsed once per folder lint and shared by the folder passes.
+    """
+    parses = {}
+    for path, text in snapshot_text.items():
+        fm = parse_frontmatter(text)
+        if fm.found:
+            parses[path] = (fm, split_sections(fm.body))
+    return parses
+
+
+def _recheck_folder_duplicate_wikilinks(results, root, parses):
     """Re-run item 10 with the folder's unambiguous alias ownership.
 
     A single-file lint can normalize ``.md`` and case while preserving paths,
@@ -2663,17 +2485,13 @@ def _recheck_folder_duplicate_wikilinks(results, root, snapshot_text):
                               missing="unresolved-target:")
 
     for result in results:
-        text = snapshot_text.get(result["file"])
-        if text is None:
+        if result["file"] not in parses:
             continue
-        fm = parse_frontmatter(text)
-        if not fm.found:
-            continue
+        _fm, sections = parses[result["file"]]
         # A self-link is 10-self-link's alone, as in the scanner.
         own = owner_for_file[result["file"]]
         occurrences = [
-            occurrence for occurrence in
-            _body_wikilink_occurrences(split_sections(fm.body))
+            occurrence for occurrence in _body_wikilink_occurrences(sections)
             if resolve(occurrence) != own]
         result["findings"] = [
             finding for finding in result["findings"]
@@ -2751,7 +2569,7 @@ def _folder_resolver(results, root):
     return resolve, owner_for_file, owners
 
 
-def _check_folder_related_labels(results, root, snapshot_text):
+def _check_folder_related_labels(results, root, parses):
     """Item 11: resolve footer targets and require their canonical titles.
 
     The title comparison is folder-only. A single entry cannot know whether a
@@ -2765,13 +2583,9 @@ def _check_folder_related_labels(results, root, snapshot_text):
               if result.get("title")}
 
     for result in results:
-        text = snapshot_text.get(result["file"])
-        if text is None:
+        if result["file"] not in parses:
             continue
-        fm = parse_frontmatter(text)
-        if not fm.found:
-            continue
-        related = split_sections(fm.body)["related_line"] or ""
+        related = parses[result["file"]][1]["related_line"] or ""
         own = owner_for_file[result["file"]]
         for target, display in extract_wikilinks(related):
             owner = resolve(target)
@@ -2811,7 +2625,7 @@ def _check_folder_related_labels(results, root, snapshot_text):
                      "expected_display": canonical}))
 
 
-def _check_folder_link_targets(results, root, snapshot_text):
+def _check_folder_link_targets(results, root, parses):
     """Items 10 and 18 with folder ownership: self-links and label targets.
 
     Every self-link is re-resolved here, including path-qualified targets and
@@ -2829,14 +2643,13 @@ def _check_folder_link_targets(results, root, snapshot_text):
     def binds_common_name(owner, display):
         """Whether an Organism target binds ``display`` as its common name."""
         if owner not in organism_fields:
-            target_fm = parse_frontmatter(
-                snapshot_text.get(owners[owner]["file"]) or "")
+            parse = parses.get(owners[owner]["file"])
+            target_fm = parse[0] if parse else None
             organism_fields[owner] = (
                 (target_fm.scalar("type") or "", target_fm.scalar("title") or "",
                  target_fm.scalar("description") or "",
-                 _shared_prose(target_fm,
-                               split_sections(target_fm.body))[0])
-                if target_fm.found else None)
+                 _shared_prose(*parse)[0])
+                if parse else None)
         fields = organism_fields[owner]
         return bool(fields) and organism_common_name_bound(*fields, display)
 
@@ -2845,21 +2658,14 @@ def _check_folder_link_targets(results, root, snapshot_text):
     def prose_of(owner):
         """The target's explanatory prose, for terms it defines in italics."""
         if owner not in target_prose:
-            target_fm = parse_frontmatter(
-                snapshot_text.get(owners[owner]["file"]) or "")
-            target_prose[owner] = (
-                _shared_prose(target_fm, split_sections(target_fm.body))[0]
-                if target_fm.found else "")
+            parse = parses.get(owners[owner]["file"])
+            target_prose[owner] = _shared_prose(*parse)[0] if parse else ""
         return target_prose[owner]
 
     for result in results:
-        text = snapshot_text.get(result["file"])
-        if text is None:
+        if result["file"] not in parses:
             continue
-        fm = parse_frontmatter(text)
-        if not fm.found:
-            continue
-        sections = split_sections(fm.body)
+        sections = parses[result["file"]][1]
         own = owner_for_file[result["file"]]
         findings = [finding for finding in result["findings"]
                     if finding["item"] != "10-self-link"]
@@ -2920,8 +2726,13 @@ def _check_folder_link_targets(results, root, snapshot_text):
         result["findings"] = findings
 
 
-def lint_path(target, severity_floor=None):
-    """Lint a single entry file or a whole folder (recursively)."""
+def lint_path(target, severity_floor=None, cache=None):
+    """Lint a single entry file or a whole folder (recursively).
+
+    ``cache``, an optional dict passed to several calls over the same files,
+    re-lints only files whose path or bytes changed; the folder checks still
+    run over every file on every call.
+    """
     target = os.path.abspath(target)
     report = {"root": target, "entries": [], "alias_collisions": [],
               "summary": {}, "problems": []}
@@ -2944,12 +2755,14 @@ def lint_path(target, severity_floor=None):
     # Cross-file checks consume the exact guarded reads used above. Reopening
     # a path could follow a later symlink or mix a newer body with old metadata.
     snapshot_text = {}
-    results = [lint_file(p, _snapshot_text=snapshot_text) for p in paths]
+    results = [lint_file(p, _snapshot_text=snapshot_text, _cache=cache)
+               for p in paths]
     if folder_mode:
         report["alias_collisions"] = _check_alias_collisions(results)
-        _recheck_folder_duplicate_wikilinks(results, target, snapshot_text)
-        _check_folder_related_labels(results, target, snapshot_text)
-        _check_folder_link_targets(results, target, snapshot_text)
+        parses = _folder_parses(snapshot_text)
+        _recheck_folder_duplicate_wikilinks(results, target, parses)
+        _check_folder_related_labels(results, target, parses)
+        _check_folder_link_targets(results, target, parses)
 
     order = {"error": 0, "warning": 1, "info": 2}
     floor = order.get(severity_floor, 2) if severity_floor else 2
@@ -3653,24 +3466,24 @@ def run_self_test():
                 .replace("ROC curve\n", "k-fold\n"), "k-fold.md"),
           [])
     check("a first-letter case difference still names the canonical subject",
-          _description_has_entity_subject("ArXiv stores preprints.", "arXiv"), True)
+          description_has_entity_subject("ArXiv stores preprints.", "arXiv"), True)
     check("a parenthetical title accepts its base term after a leading article",
-          _description_has_entity_subject(
+          description_has_entity_subject(
               "A feature supplies a model input.", "Feature (machine learning)"),
           True)
     check("a parenthetical title does not use its qualifier in running prose",
-          _description_has_entity_subject(
+          description_has_entity_subject(
               "Feature (machine learning) supplies a model input.",
               "Feature (machine learning)"), False)
     check("a placeholder subject is not the entry entity",
-          _description_has_entity_subject("This method compares groups.", "Fairness"),
+          description_has_entity_subject("This method compares groups.", "Fairness"),
           False)
     check("a different prefixed noun phrase cannot hide the title later in it",
-          _description_has_entity_subject(
+          description_has_entity_subject(
               "Machine learning fairness compares group outcomes.", "Fairness"),
           False)
     check("a title prefix must end at a subject boundary",
-          _description_has_entity_subject(
+          description_has_entity_subject(
               "Fairness-aware learning compares group outcomes.", "Fairness"),
           False)
     check("the clear placeholder mismatch is emitted as item 7",
@@ -4048,7 +3861,7 @@ def run_self_test():
     check("...but the exact title plus its established acronym counterpart is fine",
           items(bound_card.replace("??\nROC curve\n", "??\nROC curve (RC)\n")), [])
     check("compound-derived and shared-tail acronyms remain valid counterparts",
-          [_acronym_counterpart(short, long) for short, long in (
+          [acronym_counterpart(short, long) for short, long in (
               ("ATP", "adenosine triphosphate"),
               ("DNA", "deoxyribonucleic acid"),
               ("RNA", "ribonucleic acid"),
@@ -4159,9 +3972,29 @@ def run_self_test():
            if f["item"] == "19-flashcards"], [])
     check("an unrelated noun phrase and later parenthetical do not bind to "
           "the bolded title",
-          bool(_BOLD_PAREN_RE.search(
+          bool(BOLD_PAREN_RE.search(
               "**ROC curve** compares a classifier (RC) across thresholds.")),
           False)
+    import introduced_aliases as _alias_module
+    check("item 17 reads the opener parenthetical and its lead-ins with the "
+          "shared item-19 patterns",
+          [_alias_module._BOLD_PAREN_RE is BOLD_PAREN_RE,
+           _alias_module._PAREN_LEADIN_RE is PAREN_LEADIN_RE],
+          [True, True])
+    check("item-7 subject and line-3 findings carry the shared messages",
+          [f["message"] for text in (
+              mutate('description: "A ROC curve plots',
+                     'description: "This method plots'),
+              mutate("??\nROC curve\n", "??\nroc curve\n"),
+              mutate("??\nROC curve\n", "??\nROC curve (RC)\n"))
+           for f in lint_text(text, "roc-curve.md")["findings"]
+           if f["item"] in ("7-description", "19-flashcards")],
+          [description_subject_findings("This method plots.",
+                                        "ROC curve")[0]["message"],
+           "flashcard 1 line 3 is 'roc curve' -- " + flashcard_line3_fault(
+               "roc curve", "ROC curve", ["auroc"], ""),
+           "flashcard 1 line 3 is 'ROC curve (RC)' -- " + flashcard_line3_fault(
+               "ROC curve (RC)", "ROC curve", ["auroc"], "")])
     check("card line 1 leaking the title",
           items(mutate("The plot tracing the trade-off",
                        "The ROC curve traces the trade-off")),
@@ -4653,6 +4486,15 @@ def run_self_test():
           one_line_finding["evidence"]["matches"][0]["line"],
           one_line_display.splitlines().index(
               "$$\\sigma = \\sqrt{\\operatorname{Var}(X)}$$") + 1)
+    two_relation_display = equationless.replace(
+        "variance.\n", "variance:\n\n$$\n"
+        "\\sigma = \\sqrt{\\operatorname{Var}(X)}, \\qquad "
+        "\\mu = \\operatorname{E}[X]\n$$\n", 1)
+    check("two relations in one display are a split candidate",
+          items(two_relation_display), ["12-equation-split-candidate"])
+    check("an index range beside a relation is not a split candidate",
+          items(two_relation_display.replace(
+              "\\mu = \\operatorname{E}[X]", "i = 1, \\ldots, m", 1)), [])
     check("an expanded squared-deviation average clears the prose equation candidate",
           items(equationless.replace(
               "variance.\n", "variance:\n\n$$\n"
@@ -5413,6 +5255,20 @@ def run_self_test():
                # folder warning, as in wiki-lint's scanner.
                "qualified-reader.md": [("10-duplicate-wikilink", None),
                                        ("18-label-target", None)]})
+        cache = {}
+        cached = [lint_path(review, cache=cache) for _ in range(2)]
+        check("a shared cache keeps folder results exact, and the folder "
+              "checks cannot alter a stored result",
+              (cached[0] == review_report, cached[1] == review_report,
+               len(cache)), (True, True, len(review_entries)))
+        with open(os.path.join(review, "precision.md"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(mutate("read: false", "read: maybe", precision))
+        fresh = lint_path(review)
+        check("a file whose bytes change is linted again, not served from "
+              "the cache",
+              (lint_path(review, cache=cache) == fresh,
+               fresh == review_report), (True, False))
 
         bom = put("bom.md", "﻿" + good.replace('title: "ROC curve"',
                                                     'title: "Bom"')
@@ -5475,6 +5331,32 @@ def run_self_test():
         check("--severity error drops warnings and info",
               sorted({f["severity"] for e in floor["entries"]
                       for f in e["findings"]}), ["error"])
+        only_wiki = os.path.join(tmp, "findings-only")
+        os.makedirs(only_wiki)
+        with open(os.path.join(only_wiki, "roc-curve.md"), "w", encoding="utf-8") as handle:
+            handle.write(good)
+        with open(os.path.join(only_wiki, "precision.md"), "w", encoding="utf-8") as handle:
+            handle.write(precision.replace("type: Concept", "type: Bogus"))
+        only_out = os.path.join(tmp, "findings-only.json")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = main([only_wiki, "--findings-only", "-o", only_out])
+        with open(only_out, encoding="utf-8") as handle:
+            written = json.load(handle)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            printed_rc = main([only_wiki, "--findings-only", "--compact"])
+        printed = json.loads(buf.getvalue())
+        check("--findings-only lists only entries with findings, written or "
+              "printed, and summary still counts every file",
+              [(code, [os.path.basename(e["file"]) for e in report["entries"]],
+                report["summary"]["files"])
+               for code, report in ((rc, written), (printed_rc, printed))],
+              [(0, ["precision.md"], 2)] * 2)
+        check("lint_path itself still returns every entry for review_tree",
+              sorted(os.path.basename(e["file"])
+                     for e in lint_path(only_wiki)["entries"]),
+              ["precision.md", "roc-curve.md"])
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             rc = main([wiki, "-o", os.path.join(tmp, "out.json")])
@@ -5501,6 +5383,19 @@ def run_self_test():
             rc = main([])
         check("a run with no target exits 2 and says so",
               (rc, "target" in buf.getvalue()), (2, True))
+
+        vault_root = os.path.join(tmp, "vault-root")
+        os.makedirs(os.path.join(vault_root, "Wiki"))
+        obsidian_root = os.path.join(tmp, "obsidian-root")
+        os.makedirs(os.path.join(obsidian_root, ".obsidian"))
+        root_runs = []
+        for root_target in (vault_root, obsidian_root):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                root_runs.append((main([root_target]),
+                                  "looks like a vault root" in buf.getvalue()))
+        check("a vault root with Wiki/ or .obsidian/ is refused with exit 2",
+              root_runs, [(2, True), (2, True)])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -5538,6 +5433,9 @@ def _build_parser():
                    help="lowest severity to report (default: info = everything)")
     p.add_argument("-o", "--output", help="write JSON here instead of stdout")
     p.add_argument("--compact", action="store_true", help="compact JSON output")
+    p.add_argument("--findings-only", action="store_true",
+                   help="omit entries without findings from the printed or "
+                        "written report; summary still counts every file")
     return p
 
 
@@ -5556,8 +5454,22 @@ def main(argv=None):
                                    "(an entry .md file or a wiki folder), or --test"},
                          indent=2))
         return 2
+    # A wiki folder and its vault differ only by `/Wiki`. Given the vault
+    # root, every Articles/, Slides/ or Investments/ note would be linted as a
+    # broken entry in an exit-0 report.
+    if os.path.isdir(args.target) and (
+            os.path.isdir(os.path.join(args.target, ".obsidian"))
+            or os.path.isdir(os.path.join(args.target, "Wiki"))):
+        print(json.dumps({"ok": False,
+                          "error": "target looks like a vault root: %s; pass "
+                                   "<vault>/Wiki" % args.target}, indent=2))
+        return 2
     report = lint_path(args.target, severity_floor=args.severity)
     report_complete = not report["problems"]
+    if args.findings_only:
+        # Output only: lint_path stays complete for review_tree and callers.
+        report["entries"] = [entry for entry in report["entries"]
+                             if entry["findings"]]
     dumped = json.dumps(report, ensure_ascii=False,
                         **({} if args.compact else {"indent": 2}))
     if args.output:

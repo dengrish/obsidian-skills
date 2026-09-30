@@ -62,9 +62,12 @@ read: false
   exception, such as a named feed-owned attachment, retain that filename and use
   `published: null` when the source is undated; carry `--allow-unorganized` to
   lint rather than inventing a year or forcing an `_nd` rename.
-  For canonical filenames, a dated value paired with `_nd`, or a null
-  paired with a year-bearing stem, routes back to `pdf-organize` rather than
-  being reconciled from outside knowledge.
+  For canonical filenames, a `published` year that differs from the stem's year
+  segment, including a date paired with `_nd` or a null paired with a
+  year-bearing stem, means one of them misreads the document. Recheck the
+  printed date: correct `published` only if the note misread it; otherwise
+  route the rename to `pdf-organize`. Never reconcile from outside knowledge or
+  change a correctly read date to pass lint.
 - **Created:** on creation, the date the note is written. Preserve it on an
   authorized rewrite unless correcting that field is specifically in scope.
   Clippings instead preserve their capture date; do not import that producer's
@@ -113,7 +116,7 @@ Availability
 |---|---|---|
 | Question | `## Question` | `## Nobody had measured no-till carbon past a decade` |
 | Methods | `## Methods` | `## Twelve years of paired plots on one Iowa farm` |
-| Results | `## Results` | `## No-till held 6 t/ha more carbon, all of it in the top 10 cm` |
+| Results | `## Results` | `## No-till held 6 t/ha more carbon than ploughed plots, all in the top 10 cm` |
 | Interpretation | `## Interpretation` | `## Real storage, but shallower than the offset market assumes` |
 | Limitations | `## Limitations` | `## One farm, one soil type, and no deep-core sampling` |
 | Availability | `## Availability` | `## Plot data are public, the yield model is not` |
@@ -410,7 +413,7 @@ Every embed/table has its italic caption on the next line. No figure or table
 number appears in the prose or captions. End after Availability with a single
 newline.
 
-After drafting, follow the [verification checklist](review-checklist.md), then
-[workflow step 5](../SKILL.md#5-lint-the-complete-draft) for the lint command,
-mode and image arguments, naming exceptions and advisory handling. Clean format
+After drafting, follow [workflow step 4](../SKILL.md#4-lint-the-complete-draft)
+for the lint command, mode and image arguments, naming exceptions and advisory
+handling, then the [verification checklist](review-checklist.md). Clean format
 lint does not establish that the document's claims or selected body mode are correct.

@@ -103,7 +103,7 @@ jobs:
             requirements.txt
             requirements-dev.txt
             skills/figure-extract/scripts/requirements.txt
-            skills/market-research/scripts/requirements-filings.txt
+            skills/stock-research/scripts/requirements-filings.txt
       - name: Update the package installer
         run: python -m pip install --upgrade pip
       - name: Generate exact dependency-floor constraints
@@ -143,10 +143,22 @@ jobs:
         run: python tests/test_stock_dossiers.py
       - name: Check research coverage and unfinished-work continuity
         run: python tests/test_stock_coverage.py
+      - name: Check the source-collection to stock-research handoff
+        run: python tests/test_stock_feed.py
+      - name: Run nominated stock acquisition without network access
+        run: python tests/test_stock_acquire.py
+      - name: Check targeted history preflight
+        run: python tests/test_stock_history.py
+      - name: Check prospective nominee cohorts
+        run: python tests/test_stock_cohorts.py
       - name: Run source collection workflows without network access
         run: python tests/test_feed_collect.py
       - name: Check rolling three-day source collection
         run: python tests/test_feed_recent.py
+      - name: Check RSS parsing and conditional transport
+        run: python tests/test_rss_source.py
+      - name: Run RSS collection workflows without network access
+        run: python tests/test_rss_collect.py
       - name: Run source attachment workflows without network access
         run: python tests/test_feed_media.py
       - name: Check attachment collection and note integration

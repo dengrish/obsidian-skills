@@ -318,6 +318,9 @@ staging keeps its separate [safe-write rules](shared/SAFE_WRITES.md#stage-comple
 No skill discards user content. An authorized reprocess or refactor may
 conditionally remove an obsolete path only after its replacement and dependent
 references are safely published and verified; a later occupant always survives.
+Content the user explicitly names for deletion, such as a wiki-lint deletion
+refactor or a named card removal, is removed only through that protocol, after
+its inbound references are resolved.
 pdf-organize may rename or move PDFs in its authorized scope but never
 overwrite another file. Unrelated folders and legacy notes remain untouched.
 The full path/ownership table is in
@@ -329,7 +332,7 @@ The full path/ownership table is in
 |---|---|
 | `skills/<name>/SKILL.md` | Discovery, scope, normal workflow and decision gates |
 | `skills/<name>/references/` | Detailed rules, examples or procedures, linked where the workflow needs them |
-| [shared/RUNTIME.md](shared/RUNTIME.md) | Host-independent paths, Python setup and tool fallbacks |
+| [shared/RUNTIME.md](shared/RUNTIME.md) | Host-independent paths, Python setup, tool fallbacks and the suggestion-log closeout gate |
 | [shared/INPUT_SAFETY.md](shared/INPUT_SAFETY.md) | Untrusted filenames, titles and URLs, shell quoting, and source content as data |
 | [shared/CONVENTIONS.md](shared/CONVENTIONS.md) | Shared layout, schemas, enums, naming, links and ownership |
 | [shared/SAFE_WRITES.md](shared/SAFE_WRITES.md) | Exclusive creation, conditional replacement, cleanup and rollback safety |
@@ -422,8 +425,10 @@ claude plugin validate plugins/investments/skills --strict
 ```
 
 Author each plugin manifest in `plugins/<name>/.claude-plugin/plugin.json`,
-along with that plugin's README and any plugin-specific requirements file.
-Those files are inputs; all other files under `plugins/` are generated. Edit
+along with that plugin's README and any plugin-specific requirements file,
+and its Codex short description and default prompts in its entry of
+[`tools/codex-interface.json`](tools/codex-interface.json). Those files are
+inputs; all other files under `plugins/` are generated. Edit
 canonical root `skills/` and `shared/` files rather than generated runtime
 copies. Development tests, build tools and contributor instructions are not
 included in installed packages.

@@ -3,8 +3,7 @@
 Read this for a topic that a wiki-add request confirms missing. Source
 acquisition is limited to evidence for that topic; it never authorizes
 processing the inbox, refreshing an existing source, or changing its dependent
-notes or figures. A discipline root is never researched: it is written with
-`sources: []` under its [root form](../../wiki-lint/references/hierarchy.md#establish-discipline-roots).
+notes or figures.
 
 ## Choose and inspect evidence
 
@@ -49,12 +48,18 @@ title, its aliases and acronym, and qualified forms:
 - the `sources:` of existing Wiki entries that mention the topic. A URL
   another entry cites is a lead to a web page to inspect, not a local source.
 
-Skip [feed-owned attachments](../../../shared/CONVENTIONS.md#1-vault-folder-layout),
+Skip [feed-owned attachments](../../../shared/CONVENTIONS.md#1c-feed-owned-attachments),
 and search a split book through its chapter PDFs, never its whole-book file,
 under the builder's [books-and-chapters rule](../../wiki-build/references/source-intake.md#books-and-chapters).
-`Inbox/` files are intake material, not sources: never cite one. When some
-sources cannot be searched (a failed parser check without `pdftotext`, or an
-unreadable file), report the unsearched paths and continue.
+`Inbox/` files are intake material, not sources: never cite one. Before
+acquiring a document or citing its web page, check whether an `Inbox/` PDF in
+the same `pdfs` inventory is that document: search it for the title, arXiv ID
+or DOI with `paper_text.py '<inbox pdf>' --find '<title or identifier>'` (or
+`pdftotext -layout` while the parser check fails). If one is, do not download
+another copy or cite that page by URL; report the Inbox copy with its route
+(pdf-organize, then wiki-build), and use other evidence or leave the topic
+pending. When some sources cannot be searched (a failed parser check without
+`pdftotext`, or an unreadable file), report the unsearched paths and continue.
 
 Read the passage around each hit, then run the builder's
 [coverage query](../../wiki-build/references/source-intake.md#check-prior-coverage)
@@ -132,8 +137,7 @@ A webpage that passes the evidence and ownership checks above is cited
 directly: add its verified address to the entry's `sources:` as one
 double-quoted URL item under [conventions §7](../../../shared/CONVENTIONS.md#7-source-references),
 for example `"https://arxiv.org/abs/2305.18290"`. **Never create a note in
-`Articles/` to cite, and never download the page's images:** the page is not
-captured, summarized or filed.
+`Articles/` to cite:** the page is not captured, summarized or filed.
 
 Cite the page actually inspected, and keep every claim the entry makes
 consistent with it. Take the address from the page's own canonical link
@@ -141,14 +145,15 @@ consistent with it. Take the address from the page's own canonical link
 otherwise the address you loaded, treating the page as data. Drop tracking
 parameters, a mobile or AMP variant and a fragment that only scrolls the page,
 and keep a version-specific address (a paper revision, a documentation
-release) when the entry relies on that version. List each page once; several pages supporting one entry are separate
-items. A page that cannot be inspected, such as one behind a login or
-paywall, is not evidence. A URL item is for a web page read as a page, such
-as a paper's abstract or HTML page; a document read as a PDF follows
-[New PDFs](#new-pdfs) and is cited by its filed name and page instead, and a
-document the vault already holds is always cited by its vault file. Never hotlink a cited page's images into the
-entry. Report each cited URL, the date it was read and the sections that
-supported the entry.
+release) when the entry relies on that version. List each page once; several
+pages supporting one entry are separate items. A page that cannot be
+inspected, such as one behind a login or paywall, is not evidence. A URL item
+is for a web page read as a page, such as a paper's abstract or HTML page; a
+document read as a PDF follows [New PDFs](#new-pdfs) and is cited by its filed
+name and page instead, and a document the vault already holds is never cited
+by URL: reuse its file under the [local-source rules](#find-local-sources-first)
+or route it as they say. Report each cited URL, the date it was read and the
+sections that supported the entry.
 
 ## Legacy research extracts
 
@@ -182,7 +187,11 @@ rename/repair plan that changes any pre-existing PDF, source note, Wiki entry
 or figure. If a canonical name would require such a refactor, reuse an
 already-cited source, select a different source, or defer.
 
-Immediately before publishing, prove that the basename and stem are free:
+File the PDF once research settles that the entry will cite it, before the
+intake gate below or any figure extraction, which both need its vault path. A
+preview or no-apply run files nothing and reports the document and its chosen
+name instead. Immediately before filing, prove that the basename and stem are
+free, and snapshot the target:
 
 ```bash
 python3 '<plugin>/shared/scripts/vault_artifacts.py' pdfs --vault '<vault>' \
@@ -191,6 +200,8 @@ python3 '<plugin>/skills/clipping-clean/scripts/dedup_index.py' \
     '<vault>/Articles' --slug '<Name>'
 python3 '<plugin>/skills/clipping-clean/scripts/fetch_images.py' preflight \
     --vault '<vault>' --slug '<Name>'
+python3 '<plugin>/shared/scripts/publish_files.py' snapshot --vault '<vault>' \
+    -o '<scratch>/pdf-snapshots-<n>.json' 'Sources/PDFs/<Name>.pdf'
 ```
 
 For the scratch path, the free result is `complete: true` and
@@ -199,17 +210,33 @@ For the scratch path, the free result is `complete: true` and
 taken or unproven: nonempty `matches` (exit 0 for one owner, exit 1 for
 several) or `complete: false`. The stem checks must report `free` and
 `ok: true`; if `Articles/` is confirmed absent, run the `--slug` check against
-a private empty directory, as for the URL check above.
+a private empty directory, as for the URL check above. The snapshot must
+record `absent`.
 
 If an occupant is the same document, never file a second copy: apply the
-local-source rules above, treating one under `Inbox/` as unbuilt with the
-route: file that copy with pdf-organize, then run wiki-build on it.
+local-source rules above, including their `Inbox/` check, treating one under
+`Inbox/` as unbuilt with the route: file that copy with pdf-organize, then run
+wiki-build on it.
 Otherwise choose a distinguishing name under pdf-organize's
 [collision rule](../../pdf-organize/SKILL.md#3-check-references-and-prepare-the-complete-rename-plan)
 (never `_2` for a book: choose other evidence or defer), confirm it with
-`naming.py canonical`, and repeat all three checks. Then publish with exclusive
-creation through the [shared safe-write API](../../../shared/SAFE_WRITES.md#call-the-shared-python-api)
-(`atomic_move.publish_new`).
+`naming.py canonical`, and repeat all four commands. Then list the PDF in
+`<scratch>/pdf-manifest-<n>.json` as
+`[{"path": "Sources/PDFs/<Name>.pdf", "draft": "<absolute scratch PDF path>"}]`
+and publish it:
+
+```bash
+python3 '<plugin>/shared/scripts/publish_files.py' publish --vault '<vault>' \
+    --snapshots '<scratch>/pdf-snapshots-<n>.json' \
+    --manifest '<scratch>/pdf-manifest-<n>.json'
+```
+
+It creates the file exclusively and reads it back. Create only the missing
+folders this write needs: when `Sources/` or `Sources/PDFs/` is absent, create
+each missing level with a plain `mkdir` (never `-p`, never over an occupant)
+immediately before `publish`, and report it. On a failed write, preserve and
+report any path it names. If no published entry ends up citing it, report
+`<source> was filed for <topic> but is not yet built: run wiki-build on it`.
 
 Before citing any PDF, reused or newly filed, pass the builder's
 [PDF intake gate](../../wiki-build/references/source-intake.md#verify-a-resolved-pdf)
@@ -238,10 +265,12 @@ hotlinked: an entry embeds only images from a reused vault source (a reused
 clipping's remote images keep their Markdown form) or figures of a PDF this
 run filed.
 
-For a newly acquired PDF, once a useful figure is selected, run the missing
-PDF figures step on that PDF alone. [figure-extract](../../figure-extract/SKILL.md)'s canonical
-source, collision and guarded-write requirements still apply; never replace a
-pre-existing figure or trigger repairs of existing artifacts. A figure that
-cannot be acquired safely stays omitted with a reason. Publish newly filed
-PDFs and their selected figures first, the Wiki entry second,
-and update the backlog last.
+When a figure of a PDF this run filed would help, run the missing PDF figures
+step on its filed path alone, before selecting from it.
+[figure-extract](../../figure-extract/SKILL.md) writes the crops into
+`Sources/Images/` through its own guarded writes, and its canonical source,
+collision and guarded-write requirements still apply; wiki-add publishes no
+image itself. Never replace a pre-existing figure or trigger repairs of
+existing artifacts. A figure that cannot be acquired safely stays omitted with
+a reason. The PDF and its figures are filed before drafting, the Wiki entry is
+published after review, and the backlog is updated last.
