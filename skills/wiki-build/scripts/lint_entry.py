@@ -92,8 +92,8 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
       12-equation-format       an existing display has content on the same line
                               as its `$$` delimiters
       12-equation-split-candidate
-                              one display sets relations with different
-                              left-hand sides side by side; agent reviews
+                              a display line holds more than one equation;
+                              agent reviews
       12-boilerplate-candidate
                               well-definedness boilerplate in body prose or card
                               line 1 (nonempty and count guards, sign ranges on
@@ -1323,9 +1323,9 @@ def _check_equation_coverage_candidates(fm, sections, findings,
     if split_candidates:
         findings.append(_f(
             "12-equation-split-candidate", "warning",
-            "one display sets relations with different left-hand sides side "
-            "by side; when they define different quantities, split them into "
-            "two displays, each beside the prose that introduces its quantity",
+            "a display line holds more than one equation; give each equation "
+            "its own line (a separate display beside the prose that introduces "
+            "it, or a row of an aligned or gathered display)",
             {"matches": split_candidates, "agent_review": True}))
     boilerplate = find_boilerplate_candidates(masked, table_spans)
     for candidate in boilerplate:

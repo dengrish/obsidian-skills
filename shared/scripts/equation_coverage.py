@@ -26,10 +26,10 @@ Ranges a definition needs (``p \\ge 1`` for an Lp norm, ``0 \\le \\lambda \\le
 1``, ``r \\in [0,1]``) are outside its patterns, and every result remains an
 agent-review candidate rather than an edit.
 
-A third floor lists existing displays that set two relations with different
-left-hand sides side by side, such as ``a = ..., \\qquad b = ...``; an index
-range such as ``i = 1, \\ldots, m`` qualifies a relation and is not a second
-one.
+A third floor lists existing display lines that hold more than one equation,
+such as ``a = ..., \\qquad b = ...``: every equation gets its own line. An
+index range such as ``i = 1, \\ldots, m`` or a condition such as
+``\\text{for } i = 1`` qualifies an equation and is not a second one.
 
 Stdlib only, Python 3.10+ (the plugin runtime floor).
 """
@@ -321,31 +321,23 @@ def find_noncanonical_display_equation_candidates(
     return candidates
 
 
-# Displays that already lay relations out in rows are outside this check.
+# Row environments lay a display out in lines; each row is checked alone.
 _ROW_ENVIRONMENT_RE = re.compile(
-    r"\\begin\s*\{\s*(?:aligned|align|alignat|flalign|gathered|gather|"
-    r"split|multline|eqnarray)\*?\s*\}")
+    r"\\(?:begin|end)\s*\{\s*(?:aligned|align|alignat|alignedat|flalign|"
+    r"gathered|gather|split|multline|eqnarray)\*?\s*\}(?:\s*\{\d+\})?")
 _LATEX_TOKEN_RE = re.compile(r"\\(?:[A-Za-z]+|.)", re.DOTALL)
 _ENVIRONMENT_NAME_RE = re.compile(r"\s*\{[^{}]*\}")
 _DEFINING_RELATION_COMMANDS = frozenset(
     (r"\coloneqq", r"\triangleq", r"\equiv", r"\defeq"))
 _RANGE_DOTS_COMMANDS = frozenset((r"\ldots", r"\dots", r"\cdots"))
-# A segment that qualifies the relation beside it rather than stating a
-# second one: "\forall i", "\text{for } i = 1", "\text{subject to}".
+# A segment that states a condition on the equation beside it rather than a
+# second equation: "\forall i", "\text{for } i = 1", "\text{subject to}".
+# A "where" or "with" clause defines another quantity, so it is a second
+# equation.
 _QUALIFIER_LEAD_RE = re.compile(
     r"\s*(?:\\forall(?![A-Za-z])|\\(?:text|textrm|mathrm)\s*\{\s*"
-    r"(?:for|if|when|where|with|given|subject\s+to|such\s+that|s\.\s*t\.)"
+    r"(?:for|if|when|given|subject\s+to|such\s+that|s\.\s*t\.)"
     r"(?![A-Za-z]))")
-# A logical connective between relations states one derivation or
-# equivalence, not a second quantity: "f(x) = 0 \quad \Rightarrow \quad x = 1",
-# "a = 2 \qquad \therefore \qquad b = 4", "\text{hence}".
-_CONNECTIVE = (
-    r"(?:\\(?:Rightarrow|Longrightarrow|Leftarrow|Longleftarrow|implies|"
-    r"impliedby|iff|Leftrightarrow|Longleftrightarrow|therefore|because)"
-    r"(?![A-Za-z])|\\(?:text|textrm|mathrm)\s*\{\s*"
-    r"(?:hence|thus|so|therefore)(?![A-Za-z])[^{}]*\})")
-_CONNECTIVE_LEAD_RE = re.compile(r"\s*" + _CONNECTIVE)
-_CONNECTIVE_TAIL_RE = re.compile(_CONNECTIVE + r"[\s,;]*$")
 _LHS_NOISE_RE = re.compile(r"\\[,;:! ]|~|\s")
 
 
@@ -409,25 +401,70 @@ def _display_relation_segments(content):
     return segments
 
 
+def _display_lines(content):
+    """The rendered lines of one display: its rows, or the whole display.
+
+    Row environments (``aligned``, ``gathered``, ``split``...) and their
+    ``&`` column markers are unwrapped and the rows split at top-level
+    ``\\\\``; a ``cases`` or matrix body keeps its own rows.
+    """
+    body = _ROW_ENVIRONMENT_RE.sub(" ", content)
+    body = re.sub(r"(?<!\\)&", " ", body)
+    rows, start, depth, environments, index = [], 0, 0, 0, 0
+    while index < len(body):
+        char = body[index]
+        if char == "\\":
+            token = _LATEX_TOKEN_RE.match(body, index)
+            command = token.group(0)
+            if command in (r"\begin", r"\end"):
+                environments = max(0, environments + (
+                    1 if command == r"\begin" else -1))
+            elif command == "\\\\" and depth == 0 and environments == 0:
+                rows.append(body[start:index])
+                start = token.end()
+            index = token.end()
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth = max(0, depth - 1)
+        index += 1
+    rows.append(body[start:])
+    return [row for row in rows if row.strip()]
+
+
+def _equation_count(row):
+    """How many equations one rendered display line sets side by side."""
+    count, qualify_next = 0, False
+    for text, lhs, range_qualifier in _display_relation_segments(row):
+        led = bool(_QUALIFIER_LEAD_RE.match(text))
+        qualified = qualify_next or range_qualifier or led
+        # A standalone condition ("\text{subject to}") states no equation
+        # itself and qualifies the next segment.
+        qualify_next = lhs is None and led
+        side = _LHS_NOISE_RE.sub("", lhs or "").strip(",;")
+        if side and not qualified:
+            count += 1
+    return count
+
+
 def find_multi_relation_display_candidates(masked_prose,
                                            excluded_line_spans=()):
-    """Return displays that set two different relations side by side.
+    """Return displays with a line that holds more than one equation.
 
-    ``a = \\ldots, \\qquad b = \\ldots`` in one display hides the second
-    quantity beside the first; each defining relation belongs in its own
-    display beside the prose that introduces it.  The display is split only
-    at top-level ``\\quad``, ``\\qquad`` or ``,\\;`` gaps, outside every
-    group and environment, so a ``cases`` or matrix body never splits it.
-    A candidate needs two relation segments with different left-hand sides.
-    Qualifiers are exempt: an index range (``i = 1, \\ldots, m``), a segment
-    led by ``\\forall`` or a ``\\text{for|if|where|with|...}`` word, and the
-    segment after a standalone qualifier such as ``\\text{subject to}``.
-    A logical connective such as ``\\Rightarrow``, ``\\iff``,
-    ``\\therefore`` or ``\\text{hence}`` (and the relation it leads to) is
-    exempt too: a chain it joins states one derivation, not two quantities.
-    Displays already laid out in rows (``aligned``, ``gathered``...) are
-    skipped.  Every result is an agent-review candidate: a coordinated pair
-    such as polar coordinates may rightly share a line.
+    Every equation gets its own line: ``a = \\ldots, \\qquad b = \\ldots``
+    in one display line puts two side by side, as does a derivation joined by
+    ``\\Rightarrow`` or a ``\\text{where}`` clause defining another quantity.
+    A line is the whole display, or each row of an ``aligned``, ``gathered``
+    or similar layout; it is split into equations only at top-level
+    ``\\quad``, ``\\qquad`` or ``,\\;`` gaps, outside every group and
+    environment, so a ``cases`` or matrix body never splits it. Conditions
+    are not equations: an index range (``i = 1, \\ldots, m``), a segment led
+    by ``\\forall`` or a ``\\text{for|if|when|given|subject to|...}`` word,
+    and the segment after a standalone condition such as
+    ``\\text{subject to}``. Every result is an agent-review candidate: the
+    agent confirms each flagged line really holds two equations and gives
+    each its own line, leaving the math unchanged.
     """
     prose = masked_prose or ""
     excluded = {
@@ -441,23 +478,9 @@ def find_multi_relation_display_candidates(masked_prose,
     for match in matches:
         line = _line_number(prose, match.start(1))
         content = match.group(1)
-        if (line in seen or line - 1 in excluded
-                or _ROW_ENVIRONMENT_RE.search(content)):
+        if line in seen or line - 1 in excluded:
             continue
-        sides, qualify_next = [], False
-        for text, lhs, range_qualifier in _display_relation_segments(content):
-            led = bool(_QUALIFIER_LEAD_RE.match(text)
-                       or _CONNECTIVE_LEAD_RE.match(text))
-            qualified = qualify_next or range_qualifier or led
-            # A standalone qualifier or connective states no side itself and
-            # exempts the next segment; so does a connective ending this one
-            # ("a = 1 \Rightarrow \quad b = 2").
-            qualify_next = ((lhs is None and led)
-                            or bool(_CONNECTIVE_TAIL_RE.search(text)))
-            side = _LHS_NOISE_RE.sub("", lhs or "").strip(",;")
-            if side and not qualified and side not in sides:
-                sides.append(side)
-        if len(sides) >= 2:
+        if any(_equation_count(row) >= 2 for row in _display_lines(content)):
             seen.add(line)
             candidates.append({
                 "kind": "multi-relation-display",
@@ -1787,30 +1810,29 @@ def run_self_test(verbose=False):
          "$$\ny_i = w x_i, \\qquad \\text{for } i = 1\n$$\n\n"
          "$$\n\\max f(w) = 1 \\quad \\text{subject to} \\quad g(w) = 0\n$$",
          [], ()),
-        ("a standalone connective between gaps joins one derivation",
+        ("a derivation joined by a connective is two equations on a line",
          "$$\nf(x) = 0 \\quad \\Rightarrow \\quad x = 1\n$$\n\n"
-         "$$\na = b \\quad \\iff \\quad b = a + 0\n$$\n\n"
-         "$$\na = 2 \\qquad \\therefore \\qquad b = 4\n$$\n\n"
-         "$$\n\\nabla L = 0 \\quad \\Longrightarrow \\quad w = 2\n$$",
-         [], ()),
-        ("a connective leading or ending a segment is exempt too",
-         "$$\nf(x) = 0, \\quad \\implies x = 1\n$$\n\n"
          "$$\na = 1 \\Rightarrow \\quad b = 2\n$$\n\n"
-         "$$\na = 1, \\quad \\text{hence } b = 2\n$$\n\n"
-         "$$\na = 1 \\quad \\text{ thus} \\quad b = 2\n$$", [], ()),
-        ("a connective does not exempt an unrelated later relation",
+         "$$\na = 1, \\quad \\text{hence } b = 2\n$$", [2, 6, 10], ()),
+        ("a where or with clause defines a second equation",
+         "$$\ny = m x + b, \\quad \\text{where } m = 2\n$$\n\n"
+         "$$\ny = m x, \\quad \\text{with } m = 2\n$$", [2, 6], ()),
+        ("side-by-side relations and a repeated side are reported",
          "$$\nx = 1, \\quad y = 2\n$$\n\n"
          "$$\na = 1 \\quad \\text{and} \\quad b = 2\n$$\n\n"
-         "$$\na = 1 \\quad \\Rightarrowtail \\quad b = 2\n$$",
-         [2, 6, 10], ()),
+         "$$\na = 1, \\quad a = 2\n$$", [2, 6, 10], ()),
         ("gaps inside a group, environment or text never split",
          "$$\nf = \\begin{cases} a = 1, \\quad b = 2 & x \\end{cases}\n$$\n\n"
          "$$\nS = \\{a = 1, \\quad b = 2\\}\n$$\n\n"
          "$$\na = 1 \\text{ and \\quad } b = 2\n$$", [], ()),
-        ("row layouts, repeated sides and inequalities stay quiet",
-         "$$\n\\begin{aligned} a &= 1, \\quad c = 2 \\end{aligned}\n$$\n\n"
-         "$$\na = 1, \\quad a = 2\n$$\n\n$$\na \\le 1, \\quad b = 2\n$$",
-         [], ()),
+        ("each row of a row layout is its own line",
+         "$$\n\\begin{aligned} a &= 1 \\\\ b &= 2 \\end{aligned}\n$$\n\n"
+         "$$\n\\begin{gathered} a = 1 \\\\ s = \\begin{cases} -1 & x < 0 "
+         "\\\\ 1 & x > 0 \\end{cases} \\end{gathered}\n$$\n\n"
+         "$$\n\\begin{aligned} a &= 1, \\quad c = 2 \\end{aligned}\n$$",
+         [10], ()),
+        ("an inequality beside an equation is a condition, not an equation",
+         "$$\na \\le 1, \\quad b = 2\n$$", [], ()),
         ("a display in a parsed table is outside body prose",
          "Name | Value\n--- | ---\nX | $$a = 1, \\quad b = 2$$", [],
          ((0, 2),)),

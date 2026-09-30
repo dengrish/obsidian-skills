@@ -6029,7 +6029,7 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/check_parsers.py": 22,
     "shared/scripts/code_typography.py": 20,
     "shared/scripts/entry_checks.py": 95,
-    "shared/scripts/equation_coverage.py": 191,
+    "shared/scripts/equation_coverage.py": 192,
     "shared/scripts/figure_state.py": 14,
     "shared/scripts/introduced_aliases.py": 34,
     "shared/scripts/markdown_tables.py": 42,
