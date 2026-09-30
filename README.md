@@ -291,9 +291,9 @@ without overwriting either. Market research, MOCs, proposal logs and the topic
 queue stay outside `Wiki/` so they are not treated as entries.
 
 Each Wiki entry has exactly one discipline tag, or `"#misc"` alone when none
-fits. Each active tag has a `Wiki/<discipline>.md` root with empty parents, no
-researched sources (`sources: []` unless a document it was built from is
-cited) and a generated outline in `MOCs/<discipline>-moc.md`; `parents:` name Wiki entries
+fits. Each active tag has a `Wiki/<discipline>.md` root with empty parents, a cited
+source like every entry (often the reference page it is derived from) and a
+generated outline in `MOCs/<discipline>-moc.md`; `parents:` name Wiki entries
 only, a root by its bare slug such as `[[biology]]`. New entries from wiki-build and wiki-add start with `parents: []` and
 stay out of the MOCs until wiki-lint places them. wiki-lint reviews every tree
 and parent for conceptual coherence, without a fixed depth limit. The

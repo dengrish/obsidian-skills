@@ -123,9 +123,9 @@ history-dependent question; do not guess which date is wrong or try to make
 ### 4. Sources
 
 Use the canonical [source format](../../wiki-build/references/writing.md#sources).
-A [discipline root](hierarchy.md#establish-discipline-roots) may cite none,
-written exactly `sources: []`; respell a bare, null or spaced (`[ ]`) empty
-key on a root that way. An online page's URL item is valid as a quoted,
+Every entry, a [discipline root](hierarchy.md#establish-discipline-roots)
+included, cites at least one source; an empty `sources:` is reported, never
+filled from memory. An online page's URL item is valid as a quoted,
 full http(s) address; routine lint never fetches it, never converts it to or
 from a vault citation, and reports a malformed one without guessing a repair.
 Remove an exact repeated list item, URL items included. A same-stem PDF/Markdown pair remains
@@ -227,7 +227,13 @@ equation lead-ins and paragraph endings as well as the opening sentences.
 Bullets are parallel, not sequential; body links sit in sentences that state
 their relationships. Report source/tutorial scaffolding and application
 catalogs only when they do not serve the entry, and report duplicated
-explanatory treatments by conceptual owner. Length, a missing transition word,
+explanatory treatments by conceptual owner. A passage that re-explains a
+concept with its own entry is trimmed to that concept's role here and a link
+when the linked entry already explains it (a local repair below); when the
+linked entry lacks the explanation, propose moving it there. A statement the
+entry leaves unexplained, such as an equation without its meaning, a
+complexity without its reason or a term with neither definition nor link, is
+a depth proposal. Length, a missing transition word,
 list shape, or lexical similarity alone proves nothing.
 
 **Caveat review.** Inspect qualifications, final paragraphs and the
@@ -271,6 +277,12 @@ establishes an unambiguous meaning:
   proximity; use a paragraph boundary when no bridge is supported.
 - Convert an already explicit sequence from bullets to prose, or integrate a
   navigation-only link when adjacent prose already states the relationship.
+- Rewrite parallel facts about several items (the same gene in several
+  organisms, one property per variant) as one bullet per item, keeping every
+  claim.
+- Trim a re-explanation of a concept that has its own entry to its role here
+  and the link, when that entry already explains the concept; the claims stay
+  recorded in the linked entry.
 
 **Preservation and verification.** These repairs change prose expression, not
 the knowledge recorded. Preserve every substantive claim, condition, degree,

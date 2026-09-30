@@ -250,7 +250,7 @@ Derive parents and MOCs from one plan within the complete authorized closure.
 Discipline roots have empty parents; every other entry points to its nearest
 linked Wiki ancestor, never a MOC. Create missing roots only through the narrow
 [root prerequisite](references/hierarchy.md#establish-discipline-roots),
-which writes them with `sources: []` and researches no source.
+which cites the reference page each is derived from.
 [Publish](#publishing) every file under the safe-write guard and re-scan the final
 bytes against the guide's
 [completion checks](references/hierarchy.md#read-diagnostics-and-verify-completion).

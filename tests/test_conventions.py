@@ -6089,10 +6089,12 @@ SELFTEST_MIN_CASES = {
     "skills/pdf-organize/scripts/organize.py": 415,
     "skills/wiki-add/scripts/backlog.py": 54,
     "skills/wiki-build/scripts/find_collisions.py": 78,
-    "skills/wiki-build/scripts/lint_entry.py": 451,
+    # 2026-09-30: lowered after the discipline-root empty-sources exemption
+    # and its cases were removed (roots now cite a source like every entry).
+    "skills/wiki-build/scripts/lint_entry.py": 446,
     "skills/wiki-build/scripts/review_tree.py": 40,
     "skills/wiki-build/scripts/vault_index.py": 88,
-    "skills/wiki-lint/scripts/scan_vault.py": 629,
+    "skills/wiki-lint/scripts/scan_vault.py": 624,
 }
 
 
@@ -8007,10 +8009,15 @@ WRITING_RULE_PINS = (
         "are explanation, not examples",
         "Frame the entry in its own field",
         "Lead with the prototype",
+        "Link, don't re-explain",
+        "leave no open question",
+        "one self-contained bullet per item",
     )),
     (("wiki-build", "references", "equations.md"), (
         "Start from the defining relation",
-        "Explain each defining display in words",
+        "Every display must be understandable from the entry",
+        "always say in one sentence why it has that form",
+        "One equation per line",
         "General form first",
     )),
     (("wiki-build", "references", "merge.md"), (
