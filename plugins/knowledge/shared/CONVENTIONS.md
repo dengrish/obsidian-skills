@@ -434,10 +434,7 @@ read: false
   Multiple, blank, empty, missing, or malformed Wiki
   tags are QC errors. This requirement does not change source-note schemas.
 - **`sources` lists at least one source** — a vault document or an online
-  page's URL (§7) — except on a discipline root, which
-  may cite none; that empty list is written `sources: []`, never a bare
-  `sources:` (see the `parents` rule below and
-  [hierarchy](../skills/wiki-lint/references/hierarchy.md#establish-discipline-roots)).
+  page's URL (§7) — on every entry, a discipline root included.
 - **`parents` is a list, and an empty one is written `parents: []`** — never a
   bare `parents:`, which is YAML `null` rather than the empty list that the
   vault's `multitext` property type (`.obsidian/types.json`) declares. A
@@ -1084,8 +1081,7 @@ what every `[[…]]` naming it resolves to — §1a).
 
 Every Wiki entry follows the same source-backed schema and requires real
 source references; insufficient source coverage means no entry and a deferred
-entity. A discipline root is the one exception: it may cite none and is then
-written `sources: []` (§2a). An entry's `sources:` list names the documents that contributed to it.
+entity. An entry's `sources:` list names the documents that contributed to it.
 Each item is double-quoted and takes one of three forms. A vault document is a
 wikilink carrying its **literal on-disk filename, extension included** — not a
 slug, never invented, never renamed. An online page is its URL.
@@ -1095,8 +1091,9 @@ slug, never invented, never renamed. An online page is its URL.
 - **Markdown note:** `"[[Author_Title_Year.md]]"` — never an anchor.
 - **Online page:** `"https://example.org/page"` — the full, verified `http(s)`
   address of the page actually read, with no display text or Markdown link.
-  Only wiki-add cites one, for a web page it researched: it points to the page
-  and never creates a note in `Articles/` just to have something to cite.
+  wiki-add cites one for a web page it researched, and wiki-lint's missing-root
+  prerequisite for the reference page a new root is derived from; each points
+  to the page and never creates a note in `Articles/` just to have something to cite.
   Prefer the page's canonical address over a tracking, mobile or AMP variant,
   keep a version-specific address when the entry relies on that version, and
   list each page once. A URL never stands in for a vault document: when the
@@ -1176,8 +1173,8 @@ unconfirmed basename candidate never establishes coverage.
 owns the query, its resolution-tree choice and its result fields), wiki-add
 (cites in these forms, reuses existing sources only under its
 [local-source rule](../skills/wiki-add/references/research.md#find-local-sources-first),
-leaves an existing topic untouched, and is the only skill that cites a new
-URL),
+leaves an existing topic untouched, and cites a new URL for a researched
+page, as wiki-lint's missing-root prerequisite does),
 wiki-lint (checks the format in routine QC; its exact producer-mapped mode
 repairs a reported clipping-note rename, and source-backed modes read a cited
 URL online and retain their separately authorized citation scope), clipping-clean (its cleaned notes are Markdown sources),

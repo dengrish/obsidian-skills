@@ -207,10 +207,10 @@ Apply these gates in step 7, to audit-created entries too. Numbers match `lint_e
 | 6 | Type fits the entity; no code-identifier entries; named models `Concept`; API identifiers only in `Software` | [type](references/writing.md#type), [API](references/api-surface.md) |
 | 7 | One plain sentence, at most 110 characters, counted after every edit | [description](references/writing.md#description) |
 | 8 | Exactly one quoted discipline tag, `"#misc"` alone when none fits | [tags](references/writing.md#tags) |
-| 9 | Main claim first; one subject; teaching order; connected prose, no navigation-only link cues; scoped claims; Person/Event dates; a reader can explain how a Concept works | [body](references/writing.md#2-the-body), [link form](references/writing.md#link-form), [dates](references/rare-types.md#dates-in-the-opener-person-and-event) |
+| 9 | Main claim first; one subject; teaching order; connected prose, no navigation-only link cues; scoped claims; Person/Event dates; a reader can explain how a Concept works; no open questions; linked concepts not re-explained; parallel per-item facts as bullets | [body](references/writing.md#2-the-body), [link form](references/writing.md#link-form), [dates](references/rare-types.md#dates-in-the-opener-person-and-event) |
 | 10 | First eligible link per real target; none in captions or cells; merge provenance | [links](references/writing.md#link-form), [provenance](references/merge.md#integration-principle) |
 | 11 | One piped ` · ` Related line within soft bounds | [footer](references/writing.md#the-related-footer) |
-| 12 | Equations, figures and tables serve the entry; exhibits opened and captioned; defining relation first; displays explained in words | [equations](references/equations.md), [media](references/media.md) |
+| 12 | Equations, figures and tables serve the entry; exhibits opened and captioned; defining relation first; every display understandable (terms and why it holds); complexities explained | [equations](references/equations.md), [media](references/media.md) |
 | 13 | One integrated body; protected content preserved | [merge](references/merge.md#merge-logic) |
 | 14 | No source-meta framing or source-internal back-references | [principle 5](references/writing.md#prose-principles) |
 | 15 | One compact example where it makes an abstract, quantitative or procedural idea click; no walkthroughs or stories | [principle 7](references/writing.md#prose-principles) |

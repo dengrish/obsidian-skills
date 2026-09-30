@@ -174,7 +174,7 @@ and label checks.
 | `item2/provenance` | Malformed, duplicate or misplaced legacy skill-provenance metadata. Missing footers are not defects or evidence of a particular producer. |
 | `item3` | A date is missing, not `YYYY-MM-DD`, or not a valid calendar date. |
 | `item3/report-only` | `created` is later than `updated`. |
-| `item4` | Missing, scalar, malformed, or exactly duplicated source references, including invalid PDF page anchors, anchored Markdown sources and malformed URLs (a Markdown link, display text, a wikilinked or scheme-less address, whitespace, a control or invisible character, a port outside 1–65535 or a non-http scheme). A quoted full http(s) URL is a valid source. A discipline root may cite none, written exactly `sources: []`; its bare, null or spaced (`[ ]`) empty key is reported. |
+| `item4` | Missing, scalar, malformed, or exactly duplicated source references, including invalid PDF page anchors, anchored Markdown sources and malformed URLs (a Markdown link, display text, a wikilinked or scheme-less address, whitespace, a control or invisible character, a port outside 1–65535 or a non-http scheme). A quoted full http(s) URL is a valid source. Every entry, a discipline root included, needs at least one source. |
 | `item4/source-identity` | PDF and Markdown references share a normalized stem; this does not prove they are one source. URL items never enter this check. |
 | `item5` | A portable slug owned by two files, a title that cannot be slugged, `slug(title)` ≠ filename (also listed in `rename_candidates`), or a bare-slug common-noun title that needs qualification. |
 | `item6` | A code-identifier title, an API-surface failure string, fenced code, or backticked identifiers in a non-`Software` entry. |

@@ -37,10 +37,12 @@ valid tag is placed under it even when its home is a reported close call.
 Reuse the canonical Wiki entry for each active tag, checking filename, identity,
 and tag ownership rather than treating a same-named MOC or alias as the root.
 When a root is missing, Task 3 may create that narrow prerequisite using
-builder's entry rules. It writes the root from accurate background under
-[prose principle 5(h)](../../wiki-build/references/writing.md#prose-principles)
-with `sources: []`: it researches no evidence for a root and creates no
-source note, PDF or image. This prerequisite creates only
+builder's entry rules. It writes the root from one reliable overview of the
+field, such as a textbook introduction or an encyclopedia article (a
+Wikipedia page will do), and cites that page by its URL under
+[conventions §7](../../../shared/CONVENTIONS.md#7-source-references), or an
+already-cited vault document that introduces the field. It creates no source
+note, PDF or image. This prerequisite creates only
 the roots the authorized closure needs. It never fabricates citations,
 alters the user's topic queue or extracts unrelated entities.
 
@@ -50,10 +52,8 @@ branches, linking those with entries. The misc root is `Wiki/misc`, titled
 `Misc`: a brief definition of a miscellany that makes no claim about this
 vault's contents. Use the ordinary entry schema, one matching tag,
 `parents: []` and no Flashcards section; an existing root keeps its card
-unless the user asks to remove it. A root is the one entry whose `sources:`
-may be empty, written `sources: []` and never as a bare key. A root keeps a
-document it already cites, and wiki-build cites a source it genuinely builds
-the root from.
+unless the user asks to remove it. Like every entry, a root cites at least
+one source: the page or document it is derived from.
 New roots use today's date for `created:` and `updated:` and set
 `read: false`; the maintenance date freeze covers existing notes only.
 Stage a new root under its own filename and lint it with
