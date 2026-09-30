@@ -999,7 +999,7 @@ meaning-preserving mathematical-title plain-text conversion),
 `markdown_tables.py` (Markdown-table
 spans and caption checks shared by both Wiki skills), `equation_coverage.py`
 (the conservative missing-display, well-definedness-boilerplate and
-two-relations-in-one-display candidates shared by both Wiki skills),
+one-equation-per-line candidates shared by both Wiki skills),
 `code_typography.py` (bracket special tokens and literal file extensions that
 need backticks in prose), `introduced_aliases.py` (alternate names that body
 prose introduces for the entry's subject), `entry_checks.py` (the per-entry

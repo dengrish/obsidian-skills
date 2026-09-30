@@ -3201,10 +3201,11 @@ def scan(wiki, images=None, vault=None):
                  for candidate in _equation_split_candidates}))
             problems.append((
                 sl, "item12/equation-split-candidate",
-                "one display sets relations with different left-hand sides "
-                f"side by side (prose line(s) {_lines}) — executing agent: "
-                "when they define different quantities, split them into two "
-                "displays, each beside the prose that introduces its quantity"))
+                "a display line holds more than one equation "
+                f"(prose line(s) {_lines}) — executing agent: give each "
+                "equation its own line (a separate display beside the prose "
+                "that introduces it, or a row of an aligned or gathered "
+                "display), keeping the math unchanged"))
         # Well-definedness boilerplate is removed by ordinary lint (QC item
         # 12), but only the agent pass found it: a corpus run removed about 60
         # guards such as "for a nonempty dataset", `$m \ge 1$` and
